@@ -13,7 +13,7 @@ import pytest
 from agent_procutil.owned_process import run_caller_owned
 
 from test_review_executor import environment as environment
-from test_workspace_integration import integration as integration
+from test_workspace_integration import integration as integration, prepared_workspace as prepared_workspace
 from test_review_owner_store import prepared_intent as prepared_intent
 
 from agent_pull_requests.workspace_tools import WorkspaceTools, dispatch_tool
@@ -246,6 +246,34 @@ def test_existing_workspace_cli_does_not_implicitly_select_prepared_native_execu
     }, monkeypatch, capsys)
     assert code != 0 and response["error"]
     assert backend.calls == [] and store.path.read_bytes() == before
+
+
+def test_actual_cli_over_gateway_selects_supported_prepared_submit_and_original_receipt(
+    environment: tuple, prepared_workspace: tuple, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _, selected, _, attachment, backend, _ = environment
+    _, client, _, _, _, _ = prepared_workspace
+    host = WorkspaceTools(client)
+    code, capabilities = invoke_cli(host, "capabilities", {}, monkeypatch, capsys)
+    assert code == 0 and "receipt" in capabilities["operations"]
+    code, submitted = invoke_cli(host, "submit", {
+        "number": 42, "intent": selected, "source_attachment": attachment, "budget_seconds": 60,
+    }, monkeypatch, capsys)
+    assert code == 0 and submitted["result"]["status"] == "complete", submitted
+    before_calls = len(backend.calls)
+    code, receipt = invoke_cli(host, "receipt", {
+        "number": 42, "operation_id": selected["operation_id"], "action_id": "finding",
+    }, monkeypatch, capsys)
+    assert code == 0 and receipt["result"]["action_state"] == "confirmed"
+    assert receipt["result"]["identity"] == selected["actions"][0]["preparation"]["identity"]
+    assert receipt["result"]["fresh_native_read"] is False
+    assert len(backend.calls) == before_calls
+    code, vote = invoke_cli(host, "receipt", {
+        "number": 42, "operation_id": selected["operation_id"], "action_id": "verdict",
+    }, monkeypatch, capsys)
+    assert code == 0 and vote["result"]["status"] == "unavailable"
+    assert len([call for call in backend.calls if call[0] != "GET"]) == 2
 
 
 @pytest.mark.parametrize("path,side,classification", [

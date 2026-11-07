@@ -57,8 +57,10 @@ through review first.
 The [protected native owner](../../../plugins/agent-pull-requests/docs/protected-review-executor.md#prepared-native-intent-and-original-receipt-projection)
 also supports an explicitly selected v2 source embedding after prepared storage
 adoption. It retains structured identity through original native execution and
-provides a read-only original receipt projection. This is not a new
-CLI/HTTP/MCP prepared receiver, automatic preparation, fresh readback or DB merge.
+provides a read-only original receipt projection. The
+[optional existing workspace receiver](../../../plugins/agent-pull-requests/docs/workspace-integration.md#optional-prepared-review-receiver)
+can compose the actual CLI/tool/client/Gateway path after discovery and owner
+adoption. This is not automatic preparation, fresh readback or DB merge.
 Default submission remains v1 and legacy tagged bodies gain no inferred identity.
 
 ## Remaining qualification

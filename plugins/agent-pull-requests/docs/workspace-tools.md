@@ -131,6 +131,7 @@ agent-pull-requests workspace source --request request.json
 agent-pull-requests workspace source-read --request request.json
 agent-pull-requests workspace submit --request request.json
 agent-pull-requests workspace inspect --request request.json
+agent-pull-requests workspace receipt --request request.json
 agent-pull-requests workspace events --request request.json
 ```
 
@@ -163,6 +164,7 @@ Original host cancellation/authority and retained unknown effects remain separat
 | source-read | source fields plus source_attachment, path, side |
 | submit | number, intent, source_attachment, budget_seconds |
 | inspect | number, operation_id |
+| receipt (optional prepared contract) | number, operation_id, action_id |
 | events (optional) | number, after (null or epoch/sequence), limit (1-16) |
 
 Unknown fields cannot supply workspace paths, credentials or source authority.
@@ -171,6 +173,13 @@ Load/sync/materialize/submit/inspect retain the
 scope, immutable generation/CAS/framing, original observation intervals and
 durable intent/in-flight/native-ID/unknown outcomes. No policy/rubric, unconditional
 CI/merge-readiness requirement, compensation or automatic replay is introduced.
+
+The [optional prepared review receiver](workspace-integration.md#optional-prepared-review-receiver)
+enables v2 `submit` and original `receipt` reads only when the actual selected
+owner advertises its supported contract. Default/prior bindings keep v1;
+missing or malformed support refuses before sending v2, not through a legacy
+fallback. The CLI does not prepare text, allocate GUIDs, adopt storage or turn
+receipt correlation into fresh native readback or handled/echo progress.
 
 The optional [conversation event reader](conversation-journal.md) needs explicit
 owner-v3 storage and serving adoption. It is read-only and capability-selected;

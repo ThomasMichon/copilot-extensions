@@ -44,6 +44,7 @@ back to ordinary watches or another provider.
 | `lookup` | `number`; optional exact `generation_id` |
 | `chunk` | `number`, exact `generation_id`, `offset` |
 | `inspect` | `number`, original `operation_id` |
+| `receipt` (optional prepared contract) | `number`, original `operation_id`, `action_id` |
 | `submit` | `number`, immutable `intent`, separate `source_attachment`, `budget_seconds` |
 
 Load/sync use the current protected read owner and explicit expected-current
@@ -122,6 +123,55 @@ Oversized submit envelopes refuse locally before dispatch. Large immutable read
 generations are framed, but this first wire does **not** upload arbitrarily large
 intents/source manifests. An oversized result remains unavailable/unknown with
 durable receipts retained; it is not truncated to claim success.
+
+## Optional prepared review receiver
+
+The existing trusted embedding may construct `WorkspaceOperations` with
+`prepared_reviews=True` after the current lifecycle owner has adopted
+[prepared review storage](review-owner-store.md#optional-prepared-intent-storage-extension).
+This is not a request field, owner loader or permission grant. Default bindings
+retain v1 and do not advertise the optional operation.
+
+The actual executing receiver reads its current adopted intent versions through
+the same owner. Only a selected, adopted receiver advertises this additive
+`prepared_review_contract` in the existing workspace/v1 capability response:
+
+```json
+{
+  "protocol": "agent-pull-requests.prepared-review/v1",
+  "intent_versions": [2],
+  "receipt_protocol": "agent-pull-requests.prepared-comment-receipt/v1"
+}
+```
+
+Its existing `submit` request then accepts v2 prepared intent through the
+[same protected native executor](protected-review-executor.md#prepared-native-intent-and-original-receipt-projection).
+The `receipt` operation delegates to the original scoped receipt projection;
+it performs no fresh native read or handled/echo/ACK update. A read-only binding
+can advertise receipt support without advertising `submit`. Capability support
+does not establish native write permission or current eligibility.
+
+Native/Fleet clients and the CLI/tool façade require that exact supported
+contract before selecting v2 or receipt. Missing/malformed support refuses
+locally without a mutation or a legacy-send fallback; ordinary v1 metadata and
+operations remain usable. The existing capability exchange is reused, not a
+second transport or per-comment forge query. Older clients may ignore the
+additive metadata and keep using v1; older receivers do not acquire new fields
+or operations from a package-version assumption.
+
+Support is rechecked by the receiver's actual mode, adopted owner and normal
+request lifetime at use. Cached discovery cannot authorize a withdrawn receiver.
+Overlapping discovery cannot restore stale support after newer withdrawal.
+After a dispatched failure or lost result, retain the original intent/IDs and
+reconcile its original receipt through the same owner; no automatic retry,
+replacement GUID or native-object/DB merge is introduced.
+
+The caller still prepares exact source/profile/identity before final approval.
+This optional receiver does not allocate identities, generate signatures or
+turn legacy tagged text into structured preparation. Wire byte limits,
+credentials, caller/native-principal separation and writer/drain custody are
+unchanged. Source fixtures qualify the actual CLI -> client -> Gateway ->
+protected synthetic native owner, not a live provider or installed host.
 
 ## Lifetime, compatibility and limits
 
