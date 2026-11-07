@@ -233,6 +233,13 @@ implementation authority, resource custody or the fixed checkpoint.
 
 ## Plan
 
+The [current consumer and qualification study](<journal/2026/11.06 current-consumer-and-qualification-boundaries.md>)
+keeps aggregate scheduling, serial-publication, historical-ref recovery and
+guard-map native acceptance distinct from current source identities and
+delivered preventive fixes. New #11231 retains its existing diagnosis owner.
+Two identical complete scans measure 810 whole OPEN, 81 above fixed 729;
+Phase 2, all original acceptance and source/resource custody remain Active.
+
 The [account-relay and consumer-source study](<journal/2026/11.06 account-relay-and-consumer-source-closeout.md>)
 records #8551's finite delivered source completion and keeps current typing,
 controller, namespace and native-digest gaps distinct from changed-file identity.
