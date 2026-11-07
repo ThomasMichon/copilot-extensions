@@ -6,6 +6,18 @@ from collections.abc import Iterable
 from typing import Any
 
 
+def _matches_workstream_repo(repo: str, repository: str | None) -> bool:
+    from .config import _repo_matches_codespace
+
+    if not repository:
+        return False
+    owner = repo.strip().casefold().rpartition("/")[0]
+    return (
+        (not owner or repository.strip().casefold().rpartition("/")[0] == owner)
+        and _repo_matches_codespace(repo, repository)
+    )
+
+
 def _choose_owner(owners: list[dict]) -> str:
     if len(owners) == 1:
         return str(owners[0].get("worktree_id") or "")
@@ -70,13 +82,11 @@ def resolve_workstream_box(
         return None
     if not refs:
         return None
-    from .config import _repo_matches_codespace
-
     by_name = {m.name: m for m in members}
     candidates = sorted(
         name for name in refs
         if (m := by_name.get(name)) is not None
-        and _repo_matches_codespace(repo, m.repository)
+        and _matches_workstream_repo(repo, m.repository)
     )
     return candidates[0] if candidates else None
 
@@ -100,6 +110,36 @@ def resolve_current_workstream_box(
     except Exception:
         return None
     return resolve_workstream_box(members, repo, owner)
+
+
+def current_workstream_account(repo: str) -> str | None:
+    """Keep an unmapped workstream on its claimed venue's persisted account."""
+    try:
+        from agent_worktrees import claims_owner
+        from .lease import resolve_owner_worktree
+
+        owner = resolve_owner_worktree()
+        refs = set(claims_owner.claims_of_owner(owner, "codespace")) if owner else set()
+    except Exception:
+        return None
+    if not refs:
+        return None
+    from .account_binding import list_bindings
+    try:
+        bindings = list_bindings(strict=True)
+        if any(
+            not isinstance(value, str)
+            for binding in bindings for value in (binding.codespace, binding.account, binding.repo)
+        ):
+            raise RuntimeError("Malformed workstream account binding")
+        bindings.sort(key=lambda binding: binding.codespace)
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise RuntimeError("Malformed workstream account bindings") from exc
+    return next((
+        binding.account for binding in bindings
+        if binding.codespace in refs and binding.account
+        and _matches_workstream_repo(repo, binding.repo)
+    ), None)
 
 
 def same_worktree_family(holder: str, owner: str) -> bool:

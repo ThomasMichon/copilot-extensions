@@ -19,7 +19,7 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Owned Codespace Capacity](active/owned-codespace-capacity/README.md) | Draft; independent owned-count admission and safe sequential reuse proposed before runtime changes | Bounded #4187 slice; preserves recycler, capture and owner-wave integration owners; no live cleanup or rollout |
+| [Owned Codespace Capacity](active/owned-codespace-capacity/README.md) | Active; reviewed intent accepted, independent admission flow first; sequential reuse and consumer qualification open | Bounded #4187 slice; preserves recycler, capture and owner-wave integration owners; no live cleanup or rollout |
 | [Worktree Activity Convergence](active/worktree-activity-convergence/README.md) | Active; reviewed plan accepted, lifecycle/activity/event and list-control implementation open | #11195; preserves #5953/#6748/#2619 owners; selected local rollout after release only |
 | [Bridge and Dispatch Worker Contract Qualification](active/bridge-dispatch-worker-contract-qualification/README.md) | Draft; handoff proposal, no implementation claimed | #6467/#3556/#7268 existing owners; #11106 result bindings and #11108 effective profiles; no new driver or rollout |
 | [Inactive Worktree Relocation](active/inactive-worktree-relocation/README.md) | Active; qualified native-Windows first slice merged in #10943; broader acceptance/adoption open | #10879; mixed roots and broader inactive continuity; existing owners retained, no live migration or rollout |

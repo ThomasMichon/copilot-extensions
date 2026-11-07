@@ -140,7 +140,12 @@ follow-ups using the session ID:
   startup end-to-end.
 - **Pool pressure:** the catalog command's `create` action consults the pool planner before
   spending another box: it prefers reusing a suitable idle CodeSpace and refuses
-  over-budget creates unless `--force-create` is passed. Inspect with
+  over-budget creates unless `--force-create` is passed. Owned-venue admission
+  independently uses `defaults.max_owned_codespaces` (policy default 30) and
+  counts stopped venues under the selected account. Unknown/truncated inventory
+  refuses ordinary creation; stopping does not free an owned slot. A stopped
+  claimed venue needs known wake headroom. The override does not change provider
+  limits or relax existing quota-reclaim safety and account scope. Inspect with
   `<agent-codespaces catalog argv[0]> pool` or preflight with
   `<agent-codespaces catalog argv[0]> allocate <repo>`.
 
