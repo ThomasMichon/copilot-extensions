@@ -268,6 +268,25 @@ focus, selection, range anchors and action targets.
 
 ## Journal
 
+### 2026-11-07 - Unchanged-roster hot path and immediate native repaint
+- The subsequent exact-head review resolved the admission findings and raised
+  a performance risk without an open severity finding. Direct inspection
+  confirmed that the new unconditional focus remap would group/sort the
+  visible roster on every live tick, even for unchanged loader rows.
+- Loader admission now compares the proposed row set first. Only changed
+  rows remap focus, and a real change immediately requests the full native
+  repaint on the next UI tick; it does not wait for a cosmetic pulse.
+  Initial setup and incomplete-prefix replacement retain their prior
+  default behavior. No new service, source revision API or network poll was
+  introduced.
+- The actual-tick work-count control proves three unchanged ticks perform no
+  remap or refresh, while a new message-driven reorder remaps once,
+  immediately refreshes, and preserves focus, multiselection and anchor.
+  The combined connected/native-control/setup-prefix packet passed 19 tests.
+- This removes the introduced hot-path work, not the broader renderer's
+  remaining performance budget. Current-head required CI and review will
+  refresh before source merge; release and installed acceptance remain open.
+
 ### 2026-11-07 - Final-idle and selected-lock admission corrections
 - The next exact-head review identified a final-idle admission gap and a
   missing check on the Node sender's actual rendezvous lock. Worktree-change

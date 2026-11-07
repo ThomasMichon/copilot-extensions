@@ -83,6 +83,63 @@ def test_used_and_sort_compare_utc_instants_across_repeated_dst_hour(monkeypatch
     assert [row["id"] for row in sorted(rows, key=derive._last_active_secs)] == ["newest", "newer", "old"]
 
 
+def test_unchanged_live_ticks_skip_row_remapping_but_real_reorder_keeps_focus(monkeypatch):
+    monkeypatch.setattr(derive, "NOW", datetime(2026, 11, 7, 1))
+    local = ("fixture-host", "Win")
+    raws = [
+        {"id": name, "title": name, "state": "wip", "status": "active", "session_count": 1,
+         "started_at": "2026-11-01T00:00:00",
+         "message_activity": {"version": 1, "last_message_at": timestamp}}
+        for name, timestamp in (
+            ("focused", "2026-11-07T00:59:00"),
+            ("other", "2026-11-07T00:50:00"),
+        )
+    ]
+    source = SimpleNamespace(
+        LOCAL=local, LOCAL_LABEL="Fixture", bucket=derive.bucket, for_machine=derive.for_machine,
+        machines=lambda: [("Fixture", *local, True)],
+        load=lambda: [derive.norm(raw, *local) for raw in raws],
+    )
+    screen = PickerScreen(source, live=False)
+    screen.setup_sync_for_tests()
+    screen.update_state = "idle"
+    incoming = source.load()
+    screen.live = True
+    screen.loader = SimpleNamespace(
+        records=lambda: [dict(row) for row in incoming], counts=lambda: (1, 0, 0),
+        authoritative_source_ids=lambda: {row["source_id"] for row in incoming},
+    )
+    screen.sel, screen.wt_anchor, screen.frame = ("L", 0), 0, 1
+    focused = screen._selected_record()["selection_id"]
+    screen.wt_sel.replace({focused})
+    remaps = []
+    refreshes = []
+    original = screen._wt_remap
+
+    def remap(fn):
+        remaps.append(True)
+        return original(fn)
+
+    monkeypatch.setattr(screen, "_wt_remap", remap)
+    monkeypatch.setattr(screen, "refresh", lambda **kwargs: refreshes.append(kwargs.get("cause")))
+    for method in ("_maybe_repoll", "_maybe_repoll_pivot", "_maybe_refresh_worker_pivots"):
+        monkeypatch.setattr(screen, method, lambda: None)
+    for _ in range(3):
+        screen._tick()
+    assert not remaps
+    assert not refreshes
+    raws[1]["message_activity"]["last_message_at"] = "2026-11-07T01:00:00"
+    incoming = source.load()
+    screen.frame = 0
+    screen._tick()
+    assert remaps == [True]
+    assert refreshes == [None]
+    assert screen.sel == ("L", 1)
+    assert screen._selected_record()["selection_id"] == focused
+    assert screen._wt_visible_records()[screen.wt_anchor]["selection_id"] == focused
+    assert screen.wt_sel.ids == {focused}
+
+
 @pytest.mark.parametrize("width", [48, 118])
 def test_native_controls_combine_completed_preserve_focus_and_disclose_hidden_live(monkeypatch, width):
     monkeypatch.setattr(derive, "NOW", datetime(2026, 11, 7, 1))
@@ -112,6 +169,7 @@ def test_native_controls_combine_completed_preserve_focus_and_disclose_hidden_li
             scr.machine_idx = scr.local_index()
             scr.sel = ("L", 1)
             scr.wt_anchor = 1
+            scr.refresh()
             scr._sync_focus_to_sel()
             await pilot.pause()
             sections = [(name, rows) for name, rows in scr.current_list_visible()[1] if rows]

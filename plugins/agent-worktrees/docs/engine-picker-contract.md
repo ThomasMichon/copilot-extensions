@@ -575,6 +575,11 @@ optional wake; existing lifecycle and periodic correctness paths remain.
 Managed mux mapping changes and restored freshness wake the same owner;
 timestamp-only heartbeats do not. That owner uses its own fresh,
 project-qualified managed mappings when publishing mux state.
+Manager compares incoming rows before remapping the keyed visible view;
+unchanged live ticks do not repeat grouping/sorting for focus restoration.
+Changed rows request a full native repaint on the next UI tick instead of
+waiting for the slower cosmetic pulse. Incomplete source prefixes retain the
+existing last-good-row merge rules.
 
 Reclaim requests one post-effect wake even when cached liveness hints did not
 change, then retains its existing authoritative clearance wait. Process exit,
