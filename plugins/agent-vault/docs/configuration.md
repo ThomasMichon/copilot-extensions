@@ -46,6 +46,10 @@ is deleted, and nothing else is enabled.
 Task-only absence reads retained configuration without requiring an interpreter,
 even when the incoming payload's version has not been built. Task-only opt-in
 resolves the selected installed runtime instead of assuming the incoming slot.
+It retains the original project selection across payload staging for both runtime
+activation and the service configuration snapshot; a repository-only activation
+opt-in remains effective. Task ownership validates the actual PowerShell script
+operand, including supported conhost wrapping, never a later forwarded path.
 Normal install/update still prepare
 the native launcher and ensure the selected service generation independently
 of task registration. Without a task, `agent-vault start` retains the existing

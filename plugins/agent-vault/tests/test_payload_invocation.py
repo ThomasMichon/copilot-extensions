@@ -35,6 +35,16 @@ def _installer_function(name: str) -> str:
         ("enabled", "missing", "inactive-schedule", "refused"),
         ("absent", "missing", "install", "unchanged"),
         ("absent", "owned", "schedule", "removed"),
+        ("absent", "direct", "schedule", "removed"),
+        ("absent", "absolute-shell", "schedule", "removed"),
+        ("absent", "foreign-first", "schedule", "refused"),
+        ("enabled", "foreign-first", "schedule", "refused"),
+        ("absent", "owned-forwarded", "schedule", "refused"),
+        ("enabled", "owned-forwarded", "schedule", "refused"),
+        ("absent", "foreign-wrapper", "schedule", "refused"),
+        ("absent", "foreign-executor", "schedule", "refused"),
+        ("absent", "command", "schedule", "refused"),
+        ("absent", "unquoted-space", "schedule", "refused"),
         ("absent", "custom", "schedule", "refused"),
         ("absent", "suffix", "schedule", "refused"),
         ("absent", "ambiguous", "schedule", "refused"),
@@ -43,7 +53,7 @@ def _installer_function(name: str) -> str:
     ],
 )
 def test_windows_scheduling_is_separate_from_service_and_state(tmp_path, policy, task, action, expected):
-    root = tmp_path / "vault"
+    root = tmp_path / "vault space"
     root.mkdir()
     (root / "bin").mkdir()
     interpreter = root / "python.ps1"
@@ -93,6 +103,14 @@ def test_windows_scheduling_is_separate_from_service_and_state(tmp_path, policy,
         " $launcher=$TaskLauncher; if ($script:kind -eq 'custom') { $launcher='C:\\foreign\\service.ps1' }\n"
         " if ($script:kind -eq 'suffix') { $launcher += '.foreign' }\n"
         " $actions=@([pscustomobject]@{Execute='conhost.exe'; Arguments=\"--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `\"$launcher`\"\"; WorkingDirectory=$InstallDir})\n"
+        " if ($script:kind -eq 'direct') { $actions[0].Execute='C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'; $actions[0].Arguments=\"-NoProfile -File `\"$launcher`\"\" }\n"
+        " if ($script:kind -eq 'absolute-shell') { $actions[0].Arguments=\"--headless `\"C:\\Program Files\\PowerShell\\7\\pwsh.exe`\" -WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File `\"$launcher`\"\" }\n"
+        " if ($script:kind -eq 'foreign-first') { $actions[0].Arguments=\"--headless powershell.exe -File C:\\foreign.ps1 -File `\"$launcher`\"\" }\n"
+        " if ($script:kind -eq 'owned-forwarded') { $actions[0].Arguments=\"--headless powershell.exe -File C:\\foreign.ps1 `\"$launcher`\"\" }\n"
+        " if ($script:kind -eq 'foreign-wrapper') { $actions[0].Arguments=\"--headless C:\\foreign.exe -File `\"$launcher`\"\" }\n"
+        " if ($script:kind -eq 'foreign-executor') { $actions[0].Execute='cmd.exe' }\n"
+        " if ($script:kind -eq 'command') { $actions[0].Arguments=\"--headless powershell.exe -Command C:\\foreign.ps1 -File `\"$launcher`\"\" }\n"
+        " if ($script:kind -eq 'unquoted-space') { $actions[0].Arguments=\"--headless powershell.exe -File $launcher\" }\n"
         " if ($script:kind -eq 'ambiguous') { $actions += $actions[0] }\n"
         " $script:task=[pscustomobject]@{Actions=$actions; State=$(if ($script:kind -eq 'disabled') {'Disabled'} else {'Running'})}\n"
         "}\n"
@@ -214,7 +232,8 @@ def test_schedule_absent_with_unbuilt_incoming_payload(tmp_path, retained_runtim
         f"$env:USERPROFILE={quote(home)}; Set-Location -LiteralPath {quote(tmp_path)}\n"
         f"[IO.Directory]::SetCurrentDirectory({quote(tmp_path)})\n"
         f"$env:AGENT_VAULT_CONFIG={quote(config.name)}\n"
-        "$env:COPILOT_EXTENSIONS_HUMAN_UTF8=''\n"
+        "$env:COPILOT_EXTENSIONS_HUMAN_UTF8=''; $Action='schedule'\n"
+        "$env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT=''\n"
         + source[preamble_start:preamble_end]
         + source[stage_start:stage_end]
         + "$VenvDir=Join-Path $InstallDir '.venv'; $VenvPython=Join-Path $VenvDir 'Scripts\\python.exe'\n"
