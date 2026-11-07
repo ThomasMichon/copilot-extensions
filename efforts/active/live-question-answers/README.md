@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent plan and implementation PRs targeting `dev`
 - **Created:** 2026-11-07
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [interactive-session-representation](../../../visions/plugins/agent-bridge/README.md#interactive-session-representation), [evidence-backed-session-presence](../../../visions/plugins/agent-bridge/README.md#evidence-backed-session-presence)
 - **Umbrella issue:** #4418
 
@@ -83,19 +83,19 @@ document the existing trusted-operator boundary.
 
 ### Phase 1 - Reviewed contract
 - [x] Find and claim #4418; inspect current bridge and SDK seams.
-- [ ] Land this proposal through ordinary review before implementation.
+- [x] Land this proposal through ordinary review before implementation.
 
 ### Phase 2 - Correlated question roundtrip
-- [ ] Forward native requested/completed question events and expose truthful
+- [x] Forward native requested/completed question events and expose truthful
   pending form, native request id, family, generation and answer availability.
-- [ ] Add capability-gated client/CLI and authenticated service admission,
+- [x] Add capability-gated client/CLI and authenticated service admission,
   scoped to the exact live request and generation, with attributable audit.
-- [ ] Apply answers through the existing extension control channel and actual
+- [x] Apply answers through the existing extension control channel and actual
   pending-question RPCs, never ordinary prompts or permission operations.
-- [ ] Preserve single-use admission and honest accepted/rejected/unknown
+- [x] Preserve single-use admission and honest accepted/rejected/unknown
   outcomes through terminal/remote races, reconnect and restart. Replayed
   history alone cannot mint live answer authority.
-- [ ] Update canonical usage/contract docs and changefiles. Change Dispatch
+- [x] Update canonical usage/contract docs and changefiles. Change Dispatch
   only if a genuine caller needs it; task cards remain separate.
 
 ### Phase 3 - Delivery and reconciliation
@@ -104,17 +104,21 @@ document the existing trusted-operator boundary.
 
 ## Validation Plan
 
-- [ ] Focused Python and Node tests cover both question families, exact
+- [x] Focused Python and Node tests cover both question families, exact
   request/session/generation checks, malformed answers, duplicate and late
   answers, terminal-first completion, supersession, restart and unsupported SDK.
-- [ ] Authenticated HTTP admission and actual extension control execution
+- [x] Authenticated HTTP admission and actual extension control execution
   preserve read-only permissions and never call abort/send as an answer.
-- [ ] Exercise a newly created isolated real interactive question when
+- [x] Exercise a newly created isolated real interactive question when
   supported, checking native completion and same-conversation continuation;
   distinguish native evidence from mocked transport and contributed tools.
   If fundamentally unavailable, record the precise SDK limitation and link a
   tracked supported alternative rather than claiming success.
-- [ ] Run affected lint, unit/contract checks and mandatory source gates;
+- [x] Deferred to `#4418`: separate native legacy `user_input` qualification;
+  the current built-in structured form is native-qualified and both ordinary
+  pending-RPC families have focused protocol tests. Do not close the umbrella
+  as though that remaining native compatibility qualification ran.
+- [x] Run affected lint, unit/contract checks and mandatory source gates;
   audit public artifacts for private context.
 - [ ] Verify actual provider merge and resolve every remaining gate or
   transfer it explicitly to a named tracked objective.
@@ -141,3 +145,100 @@ requested protocol-only scope.
 - Current bundled SDK declares both pending-question RPCs and all four
   lifecycle events. Actual joined-session qualification remains open.
 - No existing session has been answered, cancelled or interrupted.
+
+### 2026-11-07 - Reviewed plan accepted
+
+- #11297 merged after current-head Copilot approval and required green checks.
+- Implementation uses a fresh extension-owned question snapshot plus the
+  existing durable control queue. Historical representation remains observation,
+  not answer authority. Question-only polling does not admit prompt, mode,
+  permission or policy controls, including for retained-inbox sessions.
+- Ordinary pending-question RPCs are distinct from the SDK's trusted-human
+  operations; this path never calls the latter or manufactures human evidence.
+
+### 2026-11-07 - Source roundtrip qualified
+
+- Implemented fresh extension snapshots, native request/generation admission,
+  isolated question controls, durable original-scope outcomes and CLI/client
+  capability negotiation. No Dispatch change is necessary: task cards are a
+  different authority and this path needs no dispatched task.
+- The private offline Windows fixture on Copilot CLI 1.0.108-1 displayed the
+  actual built-in form, accepted its answer through HTTP and the bundled
+  extension, completed the tool call and resumed the same conversation. It
+  required one user prompt, no abort, native completion correlation, cleared
+  represented state and a completed terminal history row with the answer.
+- Native loading exposed the observer's unnecessary `approveAll` declaration:
+  removed that unused handler instead of granting extension permission authority.
+- Latest focused question/extension/native packet: 12 passed. Existing
+  question/mode/readiness control packet: 27 passed. Two actor-free response
+  validators passed and join the required unit packet. Representation/result
+  regressions also passed; native legacy text-input qualification stays #4418.
+- Install and version guards passed. The documentation guard initially raced
+  transient build inputs during parallel preparation; the named temporary
+  directory was confirmed absent afterward and a sequential guard passed.
+- Current HTTP-52 contract evidence is being expanded and recaptured before
+  publication readiness; historical generations remain unchanged.
+
+### 2026-11-07 - Contract portfolio corrections
+
+- The local full Windows capture encountered the retained writer fixture's
+  existing 15-second communication deadline; #11311 owns that separate
+  qualification investigation. No deadline or assertion was weakened.
+- The source-pinned hosted capture ran all 281 cases and exposed a missing
+  portable receiving asset plus an omitted aggregate capability observation.
+  Added `questions.mjs` to the canonical packaged closure and observed the
+  actual health capability in the independent vector comparison.
+- All four affected receiver/aggregate cases now pass locally. The complete
+  current capture and separate verification will run against the corrected
+  published checkpoint; a partial pass is not publication evidence.
+
+### 2026-11-07 - Qualified checkpoint and rollover correction
+
+- The complete 281-case capture, independent no-write verification and
+  historical publication guards passed in the source-pinned hosted run.
+  Its native publication owner materialized the verified outputs; the
+  independent local contract guard passed with 1,061 retained fixtures.
+- A final source check reproduced a retained acknowledgment after rollover
+  with zero original-scope retry attempts. Recovery now retries that receipt
+  against its original native ID, never the answer RPC. Missing/mismatched
+  old audit records remain visible without blocking new snapshots.
+- Added focused rollover/lost-evidence controls. The corrected final source
+  will receive fresh capture and verification before publication readiness.
+
+### 2026-11-07 - Final source acceptance
+
+- The final source checkpoint passed the complete 281-case capture,
+  independent verification, historical publication guards and export.
+  Verified source-bound outputs were materialized through the native owner;
+  the independent contract guard passed again with 1,061 retained fixtures.
+- All 11 question-extension controls passed, including rollover and unavailable
+  original audit recovery. The real native form and actual extension-loader
+  packet passed again after that correction.
+- Enforced type pre-validation passed for all 40 currently admitted strict
+  projects on both declared targets. Bridge remains independently pending
+  type admission; no broader qualification is inferred.
+- Source implementation and evidence are ready for normal review and CI.
+  Merge, effort closeout and finalization remain open. No rollout occurred.
+
+### 2026-11-07 - Review correction
+
+- The first review identified uncharged correlation strings in passive result
+  snapshots. Both full values now reserve their text budget before emission;
+  insufficient room omits the pair rather than truncating an exact identifier.
+- Added four real snapshot-builder regressions covering both native families,
+  low budgets, atomic pair omission and truthful usage. The focused result
+  regression packet passed 22 cases.
+- The current HTTP-52 portfolio includes these controls (285 total). The PR
+  is temporarily draft while the corrected source receives fresh evidence;
+  no review, CI or permission gate is bypassed.
+
+### 2026-11-07 - Corrected source requalified
+
+- The corrected source passed all 285 HTTP-52 capture cases, independent
+  no-write verification, immutable historical publication guards and canonical
+  export in Actions run 42371932573.
+- The native artifact owner materialized all 150 verified outputs against
+  the exact source checkpoint. The independent contract guard passed with
+  two contracts and 1,061 retained fixtures; historical generations are intact.
+- The budget correction and its evidence are ready for renewed ordinary
+  review. Required CI, actual merge and effort closeout remain open.

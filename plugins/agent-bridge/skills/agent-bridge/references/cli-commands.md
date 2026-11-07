@@ -27,6 +27,10 @@ catalog; never resolve it through ambient `PATH`.
 ---
 ## CLI Commands
 
+For `questions` and generation-qualified live `answer`, see the
+[live question answer contract](../../../docs/live-question-answers.md).
+Owned ACP answers and tool-permission decisions remain distinct.
+
 The service must be running (the `start` management operation) for HTTP client
 commands to work. Local version/contract disclosure does not contact it.
 

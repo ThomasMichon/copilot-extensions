@@ -114,6 +114,18 @@ keyed-creation HTTP control also joins the real full-status parser and passive
 health JSON. The CLI declaration and status implementation are semantic inputs;
 HTTP generation, service endpoints and historical evidence are unchanged.
 
+The optional `live_question_answers: 1` contract adds fifteen focused controls
+to the subsequent current inventory, bringing it to 285 cases. They exercise
+actual authenticated question routes, exact session/generation/request binding,
+claim-once delivery, native-result audit semantics, original-scope recovery and
+negotiated client/CLI refusal on unsupported providers. The question models,
+validator, translator, client and bundled extension are semantic sources.
+Historical generations remain unchanged. These HTTP/fixture controls do not
+claim native SDK acceptance; the separately selected private interactive
+test is documented in [live question answers](../docs/live-question-answers.md).
+Passive correlation is exact or omitted, and its complete identifier/family
+values count toward the bounded result's text usage.
+
 The joined portable-mux fixture retains the production native socket-path
 bound. Its isolated physical temporary root must be short enough for that
 bound; a long caller `TMPDIR` can correctly refuse before creating the mocked

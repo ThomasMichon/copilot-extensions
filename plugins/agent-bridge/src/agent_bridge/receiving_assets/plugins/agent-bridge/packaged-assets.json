@@ -13,6 +13,7 @@
     "agent-bridge/extensions/agent-bridge/extension.mjs",
     "agent-bridge/extensions/agent-bridge/metadata.mjs",
     "agent-bridge/extensions/agent-bridge/plugin-readiness.mjs",
+    "agent-bridge/extensions/agent-bridge/questions.mjs",
     "agent-bridge/extensions/agent-bridge/remote-driver.mjs",
     "agent-bridge/extensions/agent-bridge/retained-delivery.mjs",
     "agent-worktrees/src/agent_worktrees/mux_prerequisite.py",
