@@ -1385,3 +1385,39 @@ order or behavior; all 24 changed modules now satisfy their existing ceilings.
 The nine focused reader/parser controls pass in 4.65 seconds (122.25 including
 preparation/cleanup), and F/E9 passes. The stopped capture is not qualification;
 the final source still requires complete writer and independent reproduction.
+
+### 2026-11-07 - Hosted qualification enabler accepted; exact-source packet pending
+
+The owner-only Windows escape hatch in #11169 is now released and accepted:
+its focused 68-test Windows run passed, actual concurrent submissions retained
+both source commits through one append-only non-branch ref, and deliberate
+failure and empty selection returned non-success. This avoids another local
+full capture on the constrained development host.
+
+Submitted this effort's exact retained source
+`d79a4c4a81814b0f65601836df4ccfab1b1522f7` to the canonical
+`bridge-http52` packet, request `f228a2d79c9740a183ab6d5d5b02e076`,
+through protected controller
+`ccea6c44019c7e9be7bafa5064e7fe6aad1340a8`.
+The original request is accepted, not yet qualified. It owns the canonical
+writer, separate same-source reproduction, contract verifier and artifact
+export; existing portfolio, receipt and aggregate limits remain unchanged.
+No local environment prewarming, shared runtime rollout or production-session
+effect was performed.
+
+This effort retains the packet's original request/result custody, validated
+artifact materialization, #11016 review/CI/merge and every remaining parent
+gate. It also retains eventual retirement of the qualification source
+workspace after its source-owned client is no longer needed. Completing the
+escape hatch does not complete this refactor.
+
+The original hosted packet completed as a failed result in run
+[42334415067](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42334415067),
+artifact `13558912228`. Its protocol group passed 241 cases but failed the
+two rollback observations; the independent reproduction and export did not
+run. It is not qualification or a timeout. The source fixture loader used
+the Windows default text encoding. Decoding the captured UTF-8 bytes as
+CP1252 exactly reproduces the hosted mismatched hash; UTF-8 reproduces the
+unchanged expected hash. Select UTF-8 explicitly for both the manifest and
+captured sources, with a focused locale-regression test. Preserve the actual
+fixture bytes, expected source hashes, complete portfolio and all deadlines.
