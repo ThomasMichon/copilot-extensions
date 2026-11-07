@@ -59,6 +59,7 @@ def semantic_environment(cfg):
     # They remain in the physical child environment where lifetime owners need them.
     for key in (
         INSTANCE_ENV, REGISTRY_ENV, ENVIRONMENT_KEY, "AGENT_MCP_SERVE_SOCKET",
+        "AGENT_MCP_INSTALL_DIR",
         # Exact scratch variables declared by the shipped CMD wrapper.
         "_ROOT", "_PY", "_VER", "_SNAP", "_INST", "_PSX",
     ):

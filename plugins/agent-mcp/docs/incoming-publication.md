@@ -32,6 +32,9 @@ Selection is revalidated after publication; the server checks the expected
 generation and root before opening an upstream or dispatching a request.
 The installed callback remains the owner of native identity, supported slot
 layout and compare-before-publication checks.
+Empty, truncated or malformed readiness JSON is pre-application unavailability.
+It does not bypass generation/root admission or convert an uncertain
+application outcome into a retry.
 Reuse and publication also authenticate the serving process's installation
 root. Equal physical version strings from separate installations do not confer
 ownership of a shared handle. Missing or foreign installation identity refuses
@@ -64,6 +67,10 @@ wrapper bookkeeping from caller authority. Explicit configuration references
 keep those fields significant; unrelated credential keys are never filtered.
 Explicit reference matching follows Windows' case-insensitive environment
 lookup, while remaining case-sensitive on POSIX.
+An unreferenced `AGENT_MCP_INSTALL_DIR` supplied by the installer is semantic
+bookkeeping only: a normal caller may leave it unset and still reuse the
+equivalent resident. Physical upstream inheritance and explicit configuration
+references retain the field; installation identity is still checked separately.
 An unset or empty, unreferenced `AGENT_MCP_HOME` compares as the canonical
 resolved default that daemon startup adds. Nonempty overrides and explicit
 configuration references remain significant.
@@ -157,6 +164,8 @@ and proves that a fresh literal command executes different Pipeline code in the
 incoming physical slot despite unchanged package versions. The old upstream PID
 and single initialization survive; retirement tripwires are not called. Both
 empty global discovery and installer-discovered configuration are exercised.
+Literal callers leave `AGENT_MCP_INSTALL_DIR` unset; only installer children
+receive each explicit installation root.
 The discovered variant additionally constructs the same physical version in a
 second installation, refuses its shared-handle publication and preserves the
 first installation's route and attached upstream.

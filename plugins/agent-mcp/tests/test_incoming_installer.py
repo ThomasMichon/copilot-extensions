@@ -162,6 +162,10 @@ async def test_ordinary_install_publishes_without_predecessor_extinction(
     environment = isolated_environment(os.environ, private / "profile")
     diagnostic = os.environ.get(DIAGNOSTIC) == "1"
     environment = _diagnostics.actor_environment(environment, DIAGNOSTIC)
+    environment = {
+        name: value for name, value in environment.items()
+        if name.casefold() != "agent_mcp_install_dir"
+    }
     diagnostic_root = private / "context-diagnostics"
     assert environment.get("OS") == "Windows_NT"
     root = Path(environment["USERPROFILE"]) / ".agent-mcp"
@@ -172,7 +176,7 @@ async def test_ordinary_install_publishes_without_predecessor_extinction(
     bin_dir = Path(environment["USERPROFILE"]) / ".local" / "bin"
     environment.update(
         COMPUTERNAME="fixture-machine",
-        AGENT_MCP_INSTALL_DIR=str(root), AGENT_MCP_NO_SERVE="", AGENT_MCP_NO_ENSURE_SERVE="",
+        AGENT_MCP_NO_SERVE="", AGENT_MCP_NO_ENSURE_SERVE="",
         AGENT_MCP_NO_MULTIPLEX="", AGENT_MCP_NO_SELFPROVISION="1",
         COPILOT_EXTENSIONS_HUMAN_UTF8="", PATH=str(bin_dir) + os.pathsep + os.environ["PATH"],
         UV_CACHE_DIR=str(Path(os.environ["COPILOT_EXTENSIONS_TEST_VENV_ROOT"]) / ".uv-cache"),

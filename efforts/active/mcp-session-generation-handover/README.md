@@ -1357,3 +1357,17 @@ migration already works.
   admission inventory. New-source validation, current review/CI, release and
   installed verification remain separate gates; prepared-application acceptance
   and complete session-preserving handover remain open.
+
+### 2026-11-06: Review corrections for ordinary caller context and readiness replies
+
+- Two focused regressions expose installer-only root bookkeeping in the
+  semantic caller digest and uncaught malformed readiness JSON. The corrections
+  ignore an unreferenced installation-root field only for semantic comparison,
+  preserve physical inheritance and explicit references, and translate only
+  readiness JSON/UTF-8 decode failures into pre-application unavailability.
+  Application uncertainty and no-replay behavior remain unchanged.
+- The ordinary installer witness now leaves the root field unset for literal
+  callers while retaining every installer child's explicit root and all
+  original assertions. New-source formal validation and current review/CI
+  remain pending. Neither finding establishes the cause of the historical
+  warm PID mismatch; that finding remains not reproduced with unknown cause.

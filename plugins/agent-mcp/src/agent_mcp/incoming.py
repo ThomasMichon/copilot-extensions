@@ -116,7 +116,10 @@ def _ping(handle) -> dict:
         if token is not None:
             request["token"] = token
         connection.sendall((json.dumps(request) + "\n").encode())
-        response = json.loads(sockio._read_ack_line(connection))
+        try:
+            response = json.loads(sockio._read_ack_line(connection))
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise OSError("serving peer returned an invalid readiness reply") from exc
         if not isinstance(response, dict) or response.get("ok") is not True:
             raise OSError("serving peer did not qualify")
         return response

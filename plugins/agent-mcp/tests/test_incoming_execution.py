@@ -145,6 +145,30 @@ def test_daemon_bookkeeping_is_not_caller_authority_but_explicit_use_is(monkeypa
     assert execution_context._identity(cfg, key) != explicit
 
 
+@pytest.mark.parametrize("platform,reference,significant", [
+    ("nt", "agent_mcp_install_dir", True),
+    ("posix", "agent_mcp_install_dir", False),
+    ("posix", "AGENT_MCP_INSTALL_DIR", True),
+])
+def test_install_root_is_semantic_bookkeeping_but_physically_inherited(
+    tmp_path, monkeypatch, platform, reference, significant,
+):
+    environment = {"AGENT_MCP_HOME": str(tmp_path / "home")}
+    monkeypatch.setattr(execution_context, "os", SimpleNamespace(
+        name=platform, environ=environment, getcwd=lambda: str(tmp_path),
+    ))
+    cfg = BridgeConfig(server=ServerSpec(type="stdio", command=["unused"]), auth=AuthSpec())
+    key = execution_context.descriptor()["key"]
+    caller = execution_context._identity(cfg, key)
+    environment["AGENT_MCP_INSTALL_DIR"] = str(tmp_path / "installation")
+    assert execution_context._identity(cfg, key) == caller
+    assert execution_context.inherited_environment(cfg)["AGENT_MCP_INSTALL_DIR"] == environment["AGENT_MCP_INSTALL_DIR"]
+    cfg.auth = AuthSpec(kind="env", source_env=reference)
+    explicit = execution_context._identity(cfg, key)
+    environment["AGENT_MCP_INSTALL_DIR"] = str(tmp_path / "other-installation")
+    assert (execution_context._identity(cfg, key) != explicit) is significant
+
+
 @pytest.mark.parametrize("platform", ["nt", "posix"])
 def test_explicit_reference_matching_retains_platform_case_semantics(monkeypatch, platform):
     cfg = BridgeConfig(

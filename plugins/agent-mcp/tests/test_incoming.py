@@ -10,6 +10,42 @@ import pytest
 from agent_mcp import cutover, forward, incoming
 
 
+@pytest.mark.parametrize("reply", [b"", b'{"ok":', b"\xff\n"], ids=["empty", "truncated", "utf8"])
+def test_malformed_ping_reply_is_pre_effect_unavailability(monkeypatch, reply):
+    class Connection:
+        def __init__(self):
+            self.remaining = bytearray(reply)
+            self.writes = []
+            self.closed = False
+
+        def settimeout(self, seconds):
+            assert seconds == 2
+
+        def sendall(self, data):
+            self.writes.append(json.loads(data))
+
+        def recv(self, size):
+            chunk = bytes(self.remaining[:size])
+            del self.remaining[:size]
+            return chunk
+
+        def shutdown(self, how):
+            pass
+
+        def close(self):
+            self.closed = True
+
+    connection = Connection()
+    monkeypatch.setattr(incoming.sockio, "_connect", lambda handle: (connection, None))
+    try:
+        with pytest.raises(OSError) as unavailable:
+            incoming._ping("fixture-handle")
+        assert isinstance(unavailable.value.__cause__, (json.JSONDecodeError, UnicodeDecodeError))
+    finally:
+        assert connection.writes == [{"op": "ping"}]
+        assert connection.closed
+
+
 @pytest.mark.parametrize("filename,publish,deploy", [
     ("init.ps1", "Publish-IncomingMcp", "Deploy-SelfProvisioningBinstub"),
     ("init.sh", "_publish_incoming_mcp || exit 1", "deploy_binstub"),
