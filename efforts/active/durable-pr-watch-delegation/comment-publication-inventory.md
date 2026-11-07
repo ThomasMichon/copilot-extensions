@@ -60,7 +60,12 @@ adoption. It retains structured identity through original native execution and
 provides a read-only original receipt projection. The
 [optional existing workspace receiver](../../../plugins/agent-pull-requests/docs/workspace-integration.md#optional-prepared-review-receiver)
 can compose the actual CLI/tool/client/Gateway path after discovery and owner
-adoption. This is not automatic preparation, fresh readback or DB merge.
+adoption. The optional
+[local preparation binding](../../../plugins/agent-pull-requests/docs/workspace-tools.md#optional-local-comment-preparation)
+can compose the actual shared preparer before preview and explicit submission
+for protected comment/reply/owned-edit source hosts. It still requires a trusted
+host policy/source binding and caller-retained GUIDs; it is not automatic
+installed adoption, allocation, fresh readback or DB merge.
 Default submission remains v1 and legacy tagged bodies gain no inferred identity.
 
 ## Remaining qualification

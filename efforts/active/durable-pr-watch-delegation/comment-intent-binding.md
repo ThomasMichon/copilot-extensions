@@ -103,3 +103,92 @@ native serializers and real-file owners. Test old/new parser refusal, receiver
 negotiation, supported rollback and lifecycle exclusion without a production
 migration. No live comment, retrospective backfill, credential, service restart,
 deployment, retained host or resource release is authorized.
+
+## Durable pre-approval selection and allocation
+
+The local producer in #11237 still requires caller-retained GUIDs and previous
+preparation. Its pure output and the existing post-selection intent admission
+cannot recover a lost preparation response or establish uniqueness after the
+caller loses that original record. Automatic allocation therefore needs a
+**review-first existing-owner refinement** before a new persisted lifecycle or
+publisher behavior. The requirements below are proposed source work, not
+implemented support or operational authority.
+
+### One original selection under the existing owner
+
+Retain the original pre-approval selection through the existing protected
+selected-operation storage owner, not a second allocation database, generic
+draft service, watcher or caller-side retry file convention. Use the existing
+scoped operation identity as the recovery key. A persisted prepared selection
+is explicitly **not admitted for execution** and contains no native attempt,
+approval, handled progress or receipt.
+
+For a first selected draft, allocate public version-4 logical-comment and
+intentional-write GUIDs, compose the actual source/profile owners, and commit
+the exact final v2 intent before returning it for preview. Keep only one
+retained final body per action, with bounded original-input binding and the
+existing capacity/lifecycle owner. Do not retain a draft/body/profile history.
+Actual policy/source resolution may precede the transaction, but allocation,
+original-selection uniqueness and durable commit must reconcile under the
+same owner; no native or external policy IO occurs under its disk lock.
+
+Reusing the same scoped operation with the same original selection returns
+the original prepared identity and exact bytes without redecoration or another
+allocation. A changed draft, candidate/reviewed-code selection, action/native target
+or supplied edit identity refuses rather than replacing that pending selection.
+Lost responses, restart and ownership handoff recover by that original key;
+an unknown commit cannot become a fresh operation or an execution retry.
+Later profile/producer-origin changes do not rewrite retained content. Current policy
+may refuse an operation, but cannot manufacture replacement approved bytes.
+
+The actual host supplies destination policy, source and effective AI profile.
+Caller labels, a GUID, a body hash or an earlier preview do not establish those
+facts. The current native/source/credential owners still qualify subsequent
+submission. Do not add a forge query only to suppress visible attribution.
+
+### Preview, admission and native correlation stay separate
+
+Return the committed final intent for actual preview and approval. Submission
+must present that exact original selection through the existing admission
+boundary before any native attempt. Preparation cannot call submission,
+change an execution-admitted operation, mark a write confirmed, allocate after
+approval or treat a request's `approved` flag as approval evidence.
+Transition to execution admission preserves the same operation, GUIDs and body;
+it must not create another retained body copy or a second effect ledger.
+
+A new comment or reply gets a fresh logical identity; a reply never inherits
+its parent's GUID. An intentional owned edit retains the original logical
+identity and gets a new write identity through the existing scoped/native
+binding. Equal content or copied tags cannot establish that prior binding.
+A genuinely legacy owned comment may acquire identity as part of its explicitly
+selected ordinary edit; this is not permission for retrospective scans,
+backfill or repairs of unknown effects.
+
+Unattempted prepared data, admitted-but-unattempted execution, unknown native
+effects and confirmed receipts retain distinct meanings after restart and
+terminal compaction. Preserve original unknown fences, captures and unresolved
+identities. Capacity exhaustion refuses without silently discarding another
+selection or authorizing production deletion.
+
+### Compatibility and finite source exit
+
+Expand the existing strict storage contract explicitly through its lifecycle
+owner before admitting pre-approval records. Old readers must refuse unsupported
+state rather than interpreting prepared data as execution admission. Existing
+legacy operations and unresolved receipts remain unchanged; a request cannot
+upgrade or downgrade the owner layout.
+
+Expose any new allocation syntax only after the actual executing producer and
+receiver advertise it through their existing capability boundary. The explicit
+caller-ID local producer, v1 submission and supported prepared v2 paths remain
+usable at their existing semantics. Missing support or rollback refuses the
+new path before effects; no effectful probe or legacy fallback claims allocation.
+
+Qualify the real source path from first preparation commit through lost-result
+recovery, preview, explicit admission, native outcome and original receipt.
+Include concurrent same-key calls, changed input, profile/source changes,
+restart, capacity/lifecycle refusal, strict old/new readers, bodyless votes,
+reply identity and intentional/legacy edits. Prove that preparation performs no
+native IO and cannot advance admission, feedback/echo, watch ACK, Dispatch or
+DB object mapping. Keep this finite protected source exit separate from other
+issue/PR/review/inline publishers, all three providers and installed adoption.
