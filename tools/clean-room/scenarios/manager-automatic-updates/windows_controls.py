@@ -50,6 +50,8 @@ def run_controls(workdir: Path, *, allow_visible_controls: bool) -> dict:
              [wt.DWORD, wt.LPCWSTR, wt.LPCWSTR, wt.DWORD, ct.c_int, ct.c_int, ct.c_int,
               ct.c_int, wt.HWND, wt.HMENU, wt.HINSTANCE, wt.LPVOID], wt.HWND),
             (api.user.SetForegroundWindow, [wt.HWND], wt.BOOL),
+            (api.user.SetWindowPos,
+             [wt.HWND, wt.HWND, ct.c_int, ct.c_int, ct.c_int, ct.c_int, wt.UINT], wt.BOOL),
             (api.user.DestroyWindow, [wt.HWND], wt.BOOL),
         )
         for function, arguments, result in signatures:
@@ -64,7 +66,16 @@ def run_controls(workdir: Path, *, allow_visible_controls: bool) -> dict:
                 ) or 0)
                 api._check(hwnd, "create owned positive-control window")
                 report["control_hwnd"] = hwnd
-                api._check(api.user.IsWindowVisible(hwnd), "positive-control window visible")
+                # Hidden launch STARTUPINFO can override the creation-time show state.
+                api._check(
+                    api.user.SetWindowPos(hwnd, None, 0, 0, 0, 0, 0x0057),
+                    "show owned positive-control window",
+                )
+                if not api.user.IsWindowVisible(hwnd):
+                    raise NativeBlocked(
+                        "positive-control-not-visible",
+                        "owned window remained hidden after the explicit show request",
+                    )
                 api._check(api.user.SetForegroundWindow(hwnd), "activate positive-control window")
                 until(api.foreground, lambda value: value == hwnd, timeout=2,
                       label="positive-control foreground")

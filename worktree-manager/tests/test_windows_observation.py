@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import importlib
+import json
 import os
 from pathlib import Path
 import threading
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -310,6 +311,84 @@ def test_native_positive_controls_require_new_visible_effect_consent(probe, tmp_
     with pytest.raises(probe.NativeBlocked, match="visible-control-consent-required"):
         module.run_controls(tmp_path, allow_visible_controls=False)
     api.assert_not_called()
+
+
+@pytest.mark.parametrize("becomes_visible", [True, False])
+def test_positive_control_explicitly_shows_a_hidden_startup_window(
+    probe: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    becomes_visible: bool,
+) -> None:
+    module = importlib.import_module("windows_controls")
+    state = SimpleNamespace(visible=False, foreground=10, events=[])
+
+    def show(
+        hwnd: int, after: None, x: int, y: int, width: int, height: int, flags: int,
+    ) -> bool:
+        assert (hwnd, after, x, y, width, height) == (20, None, 0, 0, 0, 0)
+        assert flags == 0x0057
+        state.visible = becomes_visible
+        if becomes_visible:
+            state.events.append({"kind": "show-event", "hwnd": hwnd})
+        return True
+
+    def activate(hwnd: int) -> bool:
+        state.foreground = hwnd
+        state.events.append({"kind": "foreground-event", "hwnd": hwnd})
+        return True
+
+    def check(value: object, action: str) -> None:
+        if not value:
+            raise probe.NativeBlocked("test-native-call-failed", action)
+
+    class Observer:
+        def __init__(self, _api: object) -> None:
+            self.thread = SimpleNamespace(is_alive=lambda: False)
+
+        def __enter__(self) -> Observer:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            pass
+
+        def packet(self) -> dict:
+            return {
+                "sealed": True, "hooks_closed": True, "hooks_registered": 2,
+                "samples": 2, "maximum_observation_gap_seconds": 0.1,
+                "passed": False, "raw_events": list(state.events),
+            }
+
+    user = SimpleNamespace(
+        CreateWindowExW=Mock(return_value=20), SetWindowPos=Mock(side_effect=show),
+        IsWindowVisible=Mock(side_effect=lambda hwnd: state.visible),
+        SetForegroundWindow=Mock(side_effect=activate), DestroyWindow=Mock(return_value=True),
+    )
+    api = SimpleNamespace(
+        user=user, facts=DesktopStub(probe).facts, foreground=lambda: state.foreground,
+        _check=check, close=Mock(),
+    )
+    monkeypatch.setattr(module, "WinAPI", lambda: api)
+    monkeypatch.setattr(module, "WindowObserver", Observer)
+    monkeypatch.setattr(module.ct, "get_last_error",
+                        Mock(side_effect=AssertionError("visibility has no last-error contract")),
+                        raising=False)
+    monkeypatch.setattr(module.fixtures, "private_directory",
+                        lambda root: (root.mkdir(), root)[1])
+    output = tmp_path / "controls"
+    if becomes_visible:
+        report = module.run_controls(output, allow_visible_controls=True)
+        assert report["passed"] is True
+        assert state.foreground == 10
+    else:
+        with pytest.raises(probe.NativeBlocked, match="positive-control-not-visible"):
+            module.run_controls(output, allow_visible_controls=True)
+        report = json.loads((output / "observer-controls.json").read_text())
+        assert report["passed"] is False
+        assert "WinError" not in report["error"]
+        user.SetForegroundWindow.assert_not_called()
+    user.SetWindowPos.assert_called_once()
+    user.DestroyWindow.assert_called_once_with(20)
+    assert report["cleanup_verified"] is True
+    api.close.assert_called_once()
 
 
 def test_positive_control_proof_needs_show_and_both_foreground_events(probe):

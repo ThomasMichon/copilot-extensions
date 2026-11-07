@@ -248,6 +248,13 @@ direct identity, delayed callbacks, overflow, startup/stop coverage gaps and
 immutable completion time. Native sensitivity remains unqualified until this
 separately consented control actually runs.
 
+The consented control explicitly shows only its owned window without moving,
+resizing, changing Z order or activating it at that step. This avoids inherited
+hidden `STARTUPINFO` suppressing creation-time visibility; activation and
+restoration remain separate observed actions. A false `IsWindowVisible` result
+reports a hidden control, not a possibly stale last-error value. Native SHOW
+and both foreground-event witnesses are still required.
+
 Reports and per-case logs remain in the caller's scratch directory. On any
 cleanup deadline failure, retain that directory and diagnose it; the probe
 does not force-stop an unverified process.
