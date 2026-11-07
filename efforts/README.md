@@ -19,6 +19,7 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Mux Reliability and Recovery](active/mux-reliability-recovery/README.md) | Draft; non-destructive observation, truthful degraded status and preservation-first recovery proposed before implementation | #11255; preserves #7212/#4564/#10627/#8669 owners; no live cleanup, restart or rollout |
 | [Owned Codespace Capacity](active/owned-codespace-capacity/README.md) | Draft; independent owned-count admission and safe sequential reuse proposed before runtime changes | Bounded #4187 slice; preserves recycler, capture and owner-wave integration owners; no live cleanup or rollout |
 | [Worktree Activity Convergence](active/worktree-activity-convergence/README.md) | Draft; lifecycle/activity/event convergence and explicit list controls proposed before implementation | #11195; preserves #5953/#6748/#2619 owners; selected local rollout after release only |
 | [Bridge and Dispatch Worker Contract Qualification](active/bridge-dispatch-worker-contract-qualification/README.md) | Draft; handoff proposal, no implementation claimed | #6467/#3556/#7268 existing owners; #11106 result bindings and #11108 effective profiles; no new driver or rollout |
