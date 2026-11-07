@@ -20,6 +20,8 @@ REPOSITORY_ADAPTERS = {
 _IGNORED = {"tests", "__pycache__", ".venv", ".test-runs", "build", "dist"}
 _RESOURCE_SUFFIXES = {".py", ".sh", ".ps1", ".c", ".h", ".json", ".typed", ".awk", ".pyz"}
 _RESOURCES = (
+    "libs/payload-invocation/generate.py",
+    "libs/payload-invocation/runtime_admission.py",
     "libs/agent-procutil/setup.py",
     "libs/versioned-runtime/standalone_build.py",
     "plugins/agent-containers/setup.py",

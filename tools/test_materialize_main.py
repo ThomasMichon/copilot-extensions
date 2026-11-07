@@ -6,6 +6,7 @@ import importlib.util
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -110,6 +111,94 @@ def test_invocation_promotion_refuses_foreign_manifest_before_writes(tmp_path: P
     manifest.write_bytes(manifest.read_bytes() + b"\n")
     assert mpiv.materialize(candidate, canonical_root=canonical)[0].startswith("SKIP")
     assert not (manifest.parent / "scripts/command_binding.py").exists()
+
+
+def test_packaged_manager_preparer_imports_in_isolated_python(tmp_path: Path) -> None:
+    repo = Path(__file__).resolve().parents[1]
+    source, payload = tmp_path / "source", tmp_path / "payload"
+    consumer = source / "worktree-manager"
+    consumer.mkdir(parents=True)
+    manifest = repo / "worktree-manager/packaged-assets.json"
+    shutil.copyfile(manifest, consumer / manifest.name)
+    tools = source / "tools"
+    tools.mkdir()
+    for name in json.loads(manifest.read_text())["files"]:
+        shutil.copyfile(repo / "tools" / name, tools / name)
+    shutil.copytree(
+        repo / "worktree-manager/scripts", payload / "scripts",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    log = mm.materialize_launch_wrapper_assets_into(
+        source_consumer_dir=consumer, dest_consumer_dir=payload, canonical_root=source,
+    )
+    assert log and not any(line.startswith("SKIP") for line in log), log
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", str(payload / "scripts/runtime-source-tools/prepare_runtime_source.py"),
+         "--help"],
+        cwd=tmp_path, capture_output=True, text=True, timeout=10,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stderr
+    assert "--source" in result.stdout
+
+
+def test_copied_invocation_toolkit_prepares_source_with_pinned_generators(tmp_path: Path) -> None:
+    repo = Path(__file__).resolve().parents[1]
+    canonical, _candidate = _invocation_candidate(tmp_path)
+    consumer = canonical / "plugins/sample"
+    shutil.copytree(canonical / "plugins/agent-worktrees/scripts", consumer / "scripts")
+    (consumer / "pyproject.toml").write_text('[project]\nname = "sample"\nversion = "1"\n')
+    (consumer / "payload-invocation.json").write_text(json.dumps({
+        "schema": "copilot-extensions.payload-invocation", "version": 1,
+        "command": "sample", "module": "sample.cli", "purpose": "Sample command",
+        "runtimeRoot": ".sample", "noSelfProvisionEnv": "SAMPLE_NO_PROVISION",
+    }))
+    spec = importlib.util.spec_from_file_location(
+        "_copied_preparer_packager", repo / "libs/payload-invocation/runtime_admission.py",
+    )
+    assert spec and spec.loader
+    packager = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(packager)
+    toolkit = tmp_path / "payload/scripts/_runtime_admission"
+    for relative, content in packager.expected_files(repo).items():
+        path = toolkit / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content.encode("utf-8") if isinstance(content, str) else content)
+    for name in ("generate.py", "runtime_admission.py"):
+        (canonical / "libs/payload-invocation" / name).write_text(
+            'raise RuntimeError("candidate tooling must never execute")\n',
+        )
+    before = {path.relative_to(canonical): path.read_bytes()
+              for path in canonical.rglob("*") if path.is_file()}
+    script = """
+import pathlib, shutil, sys
+toolkit, source, output = map(pathlib.Path, sys.argv[1:])
+sys.path.insert(0, str(toolkit.parent))
+import _runtime_admission
+_runtime_admission.activate()
+import prepare_runtime_source
+assert pathlib.Path(prepare_runtime_source.__file__).is_relative_to(toolkit)
+prepare_runtime_source._materialize(source, "sample", output)
+assert b"sample.cli" in (output / "bin/sample.ps1").read_bytes()
+assert (output / "scripts/emit-command-catalog.sh").is_file()
+import materialize_payload_invocation
+consumer = source / "plugins/agent-worktrees"
+copied = output.parent / "copied/agent-worktrees"
+shutil.copytree(consumer, copied)
+log = materialize_payload_invocation.materialize(copied, canonical_root=source, source_consumer=consumer)
+assert log and not any(line.startswith("SKIP") for line in log), log
+assert (copied / "scripts/_runtime_admission/libs/payload-invocation/runtime_admission.py").is_file()
+print("copied-toolkit-preparation-ok")
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", script, str(toolkit), str(canonical), str(tmp_path / "prepared")],
+        cwd=tmp_path, capture_output=True, text=True, timeout=10,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "copied-toolkit-preparation-ok"
+    assert before == {path.relative_to(canonical): path.read_bytes()
+                      for path in canonical.rglob("*") if path.is_file()}
 
 
 def test_invocation_promotion_uses_the_version_stamped_candidate_root(tmp_path: Path) -> None:

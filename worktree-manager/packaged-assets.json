@@ -6,6 +6,7 @@
   "files": [
     "prepare_runtime_source.py",
     "materialize_main.py",
+    "materialize_payload_invocation.py",
     "materialize_installer_engine.py",
     "installer_engine_ref.py",
     "materialize_launch_wrapper_assets.py",

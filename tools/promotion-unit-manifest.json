@@ -4657,7 +4657,7 @@
         "libs/repository-policy/src/repository_policy/receiving.py": "9edad82766c227e2f3e2ab0cc919f7d54fe9301e40de36a0414c4ed090140239",
         "libs/copilot-driver-core/src/agent_remote_driver/session_host/receiver_policy.py": "ca26364821860e4cf86b1cb42b3a95720ee451f82336c38beb1f4505747c124a",
         "tools/promotion_unit_tests/test_portable_receiving_policy.py": "8e9985a82dabac55cba1eee87683561cdbf6a2c0b533146f9c88c2a9122b5ad5",
-        "libs/payload-invocation/runtime_admission.py": "179827ba321782ad016c769b987599dc71403108d5f1dc3777b0c3774934ec49",
+        "libs/payload-invocation/runtime_admission.py": "7aef2672bef809bb5ed761fb1847adfcb841ace5419dd016884609a476115613",
         "tools/promotion_unit_tests/test_runtime_admission_delivery.py": "dbb56e0d18615ff20c03f3422f49e0ace70e57a1c49a73271c5bb6c34c2a03e8",
         "plugins/agent-worktrees/src/agent_worktrees/hook_ipc.py": "639041c19ef0338c571b9d4b3f44c202fd9053511fef41f3305d4a9a598c77b0",
         "plugins/agent-worktrees/src/agent_worktrees/status_monitor_cli.py": "4ce4e6e39b141d484cacdc694163f3a22f86a7eacde35080ceb301be5b13cb29",
