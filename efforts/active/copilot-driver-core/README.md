@@ -2254,3 +2254,23 @@ The bound source/selection/controller/run/attempt manifest validates on Windows
 annotation, actor-free fixture/pins and single-construction test correction
 do not change those forty controls' runtime logic. Retain their actual source
 attribution; final updated-head CI and a new verdict remain required.
+
+### 2026-11-07 - Consume packaged deferred arguments in Bridge
+
+The updated-head review finds another real consumer: Bridge recognizes only
+flat Worktrees scripts, so deferred packaged Windows launches append ACP
+options outside the native envelope. Four producer-to-consumer application
+controls reproduce the failure. Recognize package-owned scripts beneath the
+admitted installation's application slots, without following an asset path
+outside that root or recognizing an undeclared package. Keep copied launch
+assets bound to their exact record and installation root, not the package's
+asset directory.
+
+All eighty-two Bridge argument-boundary controls pass in 52.56 seconds
+(114.44 including preparation and cleanup), including the actual Windows
+Worktrees builder's legacy/application, wrapped/deferred/prepared and
+fresh/resume combinations, custom-path negative controls, and both native
+PowerShell setup consumers. This is bounded argument composition and native
+setup evidence, not Manager broker admission or complete caller lifetime.
+The existing setup envelope and CLI remain unchanged; the compatibility
+repair adds no protocol, dependency or deployment. The parent stays Active.
