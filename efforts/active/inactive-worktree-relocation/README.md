@@ -546,3 +546,19 @@ adopter pilot feedback gates subsequent widening.
   new literal aliases, post-rename retry and partial archive write, alongside
   the preceding durability/access/schema controls. The source objective remains
   Active and publication still requires fresh exact-head review and CI.
+
+### 2026-11-07 — Destination references before consequential effects
+- The next real review had no published open threads but alleged missed retained
+  destination references. Independent source inspection confirmed that planning
+  checked only the old location, while the destination check occurred after
+  publication and rebinding. Did not interpret the empty issue list as clearance.
+- Check the destination's retained workspace/database references during read-only
+  admission and again before publishing the copied checkout. Previously known
+  references now refuse without custody; a reference appearing during copy
+  remains on the cancellable side of publication.
+- The dedicated native recovery/admission packet passed **12 controls**. It
+  includes byte-preserving workspace and database refusals and a post-copy
+  destination reference followed by successful prepublication abort. The prior
+  exact-source CLI/roundtrip/history consumer packet passed **3 controls**.
+  No session database, retained workspace, actual adopter record, service or
+  default was changed. Broader session support and the whole effort remain open.
