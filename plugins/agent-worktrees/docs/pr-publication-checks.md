@@ -154,6 +154,15 @@ Foreign `create-pr --from-branch` without the source workspace refuses when
 checks are configured; the caller's unrelated checkout cannot satisfy a target
 repository's local receipt.
 
+With `--source-workspace` and `--expected-head`, the reachable-workspace adapter
+uses GitHub or Azure DevOps to read exact remote source and target branch tips.
+GitHub uses the selected endpoint and existing scoped `gh` credentials to read
+the exact commit ref; missing, mismatched or malformed refs refuse qualification.
+Both tips are fenced before and after the local checks and read again after PR
+creation. A changed or unreadable post-create tip retains the PR identity for
+reconciliation, never automatic recreation. Local Git state alone is not
+authoritative remote evidence.
+
 The checks do not replace validation hooks, provider review/merge gates,
 repository authority or native approval freshness. A receipt is auditable
 self-review evidence, not proof that a human approved the change.
