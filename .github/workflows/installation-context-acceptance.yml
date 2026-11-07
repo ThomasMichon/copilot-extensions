@@ -1827,6 +1827,8 @@ jobs:
           version: "0.12.6"
       - name: Prepare the declared engine dependency support
         run: python tools/run-plugin-tests.py agent-worktrees --prepare-only
+      - name: Prepare the declared Manager dependency support
+        run: python tools/run-standalone-tests.py worktree-manager --prepare-only
       - name: Repository source admission and pinned SSH setup controls
         env:
           PYTEST_ADDOPTS: "-vv --durations=20"
