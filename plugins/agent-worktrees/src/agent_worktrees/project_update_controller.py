@@ -41,7 +41,10 @@ def delegation_capability():
         ))
     ):
         return None
-    return {"schema": DELEGATION_SCHEMA, "version": DELEGATION_VERSION, "engine_fallback": True}
+    return {
+        "schema": DELEGATION_SCHEMA, "version": DELEGATION_VERSION,
+        "engine_fallback": True, "isolated_runtime_phase": True,
+    }
 
 
 def dispatch_update(args, auth, manager, standalone) -> int:

@@ -93,7 +93,7 @@ def test_inventory_advertises_delegation_only_with_a_capable_driver(installed, m
     capability = owner.inventory()["project_controller_delegation"]
     assert capability == ({
         "schema": "copilot-extensions.project-update-delegation",
-        "version": 1, "engine_fallback": True,
+        "version": 1, "engine_fallback": True, "isolated_runtime_phase": True,
     } if capable else None)
 
 
