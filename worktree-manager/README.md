@@ -953,7 +953,10 @@ The selected, complete physical Manager runtime also provides
 It leaves an inactive Manager stopped, or uses the existing cutover owner to
 replace a verified incumbent with the selected generation. It checks selection,
 credentials and native ownership around publication, and never terminates a
-candidate whose publication is uncertain. Its version-1 result reports
+candidate whose publication is uncertain. A failed, unpublished candidate is
+retired only through an identity-bound OS process owner with confirmed exit;
+if that owner is unavailable, the candidate remains and the result is unknown.
+Its version-1 result reports
 `ready`, `inactive` or `unknown`; an uncertain effect must not be replayed
 through another command. The timeout bounds individual waits, not the whole
 transaction; each bounded health request and its release share one completion

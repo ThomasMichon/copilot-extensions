@@ -664,7 +664,8 @@ def _retire_unpublished(root: Path, witness: str, incoming, port: int, birth: st
 
     try:
         directory = routing_dir(root)
-        with routing.routing_lock(directory, deadline=time.monotonic() + min(5.0, timeout)):
+        deadline = time.monotonic() + min(5.0, timeout)
+        with routing.routing_lock(directory, deadline=deadline):
             table = routing.read_table(directory, strict=True) or {}
             for name in ("active", "previous"):
                 raw = table.get(name)
@@ -677,10 +678,15 @@ def _retire_unpublished(root: Path, witness: str, incoming, port: int, birth: st
                 return False
             if incoming.poll() is not None:
                 return True
-            if not birth or diagnostics.process_start_time(incoming.pid) != birth:
+            remaining = deadline - time.monotonic()
+            if not birth or remaining <= 0:
                 return False
-            incoming.terminate()
-            incoming.wait(timeout=min(5.0, timeout))
+            result = diagnostics.terminate_pid_if_identity(
+                incoming.pid, birth, exit_timeout=remaining,
+            )
+            if not all(result.get(key) is True for key in ("killed", "identity_verified", "exit_confirmed")):
+                return False
+            incoming.wait(timeout=max(0.0, deadline - time.monotonic()))
             return incoming.poll() is not None
     except (AttributeError, OSError, RuntimeError, ValueError, subprocess.TimeoutExpired):
         return False

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -571,6 +572,19 @@ def test_candidate_health_cannot_succeed_after_its_deadline(tmp_path, monkeypatc
     )
 
 
+def _stub_identity_bound_termination(monkeypatch, terminate):
+    from zdd import diagnostics
+
+    def terminate_if_identity(pid, birth, *, exit_timeout):
+        assert exit_timeout > 0
+        if diagnostics.process_start_time(pid) != birth:
+            return {"killed": False, "identity_verified": False, "exit_confirmed": False}
+        terminate()
+        return {"killed": True, "identity_verified": True, "exit_confirmed": True}
+
+    monkeypatch.setattr(diagnostics, "terminate_pid_if_identity", terminate_if_identity)
+
+
 @pytest.mark.parametrize(
     "change", [
         "none", "route", "selection", "credential", "exited",
@@ -609,6 +623,7 @@ def test_guarded_reconcile_fences_publication(tmp_path, monkeypatch, change):
         running = False
         calls.append("terminate")
 
+    _stub_identity_bound_termination(monkeypatch, terminate)
     incoming = SimpleNamespace(
         pid=43, poll=lambda: None if running and not (altered and change == "candidate-exited") else 0,
         terminate=terminate,
@@ -696,6 +711,7 @@ def test_guarded_reconcile_refuses_untrusted_candidate_health(tmp_path, monkeypa
         running = False
         calls.append("terminate")
 
+    _stub_identity_bound_termination(monkeypatch, terminate)
     incoming = SimpleNamespace(
         pid=43, poll=lambda: None if running else 0, terminate=terminate,
         wait=lambda timeout: calls.append("wait") or 0,
@@ -763,6 +779,7 @@ def test_guarded_reconcile_cleans_up_only_unpublished_candidates(tmp_path, monke
         calls.append("terminate")
         running = False
 
+    _stub_identity_bound_termination(monkeypatch, terminate)
     incoming = SimpleNamespace(
         pid=43, poll=lambda: None if running else 0, terminate=terminate,
         wait=lambda timeout: calls.append("wait") or 0,
@@ -811,3 +828,73 @@ def test_guarded_reconcile_cleans_up_only_unpublished_candidates(tmp_path, monke
             assert routing.read_table(directory, strict=True)["active"]["pid"] == incoming.pid
         elif publication == "history-refused":
             assert routing.read_table(directory, strict=True)["active"]["pid"] == old.pid
+
+
+@pytest.mark.parametrize("outcome", [
+    {"killed": False, "identity_verified": False, "exit_confirmed": False},
+    {"killed": True, "identity_verified": True, "exit_confirmed": False},
+])
+def test_unpublished_candidate_retirement_requires_confirmed_identity(tmp_path, monkeypatch, outcome):
+    import time
+    from types import SimpleNamespace
+    from zdd import diagnostics, routing
+
+    directory = mux_daemon_cutover.routing_dir(tmp_path)
+    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "17" if pid == 42 else "18")
+    routing.publish_active(
+        directory, bind="127.0.0.1", port=43123, pid=42, version="1.2.2",
+        process_start_time="17",
+    )
+    witness = routing.publication_witness(directory, deadline=time.monotonic() + 5)
+    calls = []
+    incoming = SimpleNamespace(
+        pid=43, poll=lambda: None, terminate=lambda: calls.append("unsafe-signal"),
+        wait=lambda timeout: calls.append("wait"),
+    )
+    def refuse_reused(pid, birth, *, exit_timeout):
+        calls.append(("identity-bound", pid, birth))
+        return outcome
+
+    monkeypatch.setattr(diagnostics, "terminate_pid_if_identity", refuse_reused)
+    assert not mux_daemon_cutover._retire_unpublished(
+        tmp_path, witness, incoming, 43124, "18", 1.0,
+    )
+    assert calls == [("identity-bound", 43, "18")]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="native Windows process-handle qualification")
+def test_unpublished_candidate_retirement_uses_native_process_identity(tmp_path):
+    import os
+    import subprocess
+    import time
+    from agent_procutil import no_window_kwargs
+    from zdd import diagnostics, routing
+
+    directory = mux_daemon_cutover.routing_dir(tmp_path)
+    owner_birth = diagnostics.process_start_time(os.getpid())
+    assert owner_birth
+    routing.publish_active(
+        directory, bind="127.0.0.1", port=43123, pid=os.getpid(), version="1.2.2",
+        process_start_time=owner_birth,
+    )
+    witness = routing.publication_witness(directory, deadline=time.monotonic() + 5)
+    incoming = subprocess.Popen(
+        [sys.executable, "-I", "-S", "-c", "import time; time.sleep(60)"],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        **no_window_kwargs(),
+    )
+    try:
+        birth = diagnostics.process_start_time(incoming.pid)
+        assert birth
+        assert not mux_daemon_cutover._retire_unpublished(
+            tmp_path, witness, incoming, 43124, str(int(birth) + 1), 5.0,
+        )
+        assert incoming.poll() is None
+        assert mux_daemon_cutover._retire_unpublished(
+            tmp_path, witness, incoming, 43124, birth, 5.0,
+        )
+        assert incoming.poll() is not None
+    finally:
+        if incoming.poll() is None:
+            incoming.kill()
+        incoming.wait(timeout=10)
