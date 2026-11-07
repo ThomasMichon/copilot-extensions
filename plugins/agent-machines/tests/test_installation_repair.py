@@ -1310,7 +1310,7 @@ def test_outer_required_read_timeout_reaps_nested_probe(repair_fixture):
         )
     assert marker.is_file(), "the aggregate timeout must exercise an already-running probe"
     for pid in json.loads(marker.read_text()):
-        _assert_process_stopped(pid)
+        _assert_process_stopped(pid, timeout=0)
 
 
 def test_installation_repair_process_cancellation_reaps_started_process(tmp_path, monkeypatch):
@@ -1362,8 +1362,8 @@ def test_installation_repair_process_reaps_inherited_pipe_descendant(tmp_path):
     _assert_process_stopped(int(marker.read_text()))
 
 
-def _assert_process_stopped(pid):
-    deadline = time.monotonic() + 5
+def _assert_process_stopped(pid, *, timeout=5):
+    deadline = time.monotonic() + timeout
     while True:
         if os.name == "nt":
             import ctypes
