@@ -488,9 +488,11 @@ an existing encrypted signer or logon/reconnect. No runtime change is included.
   credential, SSH and host-role lifecycle owners. #11286 merged the approved
   contract at `38d8e519f6e0a00c7615e004c47aab61c9f09696`; implementation
   and installed/native acceptance remain open.
-- [ ] Review the [normal setup credential gate](#normal-setup-credential-gate-continuation)
+- [x] Review the [normal setup credential gate](#normal-setup-credential-gate-continuation)
   before runtime wiring. Retain the selected Vault/key owner and #6030 setup
-  integration; ordinary runtime health is not credential readiness.
+  integration; ordinary runtime health is not credential readiness. #11295
+  merged the approved proposal at `145eba20918a252ab7b93b2fa4aeeee4fd327206`;
+  credential integration and installed acceptance remain open.
 - [ ] Review the [selected-role setup contract](role-host-setup.md), then admit
   its bounded implementation through the existing construction and lifecycle
   owners rather than relabel client installation or foreground serving.
@@ -711,6 +713,58 @@ setup/apply, enrollment, live rollout, lifecycle takeover or implementation
 completion is asserted.
 
 ## Journal
+
+### 2026-11-07 - Cold Vault activation reader prerequisite
+
+- Reserved only the bounded reader selection correction under #6888,
+  comment6705699981. Bootstrap and explicit-install activation run before
+  installer admission; selecting the first unsupported Python can therefore
+  reject a cold reader despite a supported alternative.
+- Extracted read-only discovery from the canonical native helper. Its installer
+  caller retains the 3.11 tooling floor and outside-runtime removal checks;
+  Vault requests its existing 3.10 reader floor and retains explicit runtime
+  Python without rediscovery. POSIX qualifies existing PATH candidates in the
+  same activation helper. No installer is invoked to select Python.
+- Fourteen Windows selector/strict-diagnostic controls pass in58.57s; four
+  POSIX-only cases remain unqualified locally. Version facts are synthetic,
+  while the real configuration reader runs without a Vault runtime.
+  Twenty-six existing default-installer/capture controls pass in65.66s,
+  including two actual physical-Python-to-disposable-driver handoffs.
+- The separate first-touch packet reached13 named passes, including both
+  unmocked cold PATH entries, before its unchanged180s aggregate expired.
+  Only its three unfinished/unstarted independent controls were run again;
+  all three pass in58.54s. This supplies named coverage, not a passing
+  monolithic packet or a fresh-OS installation claim.
+- Native copies are synchronized; unrelated generated lifecycle archive drift
+  was not included. The coupled MCP scripts producer digest is refreshed
+  without changing its footprint contract or installed-layout revision.
+  Source review/CI, hosted POSIX qualification, containing release and
+  authorized installed-consumer proof remain pending.
+- Continue the selected normal setup/Vault credential seam. No Python
+  acquisition, PATH mutation, runtime/service rollout, database/key access,
+  enrollment or retirement occurred; #6681/#6030/#6888/#11123 remain open.
+- The first #11310 native qualification, run42367275482 on
+  `876fd22e027a84a9010464bdf8c3388bd1126599`, passed Linux but failed Windows
+  because the bootstrap fixture omitted the new native helper. Required CI
+  also caught its stale generated Worktrees toolkit copy. Both are corrected
+  through their existing owners, not a missing-helper fallback or CI bypass.
+- Review5811883909 identified those fixture failures, unnecessary launcher
+  discovery before PATH admission and dropped reader-startup stderr. The
+  correction admits PATH first, preserves nonzero reader stderr, and includes
+  the required fixture/toolkit closure. Python install manager's documented
+  automatic-install setting is disabled only in discovery children; parent
+  policy and the helper's existing positional arguments remain unchanged.
+- Latest controlled activation selection passes12 cases in33.19s. The three
+  real safe-configuration diagnostic cases pass in4.88s; separate current
+  startup, real PATH, capture and child-policy controls pass too. Candidate
+  version facts remain synthetic. Earlier empty or skipped new-test selections
+  were corrected and are not counted as qualification.
+- Local broad bootstrap selections hit the unchanged180s aggregate; a
+  fail-fast prefix including both Unicode cases and the missing-version
+  residual passes9 cases in64.15s. Individual coverage is not a passing
+  monolithic packet or an explanation of the earlier local timing failures.
+  A fresh published head still owes the full hosted Linux/Windows portfolio,
+  current review and required CI before source merge.
 
 ### 2026-11-07 - Vault consumer qualified; normal setup credential gate proposed
 
