@@ -252,3 +252,160 @@ def test_other_layout_adoptions_preserve_pending_selection_and_receipt_funding(
         adopter(lifecycle_checkpoint=lambda: None, expires_at=expires())
         assert selections.recover(draft, expires_at=expires()) == retained
     assert store.admit_review(prepared_intent, expires_at=expires())["operation"]["reserved_bytes"] == retained["reserved_bytes"]
+
+
+@pytest.fixture
+def composer(prepared_intent: dict, store: ReplayStore) -> tuple:
+    preparation = importlib.import_module("comment_preparation")
+    profile = importlib.import_module("attribution_profile")
+    state = {
+        "profile": profile.validate({"version": 1}),
+        "source": copy.deepcopy(prepared_intent["actions"][0]["preparation"]["identity"]["source"]),
+        "calls": [],
+    }
+
+    def compose(kind: str, body: str, *, scope: dict, **identity: object) -> dict:
+        assert kind in ("comment", "reply") and scope == SCOPE
+        # This callback is the pure half of a host binding, already resolved before entry.
+        with pytest.raises(OperationLockedError):
+            with store._lock():
+                pytest.fail("composition escaped original-selection custody")
+        state["calls"].append(copy.deepcopy(identity))
+        return preparation.prepare(
+            body, state["profile"],
+            {"domain": "forge", "visibility": "public", "activity": kind, "required": True},
+            state["source"], **identity,
+        )
+
+    return compose, state
+
+
+def test_allocate_commits_distinct_reply_identity_before_preview_and_never_recomposes(
+    store: ReplayStore, composer: tuple,
+) -> None:
+    import uuid
+
+    selections = adopt(store)
+    compose, state = composer
+    draft = selected()
+    draft["actions"].insert(1, {"id": "reply-a", "kind": "reply", "body": "Reply.", "thread_id": 20})
+    retained = selections.allocate(draft, compose=compose, expires_at=expires())["operation"]
+    assert retained["selection"]["stage"] == "prepared"
+    comments = [action for action in retained["intent"]["actions"] if "body" in action]
+    identifiers = [action["preparation"]["identity"][key]
+                   for action in comments for key in ("comment_id", "write_id")]
+    assert len(set(identifiers)) == 4 and all(uuid.UUID(value).version == 4 for value in identifiers)
+    assert "preparation" not in retained["intent"]["actions"][-1]
+    assert len(state["calls"]) == 2
+    state["profile"] = importlib.import_module("attribution_profile").validate({
+        "version": 1, "rules": [{"header": "[Changed AI] "}],
+    })
+    state["source"]["origin"]["codename"] = "changed-origin"
+    reopened = ReviewSelectionStore(ReplayStore(store.root, store.namespace))
+    assert reopened.allocate(draft, compose=compose, expires_at=expires()) == {
+        "status": "existing", "operation": retained,
+    }
+    assert len(state["calls"]) == 2
+    before = store.path.read_bytes()
+    changed = copy.deepcopy(draft)
+    changed["actions"][0]["body"] += " Changed."
+    with pytest.raises(ValueError, match="different original selection"):
+        reopened.allocate(changed, compose=compose, expires_at=expires())
+    assert store.path.read_bytes() == before and len(state["calls"]) == 2
+
+
+def test_lost_allocation_response_recovers_original_guids_and_exact_final_admission(
+    store: ReplayStore, composer: tuple, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    selections = adopt(store)
+    compose, state = composer
+    draft = selected()
+    write = storage._atomic_write_json
+
+    def lost(path, value) -> None:
+        write(path, value)
+        raise StateCommitUncertain("synthetic allocation result lost")
+
+    monkeypatch.setattr(storage, "_atomic_write_json", lost)
+    with pytest.raises(StateCommitUncertain):
+        selections.allocate(draft, compose=compose, expires_at=expires())
+    monkeypatch.setattr(storage, "_atomic_write_json", write)
+    recovered = selections.recover(draft, expires_at=expires())
+    assert recovered is not None
+    assert selections.allocate(draft, compose=compose, expires_at=expires())["operation"] == recovered
+    assert len(state["calls"]) == 1
+    assert store.admit_review(recovered["intent"], expires_at=expires())["operation"]["intent"] == recovered["intent"]
+    begun = store.begin_review_action(draft["operation_id"], SCOPE, "comment-a", expires_at=expires())
+    store.record_review_receipt(
+        draft["operation_id"], SCOPE, "comment-a", begun["action"]["attempt_id"],
+        response(thread_id=20, comment_id=1), expires_at=expires(),
+    )
+    assert selections.allocate(draft, compose=compose, expires_at=expires())["operation"]["actions"][0]["state"] == "confirmed"
+    assert len(state["calls"]) == 1
+
+
+def test_concurrent_allocators_do_not_compose_a_replacement_selection(store: ReplayStore, composer: tuple) -> None:
+    selections = adopt(store)
+    compose, state = composer
+    draft = selected()
+
+    def allocate(_index: int) -> dict:
+        try:
+            return selections.allocate(draft, compose=compose, expires_at=expires())
+        except OperationLockedError:
+            return {"status": "contended"}
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        results = list(workers.map(allocate, range(2)))
+    assert sorted(result["status"] for result in results) in (
+        ["contended", "prepared"], ["existing", "prepared"],
+    )
+    retained = selections.recover(draft, expires_at=expires())
+    assert selections.allocate(draft, compose=compose, expires_at=expires())["operation"] == retained
+    assert len(state["calls"]) == 1 and len(json.loads(store.path.read_bytes())["reviews"]) == 1
+
+
+def test_bodyless_allocation_and_unsupported_edits_never_compose(store: ReplayStore, composer: tuple) -> None:
+    compose, state = composer
+    selections = ReviewSelectionStore(store)
+    draft = selected()
+    before = store.path.read_bytes()
+    with pytest.raises(ReplayStoreInvalid, match="explicit storage adoption"):
+        selections.allocate(draft, compose=compose, expires_at=expires())
+    assert store.path.read_bytes() == before and state["calls"] == []
+    selections = adopt(store)
+    bodyless = selected("vote-only")
+    bodyless["actions"] = bodyless["actions"][1:]
+    retained = selections.allocate(bodyless, compose=compose, expires_at=expires())["operation"]
+    assert retained["intent"]["actions"] == bodyless["actions"] and state["calls"] == []
+    draft["actions"][0].update(
+        kind="edit_owned_comment", thread_id=20, comment_id=1, expected_content_id="a" * 64,
+    )
+    before = store.path.read_bytes()
+    with pytest.raises(ValueError, match="original native identity binding"):
+        selections.allocate(draft, compose=compose, expires_at=expires())
+    assert store.path.read_bytes() == before and state["calls"] == []
+
+
+@pytest.mark.parametrize("failure", ["identity", "shape", "exception"])
+def test_composition_failure_never_commits_partial_allocation(
+    store: ReplayStore, composer: tuple, failure: str,
+) -> None:
+    selections = adopt(store)
+    compose, state = composer
+    before = store.path.read_bytes()
+
+    def bad(*args, **kwargs) -> dict:
+        if failure == "exception":
+            raise RuntimeError("controlled pure preparation failure")
+        result = compose(*args, **kwargs)
+        if failure == "identity":
+            result["identity"]["write_id"] = "00000000-0000-4000-8000-000000000000"
+        else:
+            result["unexpected"] = True
+        return result
+
+    with pytest.raises((ValueError, RuntimeError)):
+        selections.allocate(selected(), compose=bad, expires_at=expires())
+    assert store.path.read_bytes() == before
+    assert selections.recover(selected(), expires_at=expires()) is None

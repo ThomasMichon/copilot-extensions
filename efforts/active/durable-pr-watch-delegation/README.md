@@ -1009,6 +1009,29 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-11-06 - Allocate fresh identities inside original-selection custody
+
+- #11251 actually merged as `911bfa164602526aecc7347016554a83cb59a8ca`
+  after exact-head Copilot approval with no open issues and the latest
+  current-head CI and required PR gate green. Managed source reconciliation
+  preserved its backup and retained the active parent/source custody.
+- The next bounded source leaf adds allocation for new comments/replies
+  through that same original-selection transaction. The trusted host resolves
+  policy/profile/source before entry and supplies only bounded synchronous
+  pure composition under the lock. Original-key recovery avoids allocation
+  or redecoration after lost results, restart, contention and admission.
+- The coupled owner/selection/capture/executor source packet passes 187 tests
+  with bounded cleanup verified. Actual shared preparation exercises distinct
+  reply GUIDs, in-lock composition, first-commit races, lost-result recovery,
+  changed input/profile/source, exact admission/native receipts, bodyless votes,
+  unsupported edits and invalid preparation without partial persistence.
+- This is not a public producer capability or complete pre-approval pipeline.
+  Bodyless votes remain bodyless; automatic owned/legacy edits refuse pending
+  their actual protected native identity binding. The explicit caller-ID path,
+  exact approval/admission/native receipt boundary and old strict formats
+  remain unchanged. Producer wiring, all-publisher adoption, mapping,
+  provider/installed/shadow and full parent acceptance remain open.
+
 ### 2026-11-06 - Retain pre-approval data without execution admission
 
 - The reviewed #11246 refinement now has a finite storage prerequisite:
