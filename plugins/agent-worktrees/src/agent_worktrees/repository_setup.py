@@ -368,6 +368,9 @@ def _call(setup: Setup, mode: str) -> Outcome:
         environment[ENGINE_CONTEXT] = json.dumps({
             "schema": "copilot-extensions.repository-setup-engine", "version": 1,
             "argv": [environment[ENGINE_PYTHON], "-I", "-m", "agent_worktrees"],
+            "capabilities": {
+                "new_admission": _json(Path(__file__).with_name("new-admission-v1.json")),
+            },
         })
         completed = subprocess.run(
             argv, cwd=setup.source.path, env=environment,
