@@ -287,18 +287,18 @@ def run_json(project: str | None, args: list[str], *,
              runner=None,
              stream_progress: bool = False,
              environment: dict[str, str] | None = None,
-             engine_command: list[str] | None = None) -> dict:
-    """Run a ``--json`` verb and parse its stdout envelope into a dict."""
+             engine_command: list[str] | None = None,
+             max_bytes: int | None = None) -> dict:
+    """Run a ``--json`` verb; bound its UTF-8 stdout to ``max_bytes``, then parse it."""
     raw = _run(
-        project,
-        args,
-        timeout=timeout,
-        allow_nonzero=allow_nonzero,
-        runner=runner,
+        project, args, timeout=timeout, allow_nonzero=allow_nonzero, runner=runner,
         stream_progress=stream_progress,
         **({"environment": environment} if environment is not None else {}),
         **({"engine_command": engine_command} if engine_command is not None else {}),
     )
+    if max_bytes is not None and len(raw.encode("utf-8", errors="surrogatepass")) > max_bytes:
+        raise EngineError(
+            f"{ENGINE_BIN} {' '.join(args)} reply exceeded {max_bytes} bytes")
     try:
         obj = json.loads(raw)
     except ValueError as e:

@@ -162,7 +162,7 @@ After the reviewed proposal, the operator admitted execution:
 - [ ] Publish a consumer migration recipe and staged compatibility tests.
   Consumers re-sync the shared engine and remove duplicated orchestration;
   adapter-only patches are not a substitute for shared fixes.
-- [ ] Qualify release, actual consumed source and a separately authorized
+- [x] Qualify release, actual consumed source and a separately authorized
   rollout. Keep merged, released, consumed and serving evidence distinct.
 
 ## Validation Plan
