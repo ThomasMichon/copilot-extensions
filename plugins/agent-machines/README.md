@@ -262,6 +262,17 @@ before applying its digest. Older runtimes reject the unknown option; retain
 that unsupported outcome without retrying a weaker selection. Payload versions
 alone do not establish receiver support. No existing form is deprecated.
 
+The installed distribution's `agent_machines/installation-repair-v1.json`
+declares version-1 required selection, read-only observation and project-root
+identity. Qualify this descriptor from the exact selected runtime, not an
+available payload. Ordinary results add `projectRoot` (the resolved selected
+repository path) and `requiredSelection` (a boolean). Consumers requiring that
+selection must check both, `apply: false`, `requiredSatisfied`, interruption,
+selection refusal, outcomes and pending restarts; exit zero alone is not ready.
+Existing explicit-module callers may ignore the additive fields. No old syntax
+or result meaning is removed, and an older runtime without the declaration is
+unsupported for a caller requiring these semantics, not an empty requirement.
+
 Review the returned closure and `planDigest`, then apply that exact selection:
 
 ```text

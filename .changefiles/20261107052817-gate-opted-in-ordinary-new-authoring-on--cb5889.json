@@ -1,0 +1,9 @@
+{
+  "comment": "Gate opted-in ordinary New authoring on selected-runtime required-application observation without installation.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

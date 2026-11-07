@@ -164,6 +164,8 @@ def test_installation_repair_required_selects_only_required_closure(repair_fixtu
     home, project, _, configure, identity = repair_fixture
     configure(classification="optional", dependencies=("agent-example/base",) if dependency else ())
     result = repair_api.repair(project, home=home, required=True)
+    assert result["projectRoot"] == str(project.resolve())
+    assert result["requiredSelection"] is True
     expected = ["child"] if not dependency else ["base", "child"]
     assert result["selected"] == [identity + "::agent-example/" + name for name in expected]
     assert result["status"] == "observed" and not result["requiredSatisfied"]

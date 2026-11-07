@@ -261,9 +261,9 @@ def execute(config, request: dict, *, identity_mode: IdentityMode = "legacy") ->
         with contextlib.suppress(FileNotFoundError):
             existing = _read_admission(directory, request_id)
         if existing is None:
-            from .launch_preflight import LaunchPreflightError, new_knowledge_error
+            from .launch_preflight import LaunchPreflightError, new_authoring_error
 
-            if error := new_knowledge_error(config, source=config.default_repo.anchor):
+            if error := new_authoring_error(config, source=config.default_repo.anchor):
                 raise LaunchPreflightError(error)
     if existing is not None:
         timestamp = existing["timestamp"]

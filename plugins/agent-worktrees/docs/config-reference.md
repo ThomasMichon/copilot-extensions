@@ -654,9 +654,45 @@ agent-worktrees ≥ 1.5.3-dev113.)
 | `base_repo` | bool | `false` | Drive the anchor directly with **no worktrees** (for repos that can't use worktrees, e.g. enlistment-based monorepos). Pair with `env_script` (Windows enlistment env) or a custom `launch`. |
 | `stateless` | bool | `false` | This repo is a stateless harness routing personal state to a bound knowledge repo (see `Config.knowledge_repo`). Implies `requires_external_state_root`. |
 | `requires_external_state_root` | bool | `false` | Personal state (efforts/visions/logs) must be written to a separately-bound knowledge repo; the resolver refuses rather than falling back to this repo. |
+| `require_application_readiness` | bool | `false` | Require the selected Machines owner's read-only required-application observation before ordinary New authoring. Missing, unsupported or incomplete observation refuses before initial request admission/allocation; no implicit install, sign-in or restart confirmation. |
 | `compose_knowledge_plugins` | bool | `true` | When false, never graft the paired knowledge repo's marketplaces/plugins into the harness session overlay. |
 | `copilot_plugin_profile` | string/null | absent | Anchor-relative strict JSON tool plugin settings. Supports only `extraKnownMarketplaces` and boolean `enabledPlugins` (including false). Independent of personal composition and launch env/argument profiles. |
 | `knowledge_only` | bool | `false` | This repo is a **knowledge-only companion**: it exists solely to be carved as another project's paired `-k` knowledge worktree, never driven directly. `create` (and the interactive new-worktree flow) refuses a standalone worktree for it; binstub reconcile skips/reclaims its `<repo>` binstub; the Worktree Manager excludes it from implicit-default/ambiguous-selection project listings. The internal pairing carve is unaffected. Set the matching registry `repos add/update --class knowledge` too so `repos list`/the Manager's repo view reflect it. See the `knowledge-only-repos` effort. |
+
+### Required applications before New authoring
+
+`require_application_readiness: true` opts this repository into required-module
+observation after the existing knowledge prerequisite. The native New planner
+and initial structured New admission enforce it; creation-time rechecking keeps
+an admitted-but-unstarted request's original allocation recoverable. Source-only
+allocation, existing sessions and recovery do not acquire this New-only gate.
+Absence/false preserves the prior behavior; nonboolean values are invalid.
+
+The observation uses the selected Machines runtime's existing
+[`installation-repair --required`](../../agent-machines/README.md) contract, not
+another health database or an executable found on PATH. It is caller-contained
+and bounded to 60 seconds. A refused, interrupted, changed, unsupported or
+not-ready result cannot pass. A fully observed empty required set can pass.
+Open **Configuration > Application Readiness** to inspect and explicitly repair;
+use **Installation & Updates** when its owner/runtime is unavailable, then retry.
+Admission does not supply credentials, install applications or attest restarts.
+This is installation readiness, not proof of every service or authentication
+scope. Domain-specific requirements retain their owning contracts.
+
+**Adoption and rollback:** the exact executing Worktrees distribution must ship
+`agent_worktrees/new-admission-v1.json` with contract
+`agent-worktrees.new-admission`, version `1`, and `required_applications: 1`
+before an adopter enables this setting. An older Worktrees reader ignoring the
+key does not enforce it; do not enable or retain a mandatory requirement through
+such a downgrade. The selected Machines distribution must carry
+`agent_machines/installation-repair-v1.json` with required-selection version `1`,
+read-only support and project-root identity. Missing, invalid or unsupported
+Machines metadata refuses only an opted-in New operation, without trying a weaker
+selection or self-provisioning. Newer payload metadata is not runtime support.
+Legacy completed slots and validated same-cell peers use their existing native
+runtime selectors and retained build identity; an unqualified selection is
+unavailable, not permission to fall back across installations. These additive
+declarations introduce no new CLI syntax or deprecation.
 
 ### Project-native plugin settings
 

@@ -1,5 +1,24 @@
 # Agent Worktrees -- Architecture
 
+## Required-application New admission
+
+An opted-in repository's `require_application_readiness` extends the existing
+native New preflight after knowledge coordination readiness, before allocation
+and initial structured-request admission. Creation-time rechecking precedes the
+started marker, preserving retained request/allocation identity through refusal.
+Source-only allocation, existing-session and recovery paths remain unchanged.
+
+`application_admission` selects the existing Machines owner through validated
+same-cell peer launch or the legacy owner's completed-runtime resolver and
+retained build identity. It reads support from that selected runtime, then
+consumes only the existing read-only required-module conductor result for the
+exact source repository. Caller-owned timeout/stream/cleanup bounds apply;
+unavailable, malformed, incomplete or changed observations refuse. No payload
+version or PATH command certifies support, and no repair or authentication
+operation runs. The [configuration contract](config-reference.md#required-applications-before-new-authoring)
+owns adoption, rollback and remediation; Machines retains inventory, module
+classification, readiness and restart truth.
+
 ## Related/config acquisition reports
 
 The existing value APIs retain their signatures, return shapes and fallback
