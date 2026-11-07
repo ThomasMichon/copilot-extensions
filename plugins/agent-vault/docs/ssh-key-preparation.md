@@ -88,6 +88,18 @@ record over the selected existing Vault transport. The CLI validates it again,
 keeps it out of stdout/logs, and writes only the explicitly selected key files.
 There is no new endpoint, credential issuer or enrollment authority.
 
+Setup consumers that already inspected an admitted public identity should pass
+`--expected-fingerprint SHA256:<digest>` to `ssh-key install`. The selected
+runtime advertises `ssh-key-install-pin-v1` through `invocation-contract --json`;
+require that capability before using the option, rather than retrying without
+the pin on an older receiver. The optional pin uses canonical unpadded SHA256
+fingerprint syntax. Malformed pins return `invalid_fingerprint` before context,
+service or key access. A validated record with a different fingerprint returns
+`key_mismatch` before any directory/file publication. Preserve the original
+selection and reconcile it; do not silently adopt the new key or overwrite the
+expected identity. Unpinned existing callers retain their behavior. Matching
+pins use the same protected publication and partial-pair recovery below.
+
 Windows objects are created with their final TokenUser ownership and protected
 TokenUser/SYSTEM DACL **before** secret bytes are written. POSIX uses `0700`
 directories and `0600` files. Existing locations must already meet that contract;
