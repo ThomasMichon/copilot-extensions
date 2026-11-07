@@ -94,6 +94,11 @@ binds that library through the existing CLI/native/Fleet/Gateway path with
 default-off trusted-host selection and a separate additive capability.
 It preserves the exact strict baseline declaration and prior fresh clients;
 it does not enroll normal hosts or adopt other publishers.
+The finite consumer source merged in #11381. Its coupled seven-file packet
+passes 250 cases, including 17 actual native/Gateway CLI edit-consumer cases;
+the earlier #11374 library packet passes 150, including 20 focused edit cases.
+These overlap and do not qualify live providers, installed hosting or other
+publication surfaces.
 
 ## Remaining qualification
 
