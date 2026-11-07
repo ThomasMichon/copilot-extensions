@@ -426,6 +426,19 @@ retained file, not unique calls or lifetime totals. Missing, partial, stale and
 unsupported evidence remain visible. Reported completion is not agent retirement.
 Refresh reloads the graph; leaving the app cancels its owned reads.
 
+Graph also lists the worktree's recorded PR associations, but only when the
+selected engine declares `companion-pr-observations-v1` on its status bundle;
+otherwise it shows claim-only text and PR state stays unknown. A recorded
+lifecycle is association bookkeeping, not current openness. Selecting one
+association runs exactly one finite `pr-watch snapshot <repo> <number> --json`
+through that same engine (no host or token overrides); **Re-read PR** repeats
+it. The result shows open, closed without merge, merged, or unknown, with its
+last-observed time and source. A reply must match the selected provider,
+repository, number and endpoint and the version-1 snapshot schema, or it is
+shown as unavailable. Review, check and mergeability fields are diagnostics
+only and never grant consent or merge authority. Refresh or exit invalidates
+in-flight reads. Bounds: 24 associations and a 256 KiB reply.
+
 The optional attention strip shows the selected head CLI's **last-reported**
 busy, idle or awaiting-operator state and transition timestamp. Continuity
 remains unknown: this is not proof of a currently pending question or of no
