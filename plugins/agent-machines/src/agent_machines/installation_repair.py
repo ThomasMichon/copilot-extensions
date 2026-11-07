@@ -542,6 +542,7 @@ def _repair(
     )
     return {
         "schema": "copilot-extensions.installation-repair", "version": 1,
+        "projectRoot": str(project_root.resolve()), "requiredSelection": required,
         "platform": platform.value, "apply": apply, "planDigest": plan_digest,
         "interrupted": interrupted,
         "restarts": journal.evidence(),

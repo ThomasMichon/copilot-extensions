@@ -138,12 +138,14 @@ def complete_pair_composition(repo_root: str | Path, summary: dict) -> None:
 def prepare_for_launch(
     repo_root: str | Path, *, dry_run: bool = False,
     compose_pair: bool = False, config: Config | None = None,
+    checked_profile: str | None = None,
 ) -> RefreshResult:
     if dry_run:
         return RefreshResult("skipped", detail="dry-run launch")
     with step("Preparing instruction projections"):
         try:
-            prepare_tool_roster(repo_root, config=config)
+            prepare_tool_roster(repo_root, config=config, **(
+                {"checked_profile": checked_profile} if checked_profile is not None else {}))
         except ToolRosterAdmissionError as exc:
             result = RefreshResult("failed", blocking=1, detail=str(exc), tool_roster_blocked=True)
             return _report(result)
@@ -164,11 +166,13 @@ def prepare_for_launch(
         return refresh_local_cache(repo_root, timeout=None)
 
 
-def prepare_tool_roster(repo_root: str | Path, *, config: Config | None = None) -> None:
+def prepare_tool_roster(repo_root: str | Path, *, config: Config | None = None,
+                        checked_profile: str | None = None) -> None:
     from . import copilot_plugin_profile as tool
 
     try:
-        tool.prepare_checkout(repo_root, config=config)
+        tool.prepare_checkout(repo_root, config=config, **(
+            {"checked_profile": checked_profile} if checked_profile is not None else {}))
     except (OSError, RuntimeError, ValueError) as exc:
         raise ToolRosterAdmissionError(f"tool plugin preparation failed: {exc}") from exc
 
@@ -176,14 +180,19 @@ def prepare_tool_roster(repo_root: str | Path, *, config: Config | None = None) 
 def prepare_admitted_launch(
     repo_root: str | Path, *, dry_run: bool = False, defer_projections: bool = False,
     compose_pair: bool = False, config: Config | None = None,
+    checked_profile: str | None = None,
 ) -> None:
     """Block tool-roster failures without changing optional guidance-copy policy."""
     if dry_run:
         return
+    tool_options = {"checked_profile": checked_profile} if checked_profile is not None else {}
     if defer_projections:
-        prepare_tool_roster(repo_root, config=config)
+        prepare_tool_roster(repo_root, config=config, **tool_options)
         return
-    result = prepare_for_launch(repo_root, compose_pair=compose_pair, config=config)
+    result = prepare_for_launch(
+        repo_root, **({"compose_pair": True} if compose_pair else {}),
+        **({"config": config} if config is not None else {}), **tool_options,
+    )
     if getattr(result, "tool_roster_blocked", False):
         raise ToolRosterAdmissionError(result.detail)
 

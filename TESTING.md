@@ -1329,7 +1329,7 @@ beyond the quiet allowance, retaining a flushed byte and deadline renewal for
 each unit while detailed diagnostics coalesce below64 KiB. Terminal counts,
 unchanged stdout and subsequent silent expiry are checked independently.
 
-The focused `owned-budget-native-acceptance.yml` manual workflow runs only
+The focused `owned-budget-native-acceptance.yml` manual workflow runs
 the bounded borrowed-parent budget packet on
 native Linux and macOS. It records the exact dispatched source, uses isolated
 test roots, and pins descendant exits across accepted delegation, sequential
@@ -1339,6 +1339,13 @@ Its separate dispatch preserves all existing installation-context selectors
 within GitHub's 25-input limit.
 PR-branch changes to this workflow or its packet tests also run the same two jobs, allowing the
 workflow itself to qualify before its first default-branch registration.
+Changes to Machines' repair-process owner also select this optional workflow.
+Its Linux job additionally runs only
+`test_outer_required_read_timeout_reaps_nested_probe` through the contained
+plugin runner: a required-module read is cut off while its probe and grandchild
+are live, and both must exit before the outer owner returns. This is native
+process-lifetime evidence, not clean-machine onboarding or credential receiving,
+and does not enlarge the required unit-only CI packet.
 The legacy-wrapper control separately removes only the parent watch to
 reproduce a retained supervisor after real Bash caller death. The corrected
 control confirms pinned exits without reporting unconfirmed SDK cleanup as

@@ -1749,6 +1749,29 @@ def test_tool_profile_native_repo_parser_refuses_invalid_shapes(api, monkeypatch
         owner._build_repo_config({"copilot_plugin_profile": value}, "synthetic-launch", "synthetic-worktrees")
 
 
+@pytest.mark.parametrize("override,expected", [
+    ({}, True), ({"require_application_readiness": False}, False),
+    ({"require_application_readiness": True}, True),
+], ids=["base", "disabled", "enabled"])
+def test_required_applications_native_repo_merge_retains_boolean_selection(api, monkeypatch, override, expected):
+    owner = _knowledge_owner(api, monkeypatch).owner
+    api.load("config_sources")
+    merged = owner._deep_merge({"require_application_readiness": True}, override)
+    result = owner._build_repo_config(merged, "synthetic-launch", "synthetic-worktrees")
+    assert result.require_application_readiness is expected
+    assert owner._build_repo_config({}, "synthetic-launch", "synthetic-worktrees").require_application_readiness is False
+
+
+@pytest.mark.parametrize("value", ["false", 1, None], ids=["string", "number", "null"])
+def test_required_applications_native_repo_parser_refuses_nonbooleans(api, monkeypatch, value):
+    owner = _knowledge_owner(api, monkeypatch).owner
+    api.load("config_sources")
+    with pytest.raises(ValueError, match="require_application_readiness"):
+        owner._build_repo_config(
+            {"require_application_readiness": value}, "synthetic-launch", "synthetic-worktrees",
+        )
+
+
 def test_tool_profile_does_not_graft_through_ordinary_preferences(api, monkeypatch):
     _knowledge_owner(api, monkeypatch)
     composition = api.load("config_sources")
