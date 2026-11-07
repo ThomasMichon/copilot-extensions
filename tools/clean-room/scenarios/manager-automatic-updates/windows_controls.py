@@ -76,10 +76,18 @@ def run_controls(workdir: Path, *, allow_visible_controls: bool) -> dict:
                         "positive-control-not-visible",
                         "owned window remained hidden after the explicit show request",
                     )
-                api._check(api.user.SetForegroundWindow(hwnd), "activate positive-control window")
+                if not api.user.SetForegroundWindow(hwnd):
+                    raise NativeBlocked(
+                        "positive-control-activation-failed",
+                        "SetForegroundWindow did not activate the owned control",
+                    )
                 until(api.foreground, lambda value: value == hwnd, timeout=2,
                       label="positive-control foreground")
-                api._check(api.user.SetForegroundWindow(original), "restore original foreground")
+                if not api.user.SetForegroundWindow(original):
+                    raise NativeBlocked(
+                        "positive-control-restoration-failed",
+                        "SetForegroundWindow did not restore the original foreground",
+                    )
                 until(api.foreground, lambda value: value == original, timeout=2,
                       label="original foreground restoration")
                 api._check(api.user.DestroyWindow(hwnd), "destroy owned positive-control window")

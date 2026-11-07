@@ -253,7 +253,9 @@ resizing, changing Z order or activating it at that step. This avoids inherited
 hidden `STARTUPINFO` suppressing creation-time visibility; activation and
 restoration remain separate observed actions. A false `IsWindowVisible` result
 reports a hidden control, not a possibly stale last-error value. Native SHOW
-and both foreground-event witnesses are still required.
+and both foreground-event witnesses are still required. Denied activation or
+restoration likewise reports that operation directly, without inventing a
+last-error result; failed restoration remains a cleanup failure.
 
 Reports and per-case logs remain in the caller's scratch directory. On any
 cleanup deadline failure, retain that directory and diagnose it; the probe

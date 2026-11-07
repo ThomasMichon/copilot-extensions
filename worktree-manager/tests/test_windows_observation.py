@@ -313,10 +313,15 @@ def test_native_positive_controls_require_new_visible_effect_consent(probe, tmp_
     api.assert_not_called()
 
 
-@pytest.mark.parametrize("becomes_visible", [True, False])
+@pytest.mark.parametrize(("becomes_visible", "rejected_focus", "blocker"), [
+    (True, None, None),
+    (False, None, "positive-control-not-visible"),
+    (True, 20, "positive-control-activation-failed"),
+    (True, 10, "positive-control-restoration-failed"),
+])
 def test_positive_control_explicitly_shows_a_hidden_startup_window(
     probe: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-    becomes_visible: bool,
+    becomes_visible: bool, rejected_focus: int | None, blocker: str | None,
 ) -> None:
     module = importlib.import_module("windows_controls")
     state = SimpleNamespace(visible=False, foreground=10, events=[])
@@ -332,6 +337,8 @@ def test_positive_control_explicitly_shows_a_hidden_startup_window(
         return True
 
     def activate(hwnd: int) -> bool:
+        if hwnd == rejected_focus:
+            return False
         state.foreground = hwnd
         state.events.append({"kind": "foreground-event", "hwnd": hwnd})
         return True
@@ -374,20 +381,21 @@ def test_positive_control_explicitly_shows_a_hidden_startup_window(
     monkeypatch.setattr(module.fixtures, "private_directory",
                         lambda root: (root.mkdir(), root)[1])
     output = tmp_path / "controls"
-    if becomes_visible:
+    if blocker is None:
         report = module.run_controls(output, allow_visible_controls=True)
         assert report["passed"] is True
         assert state.foreground == 10
     else:
-        with pytest.raises(probe.NativeBlocked, match="positive-control-not-visible"):
+        with pytest.raises(probe.NativeBlocked, match=blocker):
             module.run_controls(output, allow_visible_controls=True)
         report = json.loads((output / "observer-controls.json").read_text())
         assert report["passed"] is False
         assert "WinError" not in report["error"]
-        user.SetForegroundWindow.assert_not_called()
+        if not becomes_visible:
+            user.SetForegroundWindow.assert_not_called()
     user.SetWindowPos.assert_called_once()
     user.DestroyWindow.assert_called_once_with(20)
-    assert report["cleanup_verified"] is True
+    assert report["cleanup_verified"] is (rejected_focus != 10)
     api.close.assert_called_once()
 
 
