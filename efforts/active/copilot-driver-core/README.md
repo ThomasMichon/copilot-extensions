@@ -1676,3 +1676,10 @@ control passes in 6.15 seconds; the other 221 controls were not repeated.
 Current F/E9 lint and all 40 admitted strict projects pass their declared
 Linux/Windows analysis targets. The module-size gate passes without widening
 any ceiling. No prior cache file or source-view stage was removed.
+
+Copilot review approved head `7066ee88b4dad89c1a0bfb051a3e3fce5131147f`.
+Required CI then refused the older unit-admission digests for the changed
+checker source and candidate test file, before executing the packet. Refresh
+only those two reviewed hashes. Source verification passes with the admitted
+nodes, coverage targets and whole-packet budget unchanged; fresh CI and review
+remain required at the updated head.
