@@ -676,6 +676,8 @@ creation, bound status/activation and token-pinned recovery SSH/deletion pin
 their host independently of an ambient enterprise `GH_HOST`.
 Allocation metadata checks include display names and branch text before pool
 parsing.
+Default creation also retains the selected account during availability polling
+and the admitted token through post-create provisioning SSH.
 
 For unmapped repositories, a valid `GH_TOKEN` or `GITHUB_TOKEN` needs no saved
 login: admission verifies its account and retains that credential through

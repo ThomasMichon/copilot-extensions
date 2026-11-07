@@ -836,6 +836,7 @@ class TestAllocateCommand:
 @pytest.mark.parametrize("bound", [None, "environment-owner"])
 def test_environment_only_credentials_reach_inventory_and_creation(monkeypatch, capsys, variable, bound):
     from types import SimpleNamespace
+    from unittest.mock import AsyncMock
     from agent_codespaces import __main__ as cli, allocation, coordination, gh_account, lifecycle
     from agent_codespaces.config import CodespacesConfig
 
@@ -859,6 +860,7 @@ def test_environment_only_credentials_reach_inventory_and_creation(monkeypatch, 
     monkeypatch.setattr(cli, "_gh_binary_available", lambda: True)
     monkeypatch.setattr(cli, "validate_context", lambda: None)
     monkeypatch.setattr(lifecycle, "validate_context", lambda: None)
+    monkeypatch.setattr(lifecycle, "list_codespaces", lambda: pytest.fail("qualified consumer used merged discovery"))
     monkeypatch.setattr(cli.pool_mod, "list_leases", lambda: [])
     monkeypatch.setattr(cli.pool_mod, "list_status", lambda: [])
     monkeypatch.setattr(cli.pool_mod, "codespaces_in_use", lambda names: {})
@@ -880,7 +882,23 @@ def test_environment_only_credentials_reach_inventory_and_creation(monkeypatch, 
     )
     monkeypatch.setattr(gh_account, "token_for_account", lambda account: None)
     observed = []
-    state = "Shutdown"
+    state = "Available"
+    connections = []
+
+    async def connect(name, source, forwards):
+        assert source.gh_env["GH_HOST"] == "github.com"
+        assert source.gh_env["GH_TOKEN"] == "environment-fixture-token"
+        connections.append(name)
+        return SimpleNamespace(config=object())
+
+    manager = SimpleNamespace(ensure_connected=AsyncMock(side_effect=connect), disconnect=AsyncMock())
+    relay = SimpleNamespace(stop=AsyncMock())
+    monkeypatch.setattr("ssh_manager.ConnectionManager", lambda: manager)
+    monkeypatch.setattr(cli.relay_launch, "effective_relay_port", lambda config: 19857)
+    monkeypatch.setattr(cli.relay_launch, "build_relay_launch_env", lambda *a: ("", 19857))
+    monkeypatch.setattr(cli, "_start_supervised_relay", AsyncMock(return_value=relay))
+    for helper in ("_provision_relay_helpers", "_provision_dotfiles", "_provision_harness", "_provision_repo_hooks"):
+        monkeypatch.setattr(cli, helper, AsyncMock())
 
     def run(argv, **kwargs):
         nonlocal state
@@ -908,8 +926,12 @@ def test_environment_only_credentials_reach_inventory_and_creation(monkeypatch, 
     monkeypatch.setattr(allocation.subprocess, "run", run)
     assert main(["allocate", "example/project", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["action"] == "create"
-    assert main(["create", "example/project", "--no-wait"]) == 0
+    assert main(["create", "example/project"]) == 0
     assert main(["create", "example/project", "--no-wait", "--force-create"]) == 0
+    assert connections == ["fixture-created"]
+    relay.stop.assert_awaited_once()
+    manager.disconnect.assert_awaited_once()
+    state = "Shutdown"
     capsys.readouterr()
     assert main(["claim-status", "fixture-created"]) == 0
     assert json.loads(capsys.readouterr().out) == {"exists": True, "state": "Shutdown"}

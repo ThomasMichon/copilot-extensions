@@ -4028,7 +4028,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
         return 0
 
     print("Waiting for CodeSpace to become Available...")
-    if not wait_for_available(info.name, timeout=args.timeout):
+    if not wait_for_available(info.name, timeout=args.timeout, account=account):
         print(
             f"[WARN] {info.name} did not reach Available within "
             f"{args.timeout:.0f}s -- run provisioning later with "
@@ -4041,7 +4041,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
     # (including on_create extras).
     from .relay_launch import effective_relay_port
     relay_env, relay_port = relay_launch.build_relay_launch_env(info.name, effective_relay_port(config))
-    source = CodespaceSource(info.name, account=info.account or None)
+    source = CodespaceSource(info.name, account=account, token=environment["GH_TOKEN"])
     manager = ConnectionManager()
 
     async def _run() -> int:

@@ -118,6 +118,11 @@ existing resource ownership, not solve quota pressure by destructive cleanup.
 
 ## Journal
 
+### 2026-11-07 - Default creation and provisioning continuity
+- Reproduced four environment-only cases where creation without no-wait used merged discovery instead of its selected account.
+- Retained the selected account through availability polling and the admitted token in the post-create SSH source. Extended the existing complete consumer regression through default provisioning and teardown before status/start, with both token variables and an ambient enterprise host.
+- All 212 affected CLI, lifecycle and quota-recovery tests and touched-Python lint passed. Fresh exact-head CI/review remain required; no live authentication, venue or deployment effects occurred.
+
 ### 2026-11-07 - Saved credential and recovery host continuity
 - Reproduced four failures in the actual saved-login credential resolver and token-pinned SSH/delete adapters with an ambient enterprise host.
 - Pinned the named token command to GitHub.com and retained that host in resolved-account environments, recovery SSH configuration/connection environments and deletion. Unresolved-token fallback behavior and reclaim safety gates remain unchanged.
