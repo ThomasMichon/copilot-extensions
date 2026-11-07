@@ -468,6 +468,7 @@ def _group_cleanup_worker() -> Iterator[tuple[ThreadPoolExecutor, list[Future[No
 
 
 _CODESPACES_PROFILE_ENV = "CODESPACES_INSTALLER_TEST_PROFILE"
+_SSH_PROFILE_ENV = "AGENT_SSH_SNAPSHOT_TEST_PROFILE"
 
 
 def _test_group_plan(
@@ -580,8 +581,10 @@ def run_plugin(
         env["COPILOT_EXTENSIONS_TEST_VENV_ROOT"] = str(_venv_root())
         # Ambient profile state must never silently relax an ordinary run.
         env.pop(_CODESPACES_PROFILE_ENV, None)
+        env.pop(_SSH_PROFILE_ENV, None)
         if test_profile != "standard":
-            env[_CODESPACES_PROFILE_ENV] = test_profile
+            profile_env = _SSH_PROFILE_ENV if name == "agent-ssh" else _CODESPACES_PROFILE_ENV
+            env[profile_env] = test_profile
             env.pop("PYTEST_ADDOPTS", None)
         if selection is not None:
             env.pop("PYTEST_ADDOPTS", None)
@@ -769,7 +772,7 @@ def main(argv: list[str] | None = None) -> int:
                          "explicit value here always wins)")
     ap.add_argument(
         "--test-profile", choices=("standard", "busy-host-functional"), default="standard",
-        help="explicit Codespaces installer functional qualification profile; "
+        help="explicit Codespaces installer or SSH snapshot functional qualification profile; "
              "busy-host-functional is not original-budget or performance evidence",
     )
     ap.add_argument("--max-files-per-sub-suite", type=int, default=None,
@@ -893,8 +896,14 @@ def main(argv: list[str] | None = None) -> int:
                 if args.test_profile == "busy-host-functional":
                     effective_subsuite_timeout = 900.0
                     effective_plugin_timeout = 2700.0
+                    native_limits = (
+                        "fixture-compile=60s optional-peer=30s contributor=60s observer=180s item=300s "
+                        "strict-timeout-controls=production "
+                        if name == "agent-ssh"
+                        else "native=135s module-item=300s "
+                    )
                     print(
-                        "[PROFILE] busy-host-functional: native=135s module-item=300s "
+                        f"[PROFILE] busy-host-functional: {native_limits}"
                         "default-item=30s group=900s plugin=2700s; "
                         "functional evidence only, not original-budget/performance PASS"
                     )

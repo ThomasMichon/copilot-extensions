@@ -1086,17 +1086,20 @@ def test_adoption_defaults_keep_original_order_and_replacement_opacity(api, monk
             raise PermissionError("private repository consumer failure")
         return registered.read_registry(repository_source)
 
-    def projects():
+    def projects(path):
+        assert path is projects_source
         calls.append("projects")
         return owner.parse_projects_registry(projects_source)
 
-    def replacement():
-        discarded.append(projects())
+    def replacement(path):
+        discarded.append(projects(path))
         return {"projects": {"sample": {"default_branch": "replacement", "base_repo": False}}}
 
     monkeypatch.setattr(sys.modules[owner.__package__ + ".repos"], "read_registry", repository, raising=False)
-    api.stub("installer", read_projects_registry=replacement if mode == "opaque-reader" else projects,
-             _ORIGINAL_PROJECTS_READER=projects)
+    monkeypatch.setattr(owner, "read_projects_registry", replacement if mode == "opaque-reader" else projects)
+    monkeypatch.setattr(owner, "_ORIGINAL_PROJECTS_READER", projects)
+    api.stub("config", install_dir=lambda: Path("synthetic-root"))
+    api.stub("registry_paths", registry_path=lambda *_args, **_kwargs: projects_source)
     helper = api.load("config_adoption_defaults")
     with api.config.capture_config_observations() as observations:
         value = helper.resolve_adoption_defaults("sample", "windows")

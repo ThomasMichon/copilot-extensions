@@ -1,0 +1,9 @@
+{
+  "comment": "Provide a guarded read-only state-root request with request-local canonical binding reuse and final authority revalidation.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

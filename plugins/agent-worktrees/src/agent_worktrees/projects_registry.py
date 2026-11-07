@@ -101,3 +101,45 @@ def write_projects_document(path: Path, content: str, *, managed: bool) -> None:
         managed_write(lambda: write_registry(path, content))
     else:
         write_registry(path, content)
+
+
+def read_projects_registry(path: Path, *, strict: bool = False) -> dict:
+    """Read an already owner-resolved registry path with the normal fallback."""
+    start = acquisition.registry_call_started()
+    try:
+        value = parse_projects_registry(path)
+    except Exception as exc:
+        acquisition.registry_call_failed(str(path), exc)
+        if strict:
+            raise
+        return {"projects": {}}
+    if parse_projects_registry is not _ORIGINAL_PROJECTS_PARSER:
+        acquisition.opaque_source(str(path))
+    acquisition.registry_call_finished(start, str(path), stage="projects-registry")
+    return value
+
+
+_ORIGINAL_PROJECTS_READER = read_projects_registry
+
+
+def project_for_anchor(anchor: Path, *, read_projects, read_repos, platform, normalize):
+    """Resolve registered membership without importing a command dispatcher."""
+    target = normalize(str(anchor))
+    try:
+        projects = read_projects().get("projects", {})
+    except Exception:
+        projects = {}
+    for name, entry in projects.items():
+        path = entry.get("anchor") if isinstance(entry, dict) else None
+        if path and normalize(str(Path(path))) == target:
+            return name
+    try:
+        registry = read_repos()
+        selected_platform = platform()
+        for name in registry.repos:
+            path = registry.repos[name].local_path(selected_platform)
+            if path and normalize(str(Path(path))) == target:
+                return name
+    except Exception:
+        pass
+    return None
