@@ -233,6 +233,13 @@ implementation authority, resource custody or the fixed checkpoint.
 
 ## Plan
 
+The [provider merge and inflow study](<journal/2026/11.07 provider-merge-and-inflow-study.md>)
+records two newly merged providers without inventing a direct requirement
+crosswalk. Three original contracts and two new inflow originals remain OPEN;
+whole-text admission, unknown prior acquisition history and source/resource
+custody remain distinct from metadata completeness. Two equal complete scans
+measure 815 whole OPEN, 86 above fixed 729. Phase 2 stays Active.
+
 The [caller-owned transport planning proposal](<journal/2026/11.07 caller-owned-transport-planning.md>)
 preserves #2316's complete interactive/loopback and native-session contract as
 an independent proposed planning lane under OPEN #2709. The source remains
@@ -2953,6 +2960,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [provider merge and inflow study](<journal/2026/11.07 provider-merge-and-inflow-study.md>)
+independently verifies both merge identities and complete changed-path
+metadata without new product-source inspection or closure credit.
+Participant connections are not collaborator rosters, and requested
+metadata completeness is not full text admission. All original acceptance,
+acquisition limits, owners and campaign completion checkboxes stay unchanged.
 
 The [caller-owned transport planning proposal](<journal/2026/11.07 caller-owned-transport-planning.md>)
 requires complete current receiving/original qualification and preservation of
