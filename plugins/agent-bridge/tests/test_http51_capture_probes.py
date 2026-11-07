@@ -309,6 +309,7 @@ def test_http51_capture_actual_observations(
         for key in ("protocol_version", "min_protocol_version")
     }}
     health = api.get("/health").json()
+    observed["live_question_answers"] = health["capabilities"]["live_question_answers"]
     observed["portable_capabilities"] = {
         key: health["capabilities"][key] for key in vector["expected"]["portable_capabilities"]
     }

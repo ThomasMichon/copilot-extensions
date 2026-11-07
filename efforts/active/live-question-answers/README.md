@@ -178,3 +178,16 @@ requested protocol-only scope.
   directory was confirmed absent afterward and a sequential guard passed.
 - Current HTTP-52 contract evidence is being expanded and recaptured before
   publication readiness; historical generations remain unchanged.
+
+### 2026-11-07 - Contract portfolio corrections
+
+- The local full Windows capture encountered the retained writer fixture's
+  existing 15-second communication deadline; #11311 owns that separate
+  qualification investigation. No deadline or assertion was weakened.
+- The source-pinned hosted capture ran all 281 cases and exposed a missing
+  portable receiving asset plus an omitted aggregate capability observation.
+  Added `questions.mjs` to the canonical packaged closure and observed the
+  actual health capability in the independent vector comparison.
+- All four affected receiver/aggregate cases now pass locally. The complete
+  current capture and separate verification will run against the corrected
+  published checkpoint; a partial pass is not publication evidence.
