@@ -30,22 +30,41 @@ def fixture(mode="codename", source="built-in", explicit=False):
     return record, config
 
 
-def test_explicit_comment_producer_resolves_actual_record_without_ambient_cwd(monkeypatch, tmp_path):
+@pytest.mark.parametrize("registration", ["ordinary", "alias", "duplicate"])
+def test_explicit_comment_producer_resolves_actual_record_without_ambient_cwd(
+    monkeypatch, tmp_path, registration,
+):
     root = tmp_path / "source"
     root.mkdir()
     nested = root / "nested"
     nested.mkdir()
     state = tmp_path / "project"
     (state / "worktrees").mkdir(parents=True)
-    (state / "worktrees/selected.yaml").write_text(json.dumps({
+    registered = root
+    if registration == "alias":
+        registered = tmp_path / "source-alias"
+        try:
+            registered.symlink_to(root, target_is_directory=True)
+        except OSError:
+            pytest.skip("directory alias creation unavailable")
+    record = {
         "worktree_id": "selected", "branch": "worktree/selected", "repo": "fixture",
-        "machine": "fixture-machine", "platform": "linux", "worktree_path": str(root),
+        "machine": "fixture-machine", "platform": "linux", "worktree_path": str(registered),
         "codename": "bolted-circuit", "codename_source": "built-in", "sessions": [],
-    }), encoding="utf-8")
+    }
+    (state / "worktrees/selected.yaml").write_text(json.dumps(record), encoding="utf-8")
+    if registration == "duplicate":
+        (state / "worktrees/other.yaml").write_text(json.dumps({
+            **record, "worktree_id": "other", "branch": "worktree/other", "codename": "another-handle",
+        }), encoding="utf-8")
     _, config = fixture()
     config.repo_name = "fixture"
     monkeypatch.setattr(cli.cfg, "project_dir", lambda name=None: state)
     monkeypatch.chdir(tmp_path)
+    if registration == "duplicate":
+        with pytest.raises(ValueError, match="ambiguous"):
+            cli.resolve_comment_origin(root, config)
+        return
     assert cli.resolve_comment_origin(root, config)["origin"] == {"codename": "bolted-circuit"}
     with pytest.raises(ValueError, match="differs from its managed source"):
         cli.resolve_comment_origin(nested, config)
