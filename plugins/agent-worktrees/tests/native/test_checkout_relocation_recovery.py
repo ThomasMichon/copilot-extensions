@@ -268,3 +268,32 @@ def test_actual_move_json_keeps_stale_lock_diagnostics_out_of_stdout(checkout):
     assert json.loads(result.stdout)["phase"] == "complete"
     assert "Stale lock detected" in result.stderr and "Stale lock detected" not in result.stdout
     assert checkout.destination.exists() and not checkout.source.exists()
+
+
+def test_fresh_fixture_interpreter_validates_namespace_and_installs_command_guard(checkout):
+    script = """
+import json, subprocess, sys
+from plugin_test_command_safety import UnsafeTestCommand
+try:
+    subprocess.Popen([sys.argv[1], "-L", "foreign-not-runner-owned", "list-sessions"])
+except UnsafeTestCommand:
+    print(json.dumps({"guard_installed": True}))
+else:
+    raise AssertionError("unscoped native work was admitted")
+"""
+    env = dict(os.environ)
+    missing_mux = checkout.home / "not-installed" / ("psmux.exe" if os.name == "nt" else "tmux")
+    assert not missing_mux.exists()
+    result = run_caller_owned(
+        [sys.executable, "-c", script, str(missing_mux)], env=env, cwd=checkout.home, timeout=30,
+        max_stdout_bytes=64 * 1024, max_stderr_bytes=64 * 1024,
+    )
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert json.loads(result.stdout)["guard_installed"] is True
+    env["RELOCATION_FIXTURE_MUX_ARGS"] = "[]"
+    refused = run_caller_owned(
+        [sys.executable, "-c", "print('unexpected native work')"], env=env, cwd=checkout.home, timeout=30,
+        max_stdout_bytes=64 * 1024, max_stderr_bytes=64 * 1024,
+    )
+    assert refused.returncode == 97 and not refused.stdout
+    assert "fixture child scope refused" in refused.stderr

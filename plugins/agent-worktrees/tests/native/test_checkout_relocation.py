@@ -48,16 +48,10 @@ def _fixture_home(tmp_path, request):
 
 @pytest.fixture
 def checkout(tmp_path, monkeypatch, request):
-    from plugin_test_command_safety import private_mux_args
+    from checkout_fixture_process import scope_fixture
 
-    mux_args = private_mux_args(tmp_path)
+    scope_fixture(tmp_path, monkeypatch)
     tmp_path = _fixture_home(tmp_path, request)
-    run = subprocess.run
-    def private_mux_run(argv, *args, **kwargs):
-        if isinstance(argv, (list, tuple)) and argv and Path(argv[0]).stem.casefold() in {"tmux", "psmux"}:
-            argv = [argv[0], *mux_args, *argv[1:]]
-        return run(argv, *args, **kwargs)
-    monkeypatch.setattr(subprocess, "run", private_mux_run)
     monkeypatch.setattr(cfg, "_home", lambda: tmp_path)
     monkeypatch.setattr(permissions, "_copilot_dir", lambda: tmp_path / ".copilot")
     monkeypatch.setattr(sessions, "_session_state_dir", lambda: tmp_path / ".copilot" / "session-state")
@@ -593,7 +587,10 @@ def test_mount_inventory_failure_and_unrelated_mounts(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux private mount-namespace qualification")
-def test_native_bind_mount_refuses_without_touching_backing_data(tmp_path):
+def test_native_bind_mount_refuses_without_touching_backing_data(tmp_path, monkeypatch):
+    from checkout_fixture_process import scope_fixture
+
+    scope_fixture(tmp_path, monkeypatch)
     unshare, mount, umount = (shutil.which(name) for name in ("unshare", "mount", "umount"))
     if not all((unshare, mount, umount)):
         pytest.skip("native private mount-namespace tools are unavailable")
