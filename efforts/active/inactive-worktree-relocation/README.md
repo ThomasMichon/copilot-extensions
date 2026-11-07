@@ -791,3 +791,17 @@ adopter pilot feedback gates subsequent widening.
   unchanged controls retain their earlier full-packet evidence; these disjoint
   runs do not claim a current aggregate budget. Normal review/required CI and
   full exact-candidate Main qualification/publication remain required.
+
+### 2026-11-07 — Release prerequisite source merged; acceptance remains scoped
+- [#11278](https://github.com/ThomasMichon/copilot-extensions/pull/11278) merged
+  into `dev` at `b445fec25666fc21e43070ebf22b181eb401f7e3`
+  (`2026-11-07T08:16:53Z`). The actual current-head Copilot approval
+  `5811005168` and required CI passed. Its Medium ConPTY output-reader race
+  was corrected, validated in the real native control and resolved before merge.
+- The final correction only moves the new final-output assertions after
+  console close/reader join. Existing concurrent Resume assertions and
+  production launchers remain unchanged. The source worktree is pulled forward;
+  this effort, #10879 and the receiving source ownership remain Active.
+- Ordinary Dev CI and automatic Main native qualification, attestation and
+  publication remain separate from this source merge. No installed selection,
+  allocation default, shared service or real retained worktree was changed.
