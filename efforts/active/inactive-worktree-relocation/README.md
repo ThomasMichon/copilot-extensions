@@ -101,10 +101,10 @@ authorized resources and the existing runner/lease/cleanup boundaries.
 - [x] Complete stopped, clean, merged/final ordinary linked-checkout relocation:
   fenced admission, all-content transfer, Git repair, authoritative rebinding,
   actual consumer verification and journaled interruption/recovery.
-- [ ] Make old/new allocation roots coexist for this flow, retaining project,
+- [x] Make old/new allocation roots coexist for this flow, retaining project,
   execution-space, Git-family and ledger authority; publish and qualify the
   complete source flow early through normal review/CI, not just scaffolding.
-- [ ] Record precise supported/unsupported cases and hand the qualified source
+- [x] Record precise supported/unsupported cases and hand the qualified source
   result to separately authorized adoption. Hold widening for initial pilot
   feedback; source approval itself never starts that pilot.
 
@@ -137,7 +137,8 @@ boundaries. It is not a claim that runtime checks have already passed.
 - [x] First flow: real linked Git checkout, stopped-clean acceptance,
   complete transfer and post-move consumers on same and different volumes;
   blockers and injected interruption preserve original/recovery custody.
-- [ ] Mixed roots: existing resume/mutation/publication plus new allocations;
+- [x] First-slice mixed-root source contracts: existing path/resume-entry,
+  mutation/publication plus new allocations;
   foreign project/host/platform/Git-family/ledger and stale evidence still refuse.
 - [ ] Broader cases: dirty bytes/index, retained-session resume, paired roots,
   original pending-intent recovery, path-sensitive artifacts and unrelated live
@@ -734,3 +735,26 @@ adopter pilot feedback gates subsequent widening.
   relative backpointer refused. Together with platform-boundary and actual CLI
   controls the focused packet passed **5 cases**, with no simulated native lane.
   The first-slice scope and wider Active completion gate remain unchanged.
+
+### 2026-11-07 — First source slice merged; objective remains Active
+- [#10943](https://github.com/ThomasMichon/copilot-extensions/pull/10943) merged
+  into `dev` at `0614ce52de5c21fbeb6eb193464ba1c644aa0e9e`
+  (`2026-11-07T05:53:44Z`). Exact reviewed head
+  `2f261333b3315a0371aa24fb115e5fe2048d968d` had required CI green,
+  resolved threads and no stored/published code findings in actual review
+  `5810404347`. The remaining native-platform scrutiny was explicitly assessed
+  against the retained real Windows two-volume/abrupt-crash proof, not inferred
+  from an empty finding count. Used the normal role-scoped managed self-merge;
+  no failed check or unresolved code finding was bypassed.
+- Re-read this effort and resolved only the first-source-slice outcomes.
+  Pulled the retained worktree onto the merged `dev` through the native owner.
+  Installed-generation qualification, actual adopter resume/pilot, POSIX,
+  broader WIP/session/pair/location-authority acceptance and version/rollback
+  coverage remain in this effort's open Phase 2/3 and validation gates.
+- This journal/checklist reconciliation is source-only post-merge bookkeeping,
+  published through the normal small documentation review/CI/merge flow. It
+  does not start another implementation stretch or imply runtime activation.
+- Keep #10879, the canonical source effort and source worktree/parent ownership
+  Active. Await separately owned first-flow adoption feedback or explicit next
+  source steering before widening. No installed runtime, service, allocation
+  default or real retained worktree was changed by source delivery.
