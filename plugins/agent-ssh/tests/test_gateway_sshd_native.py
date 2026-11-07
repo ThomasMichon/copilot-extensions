@@ -118,6 +118,42 @@ def test_native_listener_login_refresh_withdrawal_and_preservation(native_target
                     time.sleep(0.05)
             first = client()
             assert first.authenticated, first.diagnostic + (root / "native.log").read_text(encoding="utf-8")
+            if os.name == "nt":
+                import ctypes
+                from ctypes import wintypes
+
+                kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+                kernel.ProcessIdToSessionId.argtypes = [
+                    wintypes.DWORD, ctypes.POINTER(wintypes.DWORD),
+                ]
+                kernel.ProcessIdToSessionId.restype = wintypes.BOOL
+                session = wintypes.DWORD()
+                assert kernel.ProcessIdToSessionId(os.getpid(), ctypes.byref(session))
+                assert session.value != 0, "Select an actual user-logon qualification lane"
+                expected = {
+                    "sid": authorization._windows_sid(), "session": session.value,
+                    "elevated": False,
+                }
+                command = (
+                    'powershell.exe -NoProfile -NonInteractive -Command "'
+                    '$i=[Security.Principal.WindowsIdentity]::GetCurrent();'
+                    '$p=[Security.Principal.WindowsPrincipal]::new($i);'
+                    '[pscustomobject]@{sid=$i.User.Value;'
+                    'session=[Diagnostics.Process]::GetCurrentProcess().SessionId;'
+                    'elevated=$p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)}'
+                    '|ConvertTo-Json -Compress"'
+                )
+            else:
+                expected, command = str(os.geteuid()), "id -u"
+            completed = subprocess.run(
+                [*client_arguments(), "-T", "127.0.0.1", command],
+                stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                timeout=15, **no_window_kwargs(),
+            )
+            assert completed.returncode == 0, "Native SSH command did not complete successfully"
+            actual = json.loads(completed.stdout) if os.name == "nt" else completed.stdout.strip()
+            if actual != expected:
+                pytest.fail("Native SSH command did not preserve the selected user context")
             target = selected["state_dir"] / "authorization" / "authorized_keys.gateway"
             native_config = selected["state_dir"] / "sshd_config"
             before = {
