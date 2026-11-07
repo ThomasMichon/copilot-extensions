@@ -6188,6 +6188,25 @@ guardian's complete source shape without executing that actor during discovery.
 
 ## The turn-key runner
 
+Worktrees' Windows update admission controls live in
+`plugins/agent-worktrees/tests/test_update_entry_windows.py`. Contained pytest
+proves early refusal through native and Git-sh fronts, read-only/foreground
+availability and exact installed-runtime forwarding. The unmocked positive
+check requires an explicitly detached/outside-Job Windows host, rather than
+weakening the normal runner's restrictive Job. Prepare its interpreter with
+`python tools/run-plugin-tests.py agent-worktrees --prepare-only`, then run:
+
+```powershell
+& "<prepared-test-python>" "plugins\agent-worktrees\tests\test_update_entry_windows.py" --native-breakaway-root "<private-caller-owned-scratch>" --powershell "<absolute-native-powershell>"
+```
+
+This dedicated check creates only private profiles and permissive fixture Jobs,
+enters the real global/payload fronts with an offline bootstrap, and independently
+pins any surviving probe child for exact cleanup. It refuses contained mode;
+do not clear its marker or change an enclosing Job to manufacture a pass.
+The corresponding pytest positive cases are skipped under containment, not
+reported as native qualification. No real installation or request is submitted.
+
 The Manager plugin and standalone test preparers install its application
 non-editably through the normal retained-source policy. Both use the shared
 cache, whose fingerprint binds that installation shape; embedded first-party

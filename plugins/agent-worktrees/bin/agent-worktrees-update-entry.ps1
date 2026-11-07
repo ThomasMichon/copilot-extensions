@@ -41,7 +41,8 @@ if (@($_updateArgs | Where-Object {
         '--request-status', '--recovery-status', '--recover-after-restart', '--recover-for-repair') -or
     $_.StartsWith('--request-status=')
 }).Count) { return }
-if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and
+    $_updateArgs -cnotcontains '--supervised-debug') {
     try {
         if (-not ('CopilotExtensions.UpdateBreakawayProbe' -as [type])) {
             Add-Type -TypeDefinition @'
@@ -120,9 +121,20 @@ namespace CopilotExtensions {
         return
     }
 }
-if ($_updateArgs -ccontains '--no-manager') { return }
 # The Git-sh handoff disables conversion only for the native invocation.
 Remove-Item Env:MSYS2_ARG_CONV_EXCL -ErrorAction SilentlyContinue
+if ($_updateArgs -ccontains '--no-manager') {
+    if ($_awUpdateStandalone) {
+        if (-not (Test-Path -LiteralPath $_awUpdateCaller -PathType Leaf)) {
+            [Console]::Error.WriteLine('[agent-worktrees] native update caller is unavailable; no update ran.')
+            exit 127
+        }
+        $env:AGENT_WORKTREES_INTERNAL_SKIP_UPDATE_BOOTSTRAP = '1'
+        & $_awUpdateCaller @_originalUpdateArgs
+        exit $LASTEXITCODE
+    }
+    return
+}
 if (-not $_updateHasProject) {
     for ($_index = 1; $_index -lt $_updateArgs.Count; $_index++) {
         $_argument = $_updateArgs[$_index]

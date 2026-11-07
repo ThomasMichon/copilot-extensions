@@ -1483,7 +1483,8 @@ before controller discovery, downloads, builds or request submission; existing
 requests are untouched. Re-run in the execution host's explicit detached/outside-Job
 shell mode (for example async with `detach=true`). Plain async execution and the
 updater's `--detach` flag do not escape an enclosing Job. Help, read-only status
-and explicit diagnostic/repair selections remain available.
+and explicit diagnostic/repair selections remain available. `--supervised-debug`
+retains its foreground execution route without requiring a durable worker.
 
 The public command submits a durable request before Manager or standalone
 execution. `--wait` observes it by default; `--detach --json` returns an
