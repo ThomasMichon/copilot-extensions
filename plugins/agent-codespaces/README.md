@@ -665,8 +665,14 @@ workstream ownership refuses even with spare slots. Confirmed local ownership
 retains legacy own-venue reuse; an explicitly returned venue must be reserved
 again. The selected account is retained before an uncertain attempt, and strict
 binding writes preserve additive fields, other records and corrupt-state bytes.
+Qualified ownership is read through the selected Worktrees runtime, not an
+installed sibling Python package. Failed or malformed ledger reads refuse;
+an omitted inventory row does not hide a matching bound obligation.
+The existing per-target lifecycle lock covers final inventory/user checks,
+local reservation, binding confirmation and eligibility-marker removal, so a
+managed destructive operation cannot interleave with that commit sequence.
 Explicit creation-only display-name/devcontainer options and a repository's
-declared devcontainer profile do not silently become cross-effort reuse:
+declared or custom global devcontainer/location preferences do not silently become cross-effort reuse:
 their compatibility is not established by this pool inventory. Existing own
 venue reuse remains unchanged; `--force-create` retains its explicit meaning.
 

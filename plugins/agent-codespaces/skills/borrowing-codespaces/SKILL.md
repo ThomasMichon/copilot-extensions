@@ -67,6 +67,13 @@ name retained responsibility. Inspect the existing `claims show`, `leases` and
 shared lease state through their owners; do not blindly repeat acquisition,
 create a replacement or force-clear another holder.
 
+Qualified ownership is read through the selected Worktrees runtime; installing
+its Python package into the Codespaces environment is not a workaround.
+Unknown ledger reads or omitted bound obligations refuse admission. Final
+reservation checks and marker removal share the native lifecycle lock.
+Unverified custom devcontainer/location preferences remain creation choices,
+not implicit permission to select another effort's venue.
+
 ## Advisory lease (borrow / release / leases)
 
 The lease is **host-local advisory state** in

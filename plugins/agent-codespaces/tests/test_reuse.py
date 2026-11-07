@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -15,8 +17,11 @@ from agent_codespaces.lifecycle import CodespaceInfo
 @pytest.fixture
 def venue(monkeypatch, tmp_path):
     from agent_codespaces import account_binding, pool, status, worktrees
+    from ssh_manager import locks
 
     monkeypatch.delenv("AGENT_CODESPACES_DISABLE_CLAIM", raising=False)
+    monkeypatch.setitem(sys.modules, "agent_worktrees", None)
+    monkeypatch.setattr(locks, "locks_dir", lambda: tmp_path / "target-locks")
     monkeypatch.setattr(lease, "LEASE_FILE", tmp_path / "leases.json")
     monkeypatch.setattr(lease, "_LOCK_FILE", tmp_path / "leases.lock")
     monkeypatch.setattr(lease, "_DEPLOY_HOLDS_FILE", tmp_path / "deploy-holds.json")
@@ -58,10 +63,18 @@ def venue(monkeypatch, tmp_path):
         "state": shared[name].state, "live": shared[name].live,
     })
     events = []
-    monkeypatch.setattr(
-        "agent_codespaces.driving_worktrees.resolve_current_workstream_box",
-        lambda *args: "returned" if any(event[0] == "journal" for event in events) else None,
-    )
+    def ownership(args, **kwargs):
+        assert args == ["--project", "project", "claims", "new-worktree", "--json"]
+        outbound = (
+            [{"kind": "codespace", "ref": "returned", "state": "active"}]
+            if any(event[0] == "journal" for event in events) else []
+        )
+        return subprocess.CompletedProcess(args, 0, json.dumps({
+            "version": 1, "machine": "machine", "repo": "project",
+            "worktree_id": "new-worktree", "outbound": outbound,
+        }), "")
+
+    monkeypatch.setattr(coordination, "_run", ownership)
     monkeypatch.setattr(
         coordination, "journal_obligation",
         lambda name, holder: events.append(("journal", name, holder)) or True,
@@ -174,7 +187,10 @@ def test_reuse_does_not_silently_reduce_requested_machine_capacity(venue, capsys
     capsys.readouterr()
 
 
-@pytest.mark.parametrize("profile", ["explicit-devcontainer", "configured-devcontainer", "display-name"])
+@pytest.mark.parametrize("profile", [
+    "explicit-devcontainer", "configured-devcontainer", "global-devcontainer",
+    "configured-location", "global-location", "display-name",
+])
 def test_creation_profile_is_not_silently_replaced_by_unqualified_reuse(venue, capsys, profile):
     from agent_codespaces.config import RepoConfig
 
@@ -185,6 +201,12 @@ def test_creation_profile_is_not_silently_replaced_by_unqualified_reuse(venue, c
         venue.config.repos["example/project"] = RepoConfig(
             devcontainer_path=".devcontainer/alternate/devcontainer.json",
         )
+    elif profile == "global-devcontainer":
+        venue.config.default_devcontainer_path = ".devcontainer/alternate/devcontainer.json"
+    elif profile == "configured-location":
+        venue.config.repos["example/project"] = RepoConfig(location="WestEurope")
+    elif profile == "global-location":
+        venue.config.default_location = "WestEurope"
     else:
         extra = ["--display-name", "new-profile"]
     assert cli.main(["create", "example/project", "--no-wait", *extra]) == 4
@@ -192,13 +214,13 @@ def test_creation_profile_is_not_silently_replaced_by_unqualified_reuse(venue, c
     assert "pressure" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("failure", ["unknown-acquire", "inventory-drift", "local-race"])
+@pytest.mark.parametrize("failure", [
+    "unknown-acquire", "inventory-drift", "inventory-omission", "local-race",
+])
 def test_failed_reservation_retains_native_responsibility_without_replay(venue, monkeypatch, capsys, failure):
-    import sys
-    from types import ModuleType
     from agent_codespaces import driving_worktrees
 
-    if failure == "unknown-acquire":
+    if failure in ("unknown-acquire", "inventory-omission"):
         def acquire(*args, **kwargs):
             venue.shared["returned"] = coordination.L2Lease(
                 "returned", "machine/project/new-worktree", True, token="b" * 40, state="leased",
@@ -230,14 +252,13 @@ def test_failed_reservation_retains_native_responsibility_without_replay(venue, 
     assert "retained" in capsys.readouterr().err
     assert venue.events[0][0] == "journal"
     assert not any(event[0] == "release" for event in venue.events)
-    peer = ModuleType("agent_worktrees")
-    peer.claims_owner = SimpleNamespace(claims_of_owner=lambda *args: ["returned"])
-    monkeypatch.setitem(sys.modules, "agent_worktrees", peer)
     assert driving_worktrees.current_workstream_account("example/project") == "selected"
     if failure == "local-race":
         assert lease._read_leases()["returned"].effort == "racing-effort"
     prior = list(venue.events)
     venue.config.max_owned_codespaces = 31
+    if failure == "inventory-omission":
+        venue.rows.pop(0)
     assert cli.main(["create", "example/project", "--no-wait"]) == 4
     assert "unconfirmed" in capsys.readouterr().err
     assert venue.events == prior
@@ -256,3 +277,37 @@ def test_context_refusal_after_shared_acquire_preserves_classification_and_custo
     assert "retained" in capsys.readouterr().err
     assert venue.shared["returned"].state == "leased"
     assert not any(event[0] == "release" for event in venue.events)
+
+
+def test_reservation_serializes_inventory_and_marker_with_destructive_lifecycle(venue, monkeypatch, capsys):
+    from contextlib import contextmanager
+
+    held = False
+    phases = []
+
+    @contextmanager
+    def target_lock(name, **kwargs):
+        nonlocal held
+        assert name == "returned"
+        held = True
+        try:
+            yield object()
+        finally:
+            held = False
+
+    def listing(*args, **kwargs):
+        if any(event[0] == "acquire" for event in venue.events):
+            assert held, "delete can enter before the fresh inventory read"
+            phases.append("inventory")
+        return venue.rows
+
+    def marker(name):
+        assert held, "delete can enter before eligibility is cleared"
+        phases.append("marker")
+
+    monkeypatch.setattr("agent_codespaces.lifecycle_lock.lifecycle_lock", target_lock)
+    monkeypatch.setattr(allocation, "list_account_codespaces", listing)
+    monkeypatch.setattr("agent_codespaces.status.clear_status", marker)
+    assert cli.main(["create", "example/project", "--no-wait"]) == 0
+    assert phases == ["inventory", "marker"] and not held
+    capsys.readouterr()
