@@ -637,8 +637,78 @@ Machine type and location default by convention (`largePremiumLinux` / `EastUs`)
 and can be overridden per-repo in `.copilot-extensions/agent-codespaces/config.yaml`. After the
 CodeSpace is Available, any `on_create` provisioning hooks from that config run
 automatically. Without `--force-create`, `create` first consults the pool
-planner: it reuses a suitable idle CodeSpace or refuses when the configured core
-budget is already under pressure.
+planner: it returns this workstream's valid retained venue instead of creating
+a new one, or refuses when local capacity is unknown or under pressure. It does
+not borrow an unrelated idle venue.
+
+Allocation and ordinary creation also enforce `defaults.max_owned_codespaces`
+(conservative policy default 30) under the target repository's selected account.
+Stopped venues still consume owned slots; stopping one only frees running
+cores. Failed, malformed or truncated selected-account inventory refuses
+new compute with pressure (exit 4), rather than falling through to a
+blind provider call. Unknown machine costs also refuse additional compute;
+a stopped claimed venue needs known wake headroom.
+`--force-create` explicitly bypasses local capacity/reuse policy, not provider
+limits or authentication. Any quota retry retains existing rescue, liveness
+and cleanup gates and is restricted to that account. Automatic reclaim requires
+a matching persisted account binding; absent, conflicting or unreadable binding
+is not permission to reclaim. The same validated credential reaches rescue,
+deletion and the account-specific stop-state lookup. Creation's headless REST
+fallback retains the admitted environment rather than rediscovering credentials.
+Ordinary quota recovery checks fresh known core headroom before a rescue can
+wake a stopped venue, then revalidates the same creation policy after reclaim.
+It reports completed recovery even if a concurrent capacity change blocks the
+retry. Explicit force-create still overrides only local policy, not the
+account, rescue, liveness or cleanup gates.
+For unmapped repositories, a workstream's own matching claim and persisted
+account binding take precedence over a newly active account, so an account
+switch does not hide its retained venue. Explicit repository mappings still
+win; unrelated bindings do not select an account. Binding contention or an
+unavailable selected credential refuses admission rather than switching users.
+Admission opts into content-strict reads of the existing binding store: corrupt,
+malformed or unreadable state refuses before account switching, without changing
+legacy readers or replacing the stored bytes. A genuinely absent store stays
+empty.
+An expired or malformed ambient identity may fall back only to that bound
+account's qualified credential. Creation-scope checks run after reuse admission
+and use the admitted environment, not an unrelated ambient token.
+Bound status and activation prefer saved account credentials, or verify that an
+environment-only credential belongs to that same account before using it. A
+different environment identity never satisfies a bound-account lookup.
+Fully qualified repository requests preserve the owner when matching claims
+and bindings; logical short names retain their host-repository aliases. The
+selected creation-scope check excludes unrelated saved logins and hosts.
+Malformed allocation metadata or account-binding fields produce an actionable
+refusal, not an uncaught parser failure. Devcontainer discovery and creation
+share the admitted account environment rather than rediscovering credentials.
+GitHub.com saved-account resolution, identity verification, qualified inventory,
+creation, bound status/activation and token-pinned recovery SSH/deletion pin
+their host independently of an ambient enterprise `GH_HOST`.
+Allocation metadata checks include display names and branch text before pool
+parsing.
+Default creation also retains the selected account during availability polling
+and the admitted token through post-create provisioning SSH.
+A recycle recommendation is advisory, not freed capacity: ordinary creation
+refuses until safe recycling has actually occurred and inventory is refreshed,
+rather than relying on a provider's higher quota to enforce the local core
+budget. A partial selected-account view can still advise already-running own
+venue reuse without additional compute, but cannot admit creation or a stopped
+venue's wake; its headroom is unqualified. Invalid native configuration reports
+a diagnostic error and can be repaired before retrying, without silent defaults.
+Picker snapshots retain their JSON error envelope for invalid configuration,
+and active subscriptions recover after configuration repair without a restart.
+
+For unmapped repositories, a valid `GH_TOKEN` or `GITHUB_TOKEN` needs no saved
+login: admission verifies its account and retains that credential through
+inventory, creation and recovery. Explicit account mappings remain strict and
+never fall back to another ambient identity.
+
+The merged `pool` and Picker views expose `owned_by_account`,
+`max_owned_codespaces` and `owned_inventory_complete`; their merged discovery
+counts are observations, not complete selected-account admission evidence.
+`owned_headroom` is null when completeness is unqualified. Selected-account
+admission uses the stricter inventory read without changing the ordinary
+discovery contract or integrating the private owner-wave foundation.
 
 ### Agent-bridge integration (automatic)
 
