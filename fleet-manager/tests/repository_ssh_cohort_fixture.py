@@ -10,6 +10,9 @@ import shutil
 import sys
 import time
 
+if __name__ == "__main__":
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 from packaging.utils import canonicalize_name
 
 from test_client_distribution import PROJECT, run
@@ -118,17 +121,19 @@ def prepare_cohort(tmp_path, monkeypatch, feeds, progress):
     sources.build_projects(snapshot, record, projects=projects)
     progress(f"normal Source cohort built: {time.monotonic() - started:.2f}s")
     outputs = {}
-    for component, extras in (
-        ("worktree-manager", ()), ("agent-worktrees", ("fleet-ssh",)),
-        ("fleet-manager", ("gateway-host", "ssh-client")),
+    for key, component, extras in (
+        ("worktree-manager", "worktree-manager", ()),
+        ("engine-base", "agent-worktrees", ()),
+        ("agent-worktrees", "agent-worktrees", ("fleet-ssh",)),
+        ("fleet-manager", "fleet-manager", ("gateway-host", "ssh-client")),
     ):
         result = profiles.prepare_registry_lock(
-            snapshot, tmp_path / ("profile-" + component), uv=uv,
+            snapshot, tmp_path / ("profile-" + key), uv=uv,
             deadline=time.monotonic() + 120, prepare_profile=True,
             component=component, extras=extras,
         )
-        outputs[component] = Path(result["snapshot"])
-        progress(f"normal {component} profile prepared: {time.monotonic() - started:.2f}s")
+        outputs[key] = Path(result["snapshot"])
+        progress(f"normal {key} profile prepared: {time.monotonic() - started:.2f}s")
     select_feed("updated/simple")
     result = profiles.prepare_registry_lock(
         snapshot, tmp_path / "profile-updated", uv=uv,
@@ -138,8 +143,37 @@ def prepare_cohort(tmp_path, monkeypatch, feeds, progress):
     outputs["updated"] = Path(result["snapshot"])
     for component, output in outputs.items():
         selected = profiles.source_inputs.select_project(
-            output, "fleet-manager" if component == "updated" else component,
+            output, {"updated": "fleet-manager", "engine-base": "agent-worktrees"}.get(
+                component, component,
+            ),
         )
         assert (output / selected.project["application"] / "application.json").is_file()
     progress(f"normal Source cohort profiles complete: {time.monotonic() - started:.2f}s")
     return outputs
+
+
+def main():
+    import argparse
+    import pytest
+
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
+    parser.add_argument("--output", type=Path, required=True)
+    arguments = parser.parse_args()
+    sys.path.insert(0, str(PROJECT.parent / "tools"))
+    from test_installer_wheel_acquisition import feeds
+
+    servers = feeds.__wrapped__()
+    try:
+        with pytest.MonkeyPatch.context() as environment:
+            outputs = prepare_cohort(
+                arguments.output, environment, next(servers),
+                lambda message: print(message, flush=True),
+            )
+        document = {key: str(value) for key, value in outputs.items()}
+        (arguments.output / "cohort.json").write_text(json.dumps(document), encoding="utf-8")
+    finally:
+        next(servers, None)
+
+
+if __name__ == "__main__":
+    main()

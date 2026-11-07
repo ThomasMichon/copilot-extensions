@@ -55,7 +55,9 @@ def test_normal_source_cohort_preparation(tmp_path_factory, monkeypatch, capfd):
             print(message, flush=True)
 
     cohort = prepared_cohort(tmp_path_factory.mktemp("cohort"), monkeypatch, progress)
-    assert set(cohort) == {"worktree-manager", "agent-worktrees", "fleet-manager", "updated"}
+    assert set(cohort) == {
+        "worktree-manager", "engine-base", "agent-worktrees", "fleet-manager", "updated",
+    }
 
 
 def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
@@ -78,13 +80,18 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
             "bus_address_selected": bool(os.environ.get("DBUS_SESSION_BUS_ADDRESS")),
         }, sort_keys=True))
     tmp_path = tmp_path_factory.mktemp("n")
-    cohort = prepared_cohort(tmp_path / "cohort", monkeypatch, progress)
+    locator = os.environ.get("COPILOT_EXTENSIONS_SSH_SETUP_COHORT")
+    assert locator, "prepare the complete Source cohort before the indivisible native lifecycle"
+    cohort = {key: Path(value) for key, value in json.loads(Path(locator).read_text()).items()}
+    monkeypatch.syspath_prepend(str(PROJECT.parent / "tools"))
     import local_install_profile as profiles
 
     def application_path(component):
         snapshot = cohort[component]
         selected = profiles.source_inputs.select_project(
-            snapshot, "fleet-manager" if component == "updated" else component,
+            snapshot, {"updated": "fleet-manager", "engine-base": "agent-worktrees"}.get(
+                component, component,
+            ),
         )
         return snapshot / selected.project["application"]
 
@@ -118,21 +125,46 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
     )
     if os.name == "nt":
         clean.update(HOMEDRIVE=home.drive, HOMEPATH=str(home)[len(home.drive):])
-    engine_application = application_path("agent-worktrees")
-    engine_source = profiles.source_inputs.select_project(cohort["agent-worktrees"], "agent-worktrees")
-    construction = json.loads((engine_application / "application.json").read_text())["construction"]
-    with monkeypatch.context() as installation:
-        for name in set(os.environ) - clean.keys():
-            installation.delenv(name)
-        for name, value in clean.items():
-            installation.setenv(name, value)
-        profiles.source_inputs.install_application(
-            cohort["agent-worktrees"], "agent-worktrees", engine_source.payload,
-            home / ".agent-worktrees", uv=Path(shutil.which("uv")),
-            base_python=Path(sys.executable), health_module="agent_worktrees",
-            expected_version=construction["runtime_version"],
-            expected_hash=construction["payload_hash"],
+    def install_engine(component):
+        source = profiles.source_inputs.select_project(cohort[component], "agent-worktrees")
+        construction = json.loads(
+            (application_path(component) / "application.json").read_text(),
+        )["construction"]
+        with monkeypatch.context() as installation:
+            for name in set(os.environ) - clean.keys():
+                installation.delenv(name)
+            for name, item in clean.items():
+                installation.setenv(name, item)
+            profiles.source_inputs.install_application(
+                cohort[component], "agent-worktrees", source.payload,
+                home / ".agent-worktrees", uv=Path(shutil.which("uv")),
+                base_python=Path(sys.executable), health_module="agent_worktrees",
+                expected_version=construction["runtime_version"],
+                expected_hash=construction["payload_hash"],
+            )
+        engine_root = home / ".agent-worktrees"
+        slot = engine_root / "versions" / (engine_root / "current-version").read_text().strip()
+        python = slot / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        observed = run([
+            profiles.source_inputs.engine._native_retained_path(python), "-I", "-B", "-c",
+            "import importlib.util,json,sys;from pathlib import Path;import agent_worktrees;"
+            "sdk=importlib.util.find_spec('fleet_manager');"
+            "print(json.dumps({'prefix':sys.prefix,'engine':agent_worktrees.__file__,"
+            "'sdk':sdk.origin if sdk else None,'paths':sys.path}))",
+        ], cwd=home, env=clean, timeout=15)
+        assert observed.returncode == 0, observed.stdout + observed.stderr
+        facts = json.loads(observed.stdout)
+        assert Path(facts["prefix"]).resolve() == (slot / ".venv").resolve()
+        assert Path(facts["engine"]).resolve().is_relative_to(slot.resolve())
+        assert (facts["sdk"] is not None) is (component == "agent-worktrees")
+        if facts["sdk"] is not None:
+            assert Path(facts["sdk"]).resolve().is_relative_to(slot.resolve())
+        assert all(
+            not Path(path).resolve().is_relative_to(PROJECT.parent.resolve())
+            for path in facts["paths"] if path
         )
+
+    install_engine("engine-base")
     manager_snapshot = cohort["worktree-manager"]
     manager_source = profiles.source_inputs.select_project(manager_snapshot, "worktree-manager")
     installed = run(
@@ -150,6 +182,9 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
         [shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(launcher)]
         if os.name == "nt" else [str(launcher)]
     )
+    inert = run([*front_door, "setup", "--apply"], cwd=home, env=clean, timeout=30)
+    assert inert.returncode == 0, inert.stdout + inert.stderr
+    assert not state.exists() and not root.exists()
 
     def git(*arguments):
         result = run(["git", "-C", str(harness), *arguments], env=clean)
@@ -269,6 +304,13 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
             rig.tasks.append(asyncio.create_task(connector.run(stopped)))
             await asyncio.wait_for(connector.connected.wait(), 3)
             assert not state.exists() and not root.exists()
+            missing = await manager()
+            assert missing.returncode != 0, missing.stdout + missing.stderr
+            assert not state.exists() and not root.exists()
+            with sqlite3.connect(enrollment.ledger.path) as connection:
+                assert connection.execute("SELECT count(*) FROM machine_enrollments").fetchone() == (0,)
+                assert connection.execute("SELECT count(*) FROM operations").fetchone() == (0,)
+            await asyncio.to_thread(install_engine, "agent-worktrees")
             first = await manager()
             if first.returncode and (root / "current-version").exists():
                 log = root / host.STATE / "host.log"
@@ -316,6 +358,12 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
             assert changed.returncode == 0, changed.stdout + changed.stderr
             incoming = await control("status")
             assert incoming["ready"] and incoming["selected"] and incoming["pid"] != initial["pid"]
+            assert (retained.read_bytes(), retained.stat().st_mtime_ns) == original
+            assert (await control("stop"))["native_exit_confirmed"]
+            restarted = await manager()
+            assert restarted.returncode == 0, restarted.stdout + restarted.stderr
+            resumed = await control("status")
+            assert resumed["ready"] and resumed["selected"] and resumed["pid"] != incoming["pid"]
             assert (retained.read_bytes(), retained.stat().st_mtime_ns) == original
             with sqlite3.connect(enrollment.ledger.path) as connection:
                 assert connection.execute("SELECT count(*) FROM machine_enrollments").fetchone() == (1,)
