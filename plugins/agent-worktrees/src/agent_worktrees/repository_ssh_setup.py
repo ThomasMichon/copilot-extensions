@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import base64
+import binascii
+import hashlib
 import importlib.util
+import json
 import os
 from pathlib import Path
 import re
@@ -11,10 +15,14 @@ import shutil
 import subprocess
 import sys
 
+from agent_procutil.owned_process import run_caller_owned
+
 from . import repository_setup as protocol
 
 CAPABILITY = "continuity-ssh-setup-v1"
 PIN_CAPABILITY = "continuity-ssh-setup-pin-v1"
+KEY_REFERENCE_CAPABILITY = "continuity-ssh-key-reference-v1"
+KEY_PIN_CAPABILITY = "continuity-ssh-key-pin-v1"
 
 
 def _installer():
@@ -36,17 +44,155 @@ def _installer():
 
 
 def _description(value: dict) -> dict:
+    version = value.get("version")
     protocol._fields(value, {
         "schema", "version", "snapshot", "root", "selection", "request_digest", "host",
-    })
-    if value["schema"] != "fleet-manager.continuity-ssh-setup" or type(value["version"]) is not int or value["version"] != 1:
+    } | ({"key_files"} if version == 2 else set()))
+    if value["schema"] != "fleet-manager.continuity-ssh-setup" or type(version) is not int or version not in (1, 2):
         raise protocol.SetupError("Selected Fleet returned unsupported SSH setup inputs.")
+    if version == 2:
+        references = protocol._fields(value["key_files"], {"identity_file", "public_key_file"})
+        if any(
+            not isinstance(path, str) or not Path(path).is_absolute() or ".." in Path(path).parts
+            for path in references.values()
+        ):
+            raise protocol.SetupError("Selected Fleet returned invalid SSH key references.")
     if (
         not isinstance(value["request_digest"], str)
         or re.fullmatch(r"[0-9a-f]{64}", value["request_digest"]) is None
     ):
         raise protocol.SetupError("Selected Fleet returned an invalid SSH request digest.")
     return value
+
+
+def key_binding(context, description: dict) -> None:
+    selection = context.ssh_key
+    directory = Path(selection.directory).expanduser()
+    if description.get("key_files") != {
+        "identity_file": str(directory / "id_ed25519"),
+        "public_key_file": str(directory / "id_ed25519.pub"),
+    }:
+        raise protocol.SetupError("Selected Vault directory differs from the SSH request's exact key references.")
+
+
+def _vault_call(selection, arguments: list[str], *, timeout: int) -> tuple[int, dict]:
+    environment = protocol._environment(attended=False)
+    environment["AGENT_VAULT_NO_SELFPROVISION"] = "1"
+    # A routing-only guard must not clear the caller's explicit provisioning inhibition.
+    environment.pop("_AGENT_WORKTREES_VAULT_RUNTIME_GUARD", None)
+    try:
+        completed = run_caller_owned(
+            [str(Path(selection.argv[0]).expanduser()), *selection.argv[1:],
+             "--configuration-root", str(Path(selection.configuration_root).expanduser()), *arguments],
+            env=environment, timeout=timeout, max_stdout_bytes=16384, max_stderr_bytes=16384,
+        )
+        value = json.loads(completed.stdout, object_pairs_hook=protocol._object)
+        if not isinstance(value, dict):
+            raise ValueError
+        return completed.returncode, value
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError, UnicodeError):
+        raise protocol.SetupError(
+            "Selected Vault outcome is unconfirmed; preserve the original entry and key location for reconciliation."
+        ) from None
+
+
+def _key_fingerprint(value: object) -> str:
+    try:
+        if not isinstance(value, str) or len(value) > 256:
+            raise ValueError
+        algorithm, encoded = value.split(" ")
+        wire = base64.b64decode(encoded, validate=True)
+        if (
+            algorithm != "ssh-ed25519" or len(wire) != 51
+            or wire[:19] != b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20"
+            or base64.b64encode(wire).decode("ascii") != encoded
+        ):
+            raise ValueError
+    except (ValueError, binascii.Error, UnicodeError):
+        raise protocol.SetupError("Selected Vault returned invalid public SSH key metadata.") from None
+    return "SHA256:" + base64.b64encode(hashlib.sha256(wire).digest()).decode("ascii").rstrip("=")
+
+
+def prepare_key(setup, context, description: dict) -> protocol.Outcome | None:
+    """Reuse the selected owning Vault before any new enrollment or installation."""
+    selection = context.ssh_key
+    key_binding(context, description)
+    root = Path(selection.configuration_root).expanduser()
+    try:
+        protocol._plain(root)
+        if not root.is_dir():
+            raise OSError
+    except OSError:
+        raise protocol.SetupError("Selected Vault configuration root is unavailable.") from None
+    setup.verify()
+    code, contract = _vault_call(selection, ["invocation-contract", "--json"], timeout=30)
+    if (
+        code != 0 or contract.get("schema") != "agent-vault.invocation"
+        or type(contract.get("version")) is not int or contract["version"] != 1
+        or not isinstance(contract.get("capabilities"), list)
+        or not all(isinstance(item, str) for item in contract["capabilities"])
+        or not {"configuration-root-v1", "ssh-key-install-pin-v1"} <= set(contract["capabilities"])
+    ):
+        return protocol.Outcome("refused", "Selected Vault lacks scoped, pinned SSH installation support; update its owner.")
+    public = None
+    for operation in ("prepare", "install"):
+        arguments = ["ssh-key", operation, "--entry", selection.entry, "--require-running", "--json"]
+        if operation == "install":
+            arguments.extend([
+                "--directory", str(Path(selection.directory).expanduser()),
+                "--expected-fingerprint", selection.fingerprint,
+            ])
+        setup.verify()
+        code, result = _vault_call(selection, arguments, timeout=120)
+        if operation == "install":
+            setup.verify()
+        if code != 0:
+            error = result.get("error")
+            hints = {
+                "needs_unlock": ("waiting", "Unlock the selected owning Vault explicitly, then resume the same selection."),
+                "service_unavailable": ("waiting", "Start the selected owning Vault separately, then resume the same selection."),
+                "database_unavailable": ("waiting", "Synchronize the selected existing database; do not create a replacement."),
+                "database_unconfigured": ("refused", "Configure the owning Vault's existing database before resuming."),
+                "entry_missing": ("waiting", "Synchronize the original SSH key entry; setup never initializes another identity."),
+                "malformed_key": ("refused", "Selected SSH key record is malformed; inspect it without replacing the identity."),
+                "ambiguous_entry": ("refused", "Selected SSH entry is ambiguous; reconcile it through the owning Vault."),
+                "invalid_entry": ("refused", "Selected SSH entry is invalid; select its original unambiguous Vault path."),
+                "crypto_unavailable": ("refused", "The selected Vault needs its SSH extra through its normal installation owner."),
+                "key_mismatch": ("refused", "Vault key differs from the selected fingerprint; preserve and reconcile the original identity."),
+                "key_conflict": ("refused", "Selected key files conflict; preserve them and reconcile through their owner."),
+                "unsafe_destination": ("refused", "Selected key location is not owner-private; setup does not repair permissions."),
+                "local_install_failed": ("waiting", "Key installation is unconfirmed; inspect the same entry and location before resuming."),
+            }
+            if not isinstance(error, str):
+                error = ""
+            status_value, message = hints.get(error, (
+                "waiting", "Selected Vault outcome is unconfirmed; reconcile the same entry and key location before resuming.",
+            ))
+            return protocol.Outcome(status_value, message)
+        expected = {"version", "status", "public_key", "fingerprint"}
+        if operation == "install":
+            expected |= {"private_key_path", "public_key_path"}
+        protocol._fields(result, expected)
+        if (
+            type(result["version"]) is not int or result["version"] != 1
+            or result["status"] not in (("reused",) if operation == "prepare" else ("installed", "reused", "recovered"))
+            or result["fingerprint"] != selection.fingerprint
+            or _key_fingerprint(result["public_key"]) != selection.fingerprint
+            or (public is not None and result["public_key"] != public)
+        ):
+            raise protocol.SetupError("Selected Vault did not confirm reuse of the exact pinned public SSH identity.")
+        public = result["public_key"]
+        if operation == "install" and (
+            result["private_key_path"] != description["key_files"]["identity_file"]
+            or result["public_key_path"] != description["key_files"]["public_key_file"]
+        ):
+            raise protocol.SetupError("Selected Vault installation has an unconfirmed key location; preserve its original inputs.")
+    return None
+
+
+def same_description(value: dict, description: dict) -> bool:
+    expected = {name: item for name, item in description.items() if name != "key_files"} | {"version": 1}
+    return _description(value) == expected
 
 
 @contextmanager
@@ -142,8 +288,11 @@ def run(setup, context, arguments: list[str], description: dict, *, apply: bool)
             return protocol.Outcome("ready", "Selected SSH application has converged its authenticated directory.")
         if not apply:
             return protocol.Outcome("needed", "Selected SSH application requires its normal installation.")
-        current = _description(_invoke([*arguments, "--apply"]))
-        if current != description:
+        arguments = [item for item in arguments if item != "--key-references-only"]
+        if context.ssh_key is not None:
+            arguments.extend(["--expected-key-fingerprint", context.ssh_key.fingerprint])
+        current = _invoke([*arguments, "--apply"])
+        if not same_description(current, description):
             raise protocol.SetupError("SSH setup inputs changed before application construction.")
         setup.verify()
         uv = shutil.which("uv")
@@ -156,8 +305,8 @@ def run(setup, context, arguments: list[str], description: dict, *, apply: bool)
             expected_hash=description["selection"]["payload_hash"],
         )
         setup.verify()
-        current = _description(_invoke(arguments))
-        if current != description:
+        current = _invoke(arguments)
+        if not same_description(current, description):
             raise protocol.SetupError("SSH setup inputs changed during application construction.")
         if not isinstance(receipt, dict) or receipt.get("state") != "installed":
             raise protocol.SetupError("Source application installation has no confirmed installed result.")
