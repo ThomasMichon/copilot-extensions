@@ -1,6 +1,7 @@
 """Prepare the actual associated applications through the normal Source builders."""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import importlib.metadata
 import json
@@ -17,6 +18,39 @@ from packaging.utils import canonicalize_name
 
 from test_client_distribution import PROJECT, run
 from test_gateway_host_distribution import _installed_wheel
+
+
+def _prepare_profiles(snapshot, output, profiles, uv, progress, started):
+    deadline = time.monotonic() + 120
+
+    def prepare(selection):
+        key, component, extras = selection
+        result = profiles.prepare_registry_lock(
+            snapshot, output / ("profile-" + key), uv=uv,
+            deadline=deadline, prepare_profile=True,
+            component=component, extras=extras,
+        )
+        return key, Path(result["snapshot"]), time.monotonic() - started
+
+    selections = (
+        ("worktree-manager", "worktree-manager", ()),
+        ("engine-base", "agent-worktrees", ()),
+        ("agent-worktrees", "agent-worktrees", ("fleet-ssh",)),
+        ("fleet-manager", "fleet-manager", ("gateway-host", "ssh-client")),
+    )
+    outputs = {}
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(prepare, selection) for selection in selections]
+        try:
+            for future in as_completed(futures):
+                key, path, elapsed = future.result()
+                outputs[key] = path
+                progress(f"normal {key} profile prepared: {elapsed:.2f}s")
+        except BaseException:
+            for future in futures:
+                future.cancel()
+            raise
+    return outputs
 
 
 def prepare_cohort(tmp_path, monkeypatch, feeds, progress):
@@ -120,20 +154,7 @@ def prepare_cohort(tmp_path, monkeypatch, feeds, progress):
     select_feed("simple")
     sources.build_projects(snapshot, record, projects=projects)
     progress(f"normal Source cohort built: {time.monotonic() - started:.2f}s")
-    outputs = {}
-    for key, component, extras in (
-        ("worktree-manager", "worktree-manager", ()),
-        ("engine-base", "agent-worktrees", ()),
-        ("agent-worktrees", "agent-worktrees", ("fleet-ssh",)),
-        ("fleet-manager", "fleet-manager", ("gateway-host", "ssh-client")),
-    ):
-        result = profiles.prepare_registry_lock(
-            snapshot, tmp_path / ("profile-" + key), uv=uv,
-            deadline=time.monotonic() + 120, prepare_profile=True,
-            component=component, extras=extras,
-        )
-        outputs[key] = Path(result["snapshot"])
-        progress(f"normal {key} profile prepared: {time.monotonic() - started:.2f}s")
+    outputs = _prepare_profiles(snapshot, tmp_path, profiles, uv, progress, started)
     select_feed("updated/simple")
     result = profiles.prepare_registry_lock(
         snapshot, tmp_path / "profile-updated", uv=uv,

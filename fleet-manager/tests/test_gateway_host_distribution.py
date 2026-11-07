@@ -85,6 +85,74 @@ def test_installed_dependency_archive_preserves_native_wheel_identity(tmp_path, 
     assert facts.version == distribution.version
 
 
+def test_cohort_profile_preparation_overlaps_independent_outputs(tmp_path):
+    from threading import Barrier, Lock
+    from types import SimpleNamespace
+
+    from repository_ssh_cohort_fixture import _prepare_profiles
+
+    barrier, lock = Barrier(2), Lock()
+    active = peak = 0
+    observed = []
+
+    def prepare(snapshot, output, **options):
+        nonlocal active, peak
+        assert snapshot == tmp_path / "source"
+        assert options["uv"] == "selected-uv" and options["prepare_profile"] is True
+        assert time.monotonic() < options["deadline"] <= time.monotonic() + 120
+        with lock:
+            active += 1
+            peak = max(peak, active)
+            observed.append((output, options["component"], options["extras"]))
+        try:
+            barrier.wait(timeout=2)
+            output.mkdir()
+            return {"snapshot": str(output)}
+        finally:
+            with lock:
+                active -= 1
+
+    messages = []
+    result = _prepare_profiles(
+        tmp_path / "source", tmp_path, SimpleNamespace(prepare_registry_lock=prepare),
+        "selected-uv", messages.append, time.monotonic(),
+    )
+    assert peak == 2 and active == 0
+    assert set(result) == {"worktree-manager", "engine-base", "agent-worktrees", "fleet-manager"}
+    assert len({output for output, _component, _extras in observed}) == 4
+    assert len(messages) == 4 and all(path.is_dir() for path in result.values())
+
+
+def test_cohort_profile_failure_waits_for_running_sibling(tmp_path):
+    from threading import Event
+    from types import SimpleNamespace
+
+    from repository_ssh_cohort_fixture import _prepare_profiles
+
+    started, released, settled = Event(), Event(), Event()
+
+    def prepare(_snapshot, output, **_options):
+        if output.name == "profile-worktree-manager":
+            assert started.wait(timeout=2)
+            released.set()
+            raise ValueError("selected profile refused")
+        if output.name == "profile-engine-base":
+            started.set()
+            try:
+                assert released.wait(timeout=2)
+                time.sleep(0.05)
+            finally:
+                settled.set()
+        return {"snapshot": str(output)}
+
+    with pytest.raises(ValueError, match="selected profile refused"):
+        _prepare_profiles(
+            tmp_path / "source", tmp_path, SimpleNamespace(prepare_registry_lock=prepare),
+            "selected-uv", lambda _message: None, time.monotonic(),
+        )
+    assert settled.is_set()
+
+
 def _closure(first_party, output, *, extras="gateway-host"):
     environment = default_environment()
     archives = dict(first_party)
