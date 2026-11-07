@@ -1,0 +1,86 @@
+# Agenda Adoption by Default
+
+- **Slug:** `agenda-adoption-by-default`
+- **Repo:** copilot-extensions (`efforts`, `agent-worktrees` plugins)
+- **Branch(es):** per-slice PRs against `dev`
+- **Created:** 2026-11-07
+- **Status:** Active
+
+## Guiding Intent
+
+Effort agendas exist, but in practice no worktree has adopted one: the managed
+initialization ceremony is long, nothing tells a session that an agenda is
+expected, and a session already deep in its work has no route into one. Make
+agendas the ordinary default where an adopter opts in, while keeping the
+active agent in control of its own agenda: a strong nudge and a short path,
+never a rigid lock or an automatic mutation.
+
+## Context
+
+- Agenda skill and managed CLI: `plugins/efforts/skills/driving-effort-agendas/`.
+  Fresh context-qualified lanes need a request-v2 `init` with items, exits,
+  outcomes, baseline context and four resource caps, plus placement through
+  `agent_worktrees worktree-data-allocate` (`scripts/agenda_managed.py`).
+- Display graph and Companion git-graph rendering already landed; a session
+  without a published agenda shows no Agenda tab.
+- Session-scoped guidance pattern: `docs/patterns/session-scoped-dynamic-guidance.md`
+  (sessionStart writes a session-folder file; a static pointer projection
+  directs the agent to read it).
+- Four-tier configuration: `docs/harness-and-knowledge.md`; agent-worktrees
+  portable knowledge preferences: `plugins/agent-worktrees/docs/config-reference.md`.
+- `effort_digest.py` already extracts open Plan / Validation Plan items.
+
+## Request
+
+> Let's look into adding a config switch that can be set in a harness/knowledge
+> repo that enables the agenda system by-default: we'll want to use
+> session-guidance to tell an agent it's using an agenda for the session, and
+> potentially use a sessionStart hook to invoke the initial commands. We should
+> also look into creating a skill to "backfill" an agenda for an agent's
+> session, as well as extend the skillset to support deriving an agenda from
+> the remainder of an effort. We do still want to allow the active agent to
+> control the agenda, so it's not an ultra-rigid lock. But we should really
+> nudge our agents into adopting the system, even for existing, long-running
+> sessions. And I'd love to be able to look over some older, completed
+> sessions to see how their backfilled agendas look.
+
+## Plan
+
+### Phase 1 — Short paths into an agenda (efforts)
+- [ ] Simple outline format: a compact list of items (action + exit) that
+      expands into a valid request-v2 `init` with default outcomes and caps.
+- [ ] Derive an outline from the remainder of an effort (open Plan /
+      Validation Plan items via `effort_digest`).
+- [ ] Backfill an outline from a Copilot session's recorded history
+      (user requests, completed work, open work), marked as reconstructed.
+- [ ] Offline preview: render any outline as the same display graph used by
+      the Companion, without a store or a running service.
+- [ ] Skill guidance for deriving and backfilling agendas.
+
+### Phase 2 — Default-on switch and session guidance (agent-worktrees)
+- [ ] Portable `agendas` preference (four-tier, knowledge-graftable), default off.
+- [ ] Session guidance reports the effective policy and this worktree's
+      agenda lane state, with the next command to run.
+- [ ] Static instruction: an agenda is expected; the agent authors and
+      controls it; adoption is never automatic mutation.
+- [ ] Recurring nudge for sessions without an agenda when the policy is on,
+      including already-running sessions.
+
+### Phase 3 — Samples and rollout notes
+- [ ] Backfill and render several completed sessions for operator review.
+- [ ] Document enabling the switch from a knowledge repository.
+
+## Validation Plan
+
+- [ ] Unit tests: outline expansion is accepted by the managed `init`
+      validator; effort derivation and session backfill are deterministic on
+      fixtures; preview output is a valid graph.
+- [ ] Unit tests: preference composition across tiers; guidance and nudge
+      appear only when enabled.
+- [ ] Sample backfills of real completed sessions reviewed by the operator.
+
+## Journal
+
+### 2026-11-07 — Kickoff
+- Effort created. Inventory showed no registered agenda lanes in active
+  projects; initialization ceremony identified as the main barrier.
