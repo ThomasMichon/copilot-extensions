@@ -782,3 +782,12 @@ adopter pilot feedback gates subsequent widening.
   reported unconfirmed native mux creation. Preserve that exact-source gate;
   the initial complete pass is not a replacement for current qualification.
   Use the bounded hosted Windows lane before treating the repair as reviewable.
+- The generic hosted selection was exercised, but lacked PSMux: its five native
+  prerequisite assertions failed and two dependency controls passed. It is not
+  qualification; no skip or controller expansion was made. After the owned
+  source scans finished, exact public candidate `6ed22481da81a370d6849a685385f9e7284d275f`
+  passed all three affected controls, including both complete concurrent
+  prewarming flows, with unchanged code/assertions/budgets. The independent
+  unchanged controls retain their earlier full-packet evidence; these disjoint
+  runs do not claim a current aggregate budget. Normal review/required CI and
+  full exact-candidate Main qualification/publication remain required.
