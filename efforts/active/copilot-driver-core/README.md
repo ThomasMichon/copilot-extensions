@@ -1690,3 +1690,51 @@ after release, leaving the original item and packet limits unchanged. Both
 native pane controls pass in 2.44 seconds (35.03 seconds including preparation
 and cleanup). This fixture-only adjustment does not change the qualified
 checker sources or require repeating their settled validation.
+
+### 2026-11-07 - Native input checkpoint merged; parent continues
+
+#11275 merged at 08:38:30 UTC as
+`b3b2a49c3b15e9423219308f4c0c01c4647342df`. Copilot review `5811088766`
+approved final head `87a701fe502e8c08bb1b295bafa31d68470d9409`,
+all three review threads were resolved, and required
+[CI 42355721035](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42355721035)
+passed. The first merge attempt briefly reported the passing check as expected;
+live check/commit/application bindings were verified, then one bounded retry
+completed through the normal Maintainer review exception. No CI bypass or
+protection change was used.
+
+Re-read the parent Plan and Validation Plan. Native input fencing,
+original-owner controlled resume, SDK task/schedule read support and the
+checker prerequisite repairs are upstream; the complete caller, auth-wait,
+caller-Job lifetime and receiving/skew items remain open. No broad item is
+closed solely by this partial checkpoint, and the parent stays Active.
+
+Preserved the owned history, collected the five merged commits locally
+without changing their tree, and pulled forward through the native owner.
+Continue with actual Manager-wrapper native execution and the remaining real
+caller matrix, then pending-aware ACP lifetime and receiving acceptance.
+SDK read availability is not complete pending-work evidence. No installed
+runtime or productive session changed.
+
+### 2026-11-07 - Native Manager pane-wrapper consumer
+
+Parameterize the existing SDK/broker control with direct and actual Manager
+PowerShell 7 pane owners, rather than duplicating its fixture. Preserve raw
+argv, the private mux namespace/data/home, normal pane Job and exact session
+incarnation cleanup. The wrapper PID is distinct from the extension-reported
+native CLI PID; do not substitute a wrapper identity into the native handshake.
+An initial fixture attempt made that substitution and was correctly refused.
+
+Both corrected controls pass in 17.78 seconds (42.47 seconds including
+preparation and cleanup). Each keeps one native conversation through the
+literal seed, WebSocket prompt, TCP prompt and original-owner stop, checks
+three provider requests without an extension permission grant, and verifies
+pane, CLI and extension exit. No installed runtime or shared mux is touched.
+
+This is a below-altitude acceptance extension, with no runtime, service,
+installer or capability-contract change. Native real-consumer validation
+was exercised; unit behavior is unchanged, and fresh-install clean-room and
+external-venue tests do not apply to this isolated Windows fixture. The full
+Manager launch-session planner, all caller cleanup Jobs, auth-wait/recovery,
+pending-aware lifetime and receiving/skew gates remain open. No parent Plan
+or Validation item is closed solely by this narrower result.
