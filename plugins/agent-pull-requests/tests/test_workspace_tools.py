@@ -137,11 +137,13 @@ def test_preapproved_compact_body_survives_actual_cli_native_write_and_restart(
 ) -> None:
     from types import SimpleNamespace
 
+    root = Path(__file__).resolve().parents[3]
+    for source in (root / "libs").glob("*/src"):
+        monkeypatch.syspath_prepend(str(source))
     from agent_worktrees import attribution_prepare_cli, tracking
     from agent_pull_requests.review_workspace import _digest, _record
     from agent_pull_requests.watch_replay_store import ReplayStore
 
-    root = Path(__file__).resolve().parents[3]
     monkeypatch.syspath_prepend(str(root / "plugins/ai-attribution/scripts"))
     import attribution_profile
     import comment_preparation
@@ -175,9 +177,10 @@ def test_preapproved_compact_body_survives_actual_cli_native_write_and_restart(
     initial_id = generation["id"]
     action = {"id": "prepared-note", "kind": kind, "body": prepared["body"]}
     if kind != "comment":
+        parent_body = original["body"] if kind == "edit_owned_comment" else "Existing parent note."
         thread = {"id": 50, "status": 1, "comments": [{
             "id": 1, "parentCommentId": 0, "commentType": 1,
-            "content": original["body"], "author": {"id": selected["scope"]["principal_id"]},
+            "content": parent_body, "author": {"id": selected["scope"]["principal_id"]},
         }]}
         backend.threads = [copy.deepcopy(thread)]
         generation["sections"]["discussions"]["data"] = [_record("discussions", thread)]
@@ -206,6 +209,9 @@ def test_preapproved_compact_body_survives_actual_cli_native_write_and_restart(
     assert (edit_write if kind == "edit_owned_comment" else original_write) in prepared["body"]
     if kind == "edit_owned_comment":
         assert original_write not in prepared["body"]
+    if kind == "reply":
+        assert backend.threads[0]["comments"][0]["content"] == parent_body
+        assert logical not in parent_body and original_write not in parent_body
     restarted = ReplayStore(store.root, store.namespace, service_identity=store.service_identity)
     native.operations.store = restarted
     retained = restarted.inspect_review(
