@@ -278,3 +278,8 @@ recovery without cache, and unchanged explicit-ID/v1/v2/default behavior.
 Rollback refuses the optional edit path without downgrading or deleting
 retained selections. Keep normal-host, other-publisher and installed/provider
 adoption separate from this source consumer exit.
+
+Normal-host wiring follows the separate
+[trusted producer-enrollment contract](comment-producer-enrollment.md).
+The injected preparation and write factories above are not evidence that the
+standalone observation-only host has those dependencies.
