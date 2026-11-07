@@ -3,6 +3,7 @@
 import json
 import hashlib
 import os
+import sqlite3
 import subprocess
 from contextlib import contextmanager
 from pathlib import Path
@@ -142,3 +143,47 @@ def test_partial_history_write_preserves_original_receipt_and_retries(checkout, 
     assert not history.exists() and state.journal_path(ledger).read_bytes() == raw
     state.archive_terminal(ledger, digest)
     assert history.read_bytes() == raw and state.journal_path(ledger).read_bytes() == raw
+
+
+@pytest.mark.parametrize("kind", ["workspace", "database"])
+def test_retained_destination_reference_refuses_before_custody(checkout, kind):
+    if kind == "workspace":
+        directory = checkout.copilot / "session-state" / "retained-destination"
+        directory.mkdir(parents=True)
+        path = directory / "workspace.yaml"
+        path.write_text(json.dumps({"cwd": str(checkout.destination)}))
+    else:
+        path = checkout.copilot / "session-store.db"
+        connection = sqlite3.connect(path)
+        try:
+            connection.execute("CREATE TABLE sessions (cwd TEXT)")
+            connection.execute("CREATE TABLE session_files (file_path TEXT)")
+            connection.execute("INSERT INTO sessions VALUES (?)", (str(checkout.destination),))
+            connection.commit()
+        finally:
+            connection.close()
+    before, ledger = path.read_bytes(), checkout.record.yaml_path.read_bytes()
+    with pytest.raises(ValueError, match="retained Copilot"):
+        relocation.plan(checkout.record.worktree_id, str(checkout.destination), checkout.config)
+    assert checkout.record.yaml_path.read_bytes() == ledger and path.read_bytes() == before
+    assert not state.journal_path(checkout.record.yaml_path).exists()
+    assert checkout.source.exists() and not checkout.destination.exists()
+
+
+@pytest.mark.timeout(120)
+def test_new_destination_reference_after_copy_still_allows_prepublication_abort(checkout, monkeypatch):
+    original = relocation.transfer.copy
+    directory = checkout.copilot / "session-state" / "new-destination"
+    def copied(source, stage):
+        original(source, stage)
+        directory.mkdir(parents=True)
+        (directory / "workspace.yaml").write_text(json.dumps({"cwd": str(checkout.destination)}))
+    with monkeypatch.context() as injection:
+        injection.setattr(relocation.transfer, "copy", copied)
+        with pytest.raises(ValueError, match="retained Copilot"):
+            relocation.move(checkout.record.worktree_id, str(checkout.destination), checkout.config)
+    assert state.read(checkout.record.yaml_path)["phase"] == "copied"
+    assert checkout.source.exists() and not checkout.destination.exists()
+    result = relocation.abort(checkout.record.worktree_id, str(checkout.destination), checkout.config)
+    assert result["phase"] == "cancelled" and checkout.source.exists()
+    assert (directory / "workspace.yaml").exists() and not checkout.destination.exists()

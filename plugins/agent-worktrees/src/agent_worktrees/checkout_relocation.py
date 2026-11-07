@@ -275,6 +275,7 @@ def plan(worktree_id: str, destination: str, config) -> dict:
         raise ValueError("relocation destination already exists")
     _stopped(record, source)
     _sessionless(source)
+    _sessionless(target)
     head = _check_data(source, config, record.branch)
     fingerprint = _digest(source)
     transfer.require_file_mutation(ledger)
@@ -375,6 +376,7 @@ def move(worktree_id: str, destination: str, config) -> dict:
             state.write(ledger, report)
         if report["phase"] == "copied":
             if stage.exists() and not target.exists():
+                _sessionless(target)
                 durability.replace(stage, target, existing=False)
             if stage.exists() or not target.is_dir() or _digest(target) != report["fingerprint"]:
                 raise ValueError("destination publication is ambiguous; retain original move custody")
