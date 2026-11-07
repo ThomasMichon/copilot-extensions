@@ -107,7 +107,8 @@ def test_decode_maps_provider_state(extra, state):
     ({"mergeable": "yes"}, "malformed"),
     ({"reviews": [{"id": 1}]}, "malformed"),
     ({"merged": True}, "contradictory"),
-    ({"title": "x" * (cpr.MAX_SNAPSHOT_BYTES + 1)}, "oversized"),
+    ({"checks_state": ["success"]}, "malformed"),
+    ({"checks_state": {"state": "success"}}, "malformed"),
 ])
 def test_decode_refuses_inadmissible_replies(extra, reason):
     with pytest.raises(cpr.PointReadError, match=reason):
@@ -123,6 +124,30 @@ def test_point_read_failure_is_explicit_unavailability(monkeypatch):
     assert read.state == "unavailable" and "rate limited" in read.reason
     monkeypatch.setattr(cpr.ec, "run_json", lambda *a, **kw: snapshot(repo="owner/other"))
     assert cpr.point_read(association(), clock=lambda: 9.0).state == "unavailable"
+
+
+def test_point_read_bounds_actual_stdout_bytes_before_parsing(monkeypatch):
+    import json
+
+    compact = json.dumps(snapshot())
+    padded = compact + " " * (cpr.MAX_SNAPSHOT_BYTES - len(compact) + 1)
+    monkeypatch.setattr(cpr.ec, "_run", lambda *a, **kw: padded)
+    read = cpr.point_read(association(), clock=lambda: 9.0)
+    assert read.state == "unavailable" and "exceeded" in read.reason
+    monkeypatch.setattr(cpr.ec, "_run", lambda *a, **kw: padded[:-1])
+    assert cpr.point_read(association(), clock=lambda: 9.0).state == "open"
+
+
+@pytest.mark.parametrize("bad_id", [[], {}])
+def test_render_reports_unhashable_ids_as_not_admitted(bad_id):
+    root = Tree("selected")
+    cpr.render(root, declared=True, fact=fact(row(pr_id=bad_id)), error=None,
+               selected=None, read=None, busy=False)
+    console = Console(width=200, record=True, file=io.StringIO())
+    console.print(root)
+    text = console.export_text()
+    assert "Point read unavailable: not admitted" in text
+    assert "1 association(s) not admitted" in text
 
 
 def test_read_associations_requires_declared_selected_fact(monkeypatch):

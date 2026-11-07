@@ -10,7 +10,6 @@ a point read is last-observed evidence, never consent or merge authority.
 
 from __future__ import annotations
 
-import json
 import re
 import time
 from dataclasses import dataclass
@@ -161,8 +160,6 @@ def decode_snapshot(obj, association: Association, *, observed_at: float) -> Poi
     """Admit one snapshot reply strictly against the selected association."""
     if not isinstance(obj, dict):
         raise PointReadError("non-object reply")
-    if len(json.dumps(obj, separators=(",", ":"))) > MAX_SNAPSHOT_BYTES:
-        raise PointReadError("oversized reply")
     if obj.get("schema") != SNAPSHOT_SCHEMA or type(obj.get("version")) is not int or obj["version"] != 1:
         raise PointReadError("unsupported snapshot contract/version")
     if obj.get("provider") != association.provider or obj.get("repo") != association.repo:
@@ -181,7 +178,7 @@ def decode_snapshot(obj, association: Association, *, observed_at: float) -> Poi
         pr_state not in ("open", "closed") or type(merged) is not bool
         or not isinstance(head_sha, str) or (head_sha and not _OBJECT_ID.fullmatch(head_sha))
         or not (mergeable is None or type(mergeable) is bool)
-        or checks not in _CHECKS or not (complete is None or type(complete) is bool)
+        or not isinstance(checks, str) or checks not in _CHECKS or not (complete is None or type(complete) is bool)
         or type(draft) is not bool or not isinstance(reviews, list)
         or any(not isinstance(review, dict) or not isinstance(review.get("state"), str)
                for review in reviews)
@@ -200,7 +197,8 @@ def decode_snapshot(obj, association: Association, *, observed_at: float) -> Poi
 def point_read(association: Association, *, runner=None, clock=time.time) -> PointRead:
     """Run one finite read; every failure is explicit unavailability, never empty success."""
     try:
-        obj = ec.run_json(None, snapshot_argv(association), runner=runner)
+        obj = ec.run_json(None, snapshot_argv(association), runner=runner,
+                          max_bytes=MAX_SNAPSHOT_BYTES)
         return decode_snapshot(obj, association, observed_at=clock())
     except (ec.EngineError, PointReadError) as exc:
         return PointRead(association, "unavailable", clock(), reason=str(exc)[:240])
@@ -244,7 +242,8 @@ def render(root: Tree, *, declared: bool, fact, error: str | None,
     for row in rows[:MAX_ASSOCIATIONS]:
         if not isinstance(row, dict):
             continue
-        item = by_id.get(row.get("pr_id"))
+        pr_id = row.get("pr_id")
+        item = by_id.get(pr_id) if isinstance(pr_id, str) else None
         label = (f"PR [{_plain(row.get('provider'))}] {_plain(row.get('repo'))}"
                  f"#{row.get('number') if type(row.get('number')) is int else '?'}; "
                  f"recorded lifecycle: {_plain(row.get('recorded_state'))} "

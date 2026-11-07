@@ -242,6 +242,119 @@ def test_pr_point_read_only_on_selection_and_late_reply_is_rejected(monkeypatch)
     asyncio.run(check())
 
 
+def _pr_app(monkeypatch, *rows):
+    from test_companion_pr_state import fact
+
+    monkeypatch.setattr(companion, "_load_current_worktree", lambda *a, **kw: pr_data())
+    monkeypatch.setattr(companion.co, "read_session_observations",
+                        lambda *a, **kw: {"observation": None, "error": "none"})
+    monkeypatch.setattr(companion.cpr, "read_associations", lambda wt, **kw: fact(*rows))
+
+
+async def _open_graph(app, pilot):
+    await app.workers.wait_for_complete()
+    app.query_one("#views", TabbedContent).active = "topology-tab"
+    await pilot.pause()
+    await app.workers.wait_for_complete()
+
+
+def test_pr_selection_stays_visible_and_deselection_cancels_the_read(monkeypatch):
+    from textual.widgets import Select
+
+    from test_companion_pr_state import row, snapshot
+
+    _pr_app(monkeypatch, row())
+    entered, release = Event(), Event()
+    cancels = []
+
+    def point(association, *, runner=None, **kw):
+        cancels.append(runner)
+        entered.set()
+        assert release.wait(5)
+        return companion.cpr.decode_snapshot(snapshot(), association, observed_at=1.0)
+
+    monkeypatch.setattr(companion.cpr, "point_read", point)
+    monkeypatch.setattr(companion.MuxCompanionApp, "_owned_read_runner",
+                        lambda self, cancelled: cancelled)
+
+    async def check():
+        app = companion.MuxCompanionApp()
+        try:
+            async with app.run_test(size=(100, 40)) as pilot:
+                await _open_graph(app, pilot)
+                select = app.query_one("#pr-association", Select)
+                select.value = "pr-1"
+                assert await asyncio.to_thread(entered.wait, 2)
+                await pilot.pause()
+                assert select.value == "pr-1" and app._pr_busy
+                select.clear()
+                await pilot.pause()
+                assert cancels[0].is_set()
+                assert app._pr_selected is None and app.query_one("#pr-read-btn").disabled
+                release.set()
+                await pilot.pause()
+                await app.workers.wait_for_complete()
+                assert app._pr_read is None and "Point read" not in graph_text(app)
+                entered.clear()
+                select.value = "pr-1"
+                await pilot.pause()
+                await app.workers.wait_for_complete()
+                assert select.value == "pr-1" and "Point read: open" in graph_text(app)
+                assert not app.query_one("#pr-read-btn").disabled
+        finally:
+            release.set()
+
+    asyncio.run(check())
+
+
+def test_switching_pr_waits_for_the_previous_read_to_retire(monkeypatch):
+    from textual.widgets import Select
+
+    from test_companion_pr_state import row, snapshot
+
+    _pr_app(monkeypatch, row(), row("pr-2", number=8))
+    entered, release = Event(), Event()
+    reads, active, peak = [], [0], [0]
+
+    def point(association, **kw):
+        reads.append(association.pr_id)
+        active[0] += 1
+        peak[0] = max(peak[0], active[0])
+        try:
+            if association.pr_id == "pr-1":
+                entered.set()
+                assert release.wait(5)
+            return companion.cpr.decode_snapshot(
+                snapshot(pr=association.number), association, observed_at=1.0)
+        finally:
+            active[0] -= 1
+
+    monkeypatch.setattr(companion.cpr, "point_read", point)
+
+    async def check():
+        app = companion.MuxCompanionApp()
+        try:
+            async with app.run_test(size=(100, 40)) as pilot:
+                await _open_graph(app, pilot)
+                select = app.query_one("#pr-association", Select)
+                select.value = "pr-1"
+                assert await asyncio.to_thread(entered.wait, 2)
+                select.value = "pr-2"
+                for _ in range(20):
+                    await pilot.pause(0.01)
+                assert reads == ["pr-1"] and select.value == "pr-2"
+                release.set()
+                await pilot.pause()
+                await app.workers.wait_for_complete()
+                assert reads == ["pr-1", "pr-2"] and peak[0] == 1
+                assert app._pr_read.association.pr_id == "pr-2"
+                assert "Point read: open" in graph_text(app)
+        finally:
+            release.set()
+
+    asyncio.run(check())
+
+
 def test_undeclared_engine_keeps_claim_only_view(monkeypatch):
     monkeypatch.setattr(companion, "_load_current_worktree", lambda *a, **kw: data())
     monkeypatch.setattr(companion.co, "read_session_observations",

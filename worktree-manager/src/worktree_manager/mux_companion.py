@@ -309,6 +309,9 @@ class MuxCompanionApp(App):
         self._observation_owner: _CompanionData | None = None
         self._attention_cancel = Event()
         self._pr_cancel = Event()
+        self._pr_read_cancel = Event()
+        self._pr_thread: asyncio.Future | None = None
+        self._pr_options: tuple[tuple[str, str], ...] | None = None
         self._pr_generation = 0
         self._pr_owner: _CompanionData | None = None
         self._pr_fact: dict | None = None
@@ -681,6 +684,7 @@ class MuxCompanionApp(App):
     def _reset_pr_state(self, error: str | None = "not-loaded") -> None:
         """Invalidate associations, selection and any in-flight point read."""
         self._pr_cancel.set()
+        self._pr_read_cancel.set()
         self._pr_generation += 1
         self._pr_owner = None
         self._pr_fact = None
@@ -721,14 +725,35 @@ class MuxCompanionApp(App):
     def _update_pr_controls(self) -> None:
         associations, _ = cpr.admitted(self._pr_fact)
         select = self.query_one("#pr-association", Select)
+        options = tuple((item.label, item.pr_id) for item in associations)
+        selected = self._pr_selected
         with self.prevent(Select.Changed):
-            select.set_options((item.label, item.pr_id) for item in associations)
+            if options != self._pr_options:
+                self._pr_options = options
+                select.set_options(options)
+            # set_options() blanks the value; keep the admitted selection visible.
+            value = selected.pr_id if selected is not None and any(
+                pr_id == selected.pr_id for _label, pr_id in options) else None
+            if value is None:
+                if not select.is_blank():
+                    select.clear()
+            elif select.value != value:
+                select.value = value
         select.disabled = not associations
         self.query_one("#pr-read-btn", Button).disabled = (
             self._pr_selected is None or self._pr_busy
         )
 
     def _select_pr(self, pr_id: str | None) -> None:
+        if pr_id is None:
+            if self._pr_selected is not None:
+                # Deselection invalidates and cancels any read for the old choice.
+                self._pr_read_cancel.set()
+                self._pr_generation += 1
+                self._pr_selected, self._pr_read, self._pr_busy = None, None, False
+                self._update_pr_controls()
+                self._update_topology()
+            return
         associations, _ = cpr.admitted(self._pr_fact)
         selected = next((item for item in associations if item.pr_id == pr_id), None)
         if selected is None or (self._pr_selected is not None and selected.key == self._pr_selected.key):
@@ -742,7 +767,7 @@ class MuxCompanionApp(App):
         associations, _ = cpr.admitted(self._pr_fact)
         if selected is None or self._pr_busy or selected.key not in {item.key for item in associations}:
             return
-        self._pr_cancel.set()
+        self._pr_read_cancel.set()
         self._pr_generation += 1
         self._pr_busy = True
         self._update_pr_controls()
@@ -751,20 +776,42 @@ class MuxCompanionApp(App):
 
     @work(exclusive=True, group="pr-point-read")
     async def _read_pr(self, selected: cpr.Association, generation: int) -> None:
-        cancelled = Event()
-        self._pr_cancel = cancelled
-        try:
-            result = await asyncio.to_thread(
+        # Cancelling a worker does not stop its thread: retire the previous
+        # read's thread and owned process before starting another (one in flight).
+        await self._retire_pr_read()
+        if generation != self._pr_generation:
+            return
+        if self._engine_cleanup_failures:
+            result = cpr.PointRead(
+                selected, "unavailable", time.time(),
+                reason="engine resource retirement unresolved; no read started")
+        else:
+            cancelled = Event()
+            self._pr_read_cancel = cancelled
+            thread = asyncio.ensure_future(asyncio.to_thread(
                 cpr.point_read, selected, runner=self._owned_read_runner(cancelled),
-            )
-        finally:
-            cancelled.set()
+            ))
+            self._pr_thread = thread
+            try:
+                await asyncio.wait({thread})
+            finally:
+                cancelled.set()
+            try:
+                result = thread.result()
+            except Exception as exc:  # noqa: BLE001 - surfaced as unavailability
+                result = cpr.PointRead(selected, "unavailable", time.time(), reason=str(exc)[:240])
         if generation != self._pr_generation or self._pr_selected is None \
                 or self._pr_selected.key != selected.key:
             return
         self._pr_read, self._pr_busy = result, False
         self._update_pr_controls()
         self._update_topology()
+
+    async def _retire_pr_read(self) -> None:
+        self._pr_read_cancel.set()
+        thread = self._pr_thread
+        if thread is not None and not thread.done():
+            await asyncio.wait({thread})
 
     @work(exclusive=True, group="session-observations")
     async def _load_observations(self) -> None:
