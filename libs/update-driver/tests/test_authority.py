@@ -671,8 +671,125 @@ def test_v5_upgrade_never_discards_unqualified_native_work(area, reason):
         change_authority("project", project="example", root=root, timeout=1,
                          verify_capabilities=lambda _deadline: reason != "capability")
     assert status(late[0], root=root).state == "pending"
+    if reason == "execution-evidence":
+        with pytest.raises(InterruptedError):
+            drain(root=root, executor=lambda _transaction: pytest.fail("uncertain request ran"))
+        assert status(late[0], root=root).state == "pending"
+        with pytest.raises(InterruptedError):
+            change_authority("project", project="example", root=root, timeout=1,
+                             verify_capabilities=lambda _deadline: True)
     with sqlite3.connect(root / "queue.sqlite3") as db:
         assert db.execute("PRAGMA user_version").fetchone()[0] == 5
+
+
+@pytest.mark.parametrize("backend", [
+    "plugin-native-install", "manager-bootstrap", "owning-plugin-provision",
+])
+def test_v5_standalone_executes_previously_accepted_unstamped_native_work(area, backend):
+    root = area / "state"
+    change_authority("standalone", root=root, timeout=1, verify_capabilities=lambda _deadline: True)
+    with sqlite3.connect(root / "queue.sqlite3") as db:
+        db.execute("PRAGMA user_version=5")
+    accepted = _prevalidated_legacy_submission(area, "e" * 32, backend)
+    _commit_legacy_submission(root, accepted)
+    ran = []
+    assert drain(root=root, executor=lambda transaction: ran.append(transaction.request.id) or 0) == 0
+    assert ran == [accepted[0]] and status(accepted[0], root=root).exit_code == 0
+    assert change_authority("project", project="example", root=root, timeout=1,
+                            verify_capabilities=lambda _deadline: True).mode == "project"
+
+
+@pytest.mark.parametrize("field,value", [
+    ("started_at", 1), ("finished_at", 1), ("boot_id", "uncertain"),
+])
+def test_pending_execution_evidence_fences_worker_and_authority_change(area, field, value):
+    from update_driver import recover_for_repair
+
+    root = area / "state"
+    change_authority("project", project="example", root=root, timeout=1,
+                     verify_capabilities=lambda _deadline: True)
+    request = _submit(area, backend="other-product")
+    with sqlite3.connect(root / "queue.sqlite3") as db:
+        db.execute(f"UPDATE requests SET {field}=? WHERE id=?", (value, request.id))
+    with pytest.raises(InterruptedError):
+        drain(root=root, executor=lambda _transaction: pytest.fail("uncertain request ran"))
+    with pytest.raises(InterruptedError):
+        change_authority("standalone", root=root, timeout=1,
+                         verify_capabilities=lambda _deadline: True)
+    preserved = status(request.id, root=root)
+    assert preserved.state == "pending" and getattr(preserved, field) == value
+    assert preserved.unresolved
+    released, = recover_for_repair(authorized=True, root=root)
+    assert released.id == request.id and released.state == "interrupted"
+    assert getattr(released, field) == value and released.exit_code is None
+    assert released.recovery_authority == "operator_repair" and not released.unresolved
+    assert change_authority("standalone", root=root, timeout=1,
+                            verify_capabilities=lambda _deadline: True).mode == "standalone"
+
+
+def test_v5_project_read_requires_matching_live_custody_and_scope(area, monkeypatch):
+    from update_driver import borrowed_custody
+    from update_driver.participant import ENVIRONMENT_KEY
+
+    root = area / "state"
+    first = _receipt(area, "first--0123456789abcdef", "agent-worktrees")
+    second = _receipt(area, "second--0123456789abcdef", "agent-worktrees")
+    for receipt in (first, second):
+        change_authority("project", project="example", context=str(receipt), root=root, timeout=1,
+                         verify_capabilities=lambda _deadline: True)
+    request = _submit(area, authority="project", project="example",
+                      context=(("COPILOT_EXTENSIONS_CONTEXT", str(first)),))
+    with sqlite3.connect(root / "queue.sqlite3") as db:
+        db.execute("PRAGMA user_version=5")
+    with pytest.raises(StateError, match="protocol upgrade"):
+        current_authority(root=root, context=str(first))
+    witnesses = []
+
+    def execute(transaction):
+        environment = transaction.participant_env()
+        witnesses.append(environment[ENVIRONMENT_KEY])
+        with borrowed_custody(root=root, environ=environment) as custody:
+            custody.assert_owned()
+            assert current_authority(root=root, context=str(first)).project == "example"
+            with pytest.raises(StateError, match="protocol upgrade"):
+                current_authority(root=root, context=str(second))
+            with pytest.raises(StateError, match="protocol upgrade"):
+                _submit(area, authority="project", project="example",
+                        context=(("COPILOT_EXTENSIONS_CONTEXT", str(first)),))
+        forged = json.loads(witnesses[0])
+        forged["key"] = "00" * 32
+        with monkeypatch.context() as change:
+            change.setenv(ENVIRONMENT_KEY, json.dumps(forged))
+            with pytest.raises(StateError, match="custody"):
+                current_authority(root=root, context=str(first))
+        return 0
+
+    assert drain(root=root, executor=execute) == 0
+    assert status(request.id, root=root).exit_code == 0
+    with monkeypatch.context() as change:
+        change.setenv(ENVIRONMENT_KEY, witnesses[0])
+        with pytest.raises(StateError, match="custody"):
+            current_authority(root=root, context=str(first))
+
+
+def test_v5_project_read_rejects_unrelated_running_custody(area):
+    from update_driver import borrowed_custody
+
+    root = area / "state"
+    change_authority("project", project="example", root=root, timeout=1,
+                     verify_capabilities=lambda _deadline: True)
+    request = _submit(area, backend="other-product", authority="project", project="example")
+    with sqlite3.connect(root / "queue.sqlite3") as db:
+        db.execute("PRAGMA user_version=5")
+
+    def execute(transaction):
+        with borrowed_custody(root=root, environ=transaction.participant_env()):
+            with pytest.raises(StateError, match="protocol upgrade"):
+                current_authority(root=root)
+        return 0
+
+    assert drain(root=root, executor=execute) == 0
+    assert status(request.id, root=root).exit_code == 0
 
 
 def test_v5_project_upgrade_preserves_accepted_project_request(area):

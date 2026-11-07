@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -223,7 +224,10 @@ def test_partial_parent_request_cannot_claim_controller_delegation(project, pare
     ) == 1
 
 
-def test_project_authority_reaches_controller_under_real_driver_custody(project, monkeypatch, tmp_path):
+@pytest.mark.parametrize("legacy_schema", [False, True])
+def test_project_authority_reaches_controller_under_real_driver_custody(
+    project, monkeypatch, tmp_path, legacy_schema,
+):
     import update_driver
     from agent_worktrees import update_driver_cli
 
@@ -257,6 +261,11 @@ def test_project_authority_reaches_controller_under_real_driver_custody(project,
         runner=update_driver.TrustedRunner((sys.executable, "-c", "pass"), str(tmp_path)),
         root=driver_root,
     )
+    if legacy_schema:
+        with sqlite3.connect(driver_root / "queue.sqlite3") as db:
+            db.execute("PRAGMA user_version=5")
+        with pytest.raises(update_driver.StateError, match="protocol upgrade"):
+            update_driver.current_authority(root=driver_root)
     monkeypatch.setattr(config, "install_dir", lambda: engine)
     borrow = update_driver.borrowed_custody
 

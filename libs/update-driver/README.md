@@ -192,8 +192,13 @@ execution, and records the selection atomically in queue schema 6. This schema
 is introduced only on an explicit switch and makes older queue clients refuse
 rather than ignore the selection. Existing schema-5 standalone selections stay
 readable; a schema-5 project selection requires a capability-verified upgrade,
-even when the selected project is unchanged. Upgrading affects the shared queue,
-so the callback must qualify all clients that will continue to use it.
+even when the selected project is unchanged. An already-admitted project
+request may read that legacy selection only under its matching live borrowed
+custody; new submissions remain blocked. Previously accepted unstamped native
+requests may finish under an unchanged schema-5 standalone selection, while
+schema 6 continues to reject unstamped late writers. Upgrading affects the
+shared queue, so the callback must qualify all clients that will continue to
+use it.
 
 Capable adapters tag requests with the chosen authority; a legacy submission
 that raced the switch cannot execute under it. The capable queue also fences
@@ -222,10 +227,13 @@ An interrupted first switch leaves a guard that makes capable clients refuse
 until the switch is retried under the same checks. If an already-prevalidated
 legacy writer committed a never-started suite request after that guard, a
 capability-verified retry terminally refuses that request instead of letting it
-strand the queue. Unrelated pending work remains pending and must settle before
-the initial schema upgrade. A missing guard or database, malformed selection,
-or uncertain execution refuses rather than restoring legacy mode. Neither
-inspection nor switching starts an update or a service.
+strand the queue. A pending row with any execution evidence remains an
+unresolved fence, is never replayed or terminally refused, and uses the
+existing restart-confirmed or explicitly authorized repair recovery. Unrelated
+pending work remains pending and must settle before the initial schema upgrade.
+A missing guard or database, malformed selection, or uncertain execution refuses
+rather than restoring legacy mode. Neither inspection nor switching starts an
+update or a service.
 
 ### Automatic-update KillSwitch and explicit/manual admission
 

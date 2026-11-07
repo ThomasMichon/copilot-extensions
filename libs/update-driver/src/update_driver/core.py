@@ -100,7 +100,12 @@ class Request:
     @property
     def unresolved(self) -> bool:
         return (
-            self.state in {"running", "interrupted", "blocked"}
+            (
+                self.state in {"running", "interrupted", "blocked"}
+                or (self.state == "pending" and any(
+                    value is not None for value in (self.started_at, self.finished_at, self.boot_id)
+                ))
+            )
             and self.settled_at is None and self.released_at is None
         )
 
@@ -520,10 +525,12 @@ def _outcome(
 
 def _has_fence(db: sqlite3.Connection, root: Path) -> bool:
     requests = tuple(_request(row, root) for row in db.execute(
-        "SELECT * FROM requests WHERE state IN ('running','interrupted','blocked')",
+        """SELECT * FROM requests WHERE state IN ('running','interrupted','blocked')
+        OR (state='pending' AND
+            (started_at IS NOT NULL OR finished_at IS NOT NULL OR boot_id IS NOT NULL))""",
     ))
     return any(
-        request.state in {"interrupted", "blocked"} and request.unresolved
+        request.state in {"pending", "interrupted", "blocked"} and request.unresolved
         for request in requests
     )
 

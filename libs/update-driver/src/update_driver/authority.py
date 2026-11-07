@@ -250,6 +250,12 @@ def current(*, root: Path | None = None, context: str = "", cwd: str = "") -> Up
                 _scope(context, root=root, cwd=cwd)
                 if version in (LEGACY_SCHEMA_VERSION, SCHEMA_VERSION) else ""
             )
+            if version == LEGACY_SCHEMA_VERSION:
+                selected = _from_db(root, selected_scope, db, allow_incomplete=True)
+                if selected.mode == "project" and _legacy_project_reader(
+                    root, selected_scope, selected, db,
+                ):
+                    return selected
             return _from_db(root, selected_scope, db)
     except (OSError, AuthorityError) as error:
         raise core.StateError("update authority state is unavailable or invalid") from error
@@ -343,12 +349,16 @@ def _selected_for_request(
     return _choose_selection(selections)
 
 
-def _refusal_for_selection(spec: RequestSpec, selected: UpdateAuthority | None) -> str | None:
+def _refusal_for_selection(
+    spec: RequestSpec, selected: UpdateAuthority | None, *, legacy_native: bool = False,
+) -> str | None:
     if selected is None:
         return "suite update authority context is unavailable or invalid"
     if selected.configured and spec.backend in _DIRECT_WRITER_BACKENDS:
         if selected.mode == "project":
             return "direct installation is disabled by project update authority"
+        if legacy_native and not spec.authority:
+            return None
     if not selected.configured and spec.authority in ("", "standalone"):
         return None
     if selected.mode == spec.authority and (
@@ -363,7 +373,47 @@ def refusal(root: Path, spec: RequestSpec, *, db: sqlite3.Connection | None = No
         return None
     return _refusal_for_selection(
         spec, _selected_for_request(root, spec, db, allow_legacy_project=db is not None),
+        legacy_native=(
+            db is not None
+            and db.execute("PRAGMA user_version").fetchone()[0] == LEGACY_SCHEMA_VERSION
+        ),
     )
+
+
+def _legacy_project_reader(root: Path, selected_scope: str, selected: UpdateAuthority, db) -> bool:
+    from . import core
+    from .participant import (
+        ENVIRONMENT_KEY, ParticipantError, borrowed_custody, participant, participant_environment,
+    )
+
+    try:
+        inherited = participant_environment()
+        custody = (
+            participant(root=root, witness=inherited[ENVIRONMENT_KEY])
+            if inherited else borrowed_custody(root=root)
+        )
+        if custody is None:
+            return False
+        try:
+            custody.assert_owned()
+            row = db.execute("SELECT * FROM requests WHERE id=?", (custody.request_id,)).fetchone()
+            if row is None:
+                return False
+            request = core._request(row, root)
+            if (
+                request.state != "running" or request.started_at is None
+                or not suite_request(request.spec)
+                or request.spec.authority != "project" or request.spec.project != selected.project
+                or selected_scope not in _request_scopes(request.spec, root)
+                or _refusal_for_selection(request.spec, selected) is not None
+            ):
+                return False
+            custody.assert_owned()
+            return True
+        finally:
+            custody.close()
+    except ParticipantError as error:
+        raise core.StateError("update authority custody is unavailable or invalid") from error
 
 
 @contextmanager
@@ -445,7 +495,10 @@ def change(
                         db.commit()
                         return previous
                     if core._has_fence(db, root):
-                        raise core.InterruptedError("update authority cannot change while execution is unsettled")
+                        raise core.InterruptedError(
+                            "update authority cannot change while execution is unsettled or "
+                            "pending execution evidence is unconfirmed",
+                        )
                     requests = [
                         core._request(row, root) for row in db.execute(
                             "SELECT * FROM requests WHERE state IN ('pending','running')",
