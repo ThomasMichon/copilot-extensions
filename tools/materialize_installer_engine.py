@@ -38,6 +38,127 @@ def _find_symlinked_ancestor(path: Path, root: Path) -> Path | None:
         current = current.parent
 
 
+def derived_file_pairs(canonical_root: Path, dest: Path) -> list[tuple[Path, Path]]:
+    """Declared non-kit assets only; an absent consumer is never created."""
+    canonical = canonical_root / "libs" / "installer-engine"
+    consumers: dict[Path, set[str]] = {}
+    support = ier.support_files(canonical)
+    for plugin in ier.ADOPTERS:
+        consumers.setdefault(canonical_root / "plugins" / plugin, set()).update(support)
+    for consumer in ier.python_adopter_dirs(canonical_root):
+        consumers.setdefault(consumer, set()).update((*ier.PYTHON_FILES, *ier.SUPPORT_FILES))
+    for consumer in ier.native_adopter_dirs(canonical_root):
+        consumers.setdefault(consumer, set()).update(ier.STANDALONE_NATIVE_FILES)
+    return [
+        (canonical / name, dest / consumer.relative_to(canonical_root) / "scripts" / name)
+        for consumer, names in sorted(consumers.items())
+        if consumer.is_dir() and (dest / consumer.relative_to(canonical_root)).is_dir()
+        for name in sorted(names)
+    ]
+
+
+def derived_path_problem(path: Path, root: Path, *, required: bool) -> str | None:
+    """A derived slot is ordinary and contained, never a link or shared inode."""
+    if not path.absolute().is_relative_to(root.absolute()) or ".." in path.parts:
+        return f"{path}: derived asset escapes its owner"
+    for current in (path, *path.parents):
+        try:
+            info = current.lstat()
+        except FileNotFoundError:
+            if current == path and required:
+                return f"{path}: required canonical asset is missing"
+        else:
+            if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+                return f"{current}: linked derived asset refused"
+            if current == path:
+                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                    return f"{path}: derived asset must be an ordinary single-link file"
+            elif not stat.S_ISDIR(info.st_mode):
+                return f"{current}: derived parent is not an ordinary directory"
+        if current == root:
+            break
+    return None
+
+
+def _derived_identity(info: os.stat_result) -> tuple[int, ...]:
+    return (
+        info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns,
+        info.st_ctime_ns, info.st_mode, info.st_nlink,
+    )
+
+
+def _read_canonical_snapshot(path: Path, root: Path) -> tuple[bytes, tuple[int, ...], int]:
+    """Read an already-admitted source, retaining identity across its byte read."""
+    before = path.lstat()
+    content = path.read_bytes()
+    after = path.lstat()
+    if _derived_identity(before) != _derived_identity(after):
+        raise ValueError(f"{path}: canonical identity changed while reading")
+    if problem := derived_path_problem(path, root, required=True):
+        raise ValueError(problem)
+    return content, _derived_identity(after), stat.S_IMODE(after.st_mode)
+
+
+def materialize_derived_files(dest: Path, *, canonical_root: Path) -> list[str]:
+    """Refresh approved derived slots in the candidate, never the source tree."""
+    plan = []
+    canonical: dict[Path, tuple[bytes, tuple[int, ...], int]] = {}
+    try:
+        for source, target in derived_file_pairs(canonical_root, dest):
+            previous = canonical_root / target.relative_to(dest)
+            if source not in canonical:
+                if problem := derived_path_problem(source, canonical_root, required=True):
+                    return [f"SKIP {problem}"]
+            for path, root, required in (
+                (previous, canonical_root, False), (target, dest, False),
+            ):
+                if problem := derived_path_problem(path, root, required=required):
+                    return [f"SKIP {problem}"]
+            if source not in canonical:
+                canonical[source] = _read_canonical_snapshot(source, canonical_root)
+            content, _identity, mode = canonical[source]
+            before = target.read_bytes() if target.exists() else None
+            expected = previous.read_bytes() if previous.exists() else None
+            if before is not None and before not in (content, expected):
+                return [f"SKIP {target}: foreign content differs from its declared source preimage"]
+            plan.append((source, target, content, before, mode))
+        # All slots are admitted before the first candidate write.
+        for source, snapshot in canonical.items():
+            if problem := derived_path_problem(source, canonical_root, required=True):
+                return [f"SKIP {problem}"]
+            if _read_canonical_snapshot(source, canonical_root) != snapshot:
+                return [f"SKIP {source}: canonical source changed before composition writes"]
+        for source, target, content, before, mode in plan:
+            if problem := derived_path_problem(target, dest, required=False):
+                return [f"SKIP {problem}"]
+            if (target.read_bytes() if target.exists() else None) != before:
+                return [f"SKIP {target}: derived source or candidate changed during composition"]
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content)
+            if os.name != "nt":
+                target.chmod(mode)
+        for source, target, content, _before, _mode in plan:
+            if problem := derived_path_problem(target, dest, required=True):
+                return [f"SKIP {problem}"]
+            identity = target.lstat()
+            observed = target.read_bytes()
+            after = target.lstat()
+            if observed != content:
+                return [f"SKIP {target}: postwrite bytes differ from admitted canonical content"]
+            if _derived_identity(identity) != _derived_identity(after):
+                return [f"SKIP {target}: derived identity changed during postwrite verification"]
+            if problem := derived_path_problem(target, dest, required=True):
+                return [f"SKIP {problem}"]
+        for source, snapshot in canonical.items():
+            if problem := derived_path_problem(source, canonical_root, required=True):
+                return [f"SKIP {problem}"]
+            if _read_canonical_snapshot(source, canonical_root) != snapshot:
+                return [f"SKIP {source}: canonical source changed during composition"]
+    except (OSError, ValueError) as error:
+        return [f"SKIP installer derived assets: {error}"]
+    return [f"OK   {target} <- {source.relative_to(canonical_root)}" for source, target, *_ in plan]
+
+
 def materialize_ref_into(
     *, source_consumer_dir: Path, dest_consumer_dir: Path, canonical_root: Path,
     dest_root: Path | None = None,
@@ -237,12 +358,14 @@ def materialize_human_output_declarations(
 def materialize_refs(
     dest: Path, *, canonical_root: Path, human_sources: frozenset[Path] | None = None,
 ) -> list[str]:
-    log: list[str] = []
+    if human_sources is None:
+        human_sources = validate_human_output_sources(canonical_root)
+    log = materialize_derived_files(dest, canonical_root=canonical_root)
+    if any(line.startswith("SKIP") for line in log):
+        return log
     dest_plugins = dest / "plugins"
     if not dest_plugins.is_dir():
         return log
-    if human_sources is None:
-        human_sources = validate_human_output_sources(canonical_root)
     for plugin in ier.ADOPTERS:
         dest_consumer_dir = dest_plugins / plugin
         if not dest_consumer_dir.is_dir():
