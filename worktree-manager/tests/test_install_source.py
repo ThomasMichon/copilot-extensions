@@ -75,6 +75,23 @@ def test_local_source_refuses_changed_or_escaping_inputs(snapshot, mutation):
         inputs.select(snapshot)
 
 
+@pytest.mark.parametrize("mutation", ["seed", "tree", "foreign-kind"])
+def test_local_source_refuses_inconsistent_composed_git_association(snapshot, mutation):
+    selected = inputs.select(snapshot)
+    record = selected.record
+    record["main_head"] = "c" * 40
+    record["composition"] = {"main_seed": "c" * 40, "tree": "d" * 40}
+    if mutation == "seed":
+        record["composition"]["main_seed"] = "e" * 40
+    elif mutation == "tree":
+        record["composition"]["tree"] = "main"
+    else:
+        record["kind"] = "main"
+    (snapshot / inputs.MANIFEST).write_text(json.dumps(record), encoding="utf-8")
+    with pytest.raises(ValueError, match="composition"):
+        inputs.select(snapshot)
+
+
 @pytest.mark.parametrize("application", [False, True])
 def test_local_source_keeps_wheels_held_until_native_installer_returns(snapshot, monkeypatch, application):
     installer = self_install._runtime_installer()
@@ -323,7 +340,8 @@ def test_prepared_source_activation_uses_existing_transactional_daemon_boundary(
 @pytest.mark.parametrize("metadata_name", [
     "copilot-extensions-worktree-manager", "Copilot_Extensions_Worktree_Manager",
 ])
-def test_local_source_retains_real_inspected_wheels(snapshot, metadata_name):
+@pytest.mark.parametrize("association_change", [None, "legacy", "seed", "tree", "removed"])
+def test_local_source_retains_real_inspected_wheels(snapshot, metadata_name, association_change):
     selected = inputs.select(snapshot)
     filename = "copilot_extensions_worktree_manager-1.0.0-py3-none-any.whl"
     wheel_dir = snapshot / "wheels"
@@ -360,11 +378,32 @@ def test_local_source_retains_real_inspected_wheels(snapshot, metadata_name):
     }
     (snapshot / "profile.json").write_text(json.dumps(profile), encoding="utf-8")
     selected.record["projects"]["worktree-manager"].update(profile="profile.json", wheel_inputs="wheels")
+    if association_change != "legacy":
+        selected.record.update(
+            main_head="c" * 40, composition={"main_seed": "c" * 40, "tree": "d" * 40},
+        )
     (snapshot / inputs.MANIFEST).write_text(json.dumps(selected.record), encoding="utf-8")
-    with inputs.manager_inputs(snapshot) as (retained, wheels):
-        assert retained.identity == selected.identity
-        wheels.verify()
-        assert wheels.distributions[0][:2] == ("copilot-extensions-worktree-manager", "1.0.0")
+    def retain():
+        with inputs.manager_inputs(snapshot) as (retained, wheels):
+            assert retained.identity == selected.identity
+            wheels.verify()
+            assert wheels.distributions[0][:2] == ("copilot-extensions-worktree-manager", "1.0.0")
+            if association_change == "seed":
+                selected.record["main_head"] = "e" * 40
+                selected.record["composition"]["main_seed"] = "e" * 40
+            elif association_change == "tree":
+                selected.record["composition"]["tree"] = "e" * 40
+            elif association_change == "removed":
+                del selected.record["composition"]
+            if association_change in {"seed", "tree", "removed"}:
+                (snapshot / inputs.MANIFEST).write_text(
+                    json.dumps(selected.record), encoding="utf-8",
+                )
+    if association_change in {"seed", "tree", "removed"}:
+        with pytest.raises(ValueError, match="composition changed"):
+            retain()
+    else:
+        retain()
 
 
 @pytest.mark.parametrize("component,name,key", [

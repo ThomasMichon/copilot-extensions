@@ -49,6 +49,24 @@ Its JSON result has exactly these fields:
 This read-only mode is necessary because only the native owner knows profile
 policy; it is not a new daemon, universal handshake or admission authority.
 
+For complete-application preparation, the same installed owner also accepts
+`--application-profile --root <root>`, without an incoming payload. It reports
+`copilot-extensions.runtime-application-profile` version one with `plugin`,
+`runtime_root`, `profile` and `extras`. It uses `selected_profile` unchanged;
+base yields no extras and provider-exec yields `["provider-exec"]`. It does not
+calculate a legacy target version or provision anything.
+
+The engine's existing inventory includes these read-only facts in
+`runtime_sources.application_profiles`, keyed by component. Each value contains
+either `selection` or an explicit `error`. The query runs only for installed
+profile owners and never executes incoming code. Invalid roots, components,
+versions, extras or oversized responses are refused. Unavailable new profile
+support does not change ordinary marketplace update eligibility. Manager's
+complete-application consumer requires the exact installed-owner profile and
+extras before preparing a V2 snapshot; missing support refuses that source-input
+boundary rather than guessing base. This profile-query declaration remains
+version one independently of the prepared-source suite packet's version.
+
 ## Frozen execution and currentness
 
 The updater retains the result separately from the original source pin. Its
@@ -65,26 +83,33 @@ both native frontends before staging/state writes. Direct native calls without
 the collected-transaction pin retain their prior source/profile arguments and
 defaults; deferred `stamp` remains source-only.
 
-Currentness requires the original full source receipt, actual selected profiled
-version, matching outer profile and venv, matching slot profile/source receipt,
-and the canonical completion probe with that slot's recorded payload hash.
-Package equality or an unprofiled source slot alone is not currentness.
+These frozen target descriptors belong to the legacy source/profile installer
+boundary, not to the V2 prepared-source suite packet. V2 carries a complete
+application snapshot and the installed-owner profile selection for each runtime;
+the engine re-reads that owner before planning and execution. V2 currentness
+requires the selected application's source/construction declaration,
+hash-qualified completion, slot-local interpreter, success receipt and
+last-known-good selector. A legacy source receipt or deploy manifest cannot
+certify or veto V2 currentness. Package equality or an unprofiled source slot
+alone is not currentness.
 
 ## Upgrade and rollback
 
-The executing engine advertises generation-1 target support as additive
-`runtime_sources.target_contract` metadata in its existing inventory. Manager
-checks that **actual engine**, not the prepared engine package, when a prepared
-payload declares this requirement, before self-update or suite execution.
-The queued generation-1 source packet remains unchanged: each record has only
-`payload` and `identity`.
+The target-provider declaration and target result above remain generation one;
+their version does not identify the prepared-source packet generation. The
+executing engine advertises `copilot-extensions.prepared-runtime-sources` version
+two in `runtime_sources`. Manager checks that **actual engine**, not the prepared
+engine package, before self-update or suite execution. Queued V2 packets retain
+the acquired `source` (`commit`, `tree`, `main_seed`) and runtime records with
+complete `snapshot` directories and `profile` selections.
 
 An old engine, old/missing owner planner, malformed declaration or unsupported
 rollback gets explicit upgrade/setup readiness rather than an effectful syntax
 trial, package-only fallback, base-profile substitution or source replacement.
-Unprofiled portfolios without target declarations retain the existing V1
-baseline. That baseline explicitly excludes Containers: it already owns
-profile-qualified slots, so missing declarations on both old sides are not
-evidence of unprofiled behavior. Its supported rollback outcome is tooling
-readiness, not guessing a target. No old CLI syntax is retired; no service or
-optional role is enabled.
+Raw prepared-source packet V1 (`payload`/`identity` records) is retired and
+refused, not adapted to V2 or used as an unprofiled fallback. Missing declarations
+are not evidence of base-profile behavior. An installed provider without V2
+support requires the documented standalone force-fresh migration rather than a
+guessed target or marketplace substitution. Ordinary updates without a
+prepared-source packet retain marketplace delivery. No service or optional role
+is enabled by these contracts.

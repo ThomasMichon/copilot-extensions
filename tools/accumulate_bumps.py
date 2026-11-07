@@ -513,7 +513,10 @@ def _project_version_at(ref: str, rel_pyproject: str) -> str | None:
     `_version_at`'s generic "first `version = ` line" regex, which could
     read an earlier unrelated table's own `version` key instead of a
     standalone consumer's real release version (PR #4514 review)."""
-    text = _git("show", f"{ref}:{rel_pyproject}")
+    return _project_version_from_text(_git("show", f"{ref}:{rel_pyproject}"))
+
+
+def _project_version_from_text(text: str) -> str | None:
     if not text:
         return None
     try:
@@ -622,8 +625,8 @@ def compute_from_diff(base: str) -> tuple[dict[str, tuple[str, str]], dict[Path,
     return plugins, lib_bumps_from_diff(base, changed)
 
 
-def _consume_changefiles() -> None:
-    for path, _data in read_changefiles():
+def _consume_changefiles(pending: list[tuple[Path, dict]] | None = None) -> None:
+    for path, _data in read_changefiles() if pending is None else pending:
         path.unlink()
 
 

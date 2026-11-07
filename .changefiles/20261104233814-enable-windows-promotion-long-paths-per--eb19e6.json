@@ -1,0 +1,9 @@
+{
+  "comment": "Enable Windows promotion long paths per Git invocation",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -3,7 +3,10 @@ from __future__ import annotations
 import http.client
 import importlib
 import json
+import socket
 import sys
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -24,6 +27,128 @@ def _releases_payload(releases: dict) -> bytes:
 
 def _file(upload_time: str, *, yanked: bool = False) -> dict:
     return {"upload_time_iso_8601": upload_time, "yanked": yanked}
+
+
+@pytest.mark.parametrize("framing", ["length", "chunked", "chunk-header"])
+def test_response_deadline_interrupts_continuous_bytes(framing):
+    reader, writer = socket.socketpair()
+    stop = threading.Event()
+    header = b"Content-Length: 100000\r\n" if framing == "length" else b"Transfer-Encoding: chunked\r\n"
+    writer.sendall(b"HTTP/1.1 200 OK\r\n" + header + b"\r\n")
+    response = http.client.HTTPResponse(reader)
+    response.begin()
+    reader.settimeout(1)
+
+    def stream():
+        try:
+            while not stop.wait(0.02):
+                writer.sendall(b"1\r\nx\r\n" if framing == "chunked" else b"1")
+        except OSError:
+            pass
+
+    producer = threading.Thread(target=stream)
+    producer.start()
+    started = time.monotonic()
+    try:
+        with pytest.raises(spf.SeasonedVersionError, match="deadline exceeded"):
+            with spf._response_deadline(response, started + 0.15):
+                response.read()
+        assert time.monotonic() - started < 0.75
+    finally:
+        stop.set()
+        producer.join(timeout=1)
+        response.close()
+        reader.close()
+        writer.close()
+    assert not producer.is_alive()
+
+
+def test_response_completes_before_deadline():
+    reader, writer = socket.socketpair()
+    writer.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}")
+    response = http.client.HTTPResponse(reader)
+    response.begin()
+    try:
+        with spf._response_deadline(response, time.monotonic() + 1):
+            assert response.read() == b"{}"
+    finally:
+        response.close()
+        reader.close()
+        writer.close()
+
+
+@pytest.mark.parametrize("prefix,chunk,followup", [
+    (b"HTTP/1.1 200", b"x", None),
+    (b"HTTP/1.1 200 OK\r\nX-Slow: ", b"x", None),
+    (b"HTTP/1.1 200 OK\r\nContent-Length: 100000\r\n\r\n", b"x", None),
+    (b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n", b"1\r\nx\r\n", None),
+    (b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n1", b"1", None),
+    *[(f"HTTP/1.1 {code} Redirect\r\nLocation: /final\r\nContent-Length: 100000\r\n\r\n".encode(),
+       b"x", None) for code in (301, 302, 303, 307, 308)],
+    (b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}", None, None),
+    (b"HTTP/1.1 404 Not Found\r\nContent-Length: 2\r\n\r\n{}", None, None),
+    (b"HTTP/1.1 302 Redirect\r\nLocation: /final\r\nContent-Length: 0\r\n\r\n", None,
+     b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}"),
+])
+def test_default_fetch_bounds_response_lifetime(monkeypatch, prefix, chunk, followup):
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    listener.settimeout(1)
+    stop, streaming = threading.Event(), threading.Event()
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+    timers = []
+    real_timer = spf.threading.Timer
+
+    def timer(*args, **kwargs):
+        created = real_timer(*args, **kwargs)
+        timers.append(created)
+        return created
+
+    monkeypatch.setattr(spf.threading, "Timer", timer)
+
+    def stream():
+        for content in [prefix, *([followup] if followup is not None else [])]:
+            with listener.accept()[0] as connection:
+                connection.settimeout(1)
+                request = b""
+                while b"\r\n\r\n" not in request:
+                    block = connection.recv(4096)
+                    if not block:
+                        return
+                    request += block
+                try:
+                    connection.sendall(content)
+                    streaming.set()
+                    end = time.monotonic() + 1.2
+                    while chunk is not None and not stop.wait(0.02) and time.monotonic() < end:
+                        connection.sendall(chunk)
+                except OSError:
+                    pass
+
+    producer = threading.Thread(target=stream)
+    producer.start()
+    started = time.monotonic()
+    try:
+        url = f"http://127.0.0.1:{listener.getsockname()[1]}/metadata"
+        if chunk is not None:
+            with pytest.raises(spf.SeasonedVersionError, match="deadline exceeded"):
+                spf._default_fetch(url, deadline=started + 0.35)
+        elif prefix.startswith(b"HTTP/1.1 404"):
+            with pytest.raises(spf.urllib.error.HTTPError) as rejected:
+                spf._default_fetch(url, deadline=started + 1)
+            assert rejected.value.code == 404
+        else:
+            assert spf._default_fetch(url, deadline=started + 1) == b"{}"
+        assert streaming.is_set()
+        assert time.monotonic() - started < 0.9
+    finally:
+        stop.set()
+        producer.join(timeout=1)
+        listener.close()
+    assert not producer.is_alive()
+    assert timers and not any(timer.is_alive() for timer in timers)
+
 
 def test_release_retains_only_selected_seasoned_file_hashes():
     old = {**_file("2026-01-01T00:00:00Z"), "digests": {"sha256": "a" * 64}}

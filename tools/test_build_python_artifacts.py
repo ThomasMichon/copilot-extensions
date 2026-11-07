@@ -1502,6 +1502,80 @@ def test_resolve_toolchain_lock_creates_venv_and_installs(
     assert any(cmd[:3] == ["uv", "pip", "install"] for cmd in calls)
 
 
+@pytest.mark.parametrize("expire_after", [None, "venv", "install", "versions"])
+def test_toolchain_preparation_uses_selected_uv_and_one_deadline(
+    tmp_path, monkeypatch, expire_after,
+):
+    now = [100.0]
+    monkeypatch.setattr(btl.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(btl, "_validated_trusted_index_url", lambda env: (
+        "https://example.invalid/simple/", None,
+    ))
+    monkeypatch.setattr(btl, "_restrict_file_to_owner", lambda path: None)
+    uv = str(tmp_path / "selected" / "uv")
+    python = str(tmp_path / "selected" / "python")
+    target = tmp_path / "toolchain"
+    incumbent = btl._venv_python_path(target)
+    incumbent.parent.mkdir(parents=True)
+    incumbent.write_bytes(b"retained incumbent")
+    btl._write_provenance_marker(target, "https://other.invalid/simple/", python)
+    before = {path.relative_to(target): path.read_bytes() for path in target.rglob("*") if path.is_file()}
+    calls = []
+
+    def run(command, **options):
+        if command[0] == uv and command[1:3] == ["python", "find"]:
+            phase, output = "find", python
+        elif command[:2] == [uv, "venv"]:
+            phase, output = "venv", ""
+            candidate = btl._venv_python_path(Path(command[3]))
+            candidate.parent.mkdir(parents=True, exist_ok=True)
+            candidate.write_bytes(b"candidate interpreter")
+        elif "-S" in command:
+            phase, output = "markers", json.dumps({"python_version": "3.12"})
+        else:
+            phase, output = "versions", _toolchain_query_stdout({
+                "setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0",
+            })
+        calls.append((phase, command, options))
+        now[0] = 201.0 if phase == expire_after else now[0] + 5
+        return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+
+    def install(executable, arguments, **options):
+        assert executable == uv and options["deadline"] == 200.0
+        calls.append(("install", arguments, options))
+        now[0] = 201.0 if expire_after == "install" else now[0] + 5
+        return subprocess.CompletedProcess(arguments, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(btl.subprocess, "run", run)
+    monkeypatch.setattr(btl, "run_uv_install", install)
+    if expire_after is not None:
+        with pytest.raises(btl.ArtifactBuildError, match="deadline"):
+            btl.resolve_toolchain_lock(target, python=python, uv=uv, deadline=200.0)
+        assert not list(tmp_path.glob(".*.staging-*"))
+        assert sorted(path.name for path in tmp_path.iterdir()) == ["provenance-key-dir", "toolchain"]
+    else:
+        lock = btl.resolve_toolchain_lock(target, python=python, uv=uv, deadline=200.0)
+        now[0] = 130.0
+        assert lock.marker_environment == {"python_version": "3.12"}
+        assert [(phase, options["timeout"]) for phase, _, options in calls] == [
+            ("find", 100.0), ("venv", 95.0), ("install", 90.0),
+            ("versions", 85.0), ("markers", 70.0),
+        ]
+    assert {path.relative_to(target): path.read_bytes() for path in target.rglob("*") if path.is_file()} == before
+
+
+@pytest.mark.parametrize("deadline", [False, float("nan"), float("inf"), 99.0])
+def test_toolchain_refuses_invalid_or_expired_budget_before_resolution(tmp_path, monkeypatch, deadline):
+    monkeypatch.setattr(btl.time, "monotonic", lambda: 100.0)
+    monkeypatch.setattr(btl, "_validated_trusted_index_url", lambda env: pytest.fail(
+        "an invalid caller budget must fail before source or interpreter resolution",
+    ))
+    target = tmp_path / "absent"
+    with pytest.raises(btl.ArtifactBuildError, match="deadline"):
+        btl.resolve_toolchain_lock(target, uv=tmp_path / "uv", deadline=deadline)
+    assert not target.exists()
+
+
 def test_resolve_toolchain_lock_version_query_uses_isolated_mode(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -1553,8 +1627,9 @@ def test_query_marker_environment_uses_isolated_mode(
     assert seen_cmds[0][1:4] == ["-I", "-S", "-c"]
 
 
+@pytest.mark.parametrize("reuse_only", [False, True])
 def test_resolve_toolchain_lock_reuses_existing_venv(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reuse_only,
 ):
     _assume_governed_feed_configured(monkeypatch)
     # Regression: a second call with the SAME venv_dir (the mechanism a
@@ -1582,10 +1657,49 @@ def test_resolve_toolchain_lock_reuses_existing_venv(
         )
 
     monkeypatch.setattr(bpa.subprocess, "run", fake_run)
-    lock = bpa.resolve_toolchain_lock(venv_dir)
+    lock = bpa.resolve_toolchain_lock(venv_dir, reuse_only=reuse_only)
 
     assert lock.packages == {"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"}
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("occupation", ["absent", "partial", "unmarked", "index", "python"])
+def test_toolchain_reuse_only_never_provisions_a_missing_or_mismatched_environment(
+    tmp_path, monkeypatch, occupation,
+):
+    _assume_governed_feed_configured(monkeypatch)
+    target = tmp_path / "retained"
+    btl._toolchain_identity_hash("https://example.internal/simple/", "")
+    if occupation != "absent":
+        target.mkdir()
+    if occupation not in {"absent", "partial"}:
+        python = btl._venv_python_path(target)
+        python.parent.mkdir(parents=True, exist_ok=True)
+        python.write_bytes(b"untouched incumbent")
+        if occupation != "unmarked":
+            btl._write_provenance_marker(
+                target,
+                "https://other.invalid/simple/" if occupation == "index"
+                else "https://example.internal/simple/",
+                "other-python" if occupation == "python" else "",
+            )
+    before = {
+        path.relative_to(tmp_path): path.read_bytes()
+        for path in tmp_path.rglob("*") if path.is_file()
+    }
+    monkeypatch.setattr(btl.subprocess, "run", lambda *args, **kwargs: pytest.fail(
+        "reuse-only refusal must not execute a retained interpreter or provision a replacement",
+    ))
+    monkeypatch.setattr(btl.tempfile, "mkdtemp", lambda *args, **kwargs: pytest.fail(
+        "reuse-only refusal must not allocate a staging environment",
+    ))
+    with pytest.raises(btl.ArtifactBuildError, match="no complete retained toolchain"):
+        btl.resolve_toolchain_lock(target, reuse_only=True)
+    assert {
+        path.relative_to(tmp_path): path.read_bytes()
+        for path in tmp_path.rglob("*") if path.is_file()
+    } == before
+    assert not list(tmp_path.glob(".*.alt-*"))
 
 
 def test_resolve_toolchain_lock_rebuilds_when_provenance_marker_missing(

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import tempfile
 
 import installer_engine as engine
@@ -20,8 +20,8 @@ def _preparation_assets(payload: Path) -> dict[Path, Path]:
     if (
         not isinstance(declaration, dict)
         or declaration.get("schema") != "copilot-extensions.packaged-assets"
-        or type(declaration.get("version")) is not int or declaration["version"] != 1
-        or declaration.get("canonicalDir") != "tools"
+        or type(declaration.get("version")) is not int
+        or (declaration["version"], declaration.get("canonicalDir")) not in ((1, "tools"), (2, "."))
         or declaration.get("payloadDir") != "scripts/runtime-source-tools"
         or not isinstance(declaration.get("files"), list) or not declaration["files"]
     ):
@@ -29,17 +29,22 @@ def _preparation_assets(payload: Path) -> dict[Path, Path]:
     assets = {}
     names = set()
     for name in declaration["files"]:
-        if not isinstance(name, str) or name in {"", ".", ".."} or Path(name).name != name:
+        if (
+            not isinstance(name, str) or not name or Path(name).is_absolute()
+            or PureWindowsPath(name).drive
+            or any(part in {"", ".", ".."} for part in name.split("/"))
+        ):
             raise ValueError("Invalid Manager source preparation asset name")
-        if "/" in name or "\\" in name or ":" in name:
+        if "\\" in name or ":" in name or declaration["version"] == 1 and "/" in name:
             raise ValueError("Invalid Manager source preparation asset name")
-        if name in names:
+        key = name.casefold() if declaration["version"] == 2 else name
+        if key in names:
             raise ValueError("Duplicate Manager source preparation asset name")
-        names.add(name)
+        names.add(key)
         target = Path(declaration["payloadDir"]) / name
         if (payload / target).is_file():
             continue
-        source = payload.parent / "tools" / name
+        source = payload.parent / declaration["canonicalDir"] / name
         if source.resolve() != source or not source.is_file():
             raise ValueError(f"Manager source preparation asset is unavailable: {name}")
         assets[target] = source

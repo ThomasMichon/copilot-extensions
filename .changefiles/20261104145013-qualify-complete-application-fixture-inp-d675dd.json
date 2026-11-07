@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify complete-application fixture inputs and resolve retained Dev release across direct and nested runtime environments.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

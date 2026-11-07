@@ -12,17 +12,15 @@ import sys
 import pytest
 from agent_procutil import no_window_kwargs
 
-import test_source_portfolio_owners as portfolio_fixtures
-
 ROOT = Path(__file__).resolve().parents[3]
-portfolio_source_snapshot = portfolio_fixtures.source_snapshot
 NATIVE_PROGRAM = r"""
-import importlib.util, json, os, re, shutil, sqlite3, subprocess, sys
+import importlib.util, json, os, re, shutil, sqlite3, subprocess, sys, time
 from contextlib import closing
 from pathlib import Path
 
-repository, snapshot, home = map(Path, sys.argv[1:4])
-plugin = sys.argv[4]
+repository, home = map(Path, sys.argv[1:3])
+plugin = sys.argv[3]
+deadline = time.monotonic() + 320
 home.mkdir()
 os.environ.update(HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home),
                   COPILOT_EXTENSIONS_TEST_CONTAINED="1")
@@ -36,14 +34,14 @@ if plugin == "agent-mcp":
     os.environ.update(AGENT_MCP_NO_CUTOVER="1", AGENT_MCP_NO_VERSION_REAP="1")
 sys.path.insert(0, str(repository / "tools"))
 import prepare_runtime_source as preparation
-artifact = home / "prepared"
-preparation._materialize(snapshot, plugin, artifact)
 sys.path.insert(0, str(repository / "plugins/agent-worktrees/tests"))
-from runtime_install_fixture import isolate_account_profile
-isolate_account_profile(artifact, home, runtime_package=None)
+from source_application_fixture import application_source, assert_application_reuse, prepare_application
+checkout, commit = application_source(
+    repository, home.parent / "source", home, deadline=deadline,
+)
 owner = home / ".copilot/installed-plugins/example" / plugin
 owner.parent.mkdir(parents=True)
-shutil.copytree(artifact, owner)
+preparation._materialize(checkout, plugin, owner, deadline=deadline)
 owner_version = "9.0.0"
 metadata = json.loads((owner / "plugin.json").read_text())
 metadata["version"] = owner_version
@@ -69,21 +67,20 @@ installer = "init" if plugin in {"agent-machines", "agent-mcp"} else "install"
 
 def run(arguments, timeout=120, input_text=None, environment=None):
     result = subprocess.run(arguments, cwd=project, capture_output=True, text=True,
-                            encoding="utf-8", timeout=timeout, input=input_text, env=environment,
+                            encoding="utf-8", timeout=min(timeout, preparation._remaining(deadline)),
+                            input=input_text, env=environment,
                             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
     assert result.returncode == 0, result.stdout + result.stderr
     return result.stdout
 
-def provision(payload, managed=False):
+def provision(payload):
     if os.name == "nt":
         command = [shell, "-NoProfile", "-File", str(payload / f"scripts/{installer}.ps1"),
                    "provision", "-InstallDir", str(root)]
     else:
         command = [shell, str(payload / f"scripts/{installer}.sh"), "provision",
                    "--install-dir", str(root)]
-    if managed:
-        command = source.lifecycle_argv(owner, plugin, root, project, tuple(command))
-    return run(command, environment=dict(step.environment) if managed else None)
+    return run(command)
 
 os.environ["COPILOT_PLUGIN_ROOT"] = str(owner)
 os.environ["COPILOT_PLUGIN_STAGED_FROM"] = str(owner)
@@ -122,21 +119,25 @@ with closing(sqlite3.connect(database)) as connection, connection:
     connection.execute("INSERT INTO retained VALUES ('existing')")
 before = {path: (path.read_bytes(), path.stat().st_ino, path.stat().st_mtime_ns)
           for path in (config, database, policy)}
-version = preparation.payload_package_version(artifact, plugin)
-digest = preparation._assembly_hash(artifact)
-identity = preparation.SourceIdentity(
-    plugin, version, "a" * 40, "b" * 40, digest,
-    preparation.runtime_version(version, "a" * 40, digest),
+snapshot = prepare_application(
+    checkout, commit, plugin, home / "prepared",
+    uv=shutil.which("uv"), deadline=deadline,
 )
-(artifact / "runtime-source.json").write_text(json.dumps(identity.document()), encoding="utf-8")
+assert_application_reuse(
+    checkout, commit, plugin, home / "prepared-reuse", snapshot,
+    uv=shutil.which("uv"), deadline=deadline,
+)
 from agent_worktrees import reconcile, update_runtime, update_runtime_plan
+from agent_worktrees.update_runtime_application import PreparedApplication
 from agent_worktrees.update_runtime_source import PreparedRuntimeSource
 reconcile.core_installed_payload_dir = lambda name: owner
 reconcile.runtime_installer_environment = lambda *args: (dict(os.environ), root)
 update_runtime._machine_gate_blocks = lambda *args: False
-source = PreparedRuntimeSource(artifact, json.dumps({
-    "runtime_source": identity.document(), "runtime_version": identity.runtime_version,
-}))
+application = PreparedApplication(snapshot, plugin, "null")
+artifact = application.payload
+identity = json.loads(application.identity)["runtime_source"]
+version = identity["package_version"]
+source = PreparedRuntimeSource(artifact, application.identity, application)
 step = update_runtime_plan.plan_registered(
     plugin, "windows" if os.name == "nt" else "linux",
     force=False, gate_context=project, source=source,
@@ -148,20 +149,22 @@ if plugin == "agent-mcp":
     assert step.environment["AGENT_MCP_NO_VERSION_REAP"] == "1"
 status = update_runtime._execute_runtime_step(step)
 assert status == "OK", status
-manifest = json.loads((root / "deploy-manifest.json").read_text())
-assert manifest["runtime_source"] == identity.document()
-assert manifest["runtime_version"] == identity.runtime_version
-assert manifest["source"]["path"] == owner.as_posix()
-assert manifest["source"]["version"] == version
-assert (root / "current-version").read_text().strip() == identity.runtime_version
-slot = root / "versions" / identity.runtime_version
-assert Path(manifest["venv"]) == slot and (root / "versions" / previous).is_dir()
-assert source.deployed_version(root, owner) == identity.runtime_version
+assert (root / "current-version").read_text().strip() == application.version
+assert (root / "last-known-good").read_text().strip() == application.version
+slot = root / "versions" / application.version
+assert json.loads((slot / "runtime-source.json").read_text()) == identity
+assert json.loads((slot / "application.json").read_text()) == json.loads(application.declaration)
+assert json.loads((slot / "install-success.json").read_text()) == {
+    "state": "installed", "version": application.version,
+}
+assert (root / "versions" / previous).is_dir()
+assert source.deployed_version(root, owner) == application.version
 assert update_runtime_plan.plan_registered(
     plugin, "windows" if os.name == "nt" else "linux",
     force=False, gate_context=project, source=source,
 ).status == "SKIPPED (current)"
-python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+venv = slot / ".venv"
+python = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 module = plugin.replace("-", "_")
 probe = (
     "import importlib,importlib.metadata,json,sys;from pathlib import Path;"
@@ -172,9 +175,9 @@ probe = (
 module_path, prefix, installed_version, module_version = json.loads(
     run([str(python), "-I", "-B", "-c", probe])
 )
-assert Path(module_path).is_relative_to(slot) and Path(prefix) == slot
+assert Path(module_path).is_relative_to(venv) and Path(prefix) == venv
 assert reconcile._versions_equal(installed_version, version), (installed_version, version)
-expected_module_version = identity.runtime_version if plugin == "agent-mcp" else version
+expected_module_version = application.version if plugin == "agent-mcp" else version
 assert reconcile._versions_equal(module_version, expected_module_version), (
     module_version, expected_module_version,
 )
@@ -189,11 +192,15 @@ else:
     command = [str(launcher), "--help"]
 completion = slot / ".install-complete.json"
 complete_before = (completion.read_bytes(), completion.stat().st_mtime_ns)
-provision(artifact, managed=True)
+run(list(application.argv(root, repair=False)), environment=dict(step.environment))
 assert (completion.read_bytes(), completion.stat().st_mtime_ns) == complete_before
-artifact.rename(home / "prepared-unavailable")
+snapshot.rename(home / "prepared-unavailable")
+checkout.rename(home / "source-unavailable")
 assert plugin in run(command)
-assert json.loads(run(binding_command)) == original_binding
+retained_binding = json.loads(run(binding_command))
+assert retained_binding == original_binding, {
+    "original_binding": original_binding, "retained_binding": retained_binding,
+}
 assert {path: (path.read_bytes(), path.stat().st_ino, path.stat().st_mtime_ns)
         for path in before} == before
 with closing(sqlite3.connect(database)) as connection:
@@ -225,7 +232,7 @@ def _persistent_user_path_fingerprint() -> str | None:
 @pytest.mark.timeout(360)
 @pytest.mark.parametrize("plugin", ["agent-ssh", "agent-machines", "agent-mcp"])
 def test_native_collected_source_preserves_service_less_owner(
-    tmp_path_factory: pytest.TempPathFactory, portfolio_source_snapshot: Path, plugin: str,
+    tmp_path_factory: pytest.TempPathFactory, plugin: str,
 ) -> None:
     if shutil.which("uv") is None or shutil.which("pwsh" if os.name == "nt" else "bash") is None:
         pytest.skip("native source construction requires uv and the native shell")
@@ -233,7 +240,7 @@ def test_native_collected_source_preserves_service_less_owner(
     user_path = _persistent_user_path_fingerprint()
     result = subprocess.run(
         [sys.executable, "-I", "-B", "-X", "utf8", "-c", NATIVE_PROGRAM,
-         str(ROOT), str(portfolio_source_snapshot), str(home), plugin],
+         str(ROOT), str(home), plugin],
         capture_output=True, text=True, encoding="utf-8", timeout=340, **no_window_kwargs(),
     )
     assert _persistent_user_path_fingerprint() == user_path, "Fixture changed persistent User PATH"

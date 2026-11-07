@@ -54,16 +54,16 @@ def test_publication_and_transactional_callback_need_no_task_adoption(installati
 
     monkeypatch.setattr(publication, "target_leases", targets)
 
-    def publish(root, version, *, expected, before_publish, after_publish):
+    def publish(root, version, *, expected, before_publish, forward_only):
         assert events == ["validate"]
         events.append("publication-lease")
         before_publish()
-        after_publish()
+        assert forward_only() is True
 
     def callback(slot):
         assert events == [
             "validate", "publication-lease", "target-leases",
-            "validate", "target-leases-released",
+            "validate",
         ]
         assert slot == state.slot
         events.append("cutover")
@@ -75,7 +75,7 @@ def test_publication_and_transactional_callback_need_no_task_adoption(installati
         after_activate=callback, transactional_activation=True,
     )
     assert result.action == "installed"
-    assert events[-1] == "cutover"
+    assert events[-2:] == ["cutover", "target-leases-released"]
     adopt.assert_not_called()
 
 
@@ -279,6 +279,40 @@ print(json.dumps({{
     )
     assert state.adapter._foreground_install(args, driver) == state.slot
     assert source_config.config_path(state.root).read_bytes() == original
+
+
+@pytest.mark.parametrize("stage_receipt", [True, False])
+def test_foreground_stage_cannot_coalesce_with_a_publishing_install(
+    installation, monkeypatch, stage_receipt,
+):
+    state = installation
+    monkeypatch.setattr(state.adapter, "_source_digest", lambda payload: "a" * 64)
+    state.adapter.runtime.mark_complete(state.root, state.slot.name, payload_hash="b" * 64)
+    log = state.root / "staging.log"
+    log.write_text(json.dumps({
+        "schema": "copilot-extensions.manager-stage" if stage_receipt
+        else "copilot-extensions.manager-bootstrap",
+        "version": 1, "root": str(state.root), "source": "a" * 64, "slot": str(state.slot),
+    }) + "\n", encoding="utf-8")
+    queued = []
+    driver = SimpleNamespace(
+        RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
+        enqueue=lambda spec, **options: queued.append((spec, options["runner"])) or SimpleNamespace(id="stage"),
+        drain=Mock(), wait=Mock(return_value=SimpleNamespace(state="completed", exit_code=0, log_path=log)),
+    )
+    args = SimpleNamespace(
+        payload=state.root, root=state.root, repair_update=False, recover_adopted=None,
+        skip_instance_reconcile=False, command=[], stage_only=True,
+    )
+    if stage_receipt:
+        assert state.adapter._foreground_install(args, driver) == state.slot
+    else:
+        with pytest.raises(RuntimeError, match="receipt does not match admission"):
+            state.adapter._foreground_install(args, driver)
+    spec, runner = queued[0]
+    assert spec.argv == ("install", "stage")
+    assert runner.argv[-1] == "--stage"
+    assert not (state.root / "current-version").exists()
 
 
 @pytest.mark.parametrize(("command", "repair"), [

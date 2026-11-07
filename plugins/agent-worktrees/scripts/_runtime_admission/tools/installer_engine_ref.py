@@ -52,7 +52,7 @@ PYTHON_FILES = (
 PYTHON_ADOPTERS = (
     "agent-worktrees", "agent-vault", "agent-pull-requests", "agent-ssh",
     "agent-codespaces", "agent-logger", "agent-bridge",
-    "agent-dispatch", "agent-mcp", "agent-index",
+    "agent-dispatch", "agent-mcp", "agent-index", "agent-containers", "agent-machines",
 )
 STANDALONE_PYTHON_ADOPTERS = ("worktree-manager", "libs/update-driver")
 STANDALONE_NATIVE_ADOPTERS = (

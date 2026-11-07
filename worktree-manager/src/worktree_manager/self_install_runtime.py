@@ -5,20 +5,14 @@ import importlib.util
 from pathlib import Path
 import sys
 
-import worktree_manager
+from .runtime_identity import running_payload_dir, runtime_scripts  # noqa: F401 -- compatibility exports
 
 
-def running_payload_dir() -> Path:
-    """The project dir of the currently-running payload (has pyproject.toml)."""
-    # .../worktree-manager/src/worktree_manager/self_install.py -> parents[2] == project.
-    package = Path(worktree_manager.__file__).resolve()
-    from .runtime_identity import running_slot
+def local_bin_hint() -> str:
+    """Render the command directory resolved by the current installation policy."""
+    from .self_install import local_bin
+    return str(local_bin())
 
-    slot = running_slot()
-    retained = (slot if slot is not None else Path(sys.prefix)) / "payload"
-    if package.is_relative_to(Path(sys.prefix).resolve()) and (retained / "pyproject.toml").is_file():
-        return retained
-    return package.parents[2]
 
 def load_runtime_installer(scripts: Path):
     script = scripts / "runtime_install.py"
@@ -63,10 +57,3 @@ def slot_package_version(slot: Path, runtime_installer, payload_version) -> str 
         except (OSError, ValueError, ImportError, RuntimeError):
             return None
     return payload_version(slot / "payload")
-
-
-def runtime_scripts(package: Path, payload_dir) -> Path:
-    resources = package / "_runtime_assets" / "scripts"
-    if resources.is_dir():
-        return resources
-    return payload_dir() / "scripts"

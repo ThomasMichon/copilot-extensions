@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve original command lifecycle for complete application updates",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

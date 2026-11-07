@@ -46,6 +46,34 @@ def test_read_changefiles_skips_unreadable_file(_isolated_changefiles_dir: Path,
     assert "skipping unreadable" in capsys.readouterr().err
 
 
+def test_parallel_changefiles_preserve_order_and_unreadable_diagnostics(
+    _isolated_changefiles_dir: Path, monkeypatch: pytest.MonkeyPatch, capsys,
+):
+    directory = _isolated_changefiles_dir
+    directory.mkdir()
+    for index in reversed(range(96)):
+        (directory / f"{index:03}.json").write_text(
+            "{bad" if index % 17 == 0 else json.dumps({"comment": f"entry {index}"}),
+            encoding="utf-8",
+        )
+    (directory / "directory.json").mkdir()
+    serial = changefile.read_changefiles()
+    diagnostics = capsys.readouterr().err
+    original = changefile._read_changefile
+    threads = set()
+
+    def read(path):
+        import threading
+
+        threads.add(threading.current_thread().name)
+        return original(path)
+
+    monkeypatch.setattr(changefile, "_read_changefile", read)
+    assert changefile.read_changefiles(parallel=True) == serial
+    assert capsys.readouterr().err == diagnostics
+    assert threads and all(name.startswith("ThreadPoolExecutor") for name in threads)
+
+
 def test_cmd_add_writes_multiple_pairs(_isolated_changefiles_dir: Path):
     code = changefile.main([
         "add", "--plugin", "agent-worktrees", "--type", "patch",

@@ -152,7 +152,23 @@ def _copy(source, destination, *, deadline: float | None = None) -> None:
 def _extract_archive(
     archive: Path, destination: Path, *, deadline: float | None = None,
     file_pointer_candidates: list[Path] | None = None,
+    include_paths: tuple[str, ...] | None = None,
 ) -> None:
+    selected: list[tuple[str, ...]] | None = None
+    files: set[Path] = set()
+    directories: set[Path] = set()
+    if include_paths is not None:
+        if not include_paths or any(destination.iterdir()):
+            raise SourcePreparationError("Scoped source extraction requires paths and an empty destination")
+        selected = []
+        for value in include_paths:
+            if not isinstance(value, str) or not value:
+                raise SourcePreparationError("Source extraction selection requires relative paths")
+            path = PurePosixPath(value)
+            if path.is_absolute() or ".." in path.parts or "\\" in value or ":" in value:
+                raise SourcePreparationError("Source extraction selection contains an unsafe path")
+            selected.append(path.parts)
+    previous_parent: Path | None = None
     with tarfile.open(archive, "r:") as source:
         for member in source:
             _remaining(deadline)
@@ -163,10 +179,28 @@ def _extract_archive(
             ):
                 raise SourcePreparationError("Source archive contains an unsafe path")
             target = destination.joinpath(*name.parts)
+            if not member.isdir() and not member.isfile():
+                raise SourcePreparationError("Source archive links and special files are unsupported")
+            if selected is not None:
+                parents = [
+                    destination.joinpath(*name.parts[:index])
+                    for index in range(1, len(name.parts))
+                ]
+                if (
+                    target in files or any(parent in files for parent in parents)
+                    or member.isfile() and target in directories
+                ):
+                    raise SourcePreparationError("Source archive contains colliding paths")
+                directories.update(parents)
+                (directories if member.isdir() else files).add(target)
+                if not any(name.parts[:len(prefix)] == prefix for prefix in selected):
+                    continue
             if member.isdir():
                 target.mkdir(parents=True, exist_ok=True)
             elif member.isfile():
-                target.parent.mkdir(parents=True, exist_ok=True)
+                if target.parent != previous_parent:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    previous_parent = target.parent
                 content = source.extractfile(member)
                 if content is None:
                     raise SourcePreparationError("Source archive file has no readable content")
@@ -177,9 +211,9 @@ def _extract_archive(
                     if file_pointer_candidates is not None and content.peek(1).startswith(b"<"):
                         file_pointer_candidates.append(target)
                     _copy(content, output, deadline=deadline)
-                target.chmod(member.mode & 0o777)
-            else:
-                raise SourcePreparationError("Source archive links and special files are unsupported")
+                # Windows chmod only changes read-only status; new files are writable.
+                if os.name != "nt" or not member.mode & 0o200:
+                    target.chmod(member.mode & 0o777)
 
 
 def _materialize(

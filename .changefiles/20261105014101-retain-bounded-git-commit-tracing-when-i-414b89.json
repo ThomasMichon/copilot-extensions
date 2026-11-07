@@ -1,0 +1,9 @@
+{
+  "comment": "Retain bounded Git commit tracing when isolated native application fixture preparation times out",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
