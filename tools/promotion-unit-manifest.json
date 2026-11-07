@@ -5267,7 +5267,7 @@
         "plugins/agent-dispatch/src/agent_dispatch/worktree_attribution.py": "9da78845c19f0cb892ba56c8ca719c00eab830cc56785d0c34e0e2ba5d3cb80a",
         "tools/promotion_unit_tests/test_ordinary_writer_admission.py": "111653f65c04a5c1aa6149aed795808202b2dde400fcc6cb138fff76734bdf39",
         "libs/payload-invocation/command_lifecycle.py": "fa59ad840f2a9c4a5c2a77c0a9d4fd22f9124e352ec310042b07d0d7d2873271",
-        "libs/payload-invocation/python-catalog-inputs.json": "6d56be9124e5fbd7d935d5a2384a1b406f639205c601dbb000168c9cb4842f2b",
+        "libs/payload-invocation/python-catalog-inputs.json": "b7053dce5beea515aa6e81b520fca4bfd2ec0343d4a618279c1383d061c0cecf",
         "tools/promotion_unit_tests/test_typecheck_catalog.py": "f3dddd8e2676e8f56a83da62a072c205b12fc9e0b3d811d2c4e75cc267239a4c",
         "libs/payload-invocation/templates/catalog-powershell.tmpl": "2d3807fc6d93a4389dcd52237cbacdf6b94d4b884b4694b4c9c20469e40e457a",
         "libs/payload-invocation/templates/dispatcher-posix.tmpl": "a49ba79f2a92262f8a51bdab2afc5129cdfe89bdc4be13925322819f462ea238",
