@@ -200,6 +200,11 @@ def _text(value, name: str, *, optional: bool = False) -> None:
         raise AgendaError(f"invalid agenda graph {name}")
 
 
+def _member(value, known) -> bool:
+    # Only strings can name a state or reference; containers must not reach hash lookups.
+    return isinstance(value, str) and value in known
+
+
 def _count(value, name: str) -> None:
     if type(value) is not int or not 0 <= value <= MAX_SEQUENCE:
         raise AgendaError(f"invalid agenda graph {name}")
@@ -222,13 +227,13 @@ def graph(value, revision: int) -> None:
         if frame["id"] in known:
             raise AgendaError("duplicate agenda graph frame")
         _text(frame["label"], "frame label")
-        if frame["state"] not in GRAPH_FRAME_STATES:
+        if not _member(frame["state"], GRAPH_FRAME_STATES):
             raise AgendaError("invalid agenda graph frame state")
         root = frame["parent"] is None
         if root != (frame["via"] is None) or root != (frame["returns"] is None):
             raise AgendaError("agenda graph root and child links disagree")
         if not root:
-            if frame["parent"] not in known:
+            if not _member(frame["parent"], known):
                 raise AgendaError("agenda graph frame precedes or lacks its parent")
             _text(frame["via"], "expanding item")
             _text(frame["returns"], "return action")
@@ -238,20 +243,20 @@ def graph(value, revision: int) -> None:
         exact(item, {"id", "frame", "label", "state", "attempts"})
         _text(item["id"], "item id")
         _text(item["label"], "item label")
-        if item["id"] in seen or item["frame"] not in known:
+        if item["id"] in seen or not _member(item["frame"], known):
             raise AgendaError("agenda graph item is duplicated or orphaned")
-        if item["state"] not in GRAPH_ITEM_STATES:
+        if not _member(item["state"], GRAPH_ITEM_STATES):
             raise AgendaError("invalid agenda graph item state")
         _count(item["attempts"], "attempt count")
         seen.add(item["id"])
     cursor = value["cursor"]
     exact(cursor, {"frame", "item", "stack"})
     stack = cursor["stack"]
-    if not isinstance(stack, list) or any(frame not in known for frame in stack):
+    if not isinstance(stack, list) or any(not _member(frame, known) for frame in stack):
         raise AgendaError("agenda graph stack names an unknown frame")
     if (cursor["frame"] is None) != (not stack) or (stack and cursor["frame"] != stack[-1]):
         raise AgendaError("agenda graph cursor is not the top of the stack")
-    if cursor["item"] is not None and cursor["item"] not in seen:
+    if cursor["item"] is not None and not _member(cursor["item"], seen):
         raise AgendaError("agenda graph cursor names an omitted item")
     for entry in history:
         exact(entry, {"at", "kind", "frame", "item", "text"})

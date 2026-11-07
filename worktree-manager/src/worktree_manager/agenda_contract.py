@@ -168,6 +168,11 @@ def _graph_text(value, *, optional: bool = False) -> bool:
     return (optional and value is None) or (isinstance(value, str) and bool(value))
 
 
+def _graph_member(value, known) -> bool:
+    # Only strings can name a state or reference; containers must not reach hash lookups.
+    return isinstance(value, str) and value in known
+
+
 def validate_graph(value, revision: int) -> None:
     """Admit the optional display graph: frame tree, item queues, stack, cursor, history."""
     if not isinstance(value, dict) or set(value) != {
@@ -187,11 +192,11 @@ def validate_graph(value, revision: int) -> None:
             not isinstance(frame, dict)
             or set(frame) != {"id", "parent", "via", "state", "label", "returns"}
             or not _graph_text(frame["id"]) or frame["id"] in known
-            or not _graph_text(frame["label"]) or frame["state"] not in _GRAPH_FRAME_STATES
+            or not _graph_text(frame["label"]) or not _graph_member(frame["state"], _GRAPH_FRAME_STATES)
             or (frame["parent"] is None) != (frame["via"] is None)
             or (frame["parent"] is None) != (frame["returns"] is None)
             or (frame["parent"] is not None and (
-                frame["parent"] not in known or not _graph_text(frame["via"])
+                not _graph_member(frame["parent"], known) or not _graph_text(frame["via"])
                 or not _graph_text(frame["returns"])
             ))
         ):
@@ -202,8 +207,8 @@ def validate_graph(value, revision: int) -> None:
         if (
             not isinstance(item, dict)
             or set(item) != {"id", "frame", "label", "state", "attempts"}
-            or not _graph_text(item["id"]) or item["id"] in seen or item["frame"] not in known
-            or not _graph_text(item["label"]) or item["state"] not in _GRAPH_ITEM_STATES
+            or not _graph_text(item["id"]) or item["id"] in seen or not _graph_member(item["frame"], known)
+            or not _graph_text(item["label"]) or not _graph_member(item["state"], _GRAPH_ITEM_STATES)
             or type(item["attempts"]) is not int or not 0 <= item["attempts"] <= MAX_INTEGER
         ):
             raise ValueError("agenda graph has an invalid, duplicated or orphaned item")
@@ -213,10 +218,10 @@ def validate_graph(value, revision: int) -> None:
         raise ValueError("agenda graph has an invalid cursor")
     stack = cursor["stack"]
     if (
-        not isinstance(stack, list) or any(frame not in known for frame in stack)
+        not isinstance(stack, list) or any(not _graph_member(frame, known) for frame in stack)
         or (cursor["frame"] is None) != (not stack)
         or (stack and cursor["frame"] != stack[-1])
-        or (cursor["item"] is not None and cursor["item"] not in seen)
+        or (cursor["item"] is not None and not _graph_member(cursor["item"], seen))
     ):
         raise ValueError("agenda graph cursor is not the top of a known stack")
     for entry in history:

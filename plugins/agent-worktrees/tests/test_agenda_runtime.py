@@ -368,6 +368,12 @@ def test_cli_publication_of_a_graph_requests_and_accepts_its_echo(monkeypatch, c
         lambda g: g["history"][0].update(at="yesterday"),
         lambda g: g["omitted"].update(items=-1),
         lambda g: g.update(extra=True),
+        lambda g: g["frames"][0].update(state=[]),
+        lambda g: g["frames"][1].update(parent={"id": "root"}),
+        lambda g: g["items"][0].update(state={}),
+        lambda g: g["items"][0].update(frame=["root"]),
+        lambda g: g["cursor"].update(stack=[["root"]]),
+        lambda g: g["cursor"].update(item=["probe"]),
     ],
 )
 def test_graph_shape_is_strict(owned, fault):

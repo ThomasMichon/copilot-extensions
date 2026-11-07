@@ -179,6 +179,12 @@ def _frame(graph, index):
     lambda graph: graph["cursor"].update(item="i-missing"),
     lambda graph: graph["history"][0].update(at="yesterday"),
     lambda graph: graph["omitted"].update(items=-1),
+    lambda graph: _frame(graph, 0).update(state=[]),
+    lambda graph: _frame(graph, 1).update(parent={"id": "f-root"}),
+    lambda graph: graph["items"][0].update(state={}),
+    lambda graph: graph["items"][0].update(frame=["f-root"]),
+    lambda graph: graph["cursor"].update(stack=[["f-root"]]),
+    lambda graph: graph["cursor"].update(item=["i-missing"]),
 ])
 def test_malformed_graph_is_rejected(mutate):
     frame = graph_publication()
