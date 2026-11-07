@@ -106,3 +106,31 @@ def test_pinned_invocation_loader_closure_is_statically_admitted(relative, expec
     from release_helper_loaders import dynamic_loads
 
     assert dynamic_loads(ast.parse((ROOT / relative).read_bytes()), relative) == expected
+
+
+@pytest.mark.parametrize("phase", ["source", "candidate"])
+def test_planned_output_ancestor_conflicts_refuse_before_writes(tmp_path, phase):
+    source, candidate, plugin = _candidate(tmp_path)
+    for root in (source, candidate):
+        manifest = root / "plugins/sample/payload-invocation.json"
+        data = json.loads(manifest.read_text())
+        data["outputDir"] = "scripts/emit-command-catalog.sh"
+        manifest.write_text(json.dumps(data), encoding="utf-8")
+    before = {path.relative_to(tmp_path): path.read_bytes()
+              for path in tmp_path.rglob("*") if path.is_file()}
+    if phase == "source":
+        spec = owner.importlib.util.spec_from_file_location(
+            "_unit_invocation_conflict_check", ROOT / "libs/payload-invocation/generate.py",
+        )
+        assert spec and spec.loader
+        generator = owner.importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(generator)
+        with pytest.raises(ValueError, match="generated output path conflict"):
+            generator.source_check(source / "plugins/sample/payload-invocation.json", canonical_root=source)
+    else:
+        log = owner.materialize(candidate, canonical_root=source)
+        assert len(log) == 1 and log[0].startswith("SKIP Invocation materialization:"), log
+        assert "generated output path conflict" in log[0], log
+    assert before == {path.relative_to(tmp_path): path.read_bytes()
+                      for path in tmp_path.rglob("*") if path.is_file()}
+    assert not (plugin / "scripts/emit-command-catalog.sh").exists()

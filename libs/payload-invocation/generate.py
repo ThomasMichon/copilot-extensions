@@ -3,7 +3,6 @@
 from __future__ import annotations
 import ast
 import sys
-
 import argparse
 import hashlib
 import json
@@ -12,13 +11,11 @@ import re
 import stat
 from pathlib import Path
 from typing import Any
-
 REPO = Path(__file__).resolve().parents[2]
 TEMPLATES = Path(__file__).resolve().parent / "templates"
 SCHEMA = "copilot-extensions.payload-invocation"
 LEGACY_VERSION = 1
 VERSION = 2
-
 _PLUGIN = re.compile(r"^[a-z][a-z0-9-]*$")
 _COMMAND = re.compile(r"^[a-z][a-z0-9-]*$")
 _MODULE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$")
@@ -899,12 +896,15 @@ def write_generated(path: Path, content: str | bytes) -> None:
 def validate_output_paths(manifest: Path, outputs: dict[Path, str | bytes]) -> None:
     """Validate the complete normal output inventory without requiring mirrors."""
     root = manifest.parent.absolute()
+    planned = {path.absolute() for path in outputs if isinstance(path, Path)}
     for path, content in outputs.items():
         if not isinstance(path, Path) or not isinstance(content, (str, bytes)):
             raise ValueError(f"{manifest}: invalid generated output inventory")
         path = path.absolute()
         if ".." in path.parts or not path.is_relative_to(root):
             raise ValueError(f"{manifest}: generated output escapes its payload: {path}")
+        if any(parent in planned for parent in path.parents):
+            raise ValueError(f"{manifest}: generated output path conflict: {path}")
         for component in (path, *path.parents):
             if component.exists() or component.is_symlink():
                 info = component.lstat()
