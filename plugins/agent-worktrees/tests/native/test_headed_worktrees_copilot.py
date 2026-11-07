@@ -284,7 +284,10 @@ class Mux {
                 f"correlation=launch_execution.Correlation({plan['attempt']!r},{plan['resolution']!r}))\n"
                 "  except BaseException:\n"
                 "    traceback.print_exc(file=log);code=3\n"
-                f"  Path({str(result_file)!r}).write_text(str(code),encoding='utf-8')\n"
+                f"  result=Path({str(result_file)!r})\n"
+                "  temporary=result.with_suffix('.tmp')\n"
+                "  temporary.write_text(str(code),encoding='utf-8')\n"
+                "  temporary.replace(result)\n"
                 "sys.exit(code)\n",
                 encoding="utf-8",
             )

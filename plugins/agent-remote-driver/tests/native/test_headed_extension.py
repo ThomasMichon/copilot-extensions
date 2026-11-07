@@ -17,6 +17,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 from agent_procutil import no_window_kwargs
+from agent_procutil._interpreter import physical_executable
 import pytest
 from websockets.asyncio.client import connect
 
@@ -101,6 +102,8 @@ def test_native_private_mux_executes_the_requested_pane(tmp_path, monkeypatch, c
     from headed_mux_fixture import FixtureMux
     binary = os.environ.get("PSMUX_TEST_BIN") or shutil.which("psmux.exe")
     assert binary
+    pane_python = physical_executable(getattr(sys, "_base_executable", sys.executable))
+    assert pane_python
     home = tmp_path / "home"
     home.mkdir()
     (home / ".psmux.conf").write_text("set -g warm off\n", encoding="utf-8")
@@ -108,24 +111,35 @@ def test_native_private_mux_executes_the_requested_pane(tmp_path, monkeypatch, c
     pane = tmp_path / "pane.py"
     pane.write_text(
         "import os,time\nfrom pathlib import Path\n"
-        "Path(os.environ['DRIVER_FIXTURE_MARKER']).write_text(str(os.getpid()),encoding='utf-8')\n"
+        "marker=Path(os.environ['DRIVER_FIXTURE_MARKER'])\n"
+        "temporary=marker.with_suffix('.tmp')\n"
+        "temporary.write_text(str(os.getpid()),encoding='utf-8')\n"
+        "temporary.replace(marker)\n"
         "while not Path(os.environ['DRIVER_FIXTURE_RELEASE']).exists(): time.sleep(0.05)\n",
         encoding="utf-8",
     )
+    monkeypatch.setenv("PSMUX_CONFIG_FILE", str(tmp_path / "unused-caller.conf"))
+    monkeypatch.setenv("PSMUX_DATA_DIR", str(tmp_path / "unused-caller-data"))
     fixture = FixtureMux(binary, home, {
-        **os.environ, "HOME": str(home), "USERPROFILE": str(home), "PSMUX_NO_WARM": "1",
+        **{key: value for key, value in os.environ.items()
+           if key not in {"PSMUX_CONFIG_FILE", "PSMUX_DATA_DIR"}},
+        "HOME": str(home), "USERPROFILE": str(home), "PSMUX_NO_WARM": "1",
+        "PSMUX_DATA_DIR": str(tmp_path / "psmux-data"),
         "DRIVER_FIXTURE_MARKER": str(marker), "DRIVER_FIXTURE_RELEASE": str(release),
     })
     if configured:
         fixture.environment.update(
             PSMUX_CONFIG_FILE=os.devnull, PSMUX_DATA_DIR=str(tmp_path / "psmux-data"),
         )
+    else:
+        assert "PSMUX_CONFIG_FILE" not in fixture.environment
+    assert fixture.environment["PSMUX_DATA_DIR"] == str(tmp_path / "psmux-data")
     identity = None
     try:
         assert fixture.query("has-session", "-t", fixture.target).returncode == 1
         launched = fixture.query(
             "new-session", "-d", "-s", fixture.target, "-c", str(tmp_path), "--",
-            sys.executable, "-I", "-B", str(pane),
+            pane_python, "-I", "-B", str(pane),
         )
         assert launched.returncode == 0, launched.stderr
         observed = fixture.query(
@@ -136,7 +150,18 @@ def test_native_private_mux_executes_the_requested_pane(tmp_path, monkeypatch, c
         deadline = time.monotonic() + 10
         while not marker.is_file() and time.monotonic() < deadline:
             time.sleep(0.05)
-        assert marker.is_file(), fixture.query("capture-pane", "-p", "-t", fixture.target).stdout
+        if not marker.is_file():
+            observed_pid = fixture.query("display-message", "-p", "-t", fixture.target, "#{pane_pid}")
+            assert observed_pid.returncode == 0 and observed_pid.stdout.strip().isdigit()
+            pid = int(observed_pid.stdout.strip())
+            detail = subprocess.run(
+                [shutil.which("pwsh"), "-NoProfile", "-Command",
+                 f"Get-CimInstance Win32_Process -Filter 'ProcessId={pid}' | "
+                 "Select-Object ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress"],
+                env=fixture.environment, capture_output=True, text=True, encoding="utf-8",
+                timeout=10, **no_window_kwargs(),
+            )
+            pytest.fail(detail.stdout + detail.stderr)
         pid = int(marker.read_text(encoding="utf-8"))
         assert pid_alive(pid)
         release.write_text("release", encoding="utf-8")
@@ -194,6 +219,66 @@ writeFileSync(process.env.DRIVER_FIXTURE_OUTPUT, JSON.stringify({
     events = [
         json.loads(line) for line in session_files[0].read_text(encoding="utf-8").splitlines()
     ]
+    assert not any(
+        event.get("data", {}).get("permissionRequest", {}).get("kind") == "extension-permission-access"
+        for event in events
+    )
+    assert len(offline_cli.requests) == 1
+    assert not (offline_cli.home / "permissions-config.json").exists()
+
+
+def test_native_joined_session_reports_pending_read_support_without_permission_grants(tmp_path, offline_cli):
+    plugin = tmp_path / "pending-plugin"
+    extension = plugin / "extensions" / "pending-fixture"
+    extension.mkdir(parents=True)
+    (plugin / "plugin.json").write_text(
+        json.dumps({"name": "pending-fixture", "version": "1.0.0"}), encoding="utf-8",
+    )
+    (extension / "extension.mjs").write_text("""
+import { writeFileSync } from "node:fs";
+import { joinSession } from "@github/copilot-sdk/extension";
+const session = await joinSession();
+const observations = {};
+for (const [name, field] of [["tasks", "tasks"], ["schedule", "entries"]]) {
+    const api = session.rpc?.[name];
+    if (typeof api?.list !== "function") {
+        observations[name] = { state: "unavailable", reason: "missing-method" };
+        continue;
+    }
+    try {
+        const result = await api.list();
+        observations[name] = Array.isArray(result?.[field])
+            ? { state: "available", field, items: result[field] }
+            : { state: "unavailable", reason: "invalid-shape" };
+    } catch {
+        observations[name] = { state: "unavailable", reason: "read-failed" };
+    }
+}
+writeFileSync(process.env.DRIVER_FIXTURE_OUTPUT, JSON.stringify({
+    sessionId: session.sessionId, observations,
+}));
+""", encoding="utf-8")
+    output = tmp_path / "pending-reads.json"
+    result = subprocess.run(
+        [
+            offline_cli.executable, "-p", "ISOLATED_PENDING_READ_FIXTURE", "--trust-folder",
+            "--experimental", "--plugin-dir", str(plugin), "--no-auto-update",
+            "--disable-builtin-mcps", "--no-custom-instructions", "--no-color", "--no-ask-user",
+            "--log-dir", str(offline_cli.logs),
+        ],
+        cwd=offline_cli.workspace, env={**offline_cli.env, "DRIVER_FIXTURE_OUTPUT": str(output)},
+        capture_output=True, timeout=60, text=True, encoding="utf-8", **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr + _logs(offline_cli.logs)
+    assert output.is_file(), result.stderr + _logs(offline_cli.logs)
+    observed = json.loads(output.read_text(encoding="utf-8"))
+    for name, field in (("tasks", "tasks"), ("schedule", "entries")):
+        snapshot = observed["observations"][name]
+        assert snapshot["state"] == "available", {name: snapshot}
+        assert snapshot["field"] == field and isinstance(snapshot["items"], list)
+    session_files = list((offline_cli.home / "session-state").glob("*/events.jsonl"))
+    assert [path.parent.name for path in session_files] == [observed["sessionId"]]
+    events = [json.loads(line) for line in session_files[0].read_text(encoding="utf-8").splitlines()]
     assert not any(
         event.get("data", {}).get("permissionRequest", {}).get("kind") == "extension-permission-access"
         for event in events

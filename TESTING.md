@@ -2373,11 +2373,19 @@ after caller cleanup Jobs. Those remain separate acceptance lanes.
 Driver's explicit `tests/native/test_headed_extension.py` lane uses the same
 canonical private mux routing, with raw pane argv separated from mux options
 by `--`. Two finite pane controls check actual script entry, PID and exit with
-default and explicit fixture configuration. The SDK/broker and coordinator
+default and null fixture configuration, always using a private data directory
+and rejecting inherited config/data overrides. PID and owner-result markers
+are published atomically. The SDK/broker and coordinator
 controls invoke native Copilot or Python directly; they do not qualify the
 Manager PowerShell pane wrapper. Unit isolation controls reject default,
 foreign and whole-server routing before spawn, without mistaking child flags
 after `--` for mux routing.
+The focused `joined_session_reports_pending_read` control queries the executing
+CLI's `session.rpc.tasks.list()` and `session.rpc.schedule.list()` without a
+permission grant, checking the native `tasks` and `entries` arrays in the same
+conversation. Missing/failed/invalid reads do not produce an empty snapshot.
+This is SDK read-support qualification, not complete background-agent evidence,
+active-work/schedule mutation coverage or automatic-idle retirement.
 
 The optional native runtime-removal portfolio includes
 `tools/test_installer_engine_uninstall.py`,

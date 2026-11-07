@@ -1635,3 +1635,22 @@ venue qualification are not applicable to these local Windows fixture
 changes. Installer, copied setup, full Manager/embody, auth-wait, physical
 keyboard, caller-Job lifetime and receiving/skew acceptance remain separate
 open gates. The parent Plan and Validation Plan remain unchanged and Active.
+
+Review of #11275 found a visible-before-complete PID marker and inherited
+PSMux config/data overrides in the finite pane control. Publish the PID and
+original Worktrees owner-result markers by atomic replacement. Reject caller
+overrides, retain a private data directory in both pane controls, and exercise
+default-config versus null-config loading separately. The default-data probe
+could hang before script entry even with the correct physical Python command
+line; do not infer that the venv redirector explained every startup failure.
+With explicit fixture-private data, both pane controls pass in 2.11 seconds
+(28.25 seconds including preparation/cleanup).
+
+A separate native joined-session observation passes in 9.97 seconds
+(36.42 seconds including preparation/cleanup). The executing CLI exposes
+`session.rpc.tasks.list()` and `session.rpc.schedule.list()` with the expected
+`tasks` and `entries` arrays, in the same native conversation and without
+granting extension permissions. Missing/failed reads remain unavailable.
+This does not yet prove complete pending agents, initial/reconnect completeness,
+active schedules or grace-race cancellation; automatic idle retirement stays
+unavailable and the lifetime gate remains open.
