@@ -31,6 +31,8 @@ start` and the installer's native direct-start fallback remain available without
 Task Scheduler, local-account setup or administrative rights. Existing explicit
 `-NonInteractive` / `AGENT_BRIDGE_NONINTERACTIVE` scheduling opt-ins are retained;
 an explicit `absent` selection wins over that compatibility opt-in.
+Automatic bootstrap does not manufacture that opt-in for drift or incomplete
+installs; its windowless PowerShell host is independent of service scheduling.
 
 After editing configuration, `scripts\install.ps1 schedule` reconciles task
 policy alone. With `absent` it does not stop a running daemon, delete runtime
