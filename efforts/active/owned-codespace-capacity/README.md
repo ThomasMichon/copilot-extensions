@@ -118,6 +118,11 @@ existing resource ownership, not solve quota pressure by destructive cleanup.
 
 ## Journal
 
+### 2026-11-06 - Admission review corrections
+- Moved the capacity model, planner and selected-account context into one focused component, preserving existing pool import paths and tightening only the affected pool ceiling; no cap was raised.
+- Preserved the qualified creation environment through the headless REST fallback for explicit and repository-mapped accounts. Quota recovery now requires a matching persisted binding and retains one credential through rescue, deletion and the account-specific stop-state lookup.
+- The four affected source suites passed 269 tests after extraction and credential repair. The final mapped/explicit creation selection passed 17 tests; touched-Python lint passed. Fresh required CI and review remain necessary.
+
 ### 2026-11-06 - Independent admission source qualified
 - Reproduced the stopped-pool failure: ordinary planning still selected creation at the owned limit, while valid existing-venue reuse passed.
 - Added selected-account owned-slot policy and known-compute admission, preserved explicit override and narrowed quota retry to the same account without relaxing rescue or live-holder gates.

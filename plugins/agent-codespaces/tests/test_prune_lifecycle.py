@@ -235,15 +235,17 @@ def test_reclaim_unknown_error_returns_none(store):
 
 @pytest.mark.parametrize("running", [False, True])
 def test_quota_reclaim_only_mutates_selected_account(store, monkeypatch, running):
-    from agent_codespaces import __main__ as cli, lifecycle
+    from agent_codespaces import __main__ as cli, allocation
 
     status_mod.set_status("foreign", status_mod.STATE_PRUNABLE)
     status_mod.set_status("selected", status_mod.STATE_PRUNABLE)
     monkeypatch.setattr(
-        lifecycle, "list_account_codespaces",
+        allocation, "list_account_codespaces",
         lambda account: [_info("selected", "Available" if running else "Shutdown")],
     )
-    with patch.object(cli, "sync_codespace_sessions", return_value={"ok": True}), \
+    monkeypatch.setattr("agent_codespaces.account_binding.bound_account_or_raise", lambda name: "selected-owner")
+    monkeypatch.setattr("agent_codespaces.owner_inventory.credential", lambda account: "selected-fixture-token")
+    with patch.object(cli, "sync_codespace_sessions", return_value={"ok": True}) as rescue, \
          patch.object(cli, "delete_codespace") as delete, \
          patch.object(cli, "stop_codespace") as stop:
         note = cli._reclaim_for_quota(
@@ -252,20 +254,56 @@ def test_quota_reclaim_only_mutates_selected_account(store, monkeypatch, running
         )
     assert note is not None and "selected" in note
     if running:
-        stop.assert_called_once_with("selected")
+        stop.assert_called_once_with(
+            "selected", account="selected-owner", token="selected-fixture-token",
+        )
         delete.assert_not_called()
     else:
-        delete.assert_called_once_with("selected", force=False)
+        delete.assert_called_once_with(
+            "selected", force=False, account="selected-owner", token="selected-fixture-token",
+        )
+        assert rescue.call_args.kwargs["account"] == "selected-owner"
+        assert rescue.call_args.kwargs["token"] == "selected-fixture-token"
         stop.assert_not_called()
     assert status_mod.get_status("foreign") is not None
 
 
+@pytest.mark.parametrize("bound", [None, "foreign-owner"])
+@pytest.mark.parametrize("running", [False, True])
+def test_quota_reclaim_refuses_missing_or_foreign_same_name_binding(
+    store, monkeypatch, bound, running,
+):
+    from agent_codespaces import __main__ as cli, allocation
+
+    status_mod.set_status("same-name", status_mod.STATE_PRUNABLE)
+    monkeypatch.setattr(
+        allocation, "list_account_codespaces",
+        lambda account: [_info("same-name", "Available" if running else "Shutdown")],
+    )
+    monkeypatch.setattr("agent_codespaces.account_binding.bound_account_or_raise", lambda name: bound)
+    monkeypatch.setattr(
+        "agent_codespaces.owner_inventory.credential",
+        lambda account: pytest.fail("ineligible identity read a credential"),
+    )
+    with patch.object(cli, "sync_codespace_sessions") as rescue, \
+         patch.object(cli, "delete_codespace") as delete, \
+         patch.object(cli, "stop_codespace") as stop:
+        assert cli._reclaim_for_quota(
+            "too many codespaces running" if running else "maximum number of codespaces",
+            account="selected-owner",
+        ) is None
+    rescue.assert_not_called()
+    delete.assert_not_called()
+    stop.assert_not_called()
+    assert status_mod.get_status("same-name") is not None
+
+
 def test_quota_reclaim_unknown_account_inventory_preserves_venues(store, monkeypatch):
-    from agent_codespaces import __main__ as cli, lifecycle
+    from agent_codespaces import __main__ as cli, allocation
 
     status_mod.set_status("retained", status_mod.STATE_PRUNABLE)
     monkeypatch.setattr(
-        lifecycle, "list_account_codespaces",
+        allocation, "list_account_codespaces",
         lambda account: (_ for _ in ()).throw(RuntimeError("inventory unavailable")),
     )
     with patch.object(cli, "sync_codespace_sessions") as rescue, \
@@ -281,7 +319,7 @@ def test_quota_reclaim_unknown_account_inventory_preserves_venues(store, monkeyp
 def test_create_retries_after_reclaim(store):
     info = _info("new-cs", "Available")
     with patch("agent_codespaces.__main__._ambient_codespace_scope", return_value=(True, "")), \
-         patch("agent_codespaces.lifecycle.allocation_account", return_value="selected-owner"), \
+         patch("agent_codespaces.allocation.allocation_account", return_value="selected-owner"), \
          patch("agent_codespaces.__main__.load_merged_config", return_value=object()), \
          patch("agent_codespaces.__main__._reclaim_for_quota", return_value="pruned x"), \
          patch(
@@ -295,7 +333,7 @@ def test_create_retries_after_reclaim(store):
 
 def test_create_quota_no_reclaim_fails(store):
     with patch("agent_codespaces.__main__._ambient_codespace_scope", return_value=(True, "")), \
-         patch("agent_codespaces.lifecycle.allocation_account", return_value="selected-owner"), \
+         patch("agent_codespaces.allocation.allocation_account", return_value="selected-owner"), \
          patch("agent_codespaces.__main__.load_merged_config", return_value=object()), \
          patch("agent_codespaces.__main__._reclaim_for_quota", return_value=None), \
          patch(

@@ -184,26 +184,6 @@ def _list_codespaces_under(login: str | None, *, qualified: bool = False) -> lis
     return codespaces
 
 
-def allocation_account(repo: str) -> str:
-    from . import gh_account
-
-    account = gh_account.account_for_repo(repo) or gh_account.active_account()
-    if not account:
-        raise RuntimeError("CodeSpace allocation account is unavailable")
-    return account
-
-
-def list_account_codespaces(account: str) -> list[CodespaceInfo]:
-    """Require a complete, credential-pinned single-account allocation view."""
-    try:
-        rows = _list_codespaces_under(account, qualified=True)
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise RuntimeError(f"CodeSpace account inventory failed: {exc}") from exc
-    if len(rows) >= 50:
-        raise RuntimeError("CodeSpace account inventory is truncated at the 50-venue listing limit")
-    return rows
-
-
 def account_for_codespace(name: str) -> str | None:
     """Return the gh account that owns CodeSpace ``name``, or None.
 
@@ -293,6 +273,7 @@ _STATUS_OVERALL_BUDGET_SECONDS = 12.0
 
 def _get_codespace_status_under(
     name: str, account: str | None, *, timeout: float = _STATUS_LOOKUP_TIMEOUT_SECONDS,
+    token: str | None = None,
 ) -> tuple[bool, str | None]:
     """Single-account attempt for :func:`get_codespace_status`. Raises
     :class:`RuntimeError` for any failure that is NOT an unambiguous 404 --
@@ -321,7 +302,8 @@ def _get_codespace_status_under(
     env = None
     if account is not None:
         mint_start = time.monotonic()
-        token = gh_account.token_for_account(account)
+        if token is None:
+            token = gh_account.token_for_account(account)
         timeout = max(timeout - (time.monotonic() - mint_start), 0.5)
         if not token:
             raise RuntimeError(
@@ -615,6 +597,7 @@ def _create_codespace_via_rest(
     branch: str | None = None,
     display_name: str | None = None,
     devcontainer_path: str | None = None,
+    environment: dict | None = None,
 ) -> str:
     """Create a CodeSpace via the REST API (no TTY gate) -- #151 fallback.
 
@@ -626,7 +609,7 @@ def _create_codespace_via_rest(
     provisioning. Raises ``RuntimeError`` if the REST call fails or returns no
     name.
     """
-    from . import gh_account
+    from .allocation import creation_environment
 
     args = [
         "gh", "api", "--method", "POST",
@@ -647,7 +630,7 @@ def _create_codespace_via_rest(
     result = subprocess.run(
         args, capture_output=True, text=True, timeout=300,
         creationflags=_creation_flags(),
-        env=gh_account.env_for_account(account) if account else None,
+        env=environment if environment is not None else creation_environment(repo, account)[1],
     )
     if result.returncode != 0:
         raise RuntimeError(
@@ -703,15 +686,9 @@ def create_codespace(
 
     log.info("Creating codespace: %s", " ".join(args))
 
-    from . import gh_account
+    from .allocation import creation_environment
 
-    if account:
-        from .owner_inventory import qualified_environment
-
-        environment = qualified_environment(account)
-    else:
-        account = gh_account.account_for_repo(repo)
-        environment = gh_account.env_for_account(account) if account else None
+    account, environment = creation_environment(repo, account)
     result = subprocess.run(
         args, capture_output=True, text=True, timeout=300,
         creationflags=_creation_flags(),
@@ -734,6 +711,7 @@ def create_codespace(
                 repo, machine_type, location, account,
                 branch=branch, display_name=display_name,
                 devcontainer_path=resolved_devcontainer,
+                environment=environment,
             )
         else:
             raise RuntimeError(f"gh codespace create failed: {stderr}")
@@ -900,7 +878,9 @@ def delete_codespace(
         log.debug("Transcript mirror prune after deleting %s failed: %s", name, exc)
 
 
-def stop_codespace(name: str, account: str | None = None) -> bool:
+def stop_codespace(
+    name: str, account: str | None = None, *, token: str | None = None,
+) -> bool:
     """Gracefully stop (shut down) a CodeSpace, PRESERVING it for later resume.
 
     The pause-and-keep counterpart to ``delete_codespace`` -- the compute is
@@ -909,27 +889,19 @@ def stop_codespace(name: str, account: str | None = None) -> bool:
     the CodeSpace was already ``Shutdown`` (idempotent no-op). Raises
     ``RuntimeError`` on an unexpected failure.
 
-    ``account`` pins ``gh`` to the owning account; when None it is resolved
-    from the cross-account listing (falls back to ambient auth).
+    ``account`` selects a strict single-account status lookup. ``token`` retains
+    a caller's validated credential through that lookup and the stop. Without
+    an explicit account, legacy merged discovery remains best-effort.
     """
-    from . import gh_account
+    from .allocation import stop_context
 
-    # Idempotency: skip the call if the CodeSpace is already shut down. Reuse
-    # the listing to also learn the owning account when not supplied.
-    try:
-        for cs in list_codespaces():
-            if cs.name == name:
-                if account is None:
-                    account = cs.account or None
-                if cs.state == _SHUTDOWN_STATE:
-                    log.info("CodeSpace %s already Shutdown; nothing to stop", name)
-                    return False
-                break
-    except ContextRefused:
-        raise
-    except RuntimeError:
-        # Can't list (auth/network) -- fall through and let `gh` decide.
-        pass
+    account, environment, state = stop_context(
+        name, account, token, listing=list_codespaces,
+        status_lookup=_get_codespace_status_under,
+    )
+    if state == _SHUTDOWN_STATE:
+        log.info("CodeSpace %s already Shutdown; nothing to stop", name)
+        return False
 
     args = ["gh", "codespace", "stop", "-c", name]
     log.info("Stopping codespace: %s", name)
@@ -937,7 +909,7 @@ def stop_codespace(name: str, account: str | None = None) -> bool:
     result = subprocess.run(
         args, capture_output=True, text=True, timeout=120,
         creationflags=_creation_flags(),
-        env=gh_account.env_for_account(account) if account else None,
+        env=environment,
     )
 
     if result.returncode != 0:

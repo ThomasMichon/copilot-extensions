@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agent_codespaces import gh_account, lifecycle
+from agent_codespaces import allocation, gh_account, lifecycle
 from agent_codespaces.lifecycle import (
     CodespaceInfo,
     cleanup_stale,
@@ -98,7 +98,7 @@ def test_allocation_listing_refuses_malformed_success(monkeypatch, response):
         lambda *args, **kwargs: MagicMock(returncode=0, stdout=response),
     )
     with pytest.raises(RuntimeError, match="Malformed"):
-        lifecycle.list_account_codespaces("selected-owner")
+        allocation.list_account_codespaces("selected-owner")
 
 
 def test_allocation_listing_keeps_selected_owner_and_marks_truncation(monkeypatch):
@@ -114,10 +114,10 @@ def test_allocation_listing_keeps_selected_owner_and_marks_truncation(monkeypatc
         return MagicMock(returncode=0, stdout=json.dumps(rows))
 
     monkeypatch.setattr(lifecycle.subprocess, "run", run)
-    assert lifecycle.list_account_codespaces("selected-owner") == []
+    assert allocation.list_account_codespaces("selected-owner") == []
     rows.extend({"name": f"venue-{index}", "state": "Shutdown"} for index in range(50))
     with pytest.raises(RuntimeError, match="truncated"):
-        lifecycle.list_account_codespaces("selected-owner")
+        allocation.list_account_codespaces("selected-owner")
     assert calls == ["selected-owner", "selected-owner"]
 
 
@@ -128,11 +128,13 @@ def test_allocation_listing_reports_native_failure_as_unknown(monkeypatch, error
         lambda *args, **kwargs: (_ for _ in ()).throw(error),
     )
     with pytest.raises(RuntimeError, match="account inventory failed"):
-        lifecycle.list_account_codespaces("selected-owner")
+        allocation.list_account_codespaces("selected-owner")
 
 
 class TestCreateCodespace:
-    def test_creation_preserves_admitted_account_environment(self, monkeypatch):
+    @pytest.mark.parametrize("explicit", [False, True])
+    def test_creation_preserves_admitted_account_environment(self, monkeypatch, explicit):
+        monkeypatch.setattr(gh_account, "account_for_repo", lambda repo: "selected-owner")
         monkeypatch.setattr(
             "agent_codespaces.owner_inventory.qualified_environment",
             lambda account: {"fixture-account": account},
@@ -140,9 +142,37 @@ class TestCreateCodespace:
         with patch.object(lifecycle.subprocess, "run", return_value=MagicMock(
             returncode=0, stdout="created-venue",
         )) as run:
-            info = create_codespace("org/repo", CodespacesConfig(), account="selected-owner")
+            info = create_codespace(
+                "org/repo", CodespacesConfig(),
+                account="selected-owner" if explicit else None,
+            )
         assert run.call_args.kwargs["env"] == {"fixture-account": "selected-owner"}
         assert info.account == "selected-owner"
+
+    @pytest.mark.parametrize("explicit", [False, True])
+    def test_rest_fallback_retains_qualified_environment(self, monkeypatch, explicit):
+        selected = {"GH_TOKEN": "selected-fixture-token"}
+        monkeypatch.setattr(gh_account, "account_for_repo", lambda repo: "selected-owner")
+        monkeypatch.setenv("GH_TOKEN", "ambient-fixture-token")
+        monkeypatch.setattr(
+            "agent_codespaces.owner_inventory.qualified_environment",
+            lambda account: dict(selected),
+        )
+        monkeypatch.setattr(
+            gh_account, "env_for_account",
+            lambda *args: pytest.fail("qualified creation rediscovered credentials"),
+        )
+        with patch.object(lifecycle, "resolve_devcontainer_path", return_value=None), \
+             patch.object(lifecycle.subprocess, "run", side_effect=[
+                 MagicMock(returncode=1, stderr="failed to prompt: no terminal"),
+                 MagicMock(returncode=0, stdout="rest-created", stderr=""),
+             ]) as run:
+            info = create_codespace(
+                "org/repo", CodespacesConfig(),
+                account="selected-owner" if explicit else None,
+            )
+        assert info.account == "selected-owner"
+        assert [call.kwargs["env"] for call in run.call_args_list] == [selected, selected]
 
     @patch("agent_codespaces.lifecycle.subprocess.run")
     def test_uses_config_defaults(self, mock_run):
@@ -810,6 +840,31 @@ def _cs(name, state):
 
 
 class TestStopCodespace:
+    @pytest.mark.parametrize("state", ["Available", "Shutdown"])
+    def test_explicit_stop_uses_selected_state_and_credential(self, monkeypatch, state):
+        monkeypatch.setenv("GH_TOKEN", "ambient-fixture-token")
+        monkeypatch.setattr(
+            lifecycle, "list_codespaces",
+            lambda: pytest.fail("selected stop consulted foreign merged inventory"),
+        )
+        monkeypatch.setattr(
+            gh_account, "token_for_account",
+            lambda account: pytest.fail("selected stop re-minted its credential"),
+        )
+        responses = [MagicMock(returncode=0, stdout=json.dumps({"state": state}), stderr="")]
+        if state != "Shutdown":
+            responses.append(MagicMock(returncode=0, stdout="", stderr=""))
+        with patch.object(lifecycle.subprocess, "run", side_effect=responses) as run:
+            assert stop_codespace(
+                "same-name", account="selected-owner", token="selected-fixture-token",
+            ) is (state != "Shutdown")
+        assert run.call_args_list[0].args[0][:3] == ["gh", "api", "/user/codespaces/same-name"]
+        assert all(
+            call.kwargs["env"]["GH_TOKEN"] == "selected-fixture-token"
+            for call in run.call_args_list
+        )
+        assert run.call_count == (1 if state == "Shutdown" else 2)
+
     @patch("agent_codespaces.lifecycle.list_codespaces")
     @patch("agent_codespaces.lifecycle.subprocess.run")
     def test_stops_available(self, mock_run, mock_list):

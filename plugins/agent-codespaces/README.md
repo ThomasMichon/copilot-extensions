@@ -649,7 +649,11 @@ blind provider call. Unknown machine costs also refuse additional compute;
 a stopped claimed venue needs known wake headroom.
 `--force-create` explicitly bypasses local capacity/reuse policy, not provider
 limits or authentication. Any quota retry retains existing rescue, liveness
-and cleanup gates and is restricted to that account.
+and cleanup gates and is restricted to that account. Automatic reclaim requires
+a matching persisted account binding; absent, conflicting or unreadable binding
+is not permission to reclaim. The same validated credential reaches rescue,
+deletion and the account-specific stop-state lookup. Creation's headless REST
+fallback retains the admitted environment rather than rediscovering credentials.
 
 The merged `pool` and Picker views expose `owned_by_account`,
 `max_owned_codespaces` and `owned_inventory_complete`; their merged discovery

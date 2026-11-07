@@ -3850,7 +3850,7 @@ def _reclaim_for_quota(err: str, *, account: str | None = None) -> str | None:
     )
     account_rows = None
     if account and (total_limit or running_limit):
-        from .lifecycle import list_account_codespaces
+        from .allocation import list_account_codespaces
 
         try:
             account_rows = list_account_codespaces(account)
@@ -3859,10 +3859,31 @@ def _reclaim_for_quota(err: str, *, account: str | None = None) -> str | None:
         except RuntimeError:
             return None
 
+    def reclaim_identity(name):
+        if account is None:
+            return {}
+        from . import account_binding
+        from .owner_inventory import credential
+
+        try:
+            bound = account_binding.bound_account_or_raise(name)
+            if not bound or bound.casefold() != account.casefold():
+                log.warning("Skipping quota reclaim for %s: account binding is absent or different", name)
+                return None
+            return {"account": account, "token": credential(account)}
+        except ContextRefused:
+            raise
+        except RuntimeError as exc:
+            log.warning("Skipping quota reclaim for %s: %s", name, exc)
+            return None
+
     if total_limit:
         for rec in sorted(list_by_state(STATE_PRUNABLE), key=lambda s: s.state_at):
             name = rec.codespace
             if account_rows is not None and not any(cs.name == name for cs in account_rows):
+                continue
+            identity = reclaim_identity(name)
+            if identity is None:
                 continue
             from ssh_manager import TargetBusyError
 
@@ -3870,12 +3891,14 @@ def _reclaim_for_quota(err: str, *, account: str | None = None) -> str | None:
 
             try:
                 with lifecycle_lock(name, refuse_live_users="prune") as lock:
-                    res = sync_codespace_sessions(name, skip_if_shutdown=False, lock=lock)
+                    res = sync_codespace_sessions(
+                        name, skip_if_shutdown=False, lock=lock, **identity,
+                    )
                     if not (res.get("ok") or res.get("skipped")):
                         continue
                     try:
                         _recheck_before(name, "prune")
-                        delete_codespace(name, force=False)
+                        delete_codespace(name, force=False, **identity)
                     except RuntimeError:
                         continue
             except TargetBusyError:
@@ -3898,13 +3921,16 @@ def _reclaim_for_quota(err: str, *, account: str | None = None) -> str | None:
         for cs in running:
             st = get_status(cs.name)
             if st and st.state in (STATE_RECOVERED, STATE_PRUNABLE):
+                identity = reclaim_identity(cs.name)
+                if identity is None:
+                    continue
                 from ssh_manager import TargetBusyError
 
                 from .lifecycle_lock import lifecycle_lock
 
                 try:  # never stop a box still in use; check + stop under the lock
                     with lifecycle_lock(cs.name, refuse_live_users="stop"):
-                        stop_codespace(cs.name)
+                        stop_codespace(cs.name, **identity)
                 except (RuntimeError, TargetBusyError):
                     continue
                 return f"stopped eligible running box '{cs.name}' to free running quota"
@@ -3930,7 +3956,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
 
     config = load_merged_config()
 
-    from .lifecycle import allocation_account
+    from .allocation import allocation_account
 
     account = allocation_account(args.repo)
     if not getattr(args, "force_create", False):
@@ -3986,6 +4012,8 @@ def _cmd_create(args: argparse.Namespace) -> int:
 
     try:
         info = _create()
+    except ContextRefused:
+        raise
     except RuntimeError as exc:
         note = _reclaim_for_quota(str(exc), account=account)
         if not note:
@@ -4239,7 +4267,7 @@ def _cmd_allocate(args: argparse.Namespace) -> int:
         else pool_mod.DEFAULT_STALE_AFTER
     )
     try:
-        from .lifecycle import allocation_account
+        from .allocation import allocation_account
         from .driving_worktrees import resolve_current_workstream_box
 
         members, budget = pool_mod.build_pool(

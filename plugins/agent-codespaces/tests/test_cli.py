@@ -583,7 +583,7 @@ class TestCreateScopeGate:
 
     @pytest.fixture(autouse=True)
     def selected_account(self, monkeypatch):
-        monkeypatch.setattr("agent_codespaces.lifecycle.allocation_account", lambda repo: "selected-owner")
+        monkeypatch.setattr("agent_codespaces.allocation.allocation_account", lambda repo: "selected-owner")
 
     def test_create_blocked_when_scope_missing(self, capsys):
         import agent_codespaces.__main__ as m
@@ -670,7 +670,7 @@ class TestCreateReuseGuard:
 
     @pytest.fixture(autouse=True)
     def selected_account(self, monkeypatch):
-        monkeypatch.setattr("agent_codespaces.lifecycle.allocation_account", lambda repo: "selected-owner")
+        monkeypatch.setattr("agent_codespaces.allocation.allocation_account", lambda repo: "selected-owner")
 
     def _decision(self, **kw):
         from agent_codespaces.pool import AllocationDecision
@@ -756,7 +756,7 @@ class TestAllocateCommand:
 
     @pytest.fixture(autouse=True)
     def selected_account(self, monkeypatch):
-        monkeypatch.setattr("agent_codespaces.lifecycle.allocation_account", lambda repo: "selected-owner")
+        monkeypatch.setattr("agent_codespaces.allocation.allocation_account", lambda repo: "selected-owner")
 
     def test_allocate_json_emits_decision(self, capsys):
         import agent_codespaces.__main__ as m
@@ -809,7 +809,7 @@ def test_owned_capacity_real_cli_process_preserves_override():
 import contextlib
 import io
 import json
-from agent_codespaces import __main__ as cli, lifecycle, pool, coordination
+from agent_codespaces import __main__ as cli, lifecycle, pool, coordination, allocation
 from agent_codespaces.config import CodespacesConfig
 from agent_codespaces.lifecycle import CodespaceInfo
 
@@ -817,7 +817,7 @@ cli.load_merged_config = CodespacesConfig
 cli._require_codespace_scope = lambda operation: None
 cli.validate_context = lambda: None
 cli._gh_binary_available = lambda: True
-lifecycle.allocation_account = lambda repo: "fixture-owner"
+allocation.allocation_account = lambda repo: "fixture-owner"
 pool.list_leases = lambda: []
 pool.list_status = lambda: []
 pool.codespaces_in_use = lambda names: {}
@@ -838,7 +838,7 @@ for count, force, failed in ((29, False, False), (30, False, False), (31, False,
             name=f"venue-{index}", display_name="", repository="example/project",
             branch="main", state="Shutdown", machine="premiumLinux", account=account,
         ) for index in range(count)]
-    lifecycle.list_account_codespaces = listing
+    allocation.list_account_codespaces = listing
     argv = ["create", "example/project", "--no-wait"]
     if force:
         argv.append("--force-create")
