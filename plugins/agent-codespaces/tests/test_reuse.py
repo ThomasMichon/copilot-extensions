@@ -1076,6 +1076,50 @@ def test_captured_generation_recovers_its_current_tombstone(venue, returning_gen
     assert len(state.releases) == 1
 
 
+@pytest.mark.parametrize("location", ["successor", "history"])
+@pytest.mark.parametrize(("opaque", "accepted"), [
+    ("maintenance-client", True), ("unicode-\u00e9-client", True), ("x" * 256, True),
+    ("", False), ("x" * 257, False), ("bad\nholder", False), ("bad\x7fholder", False), (False, False),
+])
+def test_native_holder_contract_controls_original_generation_recovery(
+    venue, returning_generation, monkeypatch, location, opaque, accepted,
+):
+    from agent_codespaces.claim_return import RETURN_KEY
+
+    state = returning_generation
+    write = lease._write_private_json
+
+    def failed_publication(path, payload):
+        progress = payload.get(RETURN_KEY, {}).get("returns", {}).get("returned")
+        if progress and progress["phase"] == "released" or "returned" not in payload:
+            raise OSError("confirmation publication unavailable")
+        write(path, payload)
+
+    monkeypatch.setattr(lease, "_write_private_json", failed_publication)
+    with pytest.raises(OSError):
+        lease.release_claim("returned", "new-worktree")
+    state.wire = _successor_wire(state.wire)
+    if location == "successor":
+        state.wire["holder"] = opaque
+    else:
+        state.wire["returned_generations"].insert(0, {
+            "lease_id": "3" * 32, "holder": opaque, "released_at": "2026-11-07T12:00:00Z",
+        })
+    monkeypatch.setattr(lease, "_write_private_json", write)
+    before = json.dumps(state.wire, sort_keys=True)
+    local = lease.LEASE_FILE.read_bytes()
+    if accepted:
+        assert lease.release_claim("returned", "new-worktree")
+        assert lease.get_lease("returned") is None
+    else:
+        with pytest.raises(RuntimeError, match="changed"):
+            lease.release_claim("returned", "new-worktree")
+        assert lease.LEASE_FILE.read_bytes() == local
+    assert not venue.ledger["new-worktree"]
+    assert json.dumps(state.wire, sort_keys=True) == before
+    assert len(state.releases) == 1
+
+
 @pytest.mark.parametrize("state", ["own", "successor", "missing-shared", "local-only"])
 def test_caller_local_custody_counts_without_active_native_ledger(venue, monkeypatch, capsys, state):
     assert cli.main(["create", "example/project", "--no-wait"]) == 0

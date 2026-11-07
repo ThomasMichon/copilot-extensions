@@ -752,9 +752,13 @@ never replayed with older arguments.
 Retry may confirm that saved generation from its own current release tombstone,
 or from the receiver's strict schema-2 `returned_generations` evidence after
 another host acquires or returns the venue. Proof must match the resource,
-original generation and complete saved holder. Missing, evicted, malformed,
-foreign or rollback-unreadable evidence remains unknown. A same-holder tombstone
-without a previously captured generation is no longer enough: it can describe
+original generation and complete saved holder.
+Other successor or historical holders follow the receiver's bounded opaque-string
+contract; they need not resolve as Worktrees references. Only the matching
+original proof must equal the exact saved holder.
+Missing, evicted, malformed, foreign or rollback-unreadable evidence remains
+unknown. A same-holder tombstone without a previously captured generation is
+no longer enough: it can describe
 a later borrow. A persisted released phase or an ACK still known to this
 invocation retains its existing meaning. Recovery settles only the original
 owner's ledger and unchanged local custody; it never returns a successor.

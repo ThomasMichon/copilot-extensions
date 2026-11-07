@@ -97,6 +97,13 @@ def _timestamp(value: object) -> datetime:
     return result
 
 
+def _receiver_holder(value: object) -> bool:
+    return (
+        isinstance(value, str) and 0 < len(value) <= 256
+        and not any(ord(character) < 32 or ord(character) == 127 for character in value)
+    )
+
+
 def _confirmed_generation_return(record: dict | None, name: str, generation: str | None, holder: str) -> bool:
     if not record or not generation or not _resource_matches(record, name):
         return False
@@ -105,7 +112,7 @@ def _confirmed_generation_return(record: dict | None, name: str, generation: str
     if (
         not current or type(version) is not int or version not in (1, 2)
         or record.get("state") not in ("leased", "released") or type(record.get("live")) is not bool
-        or not lease._same_holder_ref(record.get("holder"), record.get("holder"))
+        or not _receiver_holder(record.get("holder"))
         or record["state"] == "released" and record["live"]
     ):
         return False
@@ -125,7 +132,7 @@ def _confirmed_generation_return(record: dict | None, name: str, generation: str
             if (
                 not identity or identity in seen or released > renewed
                 or previous is not None and released < previous
-                or not lease._same_holder_ref(proof["holder"], proof["holder"])
+                or not _receiver_holder(proof["holder"])
             ):
                 return False
             seen.add(identity)
