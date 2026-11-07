@@ -2225,3 +2225,32 @@ projects remain pending. Source gates are not native POSIX qualification.
 The hosted application lane still lacks its required governed feed and is
 not substituted for this local first-touch/native result. Fresh hosted
 focused controls, final-head review and required CI remain publication gates.
+
+### 2026-11-07 - Preserve file-level qualification and source admission
+
+#11339 publishes the slice after normal rebase. Its initial CI identifies two
+source omissions: the actor-free launch-boundary fixture still substitutes
+the old installer seam, and its manifest retains the prior source bytes;
+the strict runtime-resolution scanner also needs the precise immutable-slot
+annotation for the marker-selected application environment. Update only the
+fixture seam and two source pins, not unit nodes, coverage targets or budgets.
+All fifty-three original boundary controls pass in 17.19 seconds, every
+admitted source pin verifies, and the strict runtime-resolution guard passes.
+
+Copilot review identifies a genuine duplicate-construction issue: the two
+optional application cases fit separately but exceed a 300-second group
+together. Collapse them into one original test. It always constructs once;
+an explicitly selected native executable adds the offline history assertions
+to that same construction. A whole-file run with native checks enabled
+passes in 287.17 seconds (364.00 including runner preparation and cleanup),
+with no selector, skip or wider limit. This also exercises the current rebased
+application inputs. It does not expand the qualified consumer boundary.
+
+The initial published head's forty focused hosted Windows controls qualify
+without skips in 52.33 seconds
+([run 42387795348](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42387795348)).
+The bound source/selection/controller/run/attempt manifest validates on Windows
+2025 and Python 3.12.10, with no staging branch or new transport ref. The
+annotation, actor-free fixture/pins and single-construction test correction
+do not change those forty controls' runtime logic. Retain their actual source
+attribution; final updated-head CI and a new verdict remain required.

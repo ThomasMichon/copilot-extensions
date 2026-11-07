@@ -2467,14 +2467,15 @@ The focused `test_launch_cmd.py`, `test_session_shell.py`,
 legacy selection and literal argument transport, cover application-owned copying,
 and refuse flat-interpreter fallback for an incomplete application. The Bash
 controls use Git Bash on Windows; that is not native POSIX lifecycle evidence.
-Select the application's `native-setup` case with
-`COPILOT_NATIVE_TEST_EXECUTABLE` for the real offline CLI through the installed
+Set `COPILOT_NATIVE_TEST_EXECUTABLE` for the real offline CLI through the installed
 command builder, wrapper and default setup. It reuses the startup/history
 control's literal two-turn fresh/resume assertions and synthetic local provider.
 Setup recovery suppresses host reconciliation; this does not qualify Manager,
 headed-broker admission, setup hooks or survival across caller cleanup Jobs.
-Only that case needs the native prerequisite; application construction and its
-consumer share the existing 300-second case budget.
+The single case builds the application only once, whether or not native checks
+are explicitly enabled; construction and consumers share its existing
+300-second case budget. Without that prerequisite it qualifies only admission,
+asset selection and the finite provider, not native Copilot history.
 
 The adjacent `tests/native/test_manager_application_launch.py` builds and
 installs the real Manager wheel application through the canonical standalone

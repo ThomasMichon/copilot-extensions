@@ -33,14 +33,7 @@ def _literal(value):
 
 
 @pytest.mark.timeout(300)
-@pytest.mark.parametrize("native_setup", [
-    False,
-    pytest.param(True, marks=pytest.mark.skipif(
-        not os.environ.get("COPILOT_NATIVE_TEST_EXECUTABLE"),
-        reason="Select the isolated offline native Copilot executable",
-    )),
-], ids=["admission", "native-setup"])
-def test_fresh_application_admits_its_current_native_runtime(tmp_path, monkeypatch, native_setup):
+def test_fresh_application_admits_its_current_native_runtime(tmp_path, monkeypatch):
     sys.path.insert(0, str(ROOT / "tools"))
     import build_python_artifacts as builder
     import materialize_main as materializer
@@ -173,7 +166,7 @@ def test_fresh_application_admits_its_current_native_runtime(tmp_path, monkeypat
             "application", boundary, root,
         ], cwd=caller, env=environment, deadline=deadline)
     assert json.loads(described.stdout)["contract"] == "agent-worktrees.native-seed"
-    if native_setup:
+    if os.environ.get("COPILOT_NATIVE_TEST_EXECUTABLE"):
         from test_native_startup_prompt import _qualify_native_startup
 
         def packaged_command(native, native_environment, directory):
