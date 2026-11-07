@@ -261,6 +261,29 @@ def test_read_only_controls_preserve_defaults_without_creating_state(
     assert not list(policy.home.iterdir())
 
 
+def test_controller_uses_runtime_resources_without_loading_native_owner(
+    policy: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scripts = policy.home / "resources"
+    scripts.mkdir()
+    for name in ("bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1"):
+        (scripts / name).write_text("inert unit fixture\n", encoding="utf-8")
+    calls = []
+
+    def resources():
+        calls.append("runtime resources")
+        return scripts
+
+    monkeypatch.setitem(sys.modules, "worktree_manager.self_install", SimpleNamespace(
+        _runtime_scripts=resources,
+        running_payload_dir=lambda: pytest.fail("legacy payload selected"),
+    ))
+    monkeypatch.setattr(bootstrap_policy.shutil, "which", lambda name: "inert-shell")
+    command = bootstrap_policy._guard_command()
+    assert Path(command[-1]).parent == scripts and Path(command[-1]).is_file()
+    assert calls == ["runtime resources"]
+
+
 def test_direct_manager_recheck_keeps_its_invocation_directory(
     policy: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, manager_policy_boundary: None,
 ) -> None:
