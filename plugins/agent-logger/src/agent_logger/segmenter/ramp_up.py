@@ -53,7 +53,6 @@ from agent_logger.segmenter.collate import (
     DEFAULT_SEGMENT_SIZE,
     SESSION_STATE_SUBDIR,
     TurnStats,
-    TurnStream,
     _format_checkpoints,
     _format_metadata,
     _format_turn,
@@ -70,6 +69,7 @@ from agent_logger.segmenter.collate import (
     write_segments,
 )
 from agent_logger.segmenter.platform import detect_machine
+from agent_logger.segmenter.turn_stream import TurnStream
 
 DEFAULT_TAIL_TURNS = 6
 
