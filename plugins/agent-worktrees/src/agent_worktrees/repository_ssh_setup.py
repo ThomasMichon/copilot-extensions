@@ -280,18 +280,18 @@ def run(setup, context, arguments: list[str], description: dict, *, apply: bool)
     from .repository_continuity import _invoke
 
     arguments = [*arguments, "--expected-request-digest", description["request_digest"]]
+    arguments = [item for item in arguments if item != "--key-references-only"]
+    if context.ssh_key is not None:
+        arguments.extend(["--expected-key-fingerprint", context.ssh_key.fingerprint])
     with selected_inputs(description) as (module, selected):
         setup.verify()
         if status(description, module):
-            current = _description(_invoke(arguments))
-            if current != description:
+            if not same_description(_invoke(arguments), description):
                 raise protocol.SetupError("SSH setup inputs changed during readiness inspection.")
+            setup.verify()
             return protocol.Outcome("ready", "Selected SSH application has converged its authenticated directory.")
         if not apply:
             return protocol.Outcome("needed", "Selected SSH application requires its normal installation.")
-        arguments = [item for item in arguments if item != "--key-references-only"]
-        if context.ssh_key is not None:
-            arguments.extend(["--expected-key-fingerprint", context.ssh_key.fingerprint])
         current = _invoke([*arguments, "--apply"])
         if not same_description(current, description):
             raise protocol.SetupError("SSH setup inputs changed before application construction.")

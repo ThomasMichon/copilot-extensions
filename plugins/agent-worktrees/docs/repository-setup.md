@@ -293,6 +293,9 @@ without credential calls or reinstallation, even if Vault is now locked.
 It still requires actual read-only Fleet key inspection with both the selected
 public fingerprint and original request digest, followed by source
 requalification; a changed key or request is not healthy selected readiness.
+The same pinned inspection is required when the application becomes ready
+during Vault preparation or bootstrap; late readiness does not restore the
+reference-only shortcut or skip either pin.
 Check-only calls perform no key installation. Default, outbound-only and
 nonnull-SSH/null-key contexts retain their existing behavior.
 Source tests and a captured synthetic Vault process qualify this adapter seam;

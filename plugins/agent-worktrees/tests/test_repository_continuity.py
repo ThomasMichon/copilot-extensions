@@ -102,6 +102,7 @@ def test_old_fleet_refuses_selected_ssh_before_bootstrap_or_private_request(sour
     "vault-order", "vault-locked", "vault-sync", "vault-pin", "vault-healthy",
     "vault-capability", "vault-install-unknown", "vault-location",
     "vault-healthy-request", "vault-healthy-pin",
+    "vault-late-ready", "vault-late-request", "vault-late-pin",
 ])
 def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
     source, tmp_path, monkeypatch, failure,
@@ -193,6 +194,8 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
         ssh_setup, "status",
         lambda *_args, **_kwargs: failure == "already-ready" or (
             isinstance(failure, str) and failure.startswith("vault-healthy")
+        ) or (
+            isinstance(failure, str) and failure.startswith("vault-late") and "enroll" in events
         ) or "install" in events,
     )
     monkeypatch.setattr(ssh_setup.shutil, "which", lambda *_args: sys.executable)
@@ -241,11 +244,15 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
         if arguments[0] == "ssh-setup":
             if vault:
                 healthy = failure.startswith("vault-healthy") and "inspect" in events
-                assert ("--key-references-only" in arguments) == ("vault-install" not in events and not healthy)
+                late = failure.startswith("vault-late") and "enroll" in events
+                if not late:
+                    assert ("--key-references-only" in arguments) == ("vault-install" not in events and not healthy)
                 if "--key-references-only" not in arguments:
                     assert arguments[arguments.index("--expected-key-fingerprint") + 1] == fingerprint
                     assert arguments[arguments.index("--expected-request-digest") + 1] == description["request_digest"]
-                    if failure == "vault-healthy-pin":
+                    if late:
+                        events.append("final-inspection")
+                    if failure == "vault-healthy-pin" or (late and failure == "vault-late-pin"):
                         raise setup.SetupError("selected public fingerprint mismatch")
             if "--apply" in arguments:
                 assert arguments[arguments.index("--expected-request-digest") + 1] == description["request_digest"]
@@ -256,6 +263,7 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
             return response | ({"request_digest": "changed"} if (
                 (failure == "changed-request" and "--apply" in arguments)
                 or (failure == "vault-healthy-request" and "--key-references-only" not in arguments)
+                or (failure == "vault-late-request" and "enroll" in events and "--key-references-only" not in arguments)
             ) else {})
         assert arguments[0] == "bootstrap"
         events.append("bootstrap")
@@ -288,6 +296,10 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
         assert events.index("vault-prepare") < events.index("vault-install") < events.index("enroll")
         assert events.index("enroll") < events.index("prepare") < events.index("install")
         assert events.count("vault-install") == events.count("enroll") == events.count("install") == 1
+    elif failure == "vault-late-ready":
+        assert continuity.run(selected_setup, "harness-a", apply=True).status == "ready"
+        assert events.index("vault-install") < events.index("enroll") < events.index("final-inspection")
+        assert "prepare" not in events and "install" not in events
     elif failure is not None:
         with pytest.raises(setup.SetupError) as refused:
             continuity.run(selected_setup, "harness-a", apply=True)
@@ -296,7 +308,8 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
         if failure in ("profile", "pin-capability"):
             assert "bootstrap" not in events
         if vault:
-            assert "enroll" not in events and "prepare" not in events
+            assert ("enroll" in events) == failure.startswith("vault-late")
+            assert "prepare" not in events
     else:
         result = continuity.run(selected_setup, "harness-a", apply=True)
         assert result.status == "ready" and "converged" in result.message
