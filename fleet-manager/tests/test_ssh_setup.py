@@ -2,6 +2,8 @@
 
 import json
 import os
+import base64
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -46,6 +48,71 @@ def test_normal_setup_description_never_reads_identity_or_installs(tmp_path, mon
     assert "private_key" not in json.dumps(description)
     assert not Path(document["root"]).exists()
     assert request.read_bytes() == before
+
+
+def test_key_reference_inspection_allows_first_touch_but_never_key_reads_or_apply(tmp_path, monkeypatch):
+    from fleet_manager.gateway_service_listener import read_bounded
+
+    request, document, arguments = selected(tmp_path)
+    key_files = {name: document["ssh"][name] for name in ("identity_file", "public_key_file")}
+    for path in key_files.values():
+        Path(path).unlink()
+    reads = []
+
+    def read(path, *args, **kwargs):
+        assert str(path) not in key_files.values()
+        reads.append(path)
+        return read_bounded(path, *args, **kwargs)
+
+    monkeypatch.setattr("fleet_manager.gateway_service_listener.read_bounded", read)
+    description = ssh_setup.run(request, **arguments, apply=False, key_references_only=True)
+    assert description["version"] == 2 and description["key_files"] == key_files
+    assert Path(document["ssh"]["policy_path"]) in reads
+    with pytest.raises(PlanError, match="cannot prepare"):
+        ssh_setup.run(request, **arguments, apply=True, key_references_only=True)
+    assert not Path(document["root"]).exists()
+    monkeypatch.setattr("fleet_manager.gateway_service_listener.read_bounded", read_bounded)
+    with pytest.raises(OSError):
+        ssh_setup.run(request, **arguments, apply=False)
+
+
+def test_key_reference_cli_remains_pinned_and_refuses_effectful_bypass(tmp_path, capsys):
+    from fleet_manager.__main__ import main
+
+    request, document, arguments = selected(tmp_path)
+    command = [
+        "ssh-setup", "--request", str(request), "--source", str(arguments["source"]),
+        "--harness", arguments["harness"], "--state-root", str(arguments["state_root"]),
+        "--key-references-only",
+    ]
+    assert main(command) == 0
+    inspected = json.loads(capsys.readouterr().out)
+    assert inspected["version"] == 2
+    assert main([*command, "--apply"]) == 1
+    assert "continuity-ssh-setup-refused" in capsys.readouterr().err
+    document["ssh"]["identity_file"] = str(tmp_path / "different-key")
+    request.write_bytes(canonical(document))
+    assert main([*command, "--expected-request-digest", inspected["request_digest"]]) == 1
+    assert "continuity-ssh-setup-refused" in capsys.readouterr().err
+    assert not Path(document["root"]).exists()
+
+
+def test_key_pin_refuses_replaced_or_invalid_public_identity_before_configuration(tmp_path):
+    request, document, arguments = selected(tmp_path)
+    public = Path(document["ssh"]["public_key_file"]).read_text().strip()
+    wire = base64.b64decode(public.split()[1])
+    fingerprint = "SHA256:" + base64.b64encode(hashlib.sha256(wire).digest()).decode("ascii").rstrip("=")
+    expected = ssh_setup.run(request, **arguments, apply=False)
+    assert ssh_setup.run(request, **arguments, apply=False, expected_key_fingerprint=fingerprint) == expected
+    for value in ("malformed", "SHA256:" + "A" * 43):
+        with pytest.raises(PlanError, match="fingerprint|pinned identity"):
+            ssh_setup.run(request, **arguments, apply=True, expected_key_fingerprint=value)
+        assert not Path(document["root"]).exists()
+    with pytest.raises(PlanError, match="actual key inspection"):
+        ssh_setup.run(
+            request, **arguments, apply=False, key_references_only=True,
+            expected_key_fingerprint=fingerprint,
+        )
 
 
 def test_setup_cli_keeps_projection_material_out_of_results_and_refusals(tmp_path, capsys):
