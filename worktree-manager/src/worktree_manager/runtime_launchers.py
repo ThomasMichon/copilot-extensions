@@ -15,15 +15,15 @@ _CACHE_SELECTOR_SH = (
 _CACHE_SELECTOR_PS = _CACHE_SELECTOR_SH.replace('"', "'").replace(
     "sys.stdout.write(prefix)", "import json; print(json.dumps(prefix))"
 )
-# Single-line, double-quote-free form for cmd; any failure exits non-zero so
-# the caller keeps its minted prefix. Non-ASCII paths are not selected because
-# ``set /p`` reads the result in the console code page.
+# Single-line, double-quote-free form for cmd. It prints only an ASCII
+# installed-* prefix; on fallback or failure it prints nothing (or exits
+# non-zero) so the caller keeps its minted prefix untouched, because ``set /p``
+# reads the result in the console code page.
 _CACHE_SELECTOR_CMD = (
-    "import os,sys,importlib.util as u;p=sys.pycache_prefix;"
+    "import os,sys,importlib.util as u;"
     "m=u.find_spec('agent_procutil') and __import__('agent_procutil.python_cache',fromlist=['_']);"
     "q=m and m.cache_arguments(sys.argv[1],runtime=sys.executable)[1].split('=',1)[1];"
-    "p=q if q and os.path.basename(q).startswith('installed-') and q.isascii() else p;"
-    "sys.stdout.write(p)"
+    "sys.stdout.write(q if q and os.path.basename(q).startswith('installed-') and q.isascii() else '')"
 )
 
 
