@@ -111,14 +111,117 @@ def test_attributed_profile_dropin_uses_existing_input_seam(tmp_path):
     assert report.active_configs[0].raw_config["repos"]["tools"]["copilot_plugin_profile"] == "profile.json"
 
 
-def test_no_profile_is_noop_even_with_unmanaged_jsonc(tmp_path):
+def test_no_profile_is_noop_even_with_unmanaged_jsonc(tmp_path, monkeypatch):
     configuration = cfg.Config(srcroot="", machine="", platform="", repos={
         "tools": cfg.RepoConfig(anchor=str(tmp_path), worktree_root="")})
     _overlay(tmp_path).parent.mkdir(parents=True)
     _overlay(tmp_path).write_text("{ // untouched unmanaged document\n}")
     before = _overlay(tmp_path).read_bytes()
-    assert tool.prepare_checkout(tmp_path, config=configuration)["action"] == "no-op"
+    monkeypatch.setattr(tool, "_family", lambda *a, **kw: pytest.fail("unselected profile Git scan"))
+    checked = tool.observe_for_admission(configuration)
+    assert tool.prepare_checkout(
+        tmp_path, config=configuration, checked_profile=checked)["action"] == "no-op"
     assert _overlay(tmp_path).read_bytes() == before
+
+
+def test_new_admission_refuses_unstaged_profile_without_writing(family, monkeypatch):
+    from agent_worktrees import application_admission as admission
+
+    root, _, configuration = family()
+    configuration = replace(configuration, repos={"tools": replace(
+        configuration.default_repo, require_application_readiness=True)})
+    before = {path.relative_to(root.parent): path.read_bytes()
+              for path in root.parent.rglob("*") if path.is_file()}
+    monkeypatch.setattr(admission, "_selected_runtime", lambda **kw: pytest.fail("unstaged roster"))
+    error = admission.new_application_error(configuration, source=str(root))
+    assert error and "re-register" in error
+    assert before == {path.relative_to(root.parent): path.read_bytes()
+                      for path in root.parent.rglob("*") if path.is_file()}
+
+
+def test_staged_profile_admission_retains_checked_input_and_refuses_late_change(family, monkeypatch):
+    from agent_worktrees import application_admission as admission
+    from test_application_admission import _observation
+
+    root, worktree, configuration = family()
+    configuration = replace(configuration, repos={"tools": replace(
+        configuration.default_repo, require_application_readiness=True)})
+    tool.reconcile_project("tools", root, installer.read_projects_registry())
+    monkeypatch.setattr(admission, "_selected_runtime", lambda **kw: (["owner"], {}))
+    monkeypatch.setattr(admission, "run_caller_owned", lambda argv, **kw: subprocess.CompletedProcess(
+        argv, 0, json.dumps(_observation(root)), ""))
+    preflight = admission.new_application_preflight(configuration, source=str(root))
+    assert preflight.error is None and preflight.checked_profile
+    assert tool.prepare_checkout(
+        worktree, config=configuration, checked_profile=preflight.checked_profile)["changed"] is False
+    new_worktree = root.parent / "new-worktree"
+    _git(root, "worktree", "add", "-b", "new-worktree", str(new_worktree))
+    assert tool.prepare_checkout(
+        new_worktree, config=configuration, checked_profile=preflight.checked_profile)["changed"] is True
+    assert _read(new_worktree)["enabledPlugins"] == _read(root)["enabledPlugins"]
+    _json(root / "profile.json", {"enabledPlugins": {"later@tools": True}})
+    registry = installer.projects_yaml_path().read_bytes()
+    before = _overlay(worktree).read_bytes()
+    monkeypatch.setattr(installer, "write_projects_registry", lambda *a: pytest.fail("late registry write"))
+    monkeypatch.setattr(kp, "_write_overlay", lambda *a: pytest.fail("late settings write"))
+    with pytest.raises(kp.KnowledgePluginError, match="changed|not staged"):
+        tool.prepare_checkout(worktree, config=configuration, checked_profile=preflight.checked_profile)
+    assert installer.projects_yaml_path().read_bytes() == registry
+    assert _overlay(worktree).read_bytes() == before
+
+
+def test_profile_change_during_application_read_refuses_even_after_reconcile(family, monkeypatch):
+    from agent_worktrees import application_admission as admission
+    from test_application_admission import _observation
+
+    root, _, configuration = family()
+    configuration = replace(configuration, repos={"tools": replace(
+        configuration.default_repo, require_application_readiness=True)})
+    tool.reconcile_project("tools", root, installer.read_projects_registry())
+    monkeypatch.setattr(admission, "_selected_runtime", lambda **kw: (["owner"], {}))
+
+    def observe(argv, **kw):
+        _json(root / "profile.json", {"enabledPlugins": {"later@tools": True}})
+        tool.reconcile_project("tools", root, installer.read_projects_registry())
+        return subprocess.CompletedProcess(argv, 0, json.dumps(_observation(root)), "")
+
+    monkeypatch.setattr(admission, "run_caller_owned", observe)
+    assert admission.new_application_error(configuration, source=str(root))
+
+
+def test_profile_removal_cannot_unmask_an_unobserved_plugin(family):
+    root, _, configuration = family()
+    _json(root / ".github" / "copilot" / "settings.json", {"enabledPlugins": {"off@tools": True}})
+    tool.reconcile_project("tools", root, installer.read_projects_registry())
+    configuration = replace(configuration, repos={"tools": replace(
+        configuration.default_repo, copilot_plugin_profile=None)})
+    before = _overlay(root).read_bytes()
+    with pytest.raises(kp.KnowledgePluginError, match="not staged"):
+        tool.observe_for_admission(configuration)
+    assert _overlay(root).read_bytes() == before
+    tool.prepare_checkout(root, config=configuration)
+    assert tool.observe_for_admission(configuration)
+
+
+@pytest.mark.parametrize("defer", [False, True])
+def test_launch_refresh_refuses_changed_profile_before_any_settings_or_projection_write(
+    family, monkeypatch, defer,
+):
+    from agent_worktrees import local_cache_refresh
+
+    root, worktree, configuration = family()
+    tool.reconcile_project("tools", root, installer.read_projects_registry())
+    checked = tool.observe_for_admission(configuration)
+    _json(root / "profile.json", {"enabledPlugins": {"later@tools": True}})
+    before = _overlay(worktree).read_bytes()
+    registry = installer.projects_yaml_path().read_bytes()
+    monkeypatch.setattr(local_cache_refresh, "refresh_local_cache", lambda *a, **kw:
+                        pytest.fail("unobserved roster projections"))
+    with pytest.raises(local_cache_refresh.ToolRosterAdmissionError, match="not staged"):
+        local_cache_refresh.prepare_admitted_launch(
+            worktree, config=configuration, defer_projections=defer, checked_profile=checked)
+    assert _overlay(worktree).read_bytes() == before
+    assert installer.projects_yaml_path().read_bytes() == registry
 
 
 def test_register_stages_existing_family_and_removal_retains_personal(family):
@@ -246,6 +349,8 @@ def test_unsupported_version_preserves_mixed_document(family, key, version):
     before = _overlay(root).read_bytes()
     with pytest.raises(kp.KnowledgePluginError, match="unsupported"):
         tool.prepare_checkout(root, config=configuration)
+    with pytest.raises(kp.KnowledgePluginError, match="unsupported"):
+        tool.observe_for_admission(configuration)
     assert _overlay(root).read_bytes() == before
 
 

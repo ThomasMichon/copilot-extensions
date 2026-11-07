@@ -10,6 +10,8 @@ import time
 
 from agent_procutil.owned_process import OwnedCleanupError, OwnedExecutionBudget, run_caller_owned
 
+from .launch_preflight import LaunchPreflight
+
 SCHEMA = "copilot-extensions.installation-repair"
 
 
@@ -121,11 +123,22 @@ def _ready(result: subprocess.CompletedProcess, source: str) -> bool:
 
 
 def new_application_error(config, *, source: str) -> str | None:
+    return new_application_preflight(config, source=source).error
+
+
+def new_application_preflight(config, *, source: str) -> LaunchPreflight:
+    """Observe required applications against a stable prospective tool roster."""
+    from . import copilot_plugin_profile as tool
+    from .knowledge_plugins import KnowledgePluginError
+
     if not config.default_repo.require_application_readiness:
-        return None
+        return LaunchPreflight()
     reason = "Required application observation is incomplete or not ready."
     try:
         budget = OwnedExecutionBudget.from_timeout(60, cleanup_reserve=5)
+        checked_profile = tool.observe_for_admission(config, deadline=budget.execution_deadline)
+        if time.monotonic() >= budget.execution_deadline:
+            raise TimeoutError("Required application profile selection exhausted its budget")
         prefix, environment = _selected_runtime(budget=budget)
         remaining = budget.execution_deadline - time.monotonic()
         if remaining <= 0:
@@ -135,15 +148,21 @@ def new_application_error(config, *, source: str) -> str | None:
             timeout=remaining, max_stdout_bytes=1024 * 1024, max_stderr_bytes=65536,
             cwd=source, env=environment, budget=budget,
         )
-        if _ready(result, source) and time.monotonic() < budget.deadline:
-            return None
+        if (
+            _ready(result, source)
+            and tool.observe_for_admission(config, deadline=budget.execution_deadline) == checked_profile
+            and time.monotonic() < budget.deadline
+        ):
+            return LaunchPreflight(checked_profile=checked_profile)
     except OwnedCleanupError:
         raise
+    except KnowledgePluginError as exc:
+        reason = str(exc)
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
         reason = "Required application observation is unavailable or unsupported by the selected runtime."
-    return (
+    return LaunchPreflight(policy_error=(
         "New authoring requires application readiness before allocation. " + reason
         + " Open Configuration > Application Readiness for the selected repository; "
         "use Installation & Updates if its owner is unavailable, then retry New. "
         "Admission does not install applications, acquire credentials or confirm restarts."
-    )
+    ))

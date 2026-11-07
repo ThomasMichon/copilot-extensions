@@ -8,6 +8,14 @@ and initial structured-request admission. Creation-time rechecking precedes the
 started marker, preserving retained request/allocation identity through refusal.
 Source-only allocation, existing-session and recovery paths remain unchanged.
 
+For repositories with a native tool profile, admission uses the profile owner's
+same prospective settings projection read-only. The anchor must already expose
+that roster before Machines observes applications. A changed projection or
+profile input refuses; native project registration remains the settings writer.
+The checked input travels in the internal launch preflight through New's later
+tool staging and projection refresh, which reject drift before settings writes.
+An absent profile is also retained without introducing a registry/Git scan.
+
 `application_admission` selects the existing Machines owner through validated
 same-cell peer launch with retained build identity or the legacy owner's exact
 completed interpreter. It reads support from that selected runtime, then

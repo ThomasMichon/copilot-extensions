@@ -676,6 +676,12 @@ another health database or an executable found on PATH. It is caller-contained
 and bounded to one 60-second selection/observation/cleanup budget, reserving five
 seconds for settlement. A refused, interrupted, changed, unsupported or
 not-ready result cannot pass. A fully observed empty required set can pass.
+When `copilot_plugin_profile` changes the intended roster, re-register the
+project to stage it before retrying New. Admission compares that owner's
+prospective settings with the staged anchor without writing them, checks again
+after observation, and retains the checked profile input for later New staging.
+An edited or unstaged profile cannot silently activate a different roster after
+the application check.
 Open **Configuration > Application Readiness** to inspect and explicitly repair;
 use **Installation & Updates** when its owner/runtime is unavailable, then retry.
 Admission does not supply credentials, install applications or attest restarts.

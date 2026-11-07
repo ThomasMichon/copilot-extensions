@@ -940,13 +940,13 @@ def _create_worktree_core(
             print("Added worktree path to trustedFolders.", file=sys.stderr)
         if build_launch_plan and permissions.ensure_extension_permission_approvals(worktree_path):
             print("Pre-approved facility extension permissions for worktree path.", file=sys.stderr)
-        from .copilot_plugin_profile import prepare_checkout
-        prepare_checkout(worktree_path, config=config)
+        tool_options = {"checked_profile": checked} if (checked := getattr(launch_preflight, "checked_profile", None)) is not None else {}
+        local_cache_refresh.prepare_tool_roster(worktree_path, config=config, **tool_options)
         composition_ready = _complete_created_pair(
             config, record, timestamp=timestamp, suffix=suffix, no_pair=no_pair,
         )
         if build_launch_plan and not defer_projections and composition_ready:
-            local_cache_refresh.prepare_for_launch(worktree_path)
+            local_cache_refresh.prepare_admitted_launch(worktree_path, **({"config": config, **tool_options} if tool_options else {}))
         result = {"worktree": core._worktree_to_dict(record)}
         if receiving_allocation is not None:
             from .receiving_creation_recovery import note_ready

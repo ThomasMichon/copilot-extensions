@@ -551,6 +551,8 @@ def test_actual_local_resume_alias_grid_preserves_record(tmp_path, monkeypatch, 
 def test_cold_resume_plan_executes_with_exact_prompt_at_powershell_boundary(
     tmp_path: Path, monkeypatch,
 ):
+    import venv
+
     from agent_procutil.owned_process import run_caller_owned
     from agent_worktrees import output
 
@@ -580,9 +582,25 @@ def test_cold_resume_plan_executes_with_exact_prompt_at_powershell_boundary(
     with output.capture_json_output() as captured:
         assert resolve_cli.cmd_resolve(_args(seed=seed, no_mux=True)) == 0
     plan = json.loads(captured.getvalue())["launch"]
+    assert plan["cmd"][:3] == [sys.executable, "-m", "agent_worktrees.launch_seed_exec"]
+    # Both the outer owner and setup's isolated Python child need this
+    # fixture's cold-probe I/O boundary, not an installed host mux/runtime.
+    runtime = tmp_path / "seed-runtime"
+    venv.EnvBuilder(with_pip=False).create(runtime)
+    if os.name == "nt":
+        python, site = runtime / "Scripts/python.exe", runtime / "Lib/site-packages"
+    else:
+        python = runtime / "bin/python"
+        site = runtime / f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
+    (site / "fixture.pth").write_text(
+        "\n".join(str(Path(path).resolve()) for path in sys.path if path) + "\n", encoding="utf-8")
+    (site / "sitecustomize.py").write_text(
+        "from agent_worktrees import sessions\n"
+        "sessions.verify_worktree_active = lambda *a: sessions.LiveVerdict()\n", encoding="utf-8")
     try:
         proc = run_caller_owned(
-            plan["cmd"], timeout=20, max_stdout_bytes=1024 * 1024,
+            [str(python), *plan["cmd"][1:]],
+            timeout=20, max_stdout_bytes=1024 * 1024,
             max_stderr_bytes=1024 * 1024,
             cwd=work_dir,
             env={**os.environ, "AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED": "1"},

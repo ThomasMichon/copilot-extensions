@@ -51,11 +51,13 @@ def preflight_launch(
         return _core().LaunchPreflight(policy_error=str(exc))
 
     recovery = getattr(args, "recovery", False)
+    preflight = _core().LaunchPreflight()
     if allocation_source is not None and not recovery:
-        from .launch_preflight import new_authoring_error
+        from .launch_preflight import new_authoring_preflight
 
-        if error := new_authoring_error(config, source=allocation_source):
-            return _core().LaunchPreflight(policy_error=error)
+        preflight = new_authoring_preflight(config, source=allocation_source)
+        if preflight.error:
+            return preflight
     repo = config.default_repo
     platform_key = config.platform if config.platform != "wsl" else "linux"
     launch_map = repo.launch_recovery if recovery else repo.launch
@@ -64,7 +66,7 @@ def preflight_launch(
         config_root = state_root_mod.resolve_config_root(
             config, cwd=work_dir, project=cfg.active_project()
         )
-    return _core().LaunchPreflight(config_root=config_root)
+    return dataclasses.replace(preflight, config_root=config_root)
 
 
 def _core():
@@ -367,9 +369,11 @@ def _resolve_base_repo(
         _emit_plan({"action": "none", "exit_code": 0})
         return 0
 
+    checked_profile = getattr(launch_preflight, "checked_profile", None)
     try:
         local_cache_refresh.prepare_admitted_launch(
             repo.anchor, defer_projections=getattr(args, "defer_projections", False), config=config,
+            **({"checked_profile": checked_profile} if checked_profile is not None else {}),
         )
     except local_cache_refresh.ToolRosterAdmissionError as exc:
         output.err(str(exc))

@@ -112,10 +112,27 @@ def test_selection_observation_and_settlement_share_one_deadline(
 
 def test_knowledge_refusal_does_not_probe_applications(tmp_path, monkeypatch):
     monkeypatch.setattr(launch_preflight, "new_knowledge_error", lambda *a, **k: "knowledge unavailable")
-    monkeypatch.setattr(admission, "new_application_error", lambda *a, **k: pytest.fail("later gate"))
+    monkeypatch.setattr(admission, "new_application_preflight", lambda *a, **k: pytest.fail("later gate"))
     assert launch_preflight.new_authoring_error(
         _required(_config(tmp_path)), source=str(tmp_path),
     ) == "knowledge unavailable"
+
+
+def test_profile_observation_uses_the_same_budget_and_cannot_start_a_late_owner(tmp_path, monkeypatch):
+    from agent_worktrees import copilot_plugin_profile as tool
+
+    config = _required(_config(tmp_path))
+    clock = [100.0]
+    monkeypatch.setattr(admission.time, "monotonic", lambda: clock[0])
+
+    def observe(config, *, deadline):
+        assert deadline == 155
+        clock[0] = 155
+        return "checked-input"
+
+    monkeypatch.setattr(tool, "observe_for_admission", observe)
+    monkeypatch.setattr(admission, "_selected_runtime", lambda **kw: pytest.fail("late owner selection"))
+    assert admission.new_application_error(config, source=config.default_repo.anchor)
 
 
 @pytest.mark.parametrize("value", ["false", 1, None, {}])
@@ -255,9 +272,9 @@ def test_base_repo_new_refuses_before_launch_effects(tmp_path, monkeypatch, capf
 
     def incomplete(config, *, source):
         calls.append(source)
-        return "Application Readiness is incomplete"
+        return launch_preflight.LaunchPreflight(policy_error="Application Readiness is incomplete")
 
-    monkeypatch.setattr(admission, "new_application_error", incomplete)
+    monkeypatch.setattr(admission, "new_application_preflight", incomplete)
     monkeypatch.setattr(main, "_build_launch_cmd", lambda *a, **k: pytest.fail("base New bypassed readiness"))
     assert main.cmd_resolve(main.build_parser().parse_args(["resolve", "--json", selector])) != 0
     assert calls == [config.default_repo.anchor]
@@ -278,13 +295,37 @@ def test_base_repo_existing_and_recovery_do_not_acquire_new_admission(
     monkeypatch.setattr(state_root, "resolve_config_root", lambda *a, **k: state_root.ConfigRoot(
         str(tmp_path / "configuration"), "machine_local", config.repo_name, False, True,
     ))
-    monkeypatch.setattr(admission, "new_application_error", lambda *a, **k: pytest.fail("existing New gate"))
+    monkeypatch.setattr(admission, "new_application_preflight", lambda *a, **k: pytest.fail("existing New gate"))
     monkeypatch.setattr(main, "_build_launch_cmd", lambda *a, **k: ["copilot"])
     monkeypatch.setattr(main, "_build_env", lambda *a, **k: {})
     with main.output.stdout_to_stderr():
         result = main._resolve_base_repo(config, main.build_parser().parse_args(arguments))
     assert result == 0
     assert json.loads(capfd.readouterr().out)["action"] == "none"
+
+
+@pytest.mark.parametrize("selector", ["--new", "--auto"])
+def test_base_new_retains_checked_profile_for_launch_staging(tmp_path, monkeypatch, capfd, selector):
+    from agent_worktrees import __main__ as main, local_cache_refresh, state_root
+
+    base = _required(_config(tmp_path))
+    config = replace(base, repos={base.repo_name: replace(base.default_repo, base_repo=True)})
+    monkeypatch.setattr(main.cfg, "_ACTIVE_PROJECT", config.repo_name)
+    monkeypatch.setattr(main.cfg, "load_config", lambda *a, **kw: config)
+    monkeypatch.setattr(state_root, "resolve_config_root", lambda *a, **kw: state_root.ConfigRoot(
+        str(tmp_path / "configuration"), "machine_local", config.repo_name, False, True))
+    monkeypatch.setattr(launch_preflight, "new_knowledge_error", lambda *a, **kw: None)
+    monkeypatch.setattr(admission, "new_application_preflight", lambda *a, **kw:
+                        launch_preflight.LaunchPreflight(checked_profile="checked-input"))
+    monkeypatch.setattr(main, "_build_launch_cmd", lambda *a, **kw: ["copilot"])
+    monkeypatch.setattr(main, "_build_env", lambda *a, **kw: {})
+    staged = []
+    monkeypatch.setattr(local_cache_refresh, "prepare_admitted_launch", lambda *a, **kw:
+                        staged.append((a, kw)))
+    assert main.cmd_resolve(main.build_parser().parse_args(["resolve", "--json", selector])) == 0
+    assert staged == [((config.default_repo.anchor,), {
+        "defer_projections": False, "config": config, "checked_profile": "checked-input"})]
+    assert json.loads(capfd.readouterr().out)["action"] == "exec"
 
 
 @pytest.mark.timeout(60)

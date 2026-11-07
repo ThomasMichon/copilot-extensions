@@ -314,7 +314,7 @@ def test_required_application_refusal_preserves_request_retry(
 ):
     from test_worktree_creation_seed import _create_config
     from agent_worktrees import application_admission
-    from agent_worktrees.launch_preflight import LaunchPreflightError
+    from agent_worktrees.launch_preflight import LaunchPreflight, LaunchPreflightError
 
     base = _create_config(tmp_path)
     config = replace(base, repos={base.repo_name: replace(
@@ -328,10 +328,11 @@ def test_required_application_refusal_preserves_request_retry(
 
     def incomplete(*_args, **_kwargs):
         observations.append(1)
-        return None if creation_time and len(observations) == 1 else "Application Readiness incomplete"
+        return LaunchPreflight(policy_error=(
+            None if creation_time and len(observations) == 1 else "Application Readiness incomplete"))
 
     with monkeypatch.context() as blocked:
-        blocked.setattr(application_admission, "new_application_error", incomplete)
+        blocked.setattr(application_admission, "new_application_preflight", incomplete)
         with pytest.raises(LaunchPreflightError, match="Application Readiness"):
             request.execute(config, intent)
     assert len(observations) == (2 if creation_time else 1)
@@ -342,7 +343,7 @@ def test_required_application_refusal_preserves_request_retry(
         assert not allocation.get("creation_started") and not allocation.get("accepted")
     else:
         assert not request._admission_path(tmp_path, intent["request_id"]).exists()
-    monkeypatch.setattr(application_admission, "new_application_error", lambda *a, **k: None)
+    monkeypatch.setattr(application_admission, "new_application_preflight", lambda *a, **k: LaunchPreflight())
     result = request.execute(config, intent)
     if allocation:
         assert result["worktree_id"] == allocation["worktree_id"]
