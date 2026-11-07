@@ -76,7 +76,10 @@ the same lock.
 
 Action completion refreshes the originating row's declared read scope, not a
 later selected machine or the aggregate All sentinel. View-wide completions
-retain their explicit declared scope set. Worker prefetch, joins and the
+retain their explicit declared scope set. Every terminal view-action attempt
+refreshes its source, including failure and cancellation: partial effects and
+restart obligations must not leave the pre-action observation actionable.
+Refreshing does not turn an unsuccessful command into a success. Worker prefetch, joins and the
 visible inventory use the same scope rule, including shared provider commands
 without a `{machine}` selector. If a publication removes a selected row,
 opening Actions refuses rather than falling through to another row.

@@ -26,7 +26,8 @@ pytestmark = [
 
 
 @pytest.mark.timeout(120)
-def test_native_readiness_navigation_cancel_confirm_repair_and_refresh(tmp_path, monkeypatch):
+@pytest.mark.parametrize("outcome", ["ready", "restart", "failure", "cancel"])
+def test_native_readiness_navigation_cancel_confirm_repair_and_refresh(tmp_path, monkeypatch, outcome):
     owner_python = os.environ.get("APPLICATION_READINESS_TEST_PYTHON")
     if not owner_python:
         pytest.skip("select the contained Machines test interpreter for native owner consumption")
@@ -38,12 +39,36 @@ def test_native_readiness_navigation_cancel_confirm_repair_and_refresh(tmp_path,
          "spec=importlib.util.spec_from_file_location('repair_fixture_support',path)\n"
          "module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)\n"
          "fixture=module.repair_fixture.__wrapped__(Path(sys.argv[2]))\n"
+         "if sys.argv[3]=='restart': fixture[3](restart='shell',dependencies=('agent-example/base',))\n"
          "print(json.dumps([str(value) for value in fixture[:3]]))\n",
-         str(root), str(tmp_path)],
+         str(root), str(tmp_path), outcome],
         capture_output=True, text=True, timeout=30, **no_window_kwargs(),
     )
     assert preparation.returncode == 0, preparation.stderr
     home, project, payload = map(Path, json.loads(preparation.stdout))
+    installer_hold = home / "hold-installer"
+    if outcome in {"failure", "cancel"}:
+        script = payload / "scripts" / ("action.ps1" if os.name == "nt" else "action.sh")
+        text = script.read_text(encoding="utf-8")
+        if outcome == "failure":
+            text = text.replace(
+                "if ($Action -eq 'install') {",
+                "if ($Action -eq 'install') { if ($Module -eq 'agent-example/child') { exit 7 };",
+            ) if os.name == "nt" else text.replace(
+                'if [ "$1" = install ]; then',
+                'if [ "$1" = install ]; then\n [ "$2" != agent-example/child ] || exit 7',
+            )
+        else:
+            installer_hold.touch()
+            text = text.replace(
+                "[IO.File]::WriteAllText($state, 'ready'); exit 0",
+                "[IO.File]::WriteAllText($state, 'ready'); "
+                "while (Test-Path (Join-Path $env:HOME 'hold-installer')) { Start-Sleep -Milliseconds 50 }; exit 0",
+            ) if os.name == "nt" else text.replace(
+                'printf ready > "$state"; exit 0',
+                'printf ready > "$state"; while [ -e "$HOME/hold-installer" ]; do sleep .05; done; exit 0',
+            )
+        script.write_text(text, encoding="utf-8")
     for key in ("HOME", "USERPROFILE", "AGENT_HOME"):
         monkeypatch.setenv(key, str(home))
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
@@ -136,18 +161,38 @@ def test_native_readiness_navigation_cancel_confirm_repair_and_refresh(tmp_path,
                 hold.unlink(missing_ok=True)
             await _wait(pilot, lambda: screen._pivot_view_actions()
                         or screen._task_state()[0] == "error")
+            before_repair_reads = sum("--apply" not in call for call in calls())
             activate()
             await _wait(pilot, lambda: isinstance(app.screen, ActionConfirmScreen))
             await pilot.press("left", "enter")
+            if outcome == "cancel":
+                await _wait(pilot, lambda: isinstance(app.screen, PivotProgressScreen)
+                            and (home / "agent-example-base.ready").exists())
+                app.screen.action_cancel()
             await _wait(pilot, lambda: isinstance(app.screen, PivotProgressScreen) and app.screen.finished)
-            assert len(list(home.glob("*.ready"))) == 2
+            assert len(list(home.glob("*.ready"))) == (2 if outcome == "ready" else 1)
             app.screen.action_cancel()
-            await _wait(pilot, lambda: screen._task_summary().get("required_satisfied") is True
-                        or screen._task_state()[0] == "error")
+            async with asyncio.timeout(10):
+                await _wait(pilot, lambda: (
+                    sum("--apply" not in call for call in calls()) > before_repair_reads
+                    and not runtime.read_pending("")
+                    and screen._task_state()[0] == "ready"
+                ))
             assert screen._task_state()[0] == "ready", screen._task_state()
-            assert all(row["state"] == "ready" for row in screen._task_rows())
-            assert screen._pivot_view_actions() == []
+            if outcome == "ready":
+                assert screen._task_summary()["required_satisfied"] is True
+                assert all(row["state"] == "ready" for row in screen._task_rows())
+            elif outcome == "restart":
+                assert screen._task_summary()["repairable"] == "false"
+                assert any(row["state"] == "restart-required" for row in screen._task_rows())
+            else:
+                assert {row["state"] for row in screen._task_rows()} == {"ready", "not-ready"}
+                assert screen._task_summary()["required_satisfied"] is False
+            assert bool(screen._pivot_view_actions()) is (outcome in {"failure", "cancel"})
             assert sum("--apply" in call for call in calls()) == 1
             assert all(path.read_bytes() == value for path, value in protected.items())
 
-    asyncio.run(run())
+    try:
+        asyncio.run(run())
+    finally:
+        installer_hold.unlink(missing_ok=True)

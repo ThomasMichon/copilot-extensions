@@ -133,7 +133,7 @@ def test_cancel_and_error_remain_literal(cancel):
             await app.workers.wait_for_complete()
             assert screen.finished and screen.cancelled.is_set()
             assert screen.query_one("#view-progress").render().plain == "Cancelled."
-            completed.assert_not_called()
+            completed.assert_called_once_with()
             screen._message("Failed: [bold]denied[/bold]")
             assert screen.query_one("#view-progress").render().plain == "Failed: [bold]denied[/bold]"
             await pilot.press("escape")
