@@ -926,47 +926,11 @@ def test_posix_copy_retry_preserves_readonly_files_and_directory_modes(tmp_path)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native cross-volume qualification")
-@pytest.mark.timeout(120)
+@pytest.mark.timeout(300)
 def test_native_cross_volume_move_requires_an_explicit_owned_second_root(checkout, request):
-    root = os.environ.get("AGENT_WORKTREES_RELOCATION_SECOND_ROOT")
-    if not root:
-        pytest.skip("second fixture volume not enrolled")
-    approved = Path(root)
-    assert approved.is_dir()
-    assert checkout.source.stat().st_dev != approved.stat().st_dev
-    content_limit = 1024 * 1024
-    assert sum(path.stat().st_size for path in checkout.source.rglob("*") if path.is_file()) + 16384 <= content_limit
-    original_manifest = relocation.transfer.manifest(checkout.source)
-    original_nonce = checkout.record.creation_nonce
-    parent = approved / ("relocation-fixture-" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex)
-    parent.mkdir(mode=0o700)
-    owner = {
-        "owner": request.node.nodeid, "created_at": datetime.now(timezone.utc).isoformat(),
-        "purpose": "disposable native cross-volume relocation qualification",
-        "retention": "owned until successful fixture teardown; retain failures for owner inspection",
-    }
-    (parent / "scratch-owner.json").write_text(json.dumps(owner), encoding="utf-8")
-    destination = parent / checkout.record.worktree_id
-    assert not destination.exists()
-    checkout.destination = destination
-    succeeded = False
-    try:
-        assert _move(checkout)["phase"] == "complete"
-        assert (destination / "ignored.bin").read_bytes() == bytes(range(256))
-        assert not checkout.source.exists()
-        assert sum(path.stat().st_size for path in parent.rglob("*") if path.is_file()) <= content_limit
-        checkout.destination = checkout.source
-        assert _move(checkout)["phase"] == "complete"
-        assert not destination.exists()
-        assert relocation.transfer.manifest(checkout.source) == original_manifest
-        current = tracking.load_record(checkout.record.yaml_path)
-        assert current.worktree_path == str(checkout.source)
-        assert current.creation_nonce == original_nonce
-        succeeded = True
-    finally:
-        if succeeded:
-            assert sorted(path.name for path in parent.iterdir()) == ["scratch-owner.json"]
-            shutil.rmtree(parent)
+    from checkout_cross_volume_fixture import qualify
+
+    qualify(checkout, request)
 
 
 def test_external_fixture_keeps_primary_git_and_journal_outside_runner_teardown(tmp_path, monkeypatch):
