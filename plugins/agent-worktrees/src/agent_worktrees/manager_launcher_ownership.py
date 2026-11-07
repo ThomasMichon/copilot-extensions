@@ -11,6 +11,7 @@ _OWNED_STUBS = {
         "fa96da97ca82f2f3ac72fc33bed22b04467ec1eee018e289bcc70d691766d858",
         "db1f2e5c3e7df70d8eee1659fd08d465485d4ad49d0bc7fb9900ff8667dd8022",
         "84c13cdc024a25402bbe1428ff13410da1ffb9b9f9c21245846bc8b02c46e443",
+        "4b75cb5b0bada24cbcf1a65ba9c6bde2ae2dfaddaf37e367c5a6e564eca42ce3",
     },
     "worktree-manager.ps1": {
         "3ca986ce56b2a4bd8ffe1a1cd20dad83ba69c8a77eb5162f66b2cf745104eeff",
@@ -18,6 +19,7 @@ _OWNED_STUBS = {
         "55d2077997a9d1528b5c1e9aba3a4eb04327366ba2460e9244254f42b42ba2db",
         "fe7809ba94fa714b866ce6f6e33d136b4b3e877db909778c41181cdd4ad0b030",
         "56e68cfacd94738a19081a5ca0e843524c7be939aa28bedc77a8e79efbf527ae",
+        "aa592e68512b709c894e02be04710cacf91cd90942e40af0cfd74e031981fd71",
     },
     "worktree-manager": {
         "1d378d9461dcb0c892d1b64f443c8a38dee4ff666ca484db62697bb3424b2c65",
