@@ -191,3 +191,16 @@ requested protocol-only scope.
 - All four affected receiver/aggregate cases now pass locally. The complete
   current capture and separate verification will run against the corrected
   published checkpoint; a partial pass is not publication evidence.
+
+### 2026-11-07 - Qualified checkpoint and rollover correction
+
+- The complete 281-case capture, independent no-write verification and
+  historical publication guards passed in the source-pinned hosted run.
+  Its native publication owner materialized the verified outputs; the
+  independent local contract guard passed with 1,061 retained fixtures.
+- A final source check reproduced a retained acknowledgment after rollover
+  with zero original-scope retry attempts. Recovery now retries that receipt
+  against its original native ID, never the answer RPC. Missing/mismatched
+  old audit records remain visible without blocking new snapshots.
+- Added focused rollover/lost-evidence controls. The corrected final source
+  will receive fresh capture and verification before publication readiness.

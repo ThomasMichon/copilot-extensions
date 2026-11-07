@@ -354,6 +354,7 @@ async function pollQuestionAnswers() {
       questions: state.questions, identity: processIdentity(), session,
       request: retainedBridgeRequest,
       endpointKey: () => state.base,
+      log: extLog,
       isCurrent: () => state.registered && state.sessionId === sid && state.nativeSessionId === sid,
     });
   } finally {

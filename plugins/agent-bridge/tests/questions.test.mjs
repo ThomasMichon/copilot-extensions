@@ -155,3 +155,47 @@ test("question poll gates the running provider and retries acknowledgments, not 
   assert.equal(f.questions.acks.size, 0);
   assert.equal(requests.filter((r) => r.path.endsWith("/ack")).length, 2);
 });
+
+test("rollover retries a known native outcome under its original audit scope", async () => {
+  const f = fixture();
+  const originalAck = { generation: f.questions.generation, request_id: "question-1", state: "accepted" };
+  f.questions.acks.set(1, { sid: "native-1", ack: originalAck });
+  f.questions.reset("native-2");
+  const calls = [];
+  await pollQuestions("native-2", {
+    ...f, identity: { pid: 123, process_started_at: 1 },
+    request: async (method, path, body) => {
+      calls.push({ method, path, body });
+      return path === "/health" ? { capabilities: { live_question_answers: 1 } } : { controls: [] };
+    },
+  });
+  assert.equal(f.questions.acks.size, 0);
+  assert.deepEqual(calls.find((item) => item.path.endsWith("/ack")), {
+    method: "POST", path: "/api/v1/live-sessions/native-1/questions/answers/1/ack",
+    body: originalAck,
+  });
+  assert.equal(f.calls.length, 0);
+});
+
+test("missing original audit evidence is visible and cannot block a new snapshot or replay an answer", async () => {
+  for (const status of [404, 409]) {
+    const f = fixture();
+    f.questions.acks.set(1, { sid: "native-old", ack: {
+      generation: "old-extension", request_id: "old-request", state: "accepted",
+    } });
+    const calls = [], logs = [];
+    await pollQuestions("native-1", {
+      ...f, identity: { pid: 123, process_started_at: 1 }, log: (value) => logs.push(value),
+      request: async (_method, path) => {
+        calls.push(path);
+        if (path === "/health") return { capabilities: { live_question_answers: 1 } };
+        if (path.endsWith("/ack")) throw Object.assign(new Error("record changed"), { status });
+        return { controls: [] };
+      },
+    });
+    assert.equal(f.questions.acks.size, 0);
+    assert.ok(calls.some((path) => path.endsWith("/native-1/questions/poll")));
+    assert.match(logs[0], /original audit record unavailable/);
+    assert.equal(f.calls.length, 0);
+  }
+});

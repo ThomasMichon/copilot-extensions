@@ -148,7 +148,7 @@ export class PendingQuestions {
 
 export async function pollQuestions(sid, {
   questions, identity, session, request, isCurrent = () => true,
-  endpointKey = () => "", now = Date.now,
+  endpointKey = () => "", now = Date.now, log = () => {},
 }) {
   if (!isCurrent() || questions.sessionId !== sid) return;
   const key = endpointKey();
@@ -163,8 +163,13 @@ export async function pollQuestions(sid, {
   if (!questions.capability.supported) return;
   const base = `/api/v1/live-sessions/${encodeURIComponent(sid)}/questions`;
   for (const [id, entry] of questions.acks) {
-    if (entry.sid !== sid) continue;
-    await request("POST", `${base}/answers/${id}/ack`, entry.ack);
+    const original = `/api/v1/live-sessions/${encodeURIComponent(entry.sid)}/questions`;
+    try {
+      await request("POST", `${original}/answers/${id}/ack`, entry.ack);
+    } catch (error) {
+      if (![404, 409].includes(error?.status)) throw error;
+      log(`question answer ${id}: original audit record unavailable; no native answer replay`);
+    }
     questions.acks.delete(id);
   }
   const result = await request("POST", `${base}/poll`, questions.snapshot(session, identity));

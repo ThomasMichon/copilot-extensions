@@ -84,6 +84,9 @@ Question polling is independent of prompt-delivery custody, including a retained
 inbox; it cannot deliver prompts, switch mode or approve permissions. Audit
 reads and delayed acknowledgments stay pinned to the original native ID even
 after rollover or registration loss.
+Lost acknowledgments retry only that original audit scope, never the native
+answer. A missing or mismatched original record is logged as unavailable and
+does not block a new session's snapshot; it never becomes a success claim.
 
 Current snapshots expire after 15 seconds and bind the registered extension
 process incarnation. A Bridge restart starts with no answer authority; the
