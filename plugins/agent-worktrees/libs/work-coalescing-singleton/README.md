@@ -61,7 +61,9 @@ Pure functions over a resolved `(host, port, token)` endpoint -- this module
 never resolves rendezvous or boots a daemon itself; that stays the consumer's
 own discovery/boot logic (each plugin already has one).
 
-- `subscribe` / `release` -- explicit ref-count in/out.
+- `subscribe` / `release` -- explicit ref-count in/out. `release` also accepts
+  an optional positive finite `completion_timeout_s` bounding all transport
+  fragments; failure remains best-effort and the daemon reaper is the backstop.
 - `request(..., request_deadline_s=...)` -- one coalesced request; raises
   `DaemonUnavailable` on timeout, malformed response, or an explicit
   `fallback` reply from the server (its own coalesced execution missed the

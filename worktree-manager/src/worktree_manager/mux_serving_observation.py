@@ -4,17 +4,20 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
+import secrets
 import stat
 from pathlib import Path
 
-from zdd import diagnostics, routing
+from zdd import breadcrumb, diagnostics, routing
 
 from . import mux_daemon, mux_daemon_cutover, mux_daemon_process
 
 SCHEMA = "worktree-manager.mux-serving-observation"
 VERSION = 1
+CUSTODY_VERSION = 1
 
 
 class ServingObservationError(RuntimeError):
@@ -49,26 +52,64 @@ def _existing_token(root: Path) -> tuple[str, tuple]:
     return token, (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns)
 
 
-def observe(root: Path) -> dict:
+def _live_owner(endpoint: routing.Endpoint) -> bool:
+    from agent_procutil._daemon_instance_identity import birth_identity
+
+    try:
+        birth_identity(endpoint.pid)
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return diagnostics.process_start_time(endpoint.pid) == endpoint.process_start_time
+
+
+def _matches_health_owner(health: dict, root: Path, endpoint: routing.Endpoint, token: str) -> bool:
+    if "pid" in health or "process_start_time" in health:
+        return (
+            type(health.get("pid")) is int and health["pid"] == endpoint.pid
+            and health.get("process_start_time") == endpoint.process_start_time
+        )
+    record = mux_daemon.read_lock_data(mux_daemon.lock_path(root))
+    if not isinstance(record, dict):
+        return False
+    credential = record.get("manager_mux_token")
+    return (
+        type(record.get("pid")) is int and record["pid"] == endpoint.pid
+        and record.get("start_time") == endpoint.process_start_time
+        and record.get("manager_mux_endpoint") == routing.format_authority(endpoint.bind, endpoint.port)
+        and isinstance(credential, str) and secrets.compare_digest(credential, token)
+    )
+
+
+def observe(root: Path, *, timeout: float = 2.0, ignore_custody_files: bool = False) -> dict:
     """Observe only; never start a daemon, create credentials, or change routing."""
     try:
+        if (
+            type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0
+            or type(ignore_custody_files) is not bool
+        ):
+            raise ServingObservationError("Manager observation timeout is invalid")
         root = Path(root).resolve(strict=True)
         if not root.is_dir():
             raise ServingObservationError("Manager root is unavailable")
         directory = mux_daemon_cutover.routing_dir(root)
+        if os.path.lexists(breadcrumb.breadcrumb_path(directory)):
+            raise ServingObservationError("Manager cutover remains unsettled")
         table = routing.read_table(directory, strict=True)
         raw = table.get("active") if table is not None else None
         if raw is None:
             if (
                 table is not None
                 or os.path.lexists(routing.routing_table_path(directory))
-                or os.path.lexists(directory / routing._LOCK_FILENAME)
-                or os.path.lexists(mux_daemon_cutover._cutover_lock_path(root))
                 or os.path.lexists(mux_daemon.lock_path(root))
-                or os.path.lexists(mux_daemon_process.spawn_lock_path(root))
+                or os.path.lexists(breadcrumb.breadcrumb_path(directory))
+                or (not ignore_custody_files and (
+                    os.path.lexists(directory / routing._LOCK_FILENAME)
+                    or os.path.lexists(mux_daemon_cutover._cutover_lock_path(root))
+                    or os.path.lexists(mux_daemon_process.spawn_lock_path(root))
+                ))
             ):
                 raise ServingObservationError("unrouted Manager ownership is unconfirmed")
-            return {"state": "inactive", "generation": None}
+            return {"state": "unfenced-absence" if ignore_custody_files else "inactive", "generation": None}
         endpoint = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
         if (
             endpoint is None or endpoint.bind != "127.0.0.1"
@@ -79,36 +120,64 @@ def observe(root: Path) -> dict:
             or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,255}", endpoint.version) is None
             or endpoint.version.endswith(".")
             or not endpoint.process_start_time
-            or diagnostics.process_start_time(endpoint.pid) != endpoint.process_start_time
+            or not _live_owner(endpoint)
         ):
             raise ServingObservationError("routed Manager ownership is unconfirmed")
         token, token_identity = _existing_token(root)
         health = mux_daemon_cutover.ControlClient(
-            endpoint.base_url, root=root, timeout=2.0, token=token,
+            endpoint.base_url, root=root, timeout=min(timeout, 2.0), token=token,
+            completion_timeout_s=min(timeout, 2.0),
         ).health()
         if (
             not isinstance(health, dict) or health.get("status") != "ready"
             or health.get("active") is not True
             or health.get("runtime_generation") != endpoint.version
+            or not _matches_health_owner(health, root, endpoint, token)
             or routing.read_table(directory, strict=True) != table
-            or diagnostics.process_start_time(endpoint.pid) != endpoint.process_start_time
+            or not _live_owner(endpoint)
             or _existing_token(root) != (token, token_identity)
+            or not _matches_health_owner(health, root, endpoint, token)
+            or os.path.lexists(breadcrumb.breadcrumb_path(directory))
         ):
             raise ServingObservationError("routed Manager readiness is unconfirmed")
         return {"state": "ready", "generation": endpoint.version}
     except ServingObservationError:
         raise
-    except Exception:
+    except Exception:  # noqa: BLE001 -- never expose owner diagnostics
         raise ServingObservationError("Manager serving state is unavailable") from None
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--root", type=Path, required=True)
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("--lock-paths", action="store_true")
+    modes.add_argument("--unfenced-absence", action="store_true")
+    parser.add_argument("--timeout", type=float, default=2.0)
     args = parser.parse_args(argv)
+    if not math.isfinite(args.timeout) or not 0 < args.timeout <= 600:
+        parser.error("--timeout must be between 0 and 600 seconds")
     try:
-        result = {"schema": SCHEMA, "version": VERSION, "ok": True, **observe(args.root)}
-    except ServingObservationError:
+        if args.lock_paths:
+            from .runtime_identity import running_generation
+
+            root = args.root.resolve(strict=True)
+            if not root.is_dir():
+                raise ServingObservationError("Manager root is unavailable")
+            directory = mux_daemon_cutover.routing_dir(root)
+            result = {
+                "schema": "worktree-manager.mux-serving-locks", "version": VERSION, "ok": True,
+                "runtime_generation": running_generation(),
+                "cutover": str(mux_daemon_cutover._cutover_lock_path(root)),
+                "routing": str(directory / routing._LOCK_FILENAME),
+                "spawn": str(mux_daemon_process.spawn_lock_path(root)),
+            }
+        else:
+            result = {
+                "schema": SCHEMA, "version": VERSION, "ok": True,
+                **observe(args.root, timeout=args.timeout, ignore_custody_files=args.unfenced_absence),
+            }
+    except (OSError, RuntimeError, TypeError, ValueError):
         result = {"schema": SCHEMA, "version": VERSION, "ok": False, "state": "unknown"}
     print(json.dumps(result), flush=True)
     return 0 if result["ok"] else 1
