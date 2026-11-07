@@ -654,6 +654,10 @@ a matching persisted account binding; absent, conflicting or unreadable binding
 is not permission to reclaim. The same validated credential reaches rescue,
 deletion and the account-specific stop-state lookup. Creation's headless REST
 fallback retains the admitted environment rather than rediscovering credentials.
+For unmapped repositories, a valid `GH_TOKEN` or `GITHUB_TOKEN` needs no saved
+login: admission verifies its account and retains that credential through
+inventory, creation and recovery. Explicit account mappings remain strict and
+never fall back to another ambient identity.
 
 The merged `pool` and Picker views expose `owned_by_account`,
 `max_owned_codespaces` and `owned_inventory_complete`; their merged discovery

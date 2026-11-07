@@ -118,6 +118,10 @@ existing resource ownership, not solve quota pressure by destructive cleanup.
 
 ## Journal
 
+### 2026-11-06 - Environment-only compatibility
+- Preserved valid environment-only authentication for unmapped repositories without converting it into a saved named-account lookup. Verified identity and credentials stay together through inventory, ordinary/forced creation, REST fallback and quota recovery; explicit mappings remain strict.
+- Passed 56 focused admission, creation and recovery tests, including both supported token variables and invalid-identity refusal. Required CI and a fresh verdict remain open for the corrected source.
+
 ### 2026-11-06 - Admission review corrections
 - Moved the capacity model, planner and selected-account context into one focused component, preserving existing pool import paths and tightening only the affected pool ceiling; no cap was raised.
 - Preserved the qualified creation environment through the headless REST fallback for explicit and repository-mapped accounts. Quota recovery now requires a matching persisted binding and retains one credential through rescue, deletion and the account-specific stop-state lookup.

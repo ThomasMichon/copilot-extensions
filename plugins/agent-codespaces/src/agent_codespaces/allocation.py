@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 import os
 import subprocess
 from typing import TYPE_CHECKING
@@ -17,21 +18,53 @@ ALLOC_RECYCLE = "recycle"
 ALLOC_PRESSURE = "pressure"
 
 
-def allocation_account(repo: str) -> str:
+def allocation_context(repo: str) -> tuple[str, dict]:
     from . import gh_account
+    from .owner_inventory import qualified_environment
 
-    account = gh_account.account_for_repo(repo) or gh_account.active_account()
+    account = gh_account.account_for_repo(repo)
+    if account:
+        return account, qualified_environment(account)
+    ambient = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    if ambient:
+        from agent_procutil import no_window_kwargs
+
+        environment = dict(os.environ)
+        environment["GH_TOKEN"] = ambient
+        environment.pop("GITHUB_TOKEN", None)
+        try:
+            result = subprocess.run(
+                ["gh", "api", "user"], capture_output=True, text=True,
+                timeout=10, env=environment, **no_window_kwargs(),
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise RuntimeError(f"Environment GitHub identity verification failed: {exc}") from exc
+        if result.returncode:
+            raise RuntimeError(f"Environment GitHub identity verification failed: {result.stderr.strip()}")
+        try:
+            profile = json.loads(result.stdout)
+        except (ValueError, TypeError) as exc:
+            raise RuntimeError("Environment GitHub identity response is malformed") from exc
+        login = profile.get("login") if isinstance(profile, dict) else None
+        if not isinstance(login, str) or not login.strip():
+            raise RuntimeError("Environment GitHub identity response has no account")
+        return login.strip(), environment
+    account = gh_account.active_account()
     if not account:
         raise RuntimeError("CodeSpace allocation account is unavailable")
-    return account
+    return account, qualified_environment(account)
 
 
-def list_account_codespaces(account: str) -> list[CodespaceInfo]:
+def list_account_codespaces(
+    account: str, *, environment: dict | None = None,
+) -> list[CodespaceInfo]:
     """Require a complete, credential-pinned single-account allocation view."""
     from .lifecycle import _list_codespaces_under
 
     try:
-        rows = _list_codespaces_under(account, qualified=True)
+        rows = _list_codespaces_under(
+            account, qualified=True, **({"environment": environment} if environment is not None else {}),
+        )
     except (OSError, subprocess.SubprocessError) as exc:
         raise RuntimeError(f"CodeSpace account inventory failed: {exc}") from exc
     if len(rows) >= 50:
@@ -39,7 +72,13 @@ def list_account_codespaces(account: str) -> list[CodespaceInfo]:
     return rows
 
 
-def creation_environment(repo: str, account: str | None) -> tuple[str | None, dict | None]:
+def creation_environment(
+    repo: str, account: str | None, environment: dict | None = None,
+) -> tuple[str | None, dict | None]:
+    if environment is not None:
+        if not account:
+            raise RuntimeError("An admitted environment requires a verified account")
+        return account, environment
     from . import gh_account
 
     account = account or gh_account.account_for_repo(repo)
@@ -48,6 +87,19 @@ def creation_environment(repo: str, account: str | None) -> tuple[str | None, di
 
         return account, qualified_environment(account)
     return None, None
+
+
+def pool_inventory(rows, account, environment, *, listing):
+    supplied = rows is not None
+    if rows is None:
+        rows = list_account_codespaces(account, environment=environment) if account else listing()
+    if account:
+        rows = [row for row in rows if row.account.casefold() == account.casefold()]
+    counts: dict[str, int] = {}
+    for row in rows:
+        key = row.account.casefold() or "ambient"
+        counts[key] = counts.get(key, 0) + 1
+    return rows, counts, bool(account) or (supplied and len(counts) <= 1)
 
 
 def stop_context(name, account, token, *, listing, status_lookup):

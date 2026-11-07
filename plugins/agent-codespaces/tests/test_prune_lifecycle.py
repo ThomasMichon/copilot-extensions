@@ -241,7 +241,7 @@ def test_quota_reclaim_only_mutates_selected_account(store, monkeypatch, running
     status_mod.set_status("selected", status_mod.STATE_PRUNABLE)
     monkeypatch.setattr(
         allocation, "list_account_codespaces",
-        lambda account: [_info("selected", "Available" if running else "Shutdown")],
+        lambda account, **kwargs: [_info("selected", "Available" if running else "Shutdown")],
     )
     monkeypatch.setattr("agent_codespaces.account_binding.bound_account_or_raise", lambda name: "selected-owner")
     monkeypatch.setattr("agent_codespaces.owner_inventory.credential", lambda account: "selected-fixture-token")
@@ -278,7 +278,7 @@ def test_quota_reclaim_refuses_missing_or_foreign_same_name_binding(
     status_mod.set_status("same-name", status_mod.STATE_PRUNABLE)
     monkeypatch.setattr(
         allocation, "list_account_codespaces",
-        lambda account: [_info("same-name", "Available" if running else "Shutdown")],
+        lambda account, **kwargs: [_info("same-name", "Available" if running else "Shutdown")],
     )
     monkeypatch.setattr("agent_codespaces.account_binding.bound_account_or_raise", lambda name: bound)
     monkeypatch.setattr(
@@ -304,7 +304,7 @@ def test_quota_reclaim_unknown_account_inventory_preserves_venues(store, monkeyp
     status_mod.set_status("retained", status_mod.STATE_PRUNABLE)
     monkeypatch.setattr(
         allocation, "list_account_codespaces",
-        lambda account: (_ for _ in ()).throw(RuntimeError("inventory unavailable")),
+        lambda account, **kwargs: (_ for _ in ()).throw(RuntimeError("inventory unavailable")),
     )
     with patch.object(cli, "sync_codespace_sessions") as rescue, \
          patch.object(cli, "delete_codespace") as delete:
@@ -319,7 +319,9 @@ def test_quota_reclaim_unknown_account_inventory_preserves_venues(store, monkeyp
 def test_create_retries_after_reclaim(store):
     info = _info("new-cs", "Available")
     with patch("agent_codespaces.__main__._ambient_codespace_scope", return_value=(True, "")), \
-         patch("agent_codespaces.allocation.allocation_account", return_value="selected-owner"), \
+         patch("agent_codespaces.allocation.allocation_context", return_value=(
+             "selected-owner", {"GH_TOKEN": "selected-fixture-token"},
+         )), \
          patch("agent_codespaces.__main__.load_merged_config", return_value=object()), \
          patch("agent_codespaces.__main__._reclaim_for_quota", return_value="pruned x"), \
          patch(
@@ -333,7 +335,9 @@ def test_create_retries_after_reclaim(store):
 
 def test_create_quota_no_reclaim_fails(store):
     with patch("agent_codespaces.__main__._ambient_codespace_scope", return_value=(True, "")), \
-         patch("agent_codespaces.allocation.allocation_account", return_value="selected-owner"), \
+         patch("agent_codespaces.allocation.allocation_context", return_value=(
+             "selected-owner", {"GH_TOKEN": "selected-fixture-token"},
+         )), \
          patch("agent_codespaces.__main__.load_merged_config", return_value=object()), \
          patch("agent_codespaces.__main__._reclaim_for_quota", return_value=None), \
          patch(

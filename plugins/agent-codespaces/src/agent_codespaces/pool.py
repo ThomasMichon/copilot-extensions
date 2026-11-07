@@ -50,6 +50,7 @@ from .allocation import (
     Budget,
     DEFAULT_MAX_OWNED_CODESPACES,
     plan_allocation as plan_allocation,
+    pool_inventory,
 )
 from .live_users import claim_orphaned, codespaces_in_use
 from .live_users import holder_worktree_gone as _holder_worktree_gone  # noqa: F401
@@ -315,6 +316,7 @@ def build_pool(
     live: dict | None = None,
     account: str | None = None,
     max_owned_codespaces: int = DEFAULT_MAX_OWNED_CODESPACES,
+    environment: dict | None = None,
 ) -> tuple[list[PoolMember], Budget]:
     """Derive the full pool view (members + budget) from the owning layers.
 
@@ -340,20 +342,9 @@ def build_pool(
     import time as _time
 
     now = _time.time() if now is None else now
-    supplied = codespaces is not None
-    if codespaces is None:
-        if account:
-            from .allocation import list_account_codespaces
-
-            codespaces = list_account_codespaces(account)
-        else:
-            codespaces = list_codespaces()
-    if account:
-        codespaces = [cs for cs in codespaces if cs.account.casefold() == account.casefold()]
-    owned_by_account: dict[str, int] = {}
-    for cs in codespaces:
-        key = cs.account.casefold() or "ambient"
-        owned_by_account[key] = owned_by_account.get(key, 0) + 1
+    codespaces, owned_by_account, inventory_complete = pool_inventory(
+        codespaces, account, environment, listing=list_codespaces,
+    )
     if leases is None:
         leases = list_leases()
     if markers is None:
@@ -466,7 +457,7 @@ def build_pool(
         unknown_cores_count=unknown_running,
         max_owned_codespaces=max_owned_codespaces,
         account=account,
-        owned_inventory_complete=bool(account) or (supplied and len(owned_by_account) <= 1),
+        owned_inventory_complete=inventory_complete,
         owned_by_account=owned_by_account,
     )
     return members, budget

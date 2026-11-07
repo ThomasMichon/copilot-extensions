@@ -583,7 +583,10 @@ class TestCreateScopeGate:
 
     @pytest.fixture(autouse=True)
     def selected_account(self, monkeypatch):
-        monkeypatch.setattr("agent_codespaces.allocation.allocation_account", lambda repo: "selected-owner")
+        monkeypatch.setattr(
+            "agent_codespaces.allocation.allocation_context",
+            lambda repo: ("selected-owner", {"GH_TOKEN": "selected-fixture-token"}),
+        )
 
     def test_create_blocked_when_scope_missing(self, capsys):
         import agent_codespaces.__main__ as m
@@ -670,7 +673,10 @@ class TestCreateReuseGuard:
 
     @pytest.fixture(autouse=True)
     def selected_account(self, monkeypatch):
-        monkeypatch.setattr("agent_codespaces.allocation.allocation_account", lambda repo: "selected-owner")
+        monkeypatch.setattr(
+            "agent_codespaces.allocation.allocation_context",
+            lambda repo: ("selected-owner", {"GH_TOKEN": "selected-fixture-token"}),
+        )
 
     def _decision(self, **kw):
         from agent_codespaces.pool import AllocationDecision
@@ -756,7 +762,10 @@ class TestAllocateCommand:
 
     @pytest.fixture(autouse=True)
     def selected_account(self, monkeypatch):
-        monkeypatch.setattr("agent_codespaces.allocation.allocation_account", lambda repo: "selected-owner")
+        monkeypatch.setattr(
+            "agent_codespaces.allocation.allocation_context",
+            lambda repo: ("selected-owner", {"GH_TOKEN": "selected-fixture-token"}),
+        )
 
     def test_allocate_json_emits_decision(self, capsys):
         import agent_codespaces.__main__ as m
@@ -799,6 +808,66 @@ class TestAllocateCommand:
         assert decision["reason"] == "selected account listing failed"
 
 
+@pytest.mark.parametrize("variable", ["GH_TOKEN", "GITHUB_TOKEN"])
+def test_environment_only_credentials_reach_inventory_and_creation(monkeypatch, capsys, variable):
+    from types import SimpleNamespace
+    from agent_codespaces import __main__ as cli, allocation, coordination, gh_account, lifecycle
+    from agent_codespaces.config import CodespacesConfig
+
+    for name in ("GH_TOKEN", "GITHUB_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv(variable, "environment-fixture-token")
+    monkeypatch.setattr(gh_account, "account_for_repo", lambda repo: None)
+    monkeypatch.setattr(
+        gh_account, "active_account",
+        lambda: pytest.fail("environment credential used a saved active identity"),
+    )
+    monkeypatch.setattr(
+        "agent_codespaces.owner_inventory.qualified_environment",
+        lambda account: pytest.fail("environment credential became a named saved-token lookup"),
+    )
+    monkeypatch.setattr(cli, "load_merged_config", CodespacesConfig)
+    monkeypatch.setattr(cli, "_require_codespace_scope", lambda operation: None)
+    monkeypatch.setattr(cli, "_gh_binary_available", lambda: True)
+    monkeypatch.setattr(cli, "validate_context", lambda: None)
+    monkeypatch.setattr(lifecycle, "validate_context", lambda: None)
+    monkeypatch.setattr(lifecycle, "resolve_devcontainer_path", lambda *args, **kwargs: None)
+    monkeypatch.setattr(cli.pool_mod, "list_leases", lambda: [])
+    monkeypatch.setattr(cli.pool_mod, "list_status", lambda: [])
+    monkeypatch.setattr(cli.pool_mod, "codespaces_in_use", lambda names: {})
+    monkeypatch.setattr(coordination, "list_leases", lambda: {})
+    monkeypatch.setattr(coordination, "list_cleanliness", lambda: {})
+    monkeypatch.setattr("agent_codespaces.driving_worktrees.resolve_current_workstream_box", lambda *args: None)
+    bindings = []
+    monkeypatch.setattr(
+        "agent_codespaces.account_binding.bind",
+        lambda name, account, repo: bindings.append(account),
+    )
+    observed = []
+
+    def run(argv, **kwargs):
+        environment = kwargs["env"]
+        observed.append((argv[1:3], environment.get("GH_TOKEN"), environment.get("GITHUB_TOKEN")))
+        if argv[1:3] == ["api", "user"]:
+            value = json.dumps({"login": "environment-owner"})
+        elif argv[1:3] == ["codespace", "list"]:
+            value = "[]"
+        elif argv[1:3] == ["codespace", "create"]:
+            value = "fixture-created"
+        else:
+            pytest.fail(f"unexpected credential rediscovery or provider operation: {argv[:3]}")
+        return SimpleNamespace(returncode=0, stdout=value, stderr="")
+
+    monkeypatch.setattr(allocation.subprocess, "run", run)
+    assert main(["allocate", "example/project", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["action"] == "create"
+    assert main(["create", "example/project", "--no-wait"]) == 0
+    assert main(["create", "example/project", "--no-wait", "--force-create"]) == 0
+    assert bindings == ["environment-owner", "environment-owner"]
+    assert observed[0][0] == ["api", "user"]
+    assert all(token == "environment-fixture-token" and alternate is None for _, token, alternate in observed)
+
+
 def test_owned_capacity_real_cli_process_preserves_override():
     import subprocess
     import sys
@@ -817,7 +886,7 @@ cli.load_merged_config = CodespacesConfig
 cli._require_codespace_scope = lambda operation: None
 cli.validate_context = lambda: None
 cli._gh_binary_available = lambda: True
-allocation.allocation_account = lambda repo: "fixture-owner"
+allocation.allocation_context = lambda repo: ("fixture-owner", {"GH_TOKEN": "fixture-token"})
 pool.list_leases = lambda: []
 pool.list_status = lambda: []
 pool.codespaces_in_use = lambda names: {}
@@ -831,7 +900,7 @@ cli.create_codespace = lambda *args, **kwargs: (
 results = []
 for count, force, failed in ((29, False, False), (30, False, False), (31, False, False),
                              (30, True, False), (0, False, True)):
-    def listing(account):
+    def listing(account, **kwargs):
         if failed:
             raise RuntimeError("fixture inventory unavailable")
         return [CodespaceInfo(

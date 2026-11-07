@@ -131,6 +131,32 @@ def test_allocation_listing_reports_native_failure_as_unknown(monkeypatch, error
         allocation.list_account_codespaces("selected-owner")
 
 
+def test_mapped_account_never_falls_back_to_environment_credentials(monkeypatch):
+    monkeypatch.setenv("GH_TOKEN", "ambient-fixture-token")
+    monkeypatch.setattr(gh_account, "account_for_repo", lambda repo: "mapped-owner")
+    monkeypatch.setattr(
+        "agent_codespaces.owner_inventory.qualified_environment",
+        lambda account: (_ for _ in ()).throw(RuntimeError("mapped credential unavailable")),
+    )
+    monkeypatch.setattr(
+        allocation.subprocess, "run",
+        lambda *args, **kwargs: pytest.fail("mapped account tried ambient verification"),
+    )
+    with pytest.raises(RuntimeError, match="mapped credential unavailable"):
+        allocation.allocation_context("example/project")
+
+
+def test_environment_identity_requires_a_verified_account(monkeypatch):
+    monkeypatch.setenv("GH_TOKEN", "environment-fixture-token")
+    monkeypatch.setattr(gh_account, "account_for_repo", lambda repo: None)
+    monkeypatch.setattr(
+        allocation.subprocess, "run",
+        lambda *args, **kwargs: MagicMock(returncode=0, stdout="{}", stderr=""),
+    )
+    with pytest.raises(RuntimeError, match="identity response has no account"):
+        allocation.allocation_context("example/project")
+
+
 class TestCreateCodespace:
     @pytest.mark.parametrize("explicit", [False, True])
     def test_creation_preserves_admitted_account_environment(self, monkeypatch, explicit):

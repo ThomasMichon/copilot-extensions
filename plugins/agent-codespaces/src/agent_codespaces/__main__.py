@@ -3821,7 +3821,9 @@ def _cmd_prune(args: argparse.Namespace) -> int:
     return 0
 
 
-def _reclaim_for_quota(err: str, *, account: str | None = None) -> str | None:
+def _reclaim_for_quota(
+    err: str, *, account: str | None = None, environment: dict | None = None,
+) -> str | None:
     """On a CodeSpace-create quota error, attempt ONE safe reclaim so a retry
     can succeed. Returns a human note describing what it freed, or None.
 
@@ -3853,7 +3855,7 @@ def _reclaim_for_quota(err: str, *, account: str | None = None) -> str | None:
         from .allocation import list_account_codespaces
 
         try:
-            account_rows = list_account_codespaces(account)
+            account_rows = list_account_codespaces(account, environment=environment)
         except ContextRefused:
             raise
         except RuntimeError:
@@ -3870,7 +3872,7 @@ def _reclaim_for_quota(err: str, *, account: str | None = None) -> str | None:
             if not bound or bound.casefold() != account.casefold():
                 log.warning("Skipping quota reclaim for %s: account binding is absent or different", name)
                 return None
-            return {"account": account, "token": credential(account)}
+            return {"account": account, "token": environment["GH_TOKEN"] if environment else credential(account)}
         except ContextRefused:
             raise
         except RuntimeError as exc:
@@ -3956,14 +3958,14 @@ def _cmd_create(args: argparse.Namespace) -> int:
 
     config = load_merged_config()
 
-    from .allocation import allocation_account
+    from .allocation import allocation_context
 
-    account = allocation_account(args.repo)
+    account, environment = allocation_context(args.repo)
     if not getattr(args, "force_create", False):
         try:
             from .driving_worktrees import resolve_current_workstream_box
             _members, _budget = pool_mod.build_pool(
-                account=account,
+                account=account, environment=environment,
                 max_owned_codespaces=getattr(config, "max_owned_codespaces", 30),
             )
             decision = pool_mod.plan_allocation(
@@ -4008,6 +4010,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
             display_name=getattr(args, "display_name", None),
             devcontainer_path=getattr(args, "devcontainer_path", None),
             account=account,
+            environment=environment,
         )
 
     try:
@@ -4015,7 +4018,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
     except ContextRefused:
         raise
     except RuntimeError as exc:
-        note = _reclaim_for_quota(str(exc), account=account)
+        note = _reclaim_for_quota(str(exc), account=account, environment=environment)
         if not note:
             raise
         print(f"[..] Codespace quota hit; {note}. Retrying create...")
@@ -4267,12 +4270,13 @@ def _cmd_allocate(args: argparse.Namespace) -> int:
         else pool_mod.DEFAULT_STALE_AFTER
     )
     try:
-        from .allocation import allocation_account
+        from .allocation import allocation_context
         from .driving_worktrees import resolve_current_workstream_box
 
+        account, environment = allocation_context(args.repo)
         members, budget = pool_mod.build_pool(
             budget_cores=budget_cores, stale_after=stale_after,
-            account=allocation_account(args.repo),
+            account=account, environment=environment,
             max_owned_codespaces=getattr(config, "max_owned_codespaces", 30),
         )
         decision = pool_mod.plan_allocation(

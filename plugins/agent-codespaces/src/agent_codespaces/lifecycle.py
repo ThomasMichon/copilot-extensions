@@ -136,7 +136,9 @@ def list_codespaces(*, concurrent: bool = False) -> list[CodespaceInfo]:
     return list(merged.values())
 
 
-def _list_codespaces_under(login: str | None, *, qualified: bool = False) -> list[CodespaceInfo]:
+def _list_codespaces_under(
+    login: str | None, *, qualified: bool = False, environment: dict | None = None,
+) -> list[CodespaceInfo]:
     """Run ``gh codespace list`` under one account (or ambient when None)."""
     from . import gh_account
 
@@ -146,7 +148,9 @@ def _list_codespaces_under(login: str | None, *, qualified: bool = False) -> lis
         "name,displayName,repository,gitStatus,state,machineName,lastUsedAt",
         "--limit", "50",
     ]
-    if qualified:
+    if environment is not None:
+        env = environment
+    elif qualified:
         from .owner_inventory import qualified_environment
 
         env = qualified_environment(login)
@@ -653,6 +657,7 @@ def create_codespace(
     devcontainer_path: str | None = None,
     *,
     account: str | None = None,
+    environment: dict | None = None,
 ) -> CodespaceInfo:
     """Create a CodeSpace for the given repo using config defaults.
 
@@ -688,7 +693,7 @@ def create_codespace(
 
     from .allocation import creation_environment
 
-    account, environment = creation_environment(repo, account)
+    account, environment = creation_environment(repo, account, environment)
     result = subprocess.run(
         args, capture_output=True, text=True, timeout=300,
         creationflags=_creation_flags(),
