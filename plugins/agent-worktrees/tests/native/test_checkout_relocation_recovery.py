@@ -5,6 +5,8 @@ import hashlib
 import os
 import sqlite3
 import subprocess
+import sys
+import time
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -14,6 +16,7 @@ import pytest
 
 from agent_worktrees import checkout_relocation as relocation
 from agent_worktrees import checkout_relocation_state as state
+from agent_procutil.owned_process import run_caller_owned
 from test_checkout_relocation import checkout as checkout
 
 
@@ -247,3 +250,21 @@ def test_original_name_retirement_is_recoverable_before_complete(checkout, monke
     assert result["phase"] == "complete" and "rebound" in observed
     assert result["stage"] == retained["stage"]
     assert not checkout.source.exists() and not retirement.exists()
+
+
+@pytest.mark.timeout(120)
+def test_actual_move_json_keeps_stale_lock_diagnostics_out_of_stdout(checkout):
+    lock = Path(checkout.config.default_repo.worktree_root) / ".finalize.lock"
+    lock.write_text("0::owned-fixture-stale-lock")
+    old = time.time() - 60
+    os.utime(lock, (old, old))
+    result = run_caller_owned(
+        [sys.executable, "-m", "agent_worktrees", "--project", "sample", "move",
+         checkout.record.worktree_id, "--to", str(checkout.destination), "--apply", "--json"],
+        env=dict(os.environ, AGENT_HOME=str(checkout.home), USERPROFILE=str(checkout.home), HOME=str(checkout.home)),
+        cwd=checkout.home, timeout=100, max_stdout_bytes=1024 * 1024, max_stderr_bytes=64 * 1024,
+    )
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert json.loads(result.stdout)["phase"] == "complete"
+    assert "Stale lock detected" in result.stderr and "Stale lock detected" not in result.stdout
+    assert checkout.destination.exists() and not checkout.source.exists()

@@ -7,6 +7,7 @@ import json
 import secrets
 import shutil
 import sqlite3
+import sys
 import time
 from pathlib import Path
 
@@ -337,7 +338,10 @@ def move(worktree_id: str, destination: str, config) -> dict:
     ledger = cfg.tracking_dir(config.repo_name) / f"{worktree_id}.yaml"
     if Path(worktree_id).name != worktree_id or "/" in worktree_id or "\\" in worktree_id:
         raise ValueError("move requires one exact managed worktree ID")
-    with FinalizeLock(Path(config.default_repo.worktree_root) / ".finalize.lock", timeout=3), (
+    with FinalizeLock(
+        Path(config.default_repo.worktree_root) / ".finalize.lock", timeout=3,
+        on_stale=lambda message: print(message, file=sys.stderr),
+    ), (
         worktree_lifecycle.guard(ledger, relocation=True)
     ), launch_admission.guard(ledger), state.owner(ledger):
         report = plan(worktree_id, destination, config)
@@ -455,7 +459,10 @@ def abort(worktree_id: str, destination: str, config) -> dict:
     if Path(worktree_id).name != worktree_id or "/" in worktree_id or "\\" in worktree_id:
         raise ValueError("abort requires one exact managed worktree ID")
     ledger = cfg.tracking_dir(config.repo_name) / f"{worktree_id}.yaml"
-    with FinalizeLock(Path(config.default_repo.worktree_root) / ".finalize.lock", timeout=3), (
+    with FinalizeLock(
+        Path(config.default_repo.worktree_root) / ".finalize.lock", timeout=3,
+        on_stale=lambda message: print(message, file=sys.stderr),
+    ), (
         worktree_lifecycle.guard(ledger, relocation=True)
     ), launch_admission.guard(ledger), state.owner(ledger):
         report = state.read(ledger)
