@@ -2169,6 +2169,14 @@ outside the selected slot in either layout. Picker monitor reuse compares the
 selected interpreter's environment prefix with the monitor's recorded prefix,
 so a healthy nested environment does not cause another launch attempt.
 
+Wheel applications retain operational scripts under the installed package's
+`_runtime_assets/`, without requiring a source `payload/`. Self-install and
+bootstrap activation bind the running application to its physical installation
+and package location, accepting equivalent native Windows path spellings while
+still refusing a foreign root or package. Launcher consumers obtain resources
+from the selected Manager itself; the filesystem spelling is not an ownership
+or readiness exemption.
+
 Package versions and runtime generations are distinct: a repair adds the
 canonical `+repair.<identity>` qualifier (or `.repair.<identity>` after a local
 version). Existing source-qualified identities retain their canonical identity.

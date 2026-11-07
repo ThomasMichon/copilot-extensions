@@ -16,6 +16,26 @@ from types import ModuleType
 from typing import Callable, ContextManager
 
 
+def publish_prepared_snapshot(
+    candidate: Path, snapshot: Path, *, runtime: ModuleType, verify: Callable[[Path], None],
+) -> None:
+    """Publish a verified candidate, retrying only bounded Windows sharing failures."""
+    for attempt in range(runtime._AV_RETRY_ATTEMPTS):
+        verify(candidate)
+        if os.path.lexists(snapshot):
+            raise FileExistsError(f"Snapshot already exists: {snapshot}")
+        try:
+            candidate.rename(snapshot)
+            return
+        except OSError as error:
+            if (
+                getattr(error, "winerror", None) not in (5, 32, 33)
+                or attempt == runtime._AV_RETRY_ATTEMPTS - 1
+            ):
+                raise
+            time.sleep(runtime._AV_RETRY_BACKOFF * (attempt + 1))
+
+
 def publish_source_snapshot(
     payload: Path, snapshots: Path, version: str, *, runtime: ModuleType,
     verify: Callable[[Path], None],
@@ -40,19 +60,11 @@ def publish_source_snapshot(
                 payload, candidate, symlinks=True,
                 **({"copy_function": copy} if on_progress is not None else {}),
             )
-            for attempt in range(runtime._AV_RETRY_ATTEMPTS):
+            def verify_inputs(candidate):
                 verify(candidate)
                 verify(payload)
-                try:
-                    candidate.rename(snapshot)
-                    break
-                except OSError as error:
-                    if (
-                        getattr(error, "winerror", None) not in (5, 32, 33)
-                        or attempt == runtime._AV_RETRY_ATTEMPTS - 1
-                    ):
-                        raise
-                    time.sleep(runtime._AV_RETRY_BACKOFF * (attempt + 1))
+
+            publish_prepared_snapshot(candidate, snapshot, runtime=runtime, verify=verify_inputs)
         return snapshot
 
 

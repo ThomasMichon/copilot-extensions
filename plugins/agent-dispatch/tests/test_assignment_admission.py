@@ -13,7 +13,7 @@ from agent_dispatch import assignment_relationship_owner, server
 from agent_dispatch.assignment_workspace import AssignmentWorkspace
 from agent_dispatch.config import Config, load_config
 from agent_dispatch.queue_records import TaskError
-from agent_dispatch.source_start import config_identity
+from agent_dispatch.source_start import behavior_identity, config_identity
 
 
 @pytest.mark.parametrize(("spec", "authority"), [
@@ -113,6 +113,7 @@ def test_ordinary_app_retains_actual_independent_owners_and_queue_authority(monk
         retained.admit_request(workspace, {}, {"task_id": "replacement"})
     assert observations[0] == {"runtime": "observed"}
     assert app.state.runtime_config_identity == config_identity(cfg)
+    assert app.state.runtime_behavior_identity_v1 == behavior_identity(cfg)
     server.build_app(replace(cfg, relationship_admission=None, relationship_authority=None))
     assert queues[1]._relationship_writer is None
     assert queues[1]._relationship_authority is None

@@ -953,6 +953,7 @@ def create_app(
 
     register_status_routes(
         app, queue, bus, control_token=control_token,
+        data_auth_required=token is not None,
         cohort_source_owned=cohort_source is not None,
     )
     register_directory_routes(app, directory)
