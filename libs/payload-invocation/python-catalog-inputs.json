@@ -1,6 +1,6 @@
 {
   "kind": "in-process-catalog-v1",
-  "module": "846b61b4f8cb8b843a8aa3420a0bf4e92ddc4713a8267dee97e570f0b01bf653",
+  "module": "61c316cc59e577284ad6e5307da55de17d07cfc202fe8cb5a16c079ef16f7be2",
   "functions": {
     "_load_command": "76011bf59a00ec95fe6df935d3fa46331f01c2d3ef9ae04b273d1e060e643a10",
     "load_manifest": "414b727db1eda3843fe3bf326734250a2ddd2789e44f80c52e4409de5a0963c9",

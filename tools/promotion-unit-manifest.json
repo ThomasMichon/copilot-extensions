@@ -4688,7 +4688,9 @@
         "tools/promotion_unit_tests/test_release_helper_decisions.py::test_single_consumer_wrapper_refreshes_declared_standalone_assets[foreign]",
         "tools/promotion_unit_tests/test_release_helper_decisions.py::test_single_consumer_canonical_reference_refreshes_support_before_conversion[absent]",
         "tools/promotion_unit_tests/test_release_helper_decisions.py::test_single_consumer_canonical_reference_refreshes_support_before_conversion[stale]",
-        "tools/promotion_unit_tests/test_release_helper_decisions.py::test_single_consumer_canonical_reference_refreshes_support_before_conversion[foreign]"
+        "tools/promotion_unit_tests/test_release_helper_decisions.py::test_single_consumer_canonical_reference_refreshes_support_before_conversion[foreign]",
+        "tools/promotion_unit_tests/test_invocation_materialization.py::test_planned_output_ancestor_conflicts_refuse_before_writes[source]",
+        "tools/promotion_unit_tests/test_invocation_materialization.py::test_planned_output_ancestor_conflicts_refuse_before_writes[candidate]"
     ],
     "sources": {
         "tools/application_sources.py": "3dba45b18c2597044205a98c8bdf7cd43c7bb529c4b1a4bcb898d04af2dbe9b0",
@@ -5332,7 +5334,7 @@
         "plugins/agent-dispatch/src/agent_dispatch/worktree_attribution.py": "9da78845c19f0cb892ba56c8ca719c00eab830cc56785d0c34e0e2ba5d3cb80a",
         "tools/promotion_unit_tests/test_ordinary_writer_admission.py": "111653f65c04a5c1aa6149aed795808202b2dde400fcc6cb138fff76734bdf39",
         "libs/payload-invocation/command_lifecycle.py": "fa59ad840f2a9c4a5c2a77c0a9d4fd22f9124e352ec310042b07d0d7d2873271",
-        "libs/payload-invocation/python-catalog-inputs.json": "b7053dce5beea515aa6e81b520fca4bfd2ec0343d4a618279c1383d061c0cecf",
+        "libs/payload-invocation/python-catalog-inputs.json": "608d075e5a074d71949a912afbdf1c8f72b4170339557eb8b7d19b6a3820c553",
         "tools/promotion_unit_tests/test_typecheck_catalog.py": "f3dddd8e2676e8f56a83da62a072c205b12fc9e0b3d811d2c4e75cc267239a4c",
         "libs/payload-invocation/templates/catalog-powershell.tmpl": "2d3807fc6d93a4389dcd52237cbacdf6b94d4b884b4694b4c9c20469e40e457a",
         "libs/payload-invocation/templates/dispatcher-posix.tmpl": "a49ba79f2a92262f8a51bdab2afc5129cdfe89bdc4be13925322819f462ea238",
@@ -5347,7 +5349,7 @@
         "libs/payload-invocation/command_binding.py": "783c14e3da2c21ab10e7e61ece68d6920ec5b273d04030d099c4b0c96b285864",
         "tools/typecheck_catalog_views.py": "0e807c81f590817ef3556e38bfb278560735b56733e93f0e35d89508bb722ea7",
         "libs/payload-invocation/templates/catalog-python.tmpl": "c752063e0fa7c4ae6e344843055991498773870d78823e14a5d4f89edeaf93b6",
-        "libs/payload-invocation/generate.py": "747a7f35b93e417cdae4c86ba5561cb8f0e7f5811f53d768c3b4d61fe191f29e",
+        "libs/payload-invocation/generate.py": "f5016103ba207b1636672b94196c20f7841af3c49452d79cb4b63801f26eb979",
         "tools/promotion_unit_tests/test_live_question_answers.py": "51b9c884787883d6fec7ce81db0075d0d13f54b32df71d3bff6c92227a9134bf",
         "plugins/agent-bridge/src/agent_bridge/live_question_validation.py": "61900a7eb7acbdf924fabaabf1175ddfbe337672971a3ec4ac9016c4d720fdba",
         "plugins/agent-bridge/src/agent_bridge/mux_question_forms.py": "d7c57186148fc9538f6f18eaf87ba1abab42e60ba31f6b4e7d3d163e0d7a19b2",
@@ -5355,7 +5357,7 @@
         "plugins/agent-bridge/src/agent_bridge/client_status.py": "1d6a2a05e68d3208244dac65b700db5234c5b351bf39900b66539f0210ba5d52",
         "plugins/agent-bridge/src/agent_bridge/status_schema.py": "ee1657cc5af74c24f502665abc9a68e66190a1529bc95069f597e283308f6242",
         "tools/materialize_payload_invocation.py": "72358c48a4bdce3bdb53291145c25609f0b27ace9a6104c489411be2b645df4e",
-        "tools/promotion_unit_tests/test_invocation_materialization.py": "6090c1230eb66cdcededb2e3be6f6a28feaa42ee638a3ccd4c041c2f46648316"
+        "tools/promotion_unit_tests/test_invocation_materialization.py": "8cd11deb5f89ccbd9b4d11774e7bad4ee2b1b5e6db3fe15b6dc7a39dd98dc8d4"
     },
     "coverage_targets": [
         "plugins/agent-dispatch/src/agent_dispatch/queue_submission_consumer.py",
