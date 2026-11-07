@@ -1450,6 +1450,61 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
   only the number collected, not an unbounded list of worktree IDs. Disable entirely with
   `AGENT_WORKTREES_NO_AUTO_CLEAN=1`.
 
+### Python bytecode caches (`python-cache prune`)
+
+Plugin launchers pass `-X pycache_prefix=<runtime-root>/cache/python/<namespace>`.
+A runtime with valid install evidence (`.install-complete.json` plus package
+`RECORD`s) reuses one sealed `installed-<digest>` namespace. Without that
+evidence a launcher mints a one-off `unsealed-<id>` namespace. Launchers that
+wait for their child delete the namespace they minted afterwards. Detached
+daemons and `exec`-style launchers cannot, so some `unsealed-*` directories
+still accumulate. `python-cache prune` reclaims them:
+
+```bash
+agent-worktrees python-cache prune                    # dry run: report eligible dirs/bytes
+agent-worktrees python-cache prune --json             # same, machine-readable
+agent-worktrees python-cache prune --apply            # remove eligible dirs
+agent-worktrees python-cache prune --root ~/.agent-vault --apply
+agent-worktrees python-cache prune --apply --allow-age-only   # Windows/macOS: accept age as liveness evidence
+```
+
+By default it inspects `cache/python` under each of this account's plugin runtime
+roots (`~/.agent-*`, `~/.worktree-manager`, `~/.budget-guidance`,
+`~/.copilot-extensions/*`). `--root` (repeatable) names a runtime root instead.
+It is conservative and fails closed:
+
+- It is a dry run unless `--apply` is given.
+- It considers only `unsealed-*` directories directly under the cache root.
+  `installed-*` and every other name are never touched.
+- A candidate is skipped (`non-bytecode-content`) unless its whole tree holds
+  only directories and `.pyc` files.
+- A candidate containing any symlink, junction or other reparse point is
+  skipped (`reparse-point`). Links are never followed. A cache root whose
+  `cache/python`, `cache` or runtime-root component is itself a link is
+  reported as `cache-root-linked-or-not-directory` and not scanned.
+- A candidate whose newest entry was modified within the grace period is
+  skipped. A live process still writing bytecode keeps it fresh.
+  `--min-age-hours` defaults to 1, must be a finite number, and must be at
+  least 1 with `--apply`.
+- Liveness evidence is reported as `liveness`. On Linux every process
+  environment and command line is scanned, and a candidate named there is
+  kept (`referenced-by-live-process`). The mode is `process-scan` when every
+  process was read, `incomplete` when some were unreadable (for example
+  another account's processes), `unavailable` on platforms without a process
+  scan (Windows, macOS), and `unknown` when the scan itself failed.
+- Only `process-scan` proves a candidate unused. Under `incomplete` or
+  `unavailable` every candidate is kept (`liveness-unproven`) unless
+  `--allow-age-only` accepts the grace period as the only liveness evidence
+  (reported as `age_only_allowed`). Under `unknown` every candidate is kept
+  (`liveness-unknown`); `--allow-age-only` does not override it.
+- Each candidate is re-inventoried immediately before removal. Removal is
+  anchored to the inventoried directories (directory handles on POSIX,
+  non-delete-sharing guard handles on Windows). If any directory was replaced
+  in the meantime the candidate becomes `error` (`changed-during-removal`).
+  Any I/O error, including on the cache root itself, marks an `error` entry,
+  leaves the rest in place, and makes the command exit 1.
+- `python-cache` needs no project, so it runs from any directory.
+
 ## Installation & Config
 
 | Subcommand | Description |
@@ -2104,6 +2159,17 @@ the current directory's resolved worktree when omitted (matching most
 other subcommands); a caller that cannot be resolved either way fails
 loudly rather than logging a `worktree_id: null` entry invisible to
 `activity --worktree-id <id>`.
+
+**Disk growth under `~/.agent-*/cache/python`.** Thousands of `unsealed-*`
+directories there usually come from a launcher that ran without valid install
+evidence, or from a detached or `exec`-style launcher that cannot clean up
+after its child. A persistently empty `installed-*` set for a runtime suggests
+its install evidence is missing or invalid. Reinstalling or updating that
+runtime restores reuse. Run `agent-worktrees python-cache prune` (dry run) to
+size the backlog, then `--apply` to reclaim it (on Windows or macOS, where no
+process scan exists, add `--allow-age-only` once no affected runtime is
+running). See
+[Python bytecode caches](#python-bytecode-caches-python-cache-prune).
 
 ### Handoff trace (Tier C)
 
