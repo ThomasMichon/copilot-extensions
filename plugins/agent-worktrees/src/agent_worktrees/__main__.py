@@ -4118,6 +4118,34 @@ class _ResidentHookPolicy:
         except ValueError as exc:
             raise HookUnavailable from exc
 
+    def mixed_batch_targets(self, payload: dict) -> list[str] | None:
+        from .hook_ipc import HookUnavailable
+
+        forms = self._module("tool_call_forms.py")
+        if forms is None:
+            raise HookUnavailable
+        try:
+            events = forms.tool_events(payload, strict=True)
+        except ValueError as exc:
+            raise HookUnavailable from exc
+        if any(
+            not isinstance(event.get("toolName"), str)
+            or event["toolName"].lower() not in _HOOK_WRITE_TOOLS | _HOOK_SHELL_TOOLS | {"view", "rg", "glob"}
+            for event in events
+        ):
+            raise HookUnavailable
+        targets = []
+        for event in events:
+            selected = self.mutation_targets(event)
+            if selected is None:
+                return None
+            for target in selected:
+                if target not in targets:
+                    if len(targets) >= forms.MAX_CALLS:
+                        return None
+                    targets.append(target)
+        return targets
+
     def mutation_targets(self, payload: dict) -> list[str] | None:
         tool = str(payload.get("toolName") or payload.get("tool_name") or "").lower()
         if tool in _HOOK_WRITE_TOOLS:
@@ -4159,10 +4187,11 @@ def _resident_hook_decision(
     if kind == "preToolUse":
         return policy.pre(payload)
 
-    if kind in {"nativeToolMutation", "nativeToolBatchMutation", "shellToolMutation"}:
+    if kind in {"nativeToolMutation", "nativeToolBatchMutation", "shellToolMutation", "mixedToolBatchMutation"}:
         tool = payload.get("toolName") or payload.get("tool_name")
-        if (kind == "nativeToolBatchMutation" and "toolCalls" not in payload) or (
-            kind != "nativeToolBatchMutation" and (
+        batch = kind in {"nativeToolBatchMutation", "mixedToolBatchMutation"}
+        if (batch and "toolCalls" not in payload) or (
+            not batch and (
                 not isinstance(tool, str) or tool.lower() not in (
                     _HOOK_SHELL_TOOLS if kind == "shellToolMutation" else _HOOK_WRITE_TOOLS
                 )
@@ -4172,7 +4201,12 @@ def _resident_hook_decision(
             from .hook_ipc import HookUnavailable
 
             raise HookUnavailable
-        targets = policy.native_batch_targets(payload) if kind == "nativeToolBatchMutation" else policy.mutation_targets(payload)
+        if kind == "mixedToolBatchMutation":
+            targets = policy.mixed_batch_targets(payload)
+        elif kind == "nativeToolBatchMutation":
+            targets = policy.native_batch_targets(payload)
+        else:
+            targets = policy.mutation_targets(payload)
         if targets is None:
             segment_cache.invalidate_all()
         else:
