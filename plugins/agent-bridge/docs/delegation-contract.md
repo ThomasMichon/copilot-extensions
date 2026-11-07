@@ -53,6 +53,7 @@ delegated-agent facade.
 | Resume | `resume` or automatic resume on later send | `POST .../resume` | Session returns to `idle` when recovery succeeds |
 | End and remove | `end` | `DELETE /api/v1/sessions/{id}` | Bridge-owned session state is retired |
 | Answer agent input | `answer` | `POST .../ask-user` | Parked elicitation resumes |
+| Answer an exact live interactive question | `questions`, then `answer` with request and generation | `GET /api/v1/live-sessions/{id}/questions`, `POST .../questions/answers` | [Native question acceptance](live-question-answers.md), not a message receipt or permission grant |
 | Answer a manual permission | No dedicated CLI verb yet | `POST .../permission` with correlated request and option IDs | Parked permission resumes and emits durable resolution |
 | Hand off context | `handoff` | `POST .../handoff` | A successor session is created and linked |
 | Rebuild a damaged relay log | No CLI verb; the watchdog may trigger it internally | Authenticated `POST .../resync` | Event log is rebuilt from downstream replay and delivery cursors reset |

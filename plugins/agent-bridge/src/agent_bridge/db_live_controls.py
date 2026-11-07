@@ -12,6 +12,7 @@ from .runtime_custody import RuntimeCustodyError
 class LiveControlsMixin:
     def claim_live_controls(
         self, session_id: str, now: float, max_age: float, *, readiness_only: bool = False,
+        questions_only: bool = False,
     ) -> list[dict[str, Any]]:
         """Claim a session's pending controls for its extension to apply.
 
@@ -22,7 +23,13 @@ class LiveControlsMixin:
         are expired instead: their requester is gone (e.g. the daemon
         restarted mid-wait), so they must never apply late.
         """
-        selected = "kind = 'control:plugin-readiness'" if readiness_only else "kind LIKE 'control:%'"
+        from .live_questions import QUESTION_CONTROL
+
+        selected = (
+            f"kind = '{QUESTION_CONTROL}'" if questions_only else
+            "kind = 'control:plugin-readiness'" if readiness_only else
+            f"kind LIKE 'control:%' AND kind != '{QUESTION_CONTROL}'"
+        )
         with self._write_lock:
             conn = self._get_conn()
             conn.execute("BEGIN IMMEDIATE")
