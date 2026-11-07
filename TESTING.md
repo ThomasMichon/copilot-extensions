@@ -6363,6 +6363,30 @@ wheel's exact bytes. The full development extra remains broader than the
 dependency-free client; selected source distributions can still require a
 platform's native build prerequisites.
 
+## Fleet host probes: native Windows opt-in
+
+`agent-worktrees fleet` launches a local interpreter child and a real `ssh`
+client per host. `tests/test_fleet_cli.py` checks their argv and kwargs with a
+mocked `subprocess.run`; the desktop regression observes the actual launches
+and stays outside the required lane:
+
+```powershell
+$env:COPILOT_EXTENSIONS_NATIVE_WINDOWS = '1'
+try {
+    python tools\run-plugin-tests.py agent-worktrees --allow-explicit-tiers --test-file tests\test_fleet_windowless.py
+} finally {
+    Remove-Item Env:COPILOT_EXTENSIONS_NATIVE_WINDOWS
+}
+```
+
+From a real windowless `pythonw.exe` parent in a kill-on-close Job, it runs
+two cycles of each probe path with its production kwargs. The local path
+substitutes a real console `python.exe` for the `list` run. The SSH path runs
+the real `ssh` client through an isolated `-F` config whose `ProxyCommand` is
+a real console `python.exe` that closes the connection, so no remote host is
+contacted. It checks observed visible windows and foreground transitions; the
+SSH case is skipped when no `ssh` client is on `PATH`.
+
 ## Optional busy-host Codespaces functional qualification
 
 The manual `Installation context full` workflow's `codespaces-installer`

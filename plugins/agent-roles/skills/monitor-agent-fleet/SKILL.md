@@ -93,7 +93,10 @@ worker, and steering never edits a worker's records.
 Use supplied topology and workspace/session readers, not machine-name guesses,
 titles or private implementation databases. The optional
 [fabric reader recipe](references/fabric-readers.md) names existing adapters;
-missing adapters remain unavailable, not installation instructions.
+missing adapters remain unavailable, not installation instructions. Inventory
+worktrees per project on each host with the native `fleet` or `list --json`
+reader and its derived `state`, never a session-history sweep. A project or
+host that was not read is a coverage gap, not zero active work.
 
 Capture source and observation time. Distinguish running, live-idle, explicitly
 held, terminal and unknown. Include live-idle owners with outstanding assigned

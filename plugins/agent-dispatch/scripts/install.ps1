@@ -1972,6 +1972,9 @@ function Install-Runtime {
     $ErrorActionPreference = 'Continue'
     Remove-ConsoleTrampolines -VenvDir $VenvDir
 
+    # UV resolves the local workspace closure in the root install below, as
+    # the POSIX installer does. Only pip needs standalone prerequisite installs.
+    if (-not $UvCommand) {
     # zdd (zero-downtime graceful-cutover primitives: routing table + orchestrator).
     # Declared as `agent-zdd` in pyproject but NOT on PyPI, so `uv pip install .`
     # cannot resolve it -- install it from the vendored lib FIRST so the package
@@ -2051,6 +2054,8 @@ function Install-Runtime {
             exit 1
         }
         Write-Ok "$($lib.Display) installed"
+    }
+
     }
 
     # -ReinstallPackage/-RefreshPackage (uv only): this installs from a local

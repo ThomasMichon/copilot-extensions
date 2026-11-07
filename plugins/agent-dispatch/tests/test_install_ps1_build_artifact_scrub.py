@@ -24,6 +24,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from agent_procutil import no_window_kwargs
 
 _FIXTURE_SPEC = importlib.util.spec_from_file_location(
     "_dispatch_owned_fixtures", Path(__file__).with_name("test_installer_engine_adoption.py")
@@ -182,6 +183,7 @@ exit $code
         env=env,
         timeout=30,
         check=True,
+        **no_window_kwargs(),
     )
 
 
@@ -273,6 +275,32 @@ Write-Output "EXIT:$($result.Code)"
     assert (plugin_dir / "install-count.txt").read_text() == "1"
     assert not (plugin_dir / "build").exists()
     assert not (plugin_dir / "some_pkg.egg-info").exists()
+
+
+def test_uv_preparation_installs_workspace_once(tmp_path: Path) -> None:
+    plugin_dir = tmp_path / "plugin"
+    plugin_dir.mkdir()
+    text = _INSTALL_PS1.read_text(encoding="utf-8")
+    start = text.index("# The selected MCP extra is part")
+    end = text.index("# -ReinstallPackage/-RefreshPackage", start)
+    preparation = text[start:end]
+    setup = """
+function Remove-ConsoleTrampolines {}
+function Resolve-Zdd { throw 'UV must resolve workspace libraries in its root transaction' }
+"""
+    stub = """
+function uv { Write-Output 'fixture install'; $global:LASTEXITCODE = 0 }
+"""
+    extra = f"""
+$result = & $installPkg "{plugin_dir}"
+Write-Output "EXIT:$($result.Code)"
+"""
+    result = _run_harness(
+        plugin_dir, stub, extra,
+        block=setup + preparation + _extract_install_pkg_block(),
+    )
+    assert "EXIT:0" in result.stdout, result.stdout + result.stderr
+    assert (plugin_dir / "install-count.txt").read_text() == "1"
 
 
 def test_src_layout_egg_info_is_also_scrubbed(tmp_path: Path) -> None:
