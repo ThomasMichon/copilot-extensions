@@ -55,6 +55,10 @@ permission prompts, alter reviewer verdicts, repair services, deploy guidance
 or reserve shared resources as part of observation. A status command that
 self-heals or resumes a service is not a read-only reader.
 
+Answering a worker's parked question is a separate **answer scope**: it names
+recipients and the routine question classes the monitor may answer. Without
+it, report the question with a recommended answer.
+
 Correcting an inactive owner's persisted charter is a separate **dormant
 correction** mode with its own grant; follow
 [dormant correction](references/dormant-correction.md). It never messages a
@@ -148,6 +152,11 @@ source, selector, hypothesis, environment and result. Do not lower a required
 test/review bar, approve a scope expansion, or label all prerequisite work waste.
 Keep broader tooling proposals separate from the worker's immediate next step.
 
+Check every owner for a **parked question** first: it is the most common
+blocker, and a running turn state can hide it. Classify and handle it with
+[parked questions](references/pending-input.md); never inject keystrokes or
+answer a permission prompt.
+
 For each agent, apply the [watchdog checks](references/watchdog-checks.md):
 open questions with their default and revisit time, open obligations,
 prerequisite growth, self-raised budgets, validation weight, delivery state
@@ -212,6 +221,16 @@ copy every worker's plan or require a PR for every observation. Bound the
 audit's own reads and delegated work; disclose incomplete coverage rather than
 spending indefinitely reconstructing low-value history. The monitor must not
 become a second busy loop or consume the coordinator it is supporting.
+
+Learn as you go. Record each monitor difficulty (a reader that failed, a
+blind spot, a recurring worker pattern) as one line in the supervisory record
+during the sweep, never stopping the sweep to fix it. Report them as proposed
+improvements at the end of the sweep. Applying one is a source change, not
+observation: only with recorded source-change and publication authority, and
+through each owner's contribution flow, fold facility lessons into the
+consuming repository's adapter and promote lessons that apply to any
+repository to this skill's owner as a batched, anonymized change rather than
+one per observation.
 
 Finish a finite sweep with a private per-agent report, ranked interventions and
 coverage limits. Report source changes, publication and deployment separately.
