@@ -41,6 +41,7 @@ from .leases_cli import _hold_is_self, _self_claim_identity, _short_owner
 from .live_users import busy_report as _busy_report
 from .live_users import recheck_before as _recheck_before
 from . import pool as pool_mod
+from .allocation import intended_cores as _intended_cores
 from . import relay_launch
 from .codespace_config import CodespaceSource
 from .worktrees import ContextRefused, validate_context
@@ -3825,6 +3826,7 @@ def _cmd_prune(args: argparse.Namespace) -> int:
 
 def _reclaim_for_quota(
     err: str, *, account: str | None = None, environment: dict | None = None,
+    budget_cores: int | None = None,
 ) -> str | None:
     """On a CodeSpace-create quota error, attempt ONE safe reclaim so a retry
     can succeed. Returns a human note describing what it freed, or None.
@@ -3895,6 +3897,10 @@ def _reclaim_for_quota(
 
             try:
                 with lifecycle_lock(name, refuse_live_users="prune") as lock:
+                    from .allocation import quota_rescue_admitted
+                    if budget_cores is not None and not quota_rescue_admitted(name, account, environment, budget_cores):
+                        log.warning("Skipping quota rescue for %s: running-core headroom is insufficient or unknown", name)
+                        continue
                     res = sync_codespace_sessions(
                         name, skip_if_shutdown=False, lock=lock, **identity,
                     )
@@ -3954,20 +3960,12 @@ def _cmd_create(args: argparse.Namespace) -> int:
 
     config = load_merged_config()
 
-    from .allocation import allocation_context
+    from .allocation import allocation_context, plan_creation
 
     if not getattr(args, "force_create", False):
         try:
             account, environment = allocation_context(args.repo)
-            from .driving_worktrees import resolve_current_workstream_box
-            _members, _budget = pool_mod.build_pool(
-                account=account, environment=environment,
-                max_owned_codespaces=getattr(config, "max_owned_codespaces", 30),
-            )
-            decision = pool_mod.plan_allocation(
-                _members, _budget, repo=args.repo,
-                new_cores=_intended_cores(config, args.repo),
-                workstream_box=resolve_current_workstream_box(_members, args.repo))
+            decision = plan_creation(args.repo, config, account, environment)
         except ContextRefused:
             raise
         except RuntimeError as exc:
@@ -4016,10 +4014,25 @@ def _cmd_create(args: argparse.Namespace) -> int:
     except ContextRefused:
         raise
     except RuntimeError as exc:
-        note = _reclaim_for_quota(str(exc), account=account, environment=environment)
+        note = _reclaim_for_quota(
+            str(exc), account=account, environment=environment,
+            budget_cores=None if getattr(args, "force_create", False) else pool_mod.DEFAULT_BUDGET_CORES,
+        )
         if not note:
             raise
-        print(f"[..] Codespace quota hit; {note}. Retrying create...")
+        print(f"[..] Codespace quota hit; {note}.")
+        if not getattr(args, "force_create", False):
+            try:
+                decision = plan_creation(args.repo, config, account, environment)
+            except ContextRefused:
+                raise
+            except RuntimeError as error:
+                print(f"[pressure] {error}", file=sys.stderr)
+                return _ALLOC_PRESSURE_EXIT
+            if decision.action != pool_mod.ALLOC_CREATE:
+                print(f"[pressure] Retry refused: {decision.reason}", file=sys.stderr)
+                return _ALLOC_PRESSURE_EXIT
+        print("[..] Retrying create...")
         info = _create()
     print(f"Created: {info.name}")
 
@@ -4230,20 +4243,6 @@ def _annotate_pool_members(members) -> None:
             member.held_by_self = _hold_is_self(
                 member.holder_owner, member.l2_holder, owner, worktree,
             )
-
-
-def _intended_cores(config, repo: str) -> int:
-    """Cores a *new* box for ``repo`` would spend -- the machine tier ``create``
-    would pick (the repo's ``machine_type`` else the config default), mapped to a
-    core count. Feeds the budget-fit check in ``allocate`` / the ``create`` guard.
-    An unresolvable tier yields 0, which refuses additional compute allocation."""
-    try:
-        from .config import RepoConfig
-        repo_config = config.repos.get(repo, RepoConfig())
-        machine_type = repo_config.machine_type or config.default_machine_type
-        return pool_mod.machine_cores(machine_type or "")
-    except Exception:
-        return 0
 
 
 # Exit code for a venue request that cannot be satisfied (pool at budget, nothing

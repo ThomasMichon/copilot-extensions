@@ -655,6 +655,11 @@ a matching persisted account binding; absent, conflicting or unreadable binding
 is not permission to reclaim. The same validated credential reaches rescue,
 deletion and the account-specific stop-state lookup. Creation's headless REST
 fallback retains the admitted environment rather than rediscovering credentials.
+Ordinary quota recovery checks fresh known core headroom before a rescue can
+wake a stopped venue, then revalidates the same creation policy after reclaim.
+It reports completed recovery even if a concurrent capacity change blocks the
+retry. Explicit force-create still overrides only local policy, not the
+account, rescue, liveness or cleanup gates.
 For unmapped repositories, a workstream's own matching claim and persisted
 account binding take precedence over a newly active account, so an account
 switch does not hide its retained venue. Explicit repository mappings still

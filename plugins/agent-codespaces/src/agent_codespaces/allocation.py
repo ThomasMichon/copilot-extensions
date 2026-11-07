@@ -132,6 +132,59 @@ def creation_environment(
     return None, None
 
 
+def intended_cores(config, repo: str) -> int:
+    """Resolve the configured creation tier; unknown cost admits no new compute."""
+    try:
+        from .config import RepoConfig
+        from .pool import machine_cores
+
+        repo_config = config.repos.get(repo, RepoConfig())
+        machine_type = repo_config.machine_type or config.default_machine_type
+        return machine_cores(machine_type or "")
+    except Exception:
+        return 0
+
+
+def plan_creation(repo: str, config, account: str, environment: dict) -> AllocationDecision:
+    """Use one pinned admission path for initial creation and quota retries."""
+    from . import pool
+    from .driving_worktrees import resolve_current_workstream_box
+
+    members, budget = pool.build_pool(
+        account=account, environment=environment,
+        max_owned_codespaces=getattr(config, "max_owned_codespaces", DEFAULT_MAX_OWNED_CODESPACES),
+    )
+    return pool.plan_allocation(
+        members, budget, repo=repo, new_cores=intended_cores(config, repo),
+        workstream_box=resolve_current_workstream_box(members, repo),
+    )
+
+
+def quota_rescue_admitted(name: str, account: str | None, environment: dict | None, budget_cores: int) -> bool:
+    """Require fresh known headroom before a quota rescue can wake a venue."""
+    from . import pool
+    from .worktrees import ContextRefused
+
+    if not account:
+        return False
+    try:
+        rows = list_account_codespaces(account, environment=environment)
+        members, budget = pool.build_pool(
+            codespaces=rows, budget_cores=budget_cores,
+            leases=[], markers={}, l2_leases={}, clean_records={}, live={},
+        )
+    except ContextRefused:
+        raise
+    except RuntimeError:
+        return False
+    member = next((item for item in members if item.name == name), None)
+    return member is not None and (
+        member.running or (
+            member.cores > 0 and not budget.unknown_cores_count and budget.headroom_cores >= member.cores
+        )
+    )
+
+
 def pool_inventory(rows, account, environment, *, listing):
     supplied = rows is not None
     if rows is None:

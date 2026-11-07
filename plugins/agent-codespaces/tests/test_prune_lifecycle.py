@@ -33,6 +33,48 @@ def _info(name: str, state: str) -> CodespaceInfo:
     )
 
 
+@pytest.fixture
+def quota_creation(store, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from agent_codespaces import __main__ as cli, account_binding, allocation, coordination, lifecycle
+    from agent_codespaces.config import CodespacesConfig
+
+    state = SimpleNamespace(rows=[], after_failure=[], attempts=0)
+    monkeypatch.setattr(cli, "load_merged_config", CodespacesConfig)
+    monkeypatch.setattr(cli, "validate_context", lambda: None)
+    monkeypatch.setattr(cli, "_gh_binary_available", lambda: True)
+    monkeypatch.setattr(cli, "_require_codespace_scope", lambda *a, **kw: None)
+    monkeypatch.setattr(allocation, "allocation_context", lambda repo: ("selected-owner", {"GH_TOKEN": "fixture-token"}))
+    monkeypatch.setattr(lifecycle, "_list_codespaces_under", lambda *a, **kw: list(state.rows))
+    monkeypatch.setattr(cli.pool_mod, "codespaces_in_use", lambda names: {})
+    monkeypatch.setattr(coordination, "list_leases", lambda: {})
+    monkeypatch.setattr(coordination, "list_cleanliness", lambda: {})
+    monkeypatch.setattr("agent_codespaces.driving_worktrees.resolve_current_workstream_box", lambda *a: None)
+    monkeypatch.setattr(account_binding, "BINDINGS_FILE", store / "account-bindings.json")
+    monkeypatch.setattr(account_binding, "_LOCK_FILE", store / "account-bindings.lock")
+    monkeypatch.setattr(account_binding, "ensure_runtime_dir", lambda: None)
+    account_binding.bind("cs-old", "selected-owner", "owner/repo")
+
+    def create(*args, **kwargs):
+        state.attempts += 1
+        if state.attempts == 1:
+            state.rows = list(state.after_failure)
+            raise RuntimeError("maximum number of codespaces")
+        return _info("new-cs", "Available")
+
+    def delete(name, **kwargs):
+        state.rows = [row for row in state.rows if row.name != name]
+
+    state.create = Mock(side_effect=create)
+    state.rescue = Mock(return_value={"ok": True})
+    state.delete = Mock(side_effect=delete)
+    monkeypatch.setattr(cli, "create_codespace", state.create)
+    monkeypatch.setattr(cli, "sync_codespace_sessions", state.rescue)
+    monkeypatch.setattr(cli, "delete_codespace", state.delete)
+    return state
+
+
 # --- finalize: recover -> stop -> mark recovered ---------------------------
 
 def test_finalize_marks_recovered_and_stops(store):
@@ -186,6 +228,47 @@ def test_list_json_includes_eligibility(store, capsys):
 
 
 # --- create quota auto-retry (reclaim + retry once) ------------------------
+
+@pytest.mark.parametrize("force", [False, True])
+def test_quota_rescue_wake_obeys_local_headroom_unless_explicitly_forced(quota_creation, force):
+    old, busy = _info("cs-old", "Shutdown"), _info("busy", "Available")
+    old.machine, busy.machine = "premiumLinux", "custom64core"
+    old.account = busy.account = "selected-owner"
+    quota_creation.after_failure = [old, busy]
+    status_mod.set_status("cs-old", status_mod.STATE_PRUNABLE, "merged")
+    extra = ["--force-create"] if force else []
+    assert main(["create", "owner/repo", "--no-wait", *extra]) == (0 if force else 1)
+    assert quota_creation.attempts == (2 if force else 1)
+    assert quota_creation.rescue.call_count == int(force)
+    assert quota_creation.delete.call_count == int(force)
+    if not force:
+        assert status_mod.get_status("cs-old") is not None
+
+
+def test_quota_retry_rechecks_capacity_after_reclaim(quota_creation, monkeypatch):
+    from agent_codespaces import __main__ as cli
+
+    def reclaim(*args, **kwargs):
+        busy = _info("concurrent", "Available")
+        busy.machine, busy.account = "custom64core", "selected-owner"
+        quota_creation.rows = [busy]
+        return "freed an eligible slot"
+
+    monkeypatch.setattr(cli, "_reclaim_for_quota", reclaim)
+    assert main(["create", "owner/repo", "--no-wait"]) == 4
+    assert quota_creation.attempts == 1
+
+
+def test_quota_recovery_retries_when_wake_and_creation_fit(quota_creation):
+    old = _info("cs-old", "Shutdown")
+    old.machine, old.account = "premiumLinux", "selected-owner"
+    quota_creation.after_failure = [old]
+    status_mod.set_status("cs-old", status_mod.STATE_PRUNABLE, "merged")
+    assert main(["create", "owner/repo", "--no-wait"]) == 0
+    assert quota_creation.attempts == 2
+    quota_creation.rescue.assert_called_once()
+    quota_creation.delete.assert_called_once()
+
 
 def test_reclaim_total_limit_prunes_prunable(store):
     status_mod.set_status("cs-old", status_mod.STATE_PRUNABLE, "merged")
