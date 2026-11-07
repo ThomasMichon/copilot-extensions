@@ -2428,6 +2428,12 @@ Worktrees' `tests/test_session_shell.py -k headed_bash` checks effective
 On POSIX, the same selection executes real Bash exit/exec primers against
 refused admission; neither primer may run before the outer owner.
 The AHP controls also retain the option after a bare `--resume`.
+Both launchers use the bundled `bin/ahp-command.py` read-only adapter for this
+rewrite. Its actual command/argument transport is exercised through both final
+consumers: native positional tails are preserved, authoritative options precede
+their terminator, and copied-wrapper/inner-owner separators remain intact.
+The adapter travels with the launchers' existing runtime assets and uses the
+existing Worktrees option table, not a new installed-peer capability.
 Driver's `tests/test_headed_launcher.py -k native_validator` checks
 selector-shaped values and missing-value refusal. The existing
 `tests/test_session_host_core.py -k retained_headed_executable` control
@@ -2441,6 +2447,12 @@ selector-shaped values remain literal, and only an actual experimental option
 suppresses injection.
 The `headed_selection` controls also keep a selector-shaped split `-C` value
 from inventing a conversation, while preserving a real selected conversation.
+The optional Worktrees `tests/native/test_native_seed_application.py` constructs
+and installs the real wheel application through the canonical build/profile
+owners in a private home, removes its disposable source inputs, and checks
+current-runtime native admission. Its private project registry is empty and
+resident startup remains suppressed by the real pytest-owned test override.
+This first-touch check is distinct from full Manager/Copilot launch qualification.
 
 The optional native runtime-removal portfolio includes
 `tools/test_installer_engine_uninstall.py`,

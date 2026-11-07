@@ -1069,56 +1069,12 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
     fi
 
     if [[ "$_AHP_RESUME_AVAILABLE" == "1" ]]; then
-        if ! _VALUE_OPTIONS=$("$PYTHON" -c '
-from agent_worktrees.native_arguments import VALUE_OPTIONS, SETUP_VALUE_OPTIONS
-print("|" + "|".join(sorted(VALUE_OPTIONS | SETUP_VALUE_OPTIONS | {"-C", "--execution-directory"})) + "|")
-'); then
-            setup_log ERROR "Could not load native argument boundaries for the AHP binding."
+        _AHP_HELPER="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-launch-session.sh}")" && pwd)/ahp-command.py"
+        if ! _AHP_COMMAND=$("$PYTHON" "$_AHP_HELPER" bash "$_AHP_ENDPOINT" "$_AHP_SESSION" -- "${CMD_ARRAY[@]}"); then
+            setup_log ERROR "Could not rebind the prepared native AHP command."
             exit 3
         fi
-        _FILTERED_CMD=()
-        _SKIP_NEXT=0
-        _KEEP_NEXT=0
-        _HAS_EXPERIMENTAL=0
-        for _ARG_INDEX in "${!CMD_ARRAY[@]}"; do
-            _ARG="${CMD_ARRAY[$_ARG_INDEX]}"
-            if [[ "$_KEEP_NEXT" == "1" ]]; then
-                _FILTERED_CMD+=("$_ARG")
-                _KEEP_NEXT=0
-                continue
-            fi
-            if [[ "$_SKIP_NEXT" == "1" ]]; then
-                _SKIP_NEXT=0
-                continue
-            fi
-            case "$_ARG" in
-                --resume)
-                    _NEXT_ARG="${CMD_ARRAY[$((_ARG_INDEX + 1))]:-}"
-                    if [[ $((_ARG_INDEX + 1)) -lt ${#CMD_ARRAY[@]} && "$_NEXT_ARG" != -* ]]; then
-                        _SKIP_NEXT=1
-                    fi
-                    ;;
-                --ahp)
-                    _SKIP_NEXT=1
-                    ;;
-                --ahp=*|--resume=*)
-                    ;;
-                --experimental)
-                    _HAS_EXPERIMENTAL=1
-                    _FILTERED_CMD+=("$_ARG")
-                    ;;
-                *)
-                    _FILTERED_CMD+=("$_ARG")
-                    if [[ "$_VALUE_OPTIONS" == *"|$_ARG|"* ]]; then
-                        _KEEP_NEXT=1
-                    fi
-                    ;;
-            esac
-        done
-        CMD_ARRAY=("${_FILTERED_CMD[@]}")
-        [[ "$_HAS_EXPERIMENTAL" == "1" ]] \
-            || CMD_ARRAY+=(--experimental)
-        CMD_ARRAY+=(--ahp "$_AHP_ENDPOINT" "--resume=$_AHP_SESSION")
+        eval "CMD_ARRAY=( $_AHP_COMMAND )"
     fi
 
     # Identity vars are stripped from the CHILD Copilot process so the session

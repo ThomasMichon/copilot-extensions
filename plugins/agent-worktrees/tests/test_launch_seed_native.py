@@ -560,8 +560,12 @@ def test_native_provider_declares_receipt_expansion_without_changing_legacy_repl
     assert declaration["nul_reply_schema"] == native.NUL_REPLY_SCHEMA
 
 
-@pytest.mark.parametrize("fault", [None, "captured-old-slot", "missing-completion", "missing-bootstrap", "foreign-root"])
-def test_native_cli_selects_only_current_completed_same_installation(tmp_path, monkeypatch, fault):
+@pytest.mark.parametrize("fault", [
+    None, "captured-old-slot", "missing-completion", "missing-bootstrap", "foreign-root",
+    "separate-registry",
+])
+@pytest.mark.parametrize("application", [False, True])
+def test_native_cli_selects_only_current_completed_same_installation(tmp_path, monkeypatch, fault, application):
     root = tmp_path / "engine"
     prefix = root / "versions" / "1.2.3"
     (prefix / ".runtime-bootstrap").mkdir(parents=True)
@@ -570,7 +574,9 @@ def test_native_cli_selects_only_current_completed_same_installation(tmp_path, m
     complete.write_text("{}", encoding="utf-8")
     bootstrap = prefix / ".runtime-bootstrap" / "runtime_launcher.py"
     bootstrap.write_text("# fixture\n", encoding="utf-8")
-    monkeypatch.setattr(native.sys, "prefix", str(prefix))
+    environment = prefix / ".venv" if application else prefix
+    environment.mkdir(exist_ok=True)
+    monkeypatch.setattr(native.sys, "prefix", str(environment))
     monkeypatch.setattr(cfg, "install_dir", lambda: root)
     if fault == "captured-old-slot":
         (root / "current-version").write_text("1.2.4\n", encoding="utf-8")
@@ -581,8 +587,12 @@ def test_native_cli_selects_only_current_completed_same_installation(tmp_path, m
     elif fault == "foreign-root":
         foreign = tmp_path / "another-engine"
         foreign.mkdir()
-        monkeypatch.setattr(cfg, "install_dir", lambda: foreign)
-    if fault:
+        root = foreign
+    elif fault == "separate-registry":
+        registry = tmp_path / "registry"
+        registry.mkdir()
+        monkeypatch.setattr(cfg, "install_dir", lambda: registry)
+    if fault and fault != "separate-registry":
         with pytest.raises(ValueError):
             native.require_current_runtime(root)
     else:

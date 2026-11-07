@@ -196,12 +196,14 @@ def test_powershell_launcher_contains_unwrap():
     ["-i", "--resume", "--model", "--ahp=literal", "--agent", "--experimental"],
     ["--interactive", "--resume=literal", "--model", "--ahp"],
 ])
-def test_shell_ahp_binding_preserves_literal_option_values(tmp_path, literal_args):
+@pytest.mark.parametrize("positionals", [[], ["--", "--resume=literal-position", "--ahp", "--experimental", ""]])
+def test_shell_ahp_binding_preserves_literal_option_values(tmp_path, literal_args, positionals):
     source = _LAUNCH_SCRIPT.read_text(encoding="utf-8")
-    start = source.index('    if [[ "$_AHP_RESUME_AVAILABLE" == "1" ]]; then\n        if ! _VALUE_OPTIONS=')
+    start = source.index('    if [[ "$_AHP_RESUME_AVAILABLE" == "1" ]]; then\n        _AHP_HELPER=')
     mutate = source[start:source.index("    # Identity vars", start)]
     command = ["copilot", "--resume", "original", "--resume", "", "--resume", "--model", "selected",
-               *literal_args, "--resume=passthrough"]
+               *literal_args, "--resume=passthrough", *positionals]
+    shutil.copy2(_LAUNCH_SCRIPT.with_name("ahp-command.py"), tmp_path)
     code = "\n".join([
         "set -euo pipefail",
         "CMD_ARRAY=(" + shlex.join(command) + ")",
@@ -215,7 +217,7 @@ def test_shell_ahp_binding_preserves_literal_option_values(tmp_path, literal_arg
     ))
     environment.pop("BASH_ENV", None)
     if os.name == "nt":
-        environment["MSYS2_ARG_CONV_EXCL"] = "*"
+        environment["MSYS2_ARG_CONV_EXCL"] = "--"
     result = subprocess.run(
         [_bash_grammar_executable(), "-c", code], cwd=tmp_path, env=environment,
         capture_output=True, text=True, timeout=15,
@@ -225,6 +227,34 @@ def test_shell_ahp_binding_preserves_literal_option_values(tmp_path, literal_arg
     assert json.loads(result.stdout) == [
         "copilot", "--model", "selected", *literal_args, "--experimental",
         "--ahp", "http://127.0.0.1:1234", "--resume=authoritative",
+        *positionals,
+    ]
+
+
+@pytest.mark.parametrize("prefix", [
+    ["pwsh", "-NoProfile", "-NoLogo", "-File", "launch-command.ps1", "--",
+     "python", "-m", "agent_worktrees.launch_seed_exec", "--record", "--resume=record",
+     "--admission-only", "--", "copilot"],
+    ["env", "BASH_ENV=", "bash", "launch-command.sh", "--recovery", "--",
+     "python3", "-m", "agent_worktrees.launch_seed_exec", "--record", "--ahp=record",
+     "--admission-only", "--", "copilot"],
+    ["pwsh", "-NoProfile", "-File", "default-setup.ps1", "-RuntimePython", "--resume=python"],
+    ["bash", "default-setup.sh", "--runtime-python", "--ahp=python"],
+])
+def test_ahp_binding_keeps_prepared_transport_boundaries(tmp_path, prefix):
+    result = subprocess.run(
+        [sys.executable, str(_LAUNCH_SCRIPT.with_name("ahp-command.py")), "json",
+         "http://127.0.0.1:1234", "authoritative", "--", *prefix,
+         "--resume=stale", "--", "--resume=positional", "--experimental"],
+        cwd=tmp_path, env=dict(os.environ, PYTHONPATH=str(
+            _BIN.parents[1] / "plugins" / "agent-worktrees" / "src",
+        )), capture_output=True, text=True, timeout=15,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout) == [
+        *prefix, "--experimental", "--ahp", "http://127.0.0.1:1234",
+        "--resume=authoritative", "--", "--resume=positional", "--experimental",
     ]
 
 

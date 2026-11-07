@@ -1945,3 +1945,50 @@ flag. This is finite-process consumer proof, not another native Copilot,
 external-venue, installation or complete caller-lifecycle qualification.
 Those tiers are unchanged and remain explicit parent gates. Fresh exact-head
 review and required CI still gate this correction.
+
+The next review identifies another concrete option-boundary defect in the
+persisted AHP rewrite: positional selector-like text after the native `--`
+was removed, and authoritative options were appended too late. Both launchers
+now use one bundled read-only argv adapter instead of separate filter loops.
+It preserves typed copied-wrapper and inner-owner transport boundaries,
+canonical option values and the complete native positional tail, inserting
+the authoritative binding before the native terminator. It replaces the
+existing one-shot option-table lookup, not a new process or service boundary.
+The helper is packaged beside the launchers through the existing bin-resource
+declaration and uses existing Worktrees imports; no new peer capability is
+required.
+
+Twenty focused controls pass in 44.97 seconds (136.89 seconds including
+preparation and cleanup), including both real final-consumer grammar paths and
+nested transport controls. Four initial Git Bash failures exposed a test-only
+MSYS helper-path conversion setting; the corrected fixture keeps native option
+arguments literal while allowing that helper path to reach Windows Python.
+This remains grammar/finite-consumer evidence, not native POSIX lifecycle or
+an authenticated AHP connection.
+
+The next application-layout checkpoint also now has real first-touch evidence.
+Canonical construction and installation succeed in a private home with an
+empty project registry and pytest-suppressed resident startup. After source
+removal, the installed application's native provider rejects its own selected
+`.venv` runtime. The failure reproduces in 249.85 seconds (318.52 seconds
+including preparation and cleanup), within the original 300-second case bound.
+No completion marker, health response or installed code was fabricated.
+
+Normalize the physical runtime slot using the existing application layout
+and physical installation-root owner, retaining current selection, completion
+and bootstrap checks. The registry/data root is not the physical runtime root.
+Legacy/application and negative selection controls retain these protections.
+This is incoming-readiness work under
+[authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement);
+it changes neither outgoing retirement nor operator configuration/state,
+automatic/manual classification, delayed cleanup or independent connectivity.
+The complete first-touch rerun remains pending; full Manager/default-setup,
+caller lifetime and native authentication/recovery gates stay open.
+
+The corrected real application rerun passes all thirteen selected controls in
+235.31 seconds (300.75 seconds including preparation and cleanup): twelve
+legacy/application selection controls plus the actual first-touch build,
+installation, source removal and native-admission check. No deadline or
+selection protection was widened. This closes only the physical-slot
+admission discrepancy, not the remaining caller/default-setup or lifetime
+matrix. Fresh review and required CI remain mandatory.

@@ -95,7 +95,10 @@ def test_picker_startup_handoff_reaches_real_copied_reader(tmp_path, direct):
     ["--model", "--ahp=literal", "-i", "--resume", "--agent", "--experimental"],
     ["--interactive", "--resume=literal", "--model", "--ahp"],
 ])
-def test_manager_serializes_direct_resume_after_authoritative_binding(tmp_path, resume_args, literal_args):
+@pytest.mark.parametrize("positionals", [[], ["--", "--resume=literal-position", "--ahp", "--experimental", ""]])
+def test_manager_serializes_direct_resume_after_authoritative_binding(
+    tmp_path, resume_args, literal_args, positionals,
+):
     shell = _copied_setup(tmp_path)
     record = tmp_path / "fixture.yaml"
     capture = tmp_path / "capture.py"
@@ -104,6 +107,7 @@ def test_manager_serializes_direct_resume_after_authoritative_binding(tmp_path, 
     command = [
         PWSH, "-NoProfile", "-NoLogo", "-File", str(shell / "launch-command.ps1"),
         "--", sys.executable, str(capture), *resume_args, *literal_args, r"-C=C:\two words", literal,
+        *positionals,
     ]
     source = WRAPPER.with_name("launch-session.ps1").read_text(encoding="utf-8")
     unpack = source[source.index("if ($plan.cmd) {"):source.index("# Apply environment variables")]
@@ -122,6 +126,7 @@ def test_manager_serializes_direct_resume_after_authoritative_binding(tmp_path, 
         "post_exit": True,
     }), encoding="utf-8")
     probe = tmp_path / "binding.ps1"
+    shutil.copy2(WRAPPER.with_name("ahp-command.py"), tmp_path)
     probe.write_text(
         "$ErrorActionPreference='Stop'\n"
         "function Write-SetupLog {}\n"
@@ -147,6 +152,7 @@ def test_manager_serializes_direct_resume_after_authoritative_binding(tmp_path, 
     assert json.loads(result.stdout) == [
         *literal_args, r"-C=C:\two words", literal, "--experimental",
         "--ahp", "http://127.0.0.1:1234", "--resume=authoritative",
+        *positionals, *(["--resume=passthrough"] if positionals else []),
     ]
     assert not list((shell / "pane-args").glob("*.json"))
 

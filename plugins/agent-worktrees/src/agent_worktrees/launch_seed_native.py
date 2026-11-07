@@ -43,14 +43,15 @@ def nul_reply(prepared: dict) -> bytes:
 
 def require_current_runtime(root: Path) -> None:
     """Native callers may use only this root's current completed runtime."""
-    prefix = Path(sys.prefix)
+    prefix = Path(sys.prefix).resolve()
+    slot = prefix.parent if prefix.name == ".venv" else prefix
     if (
-        not root.is_absolute() or prefix.parent.name != "versions"
-        or not os.path.samefile(prefix.parent.parent, root)
-        or not os.path.samefile(cfg.install_dir(), root)
-        or (root / "current-version").read_text(encoding="utf-8").strip() != prefix.name
-        or not (prefix / ".install-complete.json").is_file()
-        or not (prefix / ".runtime-bootstrap" / "runtime_launcher.py").is_file()
+        not root.is_absolute() or slot.parent.name != "versions"
+        or not os.path.samefile(slot.parent.parent, root)
+        or not os.path.samefile(cfg.runtime_install_dir(), root)
+        or (root / "current-version").read_text(encoding="utf-8").strip() != slot.name
+        or not (slot / ".install-complete.json").is_file()
+        or not (slot / ".runtime-bootstrap" / "runtime_launcher.py").is_file()
     ):
         raise ValueError("Native handoff requires this installation's current completed runtime")
 

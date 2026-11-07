@@ -1274,48 +1274,11 @@ if ($CopilotPassthrough.Count -gt 0) {
 }
 
 if ($ahpArgs.Count -gt 0) {
-    $valueOptionsJson = & $VenvPython -c 'import json; from agent_worktrees.native_arguments import VALUE_OPTIONS, SETUP_VALUE_OPTIONS; print(json.dumps(sorted(VALUE_OPTIONS | SETUP_VALUE_OPTIONS | {"-C", "--execution-directory"})))'
+    $reboundJson = & $VenvPython (Join-Path $PSScriptRoot 'ahp-command.py') json $ahpArgs[1] $sessionId -- @cmd
     if ($LASTEXITCODE -ne 0) {
-        throw 'Could not load native argument boundaries for the AHP binding.'
+        throw 'Could not rebind the prepared native AHP command.'
     }
-    $valueOptions = @($valueOptionsJson | ConvertFrom-Json)
-    $filteredCmd = [System.Collections.Generic.List[string]]::new()
-    $skipNext = $false
-    $keepNext = $false
-    $hasExperimental = $false
-    for ($argIndex = 0; $argIndex -lt $cmd.Count; $argIndex++) {
-        $arg = [string]$cmd[$argIndex]
-        if ($keepNext) {
-            $filteredCmd.Add([string]$arg)
-            $keepNext = $false
-            continue
-        }
-        if ($skipNext) {
-            $skipNext = $false
-            continue
-        }
-        if ($arg -ceq '--resume') {
-            $skipNext = $argIndex + 1 -lt $cmd.Count -and -not $cmd[$argIndex + 1].StartsWith('-')
-            continue
-        }
-        if ($arg -ceq '--ahp') {
-            $skipNext = $true
-            continue
-        }
-        if ($arg -like '--ahp=*' -or $arg -like '--resume=*') {
-            continue
-        }
-        $filteredCmd.Add([string]$arg)
-        if ($arg -ceq '--experimental') {
-            $hasExperimental = $true
-        }
-        $keepNext = $arg -cin $valueOptions -or $arg.ToLowerInvariant() -in $valueOptions
-    }
-    $cmd = @($filteredCmd)
-    if (-not $hasExperimental) {
-        $cmd += '--experimental'
-    }
-    $cmd += $ahpArgs
+    $cmd = @($reboundJson | ConvertFrom-Json)
 }
 
 # ── psmux pane command: pass VERBATIM (`pwsh -File <script>`) ─────────────
