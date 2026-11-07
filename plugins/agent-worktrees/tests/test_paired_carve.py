@@ -31,10 +31,23 @@ def _config(machine="test", repo_name="citadel-harness"):
     return types.SimpleNamespace(machine=machine, repo_name=repo_name)
 
 
+def _receiving_configuration(monkeypatch):
+    def receiving_config(project, *, include_control_plane_related_pr=True):
+        root = m.state_root_mod.resolve_state_root(_config())
+        assert project == root.repo
+        return types.SimpleNamespace(
+            repo_name=project,
+            default_repo=types.SimpleNamespace(
+                anchor=root.path, worktree_root=m.cfg.derive_worktree_root(root.path),
+            ),
+        )
+    monkeypatch.setattr(m.cfg, "load_project_config", receiving_config)
+
+
 def _common_patches(monkeypatch, tmp_path):
     """Patch tracking dir + best-effort permissions/activity to no-ops."""
-    monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
-    monkeypatch.setattr(tk.cfg, "tracking_dir", lambda: tmp_path)
+    monkeypatch.setattr(m.cfg, "tracking_dir", lambda project=None: tmp_path)
+    monkeypatch.setattr(tk.cfg, "tracking_dir", lambda project=None: tmp_path)
     monkeypatch.setattr(
         m.cfg, "project_dir", lambda name=None: tmp_path / f".{name}"
     )
@@ -45,6 +58,7 @@ def _common_patches(monkeypatch, tmp_path):
     monkeypatch.setattr(m.permissions, "ensure_trusted_folder", lambda p: False)
     monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: None)
     monkeypatch.setattr(lcr, "refresh_local_cache", lambda *a, **k: None)
+    _receiving_configuration(monkeypatch)
     # codename-attribution-by-default (PR #3037 review finding): the
     # allocation-policy second revalidation reloads config fresh -- tests
     # in this module don't register a real project on disk, so give the
@@ -494,7 +508,8 @@ class TestCarvePairedKnowledgeAttributionPolicy:
             state["harness_created"] = True
 
         monkeypatch.setattr(m.git_ops, "create_worktree", _create_worktree)
-        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path / "tracking")
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda project=None: tmp_path / "tracking")
+        _receiving_configuration(monkeypatch)
         monkeypatch.setattr(m.permissions, "clone_permissions", lambda *a: False)
         monkeypatch.setattr(m.permissions, "ensure_trusted_folder", lambda *a: False)
         monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: None)
@@ -631,7 +646,8 @@ class TestPairedKnowledgeAllocationEarlyPreflight:
             m.git_ops, "create_worktree",
             lambda *a, **k: create_worktree_calls.append((a, k)),
         )
-        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path / "tracking")
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda project=None: tmp_path / "tracking")
+        _receiving_configuration(monkeypatch)
 
         from agent_worktrees import codename_tracking
         try:
@@ -705,7 +721,8 @@ class TestOriginDoesNotSkipPairing:
             m.git_ops, "create_worktree",
             create_checkout,
         )
-        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path / "tracking")
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda project=None: tmp_path / "tracking")
+        _receiving_configuration(monkeypatch)
         return create_worktree_calls
 
     def _harness_config(self, tmp_path):

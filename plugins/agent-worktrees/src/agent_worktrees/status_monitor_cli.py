@@ -524,7 +524,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         if classify_server is not None and published_lock:
             extra.update(classify_daemon.rendezvous_fields(classify_server))
         if tracking_write_server is not None and published_lock:
-            extra.update(tracking_write.rendezvous_fields(tracking_write_server))
+            extra.update(tracking_write.rendezvous_fields(tracking_write_server), checkout_relocation_writer_generation=1)
         if published_lock:
             extra.update(
                 hook_facts_version=2,

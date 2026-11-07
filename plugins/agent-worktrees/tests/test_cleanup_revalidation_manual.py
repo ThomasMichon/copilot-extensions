@@ -87,6 +87,38 @@ def test_cleanup_sweeps_do_not_count_deferred_retirement_as_removed(
         assert report["skipped"] == [{"id": rec.worktree_id, "reason": "live process holder; cleanup deferred"}]
 
 
+@pytest.mark.parametrize("mode", ["batch", "sweep"])
+def test_pending_move_skips_only_its_record_and_continues_cleanup(monkeypatch, tmp_path, capsys, mode):
+    import json
+    from agent_worktrees import checkout_relocation_state as relocation
+
+    harness = CleanupHarness(monkeypatch, tmp_path)
+    moving = make_record(tmp_path, wt_id="wt1")
+    unrelated = make_record(tmp_path, wt_id="wt2")
+    path = harness.seed(moving)
+    harness.seed(unrelated)
+    before = path.read_bytes()
+    destination = tmp_path / "destination" / moving.worktree_id
+    relocation.journal_path(path).write_text(json.dumps({
+        "schema": "agent-worktrees.checkout-relocation.v1", "phase": "copying",
+        "identity": {"worktree_id": moving.worktree_id},
+        "source": moving.worktree_path, "destination": str(destination),
+        "stage": str(destination.with_name(destination.name + ".relocating-" + "a" * 16)),
+        "fingerprint": "0" * 64, "head": "1" * 40, "ledger_sha256": "2" * 64,
+        "permissions": {"trust": None, "permissions": None},
+    }))
+    harness.set_classifier(info(S.COMPLETED), info(S.COMPLETED))
+    if mode == "batch":
+        assert harness.run_batch() == 0
+        assert "Skipping wt1:" in capsys.readouterr().out
+    else:
+        report = harness.run_sweep()
+        assert any(row["id"] == moving.worktree_id and row["reason"]
+                   for row in report["skipped"])
+    assert harness.reaped == [(unrelated.worktree_id, S.COMPLETED.value)]
+    assert path.read_bytes() == before and relocation.journal_path(path).exists()
+
+
 def test_reap_one_reports_removed_checkout_with_branch_failure(capsys, monkeypatch, tmp_path):
     from pathlib import Path
     from types import SimpleNamespace

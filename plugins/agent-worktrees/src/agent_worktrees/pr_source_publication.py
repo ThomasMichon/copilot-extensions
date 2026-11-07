@@ -126,9 +126,11 @@ def _caller(worktree_id: str, config: cfg.Config):
     if not path.is_file():
         raise SourcePublicationError("Source publication requires an existing managed caller record")
     record = tracking.load_record(path)
-    expected = Path(config.default_repo.worktree_root, worktree_id).resolve()
+    expected = Path(record.worktree_path).resolve()
+    from .legacy_wsl_record_locality import record_namespace_matches
+
     if (record.worktree_id != worktree_id or record.repo != config.repo_name
-            or Path(record.worktree_path).resolve() != expected or not expected.is_dir()
+            or not record_namespace_matches(record, config) or not expected.is_dir()
             or record.status in ("finalizing", "finalized", "archived")):
         raise SourcePublicationError("Caller record does not own this active managed workspace")
     if Path(_git(expected, "rev-parse", "--show-toplevel")).resolve() != expected:

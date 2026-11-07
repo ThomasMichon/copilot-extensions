@@ -183,7 +183,23 @@ def _replay(
     version, saved_facts, status, saved_worktree = row
     if version != SCHEMA_VERSION:
         raise CreationRequestFailure("unsupported", "Unsupported creation journal version")
-    if saved_facts != facts:
+    try:
+        original_facts, requested_facts = json.loads(saved_facts), json.loads(facts)
+    except (ValueError, TypeError) as exc:
+        raise CreationRequestFailure("invalid", "Invalid retained creation facts") from exc
+    if not isinstance(original_facts, dict) or not isinstance(requested_facts, dict):
+        raise CreationRequestFailure("invalid", "Invalid retained creation facts")
+    changed = {
+        key for key in original_facts.keys() | requested_facts.keys()
+        if key not in original_facts or key not in requested_facts or original_facts[key] != requested_facts[key]
+    }
+    if saved_facts != facts and not (
+        changed == {"worktree_root"} and validate_replay is not None
+        and all(
+            isinstance(value, str) and Path(value).is_absolute() and _canonical_path(value) == value
+            for value in (original_facts.get("worktree_root"), requested_facts.get("worktree_root"))
+        )
+    ):
         raise CreationRequestFailure("conflict", "Creation key is already bound to different allocation facts")
     receipt = json.loads(saved_worktree) if saved_worktree is not None else None
     if status == "pending":
@@ -201,6 +217,11 @@ def _replay(
     worktree = receipt.get("worktree")
     if not isinstance(worktree, dict):
         raise CreationRequestFailure("invalid", "Invalid creation result")
+    if changed == {"worktree_root"} and (
+        not isinstance(original_facts.get("worktree_root"), str)
+        or original_facts["worktree_root"] != _canonical_path(str(Path(worktree.get("path", "")).parent))
+    ):
+        raise CreationRequestFailure("conflict", "Original creation root has no retained allocation proof", worktree)
     record = _owner_record(worktree, records, project)
     current_facts = json.loads(facts)
     if (
