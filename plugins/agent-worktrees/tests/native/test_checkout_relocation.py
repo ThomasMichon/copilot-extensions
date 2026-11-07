@@ -50,6 +50,8 @@ def _fixture_home(tmp_path, request):
 def checkout(tmp_path, monkeypatch, request):
     from checkout_fixture_process import scope_fixture
 
+    if os.name != "nt":
+        pytest.skip("v1 relocation flow requires qualified native Windows; POSIX copy remains gated")
     scope_fixture(tmp_path, monkeypatch)
     tmp_path = _fixture_home(tmp_path, request)
     monkeypatch.setattr(cfg, "_home", lambda: tmp_path)

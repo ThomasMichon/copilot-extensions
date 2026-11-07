@@ -1,7 +1,11 @@
 # Inactive checkout relocation
 
 The initial contract is `agent-worktrees.checkout-relocation.v1`. This is a
-conservative complete flow, not support for every inactive worktree.
+conservative native-Windows complete flow, not support for every inactive
+worktree or an unqualified POSIX copy lane. Capability discovery reports the
+qualified platform and whether the selected native process supports it.
+Non-Windows plan/apply/abort refuse before receiving-record or journal custody;
+bounded POSIX copying and native parity remain open in the Active source effort.
 
 ## Discover before invoking
 

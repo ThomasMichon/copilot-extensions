@@ -546,3 +546,31 @@ def test_incomplete_checkout_tree_never_counts_as_complete_inventory(checkout, m
     assert payload.read_bytes() == b"must remain present"
     assert not state.journal_path(checkout.record.yaml_path).exists()
     assert checkout.source.exists() and not checkout.destination.exists()
+
+
+def test_unqualified_platform_refuses_before_receiving_record_lookup_or_custody(tmp_path, monkeypatch):
+    def forbidden(*args, **kwargs):
+        pytest.fail("unqualified platform must not inspect or mutate receiving state")
+    monkeypatch.setattr(relocation, "_native_supported", lambda: False)
+    monkeypatch.setattr(relocation.cfg, "tracking_dir", forbidden)
+    sentinel = tmp_path / "preserved"
+    sentinel.write_bytes(b"untouched")
+    for operation in (relocation.plan, relocation.move, relocation.abort):
+        with pytest.raises(ValueError, match="native Windows"):
+            operation("unqualified", str(tmp_path / "destination"), None)
+    assert sentinel.read_bytes() == b"untouched"
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["preserved"]
+    assert relocation.capabilities()["apply"] is False
+
+
+def test_historical_companion_without_intent_keeps_its_anchor_derived_root(checkout, monkeypatch):
+    paired, root, receiver, path, reserve = _companion_reservation(checkout, monkeypatch)
+    expected = Path(paired.cfg.derive_worktree_root(root.path))
+    selected, retained = paired.receiver_root(checkout.config, checkout.record.worktree_id, root, None)
+    assert Path(selected) == expected
+    assert retained == expected / (checkout.record.worktree_id + "-k")
+    assert not path.exists()
+    reserve()
+    selected, retained = paired.receiver_root(checkout.config, checkout.record.worktree_id, root, None)
+    assert Path(selected) == Path(receiver.default_repo.worktree_root)
+    assert retained == Path(selected) / (checkout.record.worktree_id + "-k")

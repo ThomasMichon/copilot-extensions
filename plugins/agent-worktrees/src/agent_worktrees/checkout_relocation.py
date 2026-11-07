@@ -25,11 +25,21 @@ from .finalize_lock import FinalizeLock
 SCHEMA = "agent-worktrees.checkout-relocation.v1"
 
 
+def _native_supported() -> bool:
+    return os.name == "nt"
+
+
+def _require_native_support() -> None:
+    if not _native_supported():
+        raise ValueError("relocation v1 requires native Windows; bounded POSIX copy qualification remains open")
+
+
 def capabilities() -> dict:
     return {
-        "schema": SCHEMA, "version": 1, "plan": True, "apply": True,
+        "schema": SCHEMA, "version": 1, "plan": _native_supported(), "apply": _native_supported(),
+        "qualified_platforms": ["windows"], "platform_supported": _native_supported(),
         "recovery": "forward",
-        "cancel_before_publication": True,
+        "cancel_before_publication": _native_supported(),
         "scope": "completed-sessionless-unpaired-plain-linked-checkout",
         "writer_generation": 1,
         "max_entries": transfer.MAX_ENTRIES, "max_bytes": transfer.MAX_BYTES,
@@ -276,6 +286,7 @@ def _target(record, destination: str, config) -> Path:
 
 
 def plan(worktree_id: str, destination: str, config) -> dict:
+    _require_native_support()
     state.require_writer_generation()
     if Path(worktree_id).name != worktree_id or "/" in worktree_id or "\\" in worktree_id:
         raise ValueError("move requires one exact managed worktree ID")
@@ -368,6 +379,7 @@ def _require_receiver(record, report: dict, config) -> None:
 
 
 def move(worktree_id: str, destination: str, config) -> dict:
+    _require_native_support()
     state.require_writer_generation()
     ledger = cfg.tracking_dir(config.repo_name) / f"{worktree_id}.yaml"
     if Path(worktree_id).name != worktree_id or "/" in worktree_id or "\\" in worktree_id:
@@ -503,6 +515,7 @@ def move(worktree_id: str, destination: str, config) -> dict:
 
 
 def abort(worktree_id: str, destination: str, config) -> dict:
+    _require_native_support()
     state.require_writer_generation()
     if Path(worktree_id).name != worktree_id or "/" in worktree_id or "\\" in worktree_id:
         raise ValueError("abort requires one exact managed worktree ID")

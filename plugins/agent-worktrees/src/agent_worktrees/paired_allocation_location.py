@@ -110,7 +110,7 @@ def receiver_root(config, worktree_id: str, root, retained_path: Path | None) ->
     if receiving.repo_name != root.repo or Path(receiving.default_repo.anchor).resolve() != Path(root.path).resolve():
         raise ValueError("paired allocation conflicts with its receiving repository")
     ledger = cfg.tracking_dir(config.repo_name) / f"{worktree_id}.yaml"
-    retained = original(tracking.load_record(ledger), root, legacy=retained_path is not None) if ledger.exists() else None
+    retained = original(tracking.load_record(ledger), root) if ledger.exists() else None
     if retained_path is not None and retained != retained_path:
         raise ValueError("paired recovery does not match the original allocation intent")
     return (str(retained.parent) if retained else receiving.default_repo.worktree_root), retained
