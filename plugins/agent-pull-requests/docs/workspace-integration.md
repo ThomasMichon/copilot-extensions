@@ -195,8 +195,9 @@ submission/receipts and explicit-ID local preparation keep their prior semantics
 The existing Gateway binding, finite deadline, checkpoint, transaction,
 capacity and request/drain owners remain unchanged.
 
-The receiver validates the original v1 scope and retained generation/revision,
-plus the selected source attachment's immutable manifest identity,
+Before first retention the receiver reuses the protected executor's pure
+static selection checks, including complete generation evidence and the full
+source/generation revision (both target-tip fields as well as head/common/iteration),
 then commits fresh comment/reply GUIDs and exact final v2 bytes through
 `ReviewSelectionStore.allocate` before returning a preview. Bodyless votes
 receive no comment identity. Owned/legacy edits remain unsupported on this

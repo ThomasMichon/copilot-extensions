@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from . import review_intent
 from .generation_cache import GenerationCache
+from .review_executor import validate_review_selection
 from .review_selection_store import ReviewSelectionStore
 from .review_workspace import _digest
 
@@ -57,12 +58,7 @@ def allocate_selection(
     if (
         not isinstance(source, dict) or attachment.get("state") != "ready"
         or attachment.get("scope") != scope or attachment.get("generation_id") != original["generation_id"]
-        or source.get("schema") != "agent-pull-requests.local-source"
-        or type(source.get("version")) is not int or source["version"] != 1
-        or source.get("complete") is not True or source.get("errors") != []
         or source.get("scope") != scope
-        or not isinstance(source.get("revision"), dict)
-        or any(source["revision"].get(key) != value for key, value in original["revision"].items())
         or source.get("id") != original["source_id"]
         or source["id"] != _digest({key: value for key, value in source.items() if key != "id"})
     ):
@@ -71,10 +67,9 @@ def allocate_selection(
     retained = selections.recover(original, expires_at=expires_at, checkpoint=checkpoint)
     if retained is None:
         generation = cache.lookup(scope, generation_id=original["generation_id"])["generation"]
-        if generation is None or any(
-            generation["revision"].get(key) != value for key, value in original["revision"].items()
-        ):
+        if generation is None:
             raise WorkspaceUnavailable("selected preparation generation unavailable")
+        validate_review_selection(original, generation, attachment)
         # Resolve policy/profile/origin outside the replay transaction; only pure
         # synchronous composition runs while the existing storage owner is locked.
         compose = workspace.selection_preparer(copy.deepcopy(generation), checkpoint=checkpoint)

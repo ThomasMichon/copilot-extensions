@@ -118,7 +118,10 @@ def test_committed_cli_preview_recovers_then_exact_submission_keeps_original_rec
     native.operations.store = ReplayStore(store.root, store.namespace, service_identity=store.service_identity)
     state["profile"]["rules"][0]["header"] = "[Changed after preview] "
     native.operations.selection_preparer = lambda *a, **k: pytest.fail("recovered preview re-resolved policy")
-    code, retry = invoke_cli(host, "allocate", request, monkeypatch, capsys)
+    from agent_pull_requests.generation_cache import GenerationCache
+    with monkeypatch.context() as unavailable:
+        unavailable.setattr(GenerationCache, "lookup", lambda *a, **k: pytest.fail("recovery requires cache"))
+        code, retry = invoke_cli(host, "allocate", request, monkeypatch, capsys)
     assert code == 0 and retry == preview and store.path.read_bytes() == before
     changed = copy.deepcopy(chosen)
     changed["source_id"] = "9" * 64
@@ -183,6 +186,41 @@ def test_changed_selection_and_unsupported_edits_refuse_before_native_effects(
             await host.invoke("allocate", altered)
         assert store.path.read_bytes() == before and backend.calls == []
         assert len(state["results"]) == 1
+        await gateway.drain(timeout=2)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("field", ["target_sha", "iteration_target_sha"])
+def test_target_only_source_revision_drift_refuses_before_retention(
+    environment: tuple, prepared_workspace: tuple, selection_workspace: tuple, field: str,
+) -> None:
+    from agent_pull_requests.review_workspace import _digest
+    from agent_pull_requests.workspace_client import WorkspaceClientError
+
+    store, _, _, attachment, backend, _ = environment
+    gateway, client, native, _, _, _ = prepared_workspace
+    draft, state = selection_workspace
+    bad_source = copy.deepcopy(attachment)
+    bad_source["source"]["revision"][field] = "9" * 40
+    bad_source["source"]["id"] = _digest({
+        key: value for key, value in bad_source["source"].items() if key != "id"
+    })
+    bad_draft = {**draft, "source_id": bad_source["source"]["id"]}
+    before = store.path.read_bytes()
+
+    async def scenario() -> None:
+        host = WorkspaceTools(client)
+        with pytest.raises(WorkspaceClientError):
+            await host.invoke("allocate", {
+                "number": 42, "intent": bad_draft, "source_attachment": bad_source, "budget_seconds": 60,
+            })
+        assert store.path.read_bytes() == before and backend.calls == [] and state["resolutions"] == 0
+        assert ReviewSelectionStore(store).recover(bad_draft, expires_at=native.expires_at()) is None
+        result = await host.invoke("allocate", {
+            "number": 42, "intent": draft, "source_attachment": attachment, "budget_seconds": 60,
+        })
+        assert result["result"]["intent"]["source_id"] == draft["source_id"]
         await gateway.drain(timeout=2)
 
     asyncio.run(scenario())
