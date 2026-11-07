@@ -165,6 +165,7 @@ if ($env:OS -eq 'Windows_NT' -and
     if (-not $driverEntry.Participant -or $driverEntry.ExitCode -ne 0) { exit $driverEntry.ExitCode }
     $driverPython = $driverEntry.Python
     $driverArguments = $driverEntry.Arguments
+    $script:IndexBootstrapPython = $driverPython
 }
 
 if ($InstallDir) {
@@ -760,24 +761,87 @@ function Invoke-VersionedGc {
 # anything else (a git checkout) => local.
 # === install-contract:v4 marker/toss helpers (#935) ===
 function Get-BootstrapPython {
-    <# A python to run the stdlib-only versioned_runtime.py helper (#935).
-       Prefers a base Python via the launcher or PATH, avoiding Windows
-       Store aliases, then considers an existing slot interpreter.
-       Returns $null if none. #>
-    $launcher = Get-Command py -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($launcher) {
-        $exe = (Invoke-Hidden -FilePath $launcher.Source -ArgList @('-3', '-c', 'import sys; print(sys.executable)') | Out-String).Trim()
-        if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { return $exe }
+    param([switch]$ExternalOnly)
+    # Source/construction helpers require 3.11; the signed runtime retains
+    # its separate package floor. Construction must not depend on its slot.
+    $probe = @'
+import json,sys
+assert sys.version_info >= (3,11)
+print(json.dumps(sys._base_executable if sys.argv[1] == 'base' else sys.executable))
+'@
+    $mode = if ($ExternalOnly) { 'base' } else { 'executable' }
+    $resolve = {
+        param([string]$Candidate)
+        if (-not $Candidate -or $Candidate -match '[\\/]WindowsApps[\\/]') { return $null }
+        try {
+            $nativeError = ''
+            $output = Invoke-Hidden -FilePath $Candidate -ArgList @(
+                '-I', '-S', '-B', '-c', $probe, $mode
+            ) -ErrorOutput ([ref]$nativeError)
+            if ($LASTEXITCODE -eq 0) {
+                $selected = ($output | Out-String) | ConvertFrom-Json
+                if ($selected -and $selected -notmatch '[\\/]WindowsApps[\\/]' -and
+                    (Test-Path -LiteralPath $selected -PathType Leaf)) { return $selected }
+            }
+        } catch { }
+        return $null
     }
-    foreach ($cand in 'python3', 'python') {
-        $c = Get-Command $cand -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($c -and $c.Source -notmatch 'WindowsApps') { return $c.Source }
+    $preferred = Get-Variable IndexBootstrapPython -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+    $selected = & $resolve $preferred
+    if ($selected) { return $selected }
+    $candidates = @()
+    foreach ($name in 'python3', 'python') {
+        $candidates += @(Get-Command $name -All -CommandType Application -ErrorAction SilentlyContinue |
+            Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' } |
+            ForEach-Object { $_.Source })
+    }
+    foreach ($launcher in @(Get-Command py -All -CommandType Application -ErrorAction SilentlyContinue |
+            Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' })) {
+        try {
+            $nativeError = ''
+            $listed = Invoke-Hidden -FilePath $launcher.Source -ArgList @('-0p') -ErrorOutput ([ref]$nativeError)
+            $launcherMatches = @()
+            if ($LASTEXITCODE -eq 0) {
+                $launcherMatches = @([regex]::Matches("$listed", '(?m)([A-Za-z]:[\\/].*python(?:[0-9.]*)?\.exe)"?\s*$'))
+            }
+            if ($launcherMatches.Count) {
+                foreach ($match in $launcherMatches) { $candidates += $match.Groups[1].Value }
+            } else {
+                foreach ($version in '3.13', '3.12', '3.11', '3') {
+                    $exe = Invoke-Hidden -FilePath $launcher.Source -ArgList @(
+                        "-$version", '-I', '-S', '-B', '-c', 'import sys; print(sys.executable)'
+                    ) -ErrorOutput ([ref]$nativeError)
+                    if ($LASTEXITCODE -eq 0 -and $exe) { $candidates += ($exe | Out-String).Trim() }
+                }
+            }
+        } catch { }
+    }
+    if ($env:OS -eq 'Windows_NT') {
+        $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)})
+        if ($env:LOCALAPPDATA) { $roots += Join-Path $env:LOCALAPPDATA 'Programs\Python' }
+        foreach ($root in $roots) {
+            if (-not $root) { continue }
+            $candidates += @(Get-ChildItem -LiteralPath $root -Filter 'Python3*' -Directory -ErrorAction SilentlyContinue |
+                Sort-Object Name -Descending |
+                ForEach-Object { Join-Path $_.FullName 'python.exe' })
+        }
+    }
+    foreach ($candidate in @($candidates | Select-Object -Unique)) {
+        $selected = & $resolve $candidate
+        if ($selected) {
+            $script:IndexBootstrapPython = $selected
+            return $selected
+        }
     }
     foreach ($d in @($VenvDir, $LinkDir)) {
+        if ($ExternalOnly) { break }
         if ($d) {
             foreach ($rel in 'Scripts\python.exe', 'bin/python') {
                 $p = Join-Path $d $rel
-                if (Test-Path -LiteralPath $p -PathType Leaf) { return $p }
+                if (Test-Path -LiteralPath $p -PathType Leaf) {
+                    $selected = & $resolve $p
+                    if ($selected) { return $selected }
+                }
             }
         }
     }
@@ -1090,7 +1154,7 @@ function Invoke-VersionedSlotClean {
     Assert-SourceRuntime
     if (-not $VersionedRuntime) { throw 'Construction requires a versioned runtime candidate' }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
-    $py = Get-BootstrapPython
+    $py = Get-BootstrapPython -ExternalOnly
     if (-not $py) { throw 'Construction requires a bootstrap Python interpreter' }
     if (-not (Get-Command Start-RuntimeConstruction -ErrorAction SilentlyContinue)) {
         $helpers = (& $py -I $vr --root $InstallDir construction-shell --shell ps1 | Out-String)
@@ -1461,7 +1525,7 @@ function New-IndexVenv {
         $previousLocation = Get-Location
         try {
             if ($env:OS -eq 'Windows_NT') { Set-Location "$env:SystemDrive\" }
-            $result = Invoke-UvVenvResilient -UvCommand $script:UvCommand -VenvDir $Dir -Arguments @('--allow-existing')
+            $result = Invoke-UvVenvResilient -UvCommand $script:UvCommand -VenvDir $Dir -Arguments @('--allow-existing', '--python', $PythonCmd)
         } finally { Set-Location $previousLocation }
         if ($result.ExitCode -eq 0 -and (Test-IndexVenv -Dir $Dir -Python $Python)) { return $true }
         Write-Warn "uv venv failed health validation (exit $($result.ExitCode)): $($result.Output)"
@@ -1566,21 +1630,8 @@ function Install-Runtime {
         [void](Publish-SourceSnapshot)
     }
     if (-not (Test-Path $PkgSrcDir)) { Write-Fail "Package source not found at $PkgSrcDir"; exit 1 }
-    $pythonCmd = $null
-    foreach ($candidate in @('python', 'python3', 'py')) {
-        $found = Get-Command $candidate -ErrorAction SilentlyContinue
-        if ($found) {
-            $prevEAP = $ErrorActionPreference
-            $ErrorActionPreference = 'Continue'
-            try {
-                $testOut = & $found.Source --version 2>&1
-                if ($LASTEXITCODE -eq 0 -and $testOut -match 'Python') { $pythonCmd = $found.Source }
-            } catch { }
-            $ErrorActionPreference = $prevEAP
-            if ($pythonCmd) { break }
-        }
-    }
-    if (-not $pythonCmd) { Write-Fail 'Python not found on PATH (need 3.10+)'; exit 1 }
+    $pythonCmd = Get-BootstrapPython -ExternalOnly
+    if (-not $pythonCmd) { Write-Fail 'No usable Python 3.11+ for source/construction helpers'; exit 1 }
     Write-Ok "Python: $pythonCmd"
 
     foreach ($dir in @($InstallDir, $LocalBin)) {
@@ -1910,7 +1961,7 @@ function Install-Engine {
         return $false
     }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
-    $py = Get-BootstrapPython
+    $py = Get-BootstrapPython -ExternalOnly
     if (-not $py) { throw 'Engine construction requires a bootstrap Python interpreter' }
     if ((Test-Path (Join-Path $EngineHome 'current-version')) -or
         (Test-Path (Join-Path $EngineHome 'last-known-good'))) {
@@ -1939,21 +1990,8 @@ function Install-Engine {
     $reuse = Start-RuntimeConstruction -Python $py -Helper $vr -Root $EngineHome `
         -Version $engineVersion -PayloadHash $payloadHash -LinkName '.venv'
     if (-not $reuse) {
-    $pythonCmd = $null
-    foreach ($candidate in @('python', 'python3', 'py')) {
-        $found = Get-Command $candidate -ErrorAction SilentlyContinue
-        if ($found) {
-            $prevEAP = $ErrorActionPreference
-            $ErrorActionPreference = 'Continue'
-            try {
-                $testOut = & $found.Source --version 2>&1
-                if ($LASTEXITCODE -eq 0 -and $testOut -match 'Python') { $pythonCmd = $found.Source }
-            } catch { }
-            $ErrorActionPreference = $prevEAP
-            if ($pythonCmd) { break }
-        }
-    }
-    if (-not $pythonCmd) { Write-Warn 'Python not found -- cannot provision engine runtime'; return $false }
+    $pythonCmd = Get-BootstrapPython -ExternalOnly
+    if (-not $pythonCmd) { Write-Warn 'No usable Python 3.11+ -- cannot provision engine runtime'; return $false }
 
     Write-Host "  ...    $(if ($Upgrade) { 'Updating' } else { 'Provisioning' }) durable engine runtime (torch stack) -- may take a while" -ForegroundColor DarkGray
     if (-not (Test-Path $EngineHome)) { New-Item -ItemType Directory -Path $EngineHome -Force | Out-Null }
