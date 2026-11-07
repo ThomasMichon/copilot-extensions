@@ -111,7 +111,7 @@ requires its own applicable authority and is recorded separately.
 - [x] Update reality docs, focused tests and changefiles; retain historical protocol evidence and the required unit-only portfolio. _(#10748; source tiers only)_
 - [ ] Record source, release and installed/native/external results separately; resolve every Plan and Validation Plan item before Done.
 - [ ] Qualify the prerequisite host account/owner callbacks through their existing launchers before retrying the external receiving flow. _(newly observed acceptance prerequisite; agent-recommended source refinement)_
-- [ ] Bound the Vault prerequisite's outgoing credential-writer transition through its existing lifecycle owner after incoming discovery publication; preserve cooperative connections during grace and use native identity/owner-checked cold retirement when handoff cannot settle. _(#11057; closes the existing authoritative-runtime-replacement intent, not a new watchdog or live recovery grant)_
+- [x] Bound the Vault prerequisite's outgoing credential-writer transition through its existing lifecycle owner after incoming discovery publication; preserve cooperative connections during grace and use native identity/owner-checked cold retirement when handoff cannot settle. _(#11072; source implementation and Windows consumer controls complete; release, installed and other native tiers remain in Validation Plan)_
 
 ## Validation Plan
 
@@ -1201,3 +1201,22 @@ implementation. The exact support closure follows the consumer trace and tests.
   added. Required exact-head CI/review, release, installer clean-room, installed
   whole-update, Linux-native/macOS and external acceptance remain open.
   No live service was changed; both source and parent efforts remain Active.
+
+### 2026-11-06 - Vault source correction merged; release and installation pending
+
+- #11072 merged as `84bcabbe068de31cc7150047609623e5bded16c7`.
+  Exact-head required CI passed on
+  `5522c9c61f02794d04a440c7c2d220c1588da1a4`; the fresh bot review was
+  `COMMENTED` with no inline or open findings, and every prior thread was
+  resolved. Its summary requested broader independent platform validation
+  without identifying another defect. The owner-authored clean-comment rule
+  satisfied source review; the managed merge used the repository-authorized
+  review exception, not a CI exception.
+- Re-read this effort after merge and resolved only the bounded Vault source
+  Plan item. Native Windows integration is not Linux installed-runtime,
+  macOS, installer clean-room or external receiving qualification. Those
+  validations and the complete ACP/muxed native flows remain open.
+- Next: verify the actual promoted Main blobs before the authorized normal
+  whole-update and selected consumer checks. No rollout authority is inferred
+  from this source merge. The effort stays Active and the worktree remains
+  owned for the continuing acceptance, not finalized at this phase boundary.
