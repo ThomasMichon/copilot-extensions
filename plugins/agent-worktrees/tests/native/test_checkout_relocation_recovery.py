@@ -526,3 +526,23 @@ def test_cancellation_repeats_parent_barrier_before_terminal_receipt(checkout, m
         result = relocation.abort(checkout.record.worktree_id, str(checkout.destination), checkout.config)
     assert result["phase"] == "cancelled" and "cancelling" in observed
     assert checkout.source.exists() and not checkout.destination.exists()
+
+
+@pytest.mark.parametrize("operation", ["manifest", "durability"])
+def test_incomplete_checkout_tree_never_counts_as_complete_inventory(checkout, monkeypatch, operation):
+    directory = checkout.source / "unreadable"
+    directory.mkdir()
+    payload = directory / "unique-data"
+    payload.write_bytes(b"must remain present")
+    original = os.scandir
+    def unreadable(path):
+        if isinstance(path, (str, bytes, Path)) and Path(os.fsdecode(path)) == directory:
+            raise PermissionError("injected incomplete checkout inventory")
+        return original(path)
+    with monkeypatch.context() as injection:
+        injection.setattr(os, "scandir", unreadable)
+        with pytest.raises(PermissionError, match="incomplete checkout"):
+            (relocation.transfer.manifest if operation == "manifest" else relocation.durability.tree)(checkout.source)
+    assert payload.read_bytes() == b"must remain present"
+    assert not state.journal_path(checkout.record.yaml_path).exists()
+    assert checkout.source.exists() and not checkout.destination.exists()

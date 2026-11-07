@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import os
+import stat
 import sys
 from pathlib import Path
 
@@ -67,9 +68,17 @@ def files(paths) -> None:
 
 
 def tree(root: Path) -> None:
-    files(path for path in root.rglob("*") if path.is_file())
+    from .checkout_transfer import walk
+
+    entries = []
+    for path in walk(root):
+        info = path.lstat()
+        if not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)) or getattr(info, "st_file_attributes", 0) & 0x400:
+            raise ValueError("relocation durability inventory is redirected or unsupported")
+        entries.append((path, info.st_mode))
+    files(path for path, mode in entries if stat.S_ISREG(mode))
     for path in sorted(
-        (path for path in root.rglob("*") if path.is_dir()),
+        (path for path, mode in entries if path != root and stat.S_ISDIR(mode)),
         key=lambda value: len(value.parts), reverse=True,
     ):
         directory(path)

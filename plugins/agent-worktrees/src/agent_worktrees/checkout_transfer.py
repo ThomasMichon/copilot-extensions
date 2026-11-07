@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import itertools
 import os
 import re
 import shutil
@@ -14,6 +13,23 @@ from agent_procutil.owned_process import run_caller_owned
 
 MAX_ENTRIES = 10_000
 MAX_BYTES = 1024 * 1024 * 1024
+
+
+def walk(root: Path):
+    pending, seen = [root], 0
+    while pending:
+        path = pending.pop()
+        seen += 1
+        if seen > MAX_ENTRIES:
+            raise ValueError("checkout directory inventory exceeds its budget")
+        yield path
+        info = path.lstat()
+        if stat.S_ISDIR(info.st_mode) and not getattr(info, "st_file_attributes", 0) & 0x400:
+            with os.scandir(path) as entries:
+                for entry in entries:
+                    if seen + len(pending) >= MAX_ENTRIES:
+                        raise ValueError("checkout directory inventory exceeds its budget")
+                    pending.append(Path(entry.path))
 
 
 def _require_no_mounts(root: Path) -> None:
@@ -66,7 +82,7 @@ def require_source_access(source: Path, destination_parent: Path) -> None:
         or stat.S_IMODE(source.parent.stat().st_mode) & 0o300 != 0o300
     ):
         raise ValueError("relocation v1 requires an owned writable source parent")
-    for index, path in enumerate(itertools.chain((source,), source.rglob("*"))):
+    for index, path in enumerate(walk(source)):
         if index >= MAX_ENTRIES:
             raise ValueError("source access inventory exceeds its budget")
         info = path.lstat()
@@ -103,7 +119,7 @@ def manifest(root: Path) -> dict[str, tuple]:
         _require_no_mounts(root)
     result = {}
     total = 0
-    for index, path in enumerate(itertools.chain((root,), root.rglob("*"))):
+    for index, path in enumerate(walk(root)):
         if index >= MAX_ENTRIES:
             raise ValueError("relocation v1 checkout exceeds its bounded entry inventory")
         info = path.lstat()
@@ -198,7 +214,7 @@ def copy(source: Path, destination: Path) -> None:
     if os.name == "nt":
         require_safe_destination(source, destination)
         access = _access(source)
-        if any(_access(path) != access for path in destination.rglob("*")):
+        if any(_access(path) != access for path in walk(destination)):
             raise ValueError("owned copy stage access changed")
         result = run_caller_owned(
             ["robocopy", str(source), str(destination), "/E", "/COPY:DATS", "/SL",
@@ -213,7 +229,7 @@ def copy(source: Path, destination: Path) -> None:
     else:
         if any(entry[4][0] != os.getuid() for entry in staged.values()):
             raise ValueError("owned copy stage has a foreign file owner")
-        for path in [destination, *(path for path in destination.rglob("*") if path.is_dir())]:
+        for path in (path for path in walk(destination) if path.is_dir()):
             path.chmod(stat.S_IMODE(path.stat().st_mode) | stat.S_IRWXU)
         shutil.copytree(source, destination, dirs_exist_ok=True, symlinks=True, copy_function=_retry_file)
 
@@ -228,7 +244,7 @@ def _retry_file(source, destination):
 def require_safe_destination(source: Path, parent: Path) -> None:
     if os.name == "nt":
         expected = _access(source)
-        if _access(parent) != expected or any(_access(p) != expected for p in source.rglob("*")):
+        if _access(parent) != expected or any(_access(p) != expected for p in walk(source)):
             raise ValueError("relocation v1 requires uniform checkout access and an equally restricted destination parent")
     elif stat.S_IMODE(parent.stat().st_mode) & 0o077:
         raise ValueError("relocation v1 requires a private destination parent")
@@ -306,7 +322,7 @@ def preserve_security(source: Path, destination: Path) -> None:
             raise ctypes.WinError(ctypes.get_last_error())
         return data
 
-    for path in [source, *sorted(source.rglob("*"))]:
+    for path in walk(source):
         if path.relative_to(source).as_posix() != ".git":
             target = destination / path.relative_to(source)
             source_security = descriptor(path)
