@@ -108,6 +108,21 @@ def _native_request(argv: list[str], session_id: str) -> str | None:
     return prompts[0] if prompts else None
 
 
+def _extension_command(argv: list[str], plugin: Path) -> list[str]:
+    index = 1
+    experimental = False
+    while index < len(argv):
+        argument = argv[index]
+        if argument == "--":
+            break
+        experimental = experimental or argument == "--experimental"
+        index += 2 if argument in VALUE_OPTIONS | {"-C", "--resume"} else 1
+    additions = ["--plugin-dir", str(plugin)]
+    if not experimental:
+        additions.append("--experimental")
+    return [*argv[:index], *additions, *argv[index:]]
+
+
 class _PaneChild:
     def __init__(self) -> None:
         self.proc: subprocess.Popen | None = None
@@ -188,10 +203,7 @@ async def run_headed(
             "nonce": nonce, "hostPid": os.getpid(),
             "client": str(plugin / "extensions" / "copilot-driver-headed" / "host-client.mjs"),
         })
-        argv = _resolve_child_exe(child_argv, child_env.get("PATH"))
-        argv += ["--plugin-dir", str(plugin)]
-        if "--experimental" not in argv:
-            argv.append("--experimental")
+        argv = _extension_command(_resolve_child_exe(child_argv, child_env.get("PATH")), plugin)
         _require_receiving_policy(cwd, policy_context)
         if startup is not None:
             startup.check(child_argv, cwd, session_id, {**os.environ, **(env or {})})

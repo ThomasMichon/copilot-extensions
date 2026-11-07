@@ -1926,3 +1926,22 @@ recovery/prefixed owners, native non-rewrite and authoritative AHP argument
 preservation. This also executes the two AHP grammar cases previously skipped
 on this host. It does not claim stock macOS Bash, native POSIX process lifetime
 or a complete Manager launch; those remain separate gates.
+
+The subsequent review has no inline findings but flags option-parsing risks.
+Direct assessment identifies two real extension-injection boundaries: appending
+flags after an option terminator makes them positional, and an experimental
+flag spelled only as an option value must not suppress the real flag.
+The core now inserts the scoped plugin and experimental flag at the native
+option boundary, skipping canonical value options and preserving positional
+arguments. An already-present actual experimental flag is not duplicated.
+This closes the existing launch-injection intent without changing a public
+contract, dependency, permission or receiving owner.
+
+Eighteen focused controls pass in 15.56 seconds (36.24 seconds including
+preparation and cleanup), with one POSIX-only signal skip. Four new cases
+execute the real retained archive and observe actual child argv, including
+a delimiter-shaped value, a positional experimental literal and an existing
+flag. This is finite-process consumer proof, not another native Copilot,
+external-venue, installation or complete caller-lifecycle qualification.
+Those tiers are unchanged and remain explicit parent gates. Fresh exact-head
+review and required CI still gate this correction.

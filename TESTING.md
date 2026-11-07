@@ -2435,6 +2435,10 @@ passes a literal `--log-dir` value through the real retained archive and
 verifies native exit. The Worktrees copied-wrapper controls call the same
 validator on the delivered native argv; no native Copilot or rollout is
 implied by these finite-process checks.
+The `retained_headed_extension_options` controls execute the archive and
+observe the real child's argv: extension flags precede the option terminator,
+selector-shaped values remain literal, and only an actual experimental option
+suppresses injection.
 The `headed_selection` controls also keep a selector-shaped split `-C` value
 from inventing a conversation, while preserving a real selected conversation.
 
