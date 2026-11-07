@@ -250,7 +250,7 @@ def _json(value: object) -> str:
 
 def _validate_db(db: sqlite3.Connection) -> None:
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version not in {2, 3, SCHEMA, authority.SCHEMA_VERSION}:
+    if version not in {2, 3, SCHEMA, authority.LEGACY_SCHEMA_VERSION, authority.SCHEMA_VERSION}:
         raise StateError("unsupported update-driver schema")
     columns = {row[1] for row in db.execute("PRAGMA table_info(requests)")}
     expected = {
@@ -263,7 +263,7 @@ def _validate_db(db: sqlite3.Connection) -> None:
         expected.update({"recovery_authority", "released_at"})
     if columns != expected:
         raise StateError("malformed update-driver schema")
-    if version == authority.SCHEMA_VERSION:
+    if version in (authority.LEGACY_SCHEMA_VERSION, authority.SCHEMA_VERSION):
         try:
             authority.validate(db)
         except authority.AuthorityError as error:
@@ -277,7 +277,7 @@ def _upgrade_schema(db: sqlite3.Connection, root: Path, custody: OperationLock) 
     custody.assert_owned()
     _validate_db(db)
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version in (SCHEMA, authority.SCHEMA_VERSION):
+    if version in (SCHEMA, authority.LEGACY_SCHEMA_VERSION, authority.SCHEMA_VERSION):
         return
     for row in db.execute("SELECT * FROM requests"):
         _request(row, root)
@@ -427,6 +427,7 @@ def _request(row: sqlite3.Row, root: Path) -> Request:
 
 
 UPDATE_AUTHORITY_CAPABILITY = authority.CAPABILITY
+QUEUED_NATIVE_WRITER_CAPABILITY = authority.QUEUED_NATIVE_WRITER_CAPABILITY
 current_authority = authority.current
 change_authority = authority.change
 
@@ -447,9 +448,9 @@ def enqueue(
         spec = _spec(replace(spec, killswitch_path=os.path.abspath(path)))
     if type(coalesce_running) is not bool:
         raise InvalidRequestError("active coalescing must be an explicit boolean")
-    spec_json, runner_json = _json(_spec_document(spec)), _json(asdict(runner))
-    identity = hashlib.sha256((spec_json + "\n" + runner_json).encode()).hexdigest()
-    with authority.submission(root, spec):
+    with authority.submission(root, spec) as spec:
+        spec_json, runner_json = _json(_spec_document(spec)), _json(asdict(runner))
+        identity = hashlib.sha256((spec_json + "\n" + runner_json).encode()).hexdigest()
         if _exclusive_custody is None:
             _reconcile_lost_owner(root)
         else:

@@ -10,7 +10,7 @@ import stat
 import time
 import uuid
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
@@ -21,13 +21,19 @@ from .foundation_state import _publish
 if TYPE_CHECKING:
     from .core import RequestSpec
 
-SCHEMA_VERSION = 5
+LEGACY_SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 CAPABILITY = "suite-update-authority/v1"
+QUEUED_NATIVE_WRITER_CAPABILITY = "suite-queued-native-writer-fencing/v1"
 _GUARD = b"copilot-extensions.update-authority/v1\n"
 _PROJECT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 _MARKETPLACE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*--[0-9a-f]{16}\Z")
 _PLUGIN = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
-_SUITE_BACKENDS = frozenset({
+_DIRECT_WRITER_BACKENDS = frozenset({
+    "engine-native-install", "plugin-native-install", "manager-bootstrap",
+    "manager-uninstall", "manager-self-install", "owning-plugin-provision",
+})
+_SUITE_BACKENDS = _DIRECT_WRITER_BACKENDS | frozenset({
     "engine", "manager", "engine-launch-update", "engine-stage-update",
     "engine-reconcile-plugins", "engine-dev-release", "manager-self-install",
 })
@@ -208,10 +214,16 @@ def _from_db(
     try:
         marker = guarded(root)
         version = db.execute("PRAGMA user_version").fetchone()[0]
-        if version == SCHEMA_VERSION:
+        if version in (LEGACY_SCHEMA_VERSION, SCHEMA_VERSION):
             if not marker:
                 raise core.StateError("update authority guard is missing")
-            return read(db, selected_scope)
+            selected = read(db, selected_scope)
+            if (
+                version == LEGACY_SCHEMA_VERSION and not allow_incomplete
+                and selected.mode == "project"
+            ):
+                raise core.StateError("update authority requires direct-writer protocol upgrade")
+            return selected
         if marker and not allow_incomplete:
             raise core.StateError("update authority transition is incomplete")
         return UpdateAuthority()
@@ -234,7 +246,10 @@ def current(*, root: Path | None = None, context: str = "", cwd: str = "") -> Up
             return UpdateAuthority()
         with core._database(root) as db:
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            selected_scope = _scope(context, root=root, cwd=cwd) if version == SCHEMA_VERSION else ""
+            selected_scope = (
+                _scope(context, root=root, cwd=cwd)
+                if version in (LEGACY_SCHEMA_VERSION, SCHEMA_VERSION) else ""
+            )
             return _from_db(root, selected_scope, db)
     except (OSError, AuthorityError) as error:
         raise core.StateError("update authority state is unavailable or invalid") from error
@@ -255,31 +270,85 @@ def _wait_operation(path: Path, deadline: float, label: str) -> OperationLock:
             time.sleep(min(.05, remaining))
 
 
-def _request_scope(spec: RequestSpec, root: Path) -> str:
-    return _scope(dict(spec.context).get("COPILOT_EXTENSIONS_CONTEXT", ""), root=root, cwd=spec.cwd)
-
-
-def refusal(root: Path, spec: RequestSpec, *, db: sqlite3.Connection | None = None) -> str | None:
+def _request_scopes(spec: RequestSpec, root: Path) -> tuple[str, ...]:
     from . import core
 
-    if not suite_request(spec):
-        return None
+    context = dict(spec.context).get("COPILOT_EXTENSIONS_CONTEXT", "")
+    if spec.backend in ("engine-native-install", "plugin-native-install") and spec.project:
+        installation = Path(spec.project)
+        marketplaces = root.parent / "marketplaces"
+        try:
+            resolved = installation.resolve() if installation.is_absolute() else installation
+            physical_marketplaces = marketplaces.resolve()
+        except (OSError, RuntimeError) as error:
+            raise core.StateError("native installation authority root is unavailable") from error
+        if installation.is_absolute() and installation.is_relative_to(marketplaces) and not (
+            resolved.is_relative_to(physical_marketplaces)
+        ):
+            raise core.StateError("native installation authority root is redirected")
+        if installation.is_absolute() and resolved.is_relative_to(physical_marketplaces):
+            parts = resolved.relative_to(physical_marketplaces).parts
+            if len(parts) < 3 or parts[1] != "plugins" or ".." in parts:
+                raise core.StateError("native installation authority scope is invalid")
+            receipt = marketplaces / parts[0] / "plugins" / parts[2] / "install.json"
+            selected = _scope(str(receipt), root=root, cwd=spec.cwd)
+            if context and _scope(context, root=root, cwd=spec.cwd) != selected:
+                raise core.StateError("native installation authority context differs from its root")
+            return (selected,)
+    selected = _scope(context, root=root, cwd=spec.cwd)
+    if spec.backend in _DIRECT_WRITER_BACKENDS and selected:
+        return ("", selected)
+    return (selected,)
+
+
+def _choose_selection(selections: list[UpdateAuthority]) -> UpdateAuthority:
+    for value in selections:
+        if value.configured and value.mode == "project":
+            return value
+    return next((value for value in selections if value.configured), UpdateAuthority())
+
+
+def _selected_for_request(
+    root: Path, spec: RequestSpec, db: sqlite3.Connection | None = None,
+    *, allow_legacy_project: bool = False,
+):
+    from . import core
+
     if db is None:
-        selected = current(
+        if os.path.lexists(root / "queue.sqlite3"):
+            with core._database(root) as existing:
+                return _selected_for_request(
+                    root, spec, existing, allow_legacy_project=allow_legacy_project,
+                )
+        return current(
             root=root, context=dict(spec.context).get("COPILOT_EXTENSIONS_CONTEXT", ""),
             cwd=spec.cwd,
         )
+    version = db.execute("PRAGMA user_version").fetchone()[0]
+    if version in (LEGACY_SCHEMA_VERSION, SCHEMA_VERSION):
+        _from_db(root, "", db, allow_incomplete=True)
+        try:
+            selected_scopes = _request_scopes(spec, root)
+        except core.StateError:
+            return None
     else:
-        version = db.execute("PRAGMA user_version").fetchone()[0]
-        if version == SCHEMA_VERSION:
-            _from_db(root, "", db)
-            try:
-                selected_scope = _request_scope(spec, root)
-            except core.StateError:
-                return "suite update authority context is unavailable or invalid"
-        else:
-            selected_scope = ""
-        selected = _from_db(root, selected_scope, db)
+        selected_scopes = ("",)
+    selections = [
+        _from_db(
+            root, value, db,
+            allow_incomplete=allow_legacy_project and version == LEGACY_SCHEMA_VERSION,
+        )
+        for value in selected_scopes
+    ]
+    return _choose_selection(selections)
+
+
+def _refusal_for_selection(spec: RequestSpec, selected: UpdateAuthority | None) -> str | None:
+    if selected is None:
+        return "suite update authority context is unavailable or invalid"
+    if selected.configured and spec.backend in _DIRECT_WRITER_BACKENDS:
+        if selected.mode == "project":
+            return "direct installation is disabled by project update authority"
     if not selected.configured and spec.authority in ("", "standalone"):
         return None
     if selected.mode == spec.authority and (
@@ -289,20 +358,34 @@ def refusal(root: Path, spec: RequestSpec, *, db: sqlite3.Connection | None = No
     return "suite update authority does not admit this request"
 
 
+def refusal(root: Path, spec: RequestSpec, *, db: sqlite3.Connection | None = None) -> str | None:
+    if not suite_request(spec):
+        return None
+    return _refusal_for_selection(
+        spec, _selected_for_request(root, spec, db, allow_legacy_project=db is not None),
+    )
+
+
 @contextmanager
 def submission(root: Path, spec: RequestSpec):
     from . import core
 
     if not suite_request(spec):
-        yield
+        yield spec
         return
     create_queue_directory(root)
     gate = _wait_operation(root / "authority.lock", time.monotonic() + 30, "update authority")
     try:
-        reason = refusal(root, spec)
+        selected = _selected_for_request(root, spec)
+        if (
+            selected is not None and selected.configured and selected.mode == "standalone"
+            and spec.backend in _DIRECT_WRITER_BACKENDS and not spec.authority
+        ):
+            spec = replace(spec, authority="standalone")
+        reason = _refusal_for_selection(spec, selected)
         if reason is not None:
             raise core.StateError(reason)
-        yield
+        yield spec
     finally:
         gate.release()
 
@@ -358,7 +441,7 @@ def change(
                     core._upgrade_schema(db, root, execution)
                     version = db.execute("PRAGMA user_version").fetchone()[0]
                     previous = _from_db(root, selected_scope, db, allow_incomplete=True)
-                    if previous == selected:
+                    if previous == selected and version == SCHEMA_VERSION:
                         db.commit()
                         return previous
                     if core._has_fence(db, root):
@@ -371,13 +454,28 @@ def change(
                     if any(request.state == "running" for request in requests):
                         raise core.InterruptedError("update authority cannot change while execution is unsettled")
                     try:
-                        incomplete = version != SCHEMA_VERSION and guarded(root)
+                        incomplete = version not in (LEGACY_SCHEMA_VERSION, SCHEMA_VERSION) and guarded(root)
                     except (OSError, AuthorityError) as error:
                         raise core.StateError("update authority state is unavailable or invalid") from error
                     late = [
                         request for request in requests
                         if incomplete and request.state == "pending" and suite_request(request.spec)
                     ]
+                    if version == LEGACY_SCHEMA_VERSION:
+                        def obsolete(request):
+                            selections = [
+                                read(db, value) for value in _request_scopes(request.spec, root)
+                            ]
+                            return (
+                                any(value.mode == "project" for value in selections)
+                                and _refusal_for_selection(request.spec, _choose_selection(selections)) is not None
+                            )
+
+                        late.extend(
+                            request for request in requests
+                            if request.state == "pending" and suite_request(request.spec)
+                            and obsolete(request)
+                        )
                     verified = False
                     if late:
                         if any(
@@ -392,19 +490,23 @@ def change(
                         execution.assert_owned()
                         gate.assert_owned()
                         core._assert_database_identity(database, identity)
+                        reason = (
+                            "suite update refused during direct-writer authority upgrade"
+                            if version == LEGACY_SCHEMA_VERSION
+                            else "suite update refused after an interrupted authority switch"
+                        )
                         for request in late:
                             db.execute(
                                 """UPDATE requests SET state='completed',exit_code=3,error=?,
                                 finished_at=? WHERE id=? AND state='pending'""",
-                                ("suite update refused after an interrupted authority switch", time.time(),
-                                 request.id),
+                                (reason, time.time(), request.id),
                             )
                         late_ids = {request.id for request in late}
                         requests = [request for request in requests if request.id not in late_ids]
                     pending = any(
                         request.state == "pending" and (
                             version != SCHEMA_VERSION
-                            or (suite_request(request.spec) and _request_scope(request.spec, root) == selected_scope)
+                            or (suite_request(request.spec) and selected_scope in _request_scopes(request.spec, root))
                         ) for request in requests
                     )
                     if pending:
@@ -419,7 +521,9 @@ def change(
                             execution.assert_owned()
                             gate.assert_owned()
                             ensure_guard(root)
-                            if version != SCHEMA_VERSION:
+                            if version == LEGACY_SCHEMA_VERSION:
+                                db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+                            elif version != SCHEMA_VERSION:
                                 initialize(db)
                             write(db, selected_scope, selected)
                             core._validate_db(db)

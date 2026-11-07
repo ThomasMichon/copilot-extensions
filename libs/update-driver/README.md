@@ -188,19 +188,34 @@ plugins in the same cell share it. The legacy installation has a separate
 per-user selection. The installation owner still validates its own receipts.
 
 The switch waits for installation custody and pending work, refuses unsettled
-execution, and records the selection atomically in queue schema 5. This schema
+execution, and records the selection atomically in queue schema 6. This schema
 is introduced only on an explicit switch and makes older queue clients refuse
-rather than ignore the selection. Capable adapters tag requests with the chosen
-authority; a legacy submission that raced the switch cannot execute under it.
-Unrelated request backends remain independent in a capable driver.
+rather than ignore the selection. Existing schema-5 standalone selections stay
+readable; a schema-5 project selection requires a capability-verified upgrade,
+even when the selected project is unchanged. Upgrading affects the shared queue,
+so the callback must qualify all clients that will continue to use it.
+
+Capable adapters tag requests with the chosen authority; a legacy submission
+that raced the switch cannot execute under it. The capable queue also fences
+its native Worktrees, plugin and Manager installation/provisioning writers in
+project mode, and stamps their standalone admission while holding the same
+authority lock. For native cell roots it resolves the physical installation
+and rechecks the cell receipt; shared legacy writers must satisfy both global
+and any supplied cell selection. Unrelated request backends and independent
+cell roots remain independent. The exported
+`QUEUED_NATIVE_WRITER_CAPABILITY` describes this queue boundary only: it is
+not proof that an unqueued writer, old Picker, scheduler or shared legacy
+installation is covered.
 
 `change_authority` requires a trusted `verify_capabilities(deadline)` callback.
 It must check the actual selected Worktrees, Manager and worker providers and
 prove that every direct writer, retained old Picker and automatic scheduler
-which can bypass the queue is either capable or settled. A version, downloaded
-payload, or unconditional success is not that proof. The callback owns bounded
+which can bypass the queue is either capable or settled. It must also coordinate
+global authority when a cell-managed portfolio shares a legacy runtime. A
+version, downloaded payload, queue capability, or unconditional success is not
+that proof. The callback owns bounded
 probe cleanup and must honor the monotonic deadline; a late result cannot
-publish a mode. Schema 5 alone cannot fence a process that bypasses the queue.
+publish a mode. Schema 6 alone cannot fence a process that bypasses the queue.
 No public mode-switch command is supplied by this primitive.
 
 An interrupted first switch leaves a guard that makes capable clients refuse
