@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 from agent_procutil import no_window_kwargs
+from runtime_install_fixture import isolate_account_profile
 
 
 @pytest.fixture
@@ -333,6 +334,7 @@ def test_source_provenance_real_first_install_from_git_metadata(
     plugin = frozen.plugin
     home = tmp_path / "home"
     home.mkdir()
+    isolate_account_profile(plugin, home)
     root = home / ".agent-worktrees"
     assert not root.exists()
     environment = dict(os.environ, HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home))
