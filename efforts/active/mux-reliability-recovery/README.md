@@ -279,3 +279,15 @@ not only its parser. Deployment and repairs to running sessions are separate.
   remain supporting evidence. Lint, module ceilings and installation contract
   are being refreshed before republishing; final exact-source review and CI
   remain required. No native PSMux, live recovery or rollout was performed.
+
+### 2026-11-07 - Concurrent-source reconciliation
+
+- Rebasing onto the current contribution branch preserved the new managed
+  mapping input and message-activity projection. Supported complete
+  observations still use fresh, project-matching managed counts; unavailable
+  mux evidence cannot promote a cached count merely because its receipt is
+  recent. Live, stale, wrong-project and cleanup-owner cases remain covered.
+- The reconciled producer/projection/PSMux-publication selection passed 46
+  tests. Exact conflict-file lint and changed-source module ceilings passed.
+  All five original blocking threads have implementation replies and are
+  resolved; a fresh review and CI for the rebased head remain outstanding.

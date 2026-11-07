@@ -90,6 +90,7 @@ def _publish_active_project(
     except MuxObservationUnavailable:
         mux_map = {}
         mux_observed = False
+    # Fresh receipt alone cannot qualify cached counts during observation loss.
     if managed_mux_cache is not None and mux_observed:
         from .mux_link import MAPPING_STALE_AFTER_SECONDS
 
