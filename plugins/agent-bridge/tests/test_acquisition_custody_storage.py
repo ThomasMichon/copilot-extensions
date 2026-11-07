@@ -142,9 +142,21 @@ def test_damaged_acquisition_custody_is_refused_not_repaired(tmp_db: Database, m
 
 def test_acquisition_writer_trigger_migrates_onto_an_existing_database(tmp_db: Database) -> None:
     """A database stamped before the Worktrees writer trigger existed opens and gains
-    it through migration, rather than failing startup as damaged custody."""
+    it through migration, rather than failing startup as damaged custody, and keeps
+    its sessions, events and acquisition history readable."""
     name = "acquisition_worktree_writer_retained"
     path = tmp_db.db_path
+    tmp_db.create_session("kept-session", "kept", None, ".", "local", "idle", 1.0)
+    tmp_db.append_event("kept-session", 1, "kept_event", {"original": True}, 2.0)
+    tmp_db.flush()
+    tmp_db.execute_write(
+        "INSERT INTO acquisition_attempts (delivery_id, target, worktree_id, request_digest,"
+        " token, state, result_json, refusal_code, created_at, updated_at)"
+        " VALUES ('kept-delivery','worker','kept-worktree','kept-digest','kept-token',"
+        " 'pending',NULL,NULL,3,4)")
+    tmp_db.execute_write(
+        "INSERT INTO acquisition_effects (delivery_id, stage, data_json)"
+        " VALUES ('kept-delivery','launching','{\"original\":true}')")
     tmp_db.execute_write(f"DROP TRIGGER {name}")
     tmp_db.execute_write("UPDATE schema_version SET version=41")
     tmp_db.close()
@@ -152,8 +164,26 @@ def test_acquisition_writer_trigger_migrates_onto_an_existing_database(tmp_db: D
     try:
         assert db.execute_read("SELECT version FROM schema_version")[0][0] == SCHEMA_VERSION
         assert db.execute_read("SELECT 1 FROM sqlite_master WHERE name=?", (name,))
+        assert db.get_session("kept-session")["name"] == "kept"
+        event, = db.get_events("kept-session")
+        assert (event["event_type"], event["data"]) == ("kept_event", {"original": True})
+        attempt, = db.execute_read("SELECT * FROM acquisition_attempts")
+        assert (attempt["delivery_id"], attempt["worktree_id"], attempt["token"], attempt["state"]) == (
+            "kept-delivery", "kept-worktree", "kept-token", "pending",
+        )
+        effect, = db.execute_read("SELECT * FROM acquisition_effects")
+        assert (effect["stage"], effect["data_json"]) == ("launching", '{"original":true}')
     finally:
         db.close()
+
+
+def test_missing_writer_trigger_on_a_current_database_is_refused(tmp_db: Database) -> None:
+    """The pre-42 exemption must not reach a database already stamped 42."""
+    name = "acquisition_worktree_writer_retained"
+    tmp_db.execute_write(f"DROP TRIGGER {name}")
+    with pytest.raises(RuntimeCustodyError, match="writable preparation"):
+        Database(tmp_db.db_path)
+    assert not tmp_db.execute_read("SELECT 1 FROM sqlite_master WHERE name=?", (name,))
 
 
 def test_legacy_acquisition_migration_preserves_original_unknown_history(tmp_path: Path) -> None:
