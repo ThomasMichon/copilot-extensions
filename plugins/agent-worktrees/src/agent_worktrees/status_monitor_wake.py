@@ -43,4 +43,4 @@ def _kind_wakes_sweep(kind: str, targets: list[str] | None) -> bool:
     """
     if kind == "handoffWake":
         return True
-    return kind in {"postToolUse", "nativeToolMutation", "nativeToolBatchMutation", "shellToolMutation"} and (targets is None or bool(targets))
+    return kind in {"postToolUse", "nativeToolMutation", "nativeToolBatchMutation", "shellToolMutation", "mixedToolBatchMutation"} and (targets is None or bool(targets))
