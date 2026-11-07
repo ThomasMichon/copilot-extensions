@@ -346,11 +346,10 @@ def test_resume_fixture_native_owner_preserves_python_argv_and_stdin(tmp_path):
     )
     with Console([PWSH, "-NoProfile", "-File", str(script)],
                  env=launch["env"], cwd=launch["target"]) as console:
-        assert console.wait() == 0, (
-            console.output.decode("utf-8", "replace")
-            + (launch["root"] / "calls.jsonl").read_text("utf-8")
-        )
-        assert console.output.decode("utf-8", "replace").count("pipeline stdin") == 1
+        exit_code = console.wait()
+    output = console.output.decode("utf-8", "replace")
+    assert exit_code == 0, output + (launch["root"] / "calls.jsonl").read_text("utf-8")
+    assert output.count("pipeline stdin") == 1
 
 
 @pytest.mark.parametrize("use_fixture_dependency", [False, True])
