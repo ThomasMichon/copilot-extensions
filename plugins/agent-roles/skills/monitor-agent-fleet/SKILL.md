@@ -72,6 +72,15 @@ held, terminal and unknown. Include live-idle owners with outstanding assigned
 work. Deduplicate paired worktrees, represented sessions and subordinate agents;
 retain the root worktree/head and relevant predecessor chain.
 
+A recurring watch whose charter targets the fleet, rather than a fixed list,
+**re-resolves its roster at the start of every cycle** from the topology
+manifest and the transport's read-only readiness check. Add a newly declared,
+ready machine. Retire one removed from the manifest, keeping its history and
+any outstanding steer record. Keep a declared but unready machine as a coverage
+gap rather than dropping it. Record the roster source and changes in the cycle
+log, then hold that roster for the rest of the cycle. Readiness failures never
+authorize provisioning, connecting or repairing a venue.
+
 For each owner, read only its applicable charter, original operator requests,
 canonical effort plan/validation, current agenda position and latest substantive
 results. Produce:
@@ -192,7 +201,8 @@ Consume incremental ranges without changing another reader's cursor.
 For an assigned recurring watch, use the existing scheduler/event mechanism.
 Prefer expected completion/review events; choose the charter's active and
 parked cadences, not per-agent minute pollers, and observe early on the
-watchdog checks' early triggers. Healthy agents get one log line, not a message. Preserve an explicit next observation and reason,
+watchdog checks' early triggers. Each cycle begins with the roster refresh
+above. Healthy agents get one log line, not a message. Preserve an explicit next observation and reason,
 batch unchanged waits, and stop the owned watch when its assignment ends.
 No daemon, cron entry, automatic joining, or background service is supplied.
 

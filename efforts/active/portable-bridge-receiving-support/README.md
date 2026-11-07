@@ -914,3 +914,290 @@ implementation. The exact support closure follows the consumer trace and tests.
 - Review this plan before implementation. Live process recovery is not
   authorized by the source direction; installed rollout and the original
   first-venue acceptance remain separate gates.
+- #11059 received exact-head approval with no active findings and green
+  required CI, then merged as `10e3ec8c9e28f899d2086f8a3a67420f3a84773c`.
+  Re-read the remaining Plan and Validation Plan. Implement #11057 through
+  the existing lifecycle and shared native process/owner primitives next;
+  no installed or receiving-consumer gate closes from this planning merge.
+
+### 2026-11-06 - Bounded Vault writer transition implemented
+
+- The focused failing control reproduced writer custody surviving settled
+  credential work until transport cleanup. The outgoing lifecycle now releases
+  that lease before cleanup and privately acknowledges the release. The
+  incoming service still acquires the actual shared lease; a public health
+  response cannot supply this acknowledgement.
+- The existing incoming tick grants thirty seconds after discovery publication,
+  then makes one central-only retirement attempt through shared native process
+  custody. Selection, discovery, admitted owner, installation slot, runtime
+  identity, principal and native birth are checked before mutation. Unknown
+  ownership or exit stays an explicit refusal, not a fabricated healthy update.
+- Actual Windows fixtures preserve an admitted old connection during grace,
+  transfer ready writer custody before hung cleanup, and cold-exclude hung
+  credential work before incoming admission. The retained admission supplies
+  the exact registry after launch-only environment fields have been cleared.
+  Fixed-address aliases are retried after old-process exit.
+- The focused lifecycle/discovery/readiness packet passes 212 cases with one
+  platform-specific skip and a CPython closed-pipe destructor warning. It
+  includes old/new receipt directions, malformed receipt and independent
+  owner/selection/birth/exit refusal controls. Linux/macOS, installer clean-room,
+  installed rollout and external receiving acceptance remain unqualified.
+  These isolated source controls do not close the parent effort.
+- Python lint, install contract, documentation and headless checks pass.
+  Final committed-source checks, review/CI, release and separately authorized
+  installed acceptance remain open. No live predecessor was terminated.
+- The final generation/ownership packet passes all 62 cases after latching
+  positive predecessor exit, avoiding repeated native probes in steady state.
+  The unchanged settlement, lifetime, auth-state, readiness and discovery
+  controls retain their earlier result. All 40 admitted strict projects pass
+  both declared type targets; pending scopes are not implicitly qualified.
+
+### 2026-11-06 - Writer-chain and first-review corrections
+
+- The first implementation head's required CI passed, but review identified
+  live backend-child exclusion, stale Unix aliases and the shared native
+  identity's `reused` result. Held #11072 as draft while addressing them;
+  that earlier head is not accepted or deployed.
+- A new failing native control also reproduced three-generation replacement:
+  discovery can name a passive failed newcomer while an older daemon still
+  owns credential work. Capture that exact contended lease holder as a second
+  bounded candidate, independently validate its central ownership and recheck
+  current lease contention at mutation. No historical sweep is introduced.
+- Native retirement now pauses the exact parent before census. Credential or
+  unknown children refuse retirement and resume the parent, retaining writer
+  exclusion. Only the actual system console-host image is exempt on Windows;
+  a same-named foreign image remains a worker. No descendants are killed.
+  The declared `psutil` dependency supports this finite native census.
+- Positive original exit includes a reused PID. Unix alias reclamation checks
+  the captured owned socket identity and liveness, preserving changed/live
+  paths. These corrections preserve the existing incoming lifecycle owner.
+- All 73 focused generation/ownership controls pass, including actual repeated
+  replacement and a real held backend process reached through the production
+  KeePassXC edit constructor. Three subsequent changed-lease controls and the
+  explicit Linux Unix-alias assertion still require execution. Final source,
+  dependency-age, review/CI, release and installed acceptance remain open.
+- The final affected packet passes 232 cases with one platform skip and
+  named per-case/teardown JUnit retained by the test owner. An earlier packet
+  exposed a Windows-only portable-fixture omission (`AF_UNIX`); supplying the
+  explicitly mocked platform constant passes all five residual probe controls.
+  Final whole-packet execution is clean, without the prior pipe warning or
+  held-cleanup diagnostic. Linux-native execution is still not claimed.
+- Serialized documentation validation passes after preparation's transient
+  source inputs are gone. Python dependency seasoning passes all 564
+  declarations with zero violations; lint and the install contract pass.
+  Fresh committed-source checks and review/CI remain required.
+- Restrict console-image identity reads to the native system directory, so an
+  unrelated backend image never causes filesystem probing outside that directory.
+  All seven affected native/census controls pass again. The two retained reports
+  contain 240 named testcases, zero failures/errors and the single platform skip;
+  repeated controls are not counted as new portfolio coverage.
+
+### 2026-11-06 - Independent Unix alias custody and native fixture routing
+
+- The second review confirmed the first corrections but found that the fixed
+  Unix alias can belong to a suffixed-primary predecessor or an even older
+  writer. Track its installation, native birth and socket identity separately
+  from discovery, using a private bounded atomic owner record for each fixed
+  bind. Legacy fixed-primary owners can be captured before exit. Missing or
+  invalid ownership never invents another process-retirement target.
+- Alias mutation and identity-checked cleanup share the publication lease.
+  Retry until the actual alias owner exits; preserve live, replaced and unknown
+  paths. This closes the existing replacement intent rather than extending it.
+- Endpoint-derived fixture requests now use the advertised native transport;
+  Unix-only discovery no longer requires a TCP alternative. Explicit fixed TCP
+  controls remain intact. Added portable ownership, invalid-record, selection
+  and cleanup controls, plus Linux-native successive-cold and older-writer
+  fixed-alias assertions.
+- The affected lifecycle, settlement, handoff, discovery and readiness packet
+  passes 251 tests with two platform skips. A CPython closed-pipe destructor
+  warning remains visible; it is not silently described as a clean run.
+  After the final reader-bound and invalid-record fallback tightening, all
+  eighteen alias controls pass separately. Named JUnit remains retained.
+- Windows source evidence does not qualify the Linux-native controls, macOS,
+  installer clean-room, installed whole-suite update or external receiving
+  acceptance. The PR remains unmerged pending final gates and fresh review/CI;
+  no live predecessor was terminated by this source correction.
+- Final lint, install contract, serialized documentation, headless launch,
+  module-size and shared-contract checks pass. All forty admitted strict
+  projects pass both declared type targets; Vault's pending type migration
+  is not implicitly qualified.
+
+### 2026-11-06 - First-touch and retained-transport review corrections
+
+- The next review confirmed independent Unix ownership and transport-aware
+  fixtures, then found first-touch record creation before the run directory
+  exists and premature Windows alias completion. Kept #11072 draft rather
+  than merge the otherwise-green head.
+- An absent-directory regression reproduced the first-touch failure. The
+  private owner writer now creates that directory before its temporary file.
+- A real Windows three-generation control reproduced the fixed TCP retry
+  stopping after the discovery predecessor exits while an older service,
+  having released writer custody, still retains its transports. Completion
+  now requires each configured transport's actual bind, retaining successful
+  binds across retries. A native bounded presence check replaces the generic
+  unprobed pipe result; only not-found permits a new fixed-pipe bind.
+- Native fixed TCP and named-pipe requests both reconnect after the older
+  listener's controlled exit. Portable controls also preserve busy, denied and
+  unknown presence results, and exercise independently partial restoration.
+- Retained native diagnostics exposed a PID-publication/cleanup race on
+  Windows, not an expired backend hold: replacement could collide with the
+  donor's PID-file reader. Writer-admission PID publication now shares the
+  publication lease and rechecks selection/discovery. Contention keeps
+  credential admission closed. Both a deterministic contention control and
+  real backend settlement pass.
+- The backend fixture preloads successor imports before its unchanged
+  eight-second held-work budget. Actual activation and retirement still occur
+  while the real backend is held. Failure output now retains bounded owned
+  process/log diagnostics and an explicit fixture-expiry marker.
+- The final affected packet passes 265 tests with three platform skips and
+  named per-case evidence retained. A CPython closed-pipe destructor warning
+  remains visible; no held-cleanup diagnostic occurs. Earlier EOF and timeout
+  outcomes remain in the retained reports rather than being erased by retries.
+  Linux/macOS, installer clean-room, installed whole-update and external
+  receiving acceptance remain separate. No live process was changed.
+- A final cleanup control failed when a newer fixed-alias owner reused the
+  same socket inode. Fixed-path cleanup now also requires the current private
+  record's PID and native birth to match this process. Own, changed-PID and
+  changed-birth cases pass; all 36 selected alias/cleanup consumers pass with
+  one Linux skip. This is a focused final correction, not a repeated full
+  265-case packet or additional unrelated coverage.
+
+### 2026-11-06 - Serialize rollback with pinned retirement
+
+- The next #11072 review had no inline findings, but its summary identified
+  a real selector race. The daemon-publication lease protects discovery;
+  SDK activation and rollback use a different kernel selector lease. Two
+  selection checks cannot close the interval before native termination.
+- Cold retirement now borrows that existing SDK lease from its own immutable
+  slot's retained bootstrap helper, holding it through pinned termination and
+  confirmed exit. No second selector protocol or generic SDK change is added.
+  Missing, nonordinary, corrupt or busy custody refuses the cold attempt;
+  cooperative replacement remains available.
+- The native regression pauses immediately after final owner revalidation
+  and before real termination. A concurrent real SDK `activate` first proves
+  that the selector lease is busy, then acquires it only after the original
+  process is positively dead. The generation packet passes 63 cases with
+  one Linux-only skip. The subsequent corrupt/busy refusal controls pass all
+  five cases; unchanged native cases retain that earlier packet's evidence.
+  This does not claim another monolithic run or Linux-native qualification.
+- The replacement reference now documents selector custody and its refusal
+  outcome. Review, exact-head CI, release and installed/external acceptance
+  remain open. No live service was changed by these source tests.
+
+### 2026-11-06 - Retain native resume custody and contain helper failures
+
+- The next #11072 review found two concrete failure classes. A syntactically
+  valid truncated retained helper can raise an ordinary acquisition error
+  outside the previous exception list. A failed native resume attaches the
+  unsettled pin to its exception, which the predecessor adapter discarded.
+- Helper loading/acquisition now converts ordinary exceptions before yielding
+  custody into `refused-selection-custody`; exceptions from the retirement
+  body are not swallowed by that loader.
+- The predecessor retains an unsettled native pin and reports
+  `refused-native-resume`. The existing lifecycle retries only its resume/close,
+  including after reselection. Shutdown closes work admission and keeps
+  resident custody until the pin settles, without another retirement attempt,
+  new watchdog or process rediscovery. Persistent resume failure remains an
+  explicit unresolved shutdown rather than false cleanup success.
+- Nine focused regressions pass, including syntactically valid truncated
+  helper refusal, exact-pin retention and an actual native paused process
+  held through reselection/shutdown before controlled resume. The complete
+  affected generation/predecessor/request-settlement/resident-lifetime packet
+  then passes 107 cases with one Linux-only skip and no held-cleanup diagnostic.
+  Linux-native, installed whole-update and external acceptance remain separate.
+  No live service was changed. Review and exact-head CI remain required.
+
+### 2026-11-06 - Supersede ready writers without losing pending pin owners
+
+- An already-ready generation could retain an older donor's failed resume
+  while still holding the writer. Returning before successor detection left
+  its credential admission open after another generation published discovery.
+  The new regression reproduced that ordering failure. Recovery still runs
+  first, but only new admission and further cold attempts wait for settlement;
+  supersession continues to close admission, drain and transfer the writer.
+- A three-generation native control also confirmed that a later incoming
+  generation could pause the middle owner of an unresolved older pin. The
+  control substituted refusal at the child census, avoiding actual owner loss.
+  Before pin acquisition, the middle generation now protects its own existing
+  daemon-instance record. It retains that protection through failed resume or
+  registry release, settling the same handles rather than attempting retirement
+  again. The later successor remains ready but refuses protected retirement.
+- Added a current-process protection handle to the existing registry owner,
+  using its existing counted `protected` field and native identity check.
+  No new marker, lease protocol, worker or watchdog is introduced. Existing
+  cleanup already holds every nonzero protection count. Changefiles cover
+  the shared library and every physical or editable consumer.
+- The final generation/predecessor/request-settlement/resident-lifetime packet
+  passes 110 cases with one Linux-only skip. The shared admission/protection
+  packet passes 54 cases. Source lint, install contract, documentation, headless,
+  module-size and changefile-presence guards pass. Earlier exact-source
+  evidence is not relabelled as a repeated whole portfolio.
+- These are contained source/Windows-native controls, not Linux-native,
+  macOS, installer clean-room, installed whole-update or external acceptance.
+  Those tiers remain open because this source correction has not passed
+  review, CI, merge and release. No live service was changed; the source and
+  parent efforts remain Active.
+- The first published unit gate refused the two changed registry modules
+  before test execution because their source bindings still named earlier
+  bytes. Re-admitted only those reviewed bindings; hosted Linux units then
+  passed. The local Windows packet separately found a retained-writer fixture
+  comparing a POSIX literal with native `Path` rendering. Made both synthetic
+  sides use the same path representation; all 61 affected controls pass.
+  Re-admitted that one test source without changing node inventory or coverage
+  targets. The complete corrected Windows packet and final-head CI remain
+  required; the earlier 60-case partial result is not qualification.
+- The module-size gate caught growth in the existing registry store. Moved
+  the protection transaction into its existing record-operation owner without
+  raising a ceiling. The final focused native custody controls pass five
+  cases; shared registry/cleanup controls pass 63 with eight platform skips.
+- The optional Windows whole-unit run completed 4,522 passes, three skips,
+  22 deliberate deselections and three framework warnings in 372.23 seconds.
+  Its no-skip evidence gate refused qualification. The skipped positions
+  correspond to the three explicitly POSIX filesystem/kernel controls;
+  required Linux CI and optional native qualification remain separate.
+- Reconciled newer `dev` while preserving the independent current CLI source
+  binding. The same retained-writer fixture correction had independently
+  arrived upstream; its bytes are retained rather than duplicated.
+- The fresh review resolved the ready-writer ordering finding, but its summary
+  raises crash safety without inline findings. Current-process registry
+  protection prevents voluntary later retirement of a pending pin owner; it
+  cannot preserve that pin if its owner crashes. Assess the SDK's existing
+  finite `RetirementCustody` owner before claiming durable native retirement.
+  No new resident service, watchdog or retirement protocol is authorized or
+  needed by that assessment. The PR stays draft; merge, release, rollout and
+  the parent acceptance remain open.
+
+### 2026-11-06 - Move Vault pins into existing finite crash-safe custody
+
+- The remaining crash-safety concern is real for a pin held directly by a
+  central daemon: registry protection can prevent planned retirement, not
+  preserve suspension rollback after owner death. Vault now uses the existing
+  SDK `RetirementCustody` finite worker, retaining that same owner before
+  startup and through unconfirmed cleanup. Settlement never replays retirement
+  or an ambiguously completed native resume. Ready-writer supersession remains
+  ahead of the new-admission recovery gate.
+- Removed this PR's now-unnecessary registry protection API, helper, tests and
+  shared-consumer changefile. The SDK has no remaining source change. Restored
+  the two affected unit source bindings without changing node inventory,
+  production coverage targets, effect restrictions or deadlines. Vault
+  explicitly adopts the existing retirement-custody dependency extra.
+- The affected generation/predecessor/alias/pipe packet passes 132 cases with
+  two platform skips; Python lint, install contract, documentation and headless
+  checks pass. The packet reports one asyncio closed-pipe finalizer warning.
+  The separate request-settlement, resident-lifetime and installer-readiness
+  packet passes all 97 cases.
+- A new native consumer case abruptly kills the fixture-owned incoming Vault
+  while its predecessor is paused. The original admitted request then
+  completes without caller cleanup or a release signal, and the same finite
+  custodian exits. The first attempt exposed test containment rather than
+  rollback failure: killing the disposable caller also closed its private
+  kill-on-close Job. The fixture now retains that Job in the runner, preserving
+  every limit and outer containment while isolating caller death. This proves
+  native Vault integration, not survival after all production cleanup Jobs
+  close; that SDK/lifetime tier remains distinct.
+- Normal shutdown, a later successor's refusal of the live custodian child,
+  rollback serialization and already-ready writer supersession also pass.
+  No resident reaper, watchdog, new retirement protocol or deployed patch was
+  added. Required exact-head CI/review, release, installer clean-room, installed
+  whole-update, Linux-native/macOS and external acceptance remain open.
+  No live service was changed; both source and parent efforts remain Active.
