@@ -972,6 +972,67 @@ def test_build_compute_applies_through_to_the_cache():
     assert cache.get("proj", "wt-1") is not None
 
 
+def test_build_compute_notifies_changes_and_restored_freshness_not_heartbeats(monkeypatch):
+    clock = [1.0]
+    monkeypatch.setattr(mux_link.time, "time", lambda: clock[0])
+    cache = mux_link.ManagedMuxCache()
+    notified = []
+    compute = mux_link.build_compute(cache, on_change=notified.append)
+    assert compute(mux_link.KIND, _obs(observed_at="2026-11-07T01:00:00Z"))["applied"]
+    clock[0] += 1
+    assert compute(mux_link.KIND, _obs(observed_at="2026-11-07T01:00:01Z"))["applied"]
+    assert len(notified) == 1
+    clock[0] += mux_link.MAPPING_STALE_AFTER_SECONDS + 1
+    assert compute(mux_link.KIND, _obs(observed_at="2026-11-07T01:01:00Z"))["applied"]
+    assert len(notified) == 2
+    assert compute(mux_link.KIND, _obs(attached_clients=2))["applied"]
+    assert notified[-1]["attached_clients"] == 2
+    assert compute(mux_link.KIND, _obs(revision=2, live=False))["applied"]
+    assert notified[-1]["live"] is False
+    assert len(notified) == 4
+    assert not compute(mux_link.KIND, _obs(revision=1))["applied"]
+    cache.close()
+    assert not compute(mux_link.KIND, _obs(revision=3))["applied"]
+    assert len(notified) == 4
+
+
+def test_build_compute_preserves_committed_result_when_notification_fails():
+    cache = mux_link.ManagedMuxCache()
+    attempted = []
+
+    def fail(entry):
+        attempted.append(entry["worktree_id"])
+        raise RuntimeError("fixture notification unavailable")
+
+    compute = mux_link.build_compute(cache, on_change=fail)
+    assert compute(mux_link.KIND, _obs()) == {"applied": True, "revision": 1}
+    assert compute(mux_link.KIND, _obs()) == {"applied": True, "revision": 1}
+    assert cache.get("proj", "wt-1")["live"] is True
+    assert attempted == ["wt-1"]
+
+
+def test_in_process_runtime_delivers_change_notification_over_real_ipc():
+    changed = threading.Event()
+    notified = []
+
+    def observe(entry):
+        notified.append((entry["project"], entry["worktree_id"]))
+        changed.set()
+
+    runtime = mux_link.InProcessRuntime()
+    runtime.start(on_change=observe)
+    try:
+        result = mux_link.mux_live_via_daemon(
+            runtime.lock_extra(), payload=_obs(),
+            fallback=lambda: pytest.fail("fresh runtime declined its existing mapping contract"),
+        )
+        assert result == {"applied": True, "revision": 1}
+        assert changed.wait(timeout=2)
+        assert notified == [("proj", "wt-1")]
+    finally:
+        runtime.shutdown()
+
+
 def test_kind_matches_the_documented_mux_live_v1_contract():
     assert mux_link.KIND == "mux-live-v1"
 

@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify Windows helper Python without lowering explicit signed runtime-base policy and pin uv fallback",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

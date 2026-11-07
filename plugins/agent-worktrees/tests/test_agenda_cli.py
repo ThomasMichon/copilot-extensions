@@ -343,3 +343,39 @@ def test_actual_main_project_failure_is_structured_and_strict(monkeypatch, capsy
     assert output.err
     with pytest.raises(SystemExit):
         main.main([*argv, "--unknown"])
+
+
+@pytest.mark.parametrize("supported", [False, True])
+def test_graph_opt_in_requires_v2_and_live_graph_capability(monkeypatch, capsys, supported):
+    calls = []
+
+    class Client:
+        def _request(self, action, payload=None, **bounds):
+            calls.append((action, payload))
+            if action == "health":
+                caps = [contract.CAPABILITY, contract.V2_CAPABILITY]
+                if supported:
+                    caps.append(contract.GRAPH_CAPABILITY)
+                return {"capabilities": caps,
+                        "worktrees": {"status": "ready", "generation": "a" * 32}}
+            assert payload == {**request(), "contract_version": 2, "graph": 1}
+            return {**reply(), "contract_version": 2}
+
+    monkeypatch.setattr(cli, "_control_client", Client)
+    monkeypatch.setattr(cli.cfg, "project_name", lambda: "project")
+    argv = ["agenda-read", "--worktree", "full-id", "--session", "head", "--json",
+            "--contract-version", "2", "--agenda-graph", "1"]
+    args = main.build_parser().parse_args(argv)
+    assert args.agenda_graph == 1
+    assert cli.cmd_agenda(args) == (0 if supported else 1)
+    output = json.loads(capsys.readouterr().out)
+    if supported:
+        assert output["ok"] is True and calls[-1][0] == "agenda-read"
+    else:
+        assert output["error"]["code"] == "unsupported" and [c[0] for c in calls] == ["health"]
+    legacy = main.build_parser().parse_args(argv[:-4] + ["--agenda-graph", "1"])
+    calls.clear()
+    assert cli.cmd_agenda(legacy) == 1
+    assert calls == [] and "graph" in json.loads(capsys.readouterr().out)["error"]["message"]
+    with pytest.raises(SystemExit):
+        main.build_parser().parse_args([*argv[:-1], "2"])

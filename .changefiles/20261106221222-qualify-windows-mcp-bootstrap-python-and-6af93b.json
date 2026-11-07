@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify Windows MCP bootstrap Python and retain its selection through source helpers and venv fallbacks",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

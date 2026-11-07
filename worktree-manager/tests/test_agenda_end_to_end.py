@@ -931,10 +931,15 @@ def test_context_qualified_reconnect_reads_current_body_and_rejects_stale_public
                     "expected_generation": owner.store.generation, "observation": original_body,
                 })
                 assert rejected["ok"] is False and rejected["error"]["code"] == "stale-revision"
-                assert owner.agendas.read({
+                selected = {
                     "contract_version": 2, "project": "example",
                     "worktree_id": "selected", "session_id": "head-a",
-                })["observation"] == current_body
+                }
+                assert owner.agendas.read({**selected, "graph": 1})["observation"] == current_body
+                # Without the opt-in, the optional display graph is stripped.
+                assert owner.agendas.read(selected)["observation"] == {
+                    key: value for key, value in current_body.items() if key != "graph"
+                }
                 assert len(store.history(home)) == 2
                 await pilot.press("escape")
                 await eventually(

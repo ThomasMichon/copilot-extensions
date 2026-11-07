@@ -306,7 +306,11 @@ It requires PowerShell 7, real PSMux and the Windows .NET Framework compiler,
 without fallback or prerequisite skips on Windows. A private executable adapter
 adds the runner-owned `-L` namespace to the launcher's PSMux calls; fixture
 control and cleanup calls use that same namespace. The adapter restores the
-backend's original PATH. Two small native controls cover direct and adapted
+backend's original PATH. A separate native executable carries the synthetic
+Python owner's literal argv, stdin and exit status; it is not a PowerShell
+script substituted for a Python executable. The actual hosting-admission
+function is also checked before and after a real private mux probe, retaining
+BOM-free JSON input despite console-encoding changes. Two small native controls cover direct and adapted
 private mux startup. Four concurrent admitted
 Resume plans traverse the unchanged production launcher, copied pane assets,
 argument receipt and startup reader,
@@ -2346,6 +2350,86 @@ against an actual stalled child, without retries or a resident waiter.
 Run the expensive current-runtime matrix explicitly on Windows with
 `python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_native_seed_runtime.py --allow-explicit-tiers --timeout 1000 --plugin-timeout 1600`.
 The existing `native` discovery exclusion keeps it out of ordinary unit CI.
+
+For the actual Worktrees Python launch owner, select
+`tests/native/test_headed_worktrees_copilot.py` with
+`COPILOT_DRIVER_HEADED_MUX_E2E=1`, `COPILOT_NATIVE_TEST_EXECUTABLE` naming an
+existing native Copilot executable, and an existing PSMux/PowerShell installation.
+Run `python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_headed_worktrees_copilot.py --allow-explicit-tiers --timeout 300 --plugin-timeout 600 --test-timeout 180`.
+This focused lane uses the managed test environment, a loopback-only model
+provider, disposable Copilot state and the runner's private mux namespace.
+It checks literal startup input, fresh launch and same-session native resume,
+broker prompts, real child PID/birth receipts, seed non-replay and exact
+fixture retirement. A second control sends literal native terminal input,
+checks that the old broker refuses further prompt delivery, then explicitly
+stops through the original owner and resumes the same conversation through a
+new broker. Each control checks the exact user history and provider request
+count, with no replay of the rejected prompt. A third `manager-no-mux`
+control invokes the actual Manager `launch-session.ps1` and Worktrees resolver,
+using an unmodified private copy of the Manager scripts rather than a synthetic
+resolved plan, through the explicit no-mux path. It checks
+the same native history, broker, PID/birth and original-owner exit receipts.
+These controls use ordinary unseeded admission and an explicit native initial
+prompt; they do not claim staged-seed qualification. The existing real
+PowerShell cold-resume consumer instead verifies Windows refusal before the
+backend starts, with its seed retained, when mux absence is unconfirmed.
+Discovery uses a read-only adapter to the real private mux, not the host's
+default server or fabricated successful replies. The fixture preserves the
+runner's registry/lifecycle context while scrubbing Copilot settings and
+credentials. Its raw pane entrypoint uses the physical Python interpreter and
+the same managed test packages, avoiding the Windows venv redirector.
+It does not install a runtime or qualify copied setup, Manager's muxed
+attached/new-window paths or the full embody planner, guarded-head or auth-wait
+recovery, physical keyboard input or survival
+after caller cleanup Jobs. Those remain separate acceptance lanes.
+
+Driver's explicit `tests/native/test_headed_extension.py` lane uses the same
+canonical private mux routing, with raw pane argv separated from mux options
+by `--`. Two finite pane controls check actual script entry, PID and exit with
+default and null fixture configuration, always using a private data directory
+and rejecting inherited config/data overrides. PID and owner-result markers
+are published atomically. The SDK/broker control selects `direct` and
+`manager-wrapper` pane owners. The latter runs the actual Manager PowerShell 7
+pane wrapper with its normal pane Job enabled and a private home without an
+installed Worktrees runtime. Both owners preserve one native conversation
+across WebSocket and TCP prompts and check exact pane, CLI and extension exit.
+Run just these two controls with `-k native_headed_sdk`; this does not qualify
+the full Manager launch-session planner or survival after caller cleanup Jobs.
+The coordinator controls still invoke Python directly.
+Unit isolation controls reject default,
+foreign and whole-server routing before spawn, without mistaking child flags
+after `--` for mux routing.
+The focused `joined_session_reports_pending_read` control queries the executing
+CLI's `session.rpc.tasks.list()` and `session.rpc.schedule.list()` without a
+permission grant, checking the native `tasks` and `entries` arrays in the same
+conversation. Missing/failed/invalid reads do not produce an empty snapshot.
+This is SDK read-support qualification, not complete background-agent evidence,
+active-work/schedule mutation coverage or automatic-idle retirement.
+
+Manager's focused `tests/test_pane_startup.py` controls also execute its actual
+persisted AHP-binding and final startup-serialization blocks against copied
+launch commands. Inline and split resume arguments must be replaced, not duplicated;
+literal drive paths and prompt text survive the final consumer. Companion
+controls refresh the inner runtime before serialization, including recovery
+commands. The producer's Windows capability-absence
+control leaves older callers on their legacy path. These are isolated contract
+controls with a synthetic binding/token, not an authenticated AHP connection.
+They preserve selector-shaped interactive/model/agent values and reject
+runtime replacement of a native executable whose literal arguments resemble
+the Python owner. Matching native-Bash AHP controls live in
+`tests/test_launch_session_unwrap.py -k shell_ahp_binding`.
+Worktrees' `tests/test_session_shell.py -k headed_bash` checks effective
+`BASH_ENV` selection before copying and explicit empty-value pinning.
+On POSIX, the same selection executes real Bash exit/exec primers against
+refused admission; neither primer may run before the outer owner.
+The AHP controls also retain the option after a bare `--resume`.
+Driver's `tests/test_headed_launcher.py -k native_validator` checks
+selector-shaped values and missing-value refusal. The existing
+`tests/test_session_host_core.py -k retained_headed_executable` control
+passes a literal `--log-dir` value through the real retained archive and
+verifies native exit. The Worktrees copied-wrapper controls call the same
+validator on the delivered native argv; no native Copilot or rollout is
+implied by these finite-process checks.
 
 The optional native runtime-removal portfolio includes
 `tools/test_installer_engine_uninstall.py`,
@@ -5096,6 +5180,11 @@ the same monotonic idle grace. Generation, admission, malformed and expired
 notifications cannot renew it or invoke policy. Actual sockets, the final
 idle-check/drain interleaving and Windows shell delivery remain in the explicit
 Worktrees consumer packet, not this actor-free inventory.
+The same in-memory handler fixture covers optional `worktreeChanged` delivery:
+current generation/admission accepts the wake, while stale, closed, legacy,
+malformed and expired frames neither reply nor invoke tool policy. Associated
+application-marker units supply a synthetic marker environment; dependency
+evaluation must not discover the test host's identity.
 The PowerShell SDK and Bridge resume fixtures compile immutable admitted source
 once per test session, then execute that code in fresh per-case module globals.
 They do not share module state, results, provider observations or qualification
@@ -6202,6 +6291,25 @@ or desktop qualification. The release-helper verifier pins the retained
 guardian's complete source shape without executing that actor during discovery.
 
 ## The turn-key runner
+
+Worktrees' Windows update admission controls live in
+`plugins/agent-worktrees/tests/test_update_entry_windows.py`. Contained pytest
+proves early refusal through native and Git-sh fronts, read-only/foreground
+availability and exact installed-runtime forwarding. The unmocked positive
+check requires an explicitly detached/outside-Job Windows host, rather than
+weakening the normal runner's restrictive Job. Prepare its interpreter with
+`python tools/run-plugin-tests.py agent-worktrees --prepare-only`, then run:
+
+```powershell
+& "<prepared-test-python>" "plugins\agent-worktrees\tests\test_update_entry_windows.py" --native-breakaway-root "<private-caller-owned-scratch>" --powershell "<absolute-native-powershell>"
+```
+
+This dedicated check creates only private profiles and permissive fixture Jobs,
+enters the real global/payload fronts with an offline bootstrap, and independently
+pins any surviving probe child for exact cleanup. It refuses contained mode;
+do not clear its marker or change an enclosing Job to manufacture a pass.
+The corresponding pytest positive cases are skipped under containment, not
+reported as native qualification. No real installation or request is submitted.
 
 The Manager plugin and standalone test preparers install its application
 non-editably through the normal retained-source policy. Both use the shared

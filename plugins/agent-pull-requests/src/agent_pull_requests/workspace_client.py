@@ -13,6 +13,7 @@ from .watch_replay_client import ReplayClient, ReplayClientError
 from .watch_replay_store import json_object
 from .workspace_operations import (
     CHUNK_BYTES, MAX_GENERATION_BYTES, PROTOCOL, NativeWorkspaceClient, encoded, materialize,
+    needs_prepared_review, prepared_review_contract, supports_prepared_review,
     _stock_preparation,
 )
 
@@ -106,6 +107,13 @@ class WorkspaceClient:
             }:
                 value["operations"] = [name for name in value["operations"] if name != "events"]
                 value["unavailable_operations"] = {"events": "unsupported_conversation_contract"}
+        if "receipt" in value["operations"] and not supports_prepared_review(value.get("prepared_review_contract")):
+            value["operations"] = [name for name in value["operations"] if name != "receipt"]
+            unavailable = value.get("unavailable_operations")
+            value["unavailable_operations"] = {
+                **(unavailable if isinstance(unavailable, dict) else {}),
+                "receipt": "unsupported_prepared_review_contract",
+            }
         if epoch != self._discovery_epoch:
             raise WorkspaceClientError("workspace_discovery_superseded")
         self._capabilities = copy.deepcopy(value)
@@ -130,6 +138,11 @@ class WorkspaceClient:
             return await self.capabilities(**({"checkpoint": checkpoint} if checkpoint is not None else {}))
         if self._capabilities is None or operation not in self._capabilities["operations"]:
             raise WorkspaceClientError("workspace_capability_required", outcome_unknown=False)
+        if needs_prepared_review(operation, payload):
+            if checkpoint is not None:
+                checkpoint()
+            if not supports_prepared_review(self._capabilities.get("prepared_review_contract")):
+                raise WorkspaceClientError("prepared_review_contract_required", outcome_unknown=False)
         value = await self._exchange(operation, payload, **(
             {"checkpoint": checkpoint} if checkpoint is not None else {}))
         if (
@@ -137,6 +150,13 @@ class WorkspaceClient:
             or not isinstance(value.get("result"), dict)
         ):
             raise WorkspaceClientError("workspace_scope_changed", outcome_unknown=operation == "submit")
+        if operation == "receipt" and (
+            value["result"].get("protocol") != prepared_review_contract()["receipt_protocol"]
+            or value["result"].get("scope") != value["scope"]
+            or value["result"].get("operation_id") != payload.get("operation_id")
+            or value["result"].get("action_id") != payload.get("action_id")
+        ):
+            raise WorkspaceClientError("invalid_prepared_receipt_response", outcome_unknown=False)
         return value
 
     def preparation_contract(self):

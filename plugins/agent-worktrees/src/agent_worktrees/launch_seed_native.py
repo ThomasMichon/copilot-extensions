@@ -203,11 +203,13 @@ def admit(
 def admission(
     record_path: Path, correlation: launch_execution.Correlation, operation_id: str,
     *, admission_only: bool = False, preserve_seed_id: str | None = None,
-    native_resume_session: str | None = None,
+    native_resume_session: str | None = None, require_cold_stop: bool = True,
 ):
     """Keep the original creation fence until the exec or retained owner releases it."""
     from . import launch_admission, launch_seed_exec, launch_seed_state, tracking
 
+    if not require_cold_stop and (not admission_only or native_resume_session is not None):
+        raise ValueError("Only ordinary admission-only execution may omit the cold-stop check")
     with launch_admission.guard(record_path):
         def check() -> None:
             _owner, saved = _load(record_path, correlation, operation_id)
@@ -233,7 +235,7 @@ def admission(
                 or not admission_only and receipt is None and launch_seed_state.peek(record_path) is not None
             ):
                 raise ValueError("Original headed launch intent changed before creation")
-            if error := launch_seed_exec._final_cold_error(current):
+            if require_cold_stop and (error := launch_seed_exec._final_cold_error(current)):
                 raise ValueError(error)
         check()
         yield check

@@ -341,6 +341,20 @@ _Operator-required outcome; agent-recommended slices and validation._
   adoption, allocation/correlation and installed qualification remain open.
   The [prepared-intent binding refinement](comment-intent-binding.md) addresses
   the missing structured admission fact before new storage/publisher behavior.
+  The reviewed [durable pre-approval selection refinement](comment-intent-binding.md#durable-pre-approval-selection-and-allocation)
+  precedes automatic allocation and strict storage/publisher changes.
+  Its finite owner data leaves below do not qualify producer adoption.
+- [x] Deliver the finite optional prepared-intent source binding: explicit
+  storage (#11207), native execution/original receipts (#11214), negotiated
+  workspace submission (#11224) and host-bound local preparation before
+  preview/approval (#11237). Caller-retained GUIDs and actual profile/source
+  owners remain required; this is not automatic all-publisher adoption,
+  allocation, acquisition/DB mapping or installed/provider qualification.
+- [x] Deliver finite pre-approval owner retention (#11251) and fresh
+  comment/reply allocation (#11253), committing exact final bytes before
+  preview and separating pending selection from execution admission.
+  Actual producer/receiver integration, automatic owned/legacy edit binding
+  and complete all-forge/installed adoption remain open.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -894,6 +908,20 @@ or silently expanding a bounded source claim.
   boundaries, with explicit surface/provider coverage and evidence tiers.
   Preserve every existing attention, native, installed and shadow gate.
 
+- [x] Qualify the finite pre-approval owner data path through actual shared
+  preparation, original-key restart/lost-result recovery, contention,
+  immutable input, explicit exact admission/native receipts, strict reader
+  lifecycle and capacity: 187 coupled cases (#11253).
+  Bodyless votes remain bodyless; automatic edits refuse rather than infer
+  native identity. This is not producer/wire, provider or installed acceptance.
+
+- [x] Qualify the finite local preparation -> exact preview -> explicit
+  native/Gateway submission -> durable reopen and confirmed retry source
+  path for comments, replies and owned edits (#11237; 133 coupled cases).
+  Retained-write profile changes, unsupported receiver/binding and caller
+  policy/identity rebinding refuse. Synthetic native responses are not live
+  provider, installed or all-publisher acceptance.
+
 - [x] Qualify the finite B4 source contract through existing-owner storage,
   actual protected synthetic readback and negotiated CLI/client/Gateway/service
   consumers: 232 coupled cases, including exact proof, overlapping operations,
@@ -992,6 +1020,138 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-06 - Allocate fresh identities inside original-selection custody
+
+- #11253 actually merged as `0bd34706744af9755aa75db2f6cca0d162f7ad77`
+  after exact-head Copilot approval with no open issues and the latest
+  current-head CI and required PR gate green. Managed source reconciliation
+  retained its backup; the parent remains Active.
+- #11251 actually merged as `911bfa164602526aecc7347016554a83cb59a8ca`
+  after exact-head Copilot approval with no open issues and the latest
+  current-head CI and required PR gate green. Managed source reconciliation
+  preserved its backup and retained the active parent/source custody.
+- The finite source leaf adds allocation for new comments/replies
+  through that same original-selection transaction. The trusted host resolves
+  policy/profile/source before entry and supplies only bounded synchronous
+  pure composition under the lock. Original-key recovery avoids allocation
+  or redecoration after lost results, restart, contention and admission.
+- The coupled owner/selection/capture/executor source packet passes 187 tests
+  with bounded cleanup verified. Actual shared preparation exercises distinct
+  reply GUIDs, in-lock composition, first-commit races, lost-result recovery,
+  changed input/profile/source, exact admission/native receipts, bodyless votes,
+  unsupported edits and invalid preparation without partial persistence.
+- This is not a public producer capability or complete pre-approval pipeline.
+  Bodyless votes remain bodyless; automatic owned/legacy edits refuse pending
+  their actual protected native identity binding. The explicit caller-ID path,
+  exact approval/admission/native receipt boundary and old strict formats
+  remain unchanged. Producer wiring, all-publisher adoption, mapping,
+  provider/installed/shadow and full parent acceptance remain open.
+
+### 2026-11-06 - Retain pre-approval data without execution admission
+
+- The reviewed #11246 refinement now has a finite storage prerequisite:
+  `ReviewSelectionStore` composes over the existing ReplayStore transaction,
+  file and review capacity. Explicit lifecycle adoption fences old strict
+  readers. A bounded original-input digest and stage accompany the single
+  final v2 intent; no second body archive or allocation ledger is introduced.
+- Exact original-key recovery retains the first committed prepared bytes
+  across restart, lost results and changed profile/origin candidates. Existing
+  nonblocking lock contention refuses; callers reconcile that original key
+  after contention clears. Changed source/action/target/draft selection refuses.
+  Preparation cannot inspect an execution operation, start an attempt, retain
+  a native receipt/projection or bind feedback capture. Exact final admission
+  changes only the stage before existing execution/receipt semantics apply.
+- The bounded four-file owner/selection/capture/executor source packet passes
+  180 tests with cleanup verified. Two test assumptions were corrected:
+  alternate source metadata must use the actual shared preparer's matching
+  body, and the existing operation lock refuses contention rather than queues
+  both concurrent callers. Neither required changing the existing lock.
+- This is data-only source support, not automatic GUID allocation, producer
+  capability advertisement, actual approval evidence or installed behavior.
+  Next, compose allocation and retained selection through the existing owner
+  before preview, preserving exact approval/native receipt boundaries.
+  Other publishers, mapping, provider/installed/shadow and full parent
+  Plan/Validation acceptance remain open. No operational effects are granted.
+
+### 2026-11-06 - Review durable selection before automatic identity allocation
+
+- The finite prepared-source completion journal #11244 actually merged after
+  exact-head Copilot approval with no open issues and the latest required CI
+  green. Its Plan/Validation credit remains limited to the delivered optional
+  source chain; the parent stays Active and the source worktree reconciled.
+- The next bounded proposal extends the existing intent-binding refinement
+  with durable pre-approval selection and allocation under the same storage
+  owner. It separates retained preview data from execution admission and
+  original native receipts, with lost-result/restart recovery by original
+  operation identity, bounded retention and explicit old/new compatibility.
+- Review this contract before changing strict storage or publisher behavior.
+  It adds no runtime path, persisted format, GUID allocator, policy authority,
+  production migration or operational permission. Other publishers, mapping,
+  full attention/CLI/provider and installed/shadow acceptance remain open.
+
+### 2026-11-06 - Compose the local producer before preview and explicit submission
+
+- #11237 actually merged as `bb2f7a49c40e44aba3aa65941b5a47085cbec546`
+  after a passing owner-authored Copilot `COMMENTED` verdict with no
+  Medium/High findings and the latest current-head CI and required PR gate
+  green. Its one Low finding, the missing PR-description documentation-impact
+  assessment and links, was corrected and live-audited before merge.
+  The existing source worktree reconciled through managed completion.
+- An optional trusted host binding composes actual profile/source preparation
+  through the existing local CLI/tool before preview/approval. It returns an
+  exact v2 intent without admission or native effects, retains caller-selected
+  identities and bodyless votes, and leaves submission/default v1 unchanged.
+  No new Gateway route, storage layout, owner loader or GUID allocator exists.
+- The final coupled source packet passes 133 cases with bounded cleanup
+  verified. The managed publication rebase preserved every validated producer
+  and workspace test owner unchanged; native/provider/installed adoption is
+  not inferred from that source proof.
+- Re-read the parent Plan/Validation and credited only this finite leaf.
+  Next, resolve durable pre-approval identity allocation/retention through the
+  existing selected-operation owner before enabling automatic allocation;
+  preparation without a retained original cannot establish cross-call
+  uniqueness. Other issue/PR/review/inline publishers, acquisition/mapping,
+  full attention/CLI/provider and installed/shadow acceptance remain open.
+  This source milestone authorizes no rollout or operational effects.
+
+### 2026-11-06 - Negotiate prepared review submission through existing workspaces
+
+- #11224 actually merged as `083c198ce7` after exact-head Copilot approval
+  with no open issues and the latest current-head CI and required PR gate
+  green. The existing source worktree reconciled through managed completion.
+- The optional existing CLI/tool/client/Gateway path negotiates prepared v2
+  submissions and scoped original receipts. Current receiver/storage/native
+  gates remain authoritative; cached support cannot authorize execution.
+  Prior/default bindings remain v1, with no silent fallback or storage adoption.
+- The final workspace, source-checkpoint and native-custody packet passes
+  125 cases with bounded cleanup verified. The corrected credential-denial
+  fixture targets the actual typed producer and proves no credential read
+  started; no SDK or runtime authority was changed.
+- Re-read the full parent Plan and Validation Plan. Continue an optional local
+  producer before final preview and approval, retaining caller-selected IDs
+  and existing profile/source owners. Automatic allocation, all-publisher
+  coverage, native/provider/installed adoption and full parent acceptance
+  remain open. No deployment or operational effect was introduced.
+
+### 2026-11-06 - Correlate explicitly selected native prepared effects
+
+- #11214 actually merged as `7ef86b52f3a091e3bda3c8e308e64f6833e62f37`
+  after exact-head Copilot approval with no open issues and the latest
+  current-head CI and required checks green. The source worktree reconciled.
+- The explicitly selected source executor retains v2 identity through the same
+  native context, unknown fence and original receipts. The read-only scoped
+  receipt projection preserves unknown/partial states and does not infer
+  identity from legacy tags or bodyless votes, perform fresh native IO or
+  advance feedback/echo/ACK/Dispatch.
+- The actual executor/feedback/owner packet passes 176 cases and the existing
+  workspace/service/echo packet passes 106, with bounded cleanup verified.
+  A confirmed original receipt remains distinct from current readback:
+  independent edits leave feedback unavailable rather than marking it handled.
+- Re-read the parent Plan/Validation and continue optional actual receiver/
+  client/tool/CLI composition through existing capability and Gateway owners.
+  Default v1, no implicit adoption/fallback and all remaining publication,
+  allocation, provider and installed gates remain; no rollout occurred.
 
 ### 2026-11-06 - Retain structured prepared identity before native source adoption
 

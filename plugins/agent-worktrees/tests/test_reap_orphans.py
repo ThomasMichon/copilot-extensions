@@ -398,6 +398,7 @@ def _managed_sweep(
     now=None,
     session_scans=None,
     before_recheck=None,
+    mux_observations=None,
 ):
     """Invoke ``sweep_managed_worktrees`` with the fleet's I/O fully patched.
 
@@ -442,7 +443,7 @@ def _managed_sweep(
              patch("agent_worktrees.config.tracking_dir", return_value=tracking_dir), \
              patch("agent_worktrees.tracking.list_records", return_value=records), \
              patch("agent_worktrees.sessions._list_mux_sessions",
-                   return_value=(mux or {})), \
+                   return_value=(mux or {}), side_effect=mux_observations), \
              patch("agent_worktrees.sessions._mux_session_activity",
                    return_value=(activity or {})), \
              patch("agent_worktrees.sessions.scan_sessions_fast", side_effect=_scan), \
@@ -465,6 +466,16 @@ def test_managed_sweep_reaps_dead_final_bridge_dry_run():
     report = _managed_sweep([_mgd("brg", kind="bridge")])
     assert [x["id"] for x in report["removed"]] == ["brg"]
     assert "would remove" in report["removed"][0]["reason"]
+
+
+@pytest.mark.parametrize("observations", [[None], [{}, None], [{}, {}, None]])
+def test_managed_sweep_never_retires_unknown_mux(observations):
+    report = _managed_sweep(
+        [_mgd("retained")], dry_run=False, mux_observations=observations,
+    )
+    assert report["removed"] == []
+    assert report["skipped"][0]["id"] == "retained"
+    assert "unknown" in report["skipped"][0]["reason"]
 
 
 def test_managed_sweep_dry_run_reports_agenda_preservation(tmp_path):

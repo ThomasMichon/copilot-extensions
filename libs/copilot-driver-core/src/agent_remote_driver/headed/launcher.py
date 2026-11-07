@@ -16,6 +16,7 @@ from agent_procutil import contained_test_mode, no_window_kwargs
 from .backend import HeadedBackend
 from .staging import stage_extension
 from .receipt import PROCESS_RECEIPT
+from ..native_arguments import VALUE_OPTIONS
 from ..session_host.host import SessionHost
 from ..session_host.launcher import (
     _ACQUISITION_ENV, _NONCE_ENV, _STARTUP_ENV,
@@ -97,6 +98,10 @@ def _native_request(argv: list[str], session_id: str) -> str | None:
                     raise ValueError("Missing native session or interactive prompt argument")
                 value = argv[index]
             (identities if name in {"--session-id", "--resume"} else prompts).append(value)
+        elif not separator and (name in VALUE_OPTIONS or name == "-C"):
+            index += 1
+            if index >= len(argv):
+                raise ValueError(f"Missing native value for {name}")
         index += 1
     if identities != [session_id] or len(prompts) > 1:
         raise ValueError("Headed execution requires one matching native session and at most one seed")

@@ -1069,15 +1069,35 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
     fi
 
     if [[ "$_AHP_RESUME_AVAILABLE" == "1" ]]; then
+        if ! _VALUE_OPTIONS=$("$PYTHON" -c '
+from agent_worktrees.native_arguments import VALUE_OPTIONS, SETUP_VALUE_OPTIONS
+print("|" + "|".join(sorted(VALUE_OPTIONS | SETUP_VALUE_OPTIONS | {"-C", "--execution-directory"})) + "|")
+'); then
+            setup_log ERROR "Could not load native argument boundaries for the AHP binding."
+            exit 3
+        fi
         _FILTERED_CMD=()
         _SKIP_NEXT=0
+        _KEEP_NEXT=0
         _HAS_EXPERIMENTAL=0
-        for _ARG in "${CMD_ARRAY[@]}"; do
+        for _ARG_INDEX in "${!CMD_ARRAY[@]}"; do
+            _ARG="${CMD_ARRAY[$_ARG_INDEX]}"
+            if [[ "$_KEEP_NEXT" == "1" ]]; then
+                _FILTERED_CMD+=("$_ARG")
+                _KEEP_NEXT=0
+                continue
+            fi
             if [[ "$_SKIP_NEXT" == "1" ]]; then
                 _SKIP_NEXT=0
                 continue
             fi
             case "$_ARG" in
+                --resume)
+                    _NEXT_ARG="${CMD_ARRAY[$((_ARG_INDEX + 1))]:-}"
+                    if [[ $((_ARG_INDEX + 1)) -lt ${#CMD_ARRAY[@]} && "$_NEXT_ARG" != -* ]]; then
+                        _SKIP_NEXT=1
+                    fi
+                    ;;
                 --ahp)
                     _SKIP_NEXT=1
                     ;;
@@ -1089,6 +1109,9 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
                     ;;
                 *)
                     _FILTERED_CMD+=("$_ARG")
+                    if [[ "$_VALUE_OPTIONS" == *"|$_ARG|"* ]]; then
+                        _KEEP_NEXT=1
+                    fi
                     ;;
             esac
         done

@@ -140,7 +140,8 @@ def test_retained_headed_executable_propagates_actual_native_exit(
     python = physical_executable(getattr(sys, "_base_executable", sys.executable))
     state_file = tmp_path / "headed.json"
     command = prepare_headed_command(
-        [python, "-I", "-c", program, "--session-id", "fixture-native"],
+        [python, "-I", "-c", program, "--session-id", "fixture-native",
+         "--log-dir", "--resume=literal"],
         session_id="fixture-native", attempt_directory=tmp_path / "attempt",
         state_file=state_file, cwd=str(tmp_path),
     )

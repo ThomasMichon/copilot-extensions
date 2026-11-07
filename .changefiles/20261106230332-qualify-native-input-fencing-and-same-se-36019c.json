@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify native input fencing and same-session owner recovery with isolated Worktrees fixtures.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

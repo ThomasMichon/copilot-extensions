@@ -1,8 +1,9 @@
 <<TOPBAR>>
   WORKTREES                                                                                           ⚙ Configuration
 ───────────────────────────────────────────────────────── ▲ ──────────────────────────────────────────────────────────
- Machine  Ctrl ◀▶                                                                      ● 1 active · 1 recent · 0 done
+ Machine  Ctrl ◀▶                                                             ● 1 active · 1 unfinished · 0 completed
     All     anomalous-potato Win ✓
+  f Status: all  g Group: Active/Recent  s Sort: used  / Search
 
    + New worktree…     ✕ Clean     ⟳ Sync     creates on anomalous-potato Win  (this host)
 
@@ -15,8 +16,7 @@
   ── Recent ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 ☐ h001   HANDOFF    7d     7d     -            -s 5t
       Ready for a successor
-  ── Completed ───────────────────────────────────────────────────────────────────────────────────────────────────────
-    (none)
+
 
 
 

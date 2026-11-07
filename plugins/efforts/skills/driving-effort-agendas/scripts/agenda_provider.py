@@ -55,6 +55,10 @@ try:
     body = json.load(sys.stdin)
     if body.get("schema") != "efforts.agenda-observation" or body.get("version") != 2:
         raise ValueError("adapter requires an observation-v2 body")
+    # The optional display graph is only sent to a resident that declares and admits it.
+    if not (1 in getattr(agenda_contract, "GRAPH_VERSIONS", ())
+            and "worktree-agendas-graph-v1" in capabilities):
+        body.pop("graph", None)
     source = body.get("source")
     if not isinstance(source, dict) or not isinstance(source.get("session"), str) or not source["session"]:
         raise ValueError("publication requires an explicit nonempty canonical head session")

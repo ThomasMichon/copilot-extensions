@@ -1,0 +1,9 @@
+{
+  "comment": "Serialize literal startup arguments only after authoritative runtime and AHP binding mutations.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

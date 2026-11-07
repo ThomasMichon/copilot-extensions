@@ -336,6 +336,56 @@ def test_creation_restores_native_pair_permissions_and_is_idempotent(
     assert launch_seed_state.state_path(path).read_bytes() == seed_before
 
 
+@pytest.mark.parametrize("tuple_identity", [False, True])
+def test_original_configured_companion_root_survives_default_change_and_repair(
+    tmp_path, monkeypatch, capsys, tuple_identity,
+):
+    from agent_worktrees import paired_allocation_location
+
+    creation = _creation_fixture(
+        tmp_path, monkeypatch, native_git=True, tuple_identity=tuple_identity, observed_identity=True,
+    )
+    initial = tmp_path / "independent-companion-root"
+    future = tmp_path / "future-companion-root"
+    receiving = creation.configs["knowledge"]
+    creation.configs["knowledge"] = replace(receiving, repos={
+        "knowledge": replace(receiving.default_repo, worktree_root=str(initial)),
+    })
+    paired_allocation_location.reserve(
+        creation.configs["harness"], creation.record.worktree_id, creation.record.creation_nonce,
+    )
+    intent = creation.record.yaml_path.with_suffix(".paired-allocation.json")
+    original = intent.read_bytes()
+    creation.configs["knowledge"] = replace(receiving, repos={
+        "knowledge": replace(receiving.default_repo, worktree_root=str(future)),
+    })
+    seed_before = launch_seed_state.state_path(creation.record.yaml_path).read_bytes()
+    code, report = _run(creation, capsys, fix=True)
+    assert code == 0 and report["prepared"] and report["repaired"]
+    child_path = initial / f"{creation.record.worktree_id}-k"
+    assert child_path.is_dir() and not (future / child_path.name).exists()
+    child = tracking.load_record(cfg.tracking_dir("knowledge") / f"{creation.record.worktree_id}-k.yaml")
+    assert child.worktree_path == str(child_path)
+    repair._same_repository(str(creation.anchors["knowledge"]), str(child_path), branch=child.branch)
+    nonce = child.creation_nonce
+    code, report = _run(creation, capsys, fix=True)
+    assert code == 0 and not report["repaired"]
+    assert tracking.load_record(child.yaml_path).creation_nonce == nonce
+    assert intent.read_bytes() == original
+    assert launch_seed_state.state_path(creation.record.yaml_path).read_bytes() == seed_before
+
+
+def test_environment_no_pair_never_resolves_or_reserves_companion(creation, monkeypatch):
+    from agent_worktrees import paired_allocation_location
+
+    monkeypatch.setenv("AGENT_WORKTREES_NO_PAIR", "1")
+    monkeypatch.setattr(state_root, "resolve_state_root", lambda *a, **k: pytest.fail("disabled pairing resolved state"))
+    paired_allocation_location.reserve(
+        creation.configs["harness"], creation.record.worktree_id, creation.record.creation_nonce,
+    )
+    assert not creation.record.yaml_path.with_suffix(".paired-allocation.json").exists()
+
+
 def test_creation_reuses_companion_after_parent_stamp_failure(native_creation, monkeypatch, capsys):
     creation = native_creation
     original = worktree_creation._stamp_and_compose_paired_knowledge
@@ -415,7 +465,7 @@ def test_creation_repairs_original_native_pair_after_optional_naming(
 @pytest.mark.parametrize("tuple_identity", [False, True])
 @pytest.mark.parametrize("conflict", [
     "hostname", "platform", "nonce", "owner", "namespace", "receiving_binding",
-    "companion_binding", "companion_anchor", "companion_platform", "companion_root",
+    "companion_binding", "companion_anchor", "companion_platform", "companion_relative_root",
     "foreign_key", "former_custom",
 ])
 def test_creation_naming_compatibility_refuses_independent_authority_conflicts(
@@ -470,10 +520,10 @@ def test_creation_naming_compatibility_refuses_independent_authority_conflicts(
             creation.configs["knowledge"],
             platform="wsl" if cfg.detect_platform() != "wsl" else "windows",
         )
-    elif conflict == "companion_root":
+    elif conflict == "companion_relative_root":
         settings = creation.configs["knowledge"]
         creation.configs["knowledge"] = replace(settings, repos={
-            "knowledge": replace(settings.default_repo, worktree_root=str(tmp_path / "another-root")),
+            "knowledge": replace(settings.default_repo, worktree_root="relative-unsafe-root"),
         })
     elif conflict == "foreign_key":
         topology = creation.anchors["harness"] / cfg.INREPO_CONFIG_DIRNAME / "machines.yaml"
@@ -798,6 +848,7 @@ def test_creation_retains_companion_lifecycle_through_guidance_against_cmd_embod
     waiting, spawned = threading.Event(), threading.Event()
     worker = None
     results = []
+    parent_reports = []
     original_config, original_dir = cfg.load_config, cfg.project_dir
     original_acquire = repair.fin.FinalizeLock.acquire
     original_output = repair.output._json_output
@@ -819,8 +870,10 @@ def test_creation_retains_companion_lifecycle_through_guidance_against_cmd_embod
     def emit(value):
         if child_thread():
             results.append(value)
-        else:
             original_output(value)
+        else:
+            # The child owns the process-global stdout capture while embodying.
+            parent_reports.append(value)
 
     def spawn(*args, **kwargs):
         spawned.set()
@@ -870,10 +923,14 @@ def test_creation_retains_companion_lifecycle_through_guidance_against_cmd_embod
     monkeypatch.setattr(local_cache_refresh, "prepare_for_launch", guidance)
     monkeypatch.setattr(repair, "_checks", checks)
     try:
-        code, report = _run(creation, capsys, fix=True)
+        code = repair.targeted_doctor(_args(creation, fix=True))
     finally:
         if worker is not None:
             worker.join(10)
+    assert len(parent_reports) == 1
+    report = parent_reports[0]
+    captured = capsys.readouterr()
+    assert creation.seed.text not in json.dumps(report) + captured.out + captured.err
     assert code == 0 and report["prepared"]
     assert worker is not None and not worker.is_alive()
     assert spawned.is_set() and results[-1] == 0

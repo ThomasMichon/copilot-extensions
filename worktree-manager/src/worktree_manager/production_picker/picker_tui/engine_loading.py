@@ -571,10 +571,20 @@ class PickerScreenLoadingMixin:
                 resident_picker.settle_local()
 
         self.call_after_refresh(release)
-    def _apply_loader_records(self, *, source_tabs=None):
+    def _replace_loader_records(self, records, preserve_focus):
+        if self.data == records:
+            return False
+        if preserve_focus:
+            self._wt_remap(lambda: setattr(self, "data", records))
+        else:
+            self.data = records
+        return True
+
+    def _apply_loader_records(self, *, source_tabs=None, preserve_focus=False):
         """Merge incomplete stream prefixes over cached rows."""
         if self.loader is None:
-            return
+            return False
+        data = self.data
         if source_tabs is not None:
             source_ids = {
                 tab.get("source_id") or machine_ssh_id(tab["machine"], tab["env"])
@@ -584,27 +594,26 @@ class PickerScreenLoadingMixin:
                     and tab.get("machine") and tab.get("env")
                 )
             }
-            self.data = [
-                rec for rec in self.data if rec.get("source_id") in source_ids
+            data = [
+                rec for rec in data if rec.get("source_id") in source_ids
             ]
         records = self.loader.records()
         authoritative_fn = getattr(self.loader, "authoritative_source_ids", None)
         if not callable(authoritative_fn):
             _ready, loading, failed = self.loader.counts()
             if records or (loading == 0 and failed == 0):
-                self.data = records
-            return
+                data = records
+            return self._replace_loader_records(data, preserve_focus)
 
         authoritative = set(authoritative_fn())
         current_sources = {
-            rec.get("source_id") for rec in self.data if rec.get("source_id")
+            rec.get("source_id") for rec in data if rec.get("source_id")
         }
         incoming_sources = {
             rec.get("source_id") for rec in records if rec.get("source_id")
         }
         if current_sources | incoming_sources <= authoritative:
-            self.data = records
-            return
+            return self._replace_loader_records(records, preserve_focus)
 
         incoming = {
             self._row_key(rec): rec
@@ -613,7 +622,7 @@ class PickerScreenLoadingMixin:
         }
         merged = []
         seen = set()
-        for rec in self.data:
+        for rec in data:
             key = self._row_key(rec)
             if key in incoming:
                 merged.append(incoming[key])
@@ -626,7 +635,7 @@ class PickerScreenLoadingMixin:
                 merged.append(rec)
                 if key is not None:
                     seen.add(key)
-        self.data = merged
+        return self._replace_loader_records(merged, preserve_focus)
     def _reconcile_bootstrap_source_ids(self, tabs, local):
         """Rewrite bootstrap rows onto the canonical local source identity.
 

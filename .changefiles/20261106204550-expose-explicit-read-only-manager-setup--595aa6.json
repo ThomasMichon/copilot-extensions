@@ -1,0 +1,9 @@
+{
+  "comment": "Expose explicit read-only Manager setup diagnostics in Configuration",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

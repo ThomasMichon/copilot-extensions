@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify the native Manager pane wrapper through the existing headed SDK broker fixture.",
+  "changes": [
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    }
+  ]
+}

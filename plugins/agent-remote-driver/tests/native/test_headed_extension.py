@@ -12,10 +12,12 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from types import SimpleNamespace
 from uuid import uuid4
 
 from agent_procutil import no_window_kwargs
+from agent_procutil._interpreter import physical_executable
 import pytest
 from websockets.asyncio.client import connect
 
@@ -92,6 +94,93 @@ def _logs(directory):
     )
 
 
+@pytest.mark.parametrize("configured", [False, True])
+def test_native_private_mux_executes_the_requested_pane(tmp_path, monkeypatch, configured):
+    if os.name != "nt" or os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1":
+        pytest.skip("Explicitly select the isolated Windows PSMux lane")
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
+    from headed_mux_fixture import FixtureMux
+    binary = os.environ.get("PSMUX_TEST_BIN") or shutil.which("psmux.exe")
+    assert binary
+    pane_python = physical_executable(getattr(sys, "_base_executable", sys.executable))
+    assert pane_python
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".psmux.conf").write_text("set -g warm off\n", encoding="utf-8")
+    marker, release = tmp_path / "started.txt", tmp_path / "release.txt"
+    pane = tmp_path / "pane.py"
+    pane.write_text(
+        "import os,time\nfrom pathlib import Path\n"
+        "marker=Path(os.environ['DRIVER_FIXTURE_MARKER'])\n"
+        "temporary=marker.with_suffix('.tmp')\n"
+        "temporary.write_text(str(os.getpid()),encoding='utf-8')\n"
+        "temporary.replace(marker)\n"
+        "while not Path(os.environ['DRIVER_FIXTURE_RELEASE']).exists(): time.sleep(0.05)\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PSMUX_CONFIG_FILE", str(tmp_path / "unused-caller.conf"))
+    monkeypatch.setenv("PSMUX_DATA_DIR", str(tmp_path / "unused-caller-data"))
+    fixture = FixtureMux(binary, home, {
+        **{key: value for key, value in os.environ.items()
+           if key not in {"PSMUX_CONFIG_FILE", "PSMUX_DATA_DIR"}},
+        "HOME": str(home), "USERPROFILE": str(home), "PSMUX_NO_WARM": "1",
+        "PSMUX_DATA_DIR": str(tmp_path / "psmux-data"),
+        "DRIVER_FIXTURE_MARKER": str(marker), "DRIVER_FIXTURE_RELEASE": str(release),
+    })
+    if configured:
+        fixture.environment.update(
+            PSMUX_CONFIG_FILE=os.devnull, PSMUX_DATA_DIR=str(tmp_path / "psmux-data"),
+        )
+    else:
+        assert "PSMUX_CONFIG_FILE" not in fixture.environment
+    assert fixture.environment["PSMUX_DATA_DIR"] == str(tmp_path / "psmux-data")
+    identity = None
+    try:
+        assert fixture.query("has-session", "-t", fixture.target).returncode == 1
+        launched = fixture.query(
+            "new-session", "-d", "-s", fixture.target, "-c", str(tmp_path), "--",
+            pane_python, "-I", "-B", str(pane),
+        )
+        assert launched.returncode == 0, launched.stderr
+        observed = fixture.query(
+            "display-message", "-p", "-t", fixture.target, "#{session_id}:#{session_created}|#{pane_id}",
+        )
+        assert observed.returncode == 0 and "|" in observed.stdout
+        identity = observed.stdout.strip()
+        deadline = time.monotonic() + 10
+        while not marker.is_file() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if not marker.is_file():
+            observed_pid = fixture.query("display-message", "-p", "-t", fixture.target, "#{pane_pid}")
+            assert observed_pid.returncode == 0 and observed_pid.stdout.strip().isdigit()
+            pid = int(observed_pid.stdout.strip())
+            detail = subprocess.run(
+                [shutil.which("pwsh"), "-NoProfile", "-Command",
+                 f"Get-CimInstance Win32_Process -Filter 'ProcessId={pid}' | "
+                 "Select-Object ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress"],
+                env=fixture.environment, capture_output=True, text=True, encoding="utf-8",
+                timeout=10, **no_window_kwargs(),
+            )
+            pytest.fail(detail.stdout + detail.stderr)
+        pid = int(marker.read_text(encoding="utf-8"))
+        assert pid_alive(pid)
+        release.write_text("release", encoding="utf-8")
+        deadline = time.monotonic() + 10
+        while pid_alive(pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not pid_alive(pid)
+    finally:
+        if fixture.query("has-session", "-t", fixture.target).returncode == 0:
+            observed = fixture.query(
+                "display-message", "-p", "-t", fixture.target, "#{session_id}:#{session_created}|#{pane_id}",
+            )
+            if observed.returncode == 1:
+                assert fixture.query("has-session", "-t", fixture.target).returncode == 1
+            else:
+                assert identity is not None and observed.returncode == 0 and observed.stdout.strip() == identity
+                assert fixture.query("kill-session", "-t", fixture.target).returncode == 0
+
+
 def test_native_launch_scoped_observer_needs_no_privileged_permission(tmp_path, offline_cli):
     plugin = tmp_path / "plugin"
     (plugin / "extensions" / "driver-fixture").mkdir(parents=True)
@@ -139,24 +228,85 @@ writeFileSync(process.env.DRIVER_FIXTURE_OUTPUT, JSON.stringify({
     assert not (offline_cli.home / "permissions-config.json").exists()
 
 
+def test_native_joined_session_reports_pending_read_support_without_permission_grants(tmp_path, offline_cli):
+    plugin = tmp_path / "pending-plugin"
+    extension = plugin / "extensions" / "pending-fixture"
+    extension.mkdir(parents=True)
+    (plugin / "plugin.json").write_text(
+        json.dumps({"name": "pending-fixture", "version": "1.0.0"}), encoding="utf-8",
+    )
+    (extension / "extension.mjs").write_text("""
+import { writeFileSync } from "node:fs";
+import { joinSession } from "@github/copilot-sdk/extension";
+const session = await joinSession();
+const observations = {};
+for (const [name, field] of [["tasks", "tasks"], ["schedule", "entries"]]) {
+    const api = session.rpc?.[name];
+    if (typeof api?.list !== "function") {
+        observations[name] = { state: "unavailable", reason: "missing-method" };
+        continue;
+    }
+    try {
+        const result = await api.list();
+        observations[name] = Array.isArray(result?.[field])
+            ? { state: "available", field, items: result[field] }
+            : { state: "unavailable", reason: "invalid-shape" };
+    } catch {
+        observations[name] = { state: "unavailable", reason: "read-failed" };
+    }
+}
+writeFileSync(process.env.DRIVER_FIXTURE_OUTPUT, JSON.stringify({
+    sessionId: session.sessionId, observations,
+}));
+""", encoding="utf-8")
+    output = tmp_path / "pending-reads.json"
+    result = subprocess.run(
+        [
+            offline_cli.executable, "-p", "ISOLATED_PENDING_READ_FIXTURE", "--trust-folder",
+            "--experimental", "--plugin-dir", str(plugin), "--no-auto-update",
+            "--disable-builtin-mcps", "--no-custom-instructions", "--no-color", "--no-ask-user",
+            "--log-dir", str(offline_cli.logs),
+        ],
+        cwd=offline_cli.workspace, env={**offline_cli.env, "DRIVER_FIXTURE_OUTPUT": str(output)},
+        capture_output=True, timeout=60, text=True, encoding="utf-8", **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr + _logs(offline_cli.logs)
+    assert output.is_file(), result.stderr + _logs(offline_cli.logs)
+    observed = json.loads(output.read_text(encoding="utf-8"))
+    for name, field in (("tasks", "tasks"), ("schedule", "entries")):
+        snapshot = observed["observations"][name]
+        assert snapshot["state"] == "available", {name: snapshot}
+        assert snapshot["field"] == field and isinstance(snapshot["items"], list)
+    session_files = list((offline_cli.home / "session-state").glob("*/events.jsonl"))
+    assert [path.parent.name for path in session_files] == [observed["sessionId"]]
+    events = [json.loads(line) for line in session_files[0].read_text(encoding="utf-8").splitlines()]
+    assert not any(
+        event.get("data", {}).get("permissionRequest", {}).get("kind") == "extension-permission-access"
+        for event in events
+    )
+    assert len(offline_cli.requests) == 1
+    assert not (offline_cli.home / "permissions-config.json").exists()
+
+
 @pytest.mark.asyncio
+@pytest.mark.parametrize("pane_owner", ["direct", "manager-wrapper"])
 async def test_native_headed_sdk_uses_common_ws_tcp_broker_and_preserves_identity(
-    tmp_path, offline_cli, monkeypatch,
+    tmp_path, offline_cli, monkeypatch, pane_owner,
 ):
     if os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1":
         pytest.skip("Explicitly select the isolated native headed mux lane")
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
     from headed_mux_fixture import FixtureMux
     binary = os.environ.get("PSMUX_TEST_BIN") or shutil.which("psmux.exe")
-    shell = shutil.which("pwsh.exe") or shutil.which("pwsh")
-    if os.name != "nt" or not binary or not shell:
-        pytest.skip("This native headed fixture selects an existing Windows PSMux and PowerShell")
+    if os.name != "nt" or not binary:
+        pytest.skip("This native headed fixture selects an existing Windows PSMux")
     (offline_cli.home / "config.json").write_text(
         json.dumps({"trustedFolders": [str(offline_cli.workspace)]}), encoding="utf-8",
     )
     (offline_cli.home / ".psmux.conf").write_text("set -g warm off\n", encoding="utf-8")
     class Owner:
         pid = None
+        pane_pid = None
         stops = 0
         returncode = None
 
@@ -202,41 +352,28 @@ async def test_native_headed_sdk_uses_common_ws_tcp_broker_and_preserves_identit
         "PSMUX_NO_WARM": "1", "WORKTREE_PANE_MIN_RUNTIME": "0",
         "COPILOT_DRIVER_HEADED_BINDING": json.dumps(backend.declaration()),
     }
-    root = Path(__file__).resolve().parents[4]
-    wrapper = root / "worktree-manager" / "bin" / "pane-wrapper.ps1"
-    native_argv = tmp_path / "native-argv.json"
-    native_argv.write_text(json.dumps([
+    native_argv = [
         offline_cli.executable, "-i", prompts[0], "--session-id", native, "--experimental",
         "--screen-reader", "--plugin-dir", str(plugin), "--no-auto-update", "--disable-builtin-mcps",
         "--no-custom-instructions", "--no-color", "--no-ask-user", "--log-dir", str(offline_cli.logs),
-    ]), encoding="utf-8")
-    pane = tmp_path / "fixture-pane.ps1"
-    pane.write_text(
-        "$ErrorActionPreference='Stop'\n"
-        "try {\n"
-        "  $nativeArgs = @(Get-Content -Raw -LiteralPath $env:DRIVER_FIXTURE_ARGV | ConvertFrom-Json)\n"
-        "  & $env:DRIVER_FIXTURE_WRAPPER @nativeArgs\n"
-        "  [IO.File]::WriteAllText($env:DRIVER_FIXTURE_LOG, \"pane exit: $LASTEXITCODE\")\n"
-        "  exit $LASTEXITCODE\n"
-        "} catch {\n"
-        "  [IO.File]::WriteAllText($env:DRIVER_FIXTURE_LOG, $_.ToString())\n"
-        "  exit 3\n"
-        "}\n", encoding="utf-8",
-    )
-    pane_log = tmp_path / "pane-result.txt"
-    assert wrapper.is_file(), "The real pane wrapper must exist before native creation"
-    environment.update(DRIVER_FIXTURE_ARGV=str(native_argv), DRIVER_FIXTURE_WRAPPER=str(wrapper),
-                       DRIVER_FIXTURE_LOG=str(pane_log))
+    ]
+    pane_argv = native_argv
+    if pane_owner == "manager-wrapper":
+        pwsh = shutil.which("pwsh")
+        assert pwsh, "PowerShell 7 is required for the native Manager wrapper lane"
+        wrapper = Path(__file__).resolve().parents[4] / "worktree-manager" / "bin" / "pane-wrapper.ps1"
+        assert wrapper.is_file()
+        assert not (offline_cli.home / ".agent-worktrees").exists()
+        pane_argv = [pwsh, "-NoProfile", "-NonInteractive", "-File", str(wrapper), *native_argv]
     fixture = FixtureMux(binary, offline_cli.home, environment)
     target, query = fixture.target, fixture.query
 
     async def launch():
         absent = await asyncio.to_thread(query, "has-session", "-t", target)
         assert absent.returncode == 1, "The fixture target must be absent before creation"
-        # PSMux joins pane argv; match the caller's existing single-quoted file boundary.
         result = await asyncio.to_thread(
             query, "new-session", "-d", "-s", target, "-c", str(offline_cli.workspace),
-            Path(shell).name, "-NoProfile", "-File", "'" + str(pane).replace("'", "''") + "'",
+            "--", *pane_argv,
         )
         assert result.returncode == 0, result.stdout + result.stderr
         observed = await asyncio.to_thread(
@@ -244,6 +381,10 @@ async def test_native_headed_sdk_uses_common_ws_tcp_broker_and_preserves_identit
         )
         assert observed.returncode == 0 and "|" in observed.stdout
         owner.identity = observed.stdout.strip()
+        pane = await asyncio.to_thread(query, "display-message", "-p", "-t", target, "#{pane_pid}")
+        assert pane.returncode == 0, pane.stderr
+        owner.pane_pid = int(pane.stdout.strip())
+        assert pid_alive(owner.pane_pid)
         owner.started.set()
 
     try:
@@ -255,11 +396,12 @@ async def test_native_headed_sdk_uses_common_ws_tcp_broker_and_preserves_identit
                 await asyncio.sleep(0.05)
             assert backend.bound.is_set(), (
                 _logs(offline_cli.logs)
-                + (pane_log.read_text(encoding="utf-8") if pane_log.is_file() else "Pane did not report an exit")
                 + (await asyncio.to_thread(query, "capture-pane", "-p", "-t", target)).stdout
             )
             assert backend.native_pid and pid_alive(backend.native_pid)
             assert backend.extension_pid and pid_alive(backend.extension_pid)
+            if pane_owner == "manager-wrapper":
+                assert owner.pane_pid != backend.native_pid
             for _ in range(600):
                 event_file = offline_cli.home / "session-state" / native / "events.jsonl"
                 if event_file.is_file():
@@ -315,9 +457,10 @@ async def test_native_headed_sdk_uses_common_ws_tcp_broker_and_preserves_identit
             await asyncio.wait_for(host.wait_child(), 15)
             assert owner.returncode is not None and owner.stops == 1
             for _ in range(100):
-                if not pid_alive(backend.native_pid) and not pid_alive(backend.extension_pid):
+                if all(not pid_alive(pid) for pid in (owner.pane_pid, backend.native_pid, backend.extension_pid)):
                     break
                 await asyncio.sleep(0.05)
+            assert not pid_alive(owner.pane_pid)
             assert not pid_alive(backend.native_pid) and not pid_alive(backend.extension_pid)
             session_files = list((offline_cli.home / "session-state").glob("*/events.jsonl"))
             assert [path.parent.name for path in session_files] == [native]
@@ -352,9 +495,8 @@ async def test_native_headed_coordinator_owns_the_common_broker_in_the_original_
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
     from headed_mux_fixture import FixtureMux
     binary = os.environ.get("PSMUX_TEST_BIN") or shutil.which("psmux.exe")
-    shell = shutil.which("pwsh.exe") or shutil.which("pwsh")
-    if os.name != "nt" or not binary or not shell:
-        pytest.skip("The native coordinator fixture requires existing Windows PSMux and PowerShell")
+    if os.name != "nt" or not binary:
+        pytest.skip("The native coordinator fixture requires existing Windows PSMux")
     if delivery == "bridge-client" and not shutil.which("node"):
         pytest.skip("Node is required for the retained Bridge client")
     (offline_cli.home / "config.json").write_text(
@@ -365,7 +507,6 @@ async def test_native_headed_coordinator_owns_the_common_broker_in_the_original_
     prompts = ['coordinator original\n"quotes" & $literal', "coordinator second"]
     receipt_nonce = uuid4().hex + uuid4().hex
     state_file = tmp_path / "host.json"
-    arguments = tmp_path / "coordinator-argv.json"
     coordinator_argv = [
         sys.executable,
         "-m", "agent_remote_driver.session_host", "--mode", "headed",
@@ -411,19 +552,10 @@ async def test_native_headed_coordinator_owns_the_common_broker_in_the_original_
             "sys.exit(code if code or certain else 3)",
             str(manifest),
         ]
-    arguments.write_text(json.dumps(coordinator_argv[1:]), encoding="utf-8")
-    pane = tmp_path / "coordinator-pane.ps1"
-    pane.write_text(
-        "$ErrorActionPreference='Stop'\n"
-        "$childArgs = @(Get-Content -Raw -LiteralPath $env:DRIVER_FIXTURE_ARGV | ConvertFrom-Json)\n"
-        "& $env:DRIVER_FIXTURE_PYTHON @childArgs\n"
-        "exit $LASTEXITCODE\n", encoding="utf-8",
-    )
     fixture = FixtureMux(binary, offline_cli.home, {
         **offline_cli.env, "HOME": str(offline_cli.home), "USERPROFILE": str(offline_cli.home),
         "PSMUX_DATA_DIR": str(tmp_path / "psmux-data"), "PSMUX_CONFIG_FILE": os.devnull,
-        "PSMUX_NO_WARM": "1", "DRIVER_FIXTURE_ARGV": str(arguments),
-        "DRIVER_FIXTURE_PYTHON": coordinator_argv[0],
+        "PSMUX_NO_WARM": "1",
         "AGENT_BRIDGE_SESSION_HOST_NONCE": receipt_nonce,
     })
     target, query = fixture.target, fixture.query
@@ -433,7 +565,7 @@ async def test_native_headed_coordinator_owns_the_common_broker_in_the_original_
         assert absent.returncode == 1
         launched = await asyncio.to_thread(
             query, "new-session", "-d", "-s", target, "-c", str(offline_cli.workspace),
-            Path(shell).name, "-NoProfile", "-File", "'" + str(pane).replace("'", "''") + "'",
+            "--", *coordinator_argv,
         )
         assert launched.returncode == 0, launched.stderr
         observed = await asyncio.to_thread(

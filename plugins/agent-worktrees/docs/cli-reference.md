@@ -546,6 +546,7 @@ continue to work unchanged.
 |------------|-------------|
 | `resolve` | Interactive picker -- select or create a worktree, emit JSON launch plan. `--new` creates + launches a **muxed interactive** session (refused without a TTY). `--codename <name>` selects an existing worktree by its assigned public-safe codename, as an alternative to `--worktree-id` (effort `pr-attribution-codenames`); resolved locally first, then via a cross-machine SSH scan (Phase 3) -- a match on a different machine fails closed (reports the machine, does not attempt a remote launch) |
 | `create` | Create a worktree **programmatically** -- no launch, no mux; prints id + path (add `--json`). The path for agents and daemons. Assigns the new worktree a random, public-safe **codename** (`codename.wordlist_path` configures a repo-declared vocabulary; falls back to a built-in neutral one) -- surfaced in the JSON output and usable later as an alternate lookup key via `list`/`resolve --codename` |
+| `move` | Read-only inactive-checkout relocation plan; `--apply` transfers and rebinds a qualified ordinary checkout, `--abort` cancels before publication. Discover the selected runtime with `get checkout-relocation` first. See [supported scope, original-operation recovery and mixed-root authority](checkout-relocation.md); not general inactive-session/WIP migration or finalization. |
 | `push-changes` | Push worktree changes to remote default branch (squash, rebase, push). Aborts if the pre-squash fails (`--allow-unsquashed` to opt into individual commits) |
 | `finalize` | Validate the branch's content is on upstream; for a merged PR with a missing cached head SHA, use a fresh provider-observed head only after the provider confirms the merge, and keep refusing when its boundary remains unverifiable; prune the worktree/branch only when idle (deferred while a session is live). The creating agent owns child cleanup; `--abandon` is refused without an operator-directed `--handoff-to <recipient-or-flow>`, recorded on each re-homed obligation |
 | `mark-complete` | Manual recovery -- set tracking status flag only (hidden from help) |
@@ -788,6 +789,20 @@ Python interpreter. Catalog construction errors are reported on stderr; they
 do not produce a ready-looking replacement catalog. The hook uses its existing
 stderr-write convention so diagnostics preserve the structural output-free
 session-start contract without relaxing the scanner's stdout refusals.
+
+Import-time helper failures, such as an interpreter too old for the binding
+helper, degrade the catalog the same way. When the catalog, enrichment or
+guidance rendering is unavailable, the exact-session guidance file is still
+written under the same per-session lock and launch ordering, as a minimal
+degraded floor rather than a ready catalog: one warning with a short reason
+code (`unsupported-interpreter`, `import-error`, `command-catalog-unavailable`,
+`runtime-helper-unavailable` or `session-start-error`), a statement that the
+command catalog is unavailable, and the `get worktree-dir` and `state-root`
+commands that obtain lifecycle facts directly. If the hook's own runtime helper
+is missing, only the stderr warning is emitted and no guidance file is written.
+On Windows, the session-start hook selects the first non-WindowsApps `python`
+on PATH that reports Python 3.10 or newer, falling back to the first such
+`python` when none does; the floor then reports `unsupported-interpreter`.
 
 On Windows, the cold hook checks the shared bootstrap killswitch before entering
 the canonical ownership lifecycle with its existing Python interpreter and one
@@ -1477,6 +1492,15 @@ updater instead. The controller owns source selection and must honor configured
 runtime-source policy and any explicit prepared-source input; selection happens
 before Manager acquisition, without changing that policy.
 
+On Windows, ordinary update entry points first test whether the current shell
+can create the breakaway process required for durable execution. Refusal exits
+before controller discovery, downloads, builds or request submission; existing
+requests are untouched. Re-run in the execution host's explicit detached/outside-Job
+shell mode (for example async with `detach=true`). Plain async execution and the
+updater's `--detach` flag do not escape an enclosing Job. Help, read-only status
+and explicit diagnostic/repair selections remain available. `--supervised-debug`
+retains its foreground execution route without requiring a durable worker.
+
 The public command submits a durable request before Manager or standalone
 execution. `--wait` observes it by default; `--detach --json` returns an
 acceptance receipt, and `--request-status <id> --json` is a project-independent
@@ -1912,6 +1936,12 @@ JSON summary and canonical exit status. Default planning, `--peek` and
 also uses the owner while preserving its status file and optional JSON output;
 `--indicator-state` remains read-only. These adapters do not replace the
 stager's own implementation or the installers' existing inner custody.
+
+If worker startup fails after admission, the failed JSON envelope retains the
+accepted `request_id` and `log_path`. Pre-admission refusals do not invent them.
+Inspect that same request with the owning status reader before another
+submission; the receipt does not establish a running worker, native exit or
+completed installation, and never authorizes replay or foreground fallback.
 
 On an interactive launch, the launcher reconciles the anchor repo's
 `.github/copilot/settings.json` `enabledPlugins`: for each

@@ -1,5 +1,6 @@
 """Real lifecycle-selected native OpenSSH listener, with no production changes."""
 
+import base64
 import json
 import os
 from pathlib import Path
@@ -18,6 +19,57 @@ from agent_ssh import gateway_sshd as ingress
 from native_ssh_auth import authenticate
 from test_gateway_provider import fixture_files
 from test_gateway_sshd import config
+
+
+def _windows_context():
+    import ctypes
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.ProcessIdToSessionId.argtypes = [
+        wintypes.DWORD, ctypes.POINTER(wintypes.DWORD),
+    ]
+    kernel.ProcessIdToSessionId.restype = wintypes.BOOL
+    session = wintypes.DWORD()
+    assert kernel.ProcessIdToSessionId(os.getpid(), ctypes.byref(session))
+    assert session.value != 0, "Select an actual user-logon qualification lane"
+    return {
+        "sid": authorization._windows_sid(), "session": session.value,
+        "elevated": False,
+    }
+
+
+def _windows_context_command():
+    script = (
+        "$i=[Security.Principal.WindowsIdentity]::GetCurrent();"
+        "$p=[Security.Principal.WindowsPrincipal]::new($i);"
+        "[pscustomobject]@{sid=$i.User.Value;"
+        "session=[Diagnostics.Process]::GetCurrentProcess().SessionId;"
+        "elevated=$p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)}"
+        "|ConvertTo-Json -Compress"
+    )
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    return "powershell.exe -NoProfile -NonInteractive -EncodedCommand " + encoded
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows SSH outer-shell command parsing")
+@pytest.mark.timeout(15)
+@pytest.mark.parametrize("shell", ["cmd", "powershell", "pwsh"])
+def test_windows_command_probe_preserves_context_through_outer_shell(shell):
+    executable = shutil.which(shell)
+    if executable is None:
+        pytest.skip("Selected Windows outer shell is unavailable")
+    arguments = ["/d", "/s", "/c"] if shell == "cmd" else [
+        "-NoProfile", "-NonInteractive", "-Command",
+    ]
+    completed = subprocess.run(
+        [executable, *arguments, _windows_context_command()],
+        stdin=subprocess.DEVNULL, capture_output=True, text=True,
+        timeout=10, **no_window_kwargs(),
+    )
+    assert completed.returncode == 0, "Native outer-shell command did not complete successfully"
+    if json.loads(completed.stdout) != _windows_context():
+        pytest.fail("Native outer shell did not preserve the selected user context")
 
 
 @pytest.mark.timeout(60)
@@ -118,6 +170,19 @@ def test_native_listener_login_refresh_withdrawal_and_preservation(native_target
                     time.sleep(0.05)
             first = client()
             assert first.authenticated, first.diagnostic + (root / "native.log").read_text(encoding="utf-8")
+            if os.name == "nt":
+                expected, command = _windows_context(), _windows_context_command()
+            else:
+                expected, command = str(os.geteuid()), "id -u"
+            completed = subprocess.run(
+                [*client_arguments(), "-T", "127.0.0.1", command],
+                stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                timeout=15, **no_window_kwargs(),
+            )
+            assert completed.returncode == 0, "Native SSH command did not complete successfully"
+            actual = json.loads(completed.stdout) if os.name == "nt" else completed.stdout.strip()
+            if actual != expected:
+                pytest.fail("Native SSH command did not preserve the selected user context")
             target = selected["state_dir"] / "authorization" / "authorized_keys.gateway"
             native_config = selected["state_dir"] / "sshd_config"
             before = {

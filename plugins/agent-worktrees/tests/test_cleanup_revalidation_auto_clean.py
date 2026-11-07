@@ -191,7 +191,7 @@ def test_sweep_finished_session_idle_grace_refresh_postpones_removal(
     assert _skipped_reason(report, "wt1") == "idle grace not elapsed (activity since selection)"
 
 
-def test_sweep_finished_session_mux_fallback_negative_cache_race_refused(
+def test_sweep_finished_session_mux_catalog_negative_cache_race_refused(
     monkeypatch, tmp_path
 ):
     harness = CleanupHarness(monkeypatch, tmp_path)
@@ -200,12 +200,12 @@ def test_sweep_finished_session_mux_fallback_negative_cache_race_refused(
     rec.mux_live_at = datetime.now(timezone.utc).isoformat()
     harness.seed(rec)
     harness.set_session_contexts([session_ctx(), session_ctx()])
-    harness.use_real_build_active_paths_with_mux_sequence(has_mux_values=[False, True])
+    harness.use_real_build_active_paths_with_mux_catalogs([{}, {}, {"wt-wt1": 0}])
     harness.set_classifier(info(S.UNUSED), info(S.UNUSED))
     report = harness.run_sweep()
     assert report["removed"] == []
     assert _skipped_reason(report, "wt1") == "worktree became active since the initial scan"
-    assert harness.has_mux_calls == 2
+    assert harness.mux_list_calls == 3
 
 
 def test_sweep_revalidation_holds_finalize_lock_and_fences_mutation(

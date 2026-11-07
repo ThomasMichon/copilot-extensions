@@ -37,7 +37,7 @@ def _entry(**overrides) -> dict:
         "worktree_id": "wt-1",
         "worktree_path": "D:\\Src\\proj.worktrees\\wt-1",
         "mux_session": "wt-1",
-        "mux_bin": "psmux",
+        "mux_bin": "fixture-mux",
         "session_incarnation": "sess:1",
         "panes": [{"pane_id": "%1", "role": "head", "live": True}],
         "attached_clients": 1,
@@ -558,7 +558,7 @@ def test_apply_status_options_runs_set_option_per_key(monkeypatch):
     ok = mux_daemon.apply_status_options(entry, {"@aw_ctx": "hello", "@aw_seg": "WIP"})
     assert ok is True
     assert len(calls) == 2
-    assert calls[0][:4] == ["psmux", "set-option", "-t", "wt-1"]
+    assert calls[0][:4] == [entry["mux_bin"], "set-option", "-t", "wt-1"]
 
 
 def test_apply_status_options_false_on_any_failure(monkeypatch):
@@ -598,7 +598,10 @@ def _fake_run_factory(
 
     def _fake_run(argv, **kwargs):
         if "has-session" in argv:
-            return subprocess.CompletedProcess(argv, 0 if has_session else 1)
+            return subprocess.CompletedProcess(
+                argv, 0 if has_session else 1, b"",
+                b"" if has_session else f"can't find session: {argv[-1]}".encode(),
+            )
         if "list-clients" in argv:
             if not list_clients_ok:
                 return subprocess.CompletedProcess(argv, 1, stdout="")
@@ -741,6 +744,43 @@ def test_compute_reports_apply_failed(tmp_path, monkeypatch):
         },
     )
     assert result == {"applied": False, "reason": "apply-failed"}
+
+
+@pytest.mark.parametrize("native", [False, True])
+def test_compute_preserves_unobservable_psmux_without_execution(tmp_path, monkeypatch, native):
+    registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    entry = _entry(mux_bin="psmux")
+    if native:
+        entry.update(session_incarnation="$1:100", native_session_incarnation="$1:100")
+    registry.register(entry)
+    before = registry.snapshot()
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: pytest.fail("PSMux execution"))
+    monkeypatch.setattr(mux_daemon, "run_mux_child",
+                        lambda *a, **kw: pytest.fail("PSMux execution"))
+    compute = mux_daemon.build_compute(registry)
+    result = compute(mux_daemon.KIND, {
+        "project": "proj", "worktree_id": "wt-1", "values": {"@aw_ctx": "x"},
+        "rendered_at": "2026-09-25T00:00:00Z",
+    })
+    assert result == {"applied": False, "reason": "enumeration-unavailable"}
+    assert registry.snapshot() == before
+
+
+@pytest.mark.parametrize("result", [
+    subprocess.CompletedProcess(["tmux"], 1, b"", b"Permission denied"),
+    subprocess.CompletedProcess(["tmux"], 0, b"", b"one server could not be queried"),
+])
+def test_legacy_presence_failure_preserves_mapping(tmp_path, monkeypatch, result):
+    registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
+    registry.register(_entry())
+    before = registry.snapshot()
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: result)
+    response = mux_daemon.build_compute(registry)(mux_daemon.KIND, {
+        "project": "proj", "worktree_id": "wt-1", "values": {"@aw_ctx": "x"},
+        "rendered_at": "2026-09-25T00:00:00Z",
+    })
+    assert response == {"applied": False, "reason": "enumeration-unavailable"}
+    assert registry.snapshot() == before
 
 
 def test_compute_invalidates_a_mapping_whose_mux_session_has_died(tmp_path, monkeypatch):
@@ -1602,19 +1642,17 @@ def test_live_mapping_republished_on_a_backstop_cadence_without_a_restart(
     daemon_result: dict = {}
 
     def _run():
-        daemon_result["rc"] = mux_daemon.run_daemon_foreground(
-            tmp_path,
-            poll_interval_s=0.01,
-            # 60 iterations keeps the daemon's own per-iteration file I/O
-            # (write_lock_data + read_lock_data every loop, independent of
-            # poll_interval_s) bounded, while still giving the 0.05s
-            # backstop cadence ~12 chances to fire -- far more than the 2
-            # observations this test needs.
-            max_iterations=60,
-            # Same lock/generation the whole run -- only the backstop cadence
-            # (never a generation change) can explain a second observation.
-            backstop_interval_s=0.05,
-        )
+        try:
+            daemon_result["rc"] = mux_daemon.run_daemon_foreground(
+                tmp_path,
+                poll_interval_s=0.01,
+                # Keep file I/O bounded while giving the backstop several chances.
+                max_iterations=60,
+                # Only the backstop can explain another unchanged-generation push.
+                backstop_interval_s=0.05,
+            )
+        except Exception as error:
+            daemon_result["error"] = repr(error)
 
     thread = threading.Thread(target=_run)
     thread.start()
@@ -1626,7 +1664,8 @@ def test_live_mapping_republished_on_a_backstop_cadence_without_a_restart(
         # (sub-second) workload would ever need. Widening the wait budget
         # costs nothing when the daemon finishes quickly, and is the only
         # way to avoid a false failure when it doesn't.
-        _wait_for(lambda: len(observed) >= 1, timeout=30.0)
+        _wait_for(lambda: len(observed) >= 1 or bool(daemon_result), timeout=30.0)
+        assert observed, daemon_result
         # Wait for the absolute count, not a delta from a captured snapshot:
         # on a fast run the daemon can already be well past 2 observations
         # by the time this thread is next scheduled, making any captured

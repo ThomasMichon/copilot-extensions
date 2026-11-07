@@ -1,8 +1,9 @@
 <<TOPBAR>>
   WORKTREES                                                                                           ⚙ Configuration
 ───────────────────────────────────────────────────────── ▲ ──────────────────────────────────────────────────────────
- Machine  Ctrl ◀▶                                                                      ● 0 active · 2 recent · 0 done
+ Machine  Ctrl ◀▶                                                             ● 0 active · 2 unfinished · 0 completed
     All     anomalous-potato Win ✓
+  f Status: all  g Group: Active/Recent  s Sort: used  / Search
 
    + New worktree…     ✕ Clean     ⟳ Sync     creates on anomalous-potato Win  (this host)
 
@@ -16,8 +17,7 @@
       Fix the thing
 ☐ bbbb   UNUSED     7d     7d     -            -s 0t
       Old idle wt
-  ── Completed ───────────────────────────────────────────────────────────────────────────────────────────────────────
-    (none)
+
 
 
 

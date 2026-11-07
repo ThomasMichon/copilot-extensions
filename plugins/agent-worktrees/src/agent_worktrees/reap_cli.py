@@ -247,7 +247,10 @@ def _remove_managed_worktree(
         except Exception:
             pass
     else:
-        if sessions.has_mux_session(rec.worktree_id):
+        mux = sessions._list_mux_sessions()
+        if mux is None:
+            return False, ["mux presence is unknown; removal deferred"]
+        if sessions.mux_session_name(rec.worktree_id) in mux:
             return False, ["live mux appeared before removal"]
         context = sessions.scan_sessions_fast([rec])
         norm = sessions._normalize_path(rec.worktree_path) if rec.worktree_path else ""
@@ -427,7 +430,12 @@ def sweep_managed_worktrees(
     if not managed:
         return result
 
-    mux = sessions._list_mux_sessions() or {}
+    mux = sessions._list_mux_sessions()
+    if mux is None:
+        result["skipped"].extend(
+            {"id": rec.worktree_id, "reason": "mux-unknown"} for rec in managed
+        )
+        return result
     activity_by_name = sessions._mux_session_activity()
     session_ctx = sessions.scan_sessions_fast(managed)
     active_paths = _build_active_paths(managed, session_ctx)
@@ -555,7 +563,12 @@ def sweep_managed_worktrees(
                 result["skipped"].append({"id": rec.worktree_id, "reason": "not-managed"})
                 continue
 
-            fresh_mux = sessions._list_mux_sessions() or {}
+            fresh_mux = sessions._list_mux_sessions()
+            if fresh_mux is None:
+                result["skipped"].append(
+                    {"id": current.worktree_id, "reason": "mux-unknown"},
+                )
+                continue
             fresh_name = sessions.mux_session_name(current.worktree_id)
             fresh_ctx = sessions.scan_sessions_fast([current])
             fresh_active_paths = _build_active_paths([current], fresh_ctx)
@@ -780,7 +793,12 @@ def sweep_finished_session_worktrees(
     session_ctx = sessions.scan_sessions_fast(records)
     active_paths = _build_active_paths(records, session_ctx)
     activity_by_name = sessions._mux_session_activity()
-    mux = sessions._list_mux_sessions() or {}
+    mux = sessions._list_mux_sessions()
+    if mux is None:
+        result["skipped"].extend(
+            {"id": rec.worktree_id, "reason": "mux-unknown"} for rec in records
+        )
+        return result
     upstream = f"{repo.remote}/{repo.default_branch}"
 
     # Pass 1 (read-only): resolve the collectable set without mutating anything,

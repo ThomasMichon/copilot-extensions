@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
+from agent_procutil import no_window_kwargs
 
 SETTINGS_RELS: tuple[tuple[str, ...], ...] = (
     (".claude", "settings.json"),
@@ -613,7 +614,7 @@ def _is_real_git_checkout(path: Path) -> bool | None:
     try:
         bare = subprocess.run(
             ["git", "-C", str(path), "rev-parse", "--is-bare-repository"],
-            capture_output=True, text=True, timeout=5, env=env,
+            capture_output=True, text=True, timeout=5, env=env, **no_window_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -624,7 +625,7 @@ def _is_real_git_checkout(path: Path) -> bool | None:
     try:
         top = subprocess.run(
             ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=5, env=env,
+            capture_output=True, text=True, timeout=5, env=env, **no_window_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return None

@@ -158,6 +158,7 @@ def test_original_owner_waits_after_coordinator_creation_without_replay(
     ["native", "--session-id", "chosen", "--ahp=http://127.0.0.1:3210"],
     ["native", "--session-id", "chosen", "--connect"],
     ["native", "--session-id", "chosen", "-i"],
+    ["native", "--session-id", "chosen", "--log-dir"],
 ])
 @pytest.mark.asyncio
 async def test_bad_native_selection_is_refused_before_any_effect(tmp_path, monkeypatch, arguments):
@@ -170,6 +171,18 @@ async def test_bad_native_selection_is_refused_before_any_effect(tmp_path, monke
         )
     policy.assert_not_called()
     assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("option,value", [
+    ("--log-dir", "--resume=literal"), ("--model", "--session-id=literal"),
+    ("--agent", "--ahp=literal"), ("-C", "--interactive=literal"),
+])
+def test_native_validator_preserves_selector_shaped_option_values(option, value):
+    argv = ["native", "--session-id", "chosen", option, value]
+    assert launcher._native_request(argv, "chosen") is None
+    assert launcher._native_request([*argv, "-i", "real seed"], "chosen") == "real seed"
+    with pytest.raises(ValueError, match="interactive native arguments"):
+        launcher._native_request([*argv, "--acp"], "chosen")
 
 
 def test_headless_parser_does_not_accept_cli_lifetime_or_headed_only_options():

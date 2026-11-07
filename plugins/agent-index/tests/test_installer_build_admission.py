@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import time
+import venv
 import pytest
 
 if os.name != "nt":
@@ -69,6 +70,15 @@ def test_direct_same_version_installs_serialize_cleanup_build_and_publication(tm
     if not pwsh:
         pytest.skip("PowerShell is unavailable")
     definitions, root = publication_fixture(tmp_path)
+    slot = root / "versions" / "2.0.0"
+    venv.EnvBuilder(with_pip=False).create(slot)
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    site = slot / ("Lib/site-packages" if os.name == "nt" else
+                   f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages")
+    package = site / "agent_index"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "__main__.py").write_text("print('inert fixture CLI')\n", encoding="utf-8")
     definitions = f". '{ENGINE / 'installer-engine.ps1'}'\n" + definitions
     started = tmp_path / "started"
     ready = tmp_path / "worker-ready"
@@ -81,6 +91,8 @@ def test_direct_same_version_installs_serialize_cleanup_build_and_publication(tm
     definitions += function("Install-Runtime", "ps1") + function("Install-ServerVenv", "ps1") + f"""
 $env:AGENT_INDEX_REBUILD_CURRENT = '1'
 $BasePython = '{sys.executable}'
+function Get-BootstrapPython {{ param([switch]$ExternalOnly) return $BasePython }}
+$VenvPython = '{python}'
 $PkgSrcDir = '{pkg / "src"}'
 $PluginDir = '{pkg}'
 $LocalBin = '{tmp_path / "bin"}'

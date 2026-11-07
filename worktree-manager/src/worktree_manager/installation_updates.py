@@ -261,6 +261,17 @@ def request_result_screen(label):
     return InstallationRequestScreen(label)
 
 
+def diagnostic_result_screen(label):
+    from .production_picker.picker_tui.configuration_form import ConfigurationResultScreen
+
+    class DiagnosticResultScreen(ConfigurationResultScreen):
+        pending_message = "Running read-only Manager setup diagnostics..."
+        success_message = "Diagnostics completed. Read the report for scope and limitations; no setup or repair was applied."
+        failure_message = "Diagnostics failed or are incomplete. Read the report before retrying; no repair was applied."
+
+    return DiagnosticResultScreen(label)
+
+
 def submit(target: str) -> int:
     from .update_driver_cli import cmd_update_request
 
@@ -276,7 +287,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--engine-argv", help=argparse.SUPPRESS)
     parser.add_argument("--engine-context", help=argparse.SUPPRESS)
-    parser.add_argument("command", choices=("list", "update", "maintenance", "automatic-updates"))
+    parser.add_argument("command", choices=("list", "doctor", "update", "maintenance", "automatic-updates"))
     parser.add_argument("target", nargs="?")
     parser.add_argument("--expected-policy")
     args = parser.parse_args(argv)
@@ -311,6 +322,12 @@ def main(argv=None):
         return 0
     if args.expected_policy:
         parser.error("--expected-policy requires maintenance or automatic-updates")
+    if args.command == "doctor":
+        if args.target != "worktree-manager":
+            parser.error("doctor requires the worktree-manager target; other components retain their own diagnostics")
+        from .doctor_cli import cmd_doctor
+
+        return cmd_doctor([])
     if args.command == "list":
         if args.target:
             parser.error("list does not accept a target")
@@ -346,6 +363,8 @@ def configuration_pivot():
         ],
         "actions": [
             {"key": "details", "label": "Installation details / limitations", "kind": "card"},
+            {"key": "doctor", "label": "Inspect Manager setup (read-only)",
+             "run": [*command, "doctor", "{id}"], "when": {"id": "worktree-manager"}},
             {"key": "bootstrap-on", "label": "Allow automatic software updates on this machine",
              "confirm": True, "run": [*command, "automatic-updates", "on", "--expected-policy", "{policy_revision}"],
              "when": {"id": BOOTSTRAP_CONTROL_ID, "bootstrap_control": True, "bootstrap_enabled": False}},

@@ -1,0 +1,9 @@
+{
+  "comment": "Accept supported UNC Python entries in mixed Windows launcher listings",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}
