@@ -100,6 +100,10 @@ owned producer. Finite envelopes also require `done` and exit zero; rows followe
 by EOF or a nonzero exit remain an incomplete read. Older Managers may time out a progressing long observation;
 refresh after updating the consumer rather than claiming the partial read ready.
 Held subscriptions retain their existing first-publication and lifetime rules.
+View-wide executable actions remain unavailable until the consumer has a successful current
+read with no replacement pending. Confirmation and progress-command dispatch
+recheck the captured scopes, as does row execution; a partial summary cannot authorize repair. Partial
+rows and read-only detail cards remain available for inspection.
 
 Version-1 compatibility also covers the existing declarative fields:
 

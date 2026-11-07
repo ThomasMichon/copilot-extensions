@@ -10,7 +10,7 @@ from .create_action_screen import CreateActionScreen
 from .background import run_background
 from .inbox import ensure_inbox
 from .engine_form_drafts import PivotFormDraftActionsMixin
-from .registered_scopes import read_scope, request_scopes
+from .registered_scopes import actions_ready, read_scope, request_scopes
 from .steering import PivotCardScreen, PivotFormScreen, SubmitErrorScreen, _normalize_form_fields, _steer_draft_path
 
 log = logging.getLogger("agent-worktrees.picker")
@@ -35,6 +35,10 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
             self.refresh()
 
         def run():
+            if getattr(action, "card", None) is None and not actions_ready(rt, scopes):
+                self.debug = "Source read is not current; refresh and reopen this action."
+                self.refresh()
+                return
             if action.internal or action.form or action.card or not action.progress:
                 self._run_task_action(reg, action, ctx)
             else:
@@ -271,8 +275,7 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
         ``progress`` action (D4) streams into the modal ProgressScreen instead of
         the sync status-line path."""
         if "_manager_scope" in rec and getattr(action, "card", None) is None:
-            state = self._pivot_runtime(reg).get(rec["_manager_scope"])[0]
-            if state != "ready":
+            if not actions_ready(self._pivot_runtime(reg), (rec["_manager_scope"],)):
                 self.debug = "Source read is not current; press r to retry before running this action."
                 return
         ctx = self._task_action_ctx(reg, rec)

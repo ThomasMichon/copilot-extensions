@@ -39,6 +39,18 @@ def request_scopes(engine, pivot):
     return tuple(scopes)
 
 
+def actions_ready(runtime, scopes):
+    """Keep legacy snapshots compatible while the current runtime checks atomically."""
+    checker = getattr(runtime, "actions_ready", None)
+    if checker is not None:
+        return checker(scopes)
+    pending = getattr(runtime, "read_pending", None)
+    return bool(scopes) and all(
+        runtime.get(scope)[0] == "ready" and not (pending is not None and pending(scope))
+        for scope in scopes
+    )
+
+
 def _read_state(states):
     states = tuple(states)
     if not states:

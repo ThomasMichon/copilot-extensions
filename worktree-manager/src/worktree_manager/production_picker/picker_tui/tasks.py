@@ -810,6 +810,9 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
             return (False, "empty action command")
         try:
             argv = _resolve_command(argv)
+            scopes = ctx.get("_manager_refresh_scopes")
+            if scopes is not None and not self.actions_ready(scopes):
+                return False, "Source read is not current; refresh and reopen this action."
             proc = self._spawn_stream(argv)
         except FileNotFoundError:
             return (False, f"{argv[0]} not found on PATH")

@@ -59,11 +59,16 @@ def test_native_readiness_navigation_cancel_confirm_repair_and_refresh(tmp_path,
         payload / "installer-readiness.json",
     )}
     trace = tmp_path / "calls.jsonl"
+    hold = tmp_path / "hold-read"
     bridge = tmp_path / "native-owner.py"
     bridge.write_text(
-        "import json,sys\nfrom pathlib import Path\n"
+        "import json,sys,time\nfrom pathlib import Path\n"
         f"with Path({str(trace)!r}).open('a',encoding='utf-8') as stream:\n"
         " stream.write(json.dumps(sys.argv[1:])+'\\n')\n"
+        "deadline=time.monotonic()+15\n"
+        f"while Path({str(hold)!r}).exists():\n"
+        " if time.monotonic()>deadline: raise SystemExit(90)\n"
+        " time.sleep(.01)\n"
         "from agent_machines.__main__ import main\nraise SystemExit(main(sys.argv[1:]))\n",
         encoding="utf-8",
     )
@@ -96,7 +101,7 @@ def test_native_readiness_navigation_cancel_confirm_repair_and_refresh(tmp_path,
                     break
                 screen._rotate_config_section(1)
                 await pilot.pause()
-            await _wait(pilot, lambda: screen._task_summary().get("repairable") == "true"
+            await _wait(pilot, lambda: screen._pivot_view_actions()
                         or screen._task_state()[0] == "error")
             assert screen._task_state()[0] == "ready", screen._task_state()
             assert len(screen._task_rows()) == 2
@@ -114,6 +119,23 @@ def test_native_readiness_navigation_cancel_confirm_repair_and_refresh(tmp_path,
             await pilot.press("enter")
             await pilot.pause()
             assert not list(home.glob("*.ready")) and all("--apply" not in call for call in calls())
+            activate()
+            await _wait(pilot, lambda: isinstance(app.screen, ActionConfirmScreen))
+            runtime = screen._pivot_runtime(reg)
+            hold.write_text("hold", encoding="utf-8")
+            try:
+                runtime.refresh_read("")
+                await _wait(pilot, lambda: runtime.read_pending(""))
+                await pilot.press("left", "enter")
+                await _wait(pilot, lambda: not isinstance(app.screen, ActionConfirmScreen))
+                assert screen.is_mounted and not isinstance(app.screen, PivotProgressScreen)
+                assert "Source read is not current" in screen.debug
+                assert not list(home.glob("*.ready"))
+                assert all("--apply" not in call for call in calls())
+            finally:
+                hold.unlink(missing_ok=True)
+            await _wait(pilot, lambda: screen._pivot_view_actions()
+                        or screen._task_state()[0] == "error")
             activate()
             await _wait(pilot, lambda: isinstance(app.screen, ActionConfirmScreen))
             await pilot.press("left", "enter")

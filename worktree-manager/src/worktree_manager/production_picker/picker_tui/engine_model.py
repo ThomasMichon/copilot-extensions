@@ -64,12 +64,17 @@ class PickerScreenModelMixin:
         return bset[self.btn_idx % len(bset)]
     def _pivot_view_actions(self):
         from .pivot_actions import entry_matches
+        from .registered_scopes import actions_ready, request_scopes
 
         reg = self._reg_pivot()
-        summary = self._task_summary() if reg is not None else {}
+        if reg is None or not getattr(reg, "view_actions", ()):
+            return []
+        ready = actions_ready(self._pivot_runtime(reg), request_scopes(self, reg))
+        summary = self._task_summary()
         return [
             action for action in getattr(reg, "view_actions", ())
-            if entry_matches(action.when, summary)
+            if (getattr(action, "card", None) is not None or ready)
+            and entry_matches(action.when, summary)
         ]
     def grid_dirty(self):
         return self.profiles_view.grid_dirty()
