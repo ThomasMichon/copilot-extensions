@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 import json
 import os
 import subprocess
+import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -18,7 +19,7 @@ ALLOC_RECYCLE = "recycle"
 ALLOC_PRESSURE = "pressure"
 
 
-def _environment_context(ambient: str) -> tuple[str, dict]:
+def _environment_context(ambient: str, *, timeout: float = 10) -> tuple[str, dict]:
     from agent_procutil import no_window_kwargs
 
     environment = dict(os.environ)
@@ -27,7 +28,7 @@ def _environment_context(ambient: str) -> tuple[str, dict]:
     try:
         result = subprocess.run(
             ["gh", "api", "user"], capture_output=True, text=True,
-            timeout=10, env=environment, **no_window_kwargs(),
+            timeout=timeout, env=environment, **no_window_kwargs(),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise RuntimeError(f"Environment GitHub identity verification failed: {exc}") from exc
@@ -41,6 +42,27 @@ def _environment_context(ambient: str) -> tuple[str, dict]:
     if not isinstance(login, str) or not login.strip():
         raise RuntimeError("Environment GitHub identity response has no account")
     return login.strip(), environment
+
+
+def verified_account_token(account: str, *, timeout: float = 10) -> str | None:
+    """Use an environment credential only after verifying the expected owner."""
+    from . import gh_account
+
+    started = time.monotonic()
+    token = gh_account.token_for_account(account)
+    if token:
+        return token
+    ambient = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
+    remaining = timeout - (time.monotonic() - started)
+    if ambient and remaining > 0:
+        try:
+            login, environment = _environment_context(ambient, timeout=remaining)
+        except RuntimeError:
+            pass
+        else:
+            if login.casefold() == account.casefold():
+                return environment["GH_TOKEN"]
+    return None
 
 
 def allocation_context(repo: str) -> tuple[str, dict]:

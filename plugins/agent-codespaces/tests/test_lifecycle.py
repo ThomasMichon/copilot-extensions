@@ -206,6 +206,22 @@ def test_bound_account_survives_invalid_ambient_identity(monkeypatch, response):
     )
 
 
+def test_strict_status_refuses_an_environment_token_for_another_owner(monkeypatch):
+    monkeypatch.setenv("GH_TOKEN", "foreign-fixture-token")
+    monkeypatch.setattr(gh_account, "token_for_account", lambda account: None)
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        assert argv == ["gh", "api", "user"]
+        return MagicMock(returncode=0, stdout=json.dumps({"login": "foreign-owner"}))
+
+    monkeypatch.setattr(lifecycle.subprocess, "run", run)
+    with pytest.raises(RuntimeError, match="refusing to fall back"):
+        lifecycle._get_codespace_status_under("same-name", "expected-owner")
+    assert len(calls) == 1
+
+
 class TestCreateCodespace:
     @pytest.mark.parametrize("explicit", [False, True])
     def test_creation_preserves_admitted_account_environment(self, monkeypatch, explicit):
@@ -915,6 +931,20 @@ def _cs(name, state):
 
 
 class TestStopCodespace:
+    def test_explicit_stop_preserves_context_refusal(self, monkeypatch):
+        from agent_codespaces.worktrees import ContextRefused
+
+        def refused():
+            raise ContextRefused("fixture context refused")
+
+        monkeypatch.setattr(lifecycle, "validate_context", refused)
+        monkeypatch.setattr(
+            lifecycle.subprocess, "run",
+            lambda *a, **kw: pytest.fail("refused context reached provider"),
+        )
+        with pytest.raises(ContextRefused, match="fixture context refused"):
+            stop_codespace("same-name", account="selected-owner", token="fixture-token")
+
     @pytest.mark.parametrize("state", ["Available", "Shutdown"])
     def test_explicit_stop_uses_selected_state_and_credential(self, monkeypatch, state):
         monkeypatch.setenv("GH_TOKEN", "ambient-fixture-token")

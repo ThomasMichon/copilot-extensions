@@ -56,7 +56,7 @@ class TestCLI:
             lifecycle, "get_codespace_status_with_account", lambda name: (True, "Shutdown", "owner"),
         )
         monkeypatch.setattr(
-            activation_cli.gh_account, "token_for_account",
+            "agent_codespaces.gh_account.token_for_account",
             lambda account: None if outcome == "owner-unavailable" else "fixture-token",
         )
 
@@ -100,7 +100,7 @@ class TestCLI:
         monkeypatch.setattr(account_binding, "bound_account_or_raise", lambda name: "exact-owner")
         monkeypatch.setattr(lifecycle, "list_codespaces", lambda: pytest.fail("unscoped listing selected"))
         monkeypatch.setattr(
-            activation_cli.gh_account, "token_for_account",
+            "agent_codespaces.gh_account.token_for_account",
             lambda account: "fixture-token" if account == "exact-owner" else pytest.fail("wrong account"),
         )
 
@@ -141,9 +141,9 @@ class TestCLI:
         monkeypatch.setattr(activation_cli.launch_policy, "refused_exit_code", lambda name: None)
         monkeypatch.setattr(account_binding, "bound_account_or_raise", lambda name: None)
         monkeypatch.setattr(account_binding, "bound_accounts_or_raise", lambda: ())
-        monkeypatch.setattr(activation_cli.gh_account, "mapped_accounts", lambda: ())
+        monkeypatch.setattr("agent_codespaces.gh_account.mapped_accounts", lambda: ())
         monkeypatch.setattr(
-            activation_cli.gh_account, "token_for_account",
+            "agent_codespaces.gh_account.token_for_account",
             lambda account: None if outcome == "token-failed" else "fixture-token",
         )
 
@@ -854,6 +854,7 @@ def test_environment_only_credentials_reach_inventory_and_creation(monkeypatch, 
     )
     monkeypatch.setattr(cli, "load_merged_config", CodespacesConfig)
     monkeypatch.setattr(cli, "_require_codespace_scope", lambda operation, **kwargs: None)
+    monkeypatch.setattr("agent_codespaces.activation_cli.launch_policy.refused_exit_code", lambda name: None)
     monkeypatch.setattr(cli, "_gh_binary_available", lambda: True)
     monkeypatch.setattr(cli, "validate_context", lambda: None)
     monkeypatch.setattr(lifecycle, "validate_context", lambda: None)
@@ -865,13 +866,24 @@ def test_environment_only_credentials_reach_inventory_and_creation(monkeypatch, 
     monkeypatch.setattr(coordination, "list_cleanliness", lambda: {})
     monkeypatch.setattr("agent_codespaces.driving_worktrees.resolve_current_workstream_box", lambda *args: None)
     bindings = []
+    bound_accounts = {}
+    def bind(name, account, repo):
+        bindings.append(account)
+        bound_accounts[name] = account
     monkeypatch.setattr(
         "agent_codespaces.account_binding.bind",
-        lambda name, account, repo: bindings.append(account),
+        bind,
     )
+    monkeypatch.setattr(
+        "agent_codespaces.account_binding.bound_account_or_raise",
+        lambda name: bound_accounts.get(name),
+    )
+    monkeypatch.setattr(gh_account, "token_for_account", lambda account: None)
     observed = []
+    state = "Shutdown"
 
     def run(argv, **kwargs):
+        nonlocal state
         environment = kwargs["env"]
         observed.append((argv[1:3], environment.get("GH_TOKEN"), environment.get("GITHUB_TOKEN")))
         if argv[1:3] == ["api", "user"]:
@@ -880,6 +892,11 @@ def test_environment_only_credentials_reach_inventory_and_creation(monkeypatch, 
             value = "[]"
         elif argv[1:3] == ["codespace", "create"]:
             value = "fixture-created"
+        elif argv[1:4] == ["api", "--method", "POST"]:
+            state = "Available"
+            value = "{}"
+        elif argv[1:3] == ["api", "/user/codespaces/fixture-created"]:
+            value = json.dumps({"state": state})
         else:
             pytest.fail(f"unexpected credential rediscovery or provider operation: {argv[:3]}")
         return SimpleNamespace(returncode=0, stdout=value, stderr="")
@@ -889,9 +906,24 @@ def test_environment_only_credentials_reach_inventory_and_creation(monkeypatch, 
     assert json.loads(capsys.readouterr().out)["action"] == "create"
     assert main(["create", "example/project", "--no-wait"]) == 0
     assert main(["create", "example/project", "--no-wait", "--force-create"]) == 0
+    capsys.readouterr()
+    assert main(["claim-status", "fixture-created"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"exists": True, "state": "Shutdown"}
+    assert main(["start", "fixture-created"]) == 0
+    assert state == "Available"
     assert bindings == ["environment-owner", "environment-owner"]
     assert observed[0][0] == ["api", "user"]
     assert all(token == "environment-fixture-token" and alternate is None for _, token, alternate in observed)
+
+
+@pytest.mark.parametrize("command,extra,expected", [
+    ("create", [], 4), ("allocate", [], 4), ("create", ["--force-create"], 1),
+])
+def test_account_resolution_failure_uses_admission_exit(monkeypatch, command, extra, expected):
+    def unavailable(repo):
+        raise RuntimeError("selected credentials unavailable")
+    monkeypatch.setattr("agent_codespaces.allocation.allocation_context", unavailable)
+    assert main([command, "example/project", *extra]) == expected
 
 
 @pytest.mark.parametrize("command", ["create", "allocate"])

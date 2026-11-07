@@ -302,13 +302,13 @@ def _get_codespace_status_under(
     or a single candidate could blow well past its allotted share (review
     finding: "...include credential resolution in the end-to-end
     deadline")."""
-    from . import gh_account
+    from .allocation import verified_account_token
 
     env = None
     if account is not None:
         mint_start = time.monotonic()
         if token is None:
-            token = gh_account.token_for_account(account)
+            token = verified_account_token(account, timeout=timeout)
         timeout = max(timeout - (time.monotonic() - mint_start), 0.5)
         if not token:
             raise RuntimeError(
@@ -832,6 +832,7 @@ def stop_codespace(
     """
     from .allocation import stop_context
 
+    validate_context()
     account, environment, state = stop_context(
         name, account, token, listing=list_codespaces,
         status_lookup=_get_codespace_status_under,

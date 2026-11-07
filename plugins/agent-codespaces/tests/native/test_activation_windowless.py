@@ -49,7 +49,7 @@ from agent_codespaces import activation_cli
 activation_cli.launch_policy.refused_exit_code = lambda name: None
 activation_cli.lifecycle.get_codespace_status_with_account = (
     lambda name, account=None: (True, "Shutdown", account))
-activation_cli.gh_account.token_for_account = lambda account: "fixture-token"
+activation_cli.verified_account_token = lambda account: "fixture-token"
 activation_cli.lifecycle.wait_for_available = lambda *a, **k: True
 real_run = subprocess.run
 calls = []

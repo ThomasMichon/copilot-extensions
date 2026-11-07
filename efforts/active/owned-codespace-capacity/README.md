@@ -118,6 +118,12 @@ existing resource ownership, not solve quota pressure by destructive cleanup.
 
 ## Journal
 
+### 2026-11-07 - Bound consumer continuity and context protection
+- Reproduced six failures across environment-only create-to-status continuity, explicit-account stop context refusal and ordinary creation's account-resolution exit code.
+- Kept saved account credentials first, permitting environment credentials in strict status and activation only after verifying the same account identity. Preserved binding authority and refused foreign environment credentials.
+- Validated context before explicit stop resolution and moved ordinary account-resolution errors into admission pressure handling; forced creation keeps its authentication refusal.
+- The four affected source suites passed 242 tests; after preserving saved-first selection and the verification deadline, 28 focused credential/activation controls and touched-Python lint passed. Exact-head CI/review remain open; no venue or deployment effects occurred.
+
 ### 2026-11-07 - Selected permission and retained-credential corrections
 - Reproduced six failures covering premature ambient scope checks and failed/malformed ambient identity blocking valid retained credentials.
 - Deferred creation-scope checks until creation is needed and kept that check on the admitted environment. Invalid ambient verification can use the workstream's bound credential, never an unrelated account; verified matching environment-only credentials remain valid.

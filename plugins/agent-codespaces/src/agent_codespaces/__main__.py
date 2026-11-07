@@ -3955,9 +3955,9 @@ def _cmd_create(args: argparse.Namespace) -> int:
 
     from .allocation import allocation_context
 
-    account, environment = allocation_context(args.repo)
     if not getattr(args, "force_create", False):
         try:
+            account, environment = allocation_context(args.repo)
             from .driving_worktrees import resolve_current_workstream_box
             _members, _budget = pool_mod.build_pool(
                 account=account, environment=environment,
@@ -3995,6 +3995,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
         # on-quota retry below.
 
     else:
+        account, environment = allocation_context(args.repo)
         print("[override] --force-create bypasses local capacity policy, not provider limits", file=sys.stderr)
 
     if (rc := _require_codespace_scope("create a CodeSpace", environment=environment)) is not None:
