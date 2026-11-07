@@ -60,6 +60,21 @@ def test_native_creation_reuse_and_openssh_consumer(tmp_path, record):
         raise AssertionError("Native OpenSSH derived a different public key")
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows SID-alias normalization")
+def test_native_numeric_system_sid_retains_owner_private_publication(tmp_path, monkeypatch, record):
+    original = ssh_key_files.WindowsSecurity.descriptor
+    monkeypatch.setattr(
+        ssh_key_files.WindowsSecurity, "descriptor",
+        lambda self, directory: original(self, directory).replace(";;;SY)", ";;;S-1-5-18)"),
+    )
+    directory = tmp_path / "keys"
+    private, public = pair(record)
+    assert ssh_key_files.install(directory, private, public)["status"] == "installed"
+    assert ssh_key_files.install(directory, private, public)["status"] == "reused"
+    matches(directory / "id_ed25519", private)
+    matches(directory / "id_ed25519.pub", public)
+
+
 @pytest.mark.parametrize("survivor", ["id_ed25519", "id_ed25519.pub"])
 def test_matching_partial_pair_is_recovered(tmp_path, record, survivor):
     directory = tmp_path / "keys"
