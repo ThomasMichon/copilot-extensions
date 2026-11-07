@@ -2312,3 +2312,61 @@ discovery function with a stubbed child boundary on Windows; they are not
 native POSIX lifecycle qualification. No available native POSIX lane is claimed,
 and that broader parent validation remains open. No discovery protocol, child
 count, deadline, dependency or runtime selection owner changes.
+
+### 2026-11-07 - Packaged launch consumers merged; continue Manager flow
+
+#11339 merged at 16:58:26 UTC as
+`7371e4246cd84d01f2c8420810e3d1cd85768b69`. Copilot approved exact head
+`910027b7377ae9a141381cbd716763276f1e7f5f` with no active findings; all three
+review threads are resolved. Both final-head CI runs, `42393042928` and
+`42393101191`, pass their guards, units and required gate. The managed merge
+used the repository-authorized Maintainer review exception, not a CI bypass.
+
+The three new discovery controls also qualify at that exact head on hosted
+Windows without skips in 26.99 seconds
+([run 42393195316](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42393195316)).
+That remains discovery-function evidence with a stubbed child boundary, not
+native POSIX lifecycle acceptance. The earlier real first-touch/native history,
+108 Bridge controls and source-bound hosted packets retain their recorded
+consumer and source limits. No staging branch or installed rollout is involved.
+
+Re-read the parent Plan and Validation Plan after merge. No broad caller,
+lifetime or receiving checkbox closes from this prerequisite slice. Preserve
+the merged history and advance this same source workspace onto the merged
+default branch; do not finalize it while the parent remains Active. The next
+checkpoint is Manager's actual mux-backed launch and reuse through the common
+broker, with one native conversation and exact fixture cleanup. Its existing
+no-mux control and qualified application-asset construction are prerequisites,
+not substitutes for that caller flow.
+
+### 2026-11-07 - Qualify the real Manager mux-backed caller
+
+Extend the existing native Worktrees packet with the unmodified Manager
+launcher's mux-backed path. A private adapter forwards actual mux commands
+only to the fixture's UUID-named Manager session. Fresh and resumed callers
+return while their real broker/native child remains alive. A second caller
+reuses that same Manager incarnation and native process births without another
+mux creation or startup-input replay. Backend execution receipts, not the
+earlier caller return, prove native exit and exact fixture retirement.
+
+Initial runs expose intermittent pre-entry stalls in the outer fixture pane,
+including a no-op control without Copilot or Manager. Minimal direct and
+PowerShell controls also pass, so no general backend root cause is established.
+Remove the unnecessary outer PowerShell wrapper and use a newly named private
+outer pane for each caller; the Manager target remains unchanged for actual
+reuse. Temporary diagnostic controls are removed, and the original item,
+subsuite, aggregate and cleanup limits remain unchanged.
+
+The final native source qualifies in two disjoint captures: Manager mux-backed
+fresh/resume/reuse passes in 129.52 seconds (190.86 including preparation and
+cleanup); the three existing broker, native-input and Manager no-mux controls
+pass in 117.29 seconds (147.42 total). This is not a single uninterrupted
+four-case capture. The native CLI uses an isolated offline provider, not a
+productive conversation or credentials.
+
+Documentation impact: update the existing packet recipe and its explicit
+consumer limits in `TESTING.md`. No product behavior, CLI/wire contract,
+dependency, admission policy, runtime installation or deployed session changes.
+The parent remains Active: constructed Manager application/metadata integration,
+externally attached/new-window paths, guarded-head/auth-wait, complete caller
+cleanup-Job survival and receiving acceptance are not closed by this control.

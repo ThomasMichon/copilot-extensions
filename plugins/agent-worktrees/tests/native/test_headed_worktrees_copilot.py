@@ -45,7 +45,7 @@ def _until(check, label, timeout=30, diagnostic=None):
     raise AssertionError(label + ("\n" + diagnostic() if diagnostic else ""))
 
 
-@pytest.mark.parametrize("control", ["broker", "native-input", "manager-no-mux"])
+@pytest.mark.parametrize("control", ["broker", "native-input", "manager-no-mux", "manager-mux"])
 def test_worktrees_native_fresh_and_resume_keep_one_history_and_real_receipts(tmp_path, control):
     from plugin_test_command_safety import private_mux_args
 
@@ -62,6 +62,15 @@ def test_worktrees_native_fresh_and_resume_keep_one_history_and_real_receipts(tm
     home, checkout = tmp_path / "copilot-home", tmp_path / "checkout"
     home.mkdir()
     checkout.mkdir()
+    temporary = tmp_path / "temp"
+    temporary.mkdir()
+    local_app_data = tmp_path / "local-app-data"
+    local_app_data.mkdir()
+    mux_data = tmp_path / "psmux-data"
+    mux_data.mkdir()
+    manager = control.startswith("manager-")
+    worktree_id = "driver-fixture-" + uuid4().hex
+    manager_target = "wt-" + worktree_id
     (home / "config.json").write_text(
         json.dumps({"trustedFolders": [str(checkout)]}), encoding="utf-8",
     )
@@ -102,8 +111,14 @@ def test_worktrees_native_fresh_and_resume_keep_one_history_and_real_receipts(tm
         COPILOT_PROVIDER_BASE_URL=f"http://127.0.0.1:{provider.server_port}",
         COPILOT_PROVIDER_MODEL_ID="gpt-4.1", COPILOT_MODEL="gpt-4.1", USE_TGREP="false",
         HOME=str(home), USERPROFILE=str(home),
-        PSMUX_DATA_DIR=str(tmp_path / "psmux-data"), PSMUX_CONFIG_FILE=os.devnull,
-        PSMUX_NO_WARM="1", WORKTREE_PANE_MIN_RUNTIME="0",
+        PSMUX_DATA_DIR=str(mux_data), PSMUX_CONFIG_FILE=os.devnull,
+        PSMUX_NO_WARM="1", WORKTREE_PANE_MIN_RUNTIME="0", WORKTREE_PANE_WAIT_TIMEOUT="0",
+        LOCALAPPDATA=str(local_app_data), TEMP=str(temporary), TMP=str(temporary),
+        WORKTREE_MANAGER_ROOT=str(tmp_path / "manager-runtime"), UV_OFFLINE="1",
+        UV_CACHE_DIR=str(tmp_path / "uv-cache"),
+        UV_PROJECT_ENVIRONMENT=str(tmp_path / "manager-environment"),
+        DRIVER_FIXTURE_MANAGER_TARGET=manager_target,
+        DRIVER_FIXTURE_MUX_LOG=str(tmp_path / "mux-commands.txt"),
     )
     mux_directory = tmp_path / "discovery"
     mux_directory.mkdir()
@@ -119,6 +134,7 @@ def test_worktrees_native_fresh_and_resume_keep_one_history_and_real_receipts(tm
         r'''
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 class Mux {
@@ -127,18 +143,46 @@ class Mux {
             Regex.Replace(value, "(\\\\*)\"", "$1$1\\\""), "(\\\\+)$", "$1$1") + "\"";
     }
     static int Main(string[] args) {
-        if (args.Length == 0 || !new[] {
-            "list-sessions", "has-session", "display-message", "list-panes", "list-windows"
-        }.Contains(args[0]) || args.Any(value => value == "-L" || value == "-S"))
+        if (args.Length == 0 || args.Any(value =>
+            value == "-L" || value == "-S" || value == ";" || value == "kill-server"))
             return 2;
+        var reads = new[] {
+            "list-sessions", "has-session", "display-message", "list-panes", "list-windows"
+        };
+        var writes = new[] { "new-session", "set-option", "source-file" };
+        if (writes.Contains(args[0])) {
+            var selector = args[0] == "new-session" ? "-s" : "-t";
+            var index = Array.IndexOf(args, selector);
+            if (args.Count(value => value == selector) != 1 || index + 1 >= args.Length ||
+                args[index + 1] != Environment.GetEnvironmentVariable("DRIVER_FIXTURE_MANAGER_TARGET") ||
+                args.Contains("-g"))
+                return 2;
+            File.AppendAllText(Environment.GetEnvironmentVariable("DRIVER_FIXTURE_MUX_LOG"),
+                              args[0] + Environment.NewLine);
+        } else if (!reads.Contains(args[0]) &&
+                   !(args.Length == 1 && args[0] == "--version")) {
+            return 2;
+        }
         using (var child = Process.Start(new ProcessStartInfo {
             FileName = BINARY,
             Arguments = String.Join(" ", new[] {
                 "-L", Environment.GetEnvironmentVariable("DRIVER_FIXTURE_MUX_NAMESPACE")
             }.Concat(args).Select(Quote)),
-            UseShellExecute = false, CreateNoWindow = true
+            UseShellExecute = false, CreateNoWindow = true,
+            RedirectStandardOutput = true, RedirectStandardError = true
         })) {
+            var stdout = child.StandardOutput.ReadToEndAsync();
+            var stderr = child.StandardError.ReadToEndAsync();
             if (!child.WaitForExit(5000)) { child.Kill(); child.WaitForExit(); return 2; }
+            if (!System.Threading.Tasks.Task.WaitAll(
+                new System.Threading.Tasks.Task[] { stdout, stderr }, 5000))
+                return 2;
+            Console.Out.Write(stdout.Result);
+            Console.Error.Write(stderr.Result);
+            if (writes.Contains(args[0])) {
+                File.AppendAllText(Environment.GetEnvironmentVariable("DRIVER_FIXTURE_MUX_LOG"),
+                    "exit=" + child.ExitCode + " " + stderr.Result + Environment.NewLine);
+            }
             return child.ExitCode;
         }
     }
@@ -156,16 +200,18 @@ class Mux {
     prompts = ['Worktrees original\nsingle \' double " & $literal', "fresh broker", "resumed broker"]
     if control == "native-input":
         prompts.insert(2, "ISOLATED native keyboard input")
-    target = "headed-fixture-" + uuid4().hex
+    outer_target = "headed-fixture-" + uuid4().hex
+    target = manager_target if control == "manager-mux" else outer_target
 
     def query(action, *arguments):
         assert action in {
             "new-session", "has-session", "display-message", "kill-session", "capture-pane", "send-keys",
         }
-        assert not any(value in {"-L", "-S", ";", "kill-server", "server"} for value in arguments)
+        mux_arguments = arguments[:arguments.index("--")] if action == "new-session" else arguments
+        assert not any(value in {"-L", "-S", ";", "kill-server", "server"} for value in mux_arguments)
         selector = "-s" if action == "new-session" else "-t"
         assert list(arguments).count(selector) == 1
-        assert arguments[arguments.index(selector) + 1] == target
+        assert arguments[arguments.index(selector) + 1] in {outer_target, target}
         if action == "send-keys":
             assert arguments in (
                 ("-t", target, "-l", "--", prompts[2]), ("-t", target, "Enter"),
@@ -183,14 +229,20 @@ class Mux {
         assert result.returncode == 0, result.stdout + result.stderr
         return json.loads(result.stdout)
 
-    def pane_process():
-        observed = query("display-message", "-p", "-t", target, "#{pane_pid}")
+    def pane_process(selected_target=None):
+        observed = query("display-message", "-p", "-t", selected_target or target, "#{pane_pid}")
         if not observed.stdout.strip().isdigit():
             return observed.stderr
         pid = int(observed.stdout.strip())
         detail = run_caller_owned(
             [shell, "-NoProfile", "-Command",
-             f"Get-CimInstance Win32_Process -Filter 'ProcessId={pid}' | "
+             "$all=@(Get-CimInstance Win32_Process);"
+             f"$front=@({pid});$selected=@();"
+             "for($depth=0;$depth -lt 5 -and $front.Count;$depth++){"
+             "$level=@($all|Where-Object {$front -contains [int]$_.ProcessId});"
+             "$selected+=$level;"
+             "$front=@($all|Where-Object {$level.ProcessId -contains [int]$_.ParentProcessId}"
+             "|ForEach-Object {[int]$_.ProcessId})};$selected | "
              "Select-Object ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress"],
             env=environment, cwd=home, timeout=10,
             max_stdout_bytes=8192, max_stderr_bytes=4096,
@@ -228,7 +280,7 @@ class Mux {
         finally:
             await client.close()
 
-    identity, state = None, None
+    identities, state = {}, None
     histories = []
     thread = threading.Thread(target=provider.serve_forever, daemon=True)
     thread.start()
@@ -239,15 +291,16 @@ class Mux {
             "project.mkdir(parents=True,exist_ok=True);"
             "(project/'config.yaml').write_text(json.dumps({'repo_name':'native-copilot','machine':'fixture',"
             "'repos':{'native-copilot':{'anchor':str(checkout),'default_branch':'dev'}}}),encoding='utf-8');"
-            "tracking_path=project/'worktrees' if sys.argv[3]=='manager-no-mux' else checkout;"
+            "manager=sys.argv[3].startswith('manager-');"
+            "tracking_path=project/'worktrees' if manager else checkout;"
             "tracking_path.mkdir(parents=True,exist_ok=True);"
             "record=tracking.create_new_record(sys.argv[2],'worktree/native-copilot',str(checkout),"
-            "'native-copilot','fixture',cfg.detect_platform() if sys.argv[3]=='manager-no-mux' else 'win32',"
+            "'native-copilot','fixture',cfg.detect_platform() if manager else 'win32',"
             "tracking_path);print(json.dumps(str(record.yaml_path)))",
-            checkout, tmp_path.name, control,
+            checkout, worktree_id, control,
         )
         record = Path(initialized)
-        if control == "manager-no-mux":
+        if manager:
             selected = runtime(
                 "import json;from agent_worktrees import config;"
                 "print(json.dumps(str(config.install_dir())))",
@@ -267,7 +320,7 @@ class Mux {
                 AGENT_RT_ROOT=str(runtime_root), WORKTREE_NO_UPDATE="1",
                 WORKTREE_NO_RECONCILE="1", WORKTREE_NO_PROVISION="1",
             )
-            manager_bin = tmp_path / "manager-bin"
+            manager_bin = tmp_path / "manager-runtime" / "bin"
             shutil.copytree(source_root / "worktree-manager" / "bin", manager_bin)
             manager_script = manager_bin / "launch-session.ps1"
             assert manager_script.read_bytes() == (
@@ -276,7 +329,9 @@ class Mux {
         for leg in ("fresh", "resume"):
             namespace = private_mux_args(tmp_path)
             environment["DRIVER_FIXTURE_MUX_NAMESPACE"] = namespace[1]
-            target = "headed-fixture-" + uuid4().hex
+            outer_target = "headed-fixture-" + uuid4().hex
+            target = manager_target if control == "manager-mux" else outer_target
+            identities = {}
             plan = runtime(
                 "import json,sys;from pathlib import Path;from uuid import uuid4;"
                 "record=Path(sys.argv[1]);"
@@ -299,7 +354,7 @@ class Mux {
                 "admission_only=True,"
                 f"correlation=launch_execution.Correlation({plan['attempt']!r},{plan['resolution']!r}))\n"
             )
-            if control == "manager-no-mux":
+            if manager:
                 runtime(
                     "import json,sys;from agent_worktrees import config;"
                     "path=config.project_dir('native-copilot')/'config.yaml';"
@@ -311,9 +366,11 @@ class Mux {
                 manager_command = [
                     shell, "-NoProfile", "-NonInteractive", "-File",
                     str(manager_script),
-                    "--project", "native-copilot", "--worktree-id", tmp_path.name,
-                    "--no-mux", "--no-update", "--no-resume", "--no-fast-forward",
+                    "--project", "native-copilot", "--worktree-id", worktree_id,
+                    "--no-update", "--no-resume", "--no-fast-forward",
                 ]
+                if control == "manager-no-mux":
+                    manager_command.append("--no-mux")
                 invocation = (
                     "    import subprocess\n"
                     "    # headless-guard: allow the real Manager consumer to inherit the fixture's private ConPTY\n"
@@ -323,18 +380,39 @@ class Mux {
             driver = tmp_path / (leg + ".py")
             result_file = tmp_path / (leg + "-result.txt")
             owner_log = tmp_path / (leg + "-owner.log")
+            owner_ready = tmp_path / (leg + "-owner-ready.txt")
+
+            def caller_diagnostics():
+                return "\n".join([
+                    owner_log.read_text(encoding="utf-8") if owner_log.exists() else "owner not started",
+                    query("capture-pane", "-p", "-t", outer_target).stdout[-8192:],
+                    pane_process(outer_target),
+                    *[
+                        path.read_text(encoding="utf-8", errors="replace")[-8192:]
+                        for path in (temporary / "worktree-setup-logs").glob("setup-*.log")
+                    ],
+                ])
+
             driver.write_text(
-                "import sys,traceback\n"
                 f"with open({str(owner_log)!r},'w',encoding='utf-8') as log:\n"
+                "  log.write('original owner started\\n');log.flush()\n"
+                "  import sys,traceback\n"
                 "  try:\n"
-                "    log.write('original owner started\\n');log.flush()\n"
-                "    import ctypes,msvcrt,os,site\n    from pathlib import Path\n"
+                "    import ctypes,msvcrt,os,site,json\n    from pathlib import Path\n"
+                "    log.write(json.dumps({key:os.environ.get(key) for key in "
+                "('TMUX','TEMP','LOCALAPPDATA','WORKTREE_NO_MUX','DRIVER_FIXTURE_MUX_NAMESPACE',"
+                "'DRIVER_FIXTURE_MANAGER_TARGET','DRIVER_FIXTURE_MUX_LOG')})+'\\n');log.flush()\n"
+                "    import shutil\n"
+                f"    assert Path(os.environ['LOCALAPPDATA']) == Path({str(local_app_data)!r})\n"
+                f"    assert shutil.which('psmux.exe') == {str(mux_directory / 'psmux.exe')!r}\n"
                 "    sys.stderr=log\n"
                 "    os.dup2(log.fileno(),2)\n"
                 "    set_stderr=ctypes.windll.kernel32.SetStdHandle\n"
                 "    set_stderr.argtypes=[ctypes.c_ulong,ctypes.c_void_p]\n"
                 "    assert set_stderr(-12,msvcrt.get_osfhandle(2))\n"
                 f"    site.addsitedir({site_packages!r})\n"
+                + "    import time\n"
+                f"    while not Path({str(owner_ready)!r}).exists(): time.sleep(0.05)\n"
                 + invocation +
                 "  except BaseException:\n"
                 "    traceback.print_exc(file=log);code=3\n"
@@ -345,25 +423,43 @@ class Mux {
                 "sys.exit(code)\n",
                 encoding="utf-8",
             )
-            assert query("has-session", "-t", target).returncode == 1
+            compile(driver.read_text(encoding="utf-8"), str(driver), "exec")
+            caller_command = [owner_python, "-I", "-S", "-B", str(driver)]
+            caller_environment = [
+                argument for name in ("PATH", "LOCALAPPDATA", "TEMP", "TMP")
+                for argument in ("-e", f"{name}={environment[name]}")
+            ]
+            assert query("has-session", "-t", outer_target).returncode == 1
+            if control == "manager-mux":
+                assert query("has-session", "-t", target).returncode == 1
             launched = query(
-                "new-session", "-d", "-s", target, "-c", str(checkout),
-                "--", owner_python, "-I", "-B", str(driver),
+                "new-session", "-d", "-s", outer_target, "-c", str(checkout),
+                *caller_environment, "--", *caller_command,
             )
             assert launched.returncode == 0, launched.stderr + (
                 owner_log.read_text(encoding="utf-8") if owner_log.exists() else ""
             )
             observed = query(
-                "display-message", "-p", "-t", target, "#{session_id}:#{session_created}|#{pane_id}",
+                "display-message", "-p", "-t", outer_target, "#{session_id}:#{session_created}|#{pane_id}",
             )
             assert observed.returncode == 0 and "|" in observed.stdout
-            identity = observed.stdout.strip()
+            identities[outer_target] = observed.stdout.strip()
+            owner_ready.write_text("ready", encoding="utf-8")
 
             def bound():
                 nonlocal attempt
+                if control == "manager-mux" and target not in identities:
+                    observed = query(
+                        "display-message", "-p", "-t", target,
+                        "#{session_id}:#{session_created}|#{pane_id}",
+                    )
+                    if observed.returncode == 0 and "|" in observed.stdout:
+                        identities[target] = observed.stdout.strip()
                 if result_file.exists():
-                    raise AssertionError(owner_log.read_text(encoding="utf-8"))
-                if control == "manager-no-mux":
+                    assert control == "manager-mux" and result_file.read_text(encoding="utf-8") == "0", (
+                        owner_log.read_text(encoding="utf-8")
+                    )
+                if manager:
                     candidates = set(record.parent.glob("launch-attempts/*")) - previous_attempts
                     paths = [path for candidate in candidates for path in candidate.glob("*/headed.json")]
                 else:
@@ -375,14 +471,18 @@ class Mux {
                         return None
                     if value["state"] == "running":
                         attempt = paths[0].parent.parent
+                        if control == "manager-mux" and target not in identities:
+                            return None
                         return value
 
             state = _until(
                 bound, f"{leg}: Worktrees launch did not bind the common broker",
-                timeout=60 if control == "manager-no-mux" else 30,
+                timeout=60 if manager else 30,
                 diagnostic=lambda: (
                     query("capture-pane", "-p", "-t", target).stdout[-8192:]
                     + "\n" + pane_process()
+                    + "\n" + query("capture-pane", "-p", "-t", outer_target).stdout[-8192:]
+                    + "\n" + pane_process(outer_target)
                     + "\n" + json.dumps([
                         {key: value for key, value in json.loads(
                             path.read_text(encoding="utf-8")
@@ -401,6 +501,10 @@ class Mux {
                         ).get("events", [])]
                         for path in record.parent.glob("launch-attempts/*/*.execution.json")
                     ])
+                    + "\n" + json.dumps([
+                        str(path.relative_to(record.parent))
+                        for path in record.parent.glob("launch-attempts/**/*.json")
+                    ])
                     + "\n" + query(
                         "display-message", "-p", "-t", target,
                         "#{pane_pid}|#{pane_current_command}|#{pane_start_command}|#{pane_dead}",
@@ -410,11 +514,31 @@ class Mux {
                         path.read_text(encoding="utf-8", errors="replace")[-4096:]
                         for path in (tmp_path / ("logs-" + leg)).glob("*.log")
                     )
+                    + "\n" + "\n".join(
+                        path.read_text(encoding="utf-8", errors="replace")[-8192:]
+                        for path in (
+                            *(temporary / "worktree-setup-logs").glob("setup-*.log"),
+                            *((tmp_path / "mux-commands.txt",)
+                              if (tmp_path / "mux-commands.txt").exists() else ()),
+                        )
+                    )
                 ),
             )
             histories.append(state)
             assert state["session_id"] == native and state["restoration"] == "unqualified"
             assert pid_alive(state["pid"]) and pid_alive(state["child_pid"])
+            if control == "manager-mux":
+                assert target in identities
+                _until(
+                    result_file.exists, f"{leg}: nested Manager caller did not return",
+                    timeout=60, diagnostic=caller_diagnostics,
+                )
+                assert result_file.read_text(encoding="utf-8") == "0"
+                _until(
+                    lambda: query("has-session", "-t", outer_target).returncode == 1,
+                    f"{leg}: original Manager caller pane did not close",
+                )
+                assert pid_alive(state["pid"]) and pid_alive(state["child_pid"])
             event_file = home / "session-state" / native / "events.jsonl"
 
             def messages():
@@ -430,6 +554,41 @@ class Mux {
                 lambda: sum(event["type"] == "assistant.turn_end" for event in messages()) >= expected_before,
                 f"{leg}: native history did not restore or finish its original seed",
             )
+            if control == "manager-mux":
+                identities.pop(outer_target)
+                outer_target = "headed-fixture-" + uuid4().hex
+                result_file.unlink()
+                owner_ready.unlink()
+                owner_log.unlink()
+                assert query("has-session", "-t", outer_target).returncode == 1
+                reused = query(
+                    "new-session", "-d", "-s", outer_target, "-c", str(checkout),
+                    *caller_environment, "--", *caller_command,
+                )
+                assert reused.returncode == 0, reused.stderr
+                observed = query(
+                    "display-message", "-p", "-t", outer_target,
+                    "#{session_id}:#{session_created}|#{pane_id}",
+                )
+                assert observed.returncode == 0 and "|" in observed.stdout
+                identities[outer_target] = observed.stdout.strip()
+                owner_ready.write_text("ready", encoding="utf-8")
+                _until(
+                    result_file.exists, f"{leg}: Manager reuse caller did not return",
+                    timeout=60, diagnostic=caller_diagnostics,
+                )
+                assert result_file.read_text(encoding="utf-8") == "0", owner_log.read_text(encoding="utf-8")
+                _until(
+                    lambda: query("has-session", "-t", outer_target).returncode == 1,
+                    f"{leg}: Manager reuse caller pane did not close",
+                )
+                observed = query(
+                    "display-message", "-p", "-t", target,
+                    "#{session_id}:#{session_created}|#{pane_id}",
+                )
+                assert observed.returncode == 0 and observed.stdout.strip() == identities[target]
+                assert state["child_process_start_time"] == process_start_time(state["child_pid"])
+                assert state["host_process_start_time"] == process_start_time(state["host_pid"])
             asyncio.run(broker(state, prompt=prompts[1] if leg == "fresh" else prompts[-1]))
             expected = prompts[:2] if leg == "fresh" else prompts
             if control == "native-input" and leg == "fresh":
@@ -445,11 +604,15 @@ class Mux {
                 expected = prompts[:3]
             assert [event["data"]["content"] for event in messages() if event["type"] == "user.message"] == expected
             execution_files = list(attempt.glob("*.execution.json"))
-            executions = [
-                json.loads(path.read_text(encoding="utf-8"))
-                for path in execution_files
-            ]
-            backend, = executions
+            execution_file, = execution_files
+
+            def spawned_receipt():
+                receipt = json.loads(execution_file.read_text(encoding="utf-8"))
+                return receipt if any(
+                    event["phase"] == "process-spawned" for event in receipt["events"]
+                ) else None
+
+            backend = _until(spawned_receipt, f"{leg}: native execution did not publish its process receipt")
             spawned, = [event for event in backend["events"] if event["phase"] == "process-spawned"]
             assert spawned["details"]["pid"] == state["child_pid"] != state["host_pid"]
             birth = spawned["details"]["process_start_time"]
@@ -471,18 +634,25 @@ class Mux {
             assert exited["state"] == "child_exited"
             exit_code = exited["child_exit_code"]
             assert type(exit_code) is int
-            finished = json.loads(execution_files[0].read_text(encoding="utf-8"))
+
+            def returned():
+                receipt = json.loads(execution_file.read_text(encoding="utf-8"))
+                return receipt if receipt["events"][-1]["phase"] == "execution-returned" else None
+
+            finished = _until(returned, f"{leg}: native execution did not publish its exit receipt")
             terminal = finished["events"][-1]
             assert terminal["phase"] == "execution-returned"
             assert terminal["details"] == {
                 "exit_code": exit_code, "process_exit_code": exit_code, "receipt_uncertain": False,
             }
-            assert int(result_file.read_text(encoding="utf-8")) == exit_code
+            assert int(result_file.read_text(encoding="utf-8")) == (
+                0 if control == "manager-mux" else exit_code
+            )
             _until(
                 lambda: query("has-session", "-t", target).returncode == 1,
                 f"{leg}: original fixture pane did not close",
             )
-            identity, state = None, None
+            identities, state = {}, None
         assert (
             histories[0]["child_pid"], histories[0]["child_process_start_time"],
         ) != (histories[1]["child_pid"], histories[1]["child_process_start_time"])
@@ -491,18 +661,24 @@ class Mux {
             home / "session-state" / native / "events.jsonl",
         ]
         assert not (home / "permissions-config.json").exists()
+        if control == "manager-mux":
+            commands = (tmp_path / "mux-commands.txt").read_text(encoding="utf-8").splitlines()
+            assert commands.count("new-session") == 2
+            assert "set-option" in commands and "source-file" in commands
     finally:
         try:
             if state is not None and pid_alive(state["pid"]):
                 asyncio.run(broker(state, stop=True))
-            present = query("has-session", "-t", target)
-            assert present.returncode in (0, 1), present.stderr
-            if present.returncode == 0:
-                observed = query(
-                    "display-message", "-p", "-t", target, "#{session_id}:#{session_created}|#{pane_id}",
-                )
-                assert identity is not None and observed.returncode == 0 and observed.stdout.strip() == identity
-                assert query("kill-session", "-t", target).returncode == 0
+            for owned_target in dict.fromkeys((outer_target, target)):
+                present = query("has-session", "-t", owned_target)
+                assert present.returncode in (0, 1), present.stderr
+                if present.returncode == 0:
+                    observed = query(
+                        "display-message", "-p", "-t", owned_target,
+                        "#{session_id}:#{session_created}|#{pane_id}",
+                    )
+                    assert observed.returncode == 0 and observed.stdout.strip() == identities.get(owned_target)
+                    assert query("kill-session", "-t", owned_target).returncode == 0
         finally:
             provider.shutdown()
             provider.server_close()
