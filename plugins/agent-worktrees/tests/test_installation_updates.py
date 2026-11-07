@@ -64,6 +64,31 @@ def test_inventory_is_read_only_and_does_not_confuse_versions(installed, monkeyp
     assert before == {p: p.read_bytes() for p in before}
 
 
+@pytest.mark.parametrize("capable", [False, True])
+def test_inventory_advertises_delegation_only_with_a_capable_driver(installed, monkeypatch, capable):
+    driver = SimpleNamespace(
+        UPDATE_AUTHORITY_CAPABILITY="suite-update-authority/v1" if capable else None,
+        current_authority=lambda **_kwargs: None,
+        borrowed_custody=lambda: None,
+        participant_environment=lambda: {},
+        status=lambda *_args, **_kwargs: None,
+        runtime_command=lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setitem(sys.modules, "update_driver", driver)
+    capability = owner.inventory()["project_controller_delegation"]
+    assert capability == ({
+        "schema": "copilot-extensions.project-update-delegation",
+        "version": 1, "engine_fallback": True,
+    } if capable else None)
+
+
+def test_inventory_does_not_advertise_an_incomplete_driver(installed, monkeypatch):
+    monkeypatch.setitem(sys.modules, "update_driver", SimpleNamespace(
+        UPDATE_AUTHORITY_CAPABILITY="suite-update-authority/v1",
+    ))
+    assert owner.inventory()["project_controller_delegation"] is None
+
+
 def test_inventory_does_not_spawn_current_footprint_probes(installed, monkeypatch, tmp_path):
     engine = tmp_path / "agent-worktrees"
     (engine / "scripts").mkdir(parents=True)

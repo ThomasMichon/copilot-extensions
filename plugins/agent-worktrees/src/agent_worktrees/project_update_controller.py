@@ -14,6 +14,24 @@ from . import config as cfg
 from . import output, update_options
 
 PROBE_TIMEOUT = 30
+DELEGATION_SCHEMA = "copilot-extensions.project-update-delegation"
+DELEGATION_VERSION = 1
+
+
+def delegation_capability():
+    """Advertise only the selected runtime's usable driver-backed seam."""
+    try:
+        import update_driver
+    except ImportError:
+        return None
+    if (
+        getattr(update_driver, "UPDATE_AUTHORITY_CAPABILITY", None) != "suite-update-authority/v1"
+        or any(not callable(getattr(update_driver, name, None)) for name in (
+            "current_authority", "borrowed_custody", "participant_environment", "status", "runtime_command",
+        ))
+    ):
+        return None
+    return {"schema": DELEGATION_SCHEMA, "version": DELEGATION_VERSION, "engine_fallback": True}
 
 
 def dispatch_update(args, auth, manager, standalone) -> int:
