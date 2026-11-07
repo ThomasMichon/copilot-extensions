@@ -478,6 +478,36 @@ def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config, request):
     scripts.mkdir(parents=True, exist_ok=True)
     for name in ("post-tool-hook.ps1", "hook-facts.ps1"):
         shutil.copyfile(PLUGIN / "scripts" / name, scripts / name)
+    if os.environ.get("AGENT_WORKTREES_CAPTURE_SEND_EXIT") == "1":
+        copied_sender = scripts / "hook-facts.ps1"
+        sender = copied_sender.read_text(encoding="utf-8")
+        original = """    } catch {} finally {
+        if ($null -ne $client) { $client.Dispose() }
+    }
+}
+
+function Get-PostToolRuntimeRoot"""
+        captured = """    } catch {
+        $sendError = $_.Exception.GetType().FullName + ': ' + $_.Exception.Message
+    } finally {
+        $exitMs = if ($null -ne $clock) { $clock.Elapsed.TotalMilliseconds } else { $null }
+        try {
+            [IO.File]::WriteAllText(
+                (Join-Path $PSScriptRoot 'send-exit.json'),
+                (ConvertTo-Json -Compress -InputObject @{
+                    elapsed_ms = $exitMs; remaining_ms = $remaining
+                    error = $sendError; connected = ($null -ne $client -and $client.Connected)
+                })
+            )
+        } finally {
+            if ($null -ne $client) { $client.Dispose() }
+        }
+    }
+}
+
+function Get-PostToolRuntimeRoot"""
+        assert sender.count(original) == 1
+        copied_sender.write_text(sender.replace(original, captured), encoding="utf-8")
     with (scripts / "post-tool-hook.ps1").open("a", encoding="utf-8") as stream:
         stream.write("\nfunction Invoke-ResidentPostTool { throw 'synchronous resident call' }\n")
     original = str(PLUGIN / "scripts" / "managed-session.ps1").replace("'", "''")
@@ -536,7 +566,12 @@ def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config, request):
         )
         yield fixture
     finally:
-        runtime.shutdown()
+        try:
+            observation = scripts / "send-exit.json"
+            if observation.exists():
+                print("send_exit=" + observation.read_text(encoding="utf-8"))
+        finally:
+            runtime.shutdown()
 
 
 @pytest.mark.portfolio_tier("T2")

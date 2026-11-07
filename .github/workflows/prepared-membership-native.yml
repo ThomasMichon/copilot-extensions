@@ -37,8 +37,9 @@ jobs:
       - name: Require actual Windows PowerShell and PowerShell 7 membership and post-tool controls
         env:
           AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP: "1"
+          AGENT_WORKTREES_CAPTURE_SEND_EXIT: "1"
           PYTHONUTF8: "0"
-          PYTEST_ADDOPTS: "-vv --tb=short --durations=10"
+          PYTEST_ADDOPTS: "-vv -rP --tb=short --durations=10"
         run: >-
           python tools/run-plugin-tests.py agent-worktrees
           --test-file tests/test_managed_session.py
