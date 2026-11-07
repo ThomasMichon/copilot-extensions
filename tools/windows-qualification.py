@@ -172,9 +172,9 @@ class Client:
         if not published:
             try:
                 value["envelope_sha"] = self.transport.append(candidate, persist)
-            except Exception:
+            except Exception as exc:
                 raise RuntimeError(
-                    f"transport incomplete; resume --request-id {value['request_id']}",
+                    f"transport incomplete ({exc}); resume --request-id {value['request_id']}",
                 ) from None
             self.save(directory, state)
 

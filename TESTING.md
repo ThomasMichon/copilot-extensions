@@ -88,6 +88,14 @@ submitted public source; there is no automatic ref cleanup. Provider rejection
 of this namespace is an explicit unsupported transport, not permission to
 create a different ref silently.
 
+The fixed-ref envelope push uses the native mediated-push marker in that
+child's environment only, so older worktree PR hooks admit the transport
+without disabling local hooks. Its command boundary rejects branch, force
+and deletion refspecs and suppresses automatic tag following. No installed
+hook, shared Git configuration or ordinary source-push policy is changed.
+Rejected pushes retain their bounded diagnostic with the original request;
+an absent or uncertain effect is not permission for automatic replay.
+
 The client emits a request ID before effects and stores its state under the
 current worktree's Git metadata (`windows-qualification/<id>`). `status` and
 `wait` resolve that same run, not the latest successful workflow.
@@ -109,6 +117,13 @@ unsupported or partial selections never become unconditional qualification.
 The result command exits zero only for qualification, one for a returned
 failed/incomplete result, and two for an unavailable or invalid result.
 Artifacts are immutable run evidence, not patches to execute or apply.
+
+Tool execution imports the selected candidate's canonical containment and
+environment helpers before pytest, keeping its sandbox roots aligned with
+that source's test policy even when the protected controller is older.
+A tool pytest exit 5 with an actual empty JUnit report returns `incomplete`
+with `incomplete_reason: empty-selection`. Missing JUnit and other failing
+commands remain `failed`; neither outcome returns qualification success.
 
 ## Per-test diagnosis and residual runs
 

@@ -111,9 +111,9 @@ not replayed under a new request identifier.
   packets; make broad suite selection explicit and keep canonical bounds.
 - [x] Return source/request/selector/platform-bound results, named progress,
   available JUnit, logs and generated evidence through ordinary Actions artifacts.
-- [ ] Prove the complete local submit, hosted run, status and result path on a
+- [x] Prove the complete local submit, hosted run, status and result path on a
   real focused Windows consumer, not a synthetic success marker.
-- [ ] Publish and merge the complete flow through normal review and required CI.
+- [x] Publish and merge the complete flow through normal review and required CI.
 
 ### Phase 3 - Qualify reuse and close the effort
 
@@ -121,22 +121,22 @@ not replayed under a new request identifier.
   or lose an older requested source when the transport ref advances.
 - [ ] Prove denied admission, failed tests, empty selections, interrupted
   submission, unknown dispatch and handled timeout retain truthful outcomes.
-- [ ] Document the actual command, source/ref retention and evidence limits in
+- [x] Document the actual command, source/ref retention and evidence limits in
   TESTING.md and contributor guidance.
-- [ ] Confirm the workflow reaches the default branch through normal promotion
+- [x] Confirm the workflow reaches the default branch through normal promotion
   and demonstrate actual hosted execution of that released control.
 - [ ] Resolve every Plan/Validation item, mark Done, archive and finalize.
 - [ ] Return to the still-open Driver effort's exact-source qualification gate.
 
 ## Validation Plan
 
-- [ ] Unit controls reject non-owner/rerun/non-control-ref admission, malformed
+- [x] Unit controls reject non-owner/rerun/non-control-ref admission, malformed
   requests, unsafe paths, arbitrary commands and implicit whole-suite requests.
 - [ ] Real Git controls preserve exact source identity, local branch/index/tree,
   old requests and unrelated refs across shared-ref contention and bounded retry.
 - [ ] The actual request/result client distinguishes accepted, pending, unknown,
   failed and qualified outcomes and never silently resubmits unknown effects.
-- [ ] Missing or unsupported hosted control is reported before staging or
+- [x] Missing or unsupported hosted control is reported before staging or
   dispatch; supported caller/controller versions retain their declared meaning.
 - [ ] Focused test identities, selection, skips, source SHA, workflow control,
   platform and artifact identity remain explicit in results.
@@ -219,3 +219,90 @@ guard for tool execution with private pytest scratch. All 59 focused controls
 now pass, including the new cross-worktree, descendant-contention and actual
 T3/T4 opt-in regressions. Review, refreshed CI, promotion and live hosted
 acceptance remain open; no qualification ref or run has been created.
+
+### 2026-11-07 - Implementation merged; hosted acceptance next
+
+#11187 merged as `88e91b14daafe9191c3e21f49eff68e7cb3a831d` after a
+genuine current-head Copilot review with no open issues and green required
+checks. The ordinary owner-authored clean-Comment policy and configured
+review-rule exception applied; no CI gate was bypassed.
+
+Pulled the same source worktree forward after retaining the merged source.
+The next slice is Phase 3: normal default-branch promotion, real focused
+Windows submit/status/result execution, shared-ref reuse and truthful failure
+acceptance. The complete hosted flow remains unchecked, and the effort stays
+Active. No hosted qualification request or transport ref exists yet.
+
+The exact merged Dev CI passed on its second attempt after the original
+queued run was cancelled before executing jobs. Normal promotion run
+`42325551793` then passed source units, native Windows Resume startup,
+artifact build and attestation, but failed in the promotion job while
+initializing the Sigstore verifier. This matches the recurring symptom
+tracked in #10651; it is not evidence of an artifact mismatch, and its
+underlying transient classification remains unconfirmed. No candidate PR
+was created. The already-running normal successor `42326592274` is being
+observed without weakening verification or force-retrying the failed lane.
+
+### 2026-11-07 - Released focused flow accepted; transport integration correction
+
+Normal successor `42326592274` passed all promotion stages. Protected Main
+advertises request/result version 1 at controller
+`7e4f306d32c4ae2ed53d4ee846dc0e32ec9c0c5d`.
+
+The actual source-owned submit/status/result flow accepted published source
+`88e91b14daafe9191c3e21f49eff68e7cb3a831d`, request
+`362a52b5c83f4f1189799fa50061c332`, run
+[42328654960](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42328654960),
+attempt 1. Downloaded artifact `13556895146` passed the client's request,
+source, controller, run/attempt, selection and Windows identity checks.
+All 53 selected `tools/test_windows_qualification.py` cases passed in 6.359
+seconds of worker execution on image `win25-vs2026` / `20261103.298.1`,
+Windows Server 2025, AMD64, with controller and test Python 3.12.10.
+The validated manifest SHA-256 is
+`52954b177ae108930a08837ff28caf08fcbe6db73f79a40a778fd5abd779791b`.
+This is genuine hosted qualification, not evidence that local-only transport
+or the separate Driver packet has passed.
+
+Two concurrent local-only candidate submissions stopped before dispatch.
+Read-only remote reconciliation found no reserved ref, and a dry run of the
+original push exposed the local legacy worktree PR guard's blanket refusal.
+This is not evidence that GitHub rejects the non-branch namespace. Both
+original request records and envelope identities remain retained; their
+unconfirmed state is not silently retried or rewritten.
+
+The compatibility correction scopes the existing native mediated-push marker
+to the exact fixed-ref envelope push's private child environment. The boundary
+refuses branch, force and deletion refspecs and suppresses automatic tag
+following; it does not change installed hooks, shared Git configuration,
+ordinary publication rules or chained local hooks. Bounded rejection
+diagnostics stay with the original request. All 64 focused controls and
+touched Python F/E9 lint pass, including the actual native legacy guard,
+local-hook chaining and unrelated-tag preservation. Review, required CI and
+live shared-ref/reuse/failure acceptance remain open.
+
+### 2026-11-07 - Hosted schema skew and result precision
+
+The explicit unmatched-selector request returned a bound failed result with
+zero tests and client exit 1 in run
+[42329653508](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42329653508).
+It never qualified. Refined the tool adapter to distinguish pytest's known
+empty-collection exit 5 with actual empty JUnit as `incomplete`; missing
+reports and genuine failures still fail.
+
+Hosted request `54a2668253d2414aba3b55033c2330ea`, run
+[42330310109](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42330310109),
+tested correction head `dbea2f3c48cb848dd9caa31227069f35cc789d43`.
+Its older protected controller's containment helper omitted sandbox roots
+required by the newer candidate's pytest policy. Collection refused with
+exit 4 before tests ran; this is not a test pass or a provider admission
+failure. The tool subprocess now selects the candidate's canonical
+containment/environment helper source before execution, as the plugin
+runner already does. A future-root schema regression proves the candidate
+owner supplies its own private environment.
+
+Review of #11213 also identified Windows shell-hook newline translation and
+porcelain push rejection details living on stdout. The fixture writes LF
+explicitly; bounded stdout and stderr are both retained and surfaced.
+All 11 targeted classification/schema/hook/diagnostic controls and touched
+Python F/E9 lint pass after these changes. Required review/CI, promotion of
+the updated controller, and hosted revalidation remain open.
