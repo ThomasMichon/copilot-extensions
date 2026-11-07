@@ -714,6 +714,8 @@ class MuxDaemonRuntime:
             "status": "draining" if self.draining else "ready",
             "version": __version__,
             "runtime_generation": running_generation(),
+            "pid": os.getpid(),
+            "process_start_time": process_start_time(os.getpid()),
             "active": not self.passive and self.accepting_requests(),
             "attached_clients": attached_clients,
             "busy": active_handlers > 0 or self.picker_sessions.busy,
