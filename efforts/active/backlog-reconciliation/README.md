@@ -233,6 +233,14 @@ implementation authority, resource custody or the fixed checkpoint.
 
 ## Plan
 
+The [documentary and retained-wake study](<journal/2026/11.06 documentary-and-retained-wake-study.md>)
+keeps the three Manager/MCP contracts separate and preserves the complete
+eight-effort layout and retained-conversation wake obligations. Whole-source
+holds, extract-only evidence and static partial credit establish no new
+closure or custody release. Two equal complete scans remain at 812 whole OPEN,
+83 above fixed 729; Phase 2 remains Active and every completion checkbox is
+unchanged.
+
 After reviewed #11272, complete actual #6917 receiving and separate fresh
 judgments, #11263/#11266 are retired NOT_PLANNED without technical completion
 or custody release. The [receiving follow-through](<journal/2026/11.06 independent-managed-validation-intake.md>)
@@ -2898,6 +2906,14 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [documentary and retained-wake study](<journal/2026/11.06 documentary-and-retained-wake-study.md>)
+records independent current metadata/source-identity checks, exhausted bounded
+studies and the original-packet sequencing deviation without retroactive repair.
+Eight-effort migration, complete hosted-wake route/lifecycle acceptance and
+the compatibility root's whole-program gate remain unresolved. Existing
+technical acceptance, source/resource custodians and campaign completion stay
+unchanged; no product or native validation is claimed.
 
 The [reviewed receiving follow-through](<journal/2026/11.06 independent-managed-validation-intake.md>)
 resolves only the two separate tracking judgments after exact-head review/CI
