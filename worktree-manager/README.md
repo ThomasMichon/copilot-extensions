@@ -941,7 +941,12 @@ starting a daemon or creating a control credential. It reports `ready` with
 the actual serving generation, `inactive` only when no route or ownership
 markers exist, and otherwise `unknown`. Health binds the routed PID and birth
 identity; older health replies are admitted only when the authenticated
-rendezvous independently matches the route.
+rendezvous independently matches the route. An unresolved cutover breadcrumb
+is never reported as a ready or inactive owner. `--lock-paths` describes this
+runtime's cutover, routing and spawn lock paths without acquiring them.
+`--unfenced-absence` ignores those lock files but reports only
+`unfenced-absence`, not verified inactivity: a coordinating caller must hold
+all three corresponding native locks and recheck before relying on it.
 
 The selected, complete physical Manager runtime also provides
 `python -m worktree_manager.mux_serving_reconcile --root <manager-root>`.

@@ -33,6 +33,41 @@ def test_unrouted_rendezvous_is_not_assumed_inactive(tmp_path: Path, marker) -> 
     assert not mux_daemon_cutover.control_token_path(tmp_path).exists()
 
 
+def test_unfenced_absence_distinguishes_custody_files_from_rendezvous(tmp_path: Path, capsys) -> None:
+    directory = mux_daemon_cutover.routing_dir(tmp_path)
+    directory.mkdir()
+    mux_daemon_cutover._cutover_lock_path(tmp_path).touch()
+    (directory / "active.lock").touch()
+    (tmp_path / "mux-daemon.spawn.lock").touch()
+    with pytest.raises(mux_serving_observation.ServingObservationError):
+        mux_serving_observation.observe(tmp_path)
+    assert mux_serving_observation.observe(tmp_path, ignore_custody_files=True) == {
+        "state": "unfenced-absence", "generation": None,
+    }
+    assert mux_serving_observation.main(["--root", str(tmp_path), "--unfenced-absence"]) == 0
+    assert json.loads(capsys.readouterr().out)["state"] == "unfenced-absence"
+    (tmp_path / "mux-daemon.lock").touch()
+    with pytest.raises(mux_serving_observation.ServingObservationError):
+        mux_serving_observation.observe(tmp_path, ignore_custody_files=True)
+
+
+def test_lock_paths_are_resolved_by_the_manager_owner_without_creating_them(tmp_path, monkeypatch, capsys):
+    from worktree_manager import mux_daemon_process, runtime_identity
+    from zdd import routing
+
+    monkeypatch.setattr(runtime_identity, "running_generation", lambda: "2.0")
+    assert mux_serving_observation.main(["--root", str(tmp_path), "--lock-paths"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result == {
+        "schema": "worktree-manager.mux-serving-locks", "version": 1, "ok": True,
+        "runtime_generation": "2.0",
+        "cutover": str(mux_daemon_cutover._cutover_lock_path(tmp_path)),
+        "routing": str(mux_daemon_cutover.routing_dir(tmp_path) / routing._LOCK_FILENAME),
+        "spawn": str(mux_daemon_process.spawn_lock_path(tmp_path)),
+    }
+    assert not mux_daemon_cutover.routing_dir(tmp_path).exists()
+
+
 def test_unrecognized_route_file_is_not_assumed_inactive(tmp_path: Path) -> None:
     directory = mux_daemon_cutover.routing_dir(tmp_path)
     directory.mkdir()
@@ -207,6 +242,30 @@ def test_observation_confirms_active_generation_and_native_identity(serving):
         "state": "ready", "generation": table["active"]["version"],
     }
     assert mux_daemon_cutover.control_token_path(root).read_text(encoding="utf-8") == "fixture-control"
+
+
+@pytest.mark.parametrize("when", ["before", "during-health"])
+def test_observation_refuses_unsettled_cutover(serving, monkeypatch, when):
+    from zdd import breadcrumb
+
+    root, _table, health = serving
+    directory = mux_daemon_cutover.routing_dir(root)
+    directory.mkdir()
+    path = breadcrumb.breadcrumb_path(directory)
+    if when == "before":
+        path.write_text("{}", encoding="utf-8")
+    else:
+        class Client:
+            def __init__(self, *_args, **_kwargs):
+                pass
+
+            def health(self):
+                path.write_text("{}", encoding="utf-8")
+                return dict(health)
+
+        monkeypatch.setattr(mux_daemon_cutover, "ControlClient", Client)
+    with pytest.raises(mux_serving_observation.ServingObservationError):
+        mux_serving_observation.observe(root)
 
 
 def test_stale_previous_record_does_not_mask_current_serving_owner(serving):
