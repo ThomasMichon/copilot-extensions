@@ -83,7 +83,12 @@ def test_provider_refuses_actual_descendant_links(provider_files, tmp_path, targ
             )
 
 
-def test_provider_child_receives_no_mixed_case_python_overrides(tmp_path, monkeypatch):
+@pytest.mark.parametrize("linked_interpreter", [False, True])
+def test_provider_child_receives_no_mixed_case_python_overrides(
+    tmp_path, monkeypatch, linked_interpreter,
+):
+    if linked_interpreter and os.name == "nt":
+        pytest.skip("POSIX virtual environments use linked Python interpreters")
     repo = Path(__file__).resolve().parents[2]
     monkeypatch.syspath_prepend(str(repo / "tools"))
     import materialize_launch_wrapper_assets
@@ -107,14 +112,16 @@ def test_provider_child_receives_no_mixed_case_python_overrides(tmp_path, monkey
         "blocked={'PYTHONPATH','PYTHONHOME','VIRTUAL_ENV','__PYVENV_LAUNCHER__'}\n"
         "(output.parent/'environment.json').write_text(json.dumps({\n"
         " 'blocked':[name for name in os.environ if name.upper() in blocked],\n"
-        " 'kept':os.environ.get('PROVIDER_KEEP')}))\n"
+        " 'kept':os.environ.get('PROVIDER_KEEP'),'prefix':sys.prefix,'executable':sys.executable}))\n"
         "runpy.run_path(str(pathlib.Path(__file__).with_name("
         "'_canonical_prepare_manager_application.py')),run_name='__main__')\n",
         encoding="utf-8",
     )
     tooling = tmp_path / "tooling"
-    venv.EnvBuilder(with_pip=False, symlinks=False).create(tooling)
+    venv.EnvBuilder(with_pip=False, symlinks=linked_interpreter).create(tooling)
     executable = tooling / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    if linked_interpreter:
+        assert executable.is_symlink()
     site = Path(sysconfig.get_paths(
         scheme="venv", vars={"base": str(tooling), "platbase": str(tooling)},
     )["purelib"])
@@ -140,7 +147,7 @@ def test_provider_child_receives_no_mixed_case_python_overrides(tmp_path, monkey
         )
     assert not output.exists()
     assert json.loads((tmp_path / "environment.json").read_text()) == {
-        "blocked": [], "kept": "preserved",
+        "blocked": [], "kept": "preserved", "prefix": str(tooling), "executable": str(executable),
     }
 
 

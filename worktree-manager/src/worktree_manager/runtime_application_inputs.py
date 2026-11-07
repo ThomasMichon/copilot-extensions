@@ -71,6 +71,9 @@ def prepare_application_inputs(
     for path in (snapshot, output, python, tooling_python, uv):
         if not path.is_absolute():
             raise ValueError("Manager input provider requires absolute input and executable paths")
+        if ".." in path.parts:
+            raise ValueError("Manager input provider paths must not contain parent traversal")
+    for path in (snapshot, output):
         _ordinary(path)
     if not all(path.is_file() for path in (python, tooling_python, uv)):
         raise ValueError("Manager input provider selected executable is unavailable")
