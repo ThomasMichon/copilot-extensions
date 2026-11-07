@@ -686,14 +686,19 @@ scope. Domain-specific requirements retain their owning contracts.
 before an adopter enables this setting. An older Worktrees reader ignoring the
 key does not enforce it; do not enable or retain a mandatory requirement through
 such a downgrade. The selected Machines distribution must carry
-`agent_machines/installation-repair-v1.json` with required-selection version `1`,
-read-only support and project-root identity. Missing, invalid or unsupported
+`agent_machines/installation-repair-v1.json` with required-selection and
+`caller_owned_readiness` capability version `1`, read-only support and project-root
+identity. The enclosing read uses `--caller-owned-readiness` so POSIX probes
+cannot detach from the finite owner's group; Windows retains Job containment.
+Missing, invalid or unsupported
 Machines metadata refuses only an opted-in New operation, without trying a weaker
 selection or self-provisioning. Newer payload metadata is not runtime support.
 Legacy completed slots and validated same-cell peers use their existing native
-runtime selectors and retained build identity; an unqualified selection is
+runtime selectors. Legacy invokes the exact completed interpreter directly;
+same-cell peers retain their pinned build identity. An unqualified selection is
 unavailable, not permission to fall back across installations. These additive
-declarations introduce no new CLI syntax or deprecation.
+declarations preserve standalone syntax and introduce no deprecation; the new
+enclosing-lifetime mode is emitted only after its provider capability is qualified.
 
 ### Project-native plugin settings
 

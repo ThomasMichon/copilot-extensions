@@ -9,15 +9,18 @@ started marker, preserving retained request/allocation identity through refusal.
 Source-only allocation, existing-session and recovery paths remain unchanged.
 
 `application_admission` selects the existing Machines owner through validated
-same-cell peer launch or the legacy owner's completed-runtime resolver and
-retained build identity. It reads support from that selected runtime, then
+same-cell peer launch with retained build identity or the legacy owner's exact
+completed interpreter. It reads support from that selected runtime, then
 consumes only the existing read-only required-module conductor result for the
 exact source repository. Caller-owned timeout/stream/cleanup bounds apply;
 unavailable, malformed, incomplete or changed observations refuse. No payload
 version or PATH command certifies support, and no repair or authentication
 operation runs. The [configuration contract](config-reference.md#required-applications-before-new-authoring)
 owns adoption, rollback and remediation; Machines retains inventory, module
-classification, readiness and restart truth.
+classification, readiness and restart truth. The capability-qualified
+caller-owned read keeps POSIX probes in the enclosing native group rather than
+separate sessions; the outer owner settles that complete lifetime before return.
+Standalone Machines observation and explicit repair retain their existing owners.
 
 ## Related/config acquisition reports
 

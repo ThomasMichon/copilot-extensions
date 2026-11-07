@@ -23,6 +23,7 @@ def _observation(source):
     return {
         "schema": "copilot-extensions.installation-repair", "version": 1,
         "projectRoot": str(Path(source).resolve()), "requiredSelection": True,
+        "callerOwnedReadiness": True,
         "apply": False, "status": "observed", "requiredSatisfied": True,
         "interrupted": False, "selectionRefusal": None,
         "selected": [], "outcomes": [], "refusedOwners": {}, "discoveryFindings": [],
@@ -41,6 +42,7 @@ def test_unselected_repository_does_not_resolve_or_run_machines(tmp_path, monkey
     {"restarts": {"pending": [{"unexpected": "module"}]}},
     {"projectRoot": "another-repository"}, {"requiredSelection": False},
     {"version": True}, {"apply": True}, {"status": "discovered"},
+    {"callerOwnedReadiness": False},
     {"refusedOwners": {"example": "unavailable"}}, {"discoveryFindings": ["unknown"]},
     {"selected": ["example::app/core"]},
 ])
@@ -67,7 +69,8 @@ def test_qualified_empty_required_set_is_not_an_unobserved_pass(tmp_path, monkey
     monkeypatch.setattr(admission, "run_caller_owned", run)
     assert admission.new_application_error(config, source=config.default_repo.anchor) is None
     assert calls[0][0] == [
-        "selected-owner", "installation-repair", "--project-root", config.default_repo.anchor, "--required",
+        "selected-owner", "installation-repair", "--project-root", config.default_repo.anchor,
+        "--required", "--caller-owned-readiness",
     ]
     assert "--apply" not in calls[0][0]
 
@@ -123,8 +126,8 @@ def test_application_requirement_rejects_nonboolean_configuration(tmp_path, valu
         )
 
 
-@pytest.mark.parametrize("version", [None, True, 2, 1])
-def test_support_comes_from_the_selected_runtime_not_a_payload(tmp_path, version):
+@pytest.mark.parametrize("version,scope", [(None, 1), (True, 1), (2, 1), (1, None), (1, True), (1, 1)])
+def test_support_comes_from_the_selected_runtime_not_a_payload(tmp_path, version, scope):
     environment = tmp_path / "selected" / ".venv"
     python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     package = environment / (
@@ -135,9 +138,12 @@ def test_support_comes_from_the_selected_runtime_not_a_payload(tmp_path, version
     if version is not None:
         (package / "installation-repair-v1.json").write_text(json.dumps({
             "schema": admission.SCHEMA, "version": version, "required_selection": 1,
+            "caller_owned_readiness": scope,
             "read_only": True, "target_identity": "project-root",
         }), encoding="utf-8")
-    assert admission._supports_required_read(python) is (type(version) is int and version == 1)
+    assert admission._supports_required_read(python) is (
+        type(version) is int and version == 1 and type(scope) is int and scope == 1
+    )
 
 
 def test_same_cell_observation_qualifies_and_keeps_the_pinned_runtime(tmp_path, monkeypatch):
@@ -183,7 +189,7 @@ def test_missing_support_or_refused_context_never_runs_the_read_or_falls_back(
     assert admission.new_application_error(config, source=config.default_repo.anchor)
 
 
-def test_legacy_observation_uses_owner_selection_and_retained_build(tmp_path, monkeypatch):
+def test_legacy_observation_keeps_the_owners_exact_completed_interpreter(tmp_path, monkeypatch):
     from agent_worktrees import _peer_launch, reconcile
     from types import SimpleNamespace
 
@@ -207,21 +213,13 @@ def test_legacy_observation_uses_owner_selection_and_retained_build(tmp_path, mo
         return python
 
     monkeypatch.setattr(_peer_launch, "_peer_python_inprocess", select)
-    monkeypatch.setattr(_peer_launch, "retained_runtime_identity", lambda *a: "retained-build")
-    pinned = []
-
-    def prefix(actual_root, actual_python, module, *, runtime_identity):
-        pinned.append((actual_root, actual_python, module, runtime_identity))
-        return ["retained-legacy-owner"]
-
-    monkeypatch.setattr(_peer_launch, "retained_runtime_prefix", prefix)
+    monkeypatch.setattr(_peer_launch, "retained_runtime_identity", lambda *a: pytest.fail("unavailable legacy bootstrap"))
     monkeypatch.setattr(admission, "_supports_required_read", lambda actual: actual == python)
     budget = admission.OwnedExecutionBudget(160, 5)
     command, environment = admission._selected_runtime(budget=budget)
-    assert command == ["retained-legacy-owner"]
+    assert command == [str(python), "-I", "-B", "-X", "utf8", "-m", "agent_machines"]
     assert selected[0]["payloadRoot"] == str(payload)
     assert selected[0]["versionsRoot"] == str(root / "versions")
-    assert pinned == [(root, python, "agent_machines", "retained-build")]
     assert seen_budgets == [budget]
     assert "COPILOT_PLUGIN_ROOT" not in environment
 

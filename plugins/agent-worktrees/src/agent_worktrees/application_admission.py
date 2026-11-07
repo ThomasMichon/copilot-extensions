@@ -34,6 +34,7 @@ def _supports_required_read(python: Path) -> bool:
         isinstance(data, dict) and data.get("schema") == SCHEMA
         and type(data.get("version")) is int and data["version"] == 1
         and type(data.get("required_selection")) is int and data["required_selection"] == 1
+        and type(data.get("caller_owned_readiness")) is int and data["caller_owned_readiness"] == 1
         and data.get("read_only") is True
         and data.get("target_identity") == "project-root"
     )
@@ -66,10 +67,7 @@ def _selected_runtime(*, budget: OwnedExecutionBudget | None = None) -> tuple[li
         })
         if python is None:
             raise ValueError("Machines has no observable completed runtime")
-        identity = _peer_launch.retained_runtime_identity(root, python, "agent_machines")
-        prefix = _peer_launch.retained_runtime_prefix(
-            root, python, "agent_machines", runtime_identity=identity,
-        )
+        prefix = [str(python), "-I", "-B", "-X", "utf8", "-m", "agent_machines"]
         environment = _peer_launch.legacy_peer_environment(dict(os.environ))
     if not _supports_required_read(python):
         raise ValueError("The selected Machines runtime does not support required application observation")
@@ -83,6 +81,7 @@ def _ready(result: subprocess.CompletedProcess, source: str) -> bool:
             result.returncode != 0 or not isinstance(data, dict) or data.get("schema") != SCHEMA
             or type(data.get("version")) is not int or data["version"] != 1
             or data.get("requiredSelection") is not True or data.get("apply") is not False
+            or data.get("callerOwnedReadiness") is not True
             or data.get("status") != "observed" or data.get("requiredSatisfied") is not True
             or data.get("interrupted") is not False or data["selectionRefusal"] is not None
             or data.get("refusedOwners") != {} or data.get("discoveryFindings") != []
@@ -132,7 +131,7 @@ def new_application_error(config, *, source: str) -> str | None:
         if remaining <= 0:
             raise TimeoutError("Required application selection exhausted its budget")
         result = run_caller_owned(
-            [*prefix, "installation-repair", "--project-root", source, "--required"],
+            [*prefix, "installation-repair", "--project-root", source, "--required", "--caller-owned-readiness"],
             timeout=remaining, max_stdout_bytes=1024 * 1024, max_stderr_bytes=65536,
             cwd=source, env=environment, budget=budget,
         )

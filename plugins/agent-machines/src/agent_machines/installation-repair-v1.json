@@ -2,6 +2,7 @@
   "schema": "copilot-extensions.installation-repair",
   "version": 1,
   "required_selection": 1,
+  "caller_owned_readiness": 1,
   "read_only": true,
   "target_identity": "project-root"
 }
