@@ -155,6 +155,16 @@ class Codec(ABC):
     def read_member(self, archive: Path, member: str) -> bytes | None:
         """Return the bytes of ``member`` from ``archive``, or ``None``."""
 
+    @contextmanager
+    def open_member(self, archive: Path, member: str) -> Iterator[BinaryIO | None]:
+        """Yield a readable binary stream over ``member``, or ``None`` if absent.
+
+        This default buffers :meth:`read_member`; built-in codecs override it
+        to decompress lazily so transcript-sized members are never held whole.
+        """
+        data = self.read_member(archive, member)
+        yield None if data is None else io.BytesIO(data)
+
     def read_member_bounded(
         self, archive: Path, member: str, *, max_bytes: int,
     ) -> bytes | None:
@@ -236,17 +246,43 @@ class TarGzCodec(Codec):
         finally:
             tmp.unlink(missing_ok=True)
 
+    @staticmethod
+    def _first_member(tar: tarfile.TarFile, target: str) -> BinaryIO | None:
+        """Stream the first entry named ``target``, reading headers only up to it.
+
+        ``TarFile.getmember`` loads every header (decompressing the whole
+        archive) and then rewinds to the *last* match, so a large member was
+        decompressed twice before its first byte. This walks headers forward
+        once and stops at the first entry with that exact name, so the member
+        streams from the current decompressor position. Duplicate names: the
+        first entry wins, and a non-regular first entry means "absent".
+        ``archive_dir`` never writes a name twice, and the strict scan behind
+        ``member_digests``/``read_member_bounded`` rejects duplicates.
+        """
+        for info in tar:
+            if info.name == target:
+                return tar.extractfile(info) if info.isfile() else None  # type: ignore[return-value]
+        return None
+
     def read_member(self, archive: Path, member: str) -> bytes | None:
         target = _validate_member_name(member)
         with tarfile.open(archive, "r:gz") as tar:
-            try:
-                info = tar.getmember(target)
-            except KeyError:
+            fh = self._first_member(tar, target)
+            if fh is None:
                 return None
-            if not info.isfile():
-                return None
-            fh = tar.extractfile(info)
-            return fh.read() if fh is not None else None
+            with fh:
+                return fh.read()
+
+    @contextmanager
+    def open_member(self, archive: Path, member: str) -> Iterator[BinaryIO | None]:
+        target = _validate_member_name(member)
+        with tarfile.open(archive, "r:gz") as tar:
+            fh = self._first_member(tar, target)
+            if fh is None:
+                yield None
+            else:
+                with fh:
+                    yield fh
 
     def extract_all(self, archive: Path, dest_dir: Path) -> None:
         dest_dir.mkdir(parents=True, exist_ok=True)
@@ -538,6 +574,27 @@ def _open_zip(path: Path) -> Iterator[zipfile.ZipFile]:
             yield archive
 
 
+class _ExactSizeReader(io.RawIOBase):
+    """Stream a ZIP member, failing if it ends before or after its declared size."""
+
+    def __init__(self, source: BinaryIO, size: int, label: str) -> None:
+        self._source = source
+        self._remaining = size
+        self._label = label
+
+    def readable(self) -> bool:
+        return True
+
+    def readinto(self, buffer: bytearray | memoryview) -> int:
+        view = memoryview(buffer).cast("B")
+        data = self._source.read(min(len(view), self._remaining + 1))
+        if len(data) > self._remaining or (not data and self._remaining and len(view)):
+            raise ValueError(f"truncated session ZIP member: {self._label!r}")
+        view[: len(data)] = data
+        self._remaining -= len(data)
+        return len(data)
+
+
 def _source_files(root: Path) -> Iterator[Path]:
     from agent_logger.sync.provenance import existing_real_directory, is_link_or_reparse
 
@@ -632,6 +689,19 @@ class ZipCodec(Codec):
             if len(data) != info.file_size:
                 raise ValueError(f"truncated session ZIP member: {info.filename!r}")
             return data
+
+    @contextmanager
+    def open_member(self, archive: Path, member: str) -> Iterator[BinaryIO | None]:
+        name = _validate_member_name(member)
+        with _open_zip(archive) as opened:
+            info = _zip_members(opened).get(name)
+            if info is None:
+                yield None
+            else:
+                with opened.open(info) as source:
+                    reader = _ExactSizeReader(source, info.file_size, info.filename)
+                    with io.BufferedReader(reader) as stream:
+                        yield stream
 
     def read_member_bounded(
         self, archive: Path, member: str, *, max_bytes: int,
