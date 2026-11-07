@@ -13,6 +13,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from agent_procutil import no_window_kwargs
 
 
 PLUGIN = Path(__file__).resolve().parents[1]
@@ -25,11 +26,15 @@ def _extract_loop() -> str:
     text = INSTALLER.read_text(encoding="utf-8")
     start = "foreach ($lib in @(\n    @{ Dir = 'dropin-registry';"
     end = "\n\n# -- 3. Install the package"
-    return start + text.split(start, 1)[1].split(end, 1)[0]
+    return "$workspaceRefresh = @()\n" + start + text.split(start, 1)[1].split(end, 1)[0]
 
 
 def _run(pwsh: str, plugin_dir: Path, have_uv: bool) -> subprocess.CompletedProcess[str]:
     loop = _extract_loop()
+    text = INSTALLER.read_text(encoding="utf-8")
+    install = text.split("# -- 3. Install the package", 1)[1].split("\n", 1)[1].split(
+        "$pkgResult =", 1
+    )[0]
     assert "--uv uv -- --python $VenvPython" in loop
     scripts = plugin_dir / "scripts"
     scripts.mkdir(parents=True)
@@ -59,6 +64,14 @@ function Invoke-StubVenvPython {{
     if ($haveUv -and $args[7] -ne '--reinstall-package') {{
         throw 'Preinstall omitted package reinstall'
     }}
+    if ($haveUv) {{
+        if ($args[-2] -ne $PluginDir -or @($args | Where-Object {{$_ -eq '--reinstall-package'}}).Count -ne 8) {{
+            throw 'Root transaction lost workspace refresh inputs'
+        }}
+        [Console]::Out.Write('ROOT_INSTALL:' + $args[-2] + '|')
+        $global:LASTEXITCODE = 0
+        return
+    }}
     [Console]::Out.Write("POLICY_INSTALL:" + $args[$pathIndex] + "|")
     $global:LASTEXITCODE = 0
 }}
@@ -66,7 +79,11 @@ $PSScriptRoot = '{scripts}'
 $VenvPython = 'Invoke-StubVenvPython'
 $PluginDir = '{plugin_dir}'
 $haveUv = ${str(have_uv).lower()}
+function Get-Command {{ param($Name) if ($Name -eq 'uv' -and $haveUv) {{'fixture-uv'}} }}
+function Remove-ConsoleTrampolines {{}}
+$CellMode=$false
 {loop}
+{install if have_uv else ""}
 """
     return subprocess.run(
         [pwsh, "-NoProfile", "-Command", script],
@@ -75,6 +92,7 @@ $haveUv = ${str(have_uv).lower()}
         encoding="utf-8",
         env={**os.environ},
         timeout=30,
+        **no_window_kwargs(),
     )
 
 
@@ -107,6 +125,10 @@ def test_preinstall_loop_resolves_plugin_local_copy_and_orders_correctly(
     installs = [
         seg.split(":", 1)[1] for seg in proc.stdout.split("|") if seg.startswith(marker)
     ]
+    if have_uv:
+        assert not installs
+        assert proc.stdout.count("ROOT_INSTALL:") == 1
+        return
     assert len(installs) == 8
     order = [Path(p).name for p in installs]
     assert "machine-transport" in order
@@ -137,6 +159,10 @@ def test_preinstall_loop_falls_back_to_repo_root_canonical_when_absent(
     installs = [
         seg.split(":", 1)[1] for seg in proc.stdout.split("|") if seg.startswith(marker)
     ]
+    if have_uv:
+        assert not installs
+        assert proc.stdout.count("ROOT_INSTALL:") == 1
+        return
     assert len(installs) == 8
     order = [Path(p).name for p in installs]
     assert order.index("remote-login-shell") < order.index("machine-transport")

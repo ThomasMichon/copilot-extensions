@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve UV workspace libraries in one policy transaction while retaining reinstall inputs and the ordered pip fallback",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}
