@@ -3,6 +3,7 @@
 import json
 import hashlib
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -347,3 +348,119 @@ def test_partial_retirement_is_not_allowed_before_complete_copy_verification(che
     with pytest.raises(ValueError, match="original copy changed"):
         relocation.move(checkout.record.worktree_id, str(checkout.destination), checkout.config)
     assert state.read(checkout.record.yaml_path)["phase"] == "rebound" and retirement.exists()
+
+
+@pytest.mark.timeout(120)
+@pytest.mark.parametrize("cut", ["publication", "rebound"])
+def test_missing_original_before_owned_retirement_never_adopts_stale_destination(checkout, monkeypatch, cut):
+    original_replace, original_write = relocation.durability.replace, state.write
+    def published(source, target, **kwargs):
+        original_replace(source, target, **kwargs)
+        if target == checkout.destination:
+            raise OSError("injected publication interruption")
+    def rebound(ledger, report):
+        original_write(ledger, report)
+        if report["phase"] == "rebound":
+            raise OSError("injected rebound interruption")
+    with monkeypatch.context() as injection:
+        injection.setattr(relocation.durability if cut == "publication" else state,
+                          "replace" if cut == "publication" else "write",
+                          published if cut == "publication" else rebound)
+        with pytest.raises(OSError, match="injected"):
+            relocation.move(checkout.record.worktree_id, str(checkout.destination), checkout.config)
+    retained = state.read(checkout.record.yaml_path)
+    before = checkout.record.yaml_path.read_bytes()
+    shutil.rmtree(checkout.source)
+    with pytest.raises(ValueError, match="disappeared before owned retirement"):
+        relocation.move(checkout.record.worktree_id, str(checkout.destination), checkout.config)
+    assert state.read(checkout.record.yaml_path)["phase"] == retained["phase"]
+    assert checkout.record.yaml_path.read_bytes() == before and not checkout.source.exists()
+    assert (checkout.destination / "ignored.bin").read_bytes() == bytes(range(256))
+
+
+@pytest.mark.parametrize("change", ["grow", "shrink"])
+def test_actual_file_growth_and_shrink_refuse_bounded_inventory(checkout, monkeypatch, change):
+    path = checkout.source / "ignored.bin"
+    before = path.read_bytes()
+    original, changed = Path.open, False
+    def opened(selected, *args, **kwargs):
+        nonlocal changed
+        if selected == path and args and args[0] == "rb" and not changed:
+            changed = True
+            with original(path, "wb") as stream:
+                stream.write(before + b"new" if change == "grow" else before[:-1])
+        return original(selected, *args, **kwargs)
+    with monkeypatch.context() as injection:
+        injection.setattr(Path, "open", opened)
+        with pytest.raises(ValueError, match="changed during bounded inventory"):
+            relocation.transfer.manifest(checkout.source)
+    assert changed and path.read_bytes() != before
+    assert not state.journal_path(checkout.record.yaml_path).exists()
+
+
+def _companion_reservation(checkout, monkeypatch):
+    from agent_worktrees import paired_allocation_location as paired
+
+    monkeypatch.delenv("AGENT_WORKTREES_NO_PAIR", raising=False)
+    anchor, allocation = checkout.home / "knowledge-anchor", checkout.home / "independent-knowledge-root"
+    anchor.mkdir()
+    allocation.mkdir()
+    root = SimpleNamespace(requires_external=True, bound=True, repo="knowledge", path=str(anchor))
+    receiver = SimpleNamespace(repo_name="knowledge", default_repo=SimpleNamespace(
+        anchor=str(anchor), worktree_root=str(allocation),
+    ))
+    monkeypatch.setattr(paired.state_root, "resolve_state_root", lambda config: root)
+    monkeypatch.setattr(paired.repos, "find_repo", lambda name: SimpleNamespace(repo_class="knowledge"))
+    monkeypatch.setattr(paired.cfg, "load_project_config", lambda *args, **kwargs: receiver)
+    path = checkout.record.yaml_path.with_suffix(".paired-allocation.json")
+    def reserve():
+        paired.reserve(checkout.config, checkout.record.worktree_id, checkout.record.creation_nonce)
+    return paired, root, receiver, path, reserve
+
+
+def test_partial_companion_reservation_never_publishes_final_intent(checkout, monkeypatch):
+    paired, root, receiver, path, reserve = _companion_reservation(checkout, monkeypatch)
+    original = Path.open
+    @contextmanager
+    def partial(selected, *args, **kwargs):
+        with original(selected, *args, **kwargs) as stream:
+            if selected.parent == path.parent and ".paired-allocation" in selected.name and args and args[0] == "x":
+                class InterruptedWriter:
+                    def write(self, data):
+                        stream.write(data[:1])
+                        stream.flush()
+                        raise OSError("injected reservation write")
+                yield InterruptedWriter()
+            else:
+                yield stream
+    with monkeypatch.context() as injection:
+        injection.setattr(Path, "open", partial)
+        with pytest.raises(OSError, match="reservation write"):
+            reserve()
+    assert not path.exists()
+    reserve()
+    assert paired.original(checkout.record, root) == Path(receiver.default_repo.worktree_root) / (
+        checkout.record.worktree_id + "-k"
+    )
+
+
+def test_companion_reservation_barrier_precedes_success_and_preserves_original_root(checkout, monkeypatch):
+    paired, root, receiver, path, reserve = _companion_reservation(checkout, monkeypatch)
+    original = relocation.durability.directory
+    def failed(selected):
+        if selected == path.parent:
+            raise OSError("injected reservation parent barrier")
+        original(selected)
+    with monkeypatch.context() as injection:
+        injection.setattr(relocation.durability, "directory", failed)
+        with pytest.raises(OSError, match="reservation parent"):
+            reserve()
+    before, initial_root = path.read_bytes(), receiver.default_repo.worktree_root
+    receiver.default_repo.worktree_root = str(checkout.home / "later-root")
+    assert paired.original(checkout.record, root).parent == Path(initial_root)
+    with pytest.raises(ValueError, match="intent conflicts"):
+        reserve()
+    assert path.read_bytes() == before
+    receiver.default_repo.worktree_root = initial_root
+    reserve()
+    assert path.read_bytes() == before

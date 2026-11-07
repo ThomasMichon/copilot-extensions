@@ -367,6 +367,11 @@ def move(worktree_id: str, destination: str, config) -> dict:
         report["caller"] = state.caller()
         state.write(ledger, report)
         stage = Path(report["stage"])
+        retirement = source.with_name(source.name + ".retiring-" + stage.name.rsplit("-", 1)[1])
+        if not source.exists() and report["phase"] != "retiring" and not (
+            report["phase"] == "rebound" and retirement.exists()
+        ):
+            raise ValueError("original copy disappeared before owned retirement; retain original custody")
         if source.exists():
             _stopped(record, source)
             _sessionless(source)
@@ -442,7 +447,6 @@ def move(worktree_id: str, destination: str, config) -> dict:
                   and (kind != "trust" or report["permissions"][kind])),
             ])
             state.write(ledger, report)
-            retirement = source.with_name(source.name + ".retiring-" + stage.name.rsplit("-", 1)[1])
             if report["phase"] == "rebound":
                 if source.exists():
                     if retirement.exists():

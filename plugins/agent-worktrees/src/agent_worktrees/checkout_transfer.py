@@ -138,8 +138,14 @@ def manifest(root: Path) -> dict[str, tuple]:
                 raise ValueError("relocation v1 checkout exceeds its bounded byte inventory")
             with path.open("rb") as stream:
                 hasher = hashlib.sha256()
+                received = 0
                 for block in iter(lambda: stream.read(1024 * 1024), b""):
+                    received += len(block)
+                    if received > info.st_size:
+                        raise ValueError("checkout file changed during bounded inventory")
                     hasher.update(block)
+                if received != info.st_size:
+                    raise ValueError("checkout file changed during bounded inventory")
                 digest = hasher.hexdigest()
         result[relative] = (
             stat.S_IMODE(info.st_mode), info.st_size if digest else 0, digest,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 from pathlib import Path
 
 from . import config as cfg, repos, state_root
@@ -55,10 +56,22 @@ def reserve(config, worktree_id: str, nonce: str, *, kind="session", no_pair=Fal
         "owner": owner,
     }
     path = _path(config.repo_name, worktree_id)
-    with path.open("x", encoding="utf-8") as stream:
-        json.dump(data, stream, sort_keys=True)
-        stream.flush()
-        os.fsync(stream.fileno())
+    from .checkout_durability import files, replace
+
+    if path.exists():
+        if path.is_symlink() or path.stat().st_size > 16 * 1024 or json.loads(path.read_text(encoding="utf-8")) != data:
+            raise ValueError("original paired allocation intent conflicts; retain owned recovery")
+    else:
+        staging = path.with_suffix(".reserving-" + secrets.token_hex(8))
+        try:
+            with staging.open("x", encoding="utf-8") as stream:
+                json.dump(data, stream, sort_keys=True)
+                stream.flush()
+                os.fsync(stream.fileno())
+            replace(staging, path, existing=False)
+        finally:
+            staging.unlink(missing_ok=True)
+    files([path])
 
 
 def original(record, root, *, legacy: bool = True) -> Path | None:
