@@ -436,6 +436,73 @@ def test_native_anchor_path_mismatch_preserves_ordinary_admission(venue, monkeyp
         assert venue.ledger["@anchor"] == {"returned"}
 
 
+@pytest.mark.parametrize("retry_ok", [False, True])
+def test_ledger_only_retirement_does_not_confirm_a_failed_shared_return(
+    venue, monkeypatch, capsys, retry_ok,
+):
+    from agent_codespaces.claim_return import RETURN_KEY
+
+    assert cli.main(["create", "example/project", "--no-wait"]) == 0
+    capsys.readouterr()
+    release = coordination.release
+    monkeypatch.setattr(coordination, "release", lambda *a, **kw: coordination.L2Result("unavailable"))
+    with pytest.raises(RuntimeError, match="Shared return"):
+        lease.release_claim("returned", "new-worktree")
+    raw = json.loads(lease.LEASE_FILE.read_text(encoding="utf-8"))
+    raw[RETURN_KEY]["returns"]["returned"]["obligation_active"] = True
+    lease.LEASE_FILE.write_text(json.dumps(raw), encoding="utf-8")
+    before = lease.LEASE_FILE.read_bytes()
+    native = coordination._run
+
+    def ownership(args, **kwargs):
+        if args == ["--project", "project", "claims", "new-worktree", "--json"]:
+            return subprocess.CompletedProcess(args, 0, json.dumps({
+                "version": 1, "machine": "machine", "repo": "project",
+                "worktree_id": "new-worktree",
+                "outbound": [{"kind": "codespace", "ref": "returned", "state": "released"}],
+            }), "")
+        return native(args, **kwargs)
+
+    monkeypatch.setattr(coordination, "_run", ownership)
+    if retry_ok:
+        monkeypatch.setattr(coordination, "release", release)
+        assert lease.release_claim("returned", "new-worktree")
+        assert venue.shared["returned"].state == "released"
+        assert lease.get_lease("returned") is None
+    else:
+        with pytest.raises(RuntimeError, match="Shared return"):
+            lease.release_claim("returned", "new-worktree")
+        assert lease.LEASE_FILE.read_bytes() == before
+        assert venue.shared["returned"].state == "leased"
+
+
+def test_reopened_owner_history_does_not_block_confirmed_reservation(venue, monkeypatch, capsys):
+    native = coordination._run
+    journal = coordination.journal_obligation
+
+    def ownership(args, **kwargs):
+        if args[:2] == ["claims", "add"]:
+            journal("returned", "machine/project/new-worktree")
+            return subprocess.CompletedProcess(args, 0, json.dumps({
+                "worktree_id": "new-worktree", "kind": "codespace", "ref": "returned",
+                "state": "active", "reopened": True,
+                "released_by_earlier_finalize": [
+                    {"kind": "codespace", "ref": "old-venue", "note": "prior return"},
+                ],
+            }), "")
+        return native(args, **kwargs)
+
+    monkeypatch.setattr(coordination, "_run", ownership)
+    monkeypatch.setattr(coordination, "journal_obligation", lambda name, holder, **kw: (
+        coordination.journal_claim(coordination.KIND, name, holder, **kw)
+    ))
+    assert cli.main(["create", "example/project", "--no-wait"]) == 0
+    assert lease.get_lease("returned").worktree == "new-worktree"
+    assert venue.ledger["new-worktree"] == {"returned"}
+    assert venue.shared["returned"].state == "leased"
+    capsys.readouterr()
+
+
 @pytest.mark.parametrize("bulk", [False, True])
 def test_preselected_return_cannot_release_a_replacement_same_owner_claim(venue, monkeypatch, capsys, bulk):
     assert cli.main(["create", "example/project", "--no-wait"]) == 0
@@ -653,7 +720,7 @@ def test_unpublished_release_phase_can_finish_after_cross_host_reuse(
 
 
 @pytest.mark.parametrize("original_active", [False, True])
-def test_native_released_transition_recovers_prepared_return_without_touching_successor(
+def test_native_ledger_retirement_does_not_authorize_successor_cleanup_after_local_failure(
     venue, monkeypatch, capsys, original_active,
 ):
     from agent_codespaces.claim_return import RETURN_KEY
@@ -691,15 +758,11 @@ def test_native_released_transition_recovers_prepared_return_without_touching_su
 
     monkeypatch.setattr(coordination, "_run", ownership)
     monkeypatch.setattr(lease, "_write_private_json", write)
-    if original_active:
-        monkeypatch.setattr(coordination, "inspect", lambda name: pytest.fail("successor inspection"))
-        assert lease.release_claim("returned", "new-worktree")
-        assert lease.get_lease("returned") is None
-    else:
-        # A legacy already-released ledger entry cannot prove this generation.
-        with pytest.raises(RuntimeError, match="changed"):
-            lease.release_claim("returned", "new-worktree")
-        assert lease._read_leases()["returned"] is not None
+    before = lease.LEASE_FILE.read_bytes()
+    with pytest.raises(RuntimeError, match="changed"):
+        lease.release_claim("returned", "new-worktree")
+    assert lease.LEASE_FILE.read_bytes() == before
+    assert lease._read_leases()["returned"] is not None
     assert vars(venue.shared["returned"]) == later
     assert sum(event[0] == "settle" for event in venue.events) == int(original_active)
     assert sum(event[0] == "release" for event in venue.events) == 1

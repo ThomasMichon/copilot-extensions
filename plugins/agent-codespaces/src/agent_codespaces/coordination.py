@@ -302,10 +302,20 @@ def _confirmed_bookkeeping(proc, holder_ref: str, ref: str, **expected) -> bool:
         payload = json.loads(proc.stdout)
     except (TypeError, ValueError):
         return False
+    if not isinstance(payload, dict):
+        return False
+    history = payload.get("released_by_earlier_finalize", [])
+    if not isinstance(history, list) or any(
+        not isinstance(item, dict)
+        or not isinstance(item.get("kind"), str) or not item["kind"]
+        or not isinstance(item.get("ref"), str) or not item["ref"]
+        or not isinstance(item.get("note", ""), str)
+        for item in history
+    ):
+        return False
     parts = holder_ref.split("#", 1)[0].split("/")
     return (
-        len(parts) == 3 and all(parts) and isinstance(payload, dict)
-        and not payload.get("deferred") and not payload.get("released_by_earlier_finalize")
+        len(parts) == 3 and all(parts) and not payload.get("deferred")
         and payload.get("worktree_id") == parts[2] and payload.get("ref") == ref
         and all(payload.get(key) == value for key, value in expected.items())
     )

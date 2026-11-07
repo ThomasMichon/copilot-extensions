@@ -135,10 +135,7 @@ def _release_claim(name: str, owner: str, expected: lease.Lease | None) -> bool:
 
         states = _qualified_claim_states(holder)
         obligation_active = states.get(name) in ("active", "at-rest")
-        released = progress and (
-            progress["phase"] == "released"
-            or progress.get("obligation_active") and states.get(name) == "released"
-        )
+        released = progress and progress["phase"] == "released"
         if not progress and not (
             shared and (
                 shared.get("state") == "leased" and shared.get("token") == held.lease_token
@@ -147,10 +144,7 @@ def _release_claim(name: str, owner: str, expected: lease.Lease | None) -> bool:
         ):
             raise RuntimeError(f"Shared ownership of '{name}' changed; local claim is retained")
         if not progress:
-            progress = {
-                "holder": holder, "lease": asdict(held), "phase": "prepared",
-                "obligation_active": obligation_active,
-            }
+            progress = {"holder": holder, "lease": asdict(held), "phase": "prepared"}
             _save_progress(name, held, progress)
         if not released:
             shared = shared if shared is not None else coordination.inspect(name)

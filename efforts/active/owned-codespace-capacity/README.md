@@ -98,6 +98,7 @@ and existing resource custody.
 
 ### Phase 4 - Qualify release and selected consumers
 - [ ] Verify promoted source inclusion without treating dev ancestry as release proof.
+- [ ] Qualify or explicitly transfer generation-qualified recovery after an unpersisted shared-return ACK (#11343); native ledger retirement alone never closes this gate.
 - [ ] Exercise the installed read-only admission consumer and a separately authorized existing-venue sequential-use flow; retain current owners, unknown effects and cleanup obligations.
 - [ ] Resolve or transfer every validation gate to a named tracked objective before marking this effort Done.
 

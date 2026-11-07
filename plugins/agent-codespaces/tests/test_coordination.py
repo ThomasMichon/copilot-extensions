@@ -308,6 +308,7 @@ def test_settle_obligation_degrades(monkeypatch):
 @pytest.mark.parametrize("operation", ["journal", "settle"])
 @pytest.mark.parametrize("bad", [
     "deferred", "wrong-owner", "wrong-ref", "wrong-state", "finalized", "malformed",
+    "history-object", "history-invalid-row",
 ])
 def test_confirmed_bookkeeping_refuses_unconfirmed_ack(monkeypatch, operation, bad):
     payload = {
@@ -324,6 +325,10 @@ def test_confirmed_bookkeeping_refuses_unconfirmed_ack(monkeypatch, operation, b
         payload.update(state="released", disposition="at-rest")
     elif bad == "finalized":
         payload["released_by_earlier_finalize"] = True
+    elif bad == "history-object":
+        payload["released_by_earlier_finalize"] = {}
+    elif bad == "history-invalid-row":
+        payload["released_by_earlier_finalize"] = [{"kind": "codespace", "ref": None}]
     monkeypatch.setattr(
         coord, "_run", lambda *a, **k: _proc(0, "{" if bad == "malformed" else json.dumps(payload)),
     )
@@ -343,6 +348,20 @@ def test_confirmed_bookkeeping_accepts_native_ack(monkeypatch):
     monkeypatch.setattr(coord, "_run", run)
     assert coord.journal_obligation("cs-one", "m/p/wt-b#session", confirmed=True)
     assert coord.settle_obligation("cs-one", "m/p/wt-b#session", released=True, confirmed=True)
+
+
+def test_confirmed_bookkeeping_accepts_native_reopen_history(monkeypatch):
+    payload = {
+        "worktree_id": "wt-b", "ref": "cs-one", "kind": "codespace",
+        "state": "active", "disposition": "released", "reopened": True,
+        "released_by_earlier_finalize": [
+            {"kind": "codespace", "ref": "previous-venue", "note": "prior return"},
+        ],
+    }
+    monkeypatch.setattr(coord, "_run", lambda *a, **kw: _proc(0, json.dumps(payload)))
+    assert coord.journal_obligation("cs-one", "m/p/wt-b", confirmed=True)
+    assert coord.settle_obligation("cs-one", "m/p/wt-b", released=True, confirmed=True)
+
 
 def test_renew_conflict_is_reported(monkeypatch):
     monkeypatch.setattr(coord, "_run", lambda *a, **k: _proc(3, stderr="lease lost"))

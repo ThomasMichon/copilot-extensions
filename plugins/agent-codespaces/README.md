@@ -687,7 +687,9 @@ generic and bulk release. A quota retry that discovers a returned venue uses
 the same reservation flow rather than creating again.
 Tokened own-workstream reuse also requires shared evidence; only tokenless
 legacy local claims retain the optional-peer fallback. Ordinary `claim` journals
-responsibility like the connection path. Return accepts a missing legacy ledger
+responsibility like the connection path. A reopened owner's valid earlier
+finalization history is diagnostic data, not a failed active-claim ACK or
+restoration of those old resources. Return accepts a missing legacy ledger
 entry only after a complete qualified native read confirms absence or prior
 release, never after a failed lookup.
 Claim, advisory borrow, heartbeat, sequential reservation and return share a
@@ -707,18 +709,17 @@ owner without rereleasing or inspecting a later borrower's lease. Unknown
 progress or settlement retains custody; unrelated current writes preserve it.
 If publishing the released phase fails after a positive shared-release ACK,
 the same invocation may still finish through confirmed native settlement and
-durable local cleanup. Prepared progress records whether the original native
-obligation was active. Its later explicit `released` transition can recover a
-failed cleanup without inspecting or releasing the successor; a missing entry
-or a legacy entry already released before this return is not that evidence.
-If neither the release phase nor native settlement is confirmed durably,
-retain the original claim. An owning caller may confirm its completed return
-through the existing qualified `claims settle <name> --owner-ref <original-ref>
---released --json` operation, then retry normal return; do not settle an unknown
-operation, remove the ledger entry, hand-edit progress or release a successor.
-Legacy claims lacking the recorded active obligation retain uncertainty until
-their original return can be established; no automatic recovery is promised
-from absent evidence.
+durable local cleanup. Native ledger retirement is bookkeeping, not proof of
+shared release: finalization can mark it released without returning the venue.
+Prepared progress, including an older optional active-obligation fact, cannot
+use a later ledger transition as shared-return evidence.
+If the actual ACK is no longer available and no released phase was persisted,
+retain original custody when the shared generation cannot be confirmed.
+Do not settle the native ledger as a workaround, remove its entry, hand-edit
+progress, release a successor or infer success from absence/expiry.
+Generation-qualified recovery after this unpersisted-ACK window remains
+tracked in [#11343](https://github.com/ThomasMichon/copilot-extensions/issues/11343);
+current refusal is not completed reconciliation.
 Older tolerant readers still see ordinary holders; older strict admission
 readers refuse the extra entry. Older writers do not join the new exclusion
 and may discard progress: serialize mixed-version writers during rollout or
