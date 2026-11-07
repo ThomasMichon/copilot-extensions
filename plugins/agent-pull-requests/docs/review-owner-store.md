@@ -197,12 +197,28 @@ transport's complete preview/submission limits before retention commits.
 Failure leaves no new selection; it does not reserve a failed preview or
 authorize another body under an already committed key.
 
-Bodyless votes allocate no GUIDs and create no filler comment. This automatic
-path refuses owned edits, including legacy edits, until their original
-logical/native binding is supplied by the actual protected source pipeline.
+Bodyless votes allocate no GUIDs and create no filler comment. Without the
+optional `generation` and `source_attachment` arguments, automatic owned edits
+still refuse. When a trusted embedding supplies its actual protected source,
+allocation reuses the executor's complete selection and native-author/baseline
+checks. Under the same transaction, confirmed original receipts for the exact
+scope/native target must bind one logical GUID and the exact baseline body.
+The actual composer receives that retained preparation and a fresh write GUID.
+Potentially matching unknown effects, conflicting logical identities and
+unmatched prepared histories refuse without committing another selection.
+
+A genuinely legacy target gets its first GUID only during its explicitly
+selected ordinary edit with that protected source binding. An unbound outer
+marker refuses; copied metadata or caller-supplied previous preparation is not
+native evidence. Quoted examples remain content. No unselected targets are
+edited or backfilled. Original-key recovery returns the committed selection
+without requiring its old generation to remain cached or composing again.
+
 The explicit caller-ID prepared path remains unchanged. This API adds no
 storage format, public request syntax, capability advertisement, callback
-loader, policy owner, publisher rollout or installed adoption.
+loader, policy owner, publisher rollout or installed adoption. The current
+workspace receiver still advertises `owned_edits: false` and refuses automatic
+edits; a compatible consumer is a separate qualification.
 
 A retained selection is not execution-admitted. Existing execution inspection,
 attempt, receipt/projection and feedback-capture paths refuse it. Only
