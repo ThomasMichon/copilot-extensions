@@ -4,8 +4,8 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent plan and implementation PRs targeting `dev`
 - **Created:** 2026-11-07
-- **Status:** Active
-- **Vision:** [interactive-session-representation](../../../visions/plugins/agent-bridge/README.md#interactive-session-representation), [evidence-backed-session-presence](../../../visions/plugins/agent-bridge/README.md#evidence-backed-session-presence)
+- **Status:** Done
+- **Vision:** [interactive-session-representation](../../../../visions/plugins/agent-bridge/README.md#interactive-session-representation), [evidence-backed-session-presence](../../../../visions/plugins/agent-bridge/README.md#evidence-backed-session-presence)
 - **Umbrella issue:** #4418
 
 ## Guiding Intent
@@ -38,7 +38,7 @@ Current SDK declarations expose `session.rpc.ui.handlePendingElicitation` and
 Method declarations alone do not prove an actual joined interactive roundtrip.
 
 This closes existing vision intent, rather than changing permission ownership.
-Apply the [contract-evolution pattern](../../../docs/patterns/service-contract-evolution.md)
+Apply the [contract-evolution pattern](../../../../docs/patterns/service-contract-evolution.md)
 and the design principles for graceful composition, proportionate safeguards,
 single ownership and platform parity. Reuse existing authenticated bridge
 transport and the durable control inbox; do not add a daemon or Dispatch queue.
@@ -99,7 +99,7 @@ document the existing trusted-operator boundary.
   only if a genuine caller needs it; task cards remain separate.
 
 ### Phase 3 - Delivery and reconciliation
-- [ ] Merge reviewed implementation with required CI, reconcile #4418 and
+- [x] Merge reviewed implementation with required CI, reconcile #4418 and
   archive this effort. Report source merge separately from release/rollout.
 
 ## Validation Plan
@@ -120,7 +120,9 @@ document the existing trusted-operator boundary.
   as though that remaining native compatibility qualification ran.
 - [x] Run affected lint, unit/contract checks and mandatory source gates;
   audit public artifacts for private context.
-- [ ] Verify actual provider merge and resolve every remaining gate or
+- [x] Deferred to `#11311`: qualify the separate Windows full-capture
+  retained-writer fixture deadline without weakening the existing assertion.
+- [x] Verify actual provider merge and resolve every remaining gate or
   transfer it explicitly to a named tracked objective.
 
 ## Proposal
@@ -242,3 +244,20 @@ requested protocol-only scope.
   two contracts and 1,061 retained fixtures; historical generations are intact.
 - The budget correction and its evidence are ready for renewed ordinary
   review. Required CI, actual merge and effort closeout remain open.
+
+### 2026-11-07 - Source delivery complete
+
+- #11309 merged to `dev` as `e87c2fb1cc3ba2b024d8f50045689d076974ec01`
+  after Copilot approved the exact final head with no active findings and the
+  ready-for-review required CI passed. The managed post-merge reconciliation
+  verified the squash-merged content before aligning this source branch.
+- The source supports authenticated, attributable, single-use answers to
+  actual pending interactive forms without aborting or replacing the turn.
+  Tool permissions and trusted-human operations remain outside the path.
+- #4418 remains open for separate native legacy `user_input` qualification;
+  #11311 retains the independent Windows full-capture fixture investigation.
+  Neither gap is represented as qualified by the current structured-form
+  native proof or the complete Linux contract portfolio.
+- This source-work effort is complete and archived. Release promotion and
+  any shared-host rollout are separate operations, not performed or authorized
+  by this effort; no pre-existing session was answered or interrupted.

@@ -19,7 +19,6 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Live Question Answers](active/live-question-answers/README.md) | Active; source and private native form roundtrip qualified, contract evidence and delivery open | #4418 retains native legacy input qualification; permissions remain terminal-owned, no shared-session answers or rollout |
 | [Owned Codespace Capacity](active/owned-codespace-capacity/README.md) | Active; reviewed intent accepted, independent admission flow first; sequential reuse and consumer qualification open | Bounded #4187 slice; preserves recycler, capture and owner-wave integration owners; no live cleanup or rollout |
 | [Worktree Activity Convergence](active/worktree-activity-convergence/README.md) | Active; reviewed plan accepted, lifecycle/activity/event and list-control implementation open | #11195; preserves #5953/#6748/#2619 owners; selected local rollout after release only |
 | [Bridge and Dispatch Worker Contract Qualification](active/bridge-dispatch-worker-contract-qualification/README.md) | Draft; handoff proposal, no implementation claimed | #6467/#3556/#7268 existing owners; #11106 result bindings and #11108 effective profiles; no new driver or rollout |
@@ -177,6 +176,7 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Live Question Answers](2026/11/07%20live-question-answers/README.md) | Done for source scope; authenticated exact-request answers merged in #11309 after approval, required CI, native structured-form proof and 285-case contract qualification | #4418 retains native legacy input qualification; #11311 retains Windows full-capture fixture investigation; no shared-session answers or rollout |
 | [Windows Qualification Escape Hatch](2026/11/07%20windows-qualification-escape-hatch/README.md) | Done; released owner-only hosted flow, all 68 focused Windows tests, actual concurrent fixed-ref transport, retained-source reuse and truthful failure/incomplete results accepted | #11169; #10765 retains the named-packet request and source-workspace retirement; no shared rollout |
 | [Effort Readback Economy](2026/11/06%20effort-readback-economy/README.md) | Done; effort digest helper and targeted-readback guidance merged in #11149 after review and required CI | #11143; README restructuring continues in #11148; no rollout |
 | [Repository Write Guidance](2026/11/06%20repository-write-guidance/README.md) | Done; native write guidance reviewed, released and installed as Worktrees 1.24.493-dev1; all five actual native controls and owned fixture cleanup passed | #10778 retains immediate archive, native focus/worktree/claim and issue settlement; broader latency qualification stays #7935; no fleet rollout |
