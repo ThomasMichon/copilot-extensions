@@ -1,9 +1,12 @@
 """Actual CLI/tool dispatch, atomic owners and local exact-Git source fixtures."""
 
+from __future__ import annotations
+
 import asyncio
 import copy
 import io
 import json
+from pathlib import Path
 import sys
 
 import pytest
@@ -125,6 +128,101 @@ def test_actual_cli_frontdoor_load_source_read_and_explicit_submit(environment, 
         "number": 42, "operation_id": request["operation_id"],
     }, monkeypatch, capsys)
     assert code == 0 and all(item["state"] == "confirmed" for item in retained["result"]["actions"])
+
+
+@pytest.mark.parametrize("kind", ["comment", "reply", "edit_owned_comment"])
+def test_preapproved_compact_body_survives_actual_cli_native_write_and_restart(
+    environment: tuple, integration: tuple, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], kind: str,
+) -> None:
+    from types import SimpleNamespace
+
+    root = Path(__file__).resolve().parents[3]
+    for source in (root / "libs").glob("*/src"):
+        monkeypatch.syspath_prepend(str(source))
+    from agent_worktrees import attribution_prepare_cli, tracking
+    from agent_pull_requests.review_workspace import _digest, _record
+    from agent_pull_requests.watch_replay_store import ReplayStore
+
+    monkeypatch.syspath_prepend(str(root / "plugins/ai-attribution/scripts"))
+    import attribution_profile
+    import comment_preparation
+
+    record = tracking.parse_record_data({
+        "worktree_id": "private-tree", "branch": "worktree/private-tree", "repo": "fixture",
+        "machine": "private-machine", "platform": "linux", "codename": "bolted-circuit",
+        "codename_source": "built-in", "worktree_path": "fixture-root", "sessions": [],
+    }, path=tmp_path / "source.yaml")
+    config = SimpleNamespace(default_repo=SimpleNamespace(pr=SimpleNamespace(
+        source_attribution="codename", source_attribution_configured=False,
+    )))
+    origin = attribution_prepare_cli.prepare_comment_origin(record, config)
+    profile = attribution_profile.validate({
+        "version": 1, "rules": [{"header": "[Selected AI] "}],
+    })
+    context = {"domain": "forge", "visibility": "public", "activity": "comment", "required": True}
+    logical = "11111111-1111-4111-8111-111111111111"
+    original_write = "22222222-2222-4222-8222-222222222222"
+    edit_write = "33333333-3333-4333-8333-333333333333"
+    original = comment_preparation.prepare(
+        "Original selected note.", profile, context, origin,
+        comment_id=logical, write_id=original_write,
+    )
+    prepared = comment_preparation.prepare(
+        "Intentional selected edit.", profile, context, origin,
+        comment_id=logical, write_id=edit_write, previous=original,
+    ) if kind == "edit_owned_comment" else original
+    store, selected, generation, attachment, backend, _ = environment
+    _, _, native, _, _, _ = integration
+    initial_id = generation["id"]
+    action = {"id": "prepared-note", "kind": kind, "body": prepared["body"]}
+    if kind != "comment":
+        parent_body = original["body"] if kind == "edit_owned_comment" else "Existing parent note."
+        thread = {"id": 50, "status": 1, "comments": [{
+            "id": 1, "parentCommentId": 0, "commentType": 1,
+            "content": parent_body, "author": {"id": selected["scope"]["principal_id"]},
+        }]}
+        backend.threads = [copy.deepcopy(thread)]
+        generation["sections"]["discussions"]["data"] = [_record("discussions", thread)]
+        generation["id"] = _digest({key: value for key, value in generation.items() if key != "id"})
+        selected["generation_id"] = attachment["generation_id"] = generation["id"]
+        native.operations.cache.publish(generation, expected_current=initial_id)
+        action["thread_id"] = 50
+        if kind == "edit_owned_comment":
+            action.update(comment_id=1, expected_content_id=_digest(original["body"]))
+    selected["actions"] = [action]
+    host = WorkspaceTools(native)
+    request = {
+        "number": 42, "intent": copy.deepcopy(selected),
+        "source_attachment": attachment, "budget_seconds": 60,
+    }
+    code, result = invoke_cli(host, "submit", request, monkeypatch, capsys)
+    assert code == 0 and result["result"]["status"] == "complete", result
+    writes = [call for call in backend.calls if call[0] != "GET"]
+    assert len(writes) == 1 and backend.vote is None
+    payload = writes[0][2]
+    assert (payload["comments"][0]["content"] if kind == "comment" else payload["content"]) == prepared["body"]
+    assert prepared["body"].startswith("[Selected AI] ")
+    assert prepared["body"].count("<!-- agent-comment:v1") == 1
+    assert "private-tree" not in prepared["body"] and "agent-worktrees:source" not in prepared["body"]
+    assert logical in prepared["body"]
+    assert (edit_write if kind == "edit_owned_comment" else original_write) in prepared["body"]
+    if kind == "edit_owned_comment":
+        assert original_write not in prepared["body"]
+    if kind == "reply":
+        assert backend.threads[0]["comments"][0]["content"] == parent_body
+        assert logical not in parent_body and original_write not in parent_body
+    restarted = ReplayStore(store.root, store.namespace, service_identity=store.service_identity)
+    native.operations.store = restarted
+    retained = restarted.inspect_review(
+        selected["operation_id"], selected["scope"], expires_at=native.expires_at(),
+    )
+    assert retained["intent"] == selected and retained["intent"]["actions"][0]["body"] == prepared["body"]
+    assert retained["actions"][0]["state"] == "confirmed"
+    code, retry = invoke_cli(host, "submit", request, monkeypatch, capsys)
+    assert code == 0 and retry["result"]["status"] == "complete"
+    assert retry["result"]["entered_writes"] == 0
+    assert len([call for call in backend.calls if call[0] != "GET"]) == 1
 
 
 @pytest.mark.parametrize("path,side,classification", [

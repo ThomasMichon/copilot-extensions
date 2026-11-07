@@ -128,6 +128,8 @@ than being reconstructed from today's worktree or an equal-content comment.
    through their real publication/intent paths. Each entry is explicitly
    delivered, legacy-compatible, unsupported or unqualified; guidance alone
    cannot claim that every publisher enforces it.
+   The [bounded source inventory](comment-publication-inventory.md) records
+   current owner paths and explicit preapproved-body composition qualification.
 4. **C3 - Observation/receipt correlation:** qualify actual preparation ->
    original native attempt -> retained outcome -> acquisition/mapping, including
    lost results and copied tags, through the existing owners.

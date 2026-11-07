@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify compact prepared comment bodies through existing workspace submission and restarted native receipt ownership.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}
