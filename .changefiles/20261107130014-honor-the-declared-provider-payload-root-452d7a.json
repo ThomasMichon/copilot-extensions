@@ -1,0 +1,9 @@
+{
+  "comment": "Honor the declared provider payload root without cross-runtime fallback",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}
