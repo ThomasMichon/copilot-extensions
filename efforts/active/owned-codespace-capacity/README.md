@@ -118,6 +118,12 @@ existing resource ownership, not solve quota pressure by destructive cleanup.
 
 ## Journal
 
+### 2026-11-07 - Malformed metadata and discovery continuity
+- Reproduced six failures covering malformed allocation metadata/binding fields and devcontainer discovery losing the normalized admitted environment.
+- Kept malformed metadata as an actionable admission failure and passed the admitted environment through devcontainer discovery before creation, including explicit-account selection.
+- Rebased onto current dev, preserving both active effort-index rows at the only conflict. All 196 affected CLI, lifecycle and claim-resolution tests and touched-Python lint passed.
+- Resolved the carried-over environment-only status/start thread after the passing complete-flow regression and concrete correction references. Fresh exact-head CI/review remain required; no venue or deployment effects occurred.
+
 ### 2026-11-07 - Qualified repository and scope isolation
 - Reproduced owner-prefix loss selecting a same-basename foreign repository's binding, and unrelated saved-login failure blocking a valid selected creation credential.
 - Preserved explicit repository owners in both claim-to-account and claim-to-venue matching while retaining logical host aliases. Selected creation-scope checks inspect only the active environment credential on github.com.

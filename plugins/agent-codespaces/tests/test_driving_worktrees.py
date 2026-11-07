@@ -148,6 +148,20 @@ def test_current_workstream_account_preserves_binding_unavailability(monkeypatch
         driving_worktrees.current_workstream_account("web")
 
 
+def test_current_workstream_account_reports_malformed_binding(monkeypatch):
+    from agent_codespaces import account_binding
+
+    fake = types.ModuleType("fake_claims_owner")
+    fake.claims_of_owner = lambda owner, kind: ["cs-web"]
+    _install_fake_claims_owner(monkeypatch, fake)
+    monkeypatch.setattr("agent_codespaces.lease.resolve_owner_worktree", lambda: "wt-a")
+    monkeypatch.setattr(account_binding, "list_bindings", lambda: [
+        account_binding.AccountBinding("cs-web", {"bad": "account"}, 0, "o/web"),
+    ])
+    with pytest.raises(RuntimeError, match="Malformed"):
+        driving_worktrees.current_workstream_account("web")
+
+
 # --- same_worktree_family (Phase 2b force-takeover bypass) ------------------
 
 

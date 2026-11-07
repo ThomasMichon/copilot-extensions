@@ -668,6 +668,9 @@ different environment identity never satisfies a bound-account lookup.
 Fully qualified repository requests preserve the owner when matching claims
 and bindings; logical short names retain their host-repository aliases. The
 selected creation-scope check excludes unrelated saved logins and hosts.
+Malformed allocation metadata or account-binding fields produce an actionable
+refusal, not an uncaught parser failure. Devcontainer discovery and creation
+share the admitted account environment rather than rediscovering credentials.
 
 For unmapped repositories, a valid `GH_TOKEN` or `GITHUB_TOKEN` needs no saved
 login: admission verifies its account and retains that credential through

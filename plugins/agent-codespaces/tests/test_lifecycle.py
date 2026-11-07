@@ -87,7 +87,12 @@ class TestListCodespaces:
         assert len(seen) == 2
 
 
-@pytest.mark.parametrize("response", ["", "null", "{}", '[{"name":"venue"}]'])
+@pytest.mark.parametrize("response", [
+    "", "null", "{}", '[{"name":"venue"}]',
+    '[{"name":"venue","state":"Available","machineName":{}}]',
+    '[{"name":"venue","state":"Available","repository":[]}]',
+    '[{"name":"venue","state":"Available","lastUsedAt":42}]',
+])
 def test_allocation_listing_refuses_malformed_success(monkeypatch, response):
     monkeypatch.setattr(
         "agent_codespaces.owner_inventory.qualified_environment",
@@ -223,6 +228,28 @@ def test_strict_status_refuses_an_environment_token_for_another_owner(monkeypatc
 
 
 class TestCreateCodespace:
+    def test_devcontainer_discovery_retains_admitted_account_environment(self, monkeypatch):
+        admitted = {"GH_TOKEN": "selected-fixture-token"}
+        monkeypatch.setattr(gh_account, "env_for_repo", lambda repo: {"GH_TOKEN": "foreign-fixture-token"})
+        observed = []
+
+        def run(argv, **kwargs):
+            observed.append(kwargs["env"])
+            if argv[1:3] == ["api", "repos/org/repo/codespaces/devcontainers"]:
+                paths = (
+                    ".devcontainer/devcontainer.json\n.devcontainer/alternate/devcontainer.json"
+                    if kwargs["env"] == admitted else ".devcontainer/foreign/a.json\n.devcontainer/foreign/b.json"
+                )
+                return MagicMock(returncode=0, stdout=paths)
+            assert argv[argv.index("--devcontainer-path") + 1] == ".devcontainer/devcontainer.json"
+            return MagicMock(returncode=0, stdout="fixture-created")
+
+        monkeypatch.setattr(lifecycle.subprocess, "run", run)
+        assert create_codespace(
+            "org/repo", CodespacesConfig(), account="selected-owner", environment=admitted,
+        ).name == "fixture-created"
+        assert observed == [admitted, admitted]
+
     @pytest.mark.parametrize("explicit", [False, True])
     def test_creation_preserves_admitted_account_environment(self, monkeypatch, explicit):
         monkeypatch.setattr(gh_account, "account_for_repo", lambda repo: "selected-owner")

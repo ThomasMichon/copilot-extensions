@@ -493,7 +493,7 @@ def get_codespace_status_with_account(
     return False, None, None
 
 
-def list_devcontainers(repo: str) -> list[str]:
+def list_devcontainers(repo: str, *, environment: dict | None = None) -> list[str]:
     """Return the discoverable devcontainer config paths for a repo.
 
     Queries ``gh api repos/{repo}/codespaces/devcontainers`` -- the same set
@@ -509,7 +509,7 @@ def list_devcontainers(repo: str) -> list[str]:
     try:
         result = subprocess.run(
             args, capture_output=True, text=True, timeout=30,
-            creationflags=_creation_flags(), env=gh_account.env_for_repo(repo),
+            creationflags=_creation_flags(), env=environment if environment is not None else gh_account.env_for_repo(repo),
         )
     except (FileNotFoundError, subprocess.SubprocessError):
         return []
@@ -526,6 +526,7 @@ def resolve_devcontainer_path(
     repo: str,
     config: CodespacesConfig,
     override: str | None = None,
+    *, environment: dict | None = None,
 ) -> str | None:
     """Pick the ``--devcontainer-path`` to pass ``gh codespace create``, or None.
 
@@ -555,7 +556,7 @@ def resolve_devcontainer_path(
         log.info("Using devcontainer path (explicit override): %s", override)
         return override
 
-    paths = list_devcontainers(repo)
+    paths = list_devcontainers(repo, **({"environment": environment} if environment is not None else {}))
     if len(paths) <= 1:
         # 0 or 1 config -> gh won't prompt; passing the flag would risk naming a
         # path that doesn't exist for repos whose sole config lives elsewhere.
@@ -603,8 +604,10 @@ def create_codespace(
     repo_config = config.repos.get(repo, RepoConfig())
     machine_type = repo_config.machine_type or config.default_machine_type
     location = repo_config.location or config.default_location
+    from .allocation import creation_environment
+    account, environment = creation_environment(repo, account, environment)
     resolved_devcontainer = resolve_devcontainer_path(
-        repo, config, override=devcontainer_path,
+        repo, config, override=devcontainer_path, environment=environment,
     )
 
     args = [
@@ -623,9 +626,6 @@ def create_codespace(
 
     log.info("Creating codespace: %s", " ".join(args))
 
-    from .allocation import creation_environment
-
-    account, environment = creation_environment(repo, account, environment)
     result = subprocess.run(
         args, capture_output=True, text=True, timeout=300,
         creationflags=_creation_flags(),

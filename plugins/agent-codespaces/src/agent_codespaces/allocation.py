@@ -105,6 +105,11 @@ def list_account_codespaces(
         raise RuntimeError(f"CodeSpace account inventory failed: {exc}") from exc
     if len(rows) >= 50:
         raise RuntimeError("CodeSpace account inventory is truncated at the 50-venue listing limit")
+    if any(
+        value is not None and not isinstance(value, str)
+        for row in rows for value in (row.repository, row.machine, row.last_used_at)
+    ):
+        raise RuntimeError("Malformed CodeSpace allocation metadata")
     return rows
 
 

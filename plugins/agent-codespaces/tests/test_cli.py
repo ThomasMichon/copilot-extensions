@@ -858,7 +858,6 @@ def test_environment_only_credentials_reach_inventory_and_creation(monkeypatch, 
     monkeypatch.setattr(cli, "_gh_binary_available", lambda: True)
     monkeypatch.setattr(cli, "validate_context", lambda: None)
     monkeypatch.setattr(lifecycle, "validate_context", lambda: None)
-    monkeypatch.setattr(lifecycle, "resolve_devcontainer_path", lambda *args, **kwargs: None)
     monkeypatch.setattr(cli.pool_mod, "list_leases", lambda: [])
     monkeypatch.setattr(cli.pool_mod, "list_status", lambda: [])
     monkeypatch.setattr(cli.pool_mod, "codespaces_in_use", lambda names: {})
@@ -891,7 +890,10 @@ def test_environment_only_credentials_reach_inventory_and_creation(monkeypatch, 
         elif argv[1:3] == ["codespace", "list"]:
             value = "[]"
         elif argv[1:3] == ["codespace", "create"]:
+            assert argv[argv.index("--devcontainer-path") + 1] == ".devcontainer/devcontainer.json"
             value = "fixture-created"
+        elif argv[1:3] == ["api", "repos/example/project/codespaces/devcontainers"]:
+            value = ".devcontainer/devcontainer.json\n.devcontainer/alternate/devcontainer.json"
         elif argv[1:4] == ["api", "--method", "POST"]:
             state = "Available"
             value = "{}"

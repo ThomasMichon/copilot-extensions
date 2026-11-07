@@ -125,7 +125,16 @@ def current_workstream_account(repo: str) -> str | None:
     if not refs:
         return None
     from .account_binding import list_bindings
-    bindings = sorted(list_bindings(), key=lambda binding: binding.codespace)
+    try:
+        bindings = list_bindings()
+        if any(
+            not isinstance(value, str)
+            for binding in bindings for value in (binding.codespace, binding.account, binding.repo)
+        ):
+            raise RuntimeError("Malformed workstream account binding")
+        bindings.sort(key=lambda binding: binding.codespace)
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise RuntimeError("Malformed workstream account bindings") from exc
     return next((
         binding.account for binding in bindings
         if binding.codespace in refs and binding.account
