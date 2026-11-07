@@ -201,7 +201,7 @@ source/generation revision (both target-tip fields as well as head/common/iterat
 then commits fresh comment/reply GUIDs and exact final v2 bytes through
 `ReviewSelectionStore.allocate` before returning a preview. Bodyless votes
 receive no comment identity. Owned/legacy edits remain unsupported on this
-automatic path pending original scoped/native identity binding.
+baseline path unless the separate selected-edit extension below is enabled.
 Selected reply targets must exist and not be deleted in that exact baseline;
 invalid targets refuse before composition. Fleet validates returned previews
 against the same normalized v1 original as the receiver, so accepted endpoint
@@ -241,12 +241,48 @@ After a dispatched failure or lost result, retain the original intent/IDs and
 reconcile its original receipt through the same owner; no automatic retry,
 replacement GUID or native-object/DB merge is introduced.
 
-The caller still prepares exact source/profile/identity before final approval.
-This optional receiver does not allocate identities, generate signatures or
-turn legacy tagged text into structured preparation. Wire byte limits,
+Without an explicit `selection_preparer`, the prepared-review receiver still
+requires caller-prepared exact source/profile/identity before final approval;
+prepared v2 submission alone cannot allocate or turn legacy tagged text into
+structured preparation. Wire byte limits,
 credentials, caller/native-principal separation and writer/drain custody are
 unchanged. Source fixtures qualify the actual CLI -> client -> Gateway ->
 protected synthetic native owner, not a live provider or installed host.
+
+### Optional selected edits
+
+A trusted embedding may additionally select `selection_owned_edits=True`,
+default false, with its existing prepared mode, resolver and write context.
+The exact baseline capability above remains unchanged. Only a currently
+supported opted-in receiver adds `owned_edit_selection_contract`:
+
+```json
+{
+  "protocol": "agent-pull-requests.owned-edit-selection/v1",
+  "selection_protocol": "agent-pull-requests.preapproval-selection/v1",
+  "effects": "none",
+  "approval_required": true
+}
+```
+
+New native/Fleet clients require this exact additive declaration before
+dispatching an edit allocation; missing/malformed support is unavailable,
+not invalid selected content or a reason to probe/fall back. Fresh allocations
+remain usable by prior clients that ignore the extra capability field.
+Refreshing discovery clears withdrawn edit support. The receiver separately
+rechecks its current opt-in before lookup, composition or retention, including
+requests sent using stale cached support.
+
+The existing request shape and `allocate` verb are unchanged. The receiver
+supplies its actual validated generation/source to the
+[same-owner selected-edit binding](review-owner-store.md#optional-pre-approval-selection-retention).
+That binding owns stable logical identity, fresh write identity, selected
+legacy classification and unknown/conflicting history refusal. Full frame
+limits, original-key/cache-independent recovery and explicit exact approval/
+submission/native receipts retain the semantics above. Withdrawing support
+refuses new edit allocations without rewriting or deleting retained previews.
+No normal read-only host configuration, installed consumer or other publisher
+is enrolled by this source opt-in.
 
 ## Lifetime, compatibility and limits
 

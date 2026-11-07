@@ -34,6 +34,27 @@ def supports_selection(value: object) -> bool:
     )
 
 
+def owned_edit_contract() -> dict:
+    return {
+        "protocol": "agent-pull-requests.owned-edit-selection/v1",
+        "selection_protocol": selection_contract()["protocol"],
+        "effects": "none", "approval_required": True,
+    }
+
+
+def supports_owned_edits(value: object) -> bool:
+    return type(value) is dict and value == owned_edit_contract() and value["approval_required"] is True
+
+
+def needs_owned_edits(operation: str, payload: object) -> bool:
+    if operation != "allocate" or not isinstance(payload, dict) or not isinstance(payload.get("intent"), dict):
+        return False
+    actions = payload["intent"].get("actions")
+    return isinstance(actions, list) and any(
+        isinstance(action, dict) and action.get("kind") == "edit_owned_comment" for action in actions
+    )
+
+
 def selection_preview(intent: dict) -> dict:
     return {
         "protocol": selection_contract()["protocol"], "intent": copy.deepcopy(intent),
@@ -53,7 +74,8 @@ def allocate_selection(
     original = review_intent.intent(payload["intent"])
     if original["scope"] != scope:
         raise ValueError("selected preparation differs from authorized workspace scope")
-    if any(action["kind"] == "edit_owned_comment" for action in original["actions"]):
+    edits = needs_owned_edits("allocate", payload)
+    if edits and workspace.selection_owned_edits is not True:
         raise ValueError("automatic owned edits require their original native identity binding")
     attachment = payload["source_attachment"]
     source = attachment.get("source") if isinstance(attachment, dict) else None
@@ -81,6 +103,7 @@ def allocate_selection(
         retained = selections.allocate(
             original, compose=compose, expires_at=expires_at, checkpoint=checkpoint,
             validate_intent=validate_intent,
+            **({"generation": generation, "source_attachment": attachment} if edits else {}),
         )["operation"]
     if validate_intent is not None:
         validate_intent(copy.deepcopy(retained["intent"]))

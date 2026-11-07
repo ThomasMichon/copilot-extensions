@@ -184,6 +184,10 @@ source attachment only after actual approval. Recover a lost preview with the
 same original v1 intent and operation ID, never a new operation or new GUIDs.
 The existing local `prepare` command retains its explicit-ID, nonpersistent
 semantics; allocation needs no local `comment_preparer` binding.
+Selected owned/legacy edit allocation additionally requires the receiver's
+[optional edit capability](workspace-integration.md#optional-selected-edits).
+New clients refuse missing or malformed support before dispatch; the baseline
+fresh-allocation capability and request shape remain unchanged.
 
 Unknown fields cannot supply workspace paths, credentials or source authority.
 Load/sync/materialize/submit/inspect retain the

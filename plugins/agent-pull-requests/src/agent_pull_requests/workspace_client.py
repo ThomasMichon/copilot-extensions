@@ -11,7 +11,7 @@ from fleet_manager.gateway_service_channel import BODY_BYTES, CONTROL_RATE, Tran
 from .watch_replay_binding import ReplayBinding
 from .watch_replay_client import ReplayClient, ReplayClientError
 from .watch_replay_store import json_object
-from .workspace_selection import selection_contract, supports_selection
+from .workspace_selection import needs_owned_edits, selection_contract, supports_owned_edits, supports_selection
 from .workspace_operations import (
     CHUNK_BYTES, MAX_GENERATION_BYTES, PROTOCOL, NativeWorkspaceClient, encoded, materialize,
     needs_prepared_review, prepared_review_contract, supports_prepared_review,
@@ -156,6 +156,10 @@ class WorkspaceClient:
                 raise WorkspaceClientError("prepared_review_contract_required", outcome_unknown=False)
         if operation == "allocate" and not supports_selection(self._capabilities.get("selection_contract")):
             raise WorkspaceClientError("selection_contract_required", outcome_unknown=False)
+        if needs_owned_edits(operation, payload) and not supports_owned_edits(
+            self._capabilities.get("owned_edit_selection_contract"),
+        ):
+            raise WorkspaceClientError("owned_edit_selection_contract_required", outcome_unknown=False)
         value = await self._exchange(operation, payload, **(
             {"checkpoint": checkpoint} if checkpoint is not None else {}))
         if (
