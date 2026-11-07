@@ -54,9 +54,44 @@ response from the exact selected runtime before emitting the new flag.
 The capability reports receiver support, not permission: `ready` must still
 pass and existing resource, identity and lifecycle gates still apply.
 
-This is the receiver-expansion phase. Existing callers send no new arguments.
-An upgraded receiver accepts old callers unchanged. A future caller requiring
+An upgraded receiver accepts old callers unchanged. A caller requiring
 no stale takeover must refuse that optional reuse operation when the capability
 is missing, malformed or absent after provider rollback; it must not retry
 ordinary acquisition as a substitute. Ordinary legacy operations remain usable.
-No new service, coordination store or on-disk schema is introduced.
+The acquisition mode introduces no new service, coordination store or schema.
+
+## Generation-qualified return evidence
+
+The receiver supports optional `lease release <kind> <key> --token <oid>
+--retain-return-proof`. Discover `lease-return-proof-v1` in the exact selected
+runtime's existing readiness response before sending this flag. Receiver
+support is not permission to return a resource or settle another owner's ledger.
+Codespaces caller migration remains separate; old callers keep their syntax.
+
+An opt-in release upgrades only that resource's payload to strict
+`schema_version: 2`, within the existing envelope and resource ref. Normal
+version-1 records and their output remain unchanged. Version 2 adds
+`returned_generations`, an ordered array of at most 16 objects containing the
+returned `lease_id`, `holder` and `released_at`. The generation ID stays stable
+through renewal; the fencing OID does not. Save the original generation and
+qualified owner before return if later reconciliation will need them.
+
+Only a successful release appends evidence. Subsequent acquisition, renewal,
+transfer and ordinary release preserve the bounded entries; the oldest entry
+is evicted when necessary. Expiry, takeover, transfer, ledger retirement and a
+successor's state cannot create a return for the original generation. Existing
+`lease inspect` exposes the validated current payload; no new query, history
+scan, receipt store or daemon is needed.
+
+Native stale-history compaction carries the evidence into its equivalent
+two-commit chain, independent of the discarded objects. Missing, evicted,
+malformed or legacy evidence is unknown, not proof of return. A receipt proves
+only that generation's shared release, not original-owner ledger settlement,
+local cleanup, provider readiness or authority over a successor.
+
+Once opted in, a resource cannot silently downgrade its payload or discard
+evidence. Upgraded receivers accept both versions and ordinary old syntax.
+An older version-1-only receiver refuses the opted-in resource on rollback
+rather than overwriting it; unaffected version-1 resources remain usable.
+Upgrade the selected receiver to resume that resource. Do not retry an
+effectful new invocation with older syntax merely because its result is unknown.

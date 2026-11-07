@@ -2370,3 +2370,49 @@ dependency, admission policy, runtime installation or deployed session changes.
 The parent remains Active: constructed Manager application/metadata integration,
 externally attached/new-window paths, guarded-head/auth-wait, complete caller
 cleanup-Job survival and receiving acceptance are not closed by this control.
+
+### 2026-11-07 - Manager mux caller checkpoint merged; continue composition
+
+#11356 merged at 18:47:11 UTC as
+`d28f1c1c05b73aafaf166f35a74593656938fb55`. Copilot approved exact head
+`a25989ef6e0ed7050dfa02db637267a3374a5dff` with no active findings or review
+threads. Final-head CI `42402452363` passes guards, eligible units with coverage
+and the required PR gate; lockdown, attribution and identifier checks also pass.
+The managed merge uses the repository-authorized Maintainer review exception,
+not a CI bypass. Publication's rebase does not change the qualified native
+fixture, common core, Manager launch assets or selected Worktrees launch inputs.
+
+Re-read the parent Plan and Validation Plan immediately after merge. Keep its
+broad caller, lifetime and receiving gates open; retain this source workspace
+and continue. The next consumer checkpoint composes the already-qualified
+first-touch Manager application with actual launch/broker behavior, instead of
+treating launcher discovery or a copied script as installed-runtime acceptance.
+The separate all-caller-cleanup-Job and native pending-work gates remain explicit.
+
+### 2026-11-07 - Compose the constructed Manager application with the broker
+
+The existing first-touch application fixture now accepts explicit native
+qualification through its actual installed Manager launcher after disposable
+source inputs are removed. Reuse the native caller packet's assertions through
+a small helper with optional Manager script/root/lifecycle inputs; its default
+copied-script behavior is unchanged. The constructed application drives the
+no-mux fresh/resume flow, with one offline native conversation, common broker,
+process births, truthful backend exit receipts and exact retirement. Its
+completion marker remains unchanged, and the original renewable resident
+lifecycle settles every cleanup receipt.
+
+The constructed application/native case passes alone in 231.35 seconds
+(264.02 including preparation and cleanup), within its existing 300-second
+case deadline. The copied Manager no-mux regression passes separately in
+64.19 seconds (86.59 total). An initial combined capture exhausted its unchanged
+300-second group limit after one case completed; it does not qualify the new
+flow. Separate captures give each already-bounded case its own original budget,
+without increasing item, group, aggregate or cleanup limits.
+
+This closes a source-independent Manager application/no-mux composition
+checkpoint, not the whole caller or lifetime portfolio. Worktrees still runs
+from the managed test environment. Constructed Manager mux metadata, external
+attachment/new-window, guarded-head/auth-wait, all caller cleanup Jobs, receiving
+and native pending-work acceptance remain open under #10765. Documentation
+impact is the existing `TESTING.md` recipe and these explicit evidence limits;
+no production behavior, dependency, wire contract or installation policy changes.
