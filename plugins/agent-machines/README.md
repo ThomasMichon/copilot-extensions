@@ -46,6 +46,12 @@ environment-only equivalent. Existing cached bytes stay part of the selection.
 Package builds use the dependency installer's existing retained-input copy, so
 backend build/egg-info output does not mutate the verified snapshot.
 
+UV resolves the declared local libraries with the root package in one
+dependency-policy transaction, retaining each library's reinstall flag.
+The non-UV fallback retains its ordered standalone prerequisite installs.
+Missing source-qualified materialized libraries still refuse; batching does
+not permit resolving an undeclared replacement from a package index.
+
 ## Legacy runtime removal
 
 The native `scripts/init.ps1 -Action uninstall -InstallDir <root>` and
