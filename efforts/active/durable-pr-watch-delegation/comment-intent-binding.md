@@ -241,3 +241,40 @@ conflicting histories, potentially matching unknown receipts, changed-input
 retry, lost commit/restart and unchanged old receiver refusal. Exercise actual
 shared composition, real-file owner retention and the protected native fixture;
 no fixture result substitutes for provider or installed adoption.
+
+### Optional owned-edit receiver extension
+
+The next finite consumer slice may bind the reviewed allocation library to
+the existing receiver's `allocate` operation through an explicit trusted-host
+opt-in, default off. Do not enroll the normal read-only host or let request
+fields select policy, origin, source resolvers or write authority.
+
+Keep the exact existing `preapproval-selection/v1` declaration and fresh
+comment/reply/vote behavior, including `owned_edits: false`, as the compatible
+baseline. Advertise selected edit support separately through one optional
+additive capability with its own stable contract identity. Existing clients
+already tolerate extra capability fields; verify that actual behavior rather
+than changing the old strict declaration or assuming identical packages.
+New native/Fleet clients must select actual edit support before dispatching an
+edit allocation. Missing, malformed or refreshed-away support refuses without
+sending that operation; the receiver independently rechecks its current opt-in,
+storage, trusted composition and write context.
+
+No new request field or operation is needed: the existing v1 original intent
+already identifies an edit's exact native target and expected content.
+The opted-in receiver must use its actual generation/source attachment,
+complete native baseline and existing policy/profile/source resolver before
+passing protected source into the same allocation transaction. Existing
+preview/submission frame limits apply before commit, and original-key recovery
+returns the first committed final bytes without re-resolution or allocation.
+Explicit final preview/approval, exact submission and native receipts remain
+separate; current support cannot grant approval or bypass the protected sender.
+
+Qualify actual CLI/tool/native/Fleet/Gateway paths for prepared and genuine
+legacy edits, lost previews, original receipts and confirmed retries. Include
+prior-client fresh allocation against an extended receiver, new-client refusal
+against missing/old/malformed support, post-discovery withdrawal, original-key
+recovery without cache, and unchanged explicit-ID/v1/v2/default behavior.
+Rollback refuses the optional edit path without downgrading or deleting
+retained selections. Keep normal-host, other-publisher and installed/provider
+adoption separate from this source consumer exit.

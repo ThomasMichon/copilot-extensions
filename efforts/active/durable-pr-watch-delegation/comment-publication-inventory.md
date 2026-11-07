@@ -81,6 +81,15 @@ refuse pending their scoped/native identity binding. This is optional source
 integration, not normal host enrollment, another publisher's adoption or
 installed/provider qualification.
 
+The optional allocation **library** additionally accepts an actual protected
+generation/source binding for selected owned edits. It resolves prior logical
+identity through the same owner's confirmed scoped native receipts and exact
+baseline, or allocates a first identity for an explicitly selected genuinely
+legacy target. Unknown/conflicting histories and unbound outer markers refuse.
+The [owner-store reference](../../../plugins/agent-pull-requests/docs/review-owner-store.md#optional-pre-approval-selection-retention)
+owns this API. It does not activate edits in the current receiver, change its
+strict capability declaration, enroll hosts or adopt other publishers.
+
 ## Remaining qualification
 
 Actual automatic publication consumers, owned-edit and other-surface allocation,
