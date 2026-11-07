@@ -945,7 +945,10 @@ rendezvous independently matches the route. An unresolved cutover breadcrumb
 is never reported as a ready or inactive owner. `--lock-paths` describes this
 runtime's cutover, routing and spawn lock paths without acquiring them.
 `--unfenced-absence` ignores those lock files but reports only
-`unfenced-absence`, not verified inactivity: a coordinating caller must hold
+`unfenced-absence`, not verified inactivity. It also recognizes a cleared
+shutdown route when intact, unsaturated publication history confirms every
+recorded owner's original process has exited. This does not account for
+unrecorded owners or settle child execution. A coordinating caller must hold
 all three corresponding native locks and recheck before relying on it.
 
 The selected, complete physical Manager runtime also provides
