@@ -562,3 +562,26 @@ adopter pilot feedback gates subsequent widening.
   exact-source CLI/roundtrip/history consumer packet passed **3 controls**.
   No session database, retained workspace, actual adopter record, service or
   default was changed. Broader session support and the whole effort remain open.
+
+### 2026-11-07 — Durable original-name retirement and retained-proof refusal
+- The next real overview again had no published issues but explicitly named
+  unpublished retirement-durability and resume-timeout concerns. Completed
+  diagnostics identified original-name removal before `complete` and the
+  retained Git-proof subprocess boundary. Did not infer review clearance.
+- Retire the verified original through an exclusive, native write-through
+  rename to an original-stage-token name before removing its unchanged
+  duplicate. Recheck that copy and synchronize the old parent before completion.
+  Recovery handles both interruption after rename and after removal without
+  allocating a replacement operation or silently dropping original custody.
+- Read-only Windows admission now proves the old parent's required mutation
+  access as well, before custody. The existing partial-retirement injection
+  still removes one duplicate file and verifies recovery, destination bytes,
+  nonce preservation and removal of the positively owned retirement copy.
+- Convert retained Git-proof expiry to an explicit unavailable-authority refusal:
+  no fabricated namespace proof and no raw timeout from the resume predicate.
+- The dedicated native recovery packet passed **15 controls**. Current complete
+  native/API and actual CLI/roundtrip flows, all five post-effect interruption
+  cuts and all three real Windows access-denial cases passed **11 controls**.
+  Production probe deadlines and the concurrent creation-repair assertions are
+  unchanged. Current-head CI/review/merge, the retained external-fixture
+  disposition and broader inactive support remain open.
