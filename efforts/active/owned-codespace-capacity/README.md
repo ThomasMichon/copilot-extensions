@@ -36,10 +36,11 @@ allocator, daemon or cleanup loop.
 
 ## Context
 
-The existing pool exposes both member count and running-core headroom, but
-allocation currently consults only the latter. Cross-account listing merges
-members and can retain partial results after one account fails; that is not a
-complete selected-account count. A stopped venue still consumes an owned slot.
+At inception, allocation consulted running-core headroom but not owned-slot
+pressure. The admission flow merged in #11228 now independently enforces both.
+Cross-account discovery can retain partial results after one account fails;
+that remains an observation, not complete selected-account admission evidence.
+A stopped venue still consumes an owned slot.
 The existing per-workstream reuse path does not cover sequential cross-effort
 reuse. Existing reclaim paths protect live holders and rescue work; capacity
 pressure must not relax those protections.
@@ -47,8 +48,8 @@ pressure must not relax those protections.
 The proposal extends the vision's independent-capacity and sequential-reuse
 intent. It follows the existing configuration layering and optional owner
 composition contracts, not the unwired full-publication inventory foundation.
-The reviewed proposal is accepted; runtime realization and consumer
-qualification remain open.
+The reviewed proposal and admission source are merged. Sequential cross-effort
+reuse, release and selected installed/live consumer qualification remain open.
 
 ## Request
 
@@ -82,9 +83,10 @@ and existing resource custody.
 - [x] Keep `allocate`, `pool`, ordinary `create` and their presenters consistent: a full stopped pool cannot yield blind creation, and stopping alone cannot free an owned slot.
 - [x] Preserve explicit `--force-create` as an intentional policy override with truthful diagnostics; it never supplies access, changes provider limits or permits broader reclaim.
 - [x] Preserve provider-side quota refusal and bounded existing retry/reclaim semantics after concurrent capacity changes; no local snapshot promises a global reservation.
-- [ ] Publish the first complete admission flow after focused checks, then steward it through merge.
+- [x] Publish the first complete admission flow after focused checks, then steward it through merge. (#11228)
 
 ### Phase 3 - Prove safe sequential reuse
+- [ ] Expand the native lease receiver with capability-advertised acquisition that refuses expired-but-unreleased holders, then migrate reuse callers only when the selected receiver supports it.
 - [ ] Extend existing suitability/admission and borrow/return paths to reuse compatible same-account, same-repository venues across efforts, including explicit read-only and no-build review use.
 - [ ] Preserve retained files, branches, configuration and claims; reject incompatible active agents and live or unknown holders rather than inferring release from local absence.
 - [ ] Account for stopped-venue wake cost separately from owned slots, and retain current workstream reuse when valid.
@@ -106,7 +108,8 @@ and existing resource custody.
 - [ ] A stopped reusable venue is admitted only with sufficient known wake headroom; valid existing-workstream reuse remains compatible.
 - [x] Lightweight real CLI/subprocess consumer check with synthetic inventory and provider adapters proves admission/refusal without backend mutation.
 - [x] Fresh isolated configuration proves defaults and overrides without requiring Worktrees, installing a runtime or contacting a provider.
-- [ ] Run the existing focused tests, touched-Python lint and install-contract/required CI checks; add one changefile per touched plugin, never hand-edit versions.
+- [x] Admission flow: run the existing focused tests, touched-Python lint and install-contract/required CI checks; add one changefile per touched plugin, never hand-edit versions. (#11228)
+- [ ] Sequential reuse flow: repeat focused tests, touched-Python lint, install-contract/required CI and the same changefile discipline before publication.
 - [ ] Run Windows and POSIX consumer checks in available owned lanes; record concrete unavailable-lane reasons rather than claiming parity from unit tests alone.
 - [ ] Record selected installed/live acceptance separately from source tests and release; obtain missing effect authority before any provider mutation.
 

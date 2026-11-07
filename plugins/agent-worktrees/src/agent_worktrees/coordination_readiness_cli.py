@@ -21,5 +21,7 @@ def dispatch(argv: list[str]) -> int:
         readiness = state_root.coordination_readiness(cfg.load_config())
     except ConfigurationError as exc:
         return output._json_error(str(exc), exit_code=3)
-    print(json.dumps(readiness.as_dict(), indent=2))
+    payload = readiness.as_dict()
+    payload["capabilities"] = ["lease-acquire-released-only-v1"]
+    print(json.dumps(payload, indent=2))
     return 0 if readiness.ready else 3
