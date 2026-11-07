@@ -353,10 +353,70 @@ onboarded merely because its source is published.
 | Logout, sleep, offline host or guest without egress | Apply the declared availability/hop policy; do not label expected absence as drift or create replacement capacity |
 | Output arrives but SSH command does not finish | Require expected identity plus exit status and EOF; preserve an unresolved channel-completion failure rather than count partial output as PASS |
 
+### User-logon SSH and selected signing readiness
+
+This #11123 amendment is an **agent-recommended contract proposal before
+implementation**, reserved by `jointed-hinge` in
+[#11123](https://github.com/ThomasMichon/copilot-extensions/issues/11123#issuecomment-6704710064).
+It realizes the agent-ssh vision's
+[real-user interactive reach](../../../visions/plugins/agent-ssh/README.md)
+without requiring a system signing service or another supervisor. It does not
+reserve the retained #6030 setup, Vault, SSH, authentication or lifecycle source.
+
+**Chosen approach:** use the existing native OpenSSH client with the selected
+identity's existing supported signing path. A normally prepared Vault SSH pair
+can use its protected local key directly; an encrypted existing key needs its
+explicitly selected compatible signer or an attended unlock path. Never remove
+key encryption, select another identity, install an agent or enroll a key to
+turn an unavailable signer into a passing prerequisite.
+
+| Capability | Proposed readiness and boundary |
+|------------|--------------------------------|
+| Outbound SSH | Qualify the actual selected client, canonical emitted route, expected peer identity, command exit and EOF. A disabled Windows `ssh-agent` service alone is not an outbound failure when the selected key can sign directly. |
+| Normal Vault SSH pair | Reuse the existing preparation/materialization owner and protected local pair. The current installer requires the selected running, unlocked Vault even when local files exist; record that first-touch prerequisite honestly, without adding a local-file fallback or claiming rollout. |
+| Existing encrypted key | Report whether the selected signer is compatible with the actual OpenSSH consumer and available in this logon session. Keep private material and passphrases in their existing custody; a missing signer is a specific prerequisite, not permission to replace or unprotect the key. |
+| Inbound authentication | Reuse the selected non-elevated foreground Gateway SSH listener, loopback binding, host pin and existing authorization owner. Authentication success alone does not prove command execution, SFTP or access to the user's interactive session. |
+| Inbound user commands | Qualify the actual installed Windows listener's user/token behavior and permitted command boundary. Public-key authentication does not supply outbound user credentials; any needed downstream identity uses its existing authorized provider, never copied credentials or inferred rights. |
+| User-logon lifetime | The existing selected host-role lifecycle owner starts and owns the connection for the user's declared logon availability. Prove survival after the initiating task's cleanup, restart/reconnect, and expected loss at logoff; do not weaken bounded test cleanup or substitute a second service, scheduler or supervisor. |
+| Optional elevated hosting | A separately selected prelogin/service-host capability may require elevated OS setup. Enumerate its exact capabilities and consent requirements separately; zero-UAC user-logon setup remains the preferred path, not an assertion that every Windows hosting mode is non-elevated. |
+
+The current [Vault preparation contract](../../../plugins/agent-vault/docs/ssh-key-preparation.md)
+and [native Gateway SSH implementation](../../../plugins/agent-ssh/src/agent_ssh/gateway_sshd.py)
+are the starting seams, not new deployment mechanisms. The
+[native authentication packet](../../../plugins/agent-ssh/tests/test_gateway_sshd_native.py)
+uses synthetic protected keys and a client without commands (`ssh -N -T`).
+Its authentication, authorization and ownership assertions do not satisfy the
+inbound-command or whole-logon lifetime rows above.
+
+Primary platform documentation bounds this proposal rather than proving the
+installed implementation:
+[Microsoft's Windows OpenSSH key guidance](https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh_keymanagement)
+separates key authentication from outbound user credentials and documents the
+elevated setup of its system agent.
+[KeePassXC's SSH integration guide](https://keepassxc.org/docs/KeePassXC_UserGuide#_ssh_agent_integration)
+describes an agent client, not a built-in signing agent. Pageant integration
+does not establish compatibility with an ordinary Windows OpenSSH client.
+Neither document authorizes installation or selects an alternative signer.
+
+Record selected client/listener/signer artifacts, current identity references,
+availability, capability-specific results and remaining gates through the
+existing operation/readiness owners. Do not store key bytes or passphrases,
+turn source publication into installed readiness, or infer revocation of an
+already healthy connection from a Vault lock. A new setup operation and an
+existing connection retain their separate authorization and lifetime contracts.
+Apply the installer's
+[authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement):
+incoming readiness and complete current selection define replacement success;
+preserve user state and session keepers, keep automatic inhibition separate,
+and leave delayed central-only retirement independent of setup completion.
+
 ## Plan
 
 ### Phase 1 - Reviewed integration and ownership
 
+- [ ] Review the [user-logon SSH/signing proposal](#user-logon-ssh-and-selected-signing-readiness)
+  under #11123 before executable changes; retain the existing setup,
+  credential, SSH and host-role lifecycle owners.
 - [ ] Review the [selected-role setup contract](role-host-setup.md), then admit
   its bounded implementation through the existing construction and lifecycle
   owners rather than relabel client installation or foreground serving.
@@ -460,6 +520,24 @@ not installation, credential or live-adoption authority.
 
 ## Validation Plan
 
+- [ ] Qualify the selected native Windows outbound client both with the normal
+  protected Vault pair and, when explicitly selected and authorized, an
+  existing encrypted-key signer. Verify unchanged key protection and host
+  trust; missing/locked Vault and absent/incompatible signer remain distinct
+  negative results, with no enrollment or system-agent fallback.
+- [ ] Prove native inbound command completion and expected user/token context
+  separately from `ssh -N -T` authentication. Include direction-policy refusal,
+  exit/EOF, permitted downstream-credential behavior and unchanged existing
+  transports; test SFTP only if that capability is selected.
+- [ ] Exercise the selected existing lifecycle owner's cold logon, post-task
+  survival, restart, sleep/reconnect, logoff and next-logon recovery in an
+  explicitly authorized isolated Windows lane. Preserve bounded test cleanup,
+  original operation identity, keys/pins and last-known-good rollback.
+- [ ] Verify ordinary setup reports each selected signing, inbound and lifetime
+  prerequisite accurately. Record unit, simple native consumer, clean-room
+  first-touch and available live-lane coverage separately; unexercised or
+  unauthorized lanes stay open, and optional elevated capabilities need their
+  own enumerated consent rather than an implicit system-service repair.
 - [ ] Complete the [selected-role setup acceptance](role-host-setup.md#validation-and-completion)
   with actual role-selected installed artifacts, finite service ownership,
   first-touch/repeat/update/recovery and thin-client-only negative evidence.
@@ -532,6 +610,23 @@ setup/apply, enrollment, live rollout, lifecycle takeover or implementation
 completion is asserted.
 
 ## Journal
+
+### 2026-11-07 - User-logon SSH and signing contract proposed
+
+- #11123 had no assignee or competing investigation reservation; the bounded
+  additive proposal/validation slice was reserved in comment6704710064.
+  The existing normal SSH setup qualification PR #11248 and retained
+  construction, credential and lifecycle scopes are not superseded.
+- Chose existing native OpenSSH plus the selected identity's supported signing
+  path, with normal Vault-pair reuse distinct from encrypted-key signing.
+  No mandatory system agent, alternate signer, key change or new supervisor
+  is proposed.
+- Native Gateway SSH authentication tests are not inbound user-command,
+  interactive-token, installed-setup or logon/reconnect acceptance. Added
+  explicit validation obligations for those remaining contracts.
+- This is source planning only. No credential access, installation, service,
+  firewall, enrollment, UAC, remote effect or rollout occurred. The effort and
+  every broader setup/convergence gate remain Active.
 
 ### 2026-11-06 - Setup audit follow-up tracked
 
