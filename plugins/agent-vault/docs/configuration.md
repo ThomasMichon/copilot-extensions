@@ -133,6 +133,9 @@ ordinary installer caller still requires 3.11; activation does not raise the
 Vault reader floor or execute an installer to select Python. POSIX qualifies
 the existing `python3`/`python` PATH candidates. Unsupported-only or absent
 Python is an explicit prerequisite refusal, never inactive readiness.
+Discovery stops at a supported PATH candidate without querying unused launchers.
+Its child processes disable Python install manager's `automatic_install`
+through `PYTHON_MANAGER_AUTOMATIC_INSTALL=false`; the parent policy is unchanged.
 Windows reader execution uses the same headless captured-process helper;
 discovery and reads neither install Python nor mutate PATH. Explicit runtime
 Python remains authoritative without rediscovery. This does not bypass the

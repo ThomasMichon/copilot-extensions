@@ -24,11 +24,10 @@ function Get-VaultRuntimeActivation {
     if ($PSBoundParameters.ContainsKey('Context')) { $readerArgs += "--context=$Context" }
     $ErrorActionPreference = 'Continue'
     try {
-        $nativeError = ''
         $arguments = @(
             '-I', '-B', '-X', 'utf8', $reader
         ) + $readerArgs
-        $output = @(Invoke-Hidden -FilePath $pythonPath -ArgList $arguments -ErrorOutput ([ref]$nativeError))
+        $output = @(Invoke-Hidden -FilePath $pythonPath -ArgList $arguments)
         $code = $LASTEXITCODE
     } finally { $ErrorActionPreference = $previousPreference }
     $result = ($output -join "`n") | ConvertFrom-Json -ErrorAction Stop

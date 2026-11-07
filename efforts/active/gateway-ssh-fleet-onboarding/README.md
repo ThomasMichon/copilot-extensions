@@ -743,6 +743,28 @@ completion is asserted.
 - Continue the selected normal setup/Vault credential seam. No Python
   acquisition, PATH mutation, runtime/service rollout, database/key access,
   enrollment or retirement occurred; #6681/#6030/#6888/#11123 remain open.
+- The first #11310 native qualification, run42367275482 on
+  `876fd22e027a84a9010464bdf8c3388bd1126599`, passed Linux but failed Windows
+  because the bootstrap fixture omitted the new native helper. Required CI
+  also caught its stale generated Worktrees toolkit copy. Both are corrected
+  through their existing owners, not a missing-helper fallback or CI bypass.
+- Review5811883909 identified those fixture failures, unnecessary launcher
+  discovery before PATH admission and dropped reader-startup stderr. The
+  correction admits PATH first, preserves nonzero reader stderr, and includes
+  the required fixture/toolkit closure. Python install manager's documented
+  automatic-install setting is disabled only in discovery children; parent
+  policy and the helper's existing positional arguments remain unchanged.
+- Latest controlled activation selection passes12 cases in33.19s. The three
+  real safe-configuration diagnostic cases pass in4.88s; separate current
+  startup, real PATH, capture and child-policy controls pass too. Candidate
+  version facts remain synthetic. Earlier empty or skipped new-test selections
+  were corrected and are not counted as qualification.
+- Local broad bootstrap selections hit the unchanged180s aggregate; a
+  fail-fast prefix including both Unicode cases and the missing-version
+  residual passes9 cases in64.15s. Individual coverage is not a passing
+  monolithic packet or an explanation of the earlier local timing failures.
+  A fresh published head still owes the full hosted Linux/Windows portfolio,
+  current review and required CI before source merge.
 
 ### 2026-11-07 - Vault consumer qualified; normal setup credential gate proposed
 

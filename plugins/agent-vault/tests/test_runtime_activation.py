@@ -352,16 +352,21 @@ def test_native_payload_explains_missing_repository_before_unlock(tmp_path):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows PowerShell strict-mode contract")
-@pytest.mark.parametrize("reason", [None, "repository-context-missing"])
+@pytest.mark.parametrize("reason", [None, "repository-context-missing", "startup"])
 def test_native_activation_failure_retains_diagnostic_under_strict_mode(tmp_path, reason):
     home, payload, runtime, _identity, _context = prepare_payload(tmp_path, "legacy")
     failure = {"state": "failed", "detail": "fixture invalid configuration"}
-    if reason:
+    if reason == "repository-context-missing":
         failure["reason"] = reason
     (payload / "scripts" / "runtime-activation.py").write_text(
-        "import json\n"
-        f"print(json.dumps({failure!r}))\n"
-        "raise SystemExit(3)\n",
+        (
+            "import sys\nsys.stderr.write('fixture reader startup failed\\n')\n"
+            "raise SystemExit(3)\n"
+            if reason == "startup" else
+            "import json\n"
+            f"print(json.dumps({failure!r}))\n"
+            "raise SystemExit(3)\n"
+        ),
         encoding="utf-8",
     )
     script = str(payload / "scripts" / "runtime-activation.ps1").replace("'", "''")
@@ -380,7 +385,9 @@ def test_native_activation_failure_retains_diagnostic_under_strict_mode(tmp_path
         cwd=home, env=env, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
     )
     assert result.returncode == 3, result.stdout + result.stderr
-    if reason:
+    if reason == "startup":
+        assert "fixture reader startup failed" in result.stderr
+    elif reason:
         assert "repository context is missing" in result.stderr
         assert "<repo> vault unlock" in result.stderr
     else:
@@ -436,8 +443,11 @@ function Get-Command {{
     }}
 }}
 function Invoke-Hidden {{
-    param($FilePath,$ArgList,[ref]$ErrorOutput,[switch]$StreamOutput)
+    param($FilePath,$ArgList,[ref]$ErrorOutput,[switch]$StreamOutput,[hashtable]$Environment)
     if ($StreamOutput) {{ throw 'activation entered an installer driver' }}
+    $capture=@{{}}
+    if ($PSBoundParameters.ContainsKey('ErrorOutput')) {{ $capture.ErrorOutput=$ErrorOutput }}
+    if ($PSBoundParameters.ContainsKey('Environment')) {{ $capture.Environment=$Environment }}
     if ($FilePath -eq {literal(launcher_path)}) {{
         $global:LASTEXITCODE=1
         if ($ArgList[0] -eq '-3.10') {{
@@ -452,10 +462,10 @@ function Invoke-Hidden {{
         return Invoke-ActivationRealHidden -FilePath {literal(physical)} -ArgList @(
             '-I','-S','-B','-c',($prefix+$ArgList[[array]::IndexOf($ArgList,'-c')+1]),
             $ArgList[-2],$ArgList[-1]
-        ) -ErrorOutput $ErrorOutput
+        ) @capture
     }}
     $script:activationReaderCalls++
-    Invoke-ActivationRealHidden -FilePath $FilePath -ArgList $ArgList -ErrorOutput $ErrorOutput
+    Invoke-ActivationRealHidden -FilePath $FilePath -ArgList $ArgList @capture
 }}
 """,
         encoding="utf-8",
@@ -495,8 +505,8 @@ try {{
         assert "Python 3.10+ reader" in details["failure"]
         assert details["readerCalls"] == 0
     else:
-        assert details["activation"]["state"] == "configuration-empty"
         assert details["failure"] is None
+        assert details["activation"]["state"] == "configuration-empty"
         assert details["readerCalls"] == 1
     if scenario == "explicit":
         assert details["discoveries"] == 0

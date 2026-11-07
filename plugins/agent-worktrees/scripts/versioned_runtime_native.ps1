@@ -16,18 +16,36 @@ if sys.argv[1].lower() in {'uninstall', 'broker-remove'}:
 print(json.dumps(str(python)))
 '@
     $probe = $probe.Replace('MINIMUM_MINOR', [string]$MinimumMinor)
-    $python = $null
+    $discoveryEnvironment = @{ PYTHON_MANAGER_AUTOMATIC_INSTALL = 'false' }
+    function Select-NativeBootstrapCandidates([string[]]$Candidates) {
+        foreach ($candidate in @($Candidates | Select-Object -Unique)) {
+            try {
+                $nativeError = ''
+                $selected = Invoke-Hidden -FilePath $candidate -ArgList @(
+                    '-I', '-S', '-B', '-c', $probe, $Action, $Root
+                ) -ErrorOutput ([ref]$nativeError) -Environment $discoveryEnvironment
+                if ($LASTEXITCODE -eq 0) {
+                    $python = ($selected | Out-String) | ConvertFrom-Json
+                    if ($python -and [IO.File]::Exists($python)) { return $python }
+                }
+            } catch { }
+        }
+        return $null
+    }
     $candidates = @()
     foreach ($name in @('python3', 'python')) {
         $candidates += @(Get-Command $name -All -CommandType Application -ErrorAction SilentlyContinue |
             Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' } |
             ForEach-Object { $_.Source })
     }
+    $python = Select-NativeBootstrapCandidates $candidates
+    if ($python) { return $python }
+    $candidates = @()
     foreach ($launcher in @(Get-Command py -All -CommandType Application -ErrorAction SilentlyContinue |
             Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' })) {
         try {
             $nativeError = ''
-            $listed = Invoke-Hidden -FilePath $launcher.Source -ArgList @('-0p') -ErrorOutput ([ref]$nativeError)
+            $listed = Invoke-Hidden -FilePath $launcher.Source -ArgList @('-0p') -ErrorOutput ([ref]$nativeError) -Environment $discoveryEnvironment
             $launcherMatches = @()
             if ($LASTEXITCODE -eq 0) {
                 $launcherMatches = @([regex]::Matches("$listed", '(?m)((?:[A-Za-z]:[\\/]|\\\\).*python(?:[0-9.]*)?\.exe)"?\s*$'))
@@ -40,12 +58,15 @@ print(json.dumps(str(python)))
                 foreach ($version in ($selectors + '3')) {
                     $exe = Invoke-Hidden -FilePath $launcher.Source -ArgList @(
                         "-$version", '-I', '-S', '-B', '-c', 'import json,sys; print(json.dumps(sys.executable))'
-                    ) -ErrorOutput ([ref]$nativeError)
+                    ) -ErrorOutput ([ref]$nativeError) -Environment $discoveryEnvironment
                     if ($LASTEXITCODE -eq 0 -and $exe) { $candidates += ($exe | Out-String) | ConvertFrom-Json }
                 }
             }
         } catch { }
     }
+    $python = Select-NativeBootstrapCandidates $candidates
+    if ($python) { return $python }
+    $candidates = @()
     if ($env:OS -eq 'Windows_NT') {
         $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)})
         if ($env:LOCALAPPDATA) { $roots += Join-Path $env:LOCALAPPDATA 'Programs\Python' }
@@ -56,20 +77,7 @@ print(json.dumps(str(python)))
                 ForEach-Object { Join-Path $_.FullName 'python.exe' })
         }
     }
-    foreach ($candidate in @($candidates | Select-Object -Unique)) {
-        try {
-            $nativeError = ''
-            $selected = Invoke-Hidden -FilePath $candidate -ArgList @(
-                '-I', '-S', '-B', '-c', $probe, $Action, $Root
-            ) -ErrorOutput ([ref]$nativeError)
-            if ($LASTEXITCODE -eq 0) {
-                $python = ($selected | Out-String) | ConvertFrom-Json
-                if ($python -and [IO.File]::Exists($python)) { break }
-                $python = $null
-            }
-        } catch { $python = $null }
-    }
-    return $python
+    return Select-NativeBootstrapCandidates $candidates
 }
 
 function Enter-NativeInstallerDriver {
@@ -116,7 +124,8 @@ function Invoke-Hidden {
         [ref]$ErrorOutput,
         [string]$InputText,
         [switch]$StreamOutput,
-        [switch]$StreamErrorOutput
+        [switch]$StreamErrorOutput,
+        [hashtable]$Environment
     )
     if ($StreamOutput -and ($PSBoundParameters.ContainsKey('ErrorOutput') -or
         $PSBoundParameters.ContainsKey('InputText'))) {
@@ -141,6 +150,9 @@ function Invoke-Hidden {
     }
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
+    if ($Environment) {
+        foreach ($name in $Environment.Keys) { $psi.EnvironmentVariables[$name] = $Environment[$name] }
+    }
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
     $psi.RedirectStandardInput = $PSBoundParameters.ContainsKey('InputText')
