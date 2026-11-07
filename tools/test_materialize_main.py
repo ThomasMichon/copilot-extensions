@@ -2366,3 +2366,62 @@ def test_materialize_launch_wrapper_assets_into_refuses_escaping_source_dir(
 
     assert any("canonicalDir must be a non-empty string" in line for line in log)
     assert not (dest_plugin / "bin" / "launch-session.sh").exists()
+
+
+@pytest.mark.parametrize(("same_root", "nested", "stale"), [
+    (True, False, True),
+    (False, False, False),
+    (True, True, False),
+    (False, True, True),
+], ids=["same-direct-stale", "separate-direct-absent", "same-transitive-absent", "separate-transitive-stale"])
+def test_materialize_refreshes_owned_driver_copies_before_they_are_consumed(
+    tmp_path: Path, same_root: bool, nested: bool, stale: bool,
+) -> None:
+    from test_sync_installer_engine import _promotion_installer_source
+
+    source = tmp_path / "source"
+    _promotion_installer_source(source, stale=False, consumer_names={"agent-vault"})
+    contract = mm.mie.ier
+    names = set((*contract.PYTHON_FILES, *contract.SUPPORT_FILES, *contract.STANDALONE_NATIVE_FILES))
+    driver = source / "libs/update-driver"
+    (driver / "scripts").mkdir(parents=True)
+    (driver / "src/update_driver").mkdir(parents=True)
+    (driver / "src/update_driver/__init__.py").write_bytes(b"VALUE = 1\n")
+    (driver / "pyproject.toml").write_text(
+        '[project]\nname = "update-driver"\nversion = "1.0"\n', encoding="utf-8",
+    )
+    if stale:
+        for name in names:
+            (driver / "scripts" / name).write_bytes(b"# reviewed old library copy\n")
+    payload = source / "plugins/agent-vault"
+    dependency = "outer" if nested else "update-driver"
+    declarations = f'{dependency} = {{path = "../../libs/{dependency}", editable = true}}\n'
+    if nested:
+        outer = source / "libs/outer"
+        (outer / "src/outer").mkdir(parents=True)
+        (outer / "src/outer/__init__.py").write_bytes(b"VALUE = 2\n")
+        (outer / "pyproject.toml").write_text(
+            '[project]\nname = "outer"\nversion = "1.0"\n'
+            '[tool.uv.sources]\nupdate-driver = {path = "../update-driver", editable = true}\n',
+            encoding="utf-8",
+        )
+        declarations += 'driver-alias = {path = "../../libs/update-driver", editable = true}\n'
+    (payload / "pyproject.toml").write_text(
+        '[project]\nname = "consumer"\nversion = "1.0"\n[tool.uv.sources]\n' + declarations,
+        encoding="utf-8",
+    )
+    before = {path.relative_to(source): path.read_bytes() for path in source.rglob("*") if path.is_file()}
+    candidate = source if same_root else tmp_path / "candidate"
+    if not same_root:
+        shutil.copytree(source, candidate)
+    log = mm.materialize(candidate, canonical_root=source)
+    assert not any(line.startswith("SKIP") for line in log), log
+    copied = candidate / "plugins/agent-vault/libs/update-driver"
+    for name in names:
+        assert (copied / "scripts" / name).read_bytes() == before[Path("libs/installer-engine") / name]
+        assert (candidate / "libs/installer-engine" / name).read_bytes() == before[Path("libs/installer-engine") / name]
+    assert mm.uer.materialized_local_source_problems(candidate / "plugins/agent-vault") == []
+    if nested:
+        assert any("(alias)" in line for line in log), log
+    if not same_root:
+        assert before == {path.relative_to(source): path.read_bytes() for path in source.rglob("*") if path.is_file()}

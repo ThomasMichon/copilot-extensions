@@ -94,6 +94,40 @@ def test_materialized_closure_refuses_file_uri_sources(tmp_path, kind):
         )
 
 
+@pytest.mark.parametrize("foreign", [False, True], ids=["owned-preimage", "foreign-preimage"])
+def test_copied_installer_consumer_binds_its_declared_library_preimage(tmp_path, foreign):
+    source, candidate = tmp_path / "source", tmp_path / "candidate"
+    contract = materializer.mie.ier
+    names = set((*contract.PYTHON_FILES, *contract.SUPPORT_FILES, *contract.STANDALONE_NATIVE_FILES))
+    library = source / "libs/update-driver"
+    for name in names:
+        _write(source / "libs/installer-engine" / name, f"# canonical {name}\n")
+        _write(library / "scripts" / name, f"# reviewed source preimage {name}\n")
+    nested = candidate / "plugins/sample/libs/update-driver"
+    for name in names:
+        _write(nested / "scripts" / name, (library / "scripts" / name).read_text())
+    target = nested / "scripts/installer_engine_commands.py"
+    if foreign:
+        target.write_bytes(b"# foreign candidate content\n")
+    before = {path.relative_to(nested): path.read_bytes()
+              for path in nested.rglob("*") if path.is_file()}
+    original = {path.relative_to(source): path.read_bytes()
+                for path in source.rglob("*") if path.is_file()}
+    log = materializer.mie.materialize_derived_files(
+        candidate, canonical_root=source, copied_consumer=(library, nested),
+    )
+    if foreign:
+        assert any(line.startswith("SKIP") and "foreign content" in line for line in log), log
+        assert before == {path.relative_to(nested): path.read_bytes()
+                          for path in nested.rglob("*") if path.is_file()}
+    else:
+        assert len(log) == len(names) and not any(line.startswith("SKIP") for line in log), log
+        for name in names:
+            assert (nested / "scripts" / name).read_bytes() == original[Path("libs/installer-engine") / name]
+    assert original == {path.relative_to(source): path.read_bytes()
+                        for path in source.rglob("*") if path.is_file()}
+
+
 def test_materializer_refuses_missing_standalone_manifest(tmp_path, monkeypatch):
     (tmp_path / "worktree-manager").mkdir()
     (tmp_path / "plugins" / "skill-only").mkdir(parents=True)

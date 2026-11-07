@@ -312,6 +312,13 @@ def materialize_uv_editable_ref_into(
         )
         log.append(result)
         if result.startswith("OK"):
+            derived_log = mie.materialize_derived_files(
+                dest_root_r, canonical_root=canonical_root_r,
+                copied_consumer=(canonical, dest_lib_dir),
+            )
+            log.extend(derived_log)
+            if any(line.startswith("SKIP") for line in derived_log):
+                continue
             materialized_libs.add(lib)
             # Fix up any `uv`-editable reference the just-copied canonical
             # lib declares FOR ITSELF (e.g. ssh-manager depending on

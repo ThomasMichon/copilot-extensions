@@ -308,6 +308,10 @@ def test_binding_human_assets_do_not_require_worktrees_source(tmp_path: Path, mo
     project = root / "plugins/agent-machines/pyproject.toml"
     project.parent.mkdir(parents=True)
     project.write_text("", encoding="utf-8")
+    invocation = root / "libs/payload-invocation"
+    shutil.copytree(REPO / "libs/payload-invocation/templates", invocation / "templates")
+    for name in ("command_binding.py", "command_lifecycle.py"):
+        shutil.copyfile(REPO / "libs/payload-invocation" / name, invocation / name)
     monkeypatch.setattr(generator, "REPO", root)
 
     assert not (root / "plugins/agent-worktrees").exists()
