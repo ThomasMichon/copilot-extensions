@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -157,7 +158,9 @@ def test_rejected_peer_preflight_cannot_authorize_l1_claim(monkeypatch):
         lambda *a, **k: _result(code=126, stderr="peer launch refused"),
     )
     monkeypatch.setattr(lease, "_read_leases", lambda: {})
-    monkeypatch.setattr(lease, "_lease_lock", lambda: pytest.fail("L1 mutation"))
+    monkeypatch.setattr(lease, "_lease_lock", nullcontext)
+    monkeypatch.setattr(lease, "_write_private_json", lambda *a, **k: pytest.fail("L1 mutation"))
+    monkeypatch.setattr(coordination, "acquire", lambda *a, **k: pytest.fail("L2 acquisition"))
     with pytest.raises(lease.CoordinationRejected, match="peer launch refused"):
         lease.claim("space", "owner", holder_ref="machine/project/worktree")
 

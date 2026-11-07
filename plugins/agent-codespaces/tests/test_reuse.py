@@ -502,7 +502,7 @@ def test_cross_caller_return_resolves_native_owner_identifier(venue, monkeypatch
     if evidence == "released":
         venue.shared["returned"].state = "released"
         venue.shared["returned"].live = False
-    if evidence == "unmatched-epoch" or evidence == "released" and owner == "relative/old-directory":
+    if evidence != "current-epoch":
         before = lease.LEASE_FILE.read_bytes()
         with pytest.raises(RuntimeError, match="unconfirmed|changed"):
             lease.release_claim("returned", owner)
@@ -652,7 +652,7 @@ def test_unsettled_return_survives_other_writes_and_blocks_owner_reentry(venue, 
 
 
 @pytest.mark.parametrize("damage", [
-    "version", "holder", "snapshot", "phase", "obligation-active", "missing-lease", "row-array",
+    "version", "holder", "snapshot", "phase", "obligation-active", "missing-lease", "row-array", "generation",
 ])
 def test_malformed_return_progress_never_becomes_an_empty_claim_set(venue, monkeypatch, capsys, damage):
     from agent_codespaces import reuse
@@ -677,6 +677,8 @@ def test_malformed_return_progress_never_becomes_an_empty_claim_set(venue, monke
         progress["obligation_active"] = "yes"
     elif damage == "row-array":
         raw[RETURN_KEY]["returns"]["returned"] = ["holder", "lease", "phase"]
+    elif damage == "generation":
+        progress["lease_id"] = 12345678901234567890123456789012
     else:
         del raw["returned"]
     lease.LEASE_FILE.write_text(json.dumps(raw), encoding="utf-8")
@@ -874,6 +876,248 @@ def test_native_ledger_retirement_does_not_authorize_successor_cleanup_after_loc
     assert lease.LEASE_FILE.read_bytes() == before
     assert venue.events == events
     assert vars(venue.shared["returned"]) == later
+
+
+@pytest.fixture
+def returning_generation(venue, monkeypatch, capsys):
+    import base64
+    from agent_codespaces.claim_return import pending_returns
+
+    assert cli.main(["create", "example/project", "--no-wait"]) == 0
+    capsys.readouterr()
+    held = venue.shared["returned"]
+    wire = {
+        "schema_version": 1,
+        "resource": {
+            "kind": "codespace", "key": "returned",
+            "identity": "codespace:" + base64.urlsafe_b64encode(b"returned").decode().rstrip("="),
+        },
+        "state": "leased", "event": "acquire", "lease_id": "1" * 32,
+        "holder": held.holder, "token": held.token, "live": True,
+        "issued_at": "2026-11-07T12:00:00Z", "renewed_at": "2026-11-07T12:00:00Z",
+        "expires_at": "2026-11-07T13:00:00Z", "ttl_seconds": 3600, "context": {},
+    }
+    state = SimpleNamespace(
+        wire=wire, releases=[], readiness=coordination.PreflightResult(
+            "ready", capabilities=frozenset({"lease-return-proof-v1"}),
+        ),
+    )
+    monkeypatch.setattr(coordination, "preflight", lambda holder: state.readiness)
+    monkeypatch.setattr(coordination, "inspect", lambda name: state.wire)
+
+    def release(name, token, **kwargs):
+        assert pending_returns()[name]["lease_id"] == "1" * 32
+        expected = (
+            {"retain_return_proof": True, "preflight_result": state.readiness}
+            if "lease-return-proof-v1" in state.readiness.capabilities else {}
+        )
+        assert kwargs == expected
+        assert token == held.token
+        state.releases.append((name, token))
+        proof = {"lease_id": wire["lease_id"], "holder": wire["holder"],
+                 "released_at": "2026-11-07T12:01:00Z"}
+        state.wire = {
+            **wire, "schema_version": 2 if expected else 1,
+            "state": "released", "event": "release", "live": False,
+            "token": "c" * 40, "renewed_at": proof["released_at"],
+            "expires_at": proof["released_at"], "ttl_seconds": 0,
+        }
+        if expected:
+            state.wire["returned_generations"] = [proof]
+        held.state, held.live, held.token = "released", False, "c" * 40
+        return coordination.L2Result("ok")
+
+    monkeypatch.setattr(coordination, "release", release)
+    return state
+
+
+def _successor_wire(record, later_state="leased"):
+    return {
+        **record, "state": later_state, "live": later_state == "leased",
+        "event": "acquire" if later_state == "leased" else "release",
+        "lease_id": "2" * 32, "holder": "other-machine/project/successor",
+        "token": "d" * 40, "issued_at": "2026-11-07T12:02:00Z",
+        "renewed_at": "2026-11-07T12:02:00Z",
+        "expires_at": "2026-11-07T13:02:00Z" if later_state == "leased" else "2026-11-07T12:02:00Z",
+        "ttl_seconds": 3600 if later_state == "leased" else 0,
+        "returned_generations": [dict(record["returned_generations"][0])] + ([] if later_state == "leased" else [{
+            "lease_id": "2" * 32, "holder": "other-machine/project/successor",
+            "released_at": "2026-11-07T12:02:00Z",
+        }]),
+    }
+
+
+@pytest.mark.parametrize("later_state", ["leased", "released"])
+@pytest.mark.parametrize("pending_settlement", [False, True])
+def test_generation_proof_recovers_unpersisted_return_without_touching_successor(
+    venue, returning_generation, monkeypatch, later_state, pending_settlement,
+):
+    from agent_codespaces.claim_return import RETURN_KEY
+
+    state = returning_generation
+    write = lease._write_private_json
+    settle = coordination.settle_obligation
+
+    def failed_publication(path, payload):
+        progress = payload.get(RETURN_KEY, {}).get("returns", {}).get("returned")
+        if progress and progress["phase"] == "released" or "returned" not in payload:
+            raise OSError("confirmation publication unavailable")
+        write(path, payload)
+
+    monkeypatch.setattr(lease, "_write_private_json", failed_publication)
+    if pending_settlement:
+        monkeypatch.setattr(coordination, "settle_obligation", lambda *a, **kw: False)
+    with pytest.raises(RuntimeError if pending_settlement else OSError):
+        lease.release_claim("returned", "new-worktree")
+    successor = _successor_wire(state.wire, later_state)
+    state.wire = successor
+    venue.shared["returned"] = coordination.L2Lease(
+        "returned", successor["holder"], successor["live"], token=successor["token"], state=later_state,
+    )
+    monkeypatch.setattr(lease, "_write_private_json", write)
+    monkeypatch.setattr(coordination, "settle_obligation", settle)
+    before = json.dumps(successor, sort_keys=True)
+    assert lease.release_claim("returned", "new-worktree")
+    assert lease.get_lease("returned") is None
+    assert not venue.ledger["new-worktree"]
+    assert json.dumps(state.wire, sort_keys=True) == before
+    assert len(state.releases) == 1
+
+
+@pytest.mark.parametrize("damage", [
+    "missing", "evicted", "foreign-holder", "wrong-generation", "malformed",
+    "numeric", "wrong-resource", "rollback", "legacy",
+])
+def test_unqualified_generation_proof_preserves_original_custody(
+    venue, returning_generation, monkeypatch, damage,
+):
+    from agent_codespaces.claim_return import RETURN_KEY
+
+    state = returning_generation
+    write = lease._write_private_json
+
+    def failed_publication(path, payload):
+        progress = payload.get(RETURN_KEY, {}).get("returns", {}).get("returned")
+        if progress and progress["phase"] == "released" or "returned" not in payload:
+            raise OSError("confirmation publication unavailable")
+        write(path, payload)
+
+    monkeypatch.setattr(lease, "_write_private_json", failed_publication)
+    with pytest.raises(OSError):
+        lease.release_claim("returned", "new-worktree")
+    state.wire = _successor_wire(state.wire)
+    proof = state.wire["returned_generations"][0]
+    if damage == "missing":
+        del state.wire["returned_generations"]
+    elif damage == "evicted":
+        state.wire["returned_generations"] = []
+    elif damage == "foreign-holder":
+        proof["holder"] = "other-machine/project/new-worktree"
+    elif damage == "wrong-generation":
+        proof["lease_id"] = "3" * 32
+    elif damage == "malformed":
+        state.wire["returned_generations"] = [["lease_id", "holder", "released_at"]]
+    elif damage == "numeric":
+        proof["lease_id"] = 12345678901234567890123456789012
+    elif damage == "wrong-resource":
+        state.wire["resource"] = {**state.wire["resource"], "key": "other-venue"}
+    elif damage == "rollback":
+        monkeypatch.setattr(coordination, "inspect", lambda name: None)
+    else:
+        state.wire["schema_version"] = 1
+    monkeypatch.setattr(lease, "_write_private_json", write)
+    before = lease.LEASE_FILE.read_bytes()
+    successor = json.dumps(state.wire, sort_keys=True)
+    with pytest.raises(RuntimeError, match="changed"):
+        lease.release_claim("returned", "new-worktree")
+    assert lease.LEASE_FILE.read_bytes() == before
+    assert json.dumps(state.wire, sort_keys=True) == successor
+    assert len(state.releases) == 1
+    assert not venue.ledger["new-worktree"]
+
+
+@pytest.mark.parametrize("supported", [False, True])
+def test_generation_capture_preserves_legacy_acknowledged_return(
+    venue, returning_generation, monkeypatch, supported,
+):
+    state = returning_generation
+    if not supported:
+        state.readiness = coordination.PreflightResult("absent", detail="legacy receiver")
+    assert lease.release_claim("returned", "new-worktree")
+    assert lease.get_lease("returned") is None
+    assert not venue.ledger["new-worktree"]
+    assert len(state.releases) == 1
+    assert state.wire["schema_version"] == (2 if supported else 1)
+
+
+@pytest.mark.parametrize("supported", [False, True])
+def test_captured_generation_recovers_its_current_tombstone(venue, returning_generation, monkeypatch, supported):
+    from agent_codespaces.claim_return import RETURN_KEY
+
+    state = returning_generation
+    if not supported:
+        state.readiness = coordination.PreflightResult("ready")
+    write = lease._write_private_json
+
+    def failed_publication(path, payload):
+        progress = payload.get(RETURN_KEY, {}).get("returns", {}).get("returned")
+        if progress and progress["phase"] == "released" or "returned" not in payload:
+            raise OSError("confirmation publication unavailable")
+        write(path, payload)
+
+    monkeypatch.setattr(lease, "_write_private_json", failed_publication)
+    with pytest.raises(OSError):
+        lease.release_claim("returned", "new-worktree")
+    before = json.dumps(state.wire, sort_keys=True)
+    monkeypatch.setattr(lease, "_write_private_json", write)
+    assert lease.release_claim("returned", "new-worktree")
+    assert lease.get_lease("returned") is None
+    assert json.dumps(state.wire, sort_keys=True) == before
+    assert len(state.releases) == 1
+
+
+@pytest.mark.parametrize("location", ["successor", "history"])
+@pytest.mark.parametrize(("opaque", "accepted"), [
+    ("maintenance-client", True), ("unicode-\u00e9-client", True), ("x" * 256, True),
+    ("", False), ("x" * 257, False), ("bad\nholder", False), ("bad\x7fholder", False), (False, False),
+])
+def test_native_holder_contract_controls_original_generation_recovery(
+    venue, returning_generation, monkeypatch, location, opaque, accepted,
+):
+    from agent_codespaces.claim_return import RETURN_KEY
+
+    state = returning_generation
+    write = lease._write_private_json
+
+    def failed_publication(path, payload):
+        progress = payload.get(RETURN_KEY, {}).get("returns", {}).get("returned")
+        if progress and progress["phase"] == "released" or "returned" not in payload:
+            raise OSError("confirmation publication unavailable")
+        write(path, payload)
+
+    monkeypatch.setattr(lease, "_write_private_json", failed_publication)
+    with pytest.raises(OSError):
+        lease.release_claim("returned", "new-worktree")
+    state.wire = _successor_wire(state.wire)
+    if location == "successor":
+        state.wire["holder"] = opaque
+    else:
+        state.wire["returned_generations"].insert(0, {
+            "lease_id": "3" * 32, "holder": opaque, "released_at": "2026-11-07T12:00:00Z",
+        })
+    monkeypatch.setattr(lease, "_write_private_json", write)
+    before = json.dumps(state.wire, sort_keys=True)
+    local = lease.LEASE_FILE.read_bytes()
+    if accepted:
+        assert lease.release_claim("returned", "new-worktree")
+        assert lease.get_lease("returned") is None
+    else:
+        with pytest.raises(RuntimeError, match="changed"):
+            lease.release_claim("returned", "new-worktree")
+        assert lease.LEASE_FILE.read_bytes() == local
+    assert not venue.ledger["new-worktree"]
+    assert json.dumps(state.wire, sort_keys=True) == before
+    assert len(state.releases) == 1
 
 
 @pytest.mark.parametrize("state", ["own", "successor", "missing-shared", "local-only"])
