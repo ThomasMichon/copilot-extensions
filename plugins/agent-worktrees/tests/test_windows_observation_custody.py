@@ -678,6 +678,9 @@ def test_actual_monitor_shutdown_retains_custody_and_negative_control(
         def activate(self):
             pass
 
+        def begin_refresh_sweep(self):
+            pass
+
         def lock_extra(self):
             return {}
 

@@ -1,0 +1,9 @@
+{
+  "comment": "Note that the fleet monitor counts a stale not-refreshed host roster as unknown coverage, never zero active work",
+  "changes": [
+    {
+      "plugin": "agent-roles",
+      "type": "patch"
+    }
+  ]
+}

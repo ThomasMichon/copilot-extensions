@@ -861,6 +861,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                         break
                 else:
                     self_retire_confirms = 0
+            worktrees_runtime.begin_refresh_sweep()  # every iteration ages the refresh window
             with state_lock:
                 can_sweep = published_lock and not admission_closed and active_generation is not None
                 if can_sweep:
@@ -877,9 +878,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 with state_lock:
                     allocation_linker.discover()
                 allocation_linker.tick()
-                picker_projects = monitor_roots.live_picker_projects()
-                demand_projects = core.list_cache.recent_demand_projects()
-                external_projects = picker_projects | demand_projects | worktrees_runtime.demand_projects()
+                external_projects = monitor_roots.live_picker_projects() | core.list_cache.recent_demand_projects()
+                external_projects |= worktrees_runtime.demand_projects()
                 served = core._monitor_sweep(
                     mux_bin,
                     token,

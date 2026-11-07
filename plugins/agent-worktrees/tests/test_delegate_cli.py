@@ -12,6 +12,7 @@ from agent_worktrees import delegate_cli
 from agent_worktrees import list_cli
 from agent_worktrees import list_views_cli
 from agent_worktrees import sessions, tracking
+from agent_worktrees import worktrees_runtime
 
 
 def _row(
@@ -396,8 +397,11 @@ def _fleet_hosts(caller_host: dict, caller_rows: list[dict]) -> list[dict]:
     (_SAVED, "unknown", False, "host-roster-advisory"),
     ({"projection": _CURRENT, "availability": {"status": "stale", "reason": "x"}},
      "unknown", False, "host-roster-advisory"),
+    ({"projection": _CURRENT,
+      "availability": {"status": "stale", "reason": worktrees_runtime.NOT_REFRESHED}},
+     "unknown", False, "host-roster-advisory"),
     ({}, "unknown", False, "host-roster-advisory"),
-], ids=["current", "saved", "stale", "unlabeled"])
+], ids=["current", "saved", "stale", "not-refreshed", "unlabeled"])
 def test_run_fleet_infers_gone_caller_only_from_current_roster(
     monkeypatch, caller_host, state, finalizable, reason,
 ):

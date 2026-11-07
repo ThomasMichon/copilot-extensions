@@ -256,7 +256,8 @@ def delegate_graph_overlays(
 def host_roster_is_current(host: dict[str, Any]) -> bool:
     """True only for a reachable fleet host row read from a current publication.
 
-    A saved (``availability.status: "advisory"``) or stale-labeled roster, or
+    A saved (``availability.status: "advisory"``) or stale-labeled roster
+    (including a publication the status-monitor no longer refreshes), or
     a reply without current-roster provenance (as from an older runtime or a
     cached listing), may omit or misstate a caller that exists now."""
     projection = host.get("projection")

@@ -201,6 +201,59 @@ def test_passive_reads_never_record_demand_or_wake_the_producer(demand_owner):
     assert wakes == [1] and owner.demand_projects() == {"other"}
 
 
+def _monitor_sweep(owner, observed_at):
+    """Mirror the monitor iteration: rotate, then republish its selected projects."""
+    owner.begin_refresh_sweep()
+    for project in sorted(owner.demand_projects()):
+        owner.publish(project, [], observed_at=observed_at)
+
+
+def test_passive_read_labels_a_publication_the_monitor_stopped_refreshing(demand_owner):
+    from agent_worktrees.delegate_cli import host_roster_is_current
+
+    owner, clock, wakes = demand_owner
+    owner.handle(request(project="kept"))
+    owner.handle(request(project="expired"))
+    _monitor_sweep(owner, 1)
+    assert owner.handle(request(project="expired", passive=True)).get("availability") is None
+
+    for sweep in range(2, 6):
+        clock[0] += 20
+        owner.handle(request(project="kept"))
+        _monitor_sweep(owner, sweep)
+    assert owner.demand_projects() == {"kept"}
+    wakes.clear()
+
+    def fleet_host(result):
+        return {"reachable": True, "projection": result["projection"],
+                "availability": result.get("availability")}
+
+    stale = owner.handle(request(project="expired", passive=True))
+    assert stale["ok"] is True and stale["worktrees"] == []
+    assert stale["projection"]["quality"] == "current"
+    assert stale["availability"] == {"status": "stale", "reason": runtime.NOT_REFRESHED}
+    assert not host_roster_is_current(fleet_host(stale))
+    kept = owner.handle(request(project="kept", passive=True))
+    assert kept.get("availability") is None and host_roster_is_current(fleet_host(kept))
+    assert wakes == [] and owner.demand_projects() == {"kept"}
+
+    renewed = owner.handle(request(project="expired"))
+    assert renewed["ok"] is True and renewed.get("availability") is None
+    assert owner.demand_projects() == {"kept", "expired"}
+    _monitor_sweep(owner, 6)
+    assert owner.handle(request(project="expired", passive=True)).get("availability") is None
+
+
+def test_passive_read_is_not_refreshed_once_the_monitor_stops_sweeping(demand_owner):
+    owner, _clock, _wakes = demand_owner
+    owner.publish("project", [{"id": "first"}], observed_at=1)
+    assert owner.handle(request(passive=True)).get("availability") is None
+    owner.begin_refresh_sweep()
+    assert owner.handle(request(passive=True)).get("availability") is None
+    owner.begin_refresh_sweep()
+    assert owner.handle(request(passive=True))["availability"]["reason"] == runtime.NOT_REFRESHED
+
+
 def test_concurrent_unavailable_readers_coalesce_per_project_and_reactivate(demand_owner):
     owner, _clock, wakes = demand_owner
     projects = ["project", "other"] * 32

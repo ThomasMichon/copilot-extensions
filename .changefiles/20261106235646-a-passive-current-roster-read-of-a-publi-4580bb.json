@@ -1,0 +1,9 @@
+{
+  "comment": "A passive current-roster read of a publication the status-monitor has stopped refreshing carries a stale not-refreshed label, so fleet treats it as unknown coverage that cannot prove a delegate's caller gone",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
