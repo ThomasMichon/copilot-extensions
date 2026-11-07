@@ -157,6 +157,7 @@ def detect_prereq(pr: Prereq) -> PrereqStatus:
         seen.add(key)
         store_alias = (
             pr.name == "python3"
+            and current_os() == "windows"
             and Path(candidate).parent.name.lower() == "windowsapps"
         )
         status = replace(

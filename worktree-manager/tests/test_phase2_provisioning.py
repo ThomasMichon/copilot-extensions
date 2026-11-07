@@ -145,13 +145,15 @@ def test_python_prerequisite_without_candidates_is_missing(monkeypatch):
 
 
 @pytest.mark.parametrize("supported_available", [False, True])
-def test_python_prerequisite_does_not_execute_windowsapps_alias(
-    monkeypatch, tmp_path, supported_available,
+@pytest.mark.parametrize("platform", ["windows", "linux"])
+def test_python_prerequisite_windowsapps_alias_is_windows_only(
+    monkeypatch, tmp_path, supported_available, platform,
 ):
     import os
 
     from worktree_manager import prereqs
 
+    monkeypatch.setattr(prereqs, "current_os", lambda: platform)
     alias_dir = str(tmp_path / "WindowsApps")
     supported_dir = str(tmp_path / "supported Python")
     alias = str(Path(alias_dir) / "python.exe")
@@ -168,15 +170,20 @@ def test_python_prerequisite_does_not_execute_windowsapps_alias(
     probes = []
 
     def probe(path):
-        assert path != alias
+        if platform == "windows":
+            assert path != alias
         probes.append(path)
         return "3.11.9"
 
     monkeypatch.setattr(prereqs, "_probe_version", probe)
     status = detect_prereq(Prereq("python3", min="3.10"))
-    assert status.satisfied is supported_available
-    assert status.path == (supported if supported_available else alias)
-    assert probes == ([supported] if supported_available else [])
+    assert status.satisfied is (supported_available or platform != "windows")
+    assert status.path == (
+        supported if platform == "windows" and supported_available else alias
+    )
+    assert probes == (
+        ([supported] if supported_available else []) if platform == "windows" else [alias]
+    )
 
 
 @pytest.mark.parametrize(
