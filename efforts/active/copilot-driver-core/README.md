@@ -1654,3 +1654,25 @@ granting extension permissions. Missing/failed reads remain unavailable.
 This does not yet prove complete pending agents, initial/reconnect completeness,
 active schedules or grace-race cancellation; automatic idle retirement stays
 unavailable and the lifetime gate remains open.
+
+The next review found that the foreign socket unit control was relative and
+therefore valid inside the POSIX sandbox. Use an absolute outside-sandbox path,
+and add a POSIX-branch control that distinguishes an owned relative socket from
+that foreign path without spawning a mux. All 14 isolation controls pass in
+0.20 seconds (16.95 seconds including preparation/cleanup).
+
+The declared type-check prerequisite exposed old invocation files beside the
+shared interpreter cache, then an occupied reusable source-view directory.
+Keep each new check's target/configuration and emitted source views in its own
+private staging directory under the existing environment lease. Preserve prior
+files and stages; retire only verified current outputs and the empty current
+directory. This is a validation-tool prerequisite, not a Driver runtime change.
+Focused regression coverage retains previous invocation files while checking
+the actual target/configuration read, source-custody failures and matrix result
+collection. The two checker test files produced 221 passes and two
+failure-path cleanup-assertion mismatches. After correcting those assertions
+to preserve an empty stage on deliberate source drift, the focused three-case
+control passes in 6.15 seconds; the other 221 controls were not repeated.
+Current F/E9 lint and all 40 admitted strict projects pass their declared
+Linux/Windows analysis targets. The module-size gate passes without widening
+any ceiling. No prior cache file or source-view stage was removed.

@@ -1,11 +1,14 @@
 """Exercise the actual native fixture command boundary without launching a mux."""
 
+import os
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
 from headed_mux_fixture import FixtureMux
+import plugin_test_command_safety as command_safety
 from plugin_test_command_safety import UnsafeTestCommand, command_problem
 
 
@@ -82,6 +85,24 @@ def test_raw_child_flags_are_not_mux_route_options(tmp_path, monkeypatch):
 def test_fixture_rejects_noncanonical_mux_route_before_spawn(tmp_path, monkeypatch, route):
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("must refuse before spawn"))
     fixture = FixtureMux("psmux.exe", tmp_path, {})
-    fixture.mux_args = route
+    fixture.mux_args = (
+        ["-S", str(fixture.sandbox.parent / "foreign.sock")]
+        if route[0] == "-S" else route
+    )
+    with pytest.raises(UnsafeTestCommand):
+        fixture.query("has-session", "-t", fixture.target)
+
+
+def test_posix_socket_scope_distinguishes_owned_relative_and_foreign_absolute_paths(tmp_path, monkeypatch):
+    fixture = FixtureMux("tmux", tmp_path, {})
+    monkeypatch.setattr(command_safety, "os", SimpleNamespace(
+        name="posix", path=os.path, fsdecode=os.fsdecode, environ=os.environ,
+    ))
+    assert command_problem(
+        ["tmux", "-S", "owned.sock", "has-session", "-t", fixture.target],
+        sandbox=fixture.sandbox, cwd=tmp_path,
+    ) is None
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("must refuse before spawn"))
+    fixture.mux_args = ["-S", str(fixture.sandbox.parent / "foreign.sock")]
     with pytest.raises(UnsafeTestCommand):
         fixture.query("has-session", "-t", fixture.target)
