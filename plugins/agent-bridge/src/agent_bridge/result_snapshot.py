@@ -713,6 +713,11 @@ def _represented_pending_input(
                     "message": message or None,
                     "message_truncated": truncated,
                     "read_only": True,
+                    **({
+                        "request_id": event.data["request_id"],
+                        "request_family": event.data.get("request_family"),
+                    } if isinstance(event.data.get("request_id"), str)
+                    and len(event.data["request_id"]) <= 512 else {}),
                 }
             ],
             reason="represented input evidence is read-only",

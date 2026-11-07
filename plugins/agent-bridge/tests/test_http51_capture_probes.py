@@ -16,6 +16,27 @@ import bridge_http52_evidence as evidence
 from bridge_http_retained_probes import capture_request, record_observations
 from http51_receipt_probes import observe as observe_receipt
 from http51_live_cli_probes import observe as observe_live_cli
+from test_live_questions import (
+    api as api,
+    test_live_question_provider_advertises_actual_capability
+    as test_live_question_provider_advertises_actual_capability,
+    test_current_native_roundtrip_and_durable_outcome
+    as test_current_native_roundtrip_and_durable_outcome,
+    test_authentication_mismatch_and_single_use_refusals
+    as test_authentication_mismatch_and_single_use_refusals,
+    test_terminal_completion_restart_and_process_replacement_revoke_observation
+    as test_terminal_completion_restart_and_process_replacement_revoke_observation,
+    test_question_answers_do_not_follow_session_aliases
+    as test_question_answers_do_not_follow_session_aliases,
+    test_native_rejection_and_uncertainty_are_not_acceptance
+    as test_native_rejection_and_uncertainty_are_not_acceptance,
+    test_unclaimed_timeout_withdraws_and_missing_required_field_refuses
+    as test_unclaimed_timeout_withdraws_and_missing_required_field_refuses,
+    test_old_provider_refuses_before_mutation_and_new_provider_gets_pinned_shape
+    as test_old_provider_refuses_before_mutation_and_new_provider_gets_pinned_shape,
+    test_cli_live_branch_preserves_owned_answer_and_permission_boundaries
+    as test_cli_live_branch_preserves_owned_answer_and_permission_boundaries,
+)
 from test_live_exact_rollback import (
     test_interrupted_pre30_upgrade_reopens_every_legacy_guard_checkpoint
     as test_interrupted_pre30_upgrade_reopens_every_legacy_guard_checkpoint,

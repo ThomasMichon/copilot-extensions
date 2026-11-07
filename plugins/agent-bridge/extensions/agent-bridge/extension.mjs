@@ -24,7 +24,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { open } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { approveAll } from "@github/copilot-sdk";
 import { joinSession } from "@github/copilot-sdk/extension";
 import {
   InFlightMessages, MainTurn, REPLAY_MAX_BYTES, adoptSessionId, drainControls, drainInbox, serializedRegister,
@@ -35,6 +34,7 @@ import { makeBridgeEndpoint } from "./bridge-endpoint.mjs";
 import { metadataRefresher, processIdentity, registrationMetadata, resolveMetadataAsync } from "./metadata.mjs";
 import { createRetainedInbox, retainedDeliverySelected } from "./retained-delivery.mjs";
 import { createHeadedDriverSession, createRemoteDriverSession, isRemoteDriverSource } from "./remote-driver.mjs";
+import { PendingQuestions, QUESTION_TYPES, pollQuestions } from "./questions.mjs";
 
 // --- Constants ---
 const HEARTBEAT_MS = 30_000; // refresh liveness (updated_at) every 30s
@@ -72,6 +72,7 @@ const REPRESENT_TYPES = new Set([
   "session.usage_info",
   "assistant.turn_end",
   "permission.requested",
+  ...QUESTION_TYPES,
   "session.compaction_start",
   "session.compaction_complete",
 ]);
@@ -100,6 +101,8 @@ const state = {
   mainTurn: new MainTurn(), // is the main agent's turn running (not a sub-agent's)?
   lastEventAt: 0, // advanced by the observe-only event handler
   readinessTasks: new Map(),
+  questions: new PendingQuestions(),
+  questioning: false,
 };
 
 function extLog(msg) {
@@ -342,6 +345,22 @@ async function pollControls() {
   }
 }
 
+async function pollQuestionAnswers() {
+  if (state.questioning || !state.registered || state.nativeSessionId !== state.sessionId) return;
+  state.questioning = true;
+  const sid = state.sessionId;
+  try {
+    await pollQuestions(sid, {
+      questions: state.questions, identity: processIdentity(), session,
+      request: retainedBridgeRequest,
+      endpointKey: () => state.base,
+      isCurrent: () => state.registered && state.sessionId === sid && state.nativeSessionId === sid,
+    });
+  } finally {
+    state.questioning = false;
+  }
+}
+
 // The bridge lost this session's represented history in a restart: send it the
 // tail of the session's own transcript (control:replay-history). The bridge
 // lands it before the live events it held meanwhile, and drops duplicates.
@@ -366,11 +385,6 @@ async function replayHistory(sid) {
 
 // --- Extension ---
 const session = await joinSession({
-  // This extension registers no tools, so no permission request is ever routed
-  // to it; approveAll is a proven, inert default (matches talk-mode). It does
-  // NOT auto-approve the operator's own tool calls -- those stay with the CLI.
-  onPermissionRequest: approveAll,
-
   // /peer -- optional MUTE toggle for message delivery INTO this session.
   // Delivery is ON by default (single-operator mesh; trust is the transport, not
   // a consent prompt) -- this just lets the operator silence a focused session.
@@ -447,6 +461,7 @@ session.on((event) => {
       // off the event loop (the bridge folds a renamed placeholder into it).
       setTimeout(() => register().catch(() => {}), 0);
     }
+    state.questions.observe(event, state.nativeSessionId);
     // Represent (Phase 5): enqueue whitelisted events for the flusher. This is
     // pure in-memory bookkeeping -- NO I/O, NO await, NO translation (the bridge
     // translates) -- so the hot-potato rule holds. The bounded queue drops the
@@ -529,6 +544,7 @@ try {
     state.inboxPoll = setInterval(() => {
       pollInbox().catch(() => {});
       pollControls().catch(() => {});
+      pollQuestionAnswers().catch(() => {});
     }, INBOX_POLL_MS);
     if (state.inboxPoll.unref) state.inboxPoll.unref();
   }

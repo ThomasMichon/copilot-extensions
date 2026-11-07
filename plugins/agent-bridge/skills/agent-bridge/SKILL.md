@@ -826,6 +826,12 @@ two capabilities without the destructive take-over:
   (`<agent-bridge catalog argv[0]> send <live-session>`)
   delivers an attributed turn *into* a live interactive session — the mirror of
   the read path.
+- **Pending agent questions.** `questions <exact-native-session-id>` inspects
+  fresh native requests; `answer` with the exact request and generation can
+  resolve supported `ask_user` requests under operator delegation. See the
+  [question answer contract](../../docs/live-question-answers.md) for identity,
+  audit, unsupported-runtime and unknown-outcome rules. This never approves
+  represented tool permissions or establishes trusted-human evidence.
 - **Addressing by worktree handle.** `resolve` maps a worktree handle → its
   currently-live session, so `reply-to` survives a session handoff (an agent is
   a *series of sessions in one worktree*).

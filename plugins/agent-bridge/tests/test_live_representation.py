@@ -234,7 +234,7 @@ class TestTranslateSdkEvent:
 
     def test_ask_user_tool_start_is_read_only_request(self) -> None:
         """A live CLI session's ask_user surfaces as a legible, READ-ONLY
-        ask_user_request (take-over to answer) -- never an opaque spinner."""
+        observation -- a tool-call id alone is never an answer selector."""
         out = translate_sdk_event(
             "tool.execution_start",
             {
@@ -257,9 +257,36 @@ class TestTranslateSdkEvent:
         assert data["requested_schema"]["properties"] == {
             "choice": {"type": "string"}
         }
-        # Represented CLI session: owner Copilot holds the reply, so this is
-        # read-only downstream (answer affordance is take-over, not inline).
+        # Fresh native question snapshots, not passive tool starts, qualify answers.
         assert data["read_only"] is True
+
+    @pytest.mark.parametrize("family", ["elicitation", "user_input"])
+    def test_native_question_lifecycle_is_correlated_without_minting_authority(self, family) -> None:
+        from agent_bridge.represented_pending import represented_pending_events
+
+        store = LiveEventStore()
+        start = {"toolCallId": "ask-1", "toolName": "ask_user",
+                 "arguments": {"message": "Same question"}}
+        store.ingest("s", [{"type": "tool.execution_start", "data": start}])
+        for request_id in ("request-1", "request-2"):
+            store.ingest("s", [{
+                "type": family + ".requested",
+                "data": {"toolCallId": "ask-1", "requestId": request_id,
+                         "message": "Same question", "question": "Same question"},
+            }])
+        events = store.get("s").get_events()
+        pending = represented_pending_events(events)
+        assert len(pending) == 1
+        assert pending[0].data["request_id"] == "request-2"
+        assert pending[0].data["read_only"] is True
+        store.ingest("s", [{
+            "type": family + ".completed", "data": {"requestId": "request-1"},
+        }])
+        assert represented_pending_events(store.get("s").get_events())[0].data["request_id"] == "request-2"
+        store.ingest("s", [{
+            "type": family + ".completed", "data": {"requestId": "request-2"},
+        }])
+        assert represented_pending_events(store.get("s").get_events()) == []
 
     def test_agent_id_passed_through(self) -> None:
         out = translate_sdk_event(

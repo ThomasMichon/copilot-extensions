@@ -15,7 +15,7 @@ def test_readiness_and_existing_delivery_node_contracts():
     result = subprocess.run(
         ["node", "--test", str(tests / "plugin-readiness.test.mjs"),
          str(tests / "delivery.test.mjs"), str(tests / "retained-delivery.test.mjs"),
-         str(tests / "retained-extension.test.mjs")],
+         str(tests / "retained-extension.test.mjs"), str(tests / "questions.test.mjs")],
         capture_output=True, text=True, timeout=25, **no_window_kwargs(),
     )
     if result.returncode != 0:
