@@ -1884,3 +1884,18 @@ copied-wrapper/real-validator controls pass in 1.87 seconds (63.41 seconds total
 Six Manager final-consumer rebinding controls pass in 36.95 seconds (144.36
 seconds total), with two native-Bash skips. Native Copilot, the source-location
 discrepancy and the remaining parent gates are not requalified by this packet.
+
+The final bare-resume/model-order selection at `52d735872e` passes both cases
+on disposable hosted Windows in 37.77 seconds through the owner-only escape
+hatch ([run](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42370030834)).
+The result validates the exact source, selection, Windows runtime and actual
+test identities; it is not inferred from workflow success. Source transport
+retains the one reserved non-branch ref without a new upstream branch.
+
+Required CI then refuses before unit execution because the Worktrees argument
+module was an explicitly hash-bound unit input. Its shared table must join that
+admitted closure. The existing actor-free local-launch fixture now loads the
+exact core table and Worktrees re-export under restored synthetic namespaces,
+without importing application actors. Update only those source hashes and the
+fixture hash; unit nodes, coverage targets, effect restrictions and deadlines
+remain unchanged. The fixed admission still needs the required complete packet.

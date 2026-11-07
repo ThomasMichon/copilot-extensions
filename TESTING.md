@@ -5606,6 +5606,10 @@ these units do not qualify Windows read-sharing fences.
 Guardian cleanup checks its operation-owned module namespaces while preserving
 pre-existing modules; legitimate lazy standard-library imports are not treated
 as leaked private modules.
+The existing local-launch boundary fixture loads the core-owned native
+value-option table and Worktrees re-export through restored synthetic package
+namespaces. Both source files are explicitly hash-bound; moving the table does
+not add unit nodes, coverage targets, application imports or actor permissions.
 
 `tools/promotion_unit_tests/test_cell_installer.py` admits the original thirteen
 actor-free Machines release-payload and watchdog controls. The owned process
