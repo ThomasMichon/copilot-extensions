@@ -23,7 +23,9 @@ def _ordinary(path: Path, root: Path) -> None:
             break
 
 
-def materialize(dest: Path, *, canonical_root: Path) -> list[str]:
+def materialize(
+    dest: Path, *, canonical_root: Path, source_consumer: Path | None = None,
+) -> list[str]:
     """Use the canonical producer, never an old kit inventory or installed copy.
 
     The promotion owner supplies its private, version-stamped candidate.
@@ -34,17 +36,26 @@ def materialize(dest: Path, *, canonical_root: Path) -> list[str]:
     try:
         _ordinary(dest, dest)
         _ordinary(canonical_root, canonical_root)
-        plugins = dest / "plugins"
-        _ordinary(plugins, dest)
-        if not plugins.exists():
-            return []
+        if source_consumer is None:
+            plugins = dest / "plugins"
+            _ordinary(plugins, dest)
+            if not plugins.exists():
+                return []
+            consumers = sorted(plugins.iterdir())
+        else:
+            source_consumer = source_consumer.absolute()
+            _ordinary(source_consumer, canonical_root)
+            consumers = [dest]
         manifests = []
-        for plugin in sorted(plugins.iterdir()):
+        for plugin in consumers:
             _ordinary(plugin, dest)
             manifest = plugin / "payload-invocation.json"
             if manifest.exists() or manifest.is_symlink():
                 _ordinary(manifest, dest)
-                source = canonical_root / manifest.relative_to(dest)
+                source = (
+                    canonical_root / manifest.relative_to(dest) if source_consumer is None
+                    else source_consumer / manifest.name
+                )
                 _ordinary(source, canonical_root)
                 if manifest.read_bytes() != source.read_bytes():
                     raise ValueError(f"Invocation manifest differs from its canonical source: {manifest}")

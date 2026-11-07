@@ -4634,6 +4634,11 @@
         "tools/promotion_unit_tests/test_invocation_materialization.py::test_pinned_invocation_loader_closure_is_statically_admitted[canonical-packager]",
         "tools/promotion_unit_tests/test_invocation_materialization.py::test_planned_output_ancestor_conflicts_refuse_before_writes[source]",
         "tools/promotion_unit_tests/test_invocation_materialization.py::test_planned_output_ancestor_conflicts_refuse_before_writes[candidate]",
+        "tools/promotion_unit_tests/test_invocation_materialization.py::test_source_preparation_materializes_declared_invocation_outputs[absent]",
+        "tools/promotion_unit_tests/test_invocation_materialization.py::test_source_preparation_materializes_declared_invocation_outputs[stale]",
+        "tools/promotion_unit_tests/test_invocation_materialization.py::test_single_invocation_consumer_uses_canonical_manifest_and_pinned_producer[absent]",
+        "tools/promotion_unit_tests/test_invocation_materialization.py::test_single_invocation_consumer_uses_canonical_manifest_and_pinned_producer[stale]",
+        "tools/promotion_unit_tests/test_invocation_materialization.py::test_single_invocation_consumer_uses_canonical_manifest_and_pinned_producer[foreign-manifest]",
         "tools/promotion_unit_tests/test_materialized_local_sources.py::test_copied_installer_consumer_binds_its_declared_library_preimage[owned-preimage]",
         "tools/promotion_unit_tests/test_materialized_local_sources.py::test_copied_installer_consumer_binds_its_declared_library_preimage[foreign-preimage]",
         "tools/promotion_unit_tests/test_materialized_local_sources.py::test_unrelated_library_copy_does_not_read_installer_inputs"
@@ -4689,7 +4694,7 @@
         "tools/core_release_inputs.py": "b4f14520dd52527eb0b5608bb366b00ce6a58a5c6037e5c027b530e94f2f3867",
         "tools/local_install_profile.py": "4341a22a52c65eb86632215ed6eaf605c5509c5bad3d95ed36c032952fb635f7",
         "tools/local_install_source.py": "9119fc8ced3bb13380097350dc51db1c2ddea95b83b4c8ee5711f3830c5ca7b0",
-        "tools/prepare_runtime_source.py": "ac7fe12bbac0b13fba9339c1fd2a6e6669c95c3ba5695c55ab21ba5f72fb92ce",
+        "tools/prepare_runtime_source.py": "ec5e8423f2e355590d10897bbc6a018f1d9a8b705e1807b413f0bf700f575daa",
         "tools/runtime_profile_bundle.py": "4710950140ca7f8e7b9a0d497e2ae4225765f9aae25b2d1d34764ef6dc28b876",
         "tools/runtime_profile_delivery.py": "e16d787834f4b8c8a64438fe267d8f1a68d0fcecb5f2e215c72531c7ed157fe8",
         "worktree-manager/scripts/install_source.py": "b2c99268d1abd8094d920a1692091aaea8140ab4c7490fcc965140e8c9fd3dd5",
@@ -5006,7 +5011,7 @@
         "tools/launch_wrapper_assets_ref.py": "65d7f51ff422e7d792ce0a6a31e238517f016785b29f4fdaa5ac6bc370a048ab",
         "tools/materialize_installer_engine.py": "0ff1a8f5ec36e8eb42a10c85f14120587372ef4aef6b0c92ce07a05c7f2e21dc",
         "tools/materialize_launch_wrapper_assets.py": "425af9a7640ea594f9725128c412ac11a6bbf8cc76c7694626f8bf9c064270bd",
-        "tools/materialize_main.py": "1b643c0781860e2e53a51927413afbefc6d79178fff2f2a48fc39bf2587369d4",
+        "tools/materialize_main.py": "49b927a3b74138522b9d1bcdc9a52bf8c4e440246632e92da9b24944df4e91b5",
         "tools/materialized_candidate_inventory.py": "9a8ff5cdc600c7ef83328ddf490981c3c4a31cbab3fc1da6a84e4c1c022bb580",
         "tools/native_daemon_artifacts.py": "c0261221fc6334f0f70d1272dde0ed8e28668f84fb7131071e1660615329f81d",
         "tools/native_qualification_contract.py": "2535d0a37a793863feaa21adb23f274faf0db416d73d3014ef361bdd539709e1",
@@ -5291,8 +5296,8 @@
         "tools/typecheck_catalog_views.py": "0e807c81f590817ef3556e38bfb278560735b56733e93f0e35d89508bb722ea7",
         "libs/payload-invocation/templates/catalog-python.tmpl": "c752063e0fa7c4ae6e344843055991498773870d78823e14a5d4f89edeaf93b6",
         "libs/payload-invocation/generate.py": "f5016103ba207b1636672b94196c20f7841af3c49452d79cb4b63801f26eb979",
-        "tools/materialize_payload_invocation.py": "72358c48a4bdce3bdb53291145c25609f0b27ace9a6104c489411be2b645df4e",
-        "tools/promotion_unit_tests/test_invocation_materialization.py": "8cd11deb5f89ccbd9b4d11774e7bad4ee2b1b5e6db3fe15b6dc7a39dd98dc8d4"
+        "tools/materialize_payload_invocation.py": "33ee1beba351737a40507d3f478a793ca6fab3df1126c7114c4297f99c1e7325",
+        "tools/promotion_unit_tests/test_invocation_materialization.py": "27c092183f2f6d408a674514f15aba2947c0584027d622f575bbeee1c19c4130"
     },
     "coverage_targets": [
         "plugins/agent-dispatch/src/agent_dispatch/queue_submission_consumer.py",

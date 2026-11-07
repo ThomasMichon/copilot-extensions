@@ -9,6 +9,7 @@ import shutil
 import pytest
 
 import materialize_payload_invocation as owner
+import prepare_runtime_source as preparation
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -134,3 +135,51 @@ def test_planned_output_ancestor_conflicts_refuse_before_writes(tmp_path, phase)
     assert before == {path.relative_to(tmp_path): path.read_bytes()
                       for path in tmp_path.rglob("*") if path.is_file()}
     assert not (plugin / "scripts/emit-command-catalog.sh").exists()
+
+
+@pytest.mark.parametrize("stale", [False, True], ids=["absent", "stale"])
+def test_source_preparation_materializes_declared_invocation_outputs(tmp_path, stale):
+    source, _candidate_root, _plugin = _candidate(tmp_path, stale=stale)
+    (source / "plugins/sample/pyproject.toml").write_text(
+        '[project]\nname = "sample"\nversion = "1.0"\n', encoding="utf-8",
+    )
+    before = {path.relative_to(source): path.read_bytes()
+              for path in source.rglob("*") if path.is_file()}
+    destination = tmp_path / "prepared/sample"
+    preparation._materialize(source, "sample", destination)
+    for name in ("sample", "sample.ps1", "sample.cmd"):
+        assert b"sample" in (destination / "bin" / name).read_bytes()
+        assert b"stale generated shim" not in (destination / "bin" / name).read_bytes()
+    assert (destination / "scripts/emit-command-catalog.sh").is_file()
+    assert (destination / "scripts/emit-command-catalog.ps1").is_file()
+    assert before == {path.relative_to(source): path.read_bytes()
+                      for path in source.rglob("*") if path.is_file()}
+
+
+@pytest.mark.parametrize("initial", ["absent", "stale", "foreign-manifest"])
+def test_single_invocation_consumer_uses_canonical_manifest_and_pinned_producer(tmp_path, initial):
+    source, _candidate_root, _plugin = _candidate(tmp_path, stale=initial == "stale")
+    consumer = source / "plugins/sample"
+    destination = tmp_path / "individual/sample"
+    shutil.copytree(consumer, destination)
+    if initial == "foreign-manifest":
+        manifest = destination / "payload-invocation.json"
+        data = json.loads(manifest.read_text())
+        data["purpose"] = "Foreign replacement"
+        manifest.write_text(json.dumps(data), encoding="utf-8")
+    before = {path.relative_to(tmp_path): path.read_bytes()
+              for path in tmp_path.rglob("*") if path.is_file()}
+    log = owner.materialize(destination, canonical_root=source, source_consumer=consumer)
+    if initial == "foreign-manifest":
+        assert log and all(line.startswith("SKIP Invocation materialization:") for line in log), log
+        assert before == {path.relative_to(tmp_path): path.read_bytes()
+                          for path in tmp_path.rglob("*") if path.is_file()}
+    else:
+        assert log and all(line.startswith("MATERIALIZE Invocation ") for line in log), log
+        assert b"sample.cli" in (destination / "bin/sample.ps1").read_bytes()
+        assert b"stale generated shim" not in (destination / "bin/sample.ps1").read_bytes()
+    assert {path.relative_to(source): path.read_bytes()
+            for path in source.rglob("*") if path.is_file()} == {
+                path.relative_to("source"): content for path, content in before.items()
+                if path.parts[0] == "source"
+            }
