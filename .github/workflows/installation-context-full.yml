@@ -620,7 +620,9 @@ jobs:
 
           expected = os.environ["WORKTREES_RUNTIME_ONLY_SOURCE"]
           assert re.fullmatch(r"[0-9a-f]{40}", expected), "Supply the exact source_sha"
-          head = run_caller_owned(["git", "rev-parse", "HEAD"], timeout=30)
+          head = run_caller_owned(
+              ["git", "rev-parse", "HEAD"], timeout=30,
+              max_stdout_bytes=1024, max_stderr_bytes=1024)
           head.check_returncode()
           assert head.stdout.strip() == expected == os.environ["GITHUB_SHA"]
           print("qualification-source=" + expected, flush=True)
@@ -661,7 +663,7 @@ jobs:
               matches = [case for case in cases if case.get("name") == name]
               assert len(matches) == 1 and matches[0].find("skipped") is None, name
       - uses: actions/upload-artifact@v4
-        if: always() && steps.composition.outcome != 'skipped'
+        if: always() && env.WORKTREES_RUNTIME_ONLY_REPORTS != ''
         with:
           name: worktrees-runtime-only-${{ runner.os }}-${{ github.sha }}
           path: ${{ env.WORKTREES_RUNTIME_ONLY_REPORTS }}

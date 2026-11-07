@@ -2839,3 +2839,13 @@ acceptance bodies match their source merge and published Main. Changes to
 TESTING and the workflow test file are unrelated additions; all admitted Dev
 bodies match Main. This is released source, not local rollout, caller adoption
 or completion of #10377.
+
+The first exact-head hosted qualification, `42321992914` at
+`b3588819fb6367b441b2654ad689e26b9aba5570`, fails on both platforms before
+test execution. The source-pin probe omitted the owned-process helper's two
+required output budgets; the report uploader then had no declared report path.
+The revised probe supplies finite budgets and the uploader runs only after a
+report directory has been declared. The pure regression stub now requires the
+same keyword-only budgets, so it cannot hide this interface mistake. Its five
+admission controls and touched-file lint pass again. The failed run supplies no
+native acceptance credit; qualification must use the revised published head.

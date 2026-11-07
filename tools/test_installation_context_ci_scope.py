@@ -52,7 +52,7 @@ def test_runtime_only_portfolio_refuses_incomplete_native_evidence(
         )
     calls = []
 
-    def run(arguments, **kwargs):
+    def run(arguments, *, timeout, max_stdout_bytes, max_stderr_bytes, env=None):
         calls.append(arguments)
         if arguments[0] == "git":
             return subprocess.CompletedProcess(arguments, 0, "a" * 40 + "\n", "")
