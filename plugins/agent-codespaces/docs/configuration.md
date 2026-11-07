@@ -103,8 +103,9 @@ returned stopped venues are considered before creating another owned slot;
 existing workstream reuse retains its prior behavior. The
 [creation/reuse contract](../README.md#create-options) describes
 selected-runtime capability discovery, ownership and retained-state limits.
-An explicit repository devcontainer profile is not qualified by the current
-pool metadata, so it does not silently select a cross-effort venue.
+Explicit repository or non-default global devcontainer/location preferences
+are not qualified by the current pool metadata, so they do not silently select
+a cross-effort venue.
 
 Exclude secrets, SSH masters/sockets, lease/adoption/activation receipts,
 credential cache, logs and installed generations from portable YAML. Credential

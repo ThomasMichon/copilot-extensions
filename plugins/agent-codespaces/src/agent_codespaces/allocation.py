@@ -175,8 +175,18 @@ def plan_creation(
     )
     requested_cores = intended_cores(config, repo) if new_cores is None else new_cores
     declared_profile = getattr(config, "repos", {}).get(repo)
-    allow_sequential = allow_sequential and not getattr(declared_profile, "devcontainer_path", None)
-    workstream = resolve_current_workstream_box(members, repo)
+    from .config import CodespacesConfig
+
+    defaults = CodespacesConfig()
+    global_profile = getattr(config, "default_devcontainer_path", defaults.default_devcontainer_path)
+    global_location = getattr(config, "default_location", defaults.default_location)
+    allow_sequential = (
+        allow_sequential and not getattr(declared_profile, "devcontainer_path", None)
+        and not getattr(declared_profile, "location", None)
+        and (not global_profile or global_profile == defaults.default_devcontainer_path)
+        and global_location == defaults.default_location
+    )
+    workstream = resolve_current_workstream_box(members, repo, account)
     if workstream:
         mode = reuse.workstream_mode(workstream, local, shared)
         if mode == "unknown":

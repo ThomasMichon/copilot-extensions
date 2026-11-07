@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+import json
 from typing import Any
 
 
@@ -52,6 +53,98 @@ def codespace_claim_owner_worktrees(codespace_names: Iterable[str]) -> dict[str,
     }
 
 
+def _workstream_claim_refs(owner: str | None) -> set[str]:
+    from . import coordination
+
+    holder = coordination.owner_ref()
+    if holder:
+        parts = holder.split("#", 1)[0].split("/")
+        if len(parts) != 3 or any(not part for part in parts):
+            raise RuntimeError("Workstream ownership identity is malformed")
+        machine, project, worktree = parts
+        if owner and owner.rstrip("/\\").replace("\\", "/").rsplit("/", 1)[-1] != worktree:
+            raise RuntimeError("Workstream ownership identity does not match the caller")
+        result = coordination._run(["--project", project, "claims", worktree, "--json"])
+        if result is None or result.returncode:
+            detail = (result.stderr or "").strip()[:500] if result is not None else "selected runtime unavailable"
+            raise RuntimeError(f"Workstream ownership lookup is unavailable: {detail}")
+        try:
+            payload = json.loads(result.stdout)
+        except (TypeError, ValueError) as error:
+            raise RuntimeError("Workstream ownership response is not JSON") from error
+        if (
+            not isinstance(payload, dict)
+            or payload.get("worktree_id") != worktree or payload.get("repo") != project
+            or payload.get("execution_machine", payload.get("machine")) != machine
+            or ("version" in payload and (
+                type(payload["version"]) is not int or payload["version"] != 1
+            ))
+            or not isinstance(payload.get("outbound"), list)
+        ):
+            raise RuntimeError("Workstream ownership response is incomplete or names another owner")
+        readiness = payload.get("coordination_readiness")
+        if readiness is not None and (
+            not isinstance(readiness, dict) or readiness.get("ready") is not True
+        ):
+            raise RuntimeError("Workstream ownership coordination is not ready")
+        refs: set[str] = set()
+        for claim in payload["outbound"]:
+            if (
+                not isinstance(claim, dict) or not isinstance(claim.get("kind"), str)
+                or not claim["kind"]
+            ):
+                raise RuntimeError("Workstream ownership contains malformed claims")
+            if claim["kind"] != "codespace":
+                continue
+            if (
+                not isinstance(claim.get("ref"), str) or not claim["ref"].strip()
+                or claim.get("state") not in ("active", "at-rest", "released")
+            ):
+                raise RuntimeError("Workstream ownership contains an unknown CodeSpace claim")
+            if claim["state"] != "released":
+                refs.add(claim["ref"])
+        return refs
+    if not owner:
+        return set()
+    try:
+        from agent_worktrees import claims_owner
+
+        return set(claims_owner.claims_of_owner(owner, "codespace"))
+    except Exception:
+        return set()
+
+
+def _box_from_refs(
+    members: Iterable[Any], repo: str, refs: set[str], account: str | None = None,
+) -> str | None:
+    by_name = {member.name: member for member in members}
+    candidates = sorted(
+        name for name in refs
+        if (member := by_name.get(name)) is not None
+        and _matches_workstream_repo(repo, member.repository)
+    )
+    if candidates:
+        return candidates[0]
+    if not account or not refs:
+        return None
+    from .account_binding import list_bindings
+
+    # A missing inventory row does not settle a recorded acquisition attempt.
+    bindings = list_bindings(strict=True)
+    if any(
+        not isinstance(value, str)
+        for binding in bindings for value in (binding.codespace, binding.account, binding.repo)
+    ):
+        raise RuntimeError("Malformed workstream account binding")
+    missing = sorted(
+        binding.codespace for binding in bindings
+        if binding.codespace in refs and binding.codespace not in by_name
+        and binding.account.casefold() == account.casefold()
+        and _matches_workstream_repo(repo, binding.repo)
+    )
+    return missing[0] if missing else None
+
+
 def resolve_workstream_box(
     members: Iterable[Any],
     repo: str,
@@ -65,63 +158,48 @@ def resolve_workstream_box(
     -- an at-rest claim is exactly "mine, just not running right now"), then
     picks the one still present in ``members`` and matching ``repo``. Multiple
     live matches (should not normally happen -- one workstream, one box) picks
-    the first deterministically (sorted by name) rather than raising. Soft
-    cross-plugin integration + best-effort: no owner, no ``agent_worktrees``,
-    or no matching claim all yield ``None`` (the caller then creates fresh,
-    never silently borrowing an unrelated box).
+    the first deterministically (sorted by name) rather than raising.
+    Qualified owners are read through the selected Worktrees runtime, not a
+    sibling Python import. A failed or malformed declared-owner lookup raises;
+    only the unattributed legacy profile retains best-effort import behavior.
     """
     if not owner:
         return None
-    try:
-        from agent_worktrees import claims_owner
-    except ImportError:
-        return None
-    try:
-        refs = claims_owner.claims_of_owner(owner, "codespace")
-    except Exception:
-        return None
-    if not refs:
-        return None
-    by_name = {m.name: m for m in members}
-    candidates = sorted(
-        name for name in refs
-        if (m := by_name.get(name)) is not None
-        and _matches_workstream_repo(repo, m.repository)
-    )
-    return candidates[0] if candidates else None
+    return _box_from_refs(members, repo, _workstream_claim_refs(owner))
 
 
 def resolve_current_workstream_box(
     members: Iterable[Any],
     repo: str,
+    account: str | None = None,
 ) -> str | None:
     """``resolve_workstream_box`` for THIS process's own calling worktree.
 
     Combines ``lease.resolve_owner_worktree()`` (who is asking) with
     :func:`resolve_workstream_box` (what they already claim) into the one call
-    a venue request needs -- degrade-safe end to end: any resolution failure
-    (no worktree context, no agent_worktrees, bad records) yields ``None``,
-    the same "create fresh" fallback as an unresolvable owner.
+    a venue request needs. A qualified native owner remains readable without
+    the sibling Python package. Unknown declared ownership raises rather than
+    becoming absence. With a selected account, a matching persisted binding
+    keeps an omitted venue's unresolved obligation visible to admission.
     """
     try:
         from .lease import resolve_owner_worktree
 
         owner = resolve_owner_worktree()
     except Exception:
-        return None
-    return resolve_workstream_box(members, repo, owner)
+        owner = None
+    return _box_from_refs(members, repo, _workstream_claim_refs(owner), account)
 
 
 def current_workstream_account(repo: str) -> str | None:
     """Keep an unmapped workstream on its claimed venue's persisted account."""
     try:
-        from agent_worktrees import claims_owner
         from .lease import resolve_owner_worktree
 
         owner = resolve_owner_worktree()
-        refs = set(claims_owner.claims_of_owner(owner, "codespace")) if owner else set()
     except Exception:
-        return None
+        owner = None
+    refs = _workstream_claim_refs(owner)
     if not refs:
         return None
     from .account_binding import list_bindings

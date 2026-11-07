@@ -1061,6 +1061,7 @@ import json
 import os
 import subprocess
 import sys
+import builtins
 from pathlib import Path
 from agent_codespaces import __main__ as cli, lifecycle, pool, coordination, allocation, lease
 from agent_codespaces import account_binding, driving_worktrees, status, worktrees
@@ -1068,6 +1069,13 @@ from agent_codespaces.config import CodespacesConfig
 from agent_codespaces.lifecycle import CodespaceInfo
 
 native_list = coordination.list_leases
+native_context = allocation.allocation_context
+original_import = builtins.__import__
+def without_worktrees_package(name, *args, **kwargs):
+    if name == "agent_worktrees" or name.startswith("agent_worktrees."):
+        raise ImportError("separate runtime")
+    return original_import(name, *args, **kwargs)
+builtins.__import__ = without_worktrees_package
 cli.load_merged_config = CodespacesConfig
 cli._require_codespace_scope = lambda operation, **kwargs: None
 cli.validate_context = lambda: None
@@ -1078,7 +1086,8 @@ pool.list_status = lambda: []
 pool.codespaces_in_use = lambda names: {}
 coordination.list_leases = lambda **kwargs: {}
 coordination.list_cleanliness = lambda: {}
-driving_worktrees.resolve_current_workstream_box = lambda *args: None
+coordination.owner_ref = lambda: None
+lease.resolve_owner_worktree = lambda: None
 created = []
 cli.create_codespace = lambda *args, **kwargs: (
     created.append(kwargs["account"]) or
@@ -1103,6 +1112,8 @@ for count, force, failed in ((29, False, False), (30, False, False), (31, False,
         allocate_result = cli.main(["allocate", "example/project", "--json"])
     results.append([create_result, allocate_result])
 root = Path(sys.argv[1])
+from ssh_manager import locks
+locks.locks_dir = lambda: root / "target-locks"
 lease.LEASE_FILE = root / "leases.json"
 lease._LOCK_FILE = root / "leases.lock"
 lease._DEPLOY_HOLDS_FILE = root / "holds.json"
@@ -1126,18 +1137,26 @@ record = {"resource": {"kind": "codespace", "key": "venue-0"},
           "holder": "machine/project/previous", "token": "a" * 40,
           "state": "released", "live": False}
 calls = []
+obligations = []
+uncertain = False
 def transport(args, **kwargs):
     calls.append(args)
-    if args[:2] == ["--project", "project"]:
+    if args == ["--project", "project", "coordination-readiness"]:
         data = {"version": 1, "ready": True, "code": "ready",
                 "capabilities": [coordination.RELEASED_ONLY_CAPABILITY]}
+    elif args == ["--project", "project", "claims", "current-worktree", "--json"]:
+        data = {"version": 1, "machine": "machine", "repo": "project",
+                "worktree_id": "current-worktree", "outbound": obligations}
     elif args[:2] == ["lease", "list"]:
         data = [record]
     elif args[:2] == ["lease", "inspect"]:
         data = record
     elif args[:2] == ["lease", "acquire"]:
         assert "--released-only" in args and record["state"] == "released"
-        record.update(state="leased", live=True, token="b" * 40)
+        record.update(state="leased", live=True, token="b" * 40,
+                      holder="machine/project/current-worktree")
+        if uncertain:
+            return subprocess.CompletedProcess(args, 4, "", "response lost")
         data = record
     elif args[:2] == ["lease", "renew"]:
         data = record
@@ -1145,6 +1164,8 @@ def transport(args, **kwargs):
         record.update(state="released", live=False, token="c" * 40)
         data = record
     elif args[:2] == ["claims", "add"]:
+        if not obligations:
+            obligations.append({"kind": "codespace", "ref": "venue-0", "state": "active"})
         data = {"ok": True}
     else:
         raise AssertionError(args)
@@ -1163,7 +1184,29 @@ assert retained.read_bytes() == b"prior effort work"
 assert pool_rows[0].branch == "retained-feature"
 assert account_binding.bound_account("venue-0") == "fixture-owner"
 assert len([args for args in calls if args[:2] == ["lease", "acquire"]]) == 1
-print(json.dumps({"results": results, "created": created, "reused": reused, "returned": returned}))
+uncertain = True
+with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+    assert cli.main(["create", "example/project", "--no-wait"]) == 4
+assert record["state"] == "leased" and lease.get_lease("venue-0") is None
+allocation.allocation_context = native_context
+from agent_codespaces import gh_account, owner_inventory
+gh_account.account_for_repo = lambda repo: None
+gh_account.active_account = lambda: "new-active-owner"
+for variable in ("GH_TOKEN", "GITHUB_TOKEN"):
+    os.environ.pop(variable, None)
+selected = []
+owner_inventory.qualified_environment = lambda account: (
+    selected.append(account) or {"GH_TOKEN": "fixture-" + account}
+)
+cli.load_merged_config = lambda: CodespacesConfig(
+    default_machine_type="premiumLinux", max_owned_codespaces=31,
+)
+with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+    retried = cli.main(["create", "example/project", "--no-wait"])
+assert retried == 4 and selected == ["fixture-owner"]
+assert len([args for args in calls if args[:2] == ["lease", "acquire"]]) == 2
+print(json.dumps({"results": results, "created": created, "reused": reused,
+                  "returned": returned, "uncertain_retry": retried}))
 '''
     result = subprocess.run(
         [sys.executable, "-c", script, str(tmp_path)], capture_output=True, text=True,
@@ -1174,6 +1217,7 @@ print(json.dumps({"results": results, "created": created, "reused": reused, "ret
     assert observed["results"] == [[0, 0], [4, 4], [4, 4], [0, 4], [4, 4]]
     assert observed["created"] == ["fixture-owner", "fixture-owner"]
     assert observed["reused"] == 0 and observed["returned"] is True
+    assert observed["uncertain_retry"] == 4
 
 
 # --- Top-level --project (command-surface <repo> <slug> surface) ---
