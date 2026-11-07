@@ -74,6 +74,10 @@ obligations, prerequisite growth, budgets, validation weight, delivery state
 and handoff fidelity, classify every wait as required, productive or waste,
 and escalate once when a delivered steer stalls; the watchdog never asks a
 blocking question itself.
+Each sweep reports evidence against enforced goals (fleet discovery, on-charter
+agents, fleet weak points, monitor weak points and, for recurring assignments
+only, recurring until confident), and a self-improvement loop folds learnings
+into the consumer's own weak-point catalogue and adapter.
 Its separately granted dormant correction mode fixes an inactive owner's
 persisted charter (effort plan, workspace title/summary, agenda cursor or,
 only through a verified record-only supersede, a pending baton) through each
@@ -103,6 +107,7 @@ references where available, and a private writable report home.
 | `skills/monitor-agent-fleet/SKILL.md` | Fleet monitor runbook |
 | `skills/monitor-agent-fleet/assets/CHARTER.md` | Fleet monitor charter template |
 | `skills/monitor-agent-fleet/assets/scenarios.json` | Offline behavioral cases, not live commands |
+| `skills/monitor-agent-fleet/assets/WEAK-POINTS.md` | Weak-point catalogue template; the consuming repository owns its filled-in copy |
 | `skills/monitor-agent-fleet/references/misdirection-patterns.md` | Patterns, distinguishing evidence and corrective steers |
 | `skills/monitor-agent-fleet/references/steering.md` | Authorized steer protocol |
 | `skills/monitor-agent-fleet/references/history-analysis.md` | Chunking, accounting and classifications |
@@ -110,6 +115,7 @@ references where available, and a private writable report home.
 | `skills/monitor-agent-fleet/references/interventions.md` | Testing, review and priority interventions |
 | `skills/monitor-agent-fleet/references/fabric-readers.md` | Optional existing reader adapters |
 | `skills/monitor-agent-fleet/references/dormant-correction.md` | Separately granted record correction for inactive owners |
+| `skills/monitor-agent-fleet/references/self-improvement.md` | Improve-the-fleet and improve-the-monitor loops; capture, fold and route learnings |
 | `skills/review-pull-requests/SKILL.md` | Sustained PR reviewer runbook |
 | `skills/review-pull-requests/assets/` | Reviewer charter and synthetic ledger example |
 | `skills/review-pull-requests/references/` | Setup/adapters, coordination/recovery and communication |

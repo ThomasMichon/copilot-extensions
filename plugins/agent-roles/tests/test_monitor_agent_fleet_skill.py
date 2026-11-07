@@ -247,3 +247,66 @@ def test_recurring_watch_re_resolves_roster_each_cycle() -> None:
     assert "recurring-roster-refresh" in {
         case["id"] for case in scenarios["cases"]
     }
+
+
+def test_enforced_goals_require_evidence_and_scope_g5_to_recurring() -> None:
+    skill = " ".join(_read(SKILL / "SKILL.md").split())
+    charter = " ".join(_read(SKILL / "assets" / "CHARTER.md").split())
+    for requirement in (
+        "## Enforced goals",
+        "**A sweep report that lacks evidence for an applicable goal is "
+        "incomplete**",
+        "reported against G1-G4 only",
+        "**G5 applies only to a recorded recurring assignment**",
+        "**a fleet that stays on-charter without a monitor**",
+        "**never self-declare an open-ended assignment done**",
+        "never widen the charter's mode, steering, answer or source-change "
+        "authority",
+    ):
+        assert requirement in skill, requirement
+    for goal in ("| G1 |", "| G2 |", "| G3 |", "| G4 |", "| G5 |"):
+        assert goal in skill, goal
+    assert skill.index("## Enforced goals") < skill.index(
+        "## 1. Establish the charter"
+    )
+    for requirement in (
+        "Confidence cadence:",
+        "Healthy sweeps to relax:",
+        "Any waste finding returns to the confidence cadence",
+        "A coverage gap or unknown target earns no healthy-sweep credit",
+        "a missing goal marks the sweep incomplete",
+    ):
+        assert requirement in charter, requirement
+    scenarios = json.loads(_read(SKILL / "assets" / "scenarios.json"))
+    assert {
+        "finite-request-goal-evidence", "recurring-confidence-cadence",
+    } <= {case["id"] for case in scenarios["cases"]}
+
+
+def test_self_improvement_loop_routes_learnings_by_owner() -> None:
+    skill = " ".join(_read(SKILL / "SKILL.md").split())
+    loop = " ".join(_read(SKILL / "references" / "self-improvement.md").split())
+    template = _read(SKILL / "assets" / "WEAK-POINTS.md")
+    assert "(references/self-improvement.md)" in skill
+    assert "(assets/WEAK-POINTS.md)" in skill
+    for requirement in (
+        "## Improve the fleet, not just the agent (G3)",
+        "## Improve this monitor (G4)",
+        "**Capture in the ledger first.**",
+        "Never stop a sweep to edit guidance or open a change",
+        "**Fold at sweep end.**",
+        "**Ride one rolling change.**",
+        "as a batched, anonymized change",
+        "needs recorded source-change and publication authority",
+        "A reader that starts, resumes or repairs a service is never the fix",
+    ):
+        assert requirement in loop, requirement
+    assert "**The consuming repository owns its filled-in catalogue**" in (
+        template
+    )
+    for section in (
+        "## Agent guidance weak points",
+        "## Monitor blind spots",
+        "## Reader discovery log",
+    ):
+        assert section in template, section
