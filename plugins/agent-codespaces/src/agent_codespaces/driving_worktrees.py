@@ -53,10 +53,10 @@ def codespace_claim_owner_worktrees(codespace_names: Iterable[str]) -> dict[str,
     }
 
 
-def _workstream_claim_refs(owner: str | None) -> set[str]:
+def _qualified_claim_refs(holder: str, owner: str | None = None) -> set[str]:
+    """Read one complete qualified owner's ledger, never treating failure as absence."""
     from . import coordination
 
-    holder = coordination.owner_ref()
     if holder:
         parts = holder.split("#", 1)[0].split("/")
         if len(parts) != 3 or any(not part for part in parts):
@@ -104,6 +104,15 @@ def _workstream_claim_refs(owner: str | None) -> set[str]:
             if claim["state"] != "released":
                 refs.add(claim["ref"])
         return refs
+    raise RuntimeError("Workstream ownership identity is missing")
+
+
+def _workstream_claim_refs(owner: str | None) -> set[str]:
+    from . import coordination
+
+    holder = coordination.owner_ref()
+    if holder:
+        return _qualified_claim_refs(holder, owner)
     if not owner:
         return set()
     try:

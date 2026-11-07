@@ -4192,6 +4192,8 @@ def _cmd_claim(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return _COORDINATION_EXIT
+    if holder_ref:
+        coordination.journal_obligation(lease.codespace, holder_ref)
     print(f"[OK] Claimed {lease.codespace} for {owner}")
     return 0
 

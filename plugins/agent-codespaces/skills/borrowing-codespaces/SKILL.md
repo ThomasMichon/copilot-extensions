@@ -75,6 +75,9 @@ Every matching obligation is checked, and holder scope includes machine and
 project, not only the worktree ID. Tokened return confirms shared release and
 original-owner ledger settlement before local cleanup. Deferred or unknown
 settlement retains the claim and reports failure; do not force-clear it.
+Tokened own-workstream reuse cannot fall back to local evidence alone. Return
+can reconcile an unjournaled legacy claim only when a complete qualified ledger
+read confirms the entry absent or already released; unreadable is not absent.
 Unverified custom devcontainer/location preferences remain creation choices,
 not implicit permission to select another effort's venue.
 
