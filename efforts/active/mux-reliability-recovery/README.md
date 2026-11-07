@@ -237,3 +237,14 @@ not only its parser. Deployment and repairs to running sessions are separate.
   required keeping legacy presence classification in the existing Manager
   discovery owner; no new provider, dependency or raised ceiling was added.
   Exact-source CI and review remain the delivery gate.
+
+### 2026-11-06 - Required unit admission correction
+
+- Required CI correctly rejected the changed mux parser's old source binding
+  before running its sealed unit packet. Updated only that binding and the
+  existing actor-free regression module's binding; no node, coverage target,
+  effect restriction or budget was removed.
+- The admitted presence control now requires unknown PSMux failure rather than
+  silent negative evidence, and its strict-parser control covers malformed
+  monitor catalogs. The selected actor-free packet passed 22 tests locally.
+  The full sealed packet still requires exact-source CI qualification.
