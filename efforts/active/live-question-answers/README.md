@@ -219,3 +219,15 @@ requested protocol-only scope.
   type admission; no broader qualification is inferred.
 - Source implementation and evidence are ready for normal review and CI.
   Merge, effort closeout and finalization remain open. No rollout occurred.
+
+### 2026-11-07 - Review correction
+
+- The first review identified uncharged correlation strings in passive result
+  snapshots. Both full values now reserve their text budget before emission;
+  insufficient room omits the pair rather than truncating an exact identifier.
+- Added four real snapshot-builder regressions covering both native families,
+  low budgets, atomic pair omission and truthful usage. The focused result
+  regression packet passed 22 cases.
+- The current HTTP-52 portfolio includes these controls (285 total). The PR
+  is temporarily draft while the corrected source receives fresh evidence;
+  no review, CI or permission gate is bypassed.

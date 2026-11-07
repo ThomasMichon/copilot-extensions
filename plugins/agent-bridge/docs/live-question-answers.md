@@ -95,6 +95,8 @@ An extension restart gets a new generation and does not reconstruct pending
 questions from transcript text. Unless a native request is observed again,
 use the original terminal. Forwarded requested/completed events improve
 representation, but passive history remains read-only and cannot mint answers.
+Bounded passive results omit correlation when the complete identifier/family
+pair cannot fit their text budget; `questions` remains the selector source.
 
 Older daemons, extensions or SDKs retain manual terminal answering. An
 unsupported or stale observation is unavailable, not an empty healthy snapshot.

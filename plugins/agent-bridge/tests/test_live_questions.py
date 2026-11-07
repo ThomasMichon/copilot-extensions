@@ -73,6 +73,41 @@ def test_live_question_provider_advertises_actual_capability(api, monkeypatch):
         assert client.get(BASE).json()["availability"] == "unavailable"
 
 
+@pytest.mark.parametrize("family,length,limit,included", [
+    ("elicitation", 512, 256, False),
+    ("user_input", 50, 256, False),
+    ("elicitation", 4, 256, True),
+    ("user_input", 512, 6000, True),
+])
+def test_passive_native_correlation_is_exact_and_charged_to_its_budget(family, length, limit, included):
+    from agent_bridge.events import EventLog
+    from agent_bridge.result_snapshot import build_represented_result_snapshot
+
+    def snapshot(correlated):
+        events = EventLog()
+        data = {"tool_call_id": "tool", "message": "Q", "read_only": True}
+        if correlated:
+            data.update(request_id="r" * length, request_family=family)
+        events.append("ask_user_request", data)
+        return build_represented_result_snapshot(
+            registration={"session_id": "native-budget", "status": "live", "turn_state": "running"},
+            event_log=events, requested_ref="native-budget", position=None,
+            max_text_chars=limit,
+        )
+
+    baseline = snapshot(False)
+    current = snapshot(True)
+    pending = current.state.pending_input.value[0]
+    assert current.limits.used_text_chars <= limit
+    if included:
+        assert pending["request_id"] == "r" * length
+        assert pending["request_family"] == family
+        assert current.limits.used_text_chars - baseline.limits.used_text_chars == length + len(family)
+    else:
+        assert "request_id" not in pending and "request_family" not in pending
+        assert current.limits.used_text_chars == baseline.limits.used_text_chars
+
+
 @pytest.mark.parametrize("family", ["elicitation", "user_input"])
 def test_current_native_roundtrip_and_durable_outcome(api, family):
     assert api.client.get(BASE).json()["availability"] == "unavailable"

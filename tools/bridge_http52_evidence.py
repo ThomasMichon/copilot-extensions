@@ -105,6 +105,7 @@ EXTRA_PATHS = (
 PROBES = {
     **retained.PROBES,
     "test_live_question_provider_advertises_actual_capability": 1,
+    "test_passive_native_correlation_is_exact_and_charged_to_its_budget": 4,
     "test_current_native_roundtrip_and_durable_outcome": 2,
     "test_authentication_mismatch_and_single_use_refusals": 1,
     "test_terminal_completion_restart_and_process_replacement_revoke_observation": 1,

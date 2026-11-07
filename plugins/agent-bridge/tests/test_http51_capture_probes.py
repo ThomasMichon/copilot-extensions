@@ -20,6 +20,8 @@ from test_live_questions import (
     api as api,
     test_live_question_provider_advertises_actual_capability
     as test_live_question_provider_advertises_actual_capability,
+    test_passive_native_correlation_is_exact_and_charged_to_its_budget
+    as test_passive_native_correlation_is_exact_and_charged_to_its_budget,
     test_current_native_roundtrip_and_durable_outcome
     as test_current_native_roundtrip_and_durable_outcome,
     test_authentication_mismatch_and_single_use_refusals

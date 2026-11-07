@@ -702,6 +702,17 @@ def _represented_pending_input(
     message, truncated, _ = budget.clip(
         event.data.get("message"), field_limit=240
     )
+    correlation: dict[str, str] = {}
+    request_id = event.data.get("request_id")
+    family = event.data.get("request_family")
+    # Correlation is exact or absent; clipping would invent another identifier.
+    if (
+        isinstance(request_id, str) and 0 < len(request_id) <= 512
+        and isinstance(family, str) and family in {"elicitation", "user_input"}
+        and len(request_id) + len(family) <= budget.limit - budget.used
+    ):
+        correlation["request_id"], _, _ = budget.clip(request_id)
+        correlation["request_family"], _, _ = budget.clip(family)
     return (
         ResultField(
             availability="partial",
@@ -713,11 +724,7 @@ def _represented_pending_input(
                     "message": message or None,
                     "message_truncated": truncated,
                     "read_only": True,
-                    **({
-                        "request_id": event.data["request_id"],
-                        "request_family": event.data.get("request_family"),
-                    } if isinstance(event.data.get("request_id"), str)
-                    and len(event.data["request_id"]) <= 512 else {}),
+                    **correlation,
                 }
             ],
             reason="represented input evidence is read-only",
