@@ -6,6 +6,8 @@ from __future__ import annotations
 import sys
 import types
 
+import pytest
+
 from agent_codespaces import driving_worktrees
 
 
@@ -94,6 +96,40 @@ def test_resolve_workstream_box_degrades_on_lookup_error(monkeypatch):
     assert driving_worktrees.resolve_workstream_box(
         [_Member("cs-web", "o/web-codespaces")], "web", "wt-a",
     ) is None
+
+
+@pytest.mark.parametrize("claimed,repository,expected", [
+    (True, "o/web-codespaces", "original-owner"),
+    (False, "o/web-codespaces", None),
+    (True, "o/other-codespaces", None),
+])
+def test_current_workstream_account_requires_own_matching_binding(
+    monkeypatch, claimed, repository, expected,
+):
+    from agent_codespaces import account_binding
+
+    fake = types.ModuleType("fake_claims_owner")
+    fake.claims_of_owner = lambda owner, kind: ["cs-web"] if claimed else []
+    _install_fake_claims_owner(monkeypatch, fake)
+    monkeypatch.setattr("agent_codespaces.lease.resolve_owner_worktree", lambda: "wt-a")
+    monkeypatch.setattr(account_binding, "list_bindings", lambda: [
+        account_binding.AccountBinding("cs-web", "original-owner", 0, repository),
+    ])
+    assert driving_worktrees.current_workstream_account("web") == expected
+
+
+def test_current_workstream_account_preserves_binding_unavailability(monkeypatch):
+    fake = types.ModuleType("fake_claims_owner")
+    fake.claims_of_owner = lambda owner, kind: ["cs-web"]
+    _install_fake_claims_owner(monkeypatch, fake)
+    monkeypatch.setattr("agent_codespaces.lease.resolve_owner_worktree", lambda: "wt-a")
+
+    def unavailable():
+        raise RuntimeError("binding lock unavailable")
+
+    monkeypatch.setattr("agent_codespaces.account_binding.list_bindings", unavailable)
+    with pytest.raises(RuntimeError, match="binding lock unavailable"):
+        driving_worktrees.current_workstream_account("web")
 
 
 # --- same_worktree_family (Phase 2b force-takeover bypass) ------------------

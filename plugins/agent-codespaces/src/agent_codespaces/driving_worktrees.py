@@ -102,6 +102,29 @@ def resolve_current_workstream_box(
     return resolve_workstream_box(members, repo, owner)
 
 
+def current_workstream_account(repo: str) -> str | None:
+    """Keep an unmapped workstream on its claimed venue's persisted account."""
+    try:
+        from agent_worktrees import claims_owner
+        from .lease import resolve_owner_worktree
+
+        owner = resolve_owner_worktree()
+        refs = set(claims_owner.claims_of_owner(owner, "codespace")) if owner else set()
+    except Exception:
+        return None
+    if not refs:
+        return None
+    from .account_binding import list_bindings
+    from .config import _repo_matches_codespace
+
+    bindings = sorted(list_bindings(), key=lambda binding: binding.codespace)
+    return next((
+        binding.account for binding in bindings
+        if binding.codespace in refs and binding.account
+        and _repo_matches_codespace(repo, binding.repo)
+    ), None)
+
+
 def same_worktree_family(holder: str, owner: str) -> bool:
     """True when ``holder`` and ``owner`` are the same worktree, or one created
     the other (directly or transitively, via ``owner_ref``).

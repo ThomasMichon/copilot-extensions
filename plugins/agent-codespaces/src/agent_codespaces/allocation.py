@@ -20,11 +20,13 @@ ALLOC_PRESSURE = "pressure"
 
 def allocation_context(repo: str) -> tuple[str, dict]:
     from . import gh_account
+    from .driving_worktrees import current_workstream_account
     from .owner_inventory import qualified_environment
 
     account = gh_account.account_for_repo(repo)
     if account:
         return account, qualified_environment(account)
+    bound = current_workstream_account(repo)
     ambient = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
     if ambient:
         from agent_procutil import no_window_kwargs
@@ -48,8 +50,11 @@ def allocation_context(repo: str) -> tuple[str, dict]:
         login = profile.get("login") if isinstance(profile, dict) else None
         if not isinstance(login, str) or not login.strip():
             raise RuntimeError("Environment GitHub identity response has no account")
-        return login.strip(), environment
-    account = gh_account.active_account()
+        login = login.strip()
+        if bound and bound.casefold() != login.casefold():
+            return bound, qualified_environment(bound)
+        return login, environment
+    account = bound or gh_account.active_account()
     if not account:
         raise RuntimeError("CodeSpace allocation account is unavailable")
     return account, qualified_environment(account)

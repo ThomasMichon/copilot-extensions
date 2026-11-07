@@ -809,7 +809,8 @@ class TestAllocateCommand:
 
 
 @pytest.mark.parametrize("variable", ["GH_TOKEN", "GITHUB_TOKEN"])
-def test_environment_only_credentials_reach_inventory_and_creation(monkeypatch, capsys, variable):
+@pytest.mark.parametrize("bound", [None, "environment-owner"])
+def test_environment_only_credentials_reach_inventory_and_creation(monkeypatch, capsys, variable, bound):
     from types import SimpleNamespace
     from agent_codespaces import __main__ as cli, allocation, coordination, gh_account, lifecycle
     from agent_codespaces.config import CodespacesConfig
@@ -818,6 +819,7 @@ def test_environment_only_credentials_reach_inventory_and_creation(monkeypatch, 
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv(variable, "environment-fixture-token")
     monkeypatch.setattr(gh_account, "account_for_repo", lambda repo: None)
+    monkeypatch.setattr("agent_codespaces.driving_worktrees.current_workstream_account", lambda repo: bound)
     monkeypatch.setattr(
         gh_account, "active_account",
         lambda: pytest.fail("environment credential used a saved active identity"),
@@ -866,6 +868,63 @@ def test_environment_only_credentials_reach_inventory_and_creation(monkeypatch, 
     assert bindings == ["environment-owner", "environment-owner"]
     assert observed[0][0] == ["api", "user"]
     assert all(token == "environment-fixture-token" and alternate is None for _, token, alternate in observed)
+
+
+@pytest.mark.parametrize("command", ["create", "allocate"])
+def test_unmapped_workstream_reuses_bound_account_after_active_switch(monkeypatch, capsys, command):
+    import sys
+    from types import ModuleType, SimpleNamespace
+
+    from agent_codespaces import __main__ as cli, account_binding, coordination, gh_account, lifecycle
+    from agent_codespaces.config import CodespacesConfig
+
+    claims = SimpleNamespace(claims_of_owner=lambda owner, kind: ["retained-venue"])
+    peer = ModuleType("agent_worktrees")
+    peer.claims_owner = claims
+    monkeypatch.setitem(sys.modules, "agent_worktrees", peer)
+    monkeypatch.setattr("agent_codespaces.lease.resolve_owner_worktree", lambda: "fixture-worktree")
+    monkeypatch.setattr(account_binding, "list_bindings", lambda: [
+        account_binding.AccountBinding("retained-venue", "original-owner", 0, "example/project"),
+    ])
+    for name in ("GH_TOKEN", "GITHUB_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(gh_account, "account_for_repo", lambda repo: None)
+    monkeypatch.setattr(gh_account, "active_account", lambda: "new-active-owner")
+    monkeypatch.setattr(
+        "agent_codespaces.owner_inventory.qualified_environment",
+        lambda account: {"GH_TOKEN": f"fixture-{account}"},
+    )
+    monkeypatch.setattr(cli, "load_merged_config", CodespacesConfig)
+    monkeypatch.setattr(cli, "_require_codespace_scope", lambda operation: None)
+    monkeypatch.setattr(cli, "_gh_binary_available", lambda: True)
+    monkeypatch.setattr(cli, "validate_context", lambda: None)
+    monkeypatch.setattr(cli.pool_mod, "list_leases", lambda: [])
+    monkeypatch.setattr(cli.pool_mod, "list_status", lambda: [])
+    monkeypatch.setattr(cli.pool_mod, "codespaces_in_use", lambda names: {})
+    monkeypatch.setattr(coordination, "list_leases", lambda: {})
+    monkeypatch.setattr(coordination, "list_cleanliness", lambda: {})
+    selected = []
+
+    def listing(account, *, qualified, environment):
+        selected.append(account)
+        assert environment == {"GH_TOKEN": f"fixture-{account}"}
+        return [
+            lifecycle.CodespaceInfo(
+                name="retained-venue", repository="example/project",
+                display_name="", branch="main",
+                state="Available", machine="basicLinux32gb", account=account,
+            ),
+        ] if account == "original-owner" else []
+
+    monkeypatch.setattr(lifecycle, "_list_codespaces_under", listing)
+    monkeypatch.setattr(cli, "create_codespace", lambda *a, **kw: pytest.fail("lost own venue"))
+    args = ["--json"] if command == "allocate" else ["--no-wait"]
+    assert main([command, "example/project", *args]) == 0
+    output = capsys.readouterr().out
+    if command == "allocate":
+        assert json.loads(output)["action"] == "reuse"
+    assert "retained-venue" in output
+    assert selected == ["original-owner"]
 
 
 def test_owned_capacity_real_cli_process_preserves_override():

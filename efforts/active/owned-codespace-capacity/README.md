@@ -118,6 +118,11 @@ existing resource ownership, not solve quota pressure by destructive cleanup.
 
 ## Journal
 
+### 2026-11-06 - Retained workstream account
+- Reproduced ordinary `create` attempting a new venue and `allocate` suggesting creation after an unmapped workstream's active account changed.
+- Selected the workstream's own repository-matching persisted account before narrowing inventory; explicit repository mappings remain authoritative, and matching environment-only credentials stay usable without a saved token.
+- The affected CLI, lifecycle and claim-resolution suites passed 179 tests, including the actual CLI subprocess admission control; touched-Python lint and the 13-plugin install contract passed. Added unrelated-binding/unknown-binding controls. Corrected-head review/CI and installed/live gates remain open.
+
 ### 2026-11-06 - Environment-only compatibility
 - Preserved valid environment-only authentication for unmapped repositories without converting it into a saved named-account lookup. Verified identity and credentials stay together through inventory, ordinary/forced creation, REST fallback and quota recovery; explicit mappings remain strict.
 - Passed 56 focused admission, creation and recovery tests, including both supported token variables and invalid-identity refusal. Required CI and a fresh verdict remain open for the corrected source.

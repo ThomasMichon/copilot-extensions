@@ -135,6 +135,10 @@ def test_mapped_account_never_falls_back_to_environment_credentials(monkeypatch)
     monkeypatch.setenv("GH_TOKEN", "ambient-fixture-token")
     monkeypatch.setattr(gh_account, "account_for_repo", lambda repo: "mapped-owner")
     monkeypatch.setattr(
+        "agent_codespaces.driving_worktrees.current_workstream_account",
+        lambda repo: pytest.fail("explicit mapping consulted another account's claim"),
+    )
+    monkeypatch.setattr(
         "agent_codespaces.owner_inventory.qualified_environment",
         lambda account: (_ for _ in ()).throw(RuntimeError("mapped credential unavailable")),
     )
@@ -154,6 +158,29 @@ def test_environment_identity_requires_a_verified_account(monkeypatch):
         lambda *args, **kwargs: MagicMock(returncode=0, stdout="{}", stderr=""),
     )
     with pytest.raises(RuntimeError, match="identity response has no account"):
+        allocation.allocation_context("example/project")
+
+
+def test_bound_account_never_falls_back_to_another_environment_identity(monkeypatch):
+    monkeypatch.setenv("GH_TOKEN", "ambient-fixture-token")
+    monkeypatch.setattr(gh_account, "account_for_repo", lambda repo: None)
+    monkeypatch.setattr(
+        "agent_codespaces.driving_worktrees.current_workstream_account",
+        lambda repo: "original-owner",
+    )
+    monkeypatch.setattr(
+        allocation.subprocess, "run",
+        lambda *args, **kwargs: MagicMock(
+            returncode=0, stdout=json.dumps({"login": "new-active-owner"}), stderr="",
+        ),
+    )
+
+    def unavailable(account):
+        assert account == "original-owner"
+        raise RuntimeError("retained credential unavailable")
+
+    monkeypatch.setattr("agent_codespaces.owner_inventory.qualified_environment", unavailable)
+    with pytest.raises(RuntimeError, match="retained credential unavailable"):
         allocation.allocation_context("example/project")
 
 

@@ -654,6 +654,12 @@ a matching persisted account binding; absent, conflicting or unreadable binding
 is not permission to reclaim. The same validated credential reaches rescue,
 deletion and the account-specific stop-state lookup. Creation's headless REST
 fallback retains the admitted environment rather than rediscovering credentials.
+For unmapped repositories, a workstream's own matching claim and persisted
+account binding take precedence over a newly active account, so an account
+switch does not hide its retained venue. Explicit repository mappings still
+win; unrelated bindings do not select an account. Binding contention or an
+unavailable selected credential refuses admission rather than switching users.
+
 For unmapped repositories, a valid `GH_TOKEN` or `GITHUB_TOKEN` needs no saved
 login: admission verifies its account and retains that credential through
 inventory, creation and recovery. Explicit account mappings remain strict and
