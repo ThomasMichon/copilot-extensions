@@ -9,9 +9,10 @@ import os
 import re
 import secrets
 import stat
+import time
 from pathlib import Path
 
-from zdd import breadcrumb, diagnostics, routing
+from zdd import breadcrumb, diagnostics, publication_history, routing
 
 from . import mux_daemon, mux_daemon_cutover, mux_daemon_process
 
@@ -80,6 +81,60 @@ def _matches_health_owner(health: dict, root: Path, endpoint: routing.Endpoint, 
     )
 
 
+def _closed_route_is_absent(root: Path, directory: Path, table: dict, deadline: float) -> bool:
+    """Observe recorded owners only; the caller must supply native fencing."""
+    from zdd.process_exit import observe_original_exit
+
+    if (
+        set(table) != {"previous", "epoch", publication_history.KEY}
+        or not isinstance(table["epoch"], str) or not table["epoch"]
+    ):
+        return False
+    previous = table["previous"]
+    history = publication_history.read(table)
+    if (
+        not isinstance(previous, dict)
+        or set(previous) != {"bind", "port", "pid", "version", "generation", "process_start_time"}
+        or not isinstance(previous["version"], str) or not previous["version"]
+        or history is None or set(history) != {"version", "epoch", "saturated", "entries"}
+        or history["saturated"] or not history["entries"]
+    ):
+        return False
+    fields = ("bind", "port", "pid", "process_start_time", "generation")
+    if {key: previous[key] for key in fields} not in history["entries"]:
+        return False
+    path = routing.routing_table_path(directory)
+    before = path.lstat()
+    if (
+        not stat.S_ISREG(before.st_mode) or stat.S_ISLNK(before.st_mode)
+        or getattr(before, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        or os.path.lexists(mux_daemon.lock_path(root))
+        or os.path.lexists(breadcrumb.breadcrumb_path(directory))
+    ):
+        return False
+    for entry in history["entries"]:
+        if (
+            time.monotonic() >= deadline or entry["bind"] != "127.0.0.1"
+            or type(entry["pid"]) is not int or entry["pid"] <= 0
+            or not isinstance(entry["process_start_time"], str) or not entry["process_start_time"]
+            or entry["generation"] <= 0
+        ):
+            return False
+        try:
+            if observe_original_exit(entry["pid"], entry["process_start_time"]) is not True:
+                return False
+        except (OSError, ValueError, NotImplementedError):
+            return False
+    after = path.lstat()
+    return (
+        time.monotonic() < deadline and os.path.samestat(before, after)
+        and before.st_size == after.st_size and before.st_mtime_ns == after.st_mtime_ns
+        and routing.read_table(directory, strict=True) == table
+        and not os.path.lexists(mux_daemon.lock_path(root))
+        and not os.path.lexists(breadcrumb.breadcrumb_path(directory))
+    )
+
+
 def observe(root: Path, *, timeout: float = 2.0, ignore_custody_files: bool = False) -> dict:
     """Observe only; never start a daemon, create credentials, or change routing."""
     try:
@@ -97,6 +152,11 @@ def observe(root: Path, *, timeout: float = 2.0, ignore_custody_files: bool = Fa
         table = routing.read_table(directory, strict=True)
         raw = table.get("active") if table is not None else None
         if raw is None:
+            if (
+                ignore_custody_files and table is not None
+                and _closed_route_is_absent(root, directory, table, time.monotonic() + timeout)
+            ):
+                return {"state": "unfenced-absence", "generation": None}
             if (
                 table is not None
                 or os.path.lexists(routing.routing_table_path(directory))

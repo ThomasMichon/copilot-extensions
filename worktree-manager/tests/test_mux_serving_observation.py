@@ -52,6 +52,137 @@ def test_unfenced_absence_distinguishes_custody_files_from_rendezvous(tmp_path: 
         mux_serving_observation.observe(tmp_path, ignore_custody_files=True)
 
 
+def _cleared_mux_route(root, monkeypatch):
+    from zdd import diagnostics, routing
+
+    directory = mux_daemon_cutover.routing_dir(root)
+    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: {42: "17", 43: "18"}[pid])
+    for pid, port in ((42, 43123), (43, 43124)):
+        routing.publish_active(
+            directory, bind="127.0.0.1", port=port, pid=pid, version="1.2.3",
+            process_start_time={42: "17", 43: "18"}[pid], demote_existing=True,
+        )
+    assert routing.clear_if_owner(directory, pid=43)
+    return directory
+
+
+def test_unfenced_absence_after_clean_shutdown_checks_all_remembered_owners(tmp_path, monkeypatch):
+    from zdd import process_exit, routing
+
+    directory = _cleared_mux_route(tmp_path, monkeypatch)
+    original = routing.read_table(directory, strict=True)
+    seen = []
+
+    def dead(pid, start_time):
+        seen.append((pid, start_time))
+        return True
+
+    monkeypatch.setattr(process_exit, "observe_original_exit", dead)
+    with pytest.raises(mux_serving_observation.ServingObservationError):
+        mux_serving_observation.observe(tmp_path)
+    assert mux_serving_observation.observe(tmp_path, ignore_custody_files=True) == {
+        "state": "unfenced-absence", "generation": None,
+    }
+    assert set(seen) == {(42, "17"), (43, "18")}
+    assert routing.read_table(directory, strict=True) == original
+
+
+@pytest.mark.parametrize(
+    "reason", [
+        "live", "unknown", "nonboolean", "saturated", "missing-birth",
+        "missing-history", "unrecorded", "lock", "changed",
+    ],
+)
+def test_shutdown_history_never_proves_absence_with_uncertain_owners(tmp_path, monkeypatch, reason):
+    from zdd import process_exit, routing
+
+    directory = _cleared_mux_route(tmp_path, monkeypatch)
+    path = routing.routing_table_path(directory)
+    table = routing.read_table(directory, strict=True)
+    if reason == "saturated":
+        table["publication_history"]["saturated"] = True
+    elif reason == "missing-birth":
+        table["publication_history"]["entries"][0]["process_start_time"] = None
+    elif reason == "missing-history":
+        del table["publication_history"]
+    elif reason == "unrecorded":
+        table["previous"]["pid"] = 44
+    elif reason == "lock":
+        (tmp_path / "mux-daemon.lock").touch()
+    path.write_text(json.dumps(table), encoding="utf-8")
+
+    def original_exit(pid, _start_time):
+        if pid == 42 and reason == "live":
+            return False
+        if pid == 42 and reason == "unknown":
+            raise PermissionError("unavailable")
+        if pid == 42 and reason == "nonboolean":
+            return 1
+        return True
+
+    monkeypatch.setattr(process_exit, "observe_original_exit", original_exit)
+    if reason == "changed":
+        read = routing.read_table
+        calls = []
+
+        def changed(*args, **kwargs):
+            calls.append(None)
+            value = read(*args, **kwargs)
+            return value if len(calls) == 1 else {**value, "active": value["previous"]}
+
+        monkeypatch.setattr(routing, "read_table", changed)
+    with pytest.raises(mux_serving_observation.ServingObservationError):
+        mux_serving_observation.observe(tmp_path, ignore_custody_files=True)
+
+
+def test_shutdown_history_requires_proof_within_the_observation_deadline(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    _cleared_mux_route(tmp_path, monkeypatch)
+    ticks = iter((0.0, 2.0))
+    monkeypatch.setattr(mux_serving_observation, "time", SimpleNamespace(monotonic=lambda: next(ticks)))
+    with pytest.raises(mux_serving_observation.ServingObservationError):
+        mux_serving_observation.observe(tmp_path, timeout=1, ignore_custody_files=True)
+
+
+def test_unfenced_shutdown_observation_uses_real_original_exit(tmp_path):
+    import os
+    import subprocess
+    from agent_procutil import direct_python, no_window_kwargs
+    from zdd import diagnostics, routing
+
+    python, extra = direct_python(sys.executable)
+    process = subprocess.Popen(
+        [python, "-c", "import sys; sys.stdin.read()"], env={**os.environ, **extra},
+        stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        **no_window_kwargs(),
+    )
+    try:
+        start = diagnostics.process_start_time(process.pid)
+        assert start
+        directory = mux_daemon_cutover.routing_dir(tmp_path)
+        routing.publish_active(
+            directory, bind="127.0.0.1", port=43123, pid=process.pid, version="1.2.3",
+            process_start_time=start,
+        )
+        assert routing.clear_if_owner(directory, pid=process.pid)
+        with pytest.raises(mux_serving_observation.ServingObservationError):
+            mux_serving_observation.observe(tmp_path, ignore_custody_files=True)
+        process.stdin.close()
+        assert process.wait(timeout=10) == 0
+        assert mux_serving_observation.observe(tmp_path, ignore_custody_files=True) == {
+            "state": "unfenced-absence", "generation": None,
+        }
+    finally:
+        if process.stdin is not None and not process.stdin.closed:
+            process.stdin.close()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.terminate()
+            process.wait(timeout=10)
+
+
 def test_lock_paths_are_resolved_by_the_manager_owner_without_creating_them(tmp_path, monkeypatch, capsys):
     from worktree_manager import mux_daemon_process, runtime_identity
     from zdd import routing

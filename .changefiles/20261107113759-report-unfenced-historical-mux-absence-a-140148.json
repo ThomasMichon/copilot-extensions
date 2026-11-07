@@ -1,0 +1,9 @@
+{
+  "comment": "Report unfenced historical mux absence after clean shutdown",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
