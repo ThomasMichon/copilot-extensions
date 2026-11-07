@@ -207,6 +207,21 @@ classic-mode migrations and unconfirmed readiness fail rather than report
 installation success. A committed cutover with an unsettled startup result is
 not proof that the incumbent or selectors were restored.
 
+Selected, complete physical Source or repair generations also provide
+`python -m agent_dispatch.coordinator_observation --probe` and `--apply`.
+The version-1 `agent-dispatch.coordinator-serving-observation` JSON contract
+reports a verified local serving generation, an evidenced inactive state, or
+an explicit unknown result. Observation checks routed process birth, health
+using the configured authentication, effective configuration and route
+identity; legacy discovery or an unverified endpoint is not treated as inactive. Local control
+uses loopback without environment proxies and does not pass update-driver
+custody to the daemon. `--apply`
+reuses the existing guarded coordinator cutover without starting an absent
+service or running broad reaping. It does not update the supervisor or claim
+suite-wide readiness. Older runtimes without this module remain unchanged:
+callers must establish support before invoking the new form and must not replay
+an effectful request through another command after an uncertain result.
+
 Source validation compares the actual installation identity and normalizes
 equivalent Windows extended-path spellings without relaxing module containment
 or redirected-slot refusal. Supervisor intent is captured before coordinator

@@ -1,0 +1,9 @@
+{
+  "comment": "Observe and reconcile selected coordinator generations without starting an absent service.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
