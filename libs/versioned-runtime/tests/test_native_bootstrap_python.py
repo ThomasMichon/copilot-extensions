@@ -20,6 +20,44 @@ def _quote(value):
 
 
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
+def test_native_path_admission_does_not_probe_unused_launcher(tmp_path, host):
+    script = f"""
+function Get-Command {{
+    param($Name,[switch]$All,$CommandType,$ErrorAction)
+    if ($Name -eq 'py') {{ throw 'discovery continued after supported PATH admission' }}
+    if ($Name -eq 'python3') {{
+        [pscustomobject]@{{Source={_quote(sys._base_executable)};CommandType='Application'}}
+    }}
+}}
+$before=$env:PATH
+$selected=Resolve-NativeBootstrapPython -MinimumMinor 10
+if (-not $selected) {{ throw 'physical PATH reader was not retained' }}
+if ($before -cne $env:PATH) {{ throw 'discovery changed PATH' }}
+$selected | ConvertTo-Json -Compress
+"""
+    result = _run(host, script, tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert Path(json.loads(result.stdout)).samefile(sys._base_executable)
+
+
+@pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
+def test_native_discovery_suppresses_manager_install_only_in_child(tmp_path, host):
+    script = f"""
+$env:PYTHON_MANAGER_AUTOMATIC_INSTALL='true'
+$code='import json,os; print(json.dumps(os.environ["PYTHON_MANAGER_AUTOMATIC_INSTALL"]))'
+$output=Invoke-Hidden -FilePath {_quote(sys._base_executable)} -ArgList @(
+    '-I','-S','-B','-c',$code
+) -Environment @{{PYTHON_MANAGER_AUTOMATIC_INSTALL='false'}}
+if ($LASTEXITCODE -ne 0) {{ throw 'native discovery child failed' }}
+if ($env:PYTHON_MANAGER_AUTOMATIC_INSTALL -cne 'true') {{ throw 'discovery changed parent policy' }}
+$output
+"""
+    result = _run(host, script, tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout) == "false"
+
+
+@pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
 @pytest.mark.parametrize(
     "scenario", ["path", "launcher-unc", "launcher-selector", "launcher-selector-unicode", "known-root", "unsupported", "missing", "removal"],
 )

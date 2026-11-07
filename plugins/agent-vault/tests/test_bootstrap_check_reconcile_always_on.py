@@ -87,6 +87,7 @@ def _make_fake_plugin(root: Path, name: str) -> Path:
         "runtime-environment.sh", "runtime-environment.ps1",
         "bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1",
         "runtime-activation.sh", "runtime-activation.ps1", "runtime-activation.py",
+        "versioned_runtime_native.ps1",
     ):
         shutil.copyfile(_PLUGIN_ROOT / "scripts" / filename, scripts_dir / filename)
     shutil.copytree(
