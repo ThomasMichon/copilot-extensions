@@ -12,10 +12,11 @@ from .source_attachment import EXECUTION_CONTRACT, attach_source, attach_source_
 from .workspace_operations import PROTOCOL, encoded, needs_prepared_review, supports_prepared_review
 from .review_workspace import MAX_GENERATION_BYTES, _generation, _scope
 from .review_intent import identifier
+from .workspace_selection import supports_selection
 
 TOOL_PROTOCOL = "agent-pull-requests.workspace-tools/v1"
 COMMANDS = ("capabilities", "load", "sync", "materialize", "source", "source-read", "submit", "inspect", "events", "receipt",
-            "prepare")
+            "prepare", "allocate")
 FIELDS = {
     "capabilities": (),
     "load": ("number", "expected_current", "budget_seconds"),
@@ -27,6 +28,7 @@ FIELDS = {
     "inspect": ("number", "operation_id"),
     "receipt": ("number", "operation_id", "action_id"),
     "prepare": ("number", "intent", "identities"),
+    "allocate": ("number", "intent", "source_attachment", "budget_seconds"),
     "events": ("number", "after", "limit"),
 }
 READ_CONTRACT = {
@@ -145,10 +147,10 @@ class WorkspaceTools:
                 raise WorkspaceToolUnavailable("workspace_contract_unsupported")
             available = backend.get("operations", [])
             operations += [
-                name for name in ("load", "sync", "submit", "inspect", "events", "receipt")
+                name for name in ("load", "sync", "submit", "inspect", "events", "receipt", "allocate")
                 if name in available and (
                     name != "receipt" or supports_prepared_review(backend.get("prepared_review_contract"))
-                )
+                ) and (name != "allocate" or supports_selection(backend.get("selection_contract")))
             ]
             if (
                 callable(self.comment_preparer) and "submit" in available
@@ -249,7 +251,7 @@ class WorkspaceTools:
             raise WorkspaceToolUnavailable("prepared_review_contract_unsupported")
         if command == "prepare":
             return await self._prepare_comments(request)
-        if command in ("load", "sync", "submit", "inspect", "events", "receipt"):
+        if command in ("load", "sync", "submit", "inspect", "events", "receipt", "allocate"):
             return await _call(self.client.exchange, command, copy.deepcopy(request))
         required = {"number", "generation_id"}
         if command in ("source", "source-read"):
