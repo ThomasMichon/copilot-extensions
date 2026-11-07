@@ -40,8 +40,9 @@ def test_foreign_package_version_cannot_claim_generation(tmp_path: Path) -> None
 
 @pytest.mark.parametrize("nested", [False, True])
 @pytest.mark.parametrize("local", ["", "+vendor.007"])
-def test_reconstructed_slot_reports_exact_generation(tmp_path: Path, nested, local) -> None:
-    package = "1.2.3.dev4" + local
+@pytest.mark.parametrize("release", ["1.2.3.dev4", "1.2.3rc4", "1.2.3.post2"])
+def test_reconstructed_slot_reports_exact_generation(tmp_path: Path, nested, local, release) -> None:
+    package = release + local
     generation = package + ("." if local else "+") + "repair." + "0" * 31 + "1"
     slot = tmp_path / "versions" / generation
     prefix = slot / ".venv" if nested else slot
@@ -61,6 +62,26 @@ def test_malformed_reconstructed_slot_keeps_package_version(tmp_path: Path, suff
     assert effective_runtime_version(
         PACKAGE, prefix=prefix, module_path=prefix / "lib" / "source_build.py",
     ) == PACKAGE
+
+
+def test_reconstructed_slot_rejects_a_second_local_separator(tmp_path: Path) -> None:
+    package = "1.2.3+vendor"
+    prefix = tmp_path / "versions" / (package + "+repair." + "a" * 32)
+    assert effective_runtime_version(
+        package, prefix=prefix, module_path=prefix / "lib" / "source_build.py",
+    ) == package
+
+
+@pytest.mark.parametrize(("package", "owner"), [
+    ("1.2.3rc4", "1.2.3-rc4"),
+    ("1.2.3+vendor.7", "1.2.3+vendor.007"),
+])
+def test_reconstructed_slot_accepts_equivalent_package_versions(tmp_path: Path, package, owner) -> None:
+    generation = owner + ("." if "+" in owner else "+") + "repair." + "a" * 32
+    prefix = tmp_path / "versions" / generation
+    assert effective_runtime_version(
+        package, prefix=prefix, module_path=prefix / "lib" / "source_build.py",
+    ) == generation
 
 
 @pytest.mark.parametrize("qualified", [False, True])
