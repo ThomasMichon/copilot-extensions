@@ -335,6 +335,10 @@ _Operator-required outcome; agent-recommended slices and validation._
   adopter leaves. Keep AI-profile/privacy policy, minimal clutter, stable
   comment/per-write identity and native proof distinct; a helper alone is
   not full publication coverage.
+  Shared preparation merged in #11146. The
+  [publisher inventory](comment-publication-inventory.md) keeps legacy,
+  explicit-composition and unsupported surfaces distinct; automatic consumer
+  adoption, allocation/correlation and installed qualification remain open.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -986,6 +990,25 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-06 - Land compact comment preparation and continue actual consumers
+
+- #11146 actually merged as `1f92edb9aba7a9f1499dbc36efa7c3981e6abba0`
+  after current-head Copilot approval and the latest required checks passed.
+  The source worktree reconciled through its normal completion path.
+- The optional AI-profile/body helper composes a public-safe source snapshot,
+  supplied comment/write GUIDs and one bounded hidden marker before approval.
+  It preserves retry bytes and refuses foreign/ambiguous/filler metadata;
+  it does not allocate identities, persist intent, publish or prove native effects.
+- Its final focused source packet passes 119 cases with four existing profile
+  skips and verified cleanup. Strict typing passes all seven targets under
+  Linux and win32 settings. The actual origin/body CLI composition case also
+  passes separately; native Windows and installed/provider adoption are not
+  claimed.
+- Re-read the parent Plan and Validation Plan; the effort and #11128 remain
+  open. Continue actual publication-owner inventory and contained opaque-body
+  consumer qualification, retaining allocation, correlation and separately
+  authorized adoption as unfinished work.
 
 ### 2026-11-06 - Repair the actual release-candidate projection blocker
 

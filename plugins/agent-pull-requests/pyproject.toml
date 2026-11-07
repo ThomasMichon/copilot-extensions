@@ -38,12 +38,14 @@ agent-procutil = { path = "../../libs/agent-procutil", editable = true }
 # rendezvous, orphaning one silently.
 agent-single-instance-lease = { path = "../../libs/single-instance-lease", editable = true }
 agent-zdd = { path = "../../libs/zdd", editable = true }
+agent-worktrees = { path = "../agent-worktrees", editable = true }
 
 [project.optional-dependencies]
 fleet = ["fleet-manager[service-gateway]>=0.1.0.dev1"]
 dev = [
     "pytest>=9.1.1",
     "agent-pull-requests[fleet]",
+    "agent-worktrees",
 ]
 
 [project.scripts]
