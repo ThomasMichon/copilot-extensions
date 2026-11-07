@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import base64
+import hashlib
 from pathlib import Path
 import re
 
@@ -16,14 +18,23 @@ from .ssh_machine_config import SSHMachineConfig, absolute
 
 CAPABILITY = "continuity-ssh-setup-v1"
 PIN_CAPABILITY = "continuity-ssh-setup-pin-v1"
+KEY_REFERENCE_CAPABILITY = "continuity-ssh-key-reference-v1"
+KEY_PIN_CAPABILITY = "continuity-ssh-key-pin-v1"
 SCHEMA = "fleet-manager.continuity-ssh-setup"
 
 
 def describe(
     request: Path, *, source: Path, harness: str, state_root: Path,
     expected_request_digest: str | None = None,
+    key_references_only: bool = False,
+    expected_key_fingerprint: str | None = None,
 ) -> tuple[dict, SSHMachineConfig]:
     """Read public setup bindings, not the retained private machine identity."""
+    if expected_key_fingerprint is not None and (
+        key_references_only or not isinstance(expected_key_fingerprint, str)
+        or re.fullmatch(r"SHA256:[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]", expected_key_fingerprint) is None
+    ):
+        raise PlanError("SSH public-key pin requires canonical fingerprint and actual key inspection")
     value = decode(read_private_file(absolute(str(request)), 16384))
     record(value, SCHEMA, {
         "snapshot", "root", "selection", "authority", "installation", "ssh",
@@ -97,12 +108,19 @@ def describe(
     from .gateway_service_listener import read_bounded
     from .gateway_ssh_provider import public_key
 
-    raw = read_bounded(Path(ssh["public_key_file"]))
-    if len(raw) > 256:
-        raise PlanError("SSH setup public-key reference exceeds its bound")
-    public_key(raw.decode("ascii").strip())
+    key_paths = {Path(ssh[name]) for name in ("identity_file", "public_key_file")}
+    if not key_references_only:
+        raw = read_bounded(Path(ssh["public_key_file"]))
+        if len(raw) > 256:
+            raise PlanError("SSH setup public-key reference exceeds its bound")
+        key = public_key(raw.decode("ascii").strip())
+        wire = base64.b64decode(key.split(" ")[1], validate=True)
+        fingerprint = "SHA256:" + base64.b64encode(hashlib.sha256(wire).digest()).decode("ascii").rstrip("=")
+        if expected_key_fingerprint is not None and fingerprint != expected_key_fingerprint:
+            raise PlanError("SSH public key differs from the selected pinned identity")
     for path in config.input_paths():
-        if path not in (source, state_root) and path != Path(ssh["public_key_file"]):
+        if (path not in (source, state_root) and path != Path(ssh["public_key_file"])
+                and not (key_references_only and path in key_paths)):
             read_bounded(path)
 
     for path in (request, snapshot, root, root / "ssh-client.json", root / CONFIG):
@@ -119,19 +137,27 @@ def describe(
         if os.path.lexists(path) and decode(read_private_file(path, 16384)) != expected:
             raise PlanError("SSH setup preserves changed or foreign host configuration; reconcile through its owner")
     return {
-        "schema": SCHEMA, "version": 1,
+        "schema": SCHEMA, "version": 2 if key_references_only else 1,
         **{name: value[name] for name in ("snapshot", "root", "selection")},
         "request_digest": request_digest, "host": selection,
+        **({"key_files": {name: ssh[name] for name in ("identity_file", "public_key_file")}}
+           if key_references_only else {}),
     }, config
 
 
 def run(
     request: Path, *, source: Path, harness: str, state_root: Path, apply: bool,
     expected_request_digest: str | None = None,
+    key_references_only: bool = False,
+    expected_key_fingerprint: str | None = None,
 ) -> dict:
+    if apply and key_references_only:
+        raise PlanError("Public key-reference inspection cannot prepare an SSH installation")
     description, config = describe(
         request, source=source, harness=harness, state_root=state_root,
         expected_request_digest=expected_request_digest,
+        key_references_only=key_references_only,
+        expected_key_fingerprint=expected_key_fingerprint,
     )
     if apply:
         root = Path(description["root"])
@@ -154,6 +180,7 @@ def run(
         current, _ = describe(
             request, source=source, harness=harness, state_root=state_root,
             expected_request_digest=expected_request_digest,
+            expected_key_fingerprint=expected_key_fingerprint,
         )
         if current != description:
             raise PlanError("SSH setup inputs changed during preparation")
