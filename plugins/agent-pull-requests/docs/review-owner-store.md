@@ -175,9 +175,10 @@ first committed final bytes, not a later origin/profile's candidate. Existing
 nonblocking lock contention refuses; reconcile the same key after it clears.
 An uncertain commit must be reconciled by that same original key.
 
-This is a **data-only prerequisite**, not a public producer capability or
-preparation provenance. `retain` still accepts the caller's already-prepared
-intent. Producer integration remains separate work under the
+This is a **data-only prerequisite**, not preparation provenance.
+`retain` still accepts the caller's already-prepared intent. The optional
+[workspace receiver](workspace-integration.md#optional-pre-approval-selection-receiver)
+composes the allocation API below under the
 [reviewed pre-approval contract](../../../efforts/active/durable-pr-watch-delegation/comment-intent-binding.md#durable-pre-approval-selection-and-allocation).
 
 The optional source-only `allocate(original, compose=..., expires_at=...,

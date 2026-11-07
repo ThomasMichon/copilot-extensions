@@ -11,6 +11,7 @@ from fleet_manager.gateway_service_channel import BODY_BYTES, CONTROL_RATE, Tran
 from .watch_replay_binding import ReplayBinding
 from .watch_replay_client import ReplayClient, ReplayClientError
 from .watch_replay_store import json_object
+from .workspace_selection import selection_contract, supports_selection
 from .workspace_operations import (
     CHUNK_BYTES, MAX_GENERATION_BYTES, PROTOCOL, NativeWorkspaceClient, encoded, materialize,
     needs_prepared_review, prepared_review_contract, supports_prepared_review,
@@ -114,6 +115,13 @@ class WorkspaceClient:
                 **(unavailable if isinstance(unavailable, dict) else {}),
                 "receipt": "unsupported_prepared_review_contract",
             }
+        if "allocate" in value["operations"] and not supports_selection(value.get("selection_contract")):
+            value["operations"] = [name for name in value["operations"] if name != "allocate"]
+            unavailable = value.get("unavailable_operations")
+            value["unavailable_operations"] = {
+                **(unavailable if isinstance(unavailable, dict) else {}),
+                "allocate": "unsupported_selection_contract",
+            }
         if epoch != self._discovery_epoch:
             raise WorkspaceClientError("workspace_discovery_superseded")
         self._capabilities = copy.deepcopy(value)
@@ -143,6 +151,8 @@ class WorkspaceClient:
                 checkpoint()
             if not supports_prepared_review(self._capabilities.get("prepared_review_contract")):
                 raise WorkspaceClientError("prepared_review_contract_required", outcome_unknown=False)
+        if operation == "allocate" and not supports_selection(self._capabilities.get("selection_contract")):
+            raise WorkspaceClientError("selection_contract_required", outcome_unknown=False)
         value = await self._exchange(operation, payload, **(
             {"checkpoint": checkpoint} if checkpoint is not None else {}))
         if (
@@ -157,6 +167,19 @@ class WorkspaceClient:
             or value["result"].get("action_id") != payload.get("action_id")
         ):
             raise WorkspaceClientError("invalid_prepared_receipt_response", outcome_unknown=False)
+        if operation == "allocate":
+            from .review_selection_store import ReviewSelectionStore
+            try:
+                result = value["result"]
+                if (
+                    set(result) != {"protocol", "intent", "effects", "approval_required"}
+                    or result["protocol"] != selection_contract()["protocol"]
+                    or result["effects"] != "none" or result["approval_required"] is not True
+                ):
+                    raise ValueError
+                ReviewSelectionStore._prepared(payload["intent"], result["intent"])
+            except (ValueError, KeyError, TypeError):
+                raise WorkspaceClientError("invalid_selection_response", outcome_unknown=False) from None
         return value
 
     def preparation_contract(self):

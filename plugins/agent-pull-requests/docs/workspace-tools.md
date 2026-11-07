@@ -130,6 +130,7 @@ agent-pull-requests workspace materialize --request request.json
 agent-pull-requests workspace source --request request.json
 agent-pull-requests workspace source-read --request request.json
 agent-pull-requests workspace prepare --request request.json
+agent-pull-requests workspace allocate --request request.json
 agent-pull-requests workspace submit --request request.json
 agent-pull-requests workspace inspect --request request.json
 agent-pull-requests workspace receipt --request request.json
@@ -164,10 +165,22 @@ Original host cancellation/authority and retained unknown effects remain separat
 | source | number, generation_id, budget_seconds |
 | source-read | source fields plus source_attachment, path, side |
 | prepare (optional local binding) | number, intent (v1 draft), identities |
+| allocate (optional receiver binding) | number, intent (v1 draft), budget_seconds |
 | submit | number, intent, source_attachment, budget_seconds |
 | inspect | number, operation_id |
 | receipt (optional prepared contract) | number, operation_id, action_id |
 | events (optional) | number, after (null or epoch/sequence), limit (1-16) |
+
+`allocate` selects only the executing receiver's optional
+[pre-approval selection contract](workspace-integration.md#optional-pre-approval-selection-receiver).
+It takes no caller identities, profile, source-origin or approval flag.
+The response's `result.intent` is the durably committed final v2 preview;
+`approval_required: true` and `effects: none` describe preparation, not execution
+permission. Explicitly submit that exact intent with the existing protected
+source attachment only after actual approval. Recover a lost preview with the
+same original v1 intent and operation ID, never a new operation or new GUIDs.
+The existing local `prepare` command retains its explicit-ID, nonpersistent
+semantics; allocation needs no local `comment_preparer` binding.
 
 Unknown fields cannot supply workspace paths, credentials or source authority.
 Load/sync/materialize/submit/inspect retain the

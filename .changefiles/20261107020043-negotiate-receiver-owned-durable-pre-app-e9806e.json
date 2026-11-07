@@ -1,0 +1,9 @@
+{
+  "comment": "Negotiate receiver-owned durable pre-approval comment allocation through existing workspace clients and tools",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}
