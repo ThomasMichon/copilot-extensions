@@ -125,6 +125,75 @@ def venue(monkeypatch, tmp_path):
     )
 
 
+@pytest.mark.parametrize("mode", ["held-30", "returned", "missing-owner", "missing-holder"])
+def test_allocation_resolves_identity_once_per_plan(venue, monkeypatch, mode):
+    import time
+
+    if mode == "held-30":
+        now = time.time()
+        names = {row.name for row in venue.rows}
+        for row in venue.rows:
+            row.repository = "example/project"
+        lease._write_leases({
+            name: lease.Lease(
+                name, "", 1, "test-host", now, now,
+                worktree="new-worktree", lease_token="b" * 40,
+            ) for name in names
+        })
+        venue.ledger["new-worktree"] = names
+        venue.shared.clear()
+        venue.shared.update({
+            name: coordination.L2Lease(
+                name, "machine/project/new-worktree", True, token="b" * 40, state="leased",
+            ) for name in names
+        })
+    owner = lease.resolve_owner_worktree
+    holder = coordination.owner_ref
+    calls = {"owner": 0, "holder": 0}
+
+    def resolve_owner(**kwargs):
+        calls["owner"] += 1
+        return None if mode == "missing-owner" else owner(**kwargs)
+
+    def resolve_holder(**kwargs):
+        calls["holder"] += 1
+        return None if mode == "missing-holder" else holder(**kwargs)
+
+    monkeypatch.setattr(lease, "resolve_owner_worktree", resolve_owner)
+    monkeypatch.setattr(coordination, "owner_ref", resolve_holder)
+    decision = allocation.plan_creation("example/project", venue.config, "selected", {})
+    assert decision.action == (
+        allocation.ALLOC_PRESSURE if mode.startswith("missing-") else allocation.ALLOC_REUSE
+    )
+    assert calls == {"owner": 1, "holder": 1}
+    assert allocation.plan_creation("example/project", venue.config, "selected", {}).action == decision.action
+    assert calls == {"owner": 2, "holder": 2}
+    assert venue.events == []
+
+
+@pytest.mark.parametrize("state", ["active", "uncertain", "corrupt"])
+def test_reservation_rejects_existing_provider_hold_before_any_effect(venue, capsys, state):
+    from contextlib import nullcontext
+    from agent_codespaces import account_binding
+
+    if state == "uncertain":
+        with lease.deploy_hold("returned", "claim-reclaim") as hold:
+            lease.mark_deploy_hold_uncertain("returned", hold.token)
+        assert lease.get_deploy_hold("returned") is not None
+    elif state == "corrupt":
+        lease._DEPLOY_HOLDS_FILE.write_text("{", encoding="utf-8")
+    shared = vars(venue.shared["returned"]).copy()
+    guard = lease.deploy_hold("returned", "claim-reclaim") if state == "active" else nullcontext()
+    with guard:
+        assert cli.main(["create", "example/project", "--no-wait"]) == 4
+        assert "pressure" in capsys.readouterr().err
+    assert venue.events == []
+    assert vars(venue.shared["returned"]) == shared
+    assert venue.ledger["new-worktree"] == set()
+    assert not lease.LEASE_FILE.exists()
+    assert not account_binding.BINDINGS_FILE.exists()
+
+
 def test_allocate_create_connect_and_return_preserve_retained_work(venue, capsys):
     from agent_codespaces.account_binding import bound_account, bound_repo
 
@@ -345,7 +414,9 @@ def test_native_claim_journaling_is_inside_claim_return_exclusion(venue, monkeyp
 
 
 @pytest.mark.parametrize("caller", ["ssh", "copilot"])
-@pytest.mark.parametrize("blocked", ["busy", "pending", "malformed", "deploy-hold", "corrupt-hold", "store-lock"])
+@pytest.mark.parametrize("blocked", [
+    "busy", "pending", "malformed", "malformed-row", "deploy-hold", "corrupt-hold", "store-lock",
+])
 def test_connections_refuse_claim_return_exclusion_and_unknown_progress(
     venue, monkeypatch, capsys, caller, blocked,
 ):
@@ -357,13 +428,16 @@ def test_connections_refuse_claim_return_exclusion_and_unknown_progress(
     assert cli.main(["create", "example/project", "--no-wait"]) == 0
     capsys.readouterr()
     monkeypatch.setattr(lease, "active_worktree_ids", lambda: {"new-worktree"})
-    if blocked in ("pending", "malformed"):
+    if blocked in ("pending", "malformed", "malformed-row"):
         monkeypatch.setattr(coordination, "settle_obligation", lambda *a, **kw: False)
         with pytest.raises(RuntimeError, match="settlement"):
             lease.release_claim("returned", "new-worktree")
-        if blocked == "malformed":
+        if blocked in ("malformed", "malformed-row"):
             raw = json.loads(lease.LEASE_FILE.read_text(encoding="utf-8"))
-            raw[RETURN_KEY]["version"] = 2
+            if blocked == "malformed":
+                raw[RETURN_KEY]["version"] = 2
+            else:
+                raw[RETURN_KEY]["returns"]["returned"] = ["holder", "lease", "phase"]
             lease.LEASE_FILE.write_text(json.dumps(raw), encoding="utf-8")
     elif blocked == "corrupt-hold":
         lease._DEPLOY_HOLDS_FILE.write_text("{", encoding="utf-8")
@@ -575,7 +649,9 @@ def test_unsettled_return_survives_other_writes_and_blocks_owner_reentry(venue, 
         assert lease.LEASE_FILE.read_bytes() == before
 
 
-@pytest.mark.parametrize("damage", ["version", "holder", "snapshot", "phase", "obligation-active", "missing-lease"])
+@pytest.mark.parametrize("damage", [
+    "version", "holder", "snapshot", "phase", "obligation-active", "missing-lease", "row-array",
+])
 def test_malformed_return_progress_never_becomes_an_empty_claim_set(venue, monkeypatch, capsys, damage):
     from agent_codespaces import reuse
     from agent_codespaces.claim_return import RETURN_KEY
@@ -597,6 +673,8 @@ def test_malformed_return_progress_never_becomes_an_empty_claim_set(venue, monke
         progress["phase"] = "finished"
     elif damage == "obligation-active":
         progress["obligation_active"] = "yes"
+    elif damage == "row-array":
+        raw[RETURN_KEY]["returns"]["returned"] = ["holder", "lease", "phase"]
     else:
         del raw["returned"]
     lease.LEASE_FILE.write_text(json.dumps(raw), encoding="utf-8")
@@ -931,7 +1009,7 @@ def test_every_obligation_is_classified_before_reuse_or_new_creation(
     account_binding.bind("b-uncertain", "selected", repo="example/project", strict=True)
     monkeypatch.setattr(
         driving_worktrees, "_workstream_claim_refs",
-        lambda owner: {"a-returned", "b-uncertain"},
+        lambda owner, **kwargs: {"a-returned", "b-uncertain"},
     )
     assert cli.main(["create", "example/project", "--no-wait"]) == 4
     assert "b-uncertain" in capsys.readouterr().err
@@ -980,7 +1058,9 @@ def test_return_settles_original_owner_before_another_workstream_reuses(venue, m
     obligations["second-worktree"] = set()
     monkeypatch.setattr(lease, "resolve_owner_worktree", lambda: current[0])
     monkeypatch.setattr(coordination, "owner_ref", lambda: f"machine/project/{current[0]}")
-    monkeypatch.setattr(driving_worktrees, "_workstream_claim_refs", lambda owner: obligations[current[0]])
+    monkeypatch.setattr(
+        driving_worktrees, "_workstream_claim_refs", lambda owner, **kwargs: obligations[current[0]],
+    )
 
     def journal(name, holder, **kwargs):
         obligations[holder.rsplit("/", 1)[-1]].add(name)

@@ -7,6 +7,7 @@ import sys
 import time
 
 from . import coordination, lease
+from .driving_worktrees import WorkstreamIdentity
 
 
 def _local_records() -> dict[str, lease.Lease]:
@@ -37,7 +38,7 @@ def local_snapshot() -> dict[str, lease.Lease]:
         raise RuntimeError("Local CodeSpace ownership is unavailable") from error
 
 
-def workstream_mode(name: str, local, shared) -> str:
+def workstream_mode(name: str, local, shared, *, identity: WorkstreamIdentity | None = None) -> str:
     """An obligation records responsibility, not a confirmed acquisition."""
     if local is None:
         return "unknown"
@@ -45,7 +46,7 @@ def workstream_mode(name: str, local, shared) -> str:
     remote = shared.get(name) if shared is not None else None
     if remote is not None and remote.state == "released":
         return "released" if held is None else "unknown"
-    owner = lease.resolve_owner_worktree()
+    owner = lease.resolve_owner_worktree() if identity is None else identity[0]
     if (
         held is None or not owner or lease._claim_owner(held) != owner
         or held.host != lease._this_host() or lease._is_stale(held, lease.DEFAULT_TTL)
@@ -53,14 +54,17 @@ def workstream_mode(name: str, local, shared) -> str:
         return "unknown"
     if remote is None:
         return "unknown" if held.lease_token else "own"
-    holder = coordination.owner_ref()
+    holder = coordination.owner_ref() if identity is None else identity[1]
     return (
         "own" if remote.state == "leased" and remote.live and holder
         and lease._same_holder_ref(remote.holder, holder) else "unknown"
     )
 
 
-def candidates(members, budget, repo, local, shared, *, new_cores: int, branch=None) -> tuple[str, ...]:
+def candidates(
+    members, budget, repo, local, shared, *, new_cores: int, branch=None,
+    identity: WorkstreamIdentity | None = None,
+) -> tuple[str, ...]:
     from .driving_worktrees import _matches_workstream_repo
     from .pool import IN_USE
 
@@ -83,8 +87,10 @@ def candidates(members, budget, repo, local, shared, *, new_cores: int, branch=N
     ]
     if not suitable:
         return ()
-    owner = lease.resolve_owner_worktree()
-    holder = coordination.owner_ref()
+    owner, holder = (
+        (lease.resolve_owner_worktree(), coordination.owner_ref())
+        if identity is None else identity
+    )
     if not owner or not holder or os.environ.get("AGENT_CODESPACES_DISABLE_CLAIM"):
         return ()
     readiness = coordination.preflight(holder)
@@ -123,6 +129,14 @@ def _reserve(name, repo, config, account, environment, *, branch=None) -> lease.
         raise RuntimeError("Sequential reuse requires an owning worktree and exclusive claims")
     if name in local_snapshot():
         raise RuntimeError(f"CodeSpace '{name}' still has a local holder")
+    with lease._lease_lock():
+        holds = lease._read_live_records(
+            lease._DEPLOY_HOLDS_FILE, lease.DeployHold, lease.DEPLOY_HOLD_TTL,
+        )
+        if hold := holds.get(name):
+            raise lease.ProviderAdmissionError(
+                f"CodeSpace '{name}' is unavailable while provider {hold.operation} is in progress",
+            )
     released = coordination.inspect(name)
     if not released or released.get("state") != "released" or released.get("live") is not False:
         raise RuntimeError(f"CodeSpace '{name}' has no confirmed shared release")

@@ -153,7 +153,7 @@ def plan_creation(
 ) -> AllocationDecision:
     """Use one pinned admission path for initial creation and quota retries."""
     from . import pool
-    from .driving_worktrees import resolve_current_workstream_boxes
+    from .driving_worktrees import current_workstream_identity, resolve_current_workstream_boxes
     from . import coordination, reuse
     from .worktrees import ContextRefused
 
@@ -187,8 +187,9 @@ def plan_creation(
         and global_location == defaults.default_location
     )
     workstream = None
-    for name in resolve_current_workstream_boxes(members, repo, account):
-        mode = reuse.workstream_mode(name, local, shared)
+    identity = current_workstream_identity()
+    for name in resolve_current_workstream_boxes(members, repo, account, identity=identity):
+        mode = reuse.workstream_mode(name, local, shared, identity=identity)
         if mode == "unknown":
             return AllocationDecision(
                 action=ALLOC_PRESSURE, codespace=None,
@@ -202,6 +203,7 @@ def plan_creation(
         workstream_box=workstream,
         reusable_stopped=reuse.candidates(
             members, budget, repo, local, shared, branch=branch, new_cores=requested_cores,
+            identity=identity,
         ) if allow_sequential else (),
     )
 

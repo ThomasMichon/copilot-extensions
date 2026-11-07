@@ -652,6 +652,9 @@ Missing support leaves the legacy workstream/create path intact; it does not
 silently allow stale takeover. `allocate` remains advice, not a reservation.
 Ordinary `create` records the native obligation and exclusive shared/local
 claim before reporting a reserved name, rechecking stopped state and headroom.
+Reservation checks existing provider holds, including retained uncertain or
+unreadable hold state, before account binding, journaling or shared acquisition,
+and retains its final admission recheck.
 It neither wakes nor provisions that retained venue, changes its branch, nor
 discards files or configuration. Read-only and no-build review tasks can use
 the same exclusive sequential reservation; concurrent sharing is not enabled.
@@ -680,6 +683,10 @@ Admission classifies every matching obligation; one returned venue cannot hide
 another uncertain acquisition. Holder equality includes machine, project and
 worktree, ignoring only the session suffix. Unmapped obligations spanning
 accounts require an explicit repository-account selection.
+Each plan resolves the caller path and qualified reference once and shares that
+pair with obligation classification and candidate selection. Known missing
+identity is retained within that plan, not probed again per venue. The next
+plan resolves fresh; reservation independently revalidates identity before effects.
 Tokened return confirms shared release and settles the original qualified
 owner's ledger before removing the unchanged local claim. Unknown return or
 deferred settlement reports failure and retains local custody, including through
@@ -718,6 +725,8 @@ owner and prepared/confirmed-release phase. Ordinary lease records keep their
 legacy shape. After confirmed release, a settlement retry uses that saved
 owner without rereleasing or inspecting a later borrower's lease. Unknown
 progress or settlement retains custody; unrelated current writes preserve it.
+Progress rows must be JSON objects; arrays with matching key names are malformed
+state and receive the same blocking admission diagnostic, not a traceback.
 If publishing the released phase fails after a positive shared-release ACK,
 the same invocation may still finish through confirmed native settlement and
 durable local cleanup. Native ledger retirement is bookkeeping, not proof of

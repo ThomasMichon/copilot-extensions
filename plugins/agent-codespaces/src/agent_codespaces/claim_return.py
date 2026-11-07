@@ -22,6 +22,7 @@ def validate_pending(value, raw: dict) -> dict:
         for name, progress in records.items():
             if (
                 not isinstance(name, str) or not name or name == RETURN_KEY
+                or not isinstance(progress, dict)
                 or not {"holder", "lease", "phase"} <= set(progress) <= {
                     "holder", "lease", "phase", "obligation_active",
                 }

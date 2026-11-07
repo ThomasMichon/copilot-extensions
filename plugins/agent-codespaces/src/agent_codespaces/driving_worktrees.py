@@ -6,6 +6,21 @@ from collections.abc import Iterable
 import json
 from typing import Any
 
+WorkstreamIdentity = tuple[str | None, str | None]
+
+
+def current_workstream_identity() -> WorkstreamIdentity:
+    """Resolve the caller path and qualified reference for one planning operation."""
+    from . import coordination
+
+    try:
+        from .lease import resolve_owner_worktree
+
+        owner = resolve_owner_worktree()
+    except Exception:
+        owner = None
+    return owner, coordination.owner_ref()
+
 
 def _matches_workstream_repo(repo: str, repository: str | None) -> bool:
     from .config import _repo_matches_codespace
@@ -112,10 +127,12 @@ def _qualified_claim_states(holder: str) -> dict[str, str]:
     raise RuntimeError("Workstream ownership identity is missing")
 
 
-def _workstream_claim_refs(owner: str | None) -> set[str]:
+def _workstream_claim_refs(
+    owner: str | None, *, identity: WorkstreamIdentity | None = None,
+) -> set[str]:
     from . import coordination
 
-    holder = coordination.owner_ref()
+    holder = coordination.owner_ref() if identity is None else identity[1]
     if holder:
         return _qualified_claim_refs(holder)
     if not owner:
@@ -205,15 +222,13 @@ def resolve_current_workstream_box(
 
 def resolve_current_workstream_boxes(
     members: Iterable[Any], repo: str, account: str | None = None,
+    *, identity: WorkstreamIdentity | None = None,
 ) -> tuple[str, ...]:
     """Return every matching responsibility, including inventory omissions."""
-    try:
-        from .lease import resolve_owner_worktree
-
-        owner = resolve_owner_worktree()
-    except Exception:
-        owner = None
-    return _boxes_from_refs(members, repo, _workstream_claim_refs(owner), account)
+    identity = current_workstream_identity() if identity is None else identity
+    return _boxes_from_refs(
+        members, repo, _workstream_claim_refs(identity[0], identity=identity), account,
+    )
 
 
 def current_workstream_account(repo: str) -> str | None:
