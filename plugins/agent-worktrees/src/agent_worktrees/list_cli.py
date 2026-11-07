@@ -385,7 +385,9 @@ def _warm_list_cache_for_active_project(*, interval: float = 15, cleanup_owner=N
 
 def cmd_list(args: argparse.Namespace) -> int:
     """List worktrees from tracking records."""
-    if getattr(args, "follow", False) or getattr(args, "current", False) or (
+    if getattr(args, "follow", False) or getattr(args, "current", False) or getattr(
+        args, "passive", False
+    ) or (
         (getattr(args, "json", False) or getattr(args, "stream", False))
         and not getattr(args, "glance", False)
         and not getattr(args, "profile_assignment_history", False)
