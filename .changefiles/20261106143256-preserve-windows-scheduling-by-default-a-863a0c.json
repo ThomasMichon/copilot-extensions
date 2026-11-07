@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve Windows scheduling by default and support owned task-only retirement",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}
