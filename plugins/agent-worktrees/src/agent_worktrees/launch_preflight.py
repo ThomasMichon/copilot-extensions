@@ -46,6 +46,12 @@ def new_knowledge_error(config, *, source: str) -> str | None:
     return None
 
 
+def new_authoring_error(config, *, source: str) -> str | None:
+    from .application_admission import new_application_error
+
+    return new_knowledge_error(config, source=source) or new_application_error(config, source=source)
+
+
 def require_repository_hosting(path: str | Path) -> None:
     """Translate repository denial into the launch planner's existing refusal."""
     from repository_policy import AgentHostingError

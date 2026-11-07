@@ -52,9 +52,9 @@ def preflight_launch(
 
     recovery = getattr(args, "recovery", False)
     if allocation_source is not None and not recovery:
-        from .launch_preflight import new_knowledge_error
+        from .launch_preflight import new_authoring_error
 
-        if error := new_knowledge_error(config, source=allocation_source):
+        if error := new_authoring_error(config, source=allocation_source):
             return _core().LaunchPreflight(policy_error=error)
     repo = config.default_repo
     platform_key = config.platform if config.platform != "wsl" else "linux"
@@ -327,7 +327,11 @@ def _resolve_base_repo(
         _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
         return 3
     repo = config.default_repo
-    launch_preflight = _preflight_launch(config, args, repo.anchor)
+    new_authoring = getattr(args, "new_worktree", False) or getattr(args, "auto", False)
+    launch_preflight = _preflight_launch(
+        config, args, repo.anchor,
+        **({"allocation_source": repo.anchor} if new_authoring else {}),
+    )
     if launch_preflight.error:
         return _launch_preflight_error(launch_preflight)
     print()
