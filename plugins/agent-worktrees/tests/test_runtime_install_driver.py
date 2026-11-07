@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import threading
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -139,6 +140,47 @@ def test_native_source_installation_retains_selection_through_the_driver(
     else:
         assert spec.argv[spec.argv.index("-InputTimeout") + 1] == str(input_timeout)
         assert runner.argv[runner.argv.index("--input-timeout") + 1] == str(input_timeout)
+
+
+@pytest.mark.parametrize("action", ["install", "update"])
+def test_native_runtime_only_survives_driver_admission(adapter, tmp_path, monkeypatch, action):
+    monkeypatch.setattr(adapter, "_source_digest", lambda payload: "a" * 64)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", raising=False)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_RUNTIME_PUBLICATION", raising=False)
+    queued = []
+    driver = SimpleNamespace(
+        RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
+        enqueue=lambda spec, **kwargs: queued.append((spec, kwargs["runner"])) or SimpleNamespace(id="request"),
+        drain=Mock(), wait=Mock(return_value=SimpleNamespace(state="completed", exit_code=0)),
+    )
+    assert adapter._foreground(_arguments(tmp_path, action=action, runtime_only=True), driver) == 0
+    spec, runner = queued[0]
+    assert "-RuntimeOnly" in spec.argv
+    assert "-ProjectName" not in spec.argv
+    assert "--runtime-only" in runner.argv
+    assert "--project-name" not in runner.argv
+
+
+@pytest.mark.parametrize("action,project", [
+    ("install", "example"), ("update", ""), ("repair", None), ("uninstall", None),
+])
+def test_native_runtime_only_refuses_contradictions_before_admission(
+    adapter, tmp_path, monkeypatch, capsys, action, project,
+):
+    bootstrap = Mock()
+    monkeypatch.setattr(adapter, "bootstrap", bootstrap)
+    argv = [
+        "--payload", str(SCRIPTS.parent), "--root", str(tmp_path / "runtime"),
+        "--shell", str(tmp_path / "powershell.exe"), "--action", action, "--runtime-only",
+    ]
+    if project is not None:
+        argv.extend(["--project-name", project])
+    with pytest.raises(SystemExit) as failure:
+        adapter.main(argv)
+    assert failure.value.code == 2
+    assert "requires install/update without --project-name" in capsys.readouterr().err
+    bootstrap.assert_not_called()
+    assert not (tmp_path / "runtime").exists()
 
 
 @pytest.mark.parametrize("value", ["0", "-1", "nan", "inf", "-inf"])
@@ -518,9 +560,9 @@ def test_installer_runner_reexports_only_the_scoped_witness(adapter, tmp_path, m
 
 
 @pytest.mark.skipif(os.name != "nt", reason="actual Windows native driver entry")
-@pytest.mark.parametrize("abandoned", [False, True])
+@pytest.mark.parametrize("abandoned,runtime_only", [(False, False), (False, True), (True, False)])
 def test_real_cold_driver_and_native_reentry_use_the_same_owner(
-    adapter, tmp_path, monkeypatch, abandoned,
+    adapter, tmp_path, monkeypatch, abandoned, runtime_only,
 ):
     """Use a copied fixed no-install shell, never the product installer."""
     from agent_procutil.owned_process import run_owned
@@ -540,7 +582,7 @@ def test_real_cold_driver_and_native_reentry_use_the_same_owner(
     for name in ("update-driver", "agent-procutil", "single-instance-lease", "zdd"):
         shutil.copytree(
             SCRIPTS.parents[2] / "libs" / name, tmp_path / "libs" / name,
-            ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache", ".ruff_cache"),
+            ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache", ".ruff_cache", "tests"),
         )
     (minimal / "pyproject.toml").write_text(
         '[project]\nname="agent-worktrees"\nversion="1.0.0"\n'
@@ -555,18 +597,20 @@ def test_real_cold_driver_and_native_reentry_use_the_same_owner(
     helper = payload / "scripts" / "versioned_runtime_native.ps1"
     shutil.copyfile(SCRIPTS / helper.name, helper)
     script.write_text(
-        "param([string]$Action,[string]$InstallDir)\n"
+        "param([string]$Action,[string]$InstallDir,[switch]$RuntimeOnly)\n"
         "$ErrorActionPreference='Stop'\n"
         f". '{helper}'\n"
-        f"Invoke-Hidden -FilePath '{sys.executable}' -StreamOutput -ArgList @("
+        f"Invoke-Hidden -FilePath '{sys.executable}' -StreamOutput -ArgList (@("
         f"'-I','-S','-B','{entry}','--payload','{payload}',"
-        f"'--root',$InstallDir,'--shell','{shell}','--action',$Action,'--check-native')\n"
+        f"'--root',$InstallDir,'--shell','{shell}','--action',$Action,'--check-native') "
+        "+ $(if ($RuntimeOnly) { @('--runtime-only') } else { @() }))\n"
         "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\n"
         "[Console]::Out.WriteLine('fixed-native-out')\n"
         "[Console]::Error.WriteLine('fixed-native-error')\n"
         f"@{{root=$InstallDir;driver=$env:AGENT_WORKTREES_NATIVE_INSTALLATION;"
         f"witness=[bool]$env:UPDATE_DRIVER_WITNESS;deadline=$env:AGENT_WORKTREES_INSTALL_DEADLINE_SEC;"
-        f"globalDeadline=$env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC}} | ConvertTo-Json | Set-Content -LiteralPath '{receipt}'\n",
+        f"globalDeadline=$env:COPILOT_PLUGIN_INSTALL_DEADLINE_SEC;"
+        f"runtimeOnly=[bool]$RuntimeOnly}} | ConvertTo-Json | Set-Content -LiteralPath '{receipt}'\n",
         encoding="utf-8",
     )
     if abandoned:
@@ -590,11 +634,27 @@ def test_real_cold_driver_and_native_reentry_use_the_same_owner(
             "exit $LASTEXITCODE\n",
             encoding="utf-8",
         )
-    result = run_owned([
-        sys.executable, "-I", "-S", "-B", str(entry),
-        "--payload", str(payload), "--root", str(tmp_path / "runtime"),
-        "--shell", shell, "--action", "install",
-    ], timeout=30)
+    def report_progress():
+        rows = core.status(root=Path.home() / ".copilot-extensions" / "update-driver")
+        print(f"native-driver-progress requests={len(rows)}", flush=True)
+        for row in rows:
+            print(f"native-driver-progress state={row.state} error={row.error}", flush=True)
+            if row.log_path.is_file():
+                print(row.log_path.read_text(encoding="utf-8")[-8192:], flush=True)
+
+    diagnostic = threading.Timer(10, report_progress)
+    diagnostic.daemon = True
+    diagnostic.start()
+    try:
+        result = run_owned([
+            sys.executable, "-I", "-S", "-B", str(entry),
+            "--payload", str(payload), "--root", str(tmp_path / "runtime"),
+            "--shell", shell, "--action", "install",
+            *(["--runtime-only"] if runtime_only else []),
+        ], timeout=30)
+    finally:
+        diagnostic.cancel()
+        diagnostic.join(timeout=1)
     if abandoned:
         assert result.returncode != 0
         assert not receipt.exists()
@@ -609,6 +669,7 @@ def test_real_cold_driver_and_native_reentry_use_the_same_owner(
     assert json.loads(receipt.read_text(encoding="utf-8-sig")) == {
         "root": str(tmp_path / "runtime"), "driver": "1", "witness": True,
         "deadline": "7", "globalDeadline": "500",
+        "runtimeOnly": runtime_only,
     }
     rows = core.status(root=Path.home() / ".copilot-extensions" / "update-driver")
     assert len(rows) == 1 and rows[0].state == "completed"

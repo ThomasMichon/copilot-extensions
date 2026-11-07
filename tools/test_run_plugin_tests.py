@@ -2547,7 +2547,14 @@ def test_codespaces_functional_profile_preparation_strips_test_only_flags(
 
 
 @pytest.mark.parametrize("profile", [None, "standard", "busy-host-functional"])
-def test_codespaces_functional_profile_budgets_and_caps(monkeypatch, capsys, profile, tmp_path):
+@pytest.mark.parametrize("plugin,target", [
+    ("agent-codespaces", "tests/test_installer_engine_adoption.py"),
+    ("agent-ssh", "tests/test_snapshot_runtime.py"),
+    ("agent-ssh", "tests/test_snapshot_windows_visibility.py"),
+])
+def test_codespaces_functional_profile_budgets_and_caps(
+    monkeypatch, capsys, profile, tmp_path, plugin, target,
+):
     class Lease:
         def release(self):
             pass
@@ -2556,8 +2563,8 @@ def test_codespaces_functional_profile_budgets_and_caps(monkeypatch, capsys, pro
     monkeypatch.setattr(runner, "_acquire_admission", lambda *_args: Lease())
     observed = []
     monkeypatch.setattr(runner, "run_plugin", lambda *a, **kw: observed.append(kw) or 0)
-    files = [str(runner._CODESPACES_NATIVE_FILE)]
-    arguments = ["agent-codespaces", "--test-file", files[0], "--junit-dir", str(tmp_path / "reports")]
+    files = [target]
+    arguments = [plugin, "--test-file", files[0], "--junit-dir", str(tmp_path / "reports")]
     if profile is not None:
         arguments += ["--test-profile", profile]
     assert runner.main(arguments) == 0
@@ -2590,6 +2597,12 @@ def test_codespaces_functional_profile_budgets_and_caps(monkeypatch, capsys, pro
     ["agent-codespaces", "--test-file", "tests/test_installer_engine_adoption.py", "--max-memory-mb", "4097"],
     ["agent-codespaces", "--test-file", "tests/test_installer_engine_adoption.py", "--max-temp-mb", "2049"],
     ["agent-codespaces", "--test-file", "tests/test_installer_engine_adoption.py", "--collect-only"],
+    ["agent-ssh", "--test-file", "tests/test_session_snapshot.py"],
+    ["agent-ssh", "--test-file", "tests/test_snapshot_runtime.py", "-k", "native"],
+    ["agent-ssh", "--test-file", "tests/test_snapshot_runtime.py", "--test-timeout", "300"],
+    ["agent-ssh", "--test-file", "tests/test_snapshot_runtime.py", "--allow-host-state"],
+    ["agent-ssh", "--test-file", "tests/test_snapshot_runtime.py", "--max-processes", "129"],
+    ["agent-ssh", "agent-codespaces", "--test-file", "tests/test_snapshot_runtime.py"],
 ])
 def test_codespaces_functional_profile_refuses_unqualified_scope_and_overrides(monkeypatch, arguments):
     monkeypatch.setattr(
@@ -2613,6 +2626,7 @@ def test_codespaces_functional_profile_preserves_partitions_and_clears_ambient(
 ):
     plugin, _, _ = codespaces_native_plan
     monkeypatch.setenv(runner._CODESPACES_PROFILE_ENV, "unrequested-ambient-profile")
+    monkeypatch.setenv(runner._SSH_PROFILE_ENV, "busy-host-functional")
     monkeypatch.setenv("PYTEST_ADDOPTS", "--collect-only -k healthy")
     calls = []
 
@@ -2624,6 +2638,7 @@ def test_codespaces_functional_profile_preserves_partitions_and_clears_ambient(
         assert kwargs["env"].get("PYTEST_ADDOPTS") == (
             "--collect-only -k healthy" if profile == "standard" else None
         )
+        assert runner._SSH_PROFILE_ENV not in kwargs["env"]
         assert (
             kwargs["limits"].max_processes, kwargs["limits"].max_memory_mb,
             kwargs["limits"].max_temp_mb,
@@ -2644,6 +2659,46 @@ def test_codespaces_functional_profile_preserves_partitions_and_clears_ambient(
     )
     assert all(str(runner._CODESPACES_NATIVE_FILE) in command for command in calls)
     assert plugin.is_dir()
+
+
+@pytest.mark.parametrize("profile", ["standard", "busy-host-functional"])
+def test_ssh_functional_profile_keeps_full_inventory_and_isolates_environment(
+    monkeypatch, tmp_path, profile,
+):
+    plugin = tmp_path / "agent-ssh"
+    tests = plugin / "tests"
+    tests.mkdir(parents=True)
+    targets = ("test_snapshot_runtime.py", "test_snapshot_windows_visibility.py")
+    for target in targets:
+        (tests / target).write_text("def test_native(): pass\n", encoding="utf-8")
+    monkeypatch.setattr(runner, "_plugin_dir", lambda _name: plugin)
+    monkeypatch.setattr(runner, "_ensure_venv", lambda *a, **k: Path(sys.executable))
+    monkeypatch.setenv(runner._CODESPACES_PROFILE_ENV, "busy-host-functional")
+    monkeypatch.setenv(runner._SSH_PROFILE_ENV, "busy-host-functional")
+    monkeypatch.setenv("PYTEST_ADDOPTS", "--collect-only -k nonexistent")
+    calls = []
+
+    def execute(command, **kwargs):
+        calls.append(command)
+        assert kwargs["env"].get(runner._SSH_PROFILE_ENV) == (
+            None if profile == "standard" else profile
+        )
+        assert runner._CODESPACES_PROFILE_ENV not in kwargs["env"]
+        assert kwargs["env"].get("PYTEST_ADDOPTS") == (
+            "--collect-only -k nonexistent" if profile == "standard" else None
+        )
+        assert "-k" not in command and "--collect-only" not in command
+        assert all(str(Path("tests") / target) in command for target in targets)
+        return 0
+
+    monkeypatch.setattr(runner, "run_contained", execute)
+    assert runner.run_plugin(
+        "agent-ssh", "unused", reinstall=False, kexpr=None,
+        test_files=tuple(str(Path("tests") / target) for target in targets),
+        test_profile=profile, limits=containment.Limits(),
+        plugin_timeout=900, test_timeout=30, max_files_per_subsuite=25,
+    ) == 0
+    assert len(calls) == 1
 
 
 @pytest.mark.portfolio_tier("T2")

@@ -2730,3 +2730,150 @@ caller-adoption validation obligation. Local cold construction cost and Windows
 historical-seed performance also remain unresolved. Source review, required CI,
 merge and release are still required; parent and installed-recovery gates stay
 open.
+
+### 2026-11-06 - U18 source merged; independent promotion fixture repair pending
+
+Source #11136 receives an exact-head Approved review with no findings at
+`e8a384a2dccf12f68cf1d675b2acee0b07dedad9`. Required CI `42299341557`,
+trusted workflow/source-attribution and identifier guards pass. It merges at
+21:58:46 UTC as `9677262d0904dccefab74ff5d2d60ae733a9a689`; no parent
+closing reference is present and #10377 stays open. The Plan and Validation
+Plan are reread after merge and remain Active. All owned source additions are
+verified in the squash merge. Native squash-aware completion reconciles the
+source worktree after ordinary pull-forward aborts on duplicated historical
+commits; no new local work is discarded.
+
+The containing release is not delivered. Promotion `42301853174` fails only
+`Require real Windows Resume pane startup`: both prewarming variants raise
+`UnsafeTestCommand` because the native fixture invokes PSMux control/cleanup
+without an explicit private socket or runner-owned namespace. Its other
+executed jobs pass; downstream publication/merge remains skipped. The
+successor `42302804638` has the same failing native job when inspected.
+This is distinct from #10960's delivered dependency repair, not a flake waiver.
+The existing #10945/#10946 owner has explicitly claimed the fixture-scoping
+follow-up at 21:55:12 UTC. Preserve that claim, the safety guard, real Resume
+assertions and all finite bounds rather than create a competing patch or retry
+promotion unchanged.
+
+Next, observe the existing owner's repair and a containing qualified release,
+then migrate callers through their normal review gate. Optional prepared-source
+caller proof, local cold construction, historical-seed performance and all
+whole-flow/installed acceptance remain open. No runtime update or deployment is
+performed.
+
+### 2026-11-06 - Fresh project adoption must remain separate from runtime preparation
+
+Caller integration review identifies an additional front-door seam. The native
+PowerShell installer explicitly re-roots marketplace self-staging to the user
+home, then resolves a supplied project's repository from existing project
+configuration, a Git CWD or the canonical registered repository. A fresh
+unregistered project has none of those roots. Supplying its name therefore
+reaches `register-project-entry` without `--repo-dir`; the owning hosting-policy
+check refuses before a caller's later explicit registration can run.
+
+Omitting the name is not an explicit runtime-only contract either: the normal
+front door can infer a project from CWD and existing configuration. The proposed
+bounded prerequisite is a source-owned runtime-only option that prevents
+project inference and adoption while retaining the existing native runtime
+preparation, ownership and readiness path. Default inference stays unchanged;
+contradictory explicit project arguments must refuse. No reserved-name trick,
+fabricated configuration or alternate constructor is accepted. Deduplicate and
+coordinate the precise source stretch before implementation, then qualify the
+real native front door before caller adoption. This is not yet a native
+qualification result, source fix, release or installed recovery.
+
+### 2026-11-06 - Explicit runtime-only provider expansion claimed
+
+The precise source prerequisite is coordinated as #11178 under #10377.
+The existing #5852 parent retains the broader install/adopt and configured
+behavior separation; no open competing runtime-only PR was found. This
+additive slice does not remove legacy default inference or close that parent.
+
+The proposed provider implementation adds native shell `install`/`update`
+runtime-only selection, rejects contradictory project arguments before
+admission, and carries the selection through the existing Windows execution
+driver and ordinary staging. The selected payload's adjacent installer
+contract advertises the capability independently of package versions.
+Separately deployed callers must require that support before effects; rollback
+to an older provider is an explicit incompatibility, not trial-and-replay.
+
+This closes a composition gap under the existing authoritative-runtime-
+replacement intent, not a new lifecycle architecture. Runtime construction,
+readiness, selection, admission, custody and central-only retirement boundaries
+are unchanged. Shared migration and global integration remain ordinary owner
+operations; project registration remains a later explicit native writer action.
+Focused parser/driver and actual-shell controls are being run. Native fresh
+installation, caller policy preservation, source review, CI, merge and release
+remain open. No shared installer, runtime, configuration, service or rollout
+effect is performed by this source preparation.
+
+The initial focused local run reaches all six driver controls successfully.
+Actual Windows shell selections and front-door refusals work; their first
+assertions incorrectly treated PowerShell's own profile cache as installer
+state, so those checks now assert only installer-owned footprints. The broader
+compatibility run reaches an existing cold-driver fixture's original item
+deadline, first during retained-input preparation and then during native
+execution. Removing unrelated library test trees reduces fixture preparation,
+without changing its runtime source closure or any deadline. A bounded
+diagnostic confirms a real running request with no recorded error or output
+before the item expires. This is unresolved qualification, not a flake waiver
+or a successful runtime-only installation.
+
+Five pure workflow controls pass, rejecting failed, skipped, missing and
+wrong-source native evidence. Install-contract synchronization, touched-Python
+lint and documentation consistency pass. The new manual Linux/Windows lane
+retains exact source selection and required native cases. Publication remains
+work-in-progress until the native result is understood and qualified; caller
+migration and parent acceptance remain open.
+
+Separately, the previously blocked #11136 provider is now present in the
+qualified source release #11182. Promotion `42315848596` passes real Resume,
+artifact attestation, publication/readback and non-administrative exact
+candidate merge. Its recorded admitted Dev is
+`d7a258cee28247008412c44258fbda10d4bdaf6b`, not the workflow run's Main-base
+head. The generated Main merge is
+`b4d2d056e282960369201ed68359a9ad76db10f6`, with Worktrees
+`1.24.512-dev1`. The source merge is an ancestor of the actual admitted Dev;
+the helper, native test, composition tests, CLI documentation, workflow and
+acceptance bodies match their source merge and published Main. Changes to
+TESTING and the workflow test file are unrelated additions; all admitted Dev
+bodies match Main. This is released source, not local rollout, caller adoption
+or completion of #10377.
+
+The first exact-head hosted qualification, `42321992914` at
+`b3588819fb6367b441b2654ad689e26b9aba5570`, fails on both platforms before
+test execution. The source-pin probe omitted the owned-process helper's two
+required output budgets; the report uploader then had no declared report path.
+The revised probe supplies finite budgets and the uploader runs only after a
+report directory has been declared. The pure regression stub now requires the
+same keyword-only budgets, so it cannot hide this interface mistake. Its five
+admission controls and touched-file lint pass again. The failed run supplies no
+native acceptance credit; qualification must use the revised published head.
+
+### 2026-11-07 - Runtime-only provider native qualification
+
+Exact source `c49a2c51dcd25cffcf1b6094b49ac14c857b28ca` passes manual
+qualification `42322817268` on both disposable hosted platforms. The downloaded
+JUnit bodies confirm fourteen Linux passes and seventeen Windows passes, with
+no errors or failures. Linux exercises Bash and PowerShell Core selection,
+unchanged default inference, repeat runtime-only selection and early refusal;
+Windows exercises Windows PowerShell and PowerShell Core. Unsupported shells
+are explicit platform skips.
+
+All three actual Windows cold-driver cases pass: ordinary entry, runtime-only
+entry and caller abandonment, in 5.041, 3.627 and 3.441 seconds respectively.
+They retain the existing request owner, native reentry, deadline propagation,
+output capture and cleanup assertions. Their Linux skips reflect that fixture's
+Windows-only contract, not native Linux installation coverage. The earlier local
+item timeouts remain unresolved local results; no deadline was raised and no
+local success is inferred from this separate hosted result.
+
+This qualifies the bounded provider seam, not a complete native runtime install
+or fresh-project adoption. The shell-selection controls execute extracted
+production selection code; the cold-driver fixture deliberately substitutes a
+fixed no-install native participant. Normal source review, current-head required
+CI, merge and containing release remain due. Independently deployed callers must
+check the exact selected payload's advertised capability before migration.
+Caller fresh/prior-state policy preservation and whole-flow recovery remain
+under #11178, #5852 and the active #10377 acceptance matrix. No shared runtime,
+service, credentials, registration or installation is changed.

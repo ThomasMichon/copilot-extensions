@@ -1189,6 +1189,11 @@ enable `--strict` until the producing phases in #1096 have removed the baseline.
 
 ### Test Portfolio Discipline
 
+For explicitly requested Windows evidence without local test execution, use
+the [owner-only hosted escape hatch](TESTING.md#owner-only-hosted-windows-escape-hatch).
+Prefer focused files and selectors; it neither changes required CI nor
+substitutes for the selected flow's native acceptance criteria.
+
 Required pull-request testing is impact-conditional, positively admitted
 in-process units with coverage. Promotion uses the same unit-only policy.
 Actual-Git, multi-process, native, installer, service and end-to-end integration

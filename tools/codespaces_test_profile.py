@@ -1,4 +1,4 @@
-"""Scope and resource-limit validation for opt-in installer functional tests."""
+"""Scope and resource-limit validation for opt-in native functional tests."""
 
 from __future__ import annotations
 
@@ -11,19 +11,26 @@ def validate_profile(args: Namespace) -> None:
         return
     selected = {Path(path.replace("\\", "/")) for path in args.test_file}
     allowed = {
-        Path("tests") / "test_installer_engine_adoption.py",
-        Path("tests") / "test_snapshot_copy_contract.py",
-        Path("tests") / "test_installer_test_support.py",
+        "agent-codespaces": {
+            Path("tests") / "test_installer_engine_adoption.py",
+            Path("tests") / "test_snapshot_copy_contract.py",
+            Path("tests") / "test_installer_test_support.py",
+        },
+        "agent-ssh": {
+            Path("tests") / "test_snapshot_runtime.py",
+            Path("tests") / "test_snapshot_windows_visibility.py",
+        },
     }
     if (
-        args.plugins != ["agent-codespaces"] or not selected or not selected <= allowed
+        len(args.plugins) != 1 or not selected
+        or not selected <= allowed.get(args.plugins[0], set())
         or args.all or args.changed or args.prepare_only or args.selection_file
         or args.guards or args.kexpr or args.collect_only or args.list_only
         or args.exclude or args.pre_push or args.allow_host_state
         or args.allow_explicit_tiers
     ):
-        raise ValueError("busy-host-functional requires agent-codespaces --test-file "
-                         "with only installer adoption, snapshot-copy or installer-support files")
+        raise ValueError("busy-host-functional requires --test-file with only named "
+                         "Codespaces installer or SSH snapshot runtime/visibility files")
     if (
         any(value is not None for value in (
             args.subsuite_timeout, args.plugin_timeout, args.test_timeout,

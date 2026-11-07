@@ -1,0 +1,13 @@
+{
+  "schema": "agent-worktrees.native-installer",
+  "version": 1,
+  "capabilities": {
+    "runtime-only-v1": {
+      "actions": ["install", "update"],
+      "entrypoints": {
+        "install.ps1": "-RuntimeOnly",
+        "install.sh": "--runtime-only"
+      }
+    }
+  }
+}

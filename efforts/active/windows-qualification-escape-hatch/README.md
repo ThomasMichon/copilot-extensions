@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** serial managed proposal and implementation PRs
 - **Created:** 2026-11-06
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [Test portfolio effectiveness](../../../visions/test-portfolio/README.md)
 - **Umbrella issue:** #11169
 - **Related campaigns:** #10765, #6237, #7122
@@ -99,17 +99,17 @@ not replayed under a new request identifier.
   offload/control ownership before claiming #11169.
 - [x] Capture the complete request and distinguish the proposed design from
   execution authority.
-- [ ] Land this proposal after required review and CI before implementation.
+- [x] Land this proposal after required review and CI before implementation.
 
 ### Phase 2 - Deliver one complete focused Windows flow
 
-- [ ] Implement owner-only protected-control admission, including reruns,
+- [x] Implement owner-only protected-control admission, including reruns,
   without granting write credentials to candidate execution.
-- [ ] Implement source submission using one reserved append-only transport ref,
+- [x] Implement source submission using one reserved append-only transport ref,
   preserving exact candidate identity and the caller's branch/index/worktree.
-- [ ] Implement typed focused plugin/tool selectors and existing named capture
+- [x] Implement typed focused plugin/tool selectors and existing named capture
   packets; make broad suite selection explicit and keep canonical bounds.
-- [ ] Return source/request/selector/platform-bound results, named progress,
+- [x] Return source/request/selector/platform-bound results, named progress,
   available JUnit, logs and generated evidence through ordinary Actions artifacts.
 - [ ] Prove the complete local submit, hosted run, status and result path on a
   real focused Windows consumer, not a synthetic success marker.
@@ -162,3 +162,60 @@ Resolved the source-only local venue and compatible effort adoption, inspected
 the existing test-portfolio/control/Linux-offload campaigns, and claimed
 #11169. The proposed source/result path is additive; existing owners, the
 Driver parent and their independent completion gates remain intact.
+
+### 2026-11-06 - Plan accepted
+
+The plan in #11172 received Copilot approval at its actual head and green
+required checks, then merged as
+`f8c9820f67565402fe4b1b9de06c9bd4686f8d8c`. Pulled the same source worktree
+forward to that commit before implementation. The next slice is the complete
+focused request, Windows execution and result-return flow; no workflow,
+transport ref or qualification result is implemented or activated yet.
+
+### 2026-11-07 - Complete implementation candidate
+
+Implemented the manual owner/original-rerun/protected-control workflow and
+the source-owned submit/status/wait/resume/result client. The preferred shared
+transport is the non-branch `refs/qualification/windows-inputs`; actual GitHub
+namespace support remains a live acceptance gate, not a local-Git inference.
+Requests discover the protected provider's versioned support before effects.
+Unknown dispatches retain the same request; original transport recovery never
+replays an unobserved remote effect.
+Per-request crash-releasing operation custody excludes simultaneous local
+resumes; independent requests still contend through the transport's ordinary
+fast-forward update rather than a repository-wide lock.
+
+The worker reuses canonical plugin/library selection, tool containment and
+the complete HTTP-52 writer plus separate same-source no-write verifier and
+artifact exporter. Results distinguish actual test outcomes, skips, empty
+collection, failure and timeout, and record the managed test interpreter
+separately from controller Python.
+
+Validation: 54 focused controls passed, including actual Git append/reuse,
+contention, lost-response reconciliation and branch/index/tree preservation.
+Python F/E9 lint, headless-launch, documentation consistency and module-size
+guards passed. First-touch local Git transport is covered; the disposable
+hosted first-touch path, normal promotion, real result download and shared-ref
+reuse still need proof after implementation review/CI. No hosted request or
+remote transport ref has been created yet. This effort and its Driver parent
+remain Active.
+The actual source-owned CLI also refused the current unpublished protected
+controller explicitly before creating its request store, staging source or
+dispatching a workflow.
+Eight targeted CLI controls also passed after tightening invalid-workspace
+error handling; these supplement the 54-control run above rather than
+claiming another full transport run.
+
+### 2026-11-07 - Implementation review
+
+Opened #11187 through the normal Dev PR flow. Required checks passed at its
+first head; Copilot identified inherited Git selectors escaping the selected
+root, unconfirmed reused transport tips after contention, and missing tool
+tier enforcement. Focused real Git/pytest consumers reproduced all three.
+
+Reused the existing repository-identity environment scrubber for command
+boundaries, persisted reused tips as confirmed, and loaded the portfolio
+guard for tool execution with private pytest scratch. All 59 focused controls
+now pass, including the new cross-worktree, descendant-contention and actual
+T3/T4 opt-in regressions. Review, refreshed CI, promotion and live hosted
+acceptance remain open; no qualification ref or run has been created.

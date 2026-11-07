@@ -211,6 +211,27 @@ and preserve valid original fallback within its existing deadline.
 This prerequisite is not full cell post-tool migration or shell-only cold
 reconstruction; those consumers and their remaining contracts stay open.
 
+### Prepared Windows installation-cell post-tool migration
+
+The next finite consumer composes that original prepared-cell association
+with the existing registered read/native/batch/single-shell path. It reads
+only the selected cell's passive discovery and original current-row views.
+Discovery must match the marketplace identity from the already-validated
+cell layout, exact receipt and plugin root before sending a notification
+or using advisory facts. Do not parse the receipts again, reconstruct
+membership, select a different endpoint or relax existing input witnesses.
+
+Retain the original capabilities, process generation, receiver admission,
+event/target normalization, live switches, once-per-event reminder/late
+accounting, wire bounds and no-reply/no-retry semantics. Incompatible
+membership retains original admission; a qualified warm cell with missing
+or old discovery stays shell-only. Native controls must traverse the actual
+registered entry and original publishers/receiver, trap warm interpreter
+and synchronous calls, check read/native/batch/shell effects and distinguish
+foreign discovery, stale receipts, missing rows, live controls and a
+non-replying peer. This closes only a warm source consumer checkpoint;
+cold/directory/POSIX/recovery, installed, composed and throughput gates remain.
+
 ### First additive producer contract
 
 The next finite consumer is the Windows read-event path (`view`, `rg`, `glob`).
