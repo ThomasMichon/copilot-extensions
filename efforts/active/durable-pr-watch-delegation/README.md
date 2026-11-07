@@ -373,10 +373,13 @@ _Operator-required outcome; agent-recommended slices and validation._
   fresh allocation, explicit-ID/v1/v2 and receiver rollback semantics (#11381;
   250 coupled source cases). Normal host enrollment, other publishers and
   provider/installed adoption remain separate.
-- [ ] Review the [trusted producer-enrollment contract](comment-producer-enrollment.md)
-  before changing normal-host behavior. Deliver its actual source/profile
-  resolver and protected write-owner prerequisites through their existing
-  owners, then bind one explicitly selected authenticated host route.
+- [x] Review the [trusted producer-enrollment contract](comment-producer-enrollment.md)
+  before changing normal-host behavior (#11393).
+- [x] Deliver the finite optional in-process source/profile resolver through
+  the actual Worktrees record and attribution owners (#11397). Resolve before
+  pure retained composition; this is not normal-host enrollment.
+- [ ] Deliver the actual protected write-owner prerequisite through its
+  existing owners, then bind one explicitly selected authenticated host route.
   Injected factories and observation credentials do not satisfy these exits;
   default watch-only and native read-only hosting stay unchanged.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
@@ -955,6 +958,14 @@ or silently expanding a bounded source claim.
   explicit exact admission and read-only/default refusal. Source controls
   cannot substitute for installed/provider or operational authorization.
 
+- [x] Qualify the finite actual source/profile resolver with real managed
+  records and profile files, unique canonical root selection, aliased roots,
+  reply/edit profiles, pure in-lock composition, original preview recovery and
+  missing/prior owner refusal (#11397). The coupled packet passes 62 cases;
+  Worktrees origin passes 31; shared attribution/profile passes 120 with four
+  existing skips. Cleanup is verified. Normal writer/host/provider adoption
+  remains outside this finite source exit.
+
 - [x] Qualify the finite pre-approval owner data path through actual shared
   preparation, original-key restart/lost-result recovery, contention,
   immutable input, explicit exact admission/native receipts, strict reader
@@ -1076,6 +1087,49 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-07 - Resolve actual producer source and profile before composition
+
+- #11397 actually merged as `fa1d15da3d496760750c02fb5086ba2f0472a38d`
+  after exact-head Copilot approval, the resolved canonical-root finding and
+  latest CI `42423725267`, including required gate `128558581914`, passed.
+  Managed completion retained its backup and reconciled only the two merged
+  source commits.
+- The optional in-process resolver uses the actual managed source record and
+  effective attribution profile before returning a pure, scope-bound shared
+  composer. Original-key selection recovery precedes re-resolution. Neither
+  the service's own checkout nor caller-supplied source/policy labels become
+  producer identity or write authority.
+- Both duplicate-root and aliased-root regressions failed before correction.
+  Canonical exact-root matching now refuses ambiguity and retains registered
+  aliases. Final contained packets pass 62 coupled, 31 Worktrees and 120
+  attribution/profile cases with four existing skips and verified cleanup.
+  AI-attribution's eight strict targets pass Linux/win32 analysis; pending
+  Worktrees/PR type admission is not a strict-project result.
+- Re-read the complete current Plan/Validation and credit only this finite
+  prerequisite. Continue the protected native credential/transport owner
+  before normal host binding: current typed forge credentials are explicitly
+  observe-only and cannot be relabeled as review authority. All-publisher,
+  mapping, full provider/CLI/Dispatch/retention, installed and shadow/pane
+  acceptance remains open. No credential, host, deployment or resource effect
+  follows from this source merge.
+
+### 2026-11-07 - Review actual producer dependencies without enabling a writer
+
+- #11393 actually merged as `fd66cc49d339442664eea11bd1ffc6af17f26351`
+  after exact-head Copilot approval with no open issues or threads and latest
+  CI `42421735633`, including required gate `128551570834`, passed.
+  Managed completion retained its backup and reconciled only the merged commit.
+- The source trace distinguishes injected preparation/write factories from
+  normal hosting: the standalone configuration supplies only an observe-bound
+  reader, while protected native review consumes an existing private transport.
+  The reviewed contract preserves that read-only default and requires actual
+  producer source/profile and protected writer prerequisites before enrollment.
+- Re-read the complete current parent. Credit only contract review; continue
+  the finite actual source/profile resolver, then the protected native owner
+  and explicit host binding. All-publisher, mapping, provider/installed,
+  attention, CLI/Dispatch, retention and shadow acceptance remain open.
+  No host, credential, service or resource was activated or released.
 
 ### 2026-11-07 - Qualify optional selected-edit consumers without host activation
 
