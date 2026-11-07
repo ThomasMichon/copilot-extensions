@@ -39,7 +39,7 @@ Classify before acting, and record the classification in the register:
 
 | Kind | Handling |
 |---|---|
-| One-shot | A question answerable now. Answer it and close it in the same turn; record it only if the answer changes a thread |
+| One-shot | A question answerable now. Answer it and close it in the same turn as one minimal closed row (origin, answer pointer, `closed`) |
 | Charter | Extends or narrows the main thread's scope. Update the charter through its existing owner record (preserving the original source and any holds) and note the extension on the `main` row |
 | Steer-followup | Concerns an existing thread or an earlier steer. Attach the message to that thread's row and update its next check or exit criterion; never open a duplicate |
 | Side-quest | Tangential work the operator wants done. Delegate it to a bridge agent or sub-agent within existing authority, record that owner and the exit criterion, and only monitor it; the monitor does not do the side-quest itself |
