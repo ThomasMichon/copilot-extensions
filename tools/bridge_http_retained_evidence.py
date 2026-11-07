@@ -40,18 +40,30 @@ class EvidenceSpec:
         return f"HTTP-{self.generation}"
 
 
+def _prefixed_python(spec: EvidenceSpec, path: str) -> bool:
+    return (
+        path.startswith(spec.closure_prefixes) and path.endswith(".py")
+        and "__pycache__" not in Path(path).parts
+    )
+
+
 def captured_inventory(spec: EvidenceSpec, required: set[str], tree: dict) -> set[str]:
     def runtime_python(path: str) -> bool:
         return (
             historical.closure_python(path) or installation.closure_python(path)
-            or (
-                path.startswith(spec.closure_prefixes) and path.endswith(".py")
-                and "__pycache__" not in Path(path).parts
-            )
+            or _prefixed_python(spec, path)
         )
 
     return {path for path in required if not runtime_python(path)} | {
         path for path in tree if runtime_python(path)
+    }
+
+
+def historical_owners(spec: EvidenceSpec) -> set[str]:
+    # Without the captured tree, prefix-derived modules from a future checkout
+    # cannot be owners; explicitly affected sources always remain required.
+    return set(spec.affected) | {
+        path for path in spec.extra_paths if not _prefixed_python(spec, path)
     }
 
 
@@ -323,7 +335,7 @@ def validate(
                 raise ValueError(f"{spec.label} closure inventory differs from captured tree")
         elif require_tree:
             raise ValueError(f"{spec.label} publication requires the actual source tree")
-        elif not (set(spec.affected) | set(spec.extra_paths)) <= proof.keys():
+        elif not historical_owners(spec) <= proof.keys():
             raise ValueError(f"{spec.label} historical closure lacks required owners")
         elif historical_scope:
             retained = capture_metadata.load(root, captured["commit"])
