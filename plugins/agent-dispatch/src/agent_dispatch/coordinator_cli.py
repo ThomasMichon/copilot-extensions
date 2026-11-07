@@ -13,6 +13,7 @@ from agent_procutil.daemon_instances import daemon_entrypoint
 
 import argparse
 import json as _json
+import math
 import os
 import socket as _socket
 import sys
@@ -209,6 +210,9 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         token=effective_token,
         control_token=getattr(args, "control_token", None) or _config.resolve_control_token(),
         sweep_interval=base.sweep_interval,
+        orphan_grace=base.orphan_grace,
+        handoff_fallback_enabled=base.handoff_fallback_enabled,
+        handoff_fallback_grace=base.handoff_fallback_grace,
         pool_publication_enabled=base.pool_publication_enabled,
         relationship_admission=base.relationship_admission,
         relationship_authority=base.relationship_authority,
@@ -349,12 +353,15 @@ def _cmd_cutover(
     routing_dir: Path | None = None, install_root: Path | None = None,
     source_replacement: bool = False,
     source_environment: dict[str, str] | None = None,
+    reconcile_existing: bool = False, result_sink=None,
 ) -> int:
     """Zero-downtime graceful cutover -- shared by ``deploy`` and ``_cutover``."""
-    from zdd import breadcrumb
+    from zdd import breadcrumb, routing
     from zdd.cutover import CutoverOrchestrator
     from .action_controls import action_decision
     from .install_paths import INSTALL_DIR_ENV, install_dir
+    if source_replacement and reconcile_existing:
+        raise ValueError("coordinator replacement modes cannot be combined")
     if source_replacement:
         from .source_start import require_selected_source
 
@@ -364,6 +371,23 @@ def _cmd_cutover(
             or getattr(args, "force", False) or getattr(args, "recover", False)
         ):
             raise ValueError("Source startup cannot force or redirect replacement")
+    if reconcile_existing:
+        from .source_start import require_selected_generation
+
+        require_selected_generation()
+        if (
+            conditional is not None or install_root is not None or routing_dir is not None
+            or getattr(args, "force", False) or getattr(args, "recover", False)
+            or not isinstance(source_environment, dict) or not callable(result_sink)
+            or any(
+                not isinstance(key, str) or not isinstance(value, str)
+                or key.upper() in {"UPDATE_DRIVER_WITNESS", "AGENT_WORKTREES_INTERNAL_PROJECT_CONTROLLER"}
+                for key, value in source_environment.items()
+            )
+            or type(args.health_timeout) not in (int, float)
+            or not math.isfinite(args.health_timeout) or not 0 < args.health_timeout <= 600
+        ):
+            raise ValueError("serving reconcile cannot force or redirect replacement")
 
     def refusal(message: str) -> int:
         print(f"[FAIL] {message}", file=sys.stderr)
@@ -459,6 +483,10 @@ def _cmd_cutover(
     host = cfg.host if cfg.host not in (wildcard_v4, "", "::", "[::]") else "127.0.0.1"
     if cfg.host in ("::", "[::]"):
         host = "::1"
+    if reconcile_existing:
+        from .coordinator_observation import _loopback
+
+        host = _loopback(host)
     routing_bind = "::" if cfg.host == "[::]" else cfg.host
     spawned = {}
 
@@ -556,13 +584,14 @@ def _cmd_cutover(
 
     from .single_instance import SingleInstance, read_holder_pid
 
-    routing_lock_path = captured_routing_dir / "serve-start.lock"
+    routing_lock_path = _config.coordinator_start_lock_path(captured_routing_dir)
     routing_lock = SingleInstance(routing_lock_path)
     acquired = routing_lock.acquire()
+    wait_budget = min(30.0, args.health_timeout) if reconcile_existing else 30.0
     if not acquired:
-        deadline = core_time.monotonic() + 30.0
-        while core_time.monotonic() < deadline:
-            core_time.sleep(0.5)
+        deadline = core_time.monotonic() + wait_budget
+        while (remaining := deadline - core_time.monotonic()) > 0:
+            core_time.sleep(min(0.5, remaining))
             acquired = routing_lock.acquire()
             if acquired:
                 break
@@ -572,7 +601,7 @@ def _cmd_cutover(
         print(
             "agent-dispatch: another process is concurrently starting or "
             f"cutting over a coordinator on this host{holder_note}; refusing "
-            "to race it for the active route after waiting 30s for it to "
+            f"to race it for the active route after waiting {wait_budget:g}s for it to "
             "finish. Retry once it finishes, or -- if that process is "
             "genuinely wedged, not just slow -- terminate it externally "
             "first.",
@@ -582,15 +611,41 @@ def _cmd_cutover(
     try:
         if not admitted():
             return 3
-        if source_replacement:
+        if source_replacement or reconcile_existing:
             from .source_start import run_coordinator
 
+            options = {}
+            if reconcile_existing:
+                from .coordinator_observation import observe
+                from .source_start import require_selected_generation
+
+                expected_table = routing.read_table(captured_routing_dir, strict=True) or {}
+                observe(
+                    cfg, captured_routing_dir, run_dir=_config.run_dir(), token=token,
+                    environment=effective_env, timeout=args.health_timeout, require_behavior=False,
+                )
+                if (routing.read_table(captured_routing_dir, strict=True) or {}) != expected_table:
+                    raise RuntimeError("coordinator preflight route changed")
+
+                def confirm_inactive(_table):
+                    return observe(
+                        cfg, captured_routing_dir, run_dir=_config.run_dir(), token=token,
+                        environment=effective_env, timeout=args.health_timeout, require_behavior=False,
+                    ) == {"state": "inactive", "generation": None}
+
+                options = {
+                    "verify_selected": require_selected_generation, "start_if_missing": False,
+                    "confirm_inactive": confirm_inactive, "expected_table": expected_table,
+                }
             result = run_coordinator(
                 cfg, captured_routing_dir, token=token,
                 spawn_passive=spawn_passive, pick_free_port=pick_free_port,
-                timeout=args.health_timeout,
+                timeout=args.health_timeout, **options,
             )
-            _emit(result)
+            if result_sink is None:
+                _emit(result)
+            else:
+                result_sink(result)
             return 0 if result.get("ok") is True else 1
         _pre_recovery_breadcrumb = breadcrumb.read_breadcrumb(captured_routing_dir)
         recovery = breadcrumb.recover_stale_cutover(

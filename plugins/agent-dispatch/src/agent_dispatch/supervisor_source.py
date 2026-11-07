@@ -226,6 +226,7 @@ def acquire_candidate(daemon, admission, *, once, single_instance):
 def configure_admission(daemon, args, guard, clients):
     from zdd.diagnostics import process_start_time
     from .config import load_config
+    from .install_paths import install_dir
     from .source_start import _path_name, config_identity, require_selected_source
     from .supervise_cli import _client, _supervisor_authority_target, _write_supervisor_cycle_start
 
@@ -236,7 +237,7 @@ def configure_admission(daemon, args, guard, clients):
         pid = slot.get("pid")
         if (
             health.get("status") != "ok"
-            or health.get("runtime_config_identity") != config_identity(load_config())
+            or health.get("runtime_config_identity") != config_identity(load_config(), base_dir=install_dir())
             or type(pid) is not int or pid <= 0
             or not slot.get("process_start_time")
             or process_start_time(pid) != slot["process_start_time"]
