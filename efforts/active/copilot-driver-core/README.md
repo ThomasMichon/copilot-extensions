@@ -2294,3 +2294,21 @@ updated-head evidence. Required CI also finds the HTTP registry's stale source
 pin. Refresh the existing non-semantic local-invocation source record through
 the canonical lossless metadata owner; HTTP fixtures, generations and archived
 provenance remain unchanged. No readiness, wire or lifetime claim is expanded.
+
+The expanded forty-three compatibility controls qualify at head `5a80bf2bc1`
+on hosted Windows with no skips in 29.03 seconds
+([run 42392107109](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42392107109)).
+Required CI is green at that head, but the next review identifies the Python
+POSIX discovery function's remaining flat-interpreter assumption. Its shell
+counterpart already selects the nested application environment.
+
+Three focused controls reproduce nested-only rejection, leftover-flat selection
+and incomplete-application fallback. Make the real discovery function select
+the nested environment when the existing application declaration is present,
+with no fallback to a flat interpreter. All twenty-two discovery controls pass
+in 1.26 seconds (66.06 including preparation and cleanup), retaining legacy,
+capability, selector-race and child-custody behavior. These exercise the real
+discovery function with a stubbed child boundary on Windows; they are not
+native POSIX lifecycle qualification. No available native POSIX lane is claimed,
+and that broader parent validation remains open. No discovery protocol, child
+count, deadline, dependency or runtime selection owner changes.
