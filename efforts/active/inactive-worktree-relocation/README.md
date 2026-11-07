@@ -528,3 +528,21 @@ adopter pilot feedback gates subsequent widening.
   still awaits the exact current-head required CI and real review assessment.
   The umbrella/effort and retained-fixture disposition remain open; no activation
   or adopter data effects are implied.
+
+### 2026-11-07 — Literal path, publication replay and archive controls
+- Current-head required CI passed, but the next actual review identified three
+  additional recovery defects; CI success was not treated as review clearance.
+- Reject literal recorded spellings normalized by `Path` before custody,
+  including dot components and trailing separators. The journal and exact
+  ledger spelling cannot diverge after publication.
+- Synchronize the destination parent before the `published` checkpoint even
+  when recovery finds that rename already succeeded. A post-rename sync failure
+  now retries that barrier rather than silently skipping it.
+- Archive through a synchronized temporary file and atomic exclusive
+  publication. Partial writes never occupy the immutable final history name;
+  the complete current terminal receipt remains present throughout failure
+  and retry.
+- The dedicated native recovery packet passed **9 controls**, including the
+  new literal aliases, post-rename retry and partial archive write, alongside
+  the preceding durability/access/schema controls. The source objective remains
+  Active and publication still requires fresh exact-head review and CI.
