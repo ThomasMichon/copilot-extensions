@@ -2,19 +2,25 @@
 
 import json
 import sqlite3
+from types import SimpleNamespace
 
 import pytest
 
 from agent_worktrees import __main__ as core
-from agent_worktrees import git_ops, reclaim, sessions, tracking
+from agent_worktrees import git_ops, mux_link, reclaim, sessions, tracking
 from agent_worktrees import worktrees_producer as producer
 from agent_worktrees.worktrees_runtime import WorktreesRuntime
 from agent_worktrees.hook_facts_publication import HookFactsPublisher
 
 
-@pytest.mark.parametrize("failure", [None, sqlite3.OperationalError, KeyError])
+@pytest.mark.parametrize(("failure", "managed_state"), [
+    (None, None), (sqlite3.OperationalError, None), (KeyError, None),
+    (None, "live"), (None, "stale"), (None, "other-project"),
+    (None, "live-cleanup"),
+], ids=["direct", "sqlite-failure", "key-failure", "managed-live",
+        "managed-stale", "other-project", "managed-cleanup"])
 def test_worktrees_producer_real_serialization_keeps_counts_and_owner_facts(
-    tmp_path, monkeypatch, failure,
+    tmp_path, monkeypatch, failure, managed_state,
 ):
     checkout = tmp_path / "checkout"
     checkout.mkdir()
@@ -52,7 +58,9 @@ def test_worktrees_producer_real_serialization_keeps_counts_and_owner_facts(
         sessions,
         "mux_status_many",
         lambda _: {
-            "one": sessions.MuxInfo(exists=True, clients=1),
+            "one": sessions.MuxInfo(
+                exists=managed_state is None, clients=1 if managed_state is None else 0,
+            ),
         },
     )
     monkeypatch.setattr(
@@ -69,14 +77,40 @@ def test_worktrees_producer_real_serialization_keeps_counts_and_owner_facts(
     publisher = HookFactsPublisher(tmp_path / "runtime", None, project_root=lambda _: project)
     owner = WorktreesRuntime(tmp_path / "current.sqlite3", hook_facts=publisher)
     owner.activate()
+    options = {}
+    if managed_state is not None:
+        cache = mux_link.ManagedMuxCache()
+        if managed_state == "stale":
+            monkeypatch.setattr(mux_link.time, "time", lambda: 1.0)
+        cache.apply_observation({
+            "project": "other" if managed_state == "other-project" else "project",
+            "worktree_id": "one", "mux_session": "managed-one",
+            "mapping_revision": 1, "live": True, "attached_clients": 2,
+            "panes": [], "worktree_path": str(checkout),
+        })
+        if managed_state == "stale":
+            monkeypatch.setattr(
+                mux_link.time, "time", lambda: 2.0 + mux_link.MAPPING_STALE_AFTER_SECONDS,
+            )
+        options["managed_mux_cache"] = cache
+        if managed_state == "live-cleanup":
+            monkeypatch.setattr(git_ops, "_windows_observation", lambda: True)
+            options["cleanup_owner"] = SimpleNamespace(
+                observation_blocked=lambda _: False,
+                run_observation=lambda _project, _anchor, _session, observe: observe(),
+            )
     observed = []
     assert producer.publish_active_project(
         owner, observe_records=lambda project, records: observed.append((project, records)),
+        **options,
     ) == 1
     assert observed == [("project", [record])]
     result = owner.handle({"contract_version": 1, "project": "project", "worktree_id": "one"})
     row = result["worktrees"][0]
-    assert row["dirty"] == 4 and row["mux_session"] is True
+    assert row["dirty"] == 4
+    assert row["mux_session"] is (managed_state in (None, "live", "live-cleanup"))
+    if managed_state in ("live", "live-cleanup"):
+        assert row["mux_clients"] == 2 and row["mux_attached"] is True
     assert row["claims_assets"]["held_count"] == 1000
     assert len(row["claims_links"]) <= 8 and "resources" not in row
     assert row["checkout_present"] is True

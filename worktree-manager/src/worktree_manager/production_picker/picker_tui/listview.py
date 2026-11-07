@@ -33,6 +33,29 @@ class ListView:
     def __init__(self) -> None:
         self.query: str = ""
         self.sort_index: int = 0
+        self.group_index: int = 0
+        self.status_index: int = 0
+
+    GROUPS = ("Active/Recent", "Status", "None")
+    STATUSES = ("all", "live", "unfinished", "completed")
+
+    def cycle_group(self) -> None:
+        """Cycle Worktrees grouping without changing the underlying selection."""
+        self.group_index = (self.group_index + 1) % len(self.GROUPS)
+
+    def cycle_status(self) -> None:
+        """Explicitly select which lifecycle rows are visible."""
+        self.status_index = (self.status_index + 1) % len(self.STATUSES)
+
+    def accepts_status(self, row) -> bool:
+        """Unlike text search, an explicit status filter may hide live rows."""
+        state = row.get("state")
+        return (
+            self.status_index == 0
+            or self.status_index == 1 and state == "ACTIVE"
+            or self.status_index == 2 and state not in {"ACTIVE", "FINAL", "MERGED"}
+            or self.status_index == 3 and state in {"FINAL", "MERGED"}
+        )
 
     def filter(
         self,
@@ -84,6 +107,11 @@ class ListView:
         """Reset the filter text (Esc's first press, #2228 Phase 4) -- leaves
         the sort selection alone; only ``/`` narrowing is a "back out" step."""
         self.query = ""
+
+    def clear_filters(self) -> None:
+        """Reveal a jump target without resetting its sort or group choice."""
+        self.clear()
+        self.status_index = 0
 
     def narrow(self, rows, fields, keep, keys) -> list:
         """Filter then sort ``rows`` by the current query/sort state."""
@@ -163,14 +191,19 @@ def render_command_bar(list_view, composing, width, c_dim, keys):
     composing) + the active sort label, once cycled off its default."""
     from rich.text import Text
 
-    t = Text("  / " + list_view.query, style="" if composing else c_dim)
-    if composing:
-        t.append("▏")
-    sort_lbl = list_view.sort_label(keys)
-    if sort_lbl and list_view.sort_index:
-        suffix = f"  sort: {sort_lbl}"
-        if t.cell_len + len(suffix) <= width:
-            t.append(suffix, style=c_dim)
+    status = list_view.STATUSES[list_view.status_index]
+    if list_view.status_index in (2, 3):
+        status += " (live hidden)"
+    controls = f"  f Status: {status}"
+    if composing or list_view.query:
+        controls += "  / " + list_view.query + ("▏" if composing else "")
+    else:
+        controls += (
+            f"  g Group: {list_view.GROUPS[list_view.group_index]}"
+            f"  s Sort: {list_view.sort_label(keys) or 'default'}  / Search"
+        )
+    t = Text(controls, style="" if composing else c_dim)
+    t.truncate(width, overflow="ellipsis")
     if t.cell_len < width:
         t.append(" " * (width - t.cell_len))
     return t

@@ -371,10 +371,7 @@ class PickerScreenRuntimeMixin:
             busy = True
         # In live mode, stream in worktrees as each machine's load resolves.
         if self.live and self.loader is not None:
-            if self.list_view.query.strip():
-                self._wt_remap(self._apply_loader_records)
-            else:
-                self._apply_loader_records()
+            self._wt_remap(self._apply_loader_records)
             self._settle_initial_local_after_refresh()
             _ready, loading, _failed = self.loader.counts()
             busy = busy or loading > 0

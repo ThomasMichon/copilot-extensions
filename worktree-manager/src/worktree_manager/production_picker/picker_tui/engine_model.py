@@ -456,16 +456,24 @@ class PickerScreenModelMixin:
                 for rows in (a, r, c)
             )
         unowned = [w for w in r if w.get("sessionless")]
-        sections = [("Active", a), ("Recent", r), ("Completed", c)]
         if unowned:
             r = [w for w in r if not w.get("sessionless")]
+        if self.list_view.group_index == 0:
+            sections = [("Active", a), ("Recent", r + c)]
+        elif self.list_view.group_index == 1:
+            rows = a + r + c
             sections = [
-                ("Active", a), ("Recent", r), ("Completed", c),
-                ("Unowned · no prior session (Open starts fresh)", unowned),
+                (state, [row for row in rows if row["state"] == state])
+                for state in dict.fromkeys(row["state"] for row in rows)
             ]
+        else:
+            sections = [("Worktrees", a + r + c)]
+        if unowned:
+            sections.append(("Unowned · no prior session (Open starts fresh)", unowned))
         if owned:
             sections.append(("Owned · no session here (controller workspaces)", owned))
-        return cols, sections
+        return cols, [(label, self.list_view.sort(rows, derive.WT_SORT_KEYS))
+                      for label, rows in sections]
     def current_list_visible(self):
         """current_list() narrowed/sorted by the "/" bar (#2228 P4) --
         rendering/navigation ONLY; every other consumer keeps the full set.
@@ -479,10 +487,10 @@ class PickerScreenModelMixin:
         cols, sections = self.current_list()
         if self._kind() != "worktrees":
             return cols, sections
-        return cols, [(label, self.list_view.narrow(
-            rows, ("title", "id", "id4", "state", "status_markers"),
-            derive.wt_row_always_visible,
-            derive.WT_SORT_KEYS)) for label, rows in sections]
+        return cols, [(label, self.list_view.filter(
+            [row for row in rows if self.list_view.accepts_status(row)],
+            ("title", "id", "id4", "state", "status_markers"),
+            keep=derive.wt_row_always_visible)) for label, rows in sections]
     def _wt_visible_records(self):
         """Flat, render-order VISIBLE Worktrees rows (nav-only counterpart to
         list_records())."""

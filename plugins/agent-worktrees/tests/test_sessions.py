@@ -361,6 +361,9 @@ class TestMuxBindingForSession:
             "agent_worktrees.sessions._is_copilot_process", lambda _pid: False
         )
         monkeypatch.setattr(
+            "agent_worktrees.locks.process_start_time", lambda _pid: "fixture-start"
+        )
+        monkeypatch.setattr(
             "subprocess.run",
             lambda *args, **kwargs: pytest.fail("mux should not be queried"),
         )

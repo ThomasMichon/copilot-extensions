@@ -30,6 +30,7 @@ import { joinSession } from "@github/copilot-sdk/extension";
 import { fileURLToPath } from "node:url";
 import { createPythonPolicy, createResidentPreToolHook, selectResidentPreToolHooks } from "./resident-pre-tool.mjs";
 import { createManagedSessionAdmission } from "./managed-session.mjs";
+import { notifyWorktreeChanged } from "./worktree-changed.mjs";
 
 // Coalesce bursts of intent updates: flush at most once per this interval.
 // A long turn re-reports intent repeatedly; the trailing-edge flush keeps the
@@ -88,6 +89,7 @@ const state = {
   sessionId: null,
   lastIntent: null,
   lastIntentAt: null,   // ISO 8601 of the most recent root-agent intent
+  lastMessageAt: null,
   idle: false,          // true once the turn ends (pulse greys in the picker)
   flushTimer: null,     // pending throttled flush handle
   dirty: false,         // an intent arrived since the last flush
@@ -129,7 +131,7 @@ function persistSubStatus() {
   try {
     if (!admitSession.current(sessionInput())) return;
     const sid = state.sessionId;
-    if (!sid || !state.lastIntent) return;
+    if (!sid || (!state.lastIntent && !state.lastMessageAt)) return;
     const dir = join(homedir(), ".copilot", "session-state", sid);
     if (!existsSync(dir)) return;
     const payload = {
@@ -139,9 +141,14 @@ function persistSubStatus() {
       idle: state.idle,
       rest: state.rest,     // "busy" | "idle" | "awaiting-operator" (#228)
       restAt: state.restAt,
+      messageActivityVersion: 1,
+      lastMessageAt: state.lastMessageAt,
     };
     writeFileSync(join(dir, "substatus.json"), JSON.stringify(payload), "utf-8");
     state.dirty = false;
+    void notifyWorktreeChanged({
+      sessionDirectory: dir, cwd: sessionInput().workingDirectory,
+    });
   } catch {
     // Best-effort; the picker simply omits the live line when absent/unreadable.
   }
@@ -241,6 +248,19 @@ state.sessionId = session.sessionId ?? null;
 function on(name, callback) {
   session.on(name, async event => {
     if (await admitSession(sessionInput())) callback(event);
+  });
+}
+
+for (const name of ["user.message", "assistant.message"]) {
+  on(name, event => {
+    if (event.agentId) return;
+    const instant = Date.parse(event.timestamp);
+    const at = Number.isFinite(instant) ? instant : Date.now();
+    if (!state.lastMessageAt || at > Date.parse(state.lastMessageAt)) {
+      state.lastMessageAt = new Date(at).toISOString();
+      state.dirty = true;
+      scheduleFlush();
+    }
   });
 }
 

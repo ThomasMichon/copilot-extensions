@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 
 def _worktree_fingerprint(rows):
-    fields = ("id", "title", "state", "age_secs", "sess",
+    fields = ("id", "title", "state", "age_secs", "used_at", "used", "sess",
               "activity", "live_intent", "live_rest", "status_markers",
               "_manager_scope", "_manager_scope_state")
     return tuple(tuple(row.get(field) for field in fields) for row in rows)
@@ -298,7 +298,7 @@ class _PickerNativeData(OptionList):
             elif kind == "maintenance":
                 rows = scr.maint_records()
             else:
-                rows = scr.list_records()
+                rows = scr._wt_visible_records()
             nrows = len(rows)
             fp = _worktree_fingerprint(rows)
             if kind == "worktrees":
@@ -324,7 +324,9 @@ class _PickerNativeData(OptionList):
                 getattr(scr.list_view, "query", ""),
                 getattr(scr.list_view, "sort_index", 0), fp, worker_fp,
                 tuple(notice for notice in worktree_read_feedback(scr) if not notice.cached)
-                if kind == "worktrees" else ())
+                if kind == "worktrees" else (),
+                getattr(scr.list_view, "group_index", 0),
+                getattr(scr.list_view, "status_index", 0))
 
     def _rebuild(self):
         scr = self._screen
@@ -552,7 +554,7 @@ class _PickerNativeData(OptionList):
         try:
             cols, _sections = scr.current_list()
             lcols = fit(cols, W - 2, _NO_FLEX_COLUMN, 0)
-            rows = scr.list_records()
+            rows = scr._wt_visible_records()
         except Exception:
             return False
         if len(rows) != len(new_fp):
@@ -676,6 +678,13 @@ class _PickerNativeData(OptionList):
             self._update_sticky()
             return
         i = event.option_index
+        # Rebuilds queue highlights before restoring the keyed cursor. Ignore
+        # those superseded indices and events belonging to replaced options.
+        if (
+            i != self.highlighted or not 0 <= i < self.option_count
+            or event.option is not self.get_option_at_index(i)
+        ):
+            return
         stop = self._stops[i] if 0 <= i < len(self._stops) else None
         if stop is not None and scr.sel != stop:
             scr.sel = stop

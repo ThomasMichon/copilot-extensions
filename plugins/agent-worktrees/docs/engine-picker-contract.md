@@ -520,6 +520,59 @@ and selected row count, `worktree` frames from that same publication, then
 rejects mixed revisions, duplicates and incomplete snapshots. This one-shot
 contract remains one-shot for existing consumers.
 
+### Message activity and native mutation wakes
+
+Current rows may add `message_activity: {"version": 1, "last_message_at":
+"<ISO timestamp>"}`. A null timestamp means the producer supports the fact but
+has no usable message evidence. This is the latest root user or assistant
+message across the worktree's registered, non-detached sessions, compared by
+instant across timezone offsets. Resume, completion, intent, usage, heartbeat
+and filesystem timestamps are not messages. Session discovery remains
+registry-driven. The existing incremental turns sidecar caches only counts,
+file identity and message timestamps, not conversation bodies; legacy caches
+rebuild once when first read by the new counter.
+
+The passive extension also writes `messageActivityVersion: 1` and
+`lastMessageAt` to its own `substatus.json`, including sessions without an
+intent. This closes the event-before-log-flush window. Only real root message
+events advance the timestamp. Intent/rest writes retain the last message
+instant. Normal pulse coalescing remains bounded to 2.5 seconds.
+
+Manager uses a supported message timestamp for both USED and recency sorting.
+Missing, invalid or unknown-version optional facts retain the legacy resume,
+then completion/start fallback; future-clock ages clamp to zero. Existing
+bounded additive JSON readers ignore the new property. New readers work with
+old producers and provider rollback without new CLI syntax. An old producer's
+strict saved-row validator may reject an expanded advisory snapshot until that
+producer makes its own current publication; it must report unavailable rather
+than reinterpret the new fact. No legacy field changes meaning or is retired.
+
+The existing hook rendezvous advertises `worktree-change-v1` only while its
+serving generation has a change callback. Qualified callers send one
+`worktreeChanged` frame with version 1, existing token, `hook_generation`,
+one-second deadline and `payload: {"cwd": "<absolute path>"}`. The path is at
+most 4,096 UTF-8 bytes; null requests a coalesced wake of already-owned rosters.
+There is no reply, policy invocation, service bootstrap or new publication
+authority. Stale generations, malformed frames and closed/unadmitted owners
+decline the frame. A successful send means bytes written, not accepted work
+or a publication receipt.
+
+Record commits defer bounded metadata-only wakes until all record/pair holds
+have released, without enabling optional record/receipt evidence capture.
+The session extension uses its injected selected-installation catalog and
+the actual owner's advertised capability, never a package version, PATH
+lookup or per-message subprocess. Missing/legacy support skips only the
+optional wake; existing lifecycle and periodic correctness paths remain.
+Managed mux mapping changes and restored freshness wake the same owner;
+timestamp-only heartbeats do not. That owner uses its own fresh,
+project-qualified managed mappings when publishing mux state.
+
+Reclaim requests one post-effect wake even when cached liveness hints did not
+change, then retains its existing authoritative clearance wait. Process exit,
+state cleanup and roster confirmation remain distinct. A delayed publication
+does not authorize repeating termination, clearing a new owner or reconnecting
+every consumer.
+
 ### Explicit-project held-feed entry
 
 Canonical `--project NAME list ... --follow` invocations share an early entry
