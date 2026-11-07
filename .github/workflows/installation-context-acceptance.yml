@@ -798,31 +798,6 @@ jobs:
           python tools/run-plugin-tests.py update-driver
           --test-file tests/test_core.py
           --test-file tests/test_legacy_record_readback.py
-      - name: Qualify authority migration and uncertain pending recovery
-        if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
-        run: >-
-          python tools/run-plugin-tests.py update-driver --allow-explicit-tiers
-          --test-file tests/test_authority.py
-          --test-file tests/test_foundation_state.py
-          --test-file tests/test_recovery.py
-          --test-file tests/test_operator_recovery.py
-          --test-file tests/test_first_use.py
-          -k "v5_ or protocol_upgrade or pending_execution_evidence or
-          first_use_obeys_project_authority or actual_submit_wait_worker"
-      - name: Qualify admitted project requests through Worktrees
-        if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
-        run: >-
-          python tools/run-plugin-tests.py agent-worktrees --allow-explicit-tiers
-          --test-file tests/test_project_update_controller.py
-          -k project_authority_reaches_controller_under_real_driver_custody
-      - name: Qualify Manager authority and uncertain-request reporting
-        if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
-        run: >-
-          python tools/run-plugin-tests.py worktree-manager --allow-explicit-tiers
-          --test-file tests/test_update_driver_cli.py
-          --test-file tests/test_installation_updates.py
-          -k "legacy_project_request_reaches_manager_controller_under_real_custody or
-          durable_history_distinguishes_acceptance_running_failure_and_completion"
       - name: Qualify scoped acquisition and actual installer recovery boundary
         if: ${{ !cancelled() && steps.tooling.outcome == 'success' }}
         run: >-

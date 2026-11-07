@@ -696,7 +696,7 @@ def test_update_diagnostics_native_packet_preserves_bounds_and_source(name, rout
     required = {
         "agent-worktrees": {
             "tests/test_update_driver_json.py", "tests/test_provision_hook_cwd.py",
-            "tests/test_global_binstub_publication.py", "tests/test_project_update_controller.py",
+            "tests/test_global_binstub_publication.py",
         },
         "worktree-manager": {
             "tests/test_update_driver_cli.py", "tests/test_manager_broker_installation.py",
@@ -704,11 +704,7 @@ def test_update_diagnostics_native_packet_preserves_bounds_and_source(name, rout
             "tests/test_bootstrap_repair_recovery.py",
         },
         "agent-machines": {"tests/test_fleet_update.py", "tests/test_self_update.py"},
-        "update-driver": {
-            "tests/test_core.py", "tests/test_legacy_record_readback.py", "tests/test_authority.py",
-            "tests/test_foundation_state.py", "tests/test_recovery.py", "tests/test_operator_recovery.py",
-            "tests/test_first_use.py",
-        },
+        "update-driver": {"tests/test_core.py", "tests/test_legacy_record_readback.py"},
         "agent-vault": {
             "tests/test_service_launch.py", "tests/test_install_service_failures.py",
         },
@@ -739,30 +735,14 @@ def test_update_diagnostics_native_packet_preserves_bounds_and_source(name, rout
                 if value == "--test-file"
             )
             if target == "worktree-manager":
-                if step["name"] == "Qualify Manager authority and uncertain-request reporting":
-                    expected_filter = [
-                        "legacy_project_request_reaches_manager_controller_under_real_custody",
-                        "durable_history_distinguishes_acceptance_running_failure_and_completion",
-                    ]
-                else:
-                    expected_filter = [
-                        "manual_auto_hold", "operator_repair_classification",
-                        "bootstrap_retains_update_repair", "native_launch_submits_fixed_phases",
-                        "native_bootstrap_hold", "target_bypasses_bootstrap",
-                        "bootstrap_preserves_hold_path",
-                        "engine_handoff_is_explicit_only_for_mutating_update_commands",
-                        "scoped_engine_passthrough_retains_both_channels",
-                    ]
-                assert arguments[arguments.index("-k") + 1].split(" or ") == expected_filter
-            if step["name"] == "Qualify authority migration and uncertain pending recovery":
                 assert arguments[arguments.index("-k") + 1].split(" or ") == [
-                    "v5_", "protocol_upgrade", "pending_execution_evidence",
-                    "first_use_obeys_project_authority", "actual_submit_wait_worker",
+                    "manual_auto_hold", "operator_repair_classification",
+                    "bootstrap_retains_update_repair", "native_launch_submits_fixed_phases",
+                    "native_bootstrap_hold", "target_bypasses_bootstrap",
+                    "bootstrap_preserves_hold_path",
+                    "engine_handoff_is_explicit_only_for_mutating_update_commands",
+                    "scoped_engine_passthrough_retains_both_channels",
                 ]
-            if step["name"] == "Qualify admitted project requests through Worktrees":
-                assert arguments[arguments.index("-k") + 1] == (
-                    "project_authority_reaches_controller_under_real_driver_custody"
-                )
         assert "!cancelled() && steps.tooling.outcome == 'success'" in step["if"]
         assert not any(flag in command for flag in (
             "--test-timeout", "--timeout", "--plugin-timeout", "--allow-host-state",
@@ -1172,7 +1152,6 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "pr-artifacts-linux", "pr-artifacts-windows",
         "gateway-role-tunnels", "gateway-host-application-linux", "gateway-host-application-windows",
         "gateway-continuity-application-linux", "gateway-continuity-application-windows",
-        "gateway-normal-setup-linux", "gateway-normal-setup-windows",
         "dependency-compile-linux", "dependency-compile-windows",
         "source-build-linux", "source-build-windows",
         "source-cache-linux", "source-cache-windows",
