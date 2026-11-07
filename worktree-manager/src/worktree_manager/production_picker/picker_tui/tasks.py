@@ -143,10 +143,9 @@ def resolve_form_fields(
     return resolved
 
 
-#: Overall watchdog for a one-shot (non-``subscribe``) streaming ``list``: a
-#: stalled producer is killed after this many seconds, but rows already received
-#: are kept. A ``subscribe`` (held/live) stream has no overall deadline.
+#: Silence/initial-commit budget; finite streams also retain a process deadline.
 STREAM_TIMEOUT = 30.0
+STREAM_PROCESS_TIMEOUT = 3600.0
 
 _CREATE_NO_WINDOW = no_window_flags()
 
@@ -498,29 +497,18 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
         done = False
         saw_envelope = False
         err_frame = ""
-        raw_lines: list[str] = []
         id_field = self.pivot.id_field
 
-        # No overall deadline for a held ``subscribe`` stream (it runs until the
-        # picker exits); a one-shot stream is watchdogged so a stalled producer
-        # can't wedge the loader thread.
-        timed_out = threading.Event()
-        first_read_lock = threading.Lock()
-        initial_read_complete = False
-        def expired():
-            with first_read_lock:
-                if self.pivot.subscribe and initial_read_complete:
-                    return
-                timed_out.set()
-            _kill_proc_tree(proc)
-        timer = threading.Timer(STREAM_TIMEOUT, expired)
-        timer.daemon = True
-        timer.start()
+        from .stream_deadline import StreamDeadline
+
+        deadline = StreamDeadline(
+            subscribe=self.pivot.subscribe, timeout=STREAM_TIMEOUT,
+            process_timeout=STREAM_PROCESS_TIMEOUT, retire=lambda: _kill_proc_tree(proc),
+        )
 
         def publish() -> None:
-            nonlocal initial_read_complete
-            with first_read_lock:
-                if timed_out.is_set():
+            with deadline.lock:
+                if deadline.timed_out.is_set():
                     return
                 with self._lock:
                     generation = getattr(self._request_context, "generation", None)
@@ -528,16 +516,13 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
                         return
                     self._cache[machine] = ("ready", [by_id[i] for i in order], "")
                     self._summaries[machine] = dict(summary)
-                initial_read_complete = True
-                if self.pivot.subscribe:
-                    timer.cancel()
+                deadline.commit()
             self._release_startup(machine)
 
         try:
             for raw in proc.stdout:  # type: ignore[union-attr]
                 if self._closed.is_set():
                     break
-                raw_lines.append(raw)
                 obj = _parse_ndjson_line(raw)
                 if obj is None:
                     continue
@@ -556,6 +541,7 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
                     by_id[rid] = entry
                     ready = True
                     publish()
+                    deadline.progress()
                 elif typ == "removed":
                     saw_envelope = True
                     rid = obj.get("id")
@@ -567,6 +553,7 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
                             del by_id[rid]
                             order[:] = [i for i in order if i != rid]
                             publish()
+                            deadline.progress()
                 elif typ == "summary":
                     saw_envelope = True
                     raw_summary = obj.get("summary")
@@ -575,6 +562,7 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
                     }
                     if ready or done:
                         publish()
+                        deadline.progress()
                 elif typ == "done":
                     saw_envelope = True
                     done = True
@@ -600,8 +588,7 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
             if not err_frame:
                 err_frame = str(exc)[:200]
         finally:
-            if timer is not None:
-                timer.cancel()
+            deadline.close()
             try:
                 _, stderr = proc.communicate(timeout=5)
             except Exception:
@@ -612,17 +599,29 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
                     stderr = ""
             self._untrack(proc)
 
-        if timed_out.is_set():
+        if deadline.timed_out.is_set():
             self._subscribe_live[machine] = False
             self._finish(machine, (
                 "error", [by_id[i] for i in order],
-                f"{self.pivot.label}: no completed initial read within {STREAM_TIMEOUT:g}s; press r to retry",
+                f"{self.pivot.label}: " + (
+                    f"process budget of {STREAM_PROCESS_TIMEOUT:g}s exceeded"
+                    if deadline.process_timed_out.is_set() else
+                    f"no progress within {STREAM_TIMEOUT:g}s"
+                    if deadline.initial_read_complete else
+                    f"no completed initial read within {STREAM_TIMEOUT:g}s"
+                ) + "; press r to retry",
             ), summary)
             return
         if err_frame:
             self._handle_subscribe_drop(
                 machine, ctx, ("error", [], err_frame[:200]), {}, had_rows=ready
             )
+            return
+        if saw_envelope and not self.pivot.subscribe and (not done or proc.returncode):
+            self._finish(machine, (
+                "error", [by_id[i] for i in order],
+                f"{self.pivot.label}: incomplete stream (exit {proc.returncode}); press r to retry",
+            ), summary)
             return
         if ready or done:
             # Fully or partially resolved (empty roster included) -- keep rows.

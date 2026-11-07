@@ -179,6 +179,41 @@ For implementation details, see [`docs/architecture.md`](docs/architecture.md).
 
 ## Explicit installation repair
 
+### Application Readiness in Configuration
+
+An enabled, already-installed Machines owner contributes **Application
+Readiness** to Manager Configuration. It observes the selected registered
+project's required module closure through the same conductor described below,
+including actual optional prerequisites but not unrelated optional modules.
+Rows distinguish unobserved, ready, not-ready, failed, configuration-empty,
+unsupported, dependency-blocked and restart-required states. This is installation
+readiness, not authentication, complete app health or permission to create a task.
+
+The native adapter is also available without Manager:
+
+```text
+agent-machines installation-configuration --project <registered-project> [--stream]
+agent-machines installation-configuration --project <registered-project> --apply --expected-plan-digest <digest>
+```
+
+Browsing and refresh do not install. The payload entry refuses an absent
+Machines runtime without self-provisioning. Progressive NDJSON is the existing
+Manager v1 list protocol, not a second health database or service. Intermediate
+rows cannot enable repair; only a completed qualified observation supplies its
+plan digest. Errors and interrupted observations are not empty successful lists.
+Older native runtimes reject the new command; update through the normal owner
+before retrying, without falling back to an ambient executable.
+
+**Run declared repair for the displayed required closure** is explicitly
+confirmed and invokes the existing owner with that observation's digest. It may
+run the selected owners' installer actions; it is not an update of every installed
+component. Changed input refuses before installers. `--progress` on explicit
+apply emits the existing Manager action-progress protocol. Independent post-readiness,
+partial failure, cancellation, active-core limitations and restart obligations
+retain the conductor's semantics. No action restarts the machine, attests a
+restart, adds a sign-in flow or automatically replays an interrupted repair.
+Use the native restart-confirmation flow below when required, then refresh.
+
 `installation-repair` is separate from requirement-package restore. It discovers
 enabled, attributable plugin-owned `installer-readiness.json` contracts for the
 current project and global settings. Discovery never invokes an installer;

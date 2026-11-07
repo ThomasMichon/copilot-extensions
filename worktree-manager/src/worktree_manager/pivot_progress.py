@@ -126,7 +126,7 @@ class PivotProgressScreen(ModalScreen):
             self.dismiss()
         else:
             self.cancelled.set()
-            self._message("Cancelling authorization...")
+            self._message("Cancelling operation...")
 
     def on_button_pressed(self, event: Button.Pressed):
         event.stop()

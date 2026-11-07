@@ -91,6 +91,16 @@ or supported empty envelope for an empty scope. Missing or malformed output is
 a read error even when a wrapper reports exit zero; a bounded final stderr line
 is retained to expose provider incompatibility instead of claiming zero rows.
 
+Finite streaming lists retain the 30-second initial-publication/silence budget.
+A valid published row, delta, removal or summary renews that communication
+budget after a first row; arbitrary text and `begin` do not. A separate one-hour
+process deadline remains finite even while progress continues. Timeout retains
+partial rows as failed observations, not a completed inventory, and retires the
+owned producer. Finite envelopes also require `done` and exit zero; rows followed
+by EOF or a nonzero exit remain an incomplete read. Older Managers may time out a progressing long observation;
+refresh after updating the consumer rather than claiming the partial read ready.
+Held subscriptions retain their existing first-publication and lifetime rules.
+
 Version-1 compatibility also covers the existing declarative fields:
 
 - `columns`, `summary`, `scope`, `stream`, and `subscribe`;
