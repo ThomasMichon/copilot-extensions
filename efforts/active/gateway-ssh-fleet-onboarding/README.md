@@ -640,6 +640,12 @@ not installation, credential or live-adoption authority.
   separately from `ssh -N -T` authentication. Include direction-policy refusal,
   exit/EOF, permitted downstream-credential behavior and unchanged existing
   transports; test SFTP only if that capability is selected.
+- [x] Qualify an explicitly selected disposable encrypted peer key with the
+  actual Windows OpenSSH client and a GUI-subsystem askpass fixture. BatchMode
+  refuses without helper invocation; refused fixture unlock cannot authenticate;
+  explicit fixture unlock completes the existing listener controls without
+  changing encrypted private-key bytes/timestamp. This substitutes a synthetic
+  human response, not a production signer or attended operator unlock.
 - [ ] Exercise the selected existing lifecycle owner's cold logon, post-task
   survival, restart, sleep/reconnect, logoff and next-logon recovery in an
   explicitly authorized isolated Windows lane. Preserve bounded test cleanup,
@@ -721,6 +727,36 @@ setup/apply, enrollment, live rollout, lifecycle takeover or implementation
 completion is asserted.
 
 ## Journal
+
+### 2026-11-07 - Encrypted disposable key through native Windows askpass
+
+- Comment6711669320 reserves the existing native listener test and helper.
+  The open-PR inventory found no competing edit to either file. This is a
+  test-only realization of the selected-signing contract, not replacement
+  of the retained setup, installation or lifecycle work.
+- The new opt-in `AGENT_SSH_ENCRYPTED_NATIVE=1` case uses a freshly encrypted
+  synthetic peer key and an existing .NET Framework compiler. The resulting
+  GUI-subsystem helper writes only the synthetic fixture response to its
+  inherited stdout pipe. That pipe contract is checked before native SSH.
+  BatchMode invokes no helper, refused unlock does not authenticate, and
+  explicit allowed unlock succeeds with ambient signing agents disabled.
+- The encrypted case retains the original pinned loopback listener's actual
+  command exit/EOF, user SID/session/non-elevated token, refresh/withdrawal,
+  contention, forwarding-refusal and owner-teardown controls. The fixture
+  retains encrypted key bytes and timestamp throughout.
+- The focused encrypted case passes in12.05s. A subsequent composed packet
+  passes all17 cases in37.01s with no skips: six native controls, including
+  normal Vault and encrypted keys, plus eleven unchanged listener controls.
+  Current SSH, Vault and standalone Fleet source imports are asserted under
+  the leased canonical contained runner, with60s item/180s aggregate limits
+  and successful cleanup. Earlier current-Fleet source clarification remains
+  recorded in comment6710939049; prepared dependency roots alone do not
+  establish current Fleet source custody.
+- This is fresh synthetic-key/native-consumer proof, not a real attended
+  operator response, a production selected signer, source-denying installed
+  setup, full-logon survival/reconnect, release adoption or provider login.
+  No dependency, credential, logon configuration or service was installed
+  or changed. The parent setup/signing and lifecycle gates remain open.
 
 ### 2026-11-07 - Composed disposable Vault pair and native SSH command
 

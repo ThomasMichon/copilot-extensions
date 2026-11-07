@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify encrypted disposable Windows SSH keys through an opt-in GUI askpass fixture without changing production signing or key protection",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

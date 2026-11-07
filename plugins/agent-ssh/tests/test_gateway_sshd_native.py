@@ -80,8 +80,65 @@ def test_windows_command_probe_preserves_context_through_outer_shell(shell):
         os.environ.get("AGENT_SSH_VAULT_NATIVE") != "1",
         reason="opt-in composed disposable Vault/native SSH proof",
     )),
+    pytest.param("encrypted", id="encrypted-pair", marks=pytest.mark.skipif(
+        os.name != "nt" or os.environ.get("AGENT_SSH_ENCRYPTED_NATIVE") != "1",
+        reason="opt-in Windows encrypted fixture/native askpass proof",
+    )),
 ])
 def native_peer_key(request, native_target_root):
+    if request.param == "encrypted":
+        compiler = Path(os.environ["WINDIR"]) / "Microsoft.NET" / "Framework" / "v4.0.30319" / "csc.exe"
+        keygen = shutil.which("ssh-keygen")
+        if not compiler.is_file() or keygen is None:
+            pytest.skip("Existing .NET Framework compiler and native key generator are required")
+        root = native_target_root / "encrypted peer"
+        authorization._windows_create_directory(root)
+        private, marker = root / "peer", root / "askpass-calls"
+        passphrase = "disposable-native-fixture-passphrase"
+        subprocess.run(
+            [keygen, "-q", "-t", "ed25519", "-N", passphrase, "-f", str(private)],
+            check=True, capture_output=True, timeout=10, **no_window_kwargs(),
+        )
+        before = (private.read_bytes(), private.stat().st_mtime_ns)
+        encrypted = subprocess.run(
+            [keygen, "-y", "-P", "", "-f", str(private)],
+            stdin=subprocess.DEVNULL, capture_output=True, timeout=10, **no_window_kwargs(),
+        )
+        assert encrypted.returncode != 0, "Fixture private key is not encrypted"
+        source, executable = root / "askpass.cs", root / "askpass.exe"
+        source.write_text(
+            'using System; using System.IO; class Askpass { static int Main() {'
+            'File.AppendAllText(Environment.GetEnvironmentVariable("FIXTURE_ASKPASS_MARKER"), "called\\n");'
+            'if (Environment.GetEnvironmentVariable("FIXTURE_ASKPASS_ALLOW") != "1") return 2;'
+            'using (var output = new StreamWriter(Console.OpenStandardOutput())) {'
+            'output.Write("disposable-native-fixture-passphrase\\n"); } return 0; } }',
+            encoding="ascii",
+        )
+        compiled = subprocess.run(
+            [str(compiler), "/nologo", "/target:winexe", "/out:" + str(executable), str(source)],
+            stdin=subprocess.DEVNULL, capture_output=True, timeout=15, **no_window_kwargs(),
+        )
+        assert compiled.returncode == 0, "Existing compiler could not build the GUI askpass fixture"
+        env = {
+            **os.environ, "SSH_ASKPASS": str(executable), "SSH_ASKPASS_REQUIRE": "force",
+            "DISPLAY": "fixture", "FIXTURE_ASKPASS_MARKER": str(marker), "FIXTURE_ASKPASS_ALLOW": "1",
+        }
+        output = subprocess.run(
+            [str(executable), "fixture prompt"], env=env, stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, timeout=5, **no_window_kwargs(),
+        )
+        assert output.returncode == 0 and output.stdout == passphrase + "\n", "GUI helper pipe is incompatible"
+        assert marker.read_text(encoding="ascii") == "called\n"
+        marker.unlink()
+        try:
+            yield {
+                "private_key_path": str(private),
+                "public_key": " ".join(private.with_suffix(".pub").read_text(encoding="ascii").split()[:2]),
+                "askpass_env": env, "askpass_marker": marker,
+            }
+        finally:
+            assert (private.read_bytes(), private.stat().st_mtime_ns) == before
+        return
     if not request.param:
         yield None
         return
@@ -194,23 +251,28 @@ def test_native_listener_login_refresh_withdrawal_and_preservation(native_target
     known_hosts = root / "known_hosts"
     known_hosts.write_text("native-ingress " + public("host") + "\n", encoding="ascii")
 
-    def client_arguments(identity="peer"):
+    client_env = native_peer_key.get("askpass_env") if native_peer_key is not None else None
+
+    def client_arguments(identity="peer", *, batch=None):
         private_key = (
             Path(native_peer_key["private_key_path"])
             if identity == "peer" and native_peer_key is not None else root / identity
         )
+        if batch is None:
+            batch = not (identity == "peer" and client_env is not None)
         return [
             ssh, "-F", str(client_config), "-l", ingress._account(), "-p", str(port),
             "-i", str(private_key),
             "-o", "HostKeyAlias=native-ingress", "-o", "StrictHostKeyChecking=yes",
             "-o", 'UserKnownHostsFile="' + str(known_hosts) + '"', "-o", "GlobalKnownHostsFile=none",
             "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none",
-            "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
+            "-o", "BatchMode=" + ("yes" if batch else "no"),
+            "-o", "NumberOfPasswordPrompts=1", "-o", "ConnectTimeout=8",
             "-o", "PreferredAuthentications=publickey",
         ]
 
-    def client(identity="peer"):
-        return authenticate(client_arguments(identity), root)
+    def client(identity="peer", *, batch=None):
+        return authenticate(client_arguments(identity, batch=batch), root, env=client_env)
 
     with (root / "native.log").open("wb") as log:
         python, native_env = direct_python(sys.executable)
@@ -233,15 +295,27 @@ def test_native_listener_login_refresh_withdrawal_and_preservation(native_target
                 except OSError:
                     assert time.monotonic() < deadline, "Native ingress did not start"
                     time.sleep(0.05)
+            if client_env is not None:
+                marker = native_peer_key["askpass_marker"]
+                refused = client(batch=True)
+                assert not refused.authenticated and refused.native_exit == 255
+                assert not marker.exists(), "BatchMode invoked the fixture unlock helper"
+                client_env["FIXTURE_ASKPASS_ALLOW"] = "0"
+                refused = client(batch=False)
+                assert not refused.authenticated and refused.native_exit == 255
+                assert marker.read_text(encoding="ascii") == "called\n"
+                client_env["FIXTURE_ASKPASS_ALLOW"] = "1"
             first = client()
             assert first.authenticated, first.diagnostic + (root / "native.log").read_text(encoding="utf-8")
+            if client_env is not None:
+                assert marker.read_text(encoding="ascii") == "called\ncalled\n"
             if os.name == "nt":
                 expected, command = _windows_context(), _windows_context_command()
             else:
                 expected, command = str(os.geteuid()), "id -u"
             completed = subprocess.run(
                 [*client_arguments(), "-T", "127.0.0.1", command],
-                stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                env=client_env, stdin=subprocess.DEVNULL, capture_output=True, text=True,
                 timeout=15, **no_window_kwargs(),
             )
             assert completed.returncode == 0, "Native SSH command did not complete successfully"
@@ -275,7 +349,7 @@ def test_native_listener_login_refresh_withdrawal_and_preservation(native_target
             assert server.poll() is None and client().authenticated
             denied = subprocess.run(
                 [*client_arguments(), "-W", "127.0.0.1:22", "127.0.0.1"],
-                capture_output=True, text=True, timeout=10, **no_window_kwargs(),
+                env=client_env, capture_output=True, text=True, timeout=10, **no_window_kwargs(),
             )
             assert denied.returncode != 0 and "administratively prohibited" in denied.stderr
             directory["revision"] += 1
