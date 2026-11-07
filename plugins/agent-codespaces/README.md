@@ -728,7 +728,7 @@ Generic and bulk return also pin their preselected local snapshots; a delayed
 selection cannot release a replacement claim from the same owner.
 The existing `leases.json` retains pending returns in the reserved
 `__agent_codespaces_returns_v1__` entry: original local snapshot, qualified
-owner and prepared/confirmed-release phase. Ordinary lease records keep their
+owner, an available original `lease_id`, and prepared/confirmed-release phase. Ordinary lease records keep their
 legacy shape. After confirmed release, a settlement retry uses that saved
 owner without rereleasing or inspecting a later borrower's lease. Unknown
 progress or settlement retains custody; unrelated current writes preserve it.
@@ -742,11 +742,27 @@ Prepared progress, including an older optional active-obligation fact, cannot
 use a later ledger transition as shared-return evidence.
 If the actual ACK is no longer available and no released phase was persisted,
 retain original custody when the shared generation cannot be confirmed.
+Return captures the original raw generation ID before effects, while the
+shared fencing token and qualified holder still match. When the exact selected
+receiver advertises `lease-return-proof-v1`, it requests bounded return evidence
+through `lease release --retain-return-proof`; absent support keeps the ordinary
+acknowledged-return path without trying new syntax. A failed new invocation is
+never replayed with older arguments.
+
+Retry may confirm that saved generation from its own current release tombstone,
+or from the receiver's strict schema-2 `returned_generations` evidence after
+another host acquires or returns the venue. Proof must match the resource,
+original generation and complete saved holder. Missing, evicted, malformed,
+foreign or rollback-unreadable evidence remains unknown. A same-holder tombstone
+without a previously captured generation is no longer enough: it can describe
+a later borrow. A persisted released phase or an ACK still known to this
+invocation retains its existing meaning. Recovery settles only the original
+owner's ledger and unchanged local custody; it never returns a successor.
 Do not settle the native ledger as a workaround, remove its entry, hand-edit
 progress, release a successor or infer success from absence/expiry.
-Generation-qualified recovery after this unpersisted-ACK window remains
+Release and selected installed/POSIX/live qualification of this recovery remain
 tracked in [#11343](https://github.com/ThomasMichon/copilot-extensions/issues/11343);
-current refusal is not completed reconciliation.
+source tests are not installed or live reconciliation.
 Older tolerant readers still see ordinary holders; older strict admission
 readers refuse the extra entry. Older writers do not join the new exclusion
 and may discard progress: serialize mixed-version writers during rollout or

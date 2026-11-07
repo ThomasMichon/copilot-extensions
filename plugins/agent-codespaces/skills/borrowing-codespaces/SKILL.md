@@ -78,6 +78,15 @@ settlement retains the claim and reports failure; do not force-clear it.
 Tokened own-workstream reuse cannot fall back to local evidence alone. Return
 can reconcile an unjournaled legacy claim only when a complete qualified ledger
 read confirms the entry absent or already released; unreadable is not absent.
+That qualifies bookkeeping only, not shared-release proof. Return saves an
+available original generation before effects and discovers selected-runtime
+`lease-return-proof-v1` support before optional release syntax. On retry, that
+generation's own tombstone or strict retained receiver evidence may confirm
+return after another host reuses the venue, without touching its successor.
+Missing, evicted, malformed or rollback-unreadable evidence stays unknown; a
+same-holder tombstone without a saved generation is insufficient. Ordinary
+acknowledged return remains available without the optional capability, and an
+unknown new invocation is never replayed using older syntax.
 Unverified custom devcontainer/location preferences remain creation choices,
 not implicit permission to select another effort's venue.
 
