@@ -54,6 +54,8 @@ evidence and decision to its owner/operator rather than alternating commands.
 ## Never
 
 - Answer the target's permission prompts, approve its scope change or merge.
+  A routine parked question is answered only under the separate answer scope
+  in [parked questions](pending-input.md).
 - Start, stop, restart or replace the target's session or venue.
 - Edit the target's effort, agenda, claims, branch or checkpoint. Correcting
   an inactive owner's records is the separate

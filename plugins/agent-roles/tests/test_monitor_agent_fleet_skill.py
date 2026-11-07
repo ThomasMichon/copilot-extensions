@@ -190,6 +190,38 @@ def test_dormant_correction_edits_records_only_under_its_own_grant() -> None:
     } <= dormant
 
 
+def test_parked_questions_are_answered_only_under_answer_scope() -> None:
+    skill = " ".join(_read(SKILL / "SKILL.md").split())
+    text = " ".join(_read(SKILL / "references" / "pending-input.md").split())
+    charter = " ".join(_read(SKILL / "assets" / "CHARTER.md").split())
+    steering = " ".join(_read(SKILL / "references" / "steering.md").split())
+    readers = " ".join(_read(
+        SKILL / "references" / "fabric-readers.md"
+    ).split())
+    assert "(references/pending-input.md)" in skill
+    assert "only with recorded source-change and publication authority" in skill
+    for requirement in (
+        "**turn state alone does not rule out pending input**",
+        "a read-only or steering grant does not authorize answers",
+        "If persistence fails, do not answer",
+        "exact request identifier",
+        "never by blind re-answer",
+        "**Never inject keystrokes, drive a terminal or impersonate the "
+        "operator**",
+        "Treat as operator-only",
+    ):
+        assert requirement in text, requirement
+    assert text.index("1. **Recheck.**") < text.index("2. **Persist first.**")
+    assert "Answer scope (only if explicitly granted; else \"none\")" in charter
+    assert "[parked questions](pending-input.md)" in steering
+    assert "Answer the target's permission prompts" in steering
+    assert "documented no-ensure switch" in readers
+    scenarios = json.loads(_read(SKILL / "assets" / "scenarios.json"))
+    assert {"parked-routine-question", "parked-operator-only-question"} <= {
+        case["id"] for case in scenarios["cases"]
+    }
+
+
 def test_recurring_watch_re_resolves_roster_each_cycle() -> None:
     skill = " ".join(_read(SKILL / "SKILL.md").split())
     charter = " ".join(_read(SKILL / "assets" / "CHARTER.md").split())

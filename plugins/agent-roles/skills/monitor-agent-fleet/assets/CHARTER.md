@@ -35,6 +35,14 @@ Steering scope (only if explicitly granted; else "none")
   Validity: <expiry, revision or revocation condition>
   Limits: <one outstanding steer per target+issue; other caps>
 
+Answer scope (only if explicitly granted; else "none")
+  Recipients: <owners/selectors whose parked questions may be answered>
+  Permitted question classes: <routine decisions within the worker's own
+    delegated authority, e.g. ordering, retry/validation depth, continue>
+  Excluded: <permission/approval prompts, destructive, access/spend,
+    objective change, deployment, raising caps or review-round limits>
+  Validity: <expiry, revision or revocation condition>
+
 Dormant correction scope (only if explicitly granted; else "none")
   Record kinds: <effort plan, workspace title/summary, agenda cursor,
     pending handoff baton (only via a verified record-only supersede)>
@@ -71,6 +79,8 @@ Acceptance: <what a completed sweep or a healthy service period must show>
   marked with confidence.
 - **Messages sent** is `none` in read-only mode, and each steer in steering mode
   has a persisted pending record before send and a recorded result after.
+- Every parked question was reported or classified; each answer was within
+  the answer scope, persisted before sending and rechecked as still pending.
 - Each dormant correction had a liveness recheck and revision re-read
   immediately before the write and an owner readback after; live-idle, newly
   active and unknown targets were left unchanged.
