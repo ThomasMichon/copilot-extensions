@@ -239,8 +239,28 @@ def test_partial_batch_and_failed_presence_cannot_become_false(
         return subprocess.CompletedProcess(command, 1, b"", b"Permission denied")
 
     monkeypatch.setattr(subprocess, "run", run)
-    with pytest.raises(RuntimeError, match="absence is unconfirmed"):
+    with pytest.raises(MuxObservationUnavailable, match="observation failed"):
         sessions.mux_status_many(["fixture"])
+
+
+@pytest.mark.parametrize("error", [
+    OSError("synthetic spawn failure"),
+    subprocess.TimeoutExpired(["tmux"], 5),
+    RuntimeError("synthetic unconfirmed presence"),
+])
+def test_passive_posix_fallback_normalizes_unavailable_evidence(monkeypatch, error):
+    monkeypatch.setattr(sessions.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(sessions, "_list_mux_sessions", lambda **kw: None)
+
+    def unavailable(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(sessions, "has_mux_session", unavailable)
+    with pytest.raises(MuxObservationUnavailable):
+        sessions.mux_status_many(["fixture"])
+    with pytest.raises(type(error)) as raised:
+        sessions.mux_status_many(["fixture"], strict=True)
+    assert raised.value is error
 
 
 def test_passive_psmux_observation_never_executes(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -248,3 +248,34 @@ not only its parser. Deployment and repairs to running sessions are separate.
   silent negative evidence, and its strict-parser control covers malformed
   monitor catalogs. The selected actor-free packet passed 22 tests locally.
   The full sealed packet still requires exact-source CI qualification.
+
+### 2026-11-07 - Review corrections and consumer validation
+
+- Required CI passed at the previously published implementation head, including
+  the sealed eligible-unit packet. The blocking review findings still required
+  source corrections; green checks did not waive them.
+- Cleanup now preserves unknown mux presence at initial selection, lock-held
+  revalidation and final managed removal, even with expired/negative hints,
+  a missing checkout or forced session cleanup. Complete catalogs still catch
+  a newly appearing mux between selection and revalidation.
+- Shared per-project publication retains the existing governance and cleanup
+  custody handling. One failed PSMux-independent project publication cannot
+  shut down unrelated roster refreshes.
+- Passive status/list and legacy Picker readers return independent facts when
+  mux observation is unavailable. Refresh does not clear cached mux positives.
+  POSIX passive fallback errors use the same unavailable result; explicit
+  strict action checks retain their original refusal.
+- Current-feed publication failures and disconnects now refresh normalized
+  badges and attachment/mux-live controls, not only raw availability. Fresh
+  publication restores controls without changing retained Git/client facts.
+- Consumer tests exposed old probe-based race fixtures, platform-implicit TMux
+  cache fixtures, and a production-Picker test bootstrap requiring a host
+  installation. The tests now use complete synthetic catalogs, explicit POSIX
+  fixtures and the source-qualified engine, with environment restoration.
+  Disabled cache warming returns before requiring an active project.
+- Focused corrected cleanup/display tests passed; the cache packet passed 24
+  tests, shared monitor/producer publication passed 62, and the actual current
+  feed/deadline consumer passed 59. Earlier unaffected listing/monitor tests
+  remain supporting evidence. Lint, module ceilings and installation contract
+  are being refreshed before republishing; final exact-source review and CI
+  remain required. No native PSMux, live recovery or rollout was performed.

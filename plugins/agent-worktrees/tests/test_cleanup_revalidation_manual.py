@@ -322,17 +322,17 @@ def test_cmd_cleanup_claimant_unknown_under_lock_refused(capsys, monkeypatch, tm
     assert harness.claimant_calls == 1
 
 
-def test_cmd_cleanup_mux_fallback_negative_cache_race_refused(capsys, monkeypatch, tmp_path):
+def test_cmd_cleanup_mux_catalog_negative_cache_race_refused(capsys, monkeypatch, tmp_path):
     harness = CleanupHarness(monkeypatch, tmp_path)
     rec = make_record(tmp_path, status="finalized")
     rec.mux_live = False
     rec.mux_live_at = datetime.now(timezone.utc).isoformat()
     harness.seed(rec)
     harness.set_session_contexts([session_ctx(), session_ctx()])
-    harness.use_real_build_active_paths_with_mux_sequence(has_mux_values=[False, True])
+    harness.use_real_build_active_paths_with_mux_catalogs([{}, {"wt-wt1": 0}])
     harness.set_classifier(info(S.UNUSED), info(S.UNUSED))
     _assert_batch_skipped(capsys, harness, "became active since the initial scan")
-    assert harness.has_mux_calls == 2
+    assert harness.mux_list_calls == 2
 
 
 def test_reap_one_dirty_after_scan_refused(monkeypatch, tmp_path):
@@ -473,19 +473,19 @@ def test_reap_one_claimant_unknown_under_lock_refused(monkeypatch, tmp_path):
     assert harness.reaped == []
 
 
-def test_reap_one_mux_fallback_negative_cache_race_refused(monkeypatch, tmp_path):
+def test_reap_one_mux_catalog_negative_cache_race_refused(monkeypatch, tmp_path):
     harness = CleanupHarness(monkeypatch, tmp_path)
     rec = make_record(tmp_path, status="finalized")
     rec.mux_live = False
     rec.mux_live_at = datetime.now(timezone.utc).isoformat()
     harness.seed(rec)
     harness.set_session_contexts([session_ctx(), session_ctx()])
-    harness.use_real_build_active_paths_with_mux_sequence(has_mux_values=[False, True])
+    harness.use_real_build_active_paths_with_mux_catalogs([{}, {"wt-wt1": 0}])
     harness.set_classifier(info(S.UNUSED), info(S.UNUSED))
     result = harness.run_reap_one()
     assert result["removed"] is False and result["bucket"] == "active"
     assert harness.reaped == []
-    assert harness.has_mux_calls == 2
+    assert harness.mux_list_calls == 2
 
 
 def test_reap_one_force_active_session_still_rejected(monkeypatch, tmp_path):
@@ -498,6 +498,31 @@ def test_reap_one_force_active_session_still_rejected(monkeypatch, tmp_path):
     result = harness.run_reap_one(force=True)
     assert result["removed"] is False and result["bucket"] == "active"
     assert harness.reaped == []
+
+
+@pytest.mark.parametrize("force", [False, True])
+@pytest.mark.parametrize("checkout_exists", [False, True])
+def test_reap_one_unknown_mux_preserves_checkout_and_record(
+    monkeypatch, tmp_path, force, checkout_exists,
+):
+    harness = CleanupHarness(monkeypatch, tmp_path)
+    rec = make_record(tmp_path, status="finalized")
+    rec.mux_live = False
+    rec.mux_live_at = "2020-01-01T00:00:00"
+    path = harness.seed(rec)
+    if not checkout_exists:
+        from pathlib import Path
+        Path(rec.worktree_path).rmdir()
+    harness.set_classifier(info(S.UNUSED), info(S.UNUSED))
+    monkeypatch.setattr(cli.sessions, "_list_mux_sessions", lambda: None)
+    monkeypatch.setattr(
+        cli.sessions, "has_mux_session",
+        lambda *a, **kw: pytest.fail("cleanup must not probe PSMux"),
+    )
+    result = harness.run_reap_one(force=force)
+    assert result["removed"] is False and result["bucket"] == "mux-unknown"
+    assert harness.reaped == []
+    assert path.exists()
 
 
 def test_reap_one_force_dirty_worktree_is_removed(monkeypatch, tmp_path):
@@ -549,7 +574,7 @@ def test_reap_one_force_attach_after_scan_still_rejected(monkeypatch, tmp_path):
     assert harness.reaped == []
 
 
-def test_reap_one_force_mux_fallback_negative_cache_attach_still_rejected(
+def test_reap_one_force_mux_catalog_negative_cache_attach_still_rejected(
     monkeypatch, tmp_path
 ):
     harness = CleanupHarness(monkeypatch, tmp_path)
@@ -557,12 +582,12 @@ def test_reap_one_force_mux_fallback_negative_cache_attach_still_rejected(
     rec.mux_live = False
     rec.mux_live_at = datetime.now(timezone.utc).isoformat()
     harness.seed(rec)
-    harness.use_real_build_active_paths_with_mux_sequence(has_mux_values=[False, True])
+    harness.use_real_build_active_paths_with_mux_catalogs([{}, {"wt-wt1": 0}])
     harness.set_classifier(info(S.UNUSED), info(S.UNUSED))
     result = harness.run_reap_one(force=True)
     assert result["removed"] is False and result["bucket"] == "active"
     assert harness.reaped == []
-    assert harness.has_mux_calls == 2
+    assert harness.mux_list_calls == 2
 
 
 def test_cmd_cleanup_revalidation_holds_finalize_lock_and_fences_mutation(

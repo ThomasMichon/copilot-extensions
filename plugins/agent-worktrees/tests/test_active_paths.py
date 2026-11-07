@@ -12,6 +12,8 @@ from __future__ import annotations
 import types
 from unittest.mock import patch
 
+import pytest
+
 from agent_worktrees import __main__ as cli
 from agent_worktrees import tracking
 
@@ -73,12 +75,16 @@ def test_active_paths_fall_back_when_batch_unavailable():
     assert active == {"/tmp/a"}
 
 
-def test_windows_passive_classification_does_not_fall_back_to_psmux():
+@pytest.mark.parametrize("hint", [None, False, True])
+def test_windows_passive_classification_does_not_fall_back_to_psmux(hint):
     rec = _rec("aaaa", path="/tmp/a")
+    rec.mux_live = hint
+    rec.mux_live_at = "2020-01-01T00:00:00"
     with patch("agent_worktrees.sessions.platform.system", return_value="Windows"), \
          patch("agent_worktrees.sessions._list_mux_sessions", return_value=None), \
          patch("agent_worktrees.sessions.has_mux_session") as probe:
-        cli._build_active_paths([rec], session_ctx=_empty_ctx())
+        active = cli._build_active_paths([rec], session_ctx=_empty_ctx())
+    assert active == {"/tmp/a"}
     probe.assert_not_called()
 
 

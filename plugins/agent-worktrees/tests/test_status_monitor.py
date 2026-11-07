@@ -1806,6 +1806,25 @@ def test_psmux_sweep_publishes_independent_rosters_without_probing_or_pruning(tm
     assert (reg / "wt-a").read_text() == "/w/a"
 
 
+def test_psmux_sweep_isolates_project_publication_failure(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: tmp_path)
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda _: None)
+    projects = []
+
+    def publish():
+        project = m.cfg.project_name()
+        projects.append(project)
+        if project == "a-broken":
+            raise ValueError("synthetic failed publication")
+
+    assert m._monitor_sweep(
+        "psmux", "T", "P", set(), picker_projects={"a-broken", "b-ready"},
+        roster_publisher=publish,
+    ) == -1
+    assert projects == ["a-broken", "b-ready"]
+    assert "a-broken" in capsys.readouterr().err
+
+
 def _wire_monitor_handoff_session(tmp_path, monkeypatch):
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)

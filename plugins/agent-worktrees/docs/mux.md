@@ -85,12 +85,25 @@ timestamp; it is not refreshed into current proof. TMux retains bounded CLI
 observations, but malformed rows, duplicate sessions, diagnostics and failed
 fallback probes cannot establish absence.
 
+Cleanup retains checkouts and tracking records whenever mux presence is
+unknown, including its lock-held recheck and final managed-removal guard.
+Expired or negative cache hints do not waive this protection, nor does
+`--force` on session cleanup. Fleet `status --mux-details`, nonresident list
+reads and legacy Picker refreshes still return independent facts without
+clearing last-known mux positives. A project publication failure is isolated
+so unrelated resident rosters remain available.
+
 Picker shows **`MUX(?)`** for known but unconfirmed mux hosting and
 **`HOST(?)`** for a live process whose mux hosting is unknown. A client count
 is not inferred from either. Proven process-only and ACP hosting remain
 distinct. Old providers without this evidence retain their legacy rendering;
 an old consumer may not render the new uncertainty, so use a compatible
 Manager when relying on these badges.
+
+When a current-roster feed becomes stale or disconnects, normalized attachment
+and mux-live controls become unavailable along with the badge; preserved raw
+client counts and Git facts do not remain current control evidence. A fresh
+publication restores the normal controls.
 
 This mitigation deliberately freezes automatic PSMux discovery, client-count
 refresh and status painting that requires it. It does **not** make explicit

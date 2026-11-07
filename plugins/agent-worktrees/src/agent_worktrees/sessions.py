@@ -1186,6 +1186,9 @@ class MuxInfo:
     clients: int | None = None
     """Number of attached terminal clients, or None if unknown."""
 
+    observed: bool = True
+    """False only for an explicitly unavailable passive display observation."""
+
     @property
     def attached(self) -> bool | None:
         """Whether a human terminal is attached.
@@ -1406,8 +1409,7 @@ def _list_mux_sessions(*, strict: bool = False) -> dict[str, int] | None:
 
     if platform.system() == "Windows":
         return None
-    else:
-        cmd = ["tmux", "list-sessions", "-F", "#{session_name}:#{session_attached}"]
+    cmd = ["tmux", "list-sessions", "-F", "#{session_name}:#{session_attached}"]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=5, **no_window_kwargs())
         if result.returncode != 0:
@@ -1441,9 +1443,8 @@ def _mux_session_activity() -> dict[str, int]:
 
     if platform.system() == "Windows":
         return {}
-    else:
-        cmd = ["tmux", "list-sessions", "-F",
-               "#{session_name}:#{session_activity}"]
+    cmd = ["tmux", "list-sessions", "-F",
+           "#{session_name}:#{session_activity}"]
     out: dict[str, int] = {}
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
@@ -1463,8 +1464,9 @@ def _mux_session_activity() -> dict[str, int]:
 
 
 def mux_status_many(worktree_ids: list[str], *, strict: bool = False) -> dict[str, MuxInfo]:
-    """Get mux status, requiring confirmed absence for authoritative callers.
-    """
+    """Get mux status, requiring confirmed absence for authoritative callers."""
+    import subprocess
+
     result: dict[str, MuxInfo] = {}
     if not worktree_ids:
         return result
@@ -1485,10 +1487,26 @@ def mux_status_many(worktree_ids: list[str], *, strict: bool = False) -> dict[st
             )
         # Fallback: per-worktree has-session (no client count available)
         for wt_id in worktree_ids:
-            exists = has_mux_session(wt_id, strict=True)
+            try:
+                exists = has_mux_session(wt_id, strict=True)
+            except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
+                if strict:
+                    raise
+                from .mux_list_result import MuxObservationUnavailable
+                raise MuxObservationUnavailable("Passive mux presence observation failed") from exc
             result[wt_id] = MuxInfo(exists=exists, clients=None)
 
     return result
+
+
+def mux_status_for_display(worktree_ids: list[str]) -> dict[str, MuxInfo]:
+    """Keep independent display facts usable without inventing mux negatives."""
+    from .mux_list_result import MuxObservationUnavailable
+
+    try:
+        return mux_status_many(worktree_ids)
+    except MuxObservationUnavailable:
+        return {wt_id: MuxInfo(observed=False) for wt_id in worktree_ids}
 
 
 def kill_tmux_session(worktree_id: str) -> bool:

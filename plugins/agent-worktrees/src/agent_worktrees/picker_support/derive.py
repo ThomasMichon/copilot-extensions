@@ -186,6 +186,12 @@ def _state(w):
 
 
 def _sess(w):
+    if w.get("mux_observation_unavailable"):
+        if (w.get("mux_last_known") or {}).get("present"):
+            return "MUX(?)"
+        if w.get("session_bare_orphan"):
+            return "PROC"
+        return "HOST(?)" if w.get("session_lock_live") or w.get("session_bound_live") else "?"
     if w.get("mux_attached"):
         return f"●{w.get('mux_clients', 1)}"
     if w.get("mux_session"):
@@ -487,8 +493,8 @@ def norm(
         "pr": _pr(w),
         "cleanup_bucket": _bucket_from_raw(w),
         "ff_eligible": _ff_from_raw(w),
-        "attached": bool(w.get("mux_attached")),
-        "mux_live": bool(w.get("mux_session") or w.get("mux_attached")),
+        "attached": bool(w.get("mux_attached")) and not w.get("mux_observation_unavailable"),
+        "mux_live": bool(w.get("mux_session") or w.get("mux_attached")) and not w.get("mux_observation_unavailable"),
         "active": w.get("status") == "active",
         # two-step-restore: the most-recent session id (shown in the row
         # sub-menu so the operator can ``/resume`` it), and whether a live
