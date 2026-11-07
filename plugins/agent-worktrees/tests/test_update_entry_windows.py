@@ -826,6 +826,7 @@ def test_native_entry_controller_custody_requires_supported_launch(
 
     tmp, home, _resolver = update_entry_case
     _use_real_probe_python(monkeypatch)
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
     runtime = home / ".agent-worktrees"
     (runtime / "current-version").write_text("selected\n")
     engine = tmp / "controller-engine.py"
