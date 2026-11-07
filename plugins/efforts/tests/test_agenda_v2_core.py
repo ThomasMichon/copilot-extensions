@@ -198,6 +198,41 @@ def test_v2_observation_graph_keeps_tree_queue_stack_cursor_and_history(lane: Pa
     assert small["omitted"]["items"] == 3 and len(small["items"]) == 2
 
 
+def _graph_is_closed(graph: dict) -> None:
+    known: set[str] = set()
+    for frame in graph["frames"]:
+        assert frame["parent"] is None or frame["parent"] in known
+        known.add(frame["id"])
+    assert set(graph["cursor"]["stack"]) <= known
+    assert all(node["frame"] in known for node in graph["items"])
+    assert graph["cursor"]["item"] in {node["id"] for node in graph["items"]}
+
+
+def test_v2_graph_frame_bound_keeps_stack_and_ancestors(lane: Path, monkeypatch) -> None:
+    root_frame, _root_item, _ = current(lane)
+    outcome(lane)
+    first = expand(lane, ["investigate-a"])["transition"]
+    outcome(lane, "done")
+    update(lane, {"operation": "return", "frame_id": first["frame_id"],
+        "expansion_id": first["expansion_id"], "acceptance_ref": "a-accepted",
+        "evidence": proof("a acceptance")})
+    second = expand(lane, ["investigate-b"])["transition"]
+    state = STORE.read(lane)
+    monkeypatch.setattr(GRAPH, "FRAME_LIMIT", 2)
+    for limit in GRAPH.ITEM_LIMITS + (1,):
+        bounded = GRAPH.graph(state["documents"], state["records"], item_limit=limit)
+        assert [frame["id"] for frame in bounded["frames"]] == [root_frame, second["frame_id"]]
+        assert bounded["cursor"]["stack"] == [root_frame, second["frame_id"]]
+        assert bounded["omitted"]["frames"] == 1
+        _graph_is_closed(bounded)
+    monkeypatch.setattr(GRAPH, "FRAME_LIMIT", 1)
+    with pytest.raises(GRAPH.GraphUnfit):
+        GRAPH.graph(state["documents"], state["records"])
+    observation = {"schema": "efforts.agenda-observation"}
+    assert GRAPH.attach(observation, state["documents"], state["records"],
+                        lambda value: json.dumps(value)) == observation
+
+
 def test_v2_completed_items_cannot_be_revisited_or_relabelled(lane: Path) -> None:
     frame, item, attempt = current(lane)
     outcome(lane, "done")

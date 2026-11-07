@@ -266,6 +266,51 @@ def test_graph_is_negotiated_acknowledged_and_stripped_for_readers_that_did_not_
         assert owner.agendas.read(wrong)["ok"] is False
 
 
+def test_graph_projection_does_not_split_one_committed_revision(owned):
+    owner, *_rest = owned
+    plain = observation_v2()
+    assert owner.agendas.publish(publication(owner, plain, contract_version=2))["ok"] is True
+    # Upgrade: the same revision is retried once the publisher can carry the graph.
+    upgraded = owner.agendas.publish(publication(owner, graphed(), contract_version=2))
+    assert upgraded["ok"] is True and upgraded["observation"] == graphed()
+    assert owner.agendas.read(request(contract_version=2, graph=1))["observation"] == graphed()
+    # Rollback: a graph-unaware publisher retries it again without the graph.
+    assert owner.agendas.publish(publication(owner, plain, contract_version=2))["ok"] is True
+    assert owner.agendas.read(request(contract_version=2, graph=1))["observation"] == plain
+    changed = graphed()
+    changed["snapshot"]["root"] = "different root"
+    rejected = owner.agendas.publish(publication(owner, changed, contract_version=2))
+    assert rejected["error"]["code"] == "revision-conflict"
+
+
+def test_cli_publication_of_a_graph_requests_and_accepts_its_echo(monkeypatch, capsys):
+    from agent_worktrees import agenda_cli as cli
+
+    body = graphed()
+    calls = []
+
+    class Client:
+        def _request(self, action, payload=None, **bounds):
+            calls.append(action)
+            if action == "health":
+                return {"capabilities": [contract.CAPABILITY, contract.V2_CAPABILITY,
+                                         contract.GRAPH_CAPABILITY],
+                        "worktrees": {"status": "ready", "generation": "a" * 32}}
+            assert payload["observation"] == body
+            return {"ok": True, "contract_version": 2, "generation": "a" * 32, "sequence": 1,
+                    "project": "project", "worktree_id": body["source"]["worktree"],
+                    "session_id": body["source"]["session"], "availability": "observed",
+                    "observation": body}
+
+    monkeypatch.setattr(cli, "_control_client", Client)
+    monkeypatch.setattr(cli.cfg, "project_name", lambda: "project")
+    monkeypatch.setattr(cli.sys, "stdin", io.StringIO(json.dumps(body)))
+    args = SimpleNamespace(command="agenda-publish", json=True, contract_version=2)
+    assert cli.cmd_agenda(args) == 0, capsys.readouterr()
+    assert json.loads(capsys.readouterr().out)["observation"] == body
+    assert calls == ["health", "agenda-publish"]
+
+
 @pytest.mark.parametrize(
     "fault",
     [

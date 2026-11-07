@@ -27,6 +27,10 @@ _CAUSAL = {"decision": 0, "refinement": 0, "result": 1, "return": 2, "wait": 3, 
            "expansion": 4, "recovery": 5, "assignment": 6, "attempt": 7}
 
 
+class GraphUnfit(ValueError):
+    """The required graph structure cannot be represented within its bounds."""
+
+
 def _clip(text: str) -> str:
     text = " ".join(str(text).split())
     return text if len(text) <= LABEL_LIMIT else text[:LABEL_LIMIT - 1] + "…"
@@ -126,8 +130,27 @@ def graph(documents: dict[str, Any], records: dict[str, Any], *,
         return 2, -position[entry]
 
     kept = set(sorted(candidates, key=priority)[:max(item_limit, 0)])
-    kept_frames = [frame_id for frame_id in ordered
-                   if frame_id in live or any(entry[0] == frame_id for entry in kept)][:FRAME_LIMIT]
+
+    def lineage(frame_id: str) -> set[str]:
+        chain = set()
+        while frame_id is not None and frame_id not in chain:
+            chain.add(frame_id)
+            link = origins[frame_id]["parent_link"]
+            frame_id = None if link is None else link["parent_frame_id"]
+        return chain
+
+    # The stack, deferred branches and every retained frame's ancestors are structural.
+    selected: set[str] = set()
+    for frame_id in live:
+        selected |= lineage(frame_id)
+    if len(selected) > FRAME_LIMIT:
+        raise GraphUnfit("active and deferred frames exceed the graph frame bound")
+    for frame_id in ordered:
+        if frame_id not in selected and any(entry[0] == frame_id for entry in kept):
+            chain = lineage(frame_id) - selected
+            if len(selected) + len(chain) <= FRAME_LIMIT:
+                selected |= chain
+    kept_frames = [frame_id for frame_id in ordered if frame_id in selected]
 
     frame_nodes = []
     for frame_id in kept_frames:
@@ -171,7 +194,7 @@ def graph(documents: dict[str, Any], records: dict[str, Any], *,
                         "item": item_id, "text": _clip(_history_text(value["kind"], body))})
 
     return {"version": GRAPH_VERSION, "revision": cursor["revision"],
-            "cursor": {"frame": cursor_frame, "item": cursor_item, "stack": active[-FRAME_LIMIT:]},
+            "cursor": {"frame": cursor_frame, "item": cursor_item, "stack": active},
             "frames": frame_nodes, "items": item_nodes, "history": history,
             "omitted": {"frames": len(frames) - len(frame_nodes), "items": len(items) - len(item_nodes),
                         "history": len(events) - len(history)}}
@@ -181,11 +204,14 @@ def attach(observation: dict[str, Any], documents: dict[str, Any], records: dict
            encode: Callable[[Any], str]) -> dict[str, Any]:
     """Add the largest bounded graph that keeps the observation within its body limit.
 
-    The graph is optional display data: when even the smallest bound does not fit, the
-    observation is returned unchanged rather than becoming undeliverable because of it.
+    The graph is optional display data: when even the smallest bound does not fit, or the
+    active structure exceeds the frame bound, the observation is returned unchanged rather than becoming undeliverable because of it.
     """
     for limit in ITEM_LIMITS:
-        candidate = {**observation, "graph": graph(documents, records, item_limit=limit)}
+        try:
+            candidate = {**observation, "graph": graph(documents, records, item_limit=limit)}
+        except GraphUnfit:
+            return observation
         if len(encode(candidate).encode()) + 1 <= BODY_LIMIT:
             return candidate
     return observation

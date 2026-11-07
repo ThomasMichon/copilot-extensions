@@ -103,7 +103,14 @@ sends the request. Without that request, the reply omits `graph` and is
 otherwise unchanged, so existing consumers see the same body. Publishing
 commits the graph as part of the body. A publisher must drop it for a resident
 that does not advertise the capability, and must not tunnel it through
-another field. The graph never grants acceptance, permission or an action.
+another field. `agenda-publish` requests and checks the graph capability
+whenever its input body carries a graph. Revision identity excludes the graph:
+the same committed revision may be republished with or without it (after a
+capability upgrade or rollback) and replaces the cached projection, while any
+other difference is still a `revision-conflict`. The publisher keeps the
+active stack, deferred frames and every kept frame's ancestors in the graph,
+and omits the graph when that structure exceeds its bound. The graph never
+grants acceptance, permission or an action.
 
 ## Version-1 control contract
 

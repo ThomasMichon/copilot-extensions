@@ -170,6 +170,9 @@ def cmd_agenda(args) -> int:
                 "worktree_id": body["source"]["worktree"],
                 "session_id": body["source"]["session"],
             }
+            if "graph" in body:
+                # The resident echoes a committed graph, so request and require it.
+                request["graph"] = body["graph"]["version"]
         else:
             request = {
                 "contract_version": version,

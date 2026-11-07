@@ -329,6 +329,15 @@ def observation(body: dict, *, version: int | None = None) -> str:
     return encoded
 
 
+def revision_identity(body: dict) -> str:
+    """Canonical committed-revision identity, excluding the negotiated display graph.
+
+    The graph is a deterministic projection of the same revision; a peer may receive it
+    or not depending on capabilities, so it must not split one revision into two.
+    """
+    return observation({key: value for key, value in body.items() if key != "graph"})
+
+
 def validate_reply(result: dict, request: dict, generation: str) -> dict:
     exact(result, REPLY_FIELDS)
     selection(request)

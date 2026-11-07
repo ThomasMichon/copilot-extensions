@@ -296,10 +296,10 @@ class AgendaRuntime:
             "observation": exposed,
         }
 
-    def _source_fence(self, conn, key, body, encoded) -> None:
+    def _source_fence(self, conn, key, body) -> None:
         source = body["source"]
         subject = (*key, source["session"])
-        digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+        digest = hashlib.sha256(contract.revision_identity(body).encode("utf-8")).hexdigest()
         previous = conn.execute(
             "SELECT store_id, revision, digest FROM worktrees_agenda_source "
             "WHERE project=? AND worktree_id=? AND session_id=?",
@@ -445,12 +445,13 @@ class AgendaRuntime:
                                 )
                             if (
                                 previous["revision"] == body["revision"]
-                                and contract.observation(previous) != encoded
+                                and contract.revision_identity(previous)
+                                != contract.revision_identity(body)
                             ):
                                 raise contract.AgendaError(
                                     "conflicting committed revision", "revision-conflict"
                                 )
-                        self._source_fence(conn, key, body, encoded)
+                        self._source_fence(conn, key, body)
                         conn.execute(
                             "INSERT OR REPLACE INTO worktrees_agenda_cache VALUES (?, ?, ?)",
                             (*key, encoded),
