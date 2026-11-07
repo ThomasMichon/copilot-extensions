@@ -266,7 +266,7 @@ def plan(worktree_id: str, destination: str, config) -> dict:
             return {**previous, "apply": False, "recovery": False, "replayed": True}
     target = _target(record, destination, config)
     source = Path(record.worktree_path)
-    if source.name != worktree_id or source.absolute() != source.resolve():
+    if record.worktree_path != str(source) or source.name != worktree_id or source.absolute() != source.resolve():
         raise ValueError("relocation source location is redirected or noncanonical")
     _ordinary(record, ledger, config)
     if ledger.resolve().is_relative_to(source):
@@ -378,6 +378,7 @@ def move(worktree_id: str, destination: str, config) -> dict:
                 durability.replace(stage, target, existing=False)
             if stage.exists() or not target.is_dir() or _digest(target) != report["fingerprint"]:
                 raise ValueError("destination publication is ambiguous; retain original move custody")
+            durability.directory(target.parent)
             report["phase"] = "published"
             state.write(ledger, report)
         if report["phase"] == "published":

@@ -1,7 +1,11 @@
 """Metadata checkpoints must never outrun their durable owned effects."""
 
 import json
+import hashlib
+import os
 import subprocess
+from contextlib import contextmanager
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -64,3 +68,77 @@ def test_expired_git_probe_is_a_structured_refusal_without_move_custody(checkout
     assert result["complete"] is False and "timed out" in result["error"]
     assert not state.journal_path(checkout.record.yaml_path).exists()
     assert checkout.source.exists() and not checkout.destination.exists()
+
+
+@pytest.mark.parametrize("spelling", ["dot", "trailing"])
+def test_literal_recorded_path_alias_refuses_before_custody(checkout, spelling):
+    from agent_worktrees import tracking
+
+    record = checkout.record
+    record.worktree_path = (
+        str(checkout.source.parent) + os.sep + "." + os.sep + checkout.source.name
+        if spelling == "dot" else str(checkout.source) + os.sep
+    )
+    tracking.save_record(record)
+    before = record.yaml_path.read_bytes()
+    with pytest.raises(ValueError, match="noncanonical"):
+        relocation.plan(record.worktree_id, str(checkout.destination), checkout.config)
+    assert record.yaml_path.read_bytes() == before
+    assert not state.journal_path(record.yaml_path).exists()
+    assert checkout.source.exists() and not checkout.destination.exists()
+
+
+@pytest.mark.timeout(120)
+def test_recovery_repeats_destination_parent_sync_after_rename(checkout, monkeypatch):
+    original = relocation.durability.directory
+    def failed(path):
+        if path == checkout.destination.parent:
+            raise OSError("injected post-rename parent sync failure")
+        original(path)
+    with monkeypatch.context() as injection:
+        injection.setattr(relocation.durability, "directory", failed)
+        with pytest.raises(OSError, match="post-rename"):
+            relocation.move(checkout.record.worktree_id, str(checkout.destination), checkout.config)
+    retained = state.read(checkout.record.yaml_path)
+    assert retained["phase"] == "copied" and not Path(retained["stage"]).exists()
+    assert checkout.source.exists() and checkout.destination.exists()
+    observed = []
+    def synchronized(path):
+        if path == checkout.destination.parent:
+            observed.append(state.read(checkout.record.yaml_path)["phase"])
+        original(path)
+    with monkeypatch.context() as injection:
+        injection.setattr(relocation.durability, "directory", synchronized)
+        result = relocation.move(checkout.record.worktree_id, str(checkout.destination), checkout.config)
+    assert "copied" in observed and result["phase"] == "complete"
+    assert result["stage"] == retained["stage"] and not checkout.source.exists()
+
+
+@pytest.mark.timeout(120)
+def test_partial_history_write_preserves_original_receipt_and_retries(checkout, monkeypatch):
+    relocation.move(checkout.record.worktree_id, str(checkout.destination), checkout.config)
+    ledger = checkout.record.yaml_path
+    raw = state.journal_path(ledger).read_bytes()
+    digest = hashlib.sha256(raw).hexdigest()
+    directory = ledger.parent / "checkout-relocations" / ledger.stem
+    history = directory / (digest + ".json")
+    original = Path.open
+    @contextmanager
+    def partial(path, *args, **kwargs):
+        with original(path, *args, **kwargs) as stream:
+            if path.parent == directory and args and args[0] == "xb":
+                class InterruptedWriter:
+                    def write(self, data):
+                        stream.write(data[:12])
+                        stream.flush()
+                        raise OSError("injected partial archive write")
+                yield InterruptedWriter()
+            else:
+                yield stream
+    with monkeypatch.context() as injection:
+        injection.setattr(Path, "open", partial)
+        with pytest.raises(OSError, match="partial archive"):
+            state.archive_terminal(ledger, digest)
+    assert not history.exists() and state.journal_path(ledger).read_bytes() == raw
+    state.archive_terminal(ledger, digest)
+    assert history.read_bytes() == raw and state.journal_path(ledger).read_bytes() == raw

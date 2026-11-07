@@ -147,10 +147,17 @@ def archive_terminal(ledger: Path, expected: str) -> None:
         if history.is_symlink() or history.read_bytes() != raw:
             raise ValueError("relocation history conflicts with the original receipt")
     else:
-        with history.open("xb") as stream:
-            stream.write(raw)
-            stream.flush()
-            os.fsync(stream.fileno())
+        staging = history.with_suffix(".archiving-" + secrets.token_hex(8))
+        try:
+            with staging.open("xb") as stream:
+                stream.write(raw)
+                stream.flush()
+                os.fsync(stream.fileno())
+            from .checkout_durability import replace
+
+            replace(staging, history, existing=False)
+        finally:
+            staging.unlink(missing_ok=True)
     from .checkout_durability import directory as synchronize_directory, files
 
     files([history])
