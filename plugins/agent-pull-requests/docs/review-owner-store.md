@@ -109,6 +109,45 @@ atomic persistence may finish while the owner is withdrawn; the later denial is
 not rollback or proof of absent state. Re-read that same operation under a valid
 owner instead of inventing a replacement identity or blindly repeating effects.
 
+## Optional prepared-intent storage extension
+
+The existing lifecycle owner may explicitly call
+`adopt_prepared_reviews(lifecycle_checkpoint=..., expires_at=..., checkpoint=...)`.
+This orthogonal data extension adds `review_intent_version: 2` to the current
+owner envelope; it does not require adopting conversation, attention or capture
+features merely to store a prepared review. Those existing layout versions and
+capacity declarations retain their meanings and preserve the extension.
+Old strict envelope readers refuse the extra field before rewriting anything.
+The lifecycle checkpoint must actually exclude or transition those readers,
+as with the existing adoption API. A submit request never adopts it.
+
+An explicitly adopted owner accepts review-intent/v2. Each comment/reply/owned
+edit retains its existing body plus `preparation` with exactly `identity` and
+`body_id`, selected from the actual
+[shared preparation result](../../ai-attribution/docs/comment-preparation.md).
+The identity retains its public comment/write GUIDs and original source
+projection. The hash and canonical trailing marker must agree with the exact
+body; no second body or profile history is stored. Bodyless votes carry no
+preparation and do not create filler comments.
+
+One selected operation has at most one prepared action per logical comment;
+different replies need different comment/write identities. A write GUID cannot
+be reused by another retained action/operation. These are owner-local data
+consistency checks, not a distributed uniqueness service, evidence of who
+prepared the content or authority to post it. The actual producer still owns
+profile/audience/source policy and preparation before final approval. Original
+operation fingerprints bind the entire selected body and metadata through
+restart and unknown/confirmed receipts; changed retry bytes or identities refuse.
+All added bytes count toward the existing review/receipt reservation.
+
+Legacy v1 intents and their unresolved receipts remain unchanged and do not
+acquire preparation evidence from body markers. The default intent parser and
+protected executor still select v1; executing receiver negotiation, producer
+composition and native correlation are not enabled by this data-only extension.
+No new CLI/HTTP operation, capability advertisement, runtime adoption or
+installed/provider qualification is claimed. Rollback cannot remove the
+extension or downgrade a file with unresolved v2 records.
+
 ## Explicit remaining boundary
 
 This is **not a backend executor**. It does not perform actual write-credential/
