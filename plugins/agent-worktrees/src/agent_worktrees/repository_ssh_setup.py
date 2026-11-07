@@ -137,7 +137,7 @@ def prepare_key(setup, context, description: dict) -> protocol.Outcome | None:
         return protocol.Outcome("refused", "Selected Vault lacks scoped, pinned SSH installation support; update its owner.")
     public = None
     for operation in ("prepare", "install"):
-        arguments = ["ssh-key", operation, "--entry", selection.entry, "--require-running", "--json"]
+        arguments = ["ssh-key", operation, "--entry=" + selection.entry, "--require-running", "--json"]
         if operation == "install":
             arguments.extend([
                 "--directory", str(Path(selection.directory).expanduser()),

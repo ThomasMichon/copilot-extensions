@@ -358,6 +358,7 @@ def test_scoped_vault_adapter_uses_real_bounded_process_and_no_provisioning(tmp_
     public = "ssh-ed25519 " + base64.b64encode(wire).decode("ascii")
     fingerprint = "SHA256:" + base64.b64encode(hashlib.sha256(wire).digest()).decode("ascii").rstrip("=")
     directory = tmp_path / "key"
+    entry = "-SSH/node-a" if failure is None else "SSH/node-a"
     references = {"identity_file": str(directory / "id_ed25519"),
                   "public_key_file": str(directory / "id_ed25519.pub")}
     script.write_text(
@@ -374,6 +375,11 @@ def test_scoped_vault_adapter_uses_real_bounded_process_and_no_provisioning(tmp_
         " print(json.dumps({'schema':'agent-vault.invocation','version':1,"
         "'capabilities':[] if failure=='unsupported' else "
         "['configuration-root-v1','ssh-key-install-pin-v1']}));sys.exit(0)\n"
+        "import argparse\n"
+        "parser=argparse.ArgumentParser()\n"
+        "parser.add_argument('--entry',required=True)\n"
+        "selected,_remaining=parser.parse_known_args(arguments[2:])\n"
+        f"assert selected.entry=={entry!r}\n"
         "assert '--require-running' in arguments and '--prompt' not in arguments\n"
         "assert '--initialize' not in arguments and '--confirm-initialization' not in arguments\n"
         "if failure=='invalid-json': print('private unstructured output');sys.exit(1)\n"
@@ -388,7 +394,7 @@ def test_scoped_vault_adapter_uses_real_bounded_process_and_no_provisioning(tmp_
         encoding="utf-8",
     )
     selection = setup.SSHKeySelection(
-        (sys.executable, str(script), str(log)), str(tmp_path), "SSH/node-a", str(directory), fingerprint,
+        (sys.executable, str(script), str(log)), str(tmp_path), entry, str(directory), fingerprint,
     )
     context = SimpleNamespace(ssh_key=selection)
     original = []

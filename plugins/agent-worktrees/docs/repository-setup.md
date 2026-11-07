@@ -273,6 +273,8 @@ and directory. It accepts only reuse of the pinned public identity. Actual
 Fleet key inspection carries the same fingerprint and request digest before
 new enrollment and through configuration preparation/construction checks.
 Old receivers refuse; setup never drops the selection, scope or pin.
+The entry is passed as one `--entry=<value>` argument so a valid
+dash-prefixed entry remains a value rather than another CLI option.
 
 This gate does not provision, start, unlock or initialize Vault, fetch a
 credential through an identity cache, use an existing plaintext key as fallback,
