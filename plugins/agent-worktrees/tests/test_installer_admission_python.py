@@ -46,6 +46,7 @@ def admission(tmp_path: Path):
     )[1].split("# === end command-lifecycle: admission before staging ===", 1)[0]
     program = (
         "param([string]$BootstrapPython='',[string]$ProjectName='',[string]$Owner='',"
+        "[string]$RuntimeSourceDescriptor='',[switch]$RuntimeOnly,[string]$InstallSource='',"
         "[switch]$Force,[switch]$ZeroDowntime,[switch]$ProvisionMissingRuntime,[switch]$RemoveConfig)\n"
         "Set-StrictMode -Version Latest\n"
         "$ErrorActionPreference='Stop'\n$ContextualInstall=$false\n"
