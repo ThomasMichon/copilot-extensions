@@ -561,6 +561,13 @@ existing configured external-state caller; otherwise the lane constructs a
 qualified disposable external-state fixture. This is source-consumer visibility
 evidence, not installed-release or cold/tail qualification.
 
+For sustained host contention, use the existing runner's opt-in
+`--test-profile busy-host-functional` with only the complete snapshot runtime
+and/or Windows visibility test files. [SSH split gates](../../TESTING.md#ssh-snapshot-split-gates-under-load)
+separates native functional evidence from strict production-timeout/cleanup
+controls and unresolved latency qualification. The profile does not change
+production deadlines or require a focused window or quiet host.
+
 ## Layout
 
 ```

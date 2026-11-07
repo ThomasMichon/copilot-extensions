@@ -157,6 +157,7 @@ def test_windowless_native_child_scenario(tmp_path, monkeypatch):
     payload, caller, output = (Path(fixture[key]) for key in ("payload", "caller", "output"))
     output.mkdir()
     _require_native_payload(payload)
+    native._functional_writer(monkeypatch)
     # A regression to the shell route cannot produce a false positive.
     (payload / "scripts" / "emit-mesh-pointer.ps1").write_text(
         "throw 'native visibility acceptance forbids shell fallback'\n",
@@ -225,13 +226,16 @@ def test_windowless_native_child_scenario(tmp_path, monkeypatch):
                 "optional_owner": "available",
                 "missing_adapter_red_control": True,
                 "cleanup": cleanup,
+                **native._evidence_profile(),
             }
         ),
         encoding="utf-8",
     )
 
 
-@pytest.mark.timeout(150)
+@pytest.mark.timeout(
+    300 if os.environ.get("AGENT_SSH_SNAPSHOT_TEST_PROFILE") == "busy-host-functional" else 150
+)
 def test_windowless_writer_chain_two_cycles_and_timeout(tmp_path, monkeypatch, capsys):
     import ctypes
     from ctypes import wintypes
@@ -325,7 +329,9 @@ def test_windowless_writer_chain_two_cycles_and_timeout(tmp_path, monkeypatch, c
                 )
             finally:
                 kernel32.CloseHandle(handle)
-            stdout, stderr = process.communicate(timeout=90)
+            stdout, stderr = process.communicate(
+                timeout=180 if native._functional_profile() else 90
+            )
             assert process.returncode == 0, stdout + stderr
             assert "1 passed" in stdout, stdout
         finally:

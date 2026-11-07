@@ -5996,6 +5996,48 @@ outcomes/skips, elapsed times and cleanup result; retain failed standard-budget
 runs separately. Default CI, production deadlines, unrelated test suites and
 actual performance assertions are unchanged.
 
+### SSH snapshot split gates under load
+
+The same opt-in profile also accepts only `agent-ssh`'s complete
+`tests/test_snapshot_runtime.py` and `tests/test_snapshot_windows_visibility.py`
+files, separately or together:
+
+```bash
+python tools/run-plugin-tests.py agent-ssh --test-profile busy-host-functional \
+  --test-file tests/test_snapshot_runtime.py \
+  --test-file tests/test_snapshot_windows_visibility.py --junit-dir <reports>
+```
+
+Set `AGENT_SSH_WINDOWS_VISIBILITY=1` on native Windows to execute the real
+windowless-parent observer. It requires the active accessible input desktop,
+not a focused window. Without that opt-in/platform, its skips are not native
+visibility evidence.
+
+The functional positives use test-only 30-second optional-peer and 60-second
+contributor envelopes, a 60-second fixture-compilation guard, a 180-second GUI
+observer and 300-second native item guards. The disposable driver invokes the actual payload bootstrap, completed
+SSH/Worktrees runtimes, admission/refusal checks and process-owner primitives;
+it changes only the test's positive-call deadlines, not deployed source.
+The profile keeps the complete selected inventory and the same runner resource
+caps and aggregate bounds described above. No load probe or quiet host is required.
+
+Qualification has separate gates: native functional assertions (including
+zero surfaced windows/focus transitions and refreshed external-state reads),
+strict production-deadline degradation/cleanup controls, and latency evidence.
+The strict controls still require actual `TimeoutExpired` at the original
+5-second optional-peer and 10-second contributor limits; optional-peer resolution
+and execution descendants must both be reaped. An unrelated error or a missing
+PID is not timeout/cleanup evidence. Those controls are never widened by the
+functional driver.
+
+A functional PASS plus strict-control PASS may qualify the bounded functional
+change when explicitly selected as its acceptance contract; neither establishes
+original-budget availability, cold/tail latency or the composed two-second
+target. Keep those unresolved under the existing latency objective
+[#7935](https://github.com/ThomasMichon/copilot-extensions/issues/7935), retain
+failed standard-budget results, and report each gate separately. Production
+5/10-second deadlines, ordinary runs, required CI and fresh review are unchanged.
+
 `tools/promotion_unit_tests/test_client_guardian_resources.py` exercises the real
 client-to-guardian caller boundary with process/native-import value doubles and the actual
 stdin bootstrap. It replaces each admitted executable member after snapshot,

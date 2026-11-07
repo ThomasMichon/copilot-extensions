@@ -38,6 +38,64 @@ launcher = load(_PLUGIN / "scripts" / "snapshot_runtime.py", "snapshot_launcher_
 writer = load(_PLUGIN / "scripts" / "write_session_guidance.py", "snapshot_writer_test")
 
 
+def _functional_profile():
+    profile = os.environ.get("AGENT_SSH_SNAPSHOT_TEST_PROFILE", "standard")
+    if profile not in ("standard", "busy-host-functional"):
+        raise ValueError(f"Unknown SSH snapshot test profile: {profile}")
+    return profile == "busy-host-functional"
+
+
+def _optional_functional_prelude():
+    if not _functional_profile():
+        return ""
+    return (
+        "from agent_ssh import _worktrees\n"
+        "from functools import partial\n"
+        "_worktrees._read_state_root=partial(_worktrees._read_state_root,timeout=30)\n"
+    )
+
+
+def _functional_writer(monkeypatch):
+    """Keep actual bootstrap/runtime dispatch; widen only the test's positive calls."""
+    if not _functional_profile():
+        return
+    contributor_argv = writer._contributor_argv
+    run_owned = writer._run_owned_contributor
+    driver = (
+        "import runpy,subprocess,sys\n"
+        "path=sys.argv[1]\n"
+        "main=runpy.run_path(path)['main']\n"
+        "original_call=subprocess.call\n"
+        "def call(command,**kwargs):\n"
+        " assert command[-2]=='-c',command\n"
+        f" command[-1]={_optional_functional_prelude()!r}+command[-1]\n"
+        " return original_call(command,**kwargs)\n"
+        "subprocess.call=call\n"
+        "sys.argv=[path,'snapshot']\n"
+        "raise SystemExit(main())\n"
+    )
+
+    def argv(root, stem):
+        command = contributor_argv(root, stem)
+        if command and stem == "emit-mesh-pointer" and command[-1] == "snapshot":
+            return [*command[:-2], "-c", driver, command[-2]]
+        return command
+
+    def owned(*args, **kwargs):
+        kwargs["timeout"] = 60
+        return run_owned(*args, **kwargs)
+
+    monkeypatch.setattr(writer, "_contributor_argv", argv)
+    monkeypatch.setattr(writer, "_run_owned_contributor", owned)
+
+
+def _evidence_profile():
+    return {
+        "test_profile": "busy-host-functional" if _functional_profile() else "standard",
+        "original_budget_performance": "unqualified",
+    }
+
+
 def test_windowless_parent_retains_native_pipe_delivery(tmp_path, monkeypatch):
     monkeypatch.setattr(writer.sys, "executable", str(tmp_path / "pythonw.exe"))
     argv = writer._contributor_argv(_PLUGIN, "emit-mesh-pointer")
@@ -264,7 +322,7 @@ def _purelib(python, *, scheme=None):
 def _compile_native_fixture(python, paths):
     result = run_caller_owned(
         [str(python), "-I", "-m", "compileall", "-q", *(str(path) for path in paths)],
-        timeout=30,
+        timeout=60 if _functional_profile() else 30,
         max_stdout_bytes=8192,
         max_stderr_bytes=8192,
     )
@@ -677,7 +735,7 @@ def _configured_caller(root):
     return repo, machines / "machines.yaml"
 
 
-@pytest.mark.timeout(150)
+@pytest.mark.timeout(300 if _functional_profile() else 150)
 def test_real_native_writer_avoids_slow_shell_and_refreshes_external_snapshot(
     tmp_path, monkeypatch, capsys
 ):
@@ -735,6 +793,8 @@ def test_real_native_writer_avoids_slow_shell_and_refreshes_external_snapshot(
                 / ".copilot/session-state/session-1/instructions/agent-ssh/session-guidance.instructions.md"
             ).read_text()
         )
+        assert observed_calls[-1][1] == "TimeoutExpired", observed_calls
+    _functional_writer(monkeypatch)
     samples = []
     captured = []
     for alias in ("host-a", "host-b"):
@@ -789,6 +849,7 @@ def test_real_native_writer_avoids_slow_shell_and_refreshes_external_snapshot(
                     "cache": "not-controlled",
                     "phases": ["fresh", "resumed"],
                     "topology": "available",
+                    **_evidence_profile(),
                 }
             )
         )
@@ -826,12 +887,13 @@ def test_real_native_writer_avoids_slow_shell_and_refreshes_external_snapshot(
                     "phases": ["fresh", "resumed"],
                     "external_state": "available",
                     "composed_two_second_gate": "unqualified",
+                    **_evidence_profile(),
                 }
             )
         )
 
 
-@pytest.mark.timeout(150)
+@pytest.mark.timeout(300 if _functional_profile() else 150)
 @pytest.mark.parametrize("nested", [False, True])
 def test_explicit_native_owner_and_foreign_context_refusal(tmp_path, monkeypatch, capsys, nested):
     from agent_ssh import _worktrees
@@ -883,7 +945,7 @@ def test_explicit_native_owner_and_foreign_context_refusal(tmp_path, monkeypatch
         result = run_caller_owned(
             [
                 *command[:-2], "-c",
-                "import json,sys\n"
+                _optional_functional_prelude() + "import json,sys\n"
                 "from pathlib import Path\n"
                 "from agent_ssh import _worktrees\n"
                 "assert Path(sys.prefix)==Path(sys.argv[1])\n"
@@ -898,7 +960,7 @@ def test_explicit_native_owner_and_foreign_context_refusal(tmp_path, monkeypatch
             cwd=cwd,
             env=environment,
             input_text=json.dumps(own),
-            timeout=10,
+            timeout=60 if _functional_profile() else 10,
             max_stdout_bytes=8192,
             max_stderr_bytes=8192,
         )
@@ -925,8 +987,9 @@ def test_explicit_native_owner_and_foreign_context_refusal(tmp_path, monkeypatch
                     "cache": "not-controlled",
                     "state_root": "bound",
                     "parent": "completed-ssh-runtime",
-                    "outer_observer_seconds": 10,
-                    "optional_peer_deadline_seconds": 5,
+                    "outer_observer_seconds": 60 if _functional_profile() else 10,
+                    "optional_peer_deadline_seconds": 30 if _functional_profile() else 5,
+                    **_evidence_profile(),
                 }
             )
         )
@@ -982,6 +1045,17 @@ def _optional_deadline_controls(tmp_path, payloads, repo):
         _PLUGIN / "tests" / "test_write_session_guidance.py", "snapshot_cleanup_controls"
     )
     results = []
+    run_owned = _worktrees.run_caller_owned
+    expirations = []
+
+    def observed(*args, **kwargs):
+        assert kwargs["timeout"] == 5
+        try:
+            return run_owned(*args, **kwargs)
+        except subprocess.TimeoutExpired as exc:
+            expirations.append(exc.timeout)
+            raise
+
     for phase in ("resolution", "execution"):
         pid_file = tmp_path / f"{phase}.pid"
         blocked = (
@@ -1003,13 +1077,21 @@ def _optional_deadline_controls(tmp_path, payloads, repo):
             adapter.write_text(blocked, encoding="utf-8")
         try:
             started = time.monotonic()
-            assert _worktrees.state_root(repo, None) == (None, "unavailable")
+            from unittest.mock import patch
+
+            with patch.object(_worktrees, "run_caller_owned", observed):
+                assert _worktrees.state_root(repo, None) == (None, "unavailable")
             elapsed = time.monotonic() - started
             assert elapsed < 8  # 5s plus owned cleanup, not a new deadline.
             assert pid_file.is_file()
             assert not controls._pid_running(int(pid_file.read_text()))
+            assert expirations == [5] * (len(results) + 1)
             results.append(
-                {"phase": phase, "seconds": round(elapsed, 3), "descendant_reaped": True}
+                {
+                    "phase": phase, "seconds": round(elapsed, 3),
+                    "deadline_seconds": 5, "exception": "TimeoutExpired",
+                    "descendant_reaped": True,
+                }
             )
         finally:
             if pid_file.exists() and controls._pid_running(int(pid_file.read_text())):
@@ -1021,13 +1103,14 @@ def _optional_deadline_controls(tmp_path, payloads, repo):
     not os.environ.get("AGENT_SSH_NATIVE_CALLER"),
     reason="requires an explicitly selected, configured native caller",
 )
-@pytest.mark.timeout(150)
+@pytest.mark.timeout(300 if _functional_profile() else 150)
 def test_native_configured_external_state_source_consumer(tmp_path, monkeypatch, capsys):
     caller = Path(os.environ["AGENT_SSH_NATIVE_CALLER"]).resolve(strict=True)
     assert caller.is_dir()
     _cell(tmp_path / "cell", monkeypatch, host_context=True, legacy=True)
     output = tmp_path / "output"
     output.mkdir()
+    _functional_writer(monkeypatch)
     samples, captured = [], []
     for phase in ("fresh", "resumed"):
         started = time.monotonic()
@@ -1054,9 +1137,10 @@ def test_native_configured_external_state_source_consumer(tmp_path, monkeypatch,
                     "contributors": "actual",
                     "topology": "available",
                     "same_session_refreshed": True,
-                    "contributor_deadline_seconds": 10,
-                    "optional_peer_deadline_seconds": 5,
+                    "contributor_deadline_seconds": 60 if _functional_profile() else 10,
+                    "optional_peer_deadline_seconds": 30 if _functional_profile() else 5,
                     "composed_two_second_gate": "unqualified",
+                    **_evidence_profile(),
                 }
             )
         )
