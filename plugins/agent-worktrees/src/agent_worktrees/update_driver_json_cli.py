@@ -88,9 +88,15 @@ def _run_request(
                         _publish_result(request, text)
                         return code
         project, cwd = cfg.active_project(), update_driver_cli._invocation_cwd()
+        context = update_driver_cli._request_context()
+        selected = update_driver_cli._current_authority(
+            driver,
+            context=dict(context).get("COPILOT_EXTENSIONS_CONTEXT", ""), cwd=str(cwd),
+        )
         spec = driver.RequestSpec(
             backend=backend, argv=tuple(flags), project=project or "", cwd=str(cwd),
-            source=str(cfg.install_dir().resolve()), context=update_driver_cli._request_context(),
+            source=str(cfg.install_dir().resolve()), context=context,
+            authority="standalone" if selected.configured and selected.mode == "standalone" else "",
         )
         project_args = ["--project", project] if project else []
         invocation = [*project_args, verb, *flags]

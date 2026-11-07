@@ -84,6 +84,42 @@ def test_protocol_output_limit_fails_without_silent_truncation():
     assert buffer.getvalue() == ""
 
 
+@pytest.mark.parametrize("mode", ["standalone", "project"])
+@pytest.mark.parametrize("verb", ["stage", "reconcile"])
+def test_json_update_requests_obey_selected_authority(tmp_path, monkeypatch, mode, verb):
+    import sys
+    import update_driver
+    from update_driver import core
+
+    tmp_path = tmp_path.resolve()
+    root = tmp_path / "driver"
+    update_driver.change_authority(
+        mode, project="example" if mode == "project" else "", root=root, timeout=5,
+        verify_capabilities=lambda _deadline: True,
+    )
+    monkeypatch.setattr(core, "default_root", lambda: root)
+    monkeypatch.setattr(update_driver, "borrowed_custody", lambda: None)
+    monkeypatch.setattr(boundary.cfg, "active_project", lambda: None)
+    monkeypatch.setattr(boundary.cfg, "install_dir", lambda: tmp_path)
+    monkeypatch.setattr(boundary.update_driver_cli, "_request_context", lambda **_kwargs: ())
+    monkeypatch.setattr(
+        update_driver, "runtime_command",
+        lambda module, flags=(): ((sys.executable, "-m", module, *flags), {}),
+    )
+    monkeypatch.setattr(update_driver, "ensure_worker", lambda *_args, **_kwargs: None)
+    arguments = _args(apply=verb == "reconcile", detach=True)
+    result = (
+        boundary.cmd_stage_request(arguments) if verb == "stage"
+        else boundary.cmd_reconcile_request(arguments)
+    )
+    requests = update_driver.status(root=root)
+    if mode == "project":
+        assert result == 1 and not requests
+    else:
+        assert result == 0 and len(requests) == 1
+        assert requests[0].spec.authority == "standalone"
+
+
 @pytest.mark.parametrize("emit_json", [False, True])
 def test_early_stage_failure_preserves_unleased_status_and_stdout_contract(
     tmp_path, monkeypatch, capsys, emit_json,
