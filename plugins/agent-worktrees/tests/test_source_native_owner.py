@@ -63,7 +63,7 @@ def test_native_checkout_refuses_recursive_destination(tmp_path):
     assert not checkout.exists()
 
 
-def test_native_checkout_resolves_standalone_git_root(tmp_path):
+def test_native_checkout_resolves_standalone_git_root(tmp_path, monkeypatch):
     plugin = tmp_path / "source"
     plugin.mkdir()
     (plugin / "pyproject.toml").write_text("frozen package", encoding="utf-8")
@@ -71,19 +71,25 @@ def test_native_checkout_resolves_standalone_git_root(tmp_path):
     hooks.mkdir()
     git = shutil.which("git")
     assert git is not None
+    unrelated = tmp_path / "unrelated"
+    monkeypatch.setenv("GIT_DIR", str(unrelated / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(unrelated))
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    environment.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
     subprocess.check_call(
         [git, "-C", str(plugin), "init", "-q", "--template", str(hooks)],
-        **no_window_kwargs(),
+        env=environment, **no_window_kwargs(),
     )
     repository = Path(subprocess.check_output(
         [git, "-C", str(plugin), "rev-parse", "--show-toplevel"],
-        text=True, **no_window_kwargs(),
+        env=environment, text=True, **no_window_kwargs(),
     ).strip()).resolve()
     checkout = tmp_path / "checkout"
     _copy_native_checkout(plugin, repository, checkout)
     assert (checkout / "plugins/agent-worktrees/pyproject.toml").read_bytes() == (
         plugin / "pyproject.toml"
     ).read_bytes()
+    assert not unrelated.exists()
 
 
 @pytest.mark.timeout(1500)
