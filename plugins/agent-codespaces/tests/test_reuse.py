@@ -61,13 +61,15 @@ def venue(monkeypatch, tmp_path):
     monkeypatch.setattr(coordination, "list_leases", lambda **kwargs: shared)
     monkeypatch.setattr(coordination, "inspect", lambda name: {
         "state": shared[name].state, "live": shared[name].live,
+        "holder": shared[name].holder, "token": shared[name].token,
     })
     events = []
     def ownership(args, **kwargs):
         assert args == ["--project", "project", "claims", "new-worktree", "--json"]
         outbound = (
             [{"kind": "codespace", "ref": "returned", "state": "active"}]
-            if any(event[0] == "journal" for event in events) else []
+            if any(event[0] == "journal" for event in events)
+            and not any(event[0] == "settle" for event in events) else []
         )
         return subprocess.CompletedProcess(args, 0, json.dumps({
             "version": 1, "machine": "machine", "repo": "project",
@@ -77,7 +79,11 @@ def venue(monkeypatch, tmp_path):
     monkeypatch.setattr(coordination, "_run", ownership)
     monkeypatch.setattr(
         coordination, "journal_obligation",
-        lambda name, holder: events.append(("journal", name, holder)) or True,
+        lambda name, holder, **kwargs: events.append(("journal", name, holder)) or True,
+    )
+    monkeypatch.setattr(
+        coordination, "settle_obligation",
+        lambda name, holder, **kwargs: events.append(("settle", name, holder)) or True,
     )
 
     def acquire(name, holder, **kwargs):
@@ -173,6 +179,30 @@ def test_unsupported_receiver_preserves_baseline_without_new_invocation(venue, m
     assert "owned" in capsys.readouterr().err
 
 
+def test_quota_retry_reserves_the_returned_venue_instead_of_creating_again(venue, monkeypatch, capsys):
+    venue.config.max_owned_codespaces = 31
+    venue.rows[0].state = "Available"
+    monkeypatch.setattr(cli, "_require_codespace_scope", lambda *args, **kwargs: None)
+    creates = []
+
+    def create(*args, **kwargs):
+        creates.append(kwargs)
+        raise RuntimeError("running codespace quota exceeded")
+
+    def reclaim(*args, **kwargs):
+        assert kwargs["account"] == "selected"
+        venue.rows[0].state = "Shutdown"
+        return "stopped eligible returned venue"
+
+    monkeypatch.setattr(cli, "create_codespace", create)
+    monkeypatch.setattr(cli, "_reclaim_for_quota", reclaim)
+    assert cli.main(["create", "example/project", "--no-wait"]) == 0
+    assert capsys.readouterr().out.strip().endswith("returned")
+    assert len(creates) == 1
+    assert creates[0]["account"] == "selected"
+    assert lease.get_lease("returned").worktree == "new-worktree"
+    assert sum(event[0] == "acquire" for event in venue.events) == 1
+
 def test_explicit_branch_mismatch_does_not_reset_returned_venue(venue, capsys):
     assert cli.main(["create", "example/project", "--branch", "main", "--no-wait"]) == 4
     assert venue.rows[0].branch == "retained-feature"
@@ -263,6 +293,113 @@ def test_failed_reservation_retains_native_responsibility_without_replay(venue, 
     assert "unconfirmed" in capsys.readouterr().err
     assert venue.events == prior
 
+
+@pytest.mark.parametrize("omitted", [False, True])
+@pytest.mark.parametrize("first_held", [False, True])
+def test_every_obligation_is_classified_before_reuse_or_new_creation(
+    venue, monkeypatch, capsys, omitted, first_held,
+):
+    from agent_codespaces import account_binding, driving_worktrees
+    import time
+
+    venue.config.max_owned_codespaces = 31
+    venue.rows[0].name = "a-returned"
+    venue.shared["a-returned"] = venue.shared.pop("returned")
+    venue.shared["a-returned"].key = "a-returned"
+    venue.shared["b-uncertain"] = coordination.L2Lease(
+        "b-uncertain", "machine/project/new-worktree", True, token="d" * 40, state="leased",
+    )
+    if first_held:
+        lease._write_leases({"a-returned": lease.Lease(
+            "a-returned", "new-worktree", 1, "test-host", time.time(), time.time(),
+            worktree="new-worktree", lease_token="b" * 40,
+        )})
+        venue.shared["a-returned"] = coordination.L2Lease(
+            "a-returned", "machine/project/new-worktree", True, token="b" * 40, state="leased",
+        )
+    if not omitted:
+        venue.rows.append(CodespaceInfo(
+            name="b-uncertain", display_name="b-uncertain", repository="example/project",
+            branch="main", state="Shutdown", machine="premiumLinux", account="selected",
+        ))
+    account_binding.bind("b-uncertain", "selected", repo="example/project", strict=True)
+    monkeypatch.setattr(
+        driving_worktrees, "_workstream_claim_refs",
+        lambda owner: {"a-returned", "b-uncertain"},
+    )
+    assert cli.main(["create", "example/project", "--no-wait"]) == 4
+    assert "b-uncertain" in capsys.readouterr().err
+    assert venue.events == []
+
+
+@pytest.mark.parametrize("holder", [
+    "other-machine/project/new-worktree", "machine/other-project/new-worktree",
+])
+def test_workstream_does_not_resume_a_same_named_foreign_holder(venue, monkeypatch, capsys, holder):
+    assert cli.main(["create", "example/project", "--no-wait"]) == 0
+    capsys.readouterr()
+    venue.shared["returned"].holder = holder
+    venue.config.max_owned_codespaces = 31
+    before = list(venue.events)
+    assert cli.main(["create", "example/project", "--no-wait"]) == 4
+    assert "unconfirmed" in capsys.readouterr().err
+    assert venue.events == before
+
+
+@pytest.mark.parametrize("failure", ["release-unknown", "release-conflict", "settle-unknown", "foreign-token"])
+def test_return_keeps_local_custody_when_confirmation_is_missing(venue, monkeypatch, capsys, failure):
+    assert cli.main(["create", "example/project", "--no-wait"]) == 0
+    capsys.readouterr()
+    before = lease.LEASE_FILE.read_bytes()
+    if failure.startswith("release-"):
+        monkeypatch.setattr(coordination, "release", lambda *a, **kw: coordination.L2Result(
+            "conflict" if failure == "release-conflict" else "unavailable",
+        ))
+    elif failure == "settle-unknown":
+        monkeypatch.setattr(coordination, "settle_obligation", lambda *a, **kw: False)
+    else:
+        venue.shared["returned"].token = "d" * 40
+    with pytest.raises(RuntimeError, match="retained"):
+        lease.release_claim("returned", "new-worktree")
+    assert lease.LEASE_FILE.read_bytes() == before
+    if failure != "settle-unknown":
+        assert not any(event[0] == "settle" for event in venue.events)
+
+
+def test_return_settles_original_owner_before_another_workstream_reuses(venue, monkeypatch, capsys):
+    from agent_codespaces import driving_worktrees
+
+    current = ["new-worktree"]
+    obligations = {"new-worktree": set(), "second-worktree": set()}
+    monkeypatch.setattr(lease, "resolve_owner_worktree", lambda: current[0])
+    monkeypatch.setattr(coordination, "owner_ref", lambda: f"machine/project/{current[0]}")
+    monkeypatch.setattr(driving_worktrees, "_workstream_claim_refs", lambda owner: obligations[current[0]])
+
+    def journal(name, holder, **kwargs):
+        obligations[holder.rsplit("/", 1)[-1]].add(name)
+        return True
+
+    def settle(name, holder, **kwargs):
+        assert venue.shared[name].state == "released"
+        assert lease._read_leases()[name].worktree == holder.rsplit("/", 1)[-1]
+        obligations[holder.rsplit("/", 1)[-1]].discard(name)
+        return True
+
+    monkeypatch.setattr(coordination, "journal_obligation", journal)
+    monkeypatch.setattr(coordination, "settle_obligation", settle)
+    assert cli.main(["create", "example/project", "--no-wait"]) == 0
+    assert obligations["new-worktree"] == {"returned"}
+    assert lease.release_claim("returned", "new-worktree")
+    assert not obligations["new-worktree"]
+    current[0] = "second-worktree"
+    assert cli.main(["create", "example/project", "--no-wait"]) == 0
+    assert lease.get_lease("returned").worktree == "second-worktree"
+    current[0] = "new-worktree"
+    venue.config.max_owned_codespaces = 31
+    decision = allocation.plan_creation("example/project", venue.config, "selected", {"GH_TOKEN": "fixture"})
+    assert decision.action == "create"
+    assert not obligations["new-worktree"]
+    capsys.readouterr()
 
 def test_context_refusal_after_shared_acquire_preserves_classification_and_custody(venue, monkeypatch, capsys):
     from agent_codespaces.worktrees import ContextRefused

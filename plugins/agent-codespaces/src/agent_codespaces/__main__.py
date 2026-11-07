@@ -4028,6 +4028,10 @@ def _cmd_create(args: argparse.Namespace) -> int:
             except RuntimeError as error:
                 print(f"[pressure] {error}", file=sys.stderr)
                 return _ALLOC_PRESSURE_EXIT
+            if decision.action == pool_mod.ALLOC_REUSE:
+                from .reuse import reuse_for_create
+
+                return reuse_for_create(decision, args, config, account, environment)
             if decision.action != pool_mod.ALLOC_CREATE:
                 print(f"[pressure] Retry refused: {decision.reason}", file=sys.stderr)
                 return _ALLOC_PRESSURE_EXIT

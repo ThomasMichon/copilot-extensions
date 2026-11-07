@@ -71,6 +71,10 @@ Qualified ownership is read through the selected Worktrees runtime; installing
 its Python package into the Codespaces environment is not a workaround.
 Unknown ledger reads or omitted bound obligations refuse admission. Final
 reservation checks and marker removal share the native lifecycle lock.
+Every matching obligation is checked, and holder scope includes machine and
+project, not only the worktree ID. Tokened return confirms shared release and
+original-owner ledger settlement before local cleanup. Deferred or unknown
+settlement retains the claim and reports failure; do not force-clear it.
 Unverified custom devcontainer/location preferences remain creation choices,
 not implicit permission to select another effort's venue.
 

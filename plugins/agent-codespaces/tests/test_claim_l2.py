@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import pytest
+import json
+import subprocess
 
 from agent_codespaces import coordination as coord
 from agent_codespaces import lease as lease_mod
+
+REAL_INSPECT = coord.inspect
+REAL_RENEW = coord.renew
 
 
 @pytest.fixture
@@ -15,6 +20,17 @@ def leases(monkeypatch, tmp_path):
     monkeypatch.setattr(lease_mod, "RUNTIME_DIR", tmp_path)
     monkeypatch.setattr(lease_mod, "_LOCK_FILE", tmp_path / "leases.lock")
     monkeypatch.setattr(lease_mod, "ensure_runtime_dir", lambda: None)
+    monkeypatch.setattr(lease_mod, "resolve_owner_worktree", lambda: "/wt/a")
+    monkeypatch.setattr(coord, "owner_ref", lambda: "m/p/w")
+    monkeypatch.setattr(coord, "inspect", lambda name: {
+        "state": "leased", "holder": "m/p/w",
+        "token": lease_mod._read_leases()[name].lease_token,
+    })
+    monkeypatch.setattr(coord, "_run", lambda args, **kw: subprocess.CompletedProcess(
+        args, 0, json.dumps({
+            "worktree_id": "w", "ref": args[2], "disposition": "released",
+        }), "",
+    ))
     return tmp_path
 
 
@@ -133,6 +149,32 @@ def test_reclaim_same_owner_renews_l2(leases, monkeypatch):
     assert lease.lease_token == "tok-2"
 
 
+@pytest.mark.parametrize("holder,expected", [
+    ("m/p/w#new-session", True), ("other/p/w", False), ("m/other/w", False),
+])
+def test_renew_conflict_reconciles_full_owner_and_current_token(leases, monkeypatch, holder, expected):
+    monkeypatch.setattr(coord, "acquire", _acq("a" * 40))
+    lease_mod.claim("cs-one", "/wt/a", holder_ref="m/p/w")
+
+    def run(args, **kw):
+        if args[:2] == ["lease", "renew"]:
+            return subprocess.CompletedProcess(args, 3, "", "stale fencing token")
+        assert args[:2] == ["lease", "inspect"]
+        return subprocess.CompletedProcess(args, 0, json.dumps({
+            "state": "leased", "holder": holder, "token": "b" * 40, "live": True,
+        }), "")
+
+    monkeypatch.setattr(coord, "inspect", REAL_INSPECT)
+    monkeypatch.setattr(coord, "renew", REAL_RENEW)
+    monkeypatch.setattr(coord, "_run", run)
+    if expected:
+        assert lease_mod.claim("cs-one", "/wt/a", holder_ref="m/p/w").lease_token == "b" * 40
+    else:
+        with pytest.raises(lease_mod.ClaimConflict):
+            lease_mod.claim("cs-one", "/wt/a", holder_ref="m/p/w")
+        assert lease_mod._read_leases()["cs-one"].lease_token == "a" * 40
+
+
 def test_release_claim_releases_l2(leases, monkeypatch):
     monkeypatch.setattr(lease_mod.coordination, "acquire", _acq("tok-1"))
     lease_mod.claim("cs-one", "/wt/a", holder_ref="m/p/w")
@@ -186,3 +228,66 @@ def test_legacy_lease_without_token_skips_l2_release(leases, monkeypatch):
         lambda *a, **k: pytest.fail("no L2 release without a token"),
     )
     assert lease_mod.release_claim("cs-one", "/wt/a") is True
+
+
+@pytest.mark.parametrize("release", [
+    lambda: lease_mod.release("cs-one"),
+    lambda: lease_mod.release_worktree_claims("/wt/a"),
+])
+def test_generic_and_bulk_return_keep_unknown_shared_custody(leases, monkeypatch, release):
+    monkeypatch.setattr(coord, "acquire", _acq("tok-1"))
+    lease_mod.claim("cs-one", "/wt/a", holder_ref="m/p/w")
+    before = lease_mod.LEASE_FILE.read_bytes()
+    monkeypatch.setattr(coord, "release", lambda *a, **kw: coord.L2Result("unavailable"))
+    with pytest.raises(RuntimeError, match="retained"):
+        release()
+    assert lease_mod.LEASE_FILE.read_bytes() == before
+
+
+def test_return_from_another_caller_settles_original_qualified_owner(leases, monkeypatch):
+    monkeypatch.setattr(coord, "acquire", _acq("tok-1"))
+    owner = str(leases / "original")
+    lease_mod.claim("cs-one", owner, holder_ref="m/p/w")
+    monkeypatch.setattr(lease_mod, "resolve_owner_worktree", lambda: str(leases / "caller"))
+    monkeypatch.setattr(coord, "owner_ref", lambda: "m/other/w")
+    effects = []
+
+    def run(args, **kw):
+        if args[:2] == ["claims", "owner"]:
+            payload = {"kind": "codespace", "ref": "cs-one", "owners": [{
+                "worktree_path": owner, "qualified_ref": "m/p/w", "state": "active",
+            }]}
+        else:
+            assert args == [
+                "claims", "settle", "cs-one", "--owner-ref", "m/p/w", "--json", "--released",
+            ]
+            assert effects == ["release"]
+            payload = {"worktree_id": "w", "ref": "cs-one", "disposition": "released"}
+            effects.append("settle-original")
+        return subprocess.CompletedProcess(args, 0, json.dumps(payload), "")
+
+    monkeypatch.setattr(coord, "_run", run)
+    monkeypatch.setattr(
+        coord, "release", lambda *a, **kw: effects.append("release") or coord.L2Result("ok"),
+    )
+    assert lease_mod.release_claim("cs-one", owner)
+    assert effects == ["release", "settle-original"]
+    assert lease_mod.get_lease("cs-one") is None
+
+
+@pytest.mark.parametrize("metadata", [
+    [], [{"worktree_path": "/wrong/path", "qualified_ref": "m/p/w"}],
+    [{"worktree_path": "/wt/a", "qualified_ref": "different/p/w"}],
+])
+def test_uncertain_reverse_owner_never_releases(leases, monkeypatch, metadata):
+    monkeypatch.setattr(coord, "acquire", _acq("tok-1"))
+    owner = str(leases / "original")
+    lease_mod.claim("cs-one", owner, holder_ref="m/p/w")
+    monkeypatch.setattr(lease_mod, "resolve_owner_worktree", lambda: "other")
+    monkeypatch.setattr(coord, "_run", lambda args, **kw: subprocess.CompletedProcess(
+        args, 0, json.dumps({"owners": metadata}), "",
+    ))
+    monkeypatch.setattr(coord, "release", lambda *a, **kw: pytest.fail("unconfirmed owner released"))
+    with pytest.raises(RuntimeError, match="retained"):
+        lease_mod.release_claim("cs-one", owner)
+    assert lease_mod._read_leases()["cs-one"].worktree == owner

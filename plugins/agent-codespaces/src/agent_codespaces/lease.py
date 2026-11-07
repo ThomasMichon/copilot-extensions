@@ -402,18 +402,13 @@ def borrow(
 def release(target: str, ttl: float = DEFAULT_TTL) -> bool:
     """Release a lease by CodeSpace name or effort name."""
     with _lease_lock():
-        leases = _prune(_read_leases(), ttl)
-        to_remove = [
-            c for c, lease in leases.items()
+        leases = _read_records(LEASE_FILE, Lease, fail_closed=True)
+        selected = [
+            (c, _claim_owner(lease)) for c, lease in leases.items()
             if c == target or lease.effort == target
         ]
-        if not to_remove:
-            return False
-        for c in to_remove:
-            del leases[c]
-            log.info("Released lease on '%s'", c)
-        _write_leases(leases)
-        return True
+    released = [release_claim(c, owner, ttl=ttl) for c, owner in selected]
+    return bool(released) and all(released)
 
 
 def heartbeat(codespace: str, ttl: float = DEFAULT_TTL) -> bool:
@@ -648,12 +643,12 @@ def _claim_owner(lease: Lease) -> str:
 
 
 def _same_holder_ref(a: str | None, b: str | None) -> bool:
-    """True when two ClaimRefs name the same worktree id."""
-    if not a or not b:
+    """Compare the complete owner scope, ignoring only its session suffix."""
+    if not isinstance(a, str) or not isinstance(b, str) or not a or not b:
         return False
-    aw = a.split("/")[-1].split("#")[0].strip()
-    bw = b.split("/")[-1].split("#")[0].strip()
-    return bool(aw) and aw == bw
+    aw = a.split("#", 1)[0].split("/")
+    bw = b.split("#", 1)[0].split("/")
+    return len(aw) == 3 and all(aw) and aw == bw
 
 
 def resolve_owner_worktree(
@@ -815,14 +810,14 @@ def claim(
         elif res.rejected:
             raise CoordinationRejected(res.detail)
         elif res.conflict:
-            self_conflict = same_owner or _same_holder_ref(res.holder, holder_ref)
+            self_conflict = _same_holder_ref(res.holder, holder_ref)
             if self_conflict:
                 log.info(
                     "Re-entrant claim on '%s' by its own owner '%s'; adopting "
-                    "the existing lease (L1-only; token heals on next renew).",
+                    "the existing lease.",
                     codespace, owner,
                 )
-                lease_token = prior_token
+                lease_token = res.token or prior_token
             elif not force:
                 held_local = _read_leases().get(codespace)
                 if held_local is not None:
@@ -953,37 +948,18 @@ def lease_token_for(codespace: str, ttl: float = DEFAULT_TTL) -> str | None:
 
 def release_claim(codespace: str, owner: str, ttl: float = DEFAULT_TTL) -> bool:
     """Release ``codespace``'s claim when ``owner`` still holds it."""
-    with _lease_lock():
-        leases = _prune(_read_leases(), ttl)
-        held = leases.get(codespace)
-        if not held or _claim_owner(held) != owner:
-            return False
-        token = held.lease_token
-        del leases[codespace]
-        _write_leases(leases)
-        log.info("Released claim on '%s' (owner '%s')", codespace, owner)
-    if token:
-        coordination.release(codespace, token)
-    return True
+    from .claim_return import release_claim as confirmed_release
+
+    return confirmed_release(codespace, owner)
 
 
 def release_worktree_claims(owner: str, ttl: float = DEFAULT_TTL) -> list[str]:
     """Release every claim owned by ``owner`` and tombstone any L2 leases."""
     with _lease_lock():
-        leases = _prune(_read_leases(), ttl)
-        released_tokens = {
-            cs: lease.lease_token
+        leases = _read_records(LEASE_FILE, Lease, fail_closed=True)
+        names = [
+            cs
             for cs, lease in leases.items()
             if _claim_owner(lease) == owner
-        }
-        for cs in released_tokens:
-            del leases[cs]
-        if released_tokens:
-            _write_leases(leases)
-            log.info(
-                "Released %d claim(s) for worktree '%s'", len(released_tokens), owner
-            )
-    for cs, token in released_tokens.items():
-        if token:
-            coordination.release(cs, token)
-    return list(released_tokens)
+        ]
+    return [name for name in names if release_claim(name, owner, ttl=ttl)]

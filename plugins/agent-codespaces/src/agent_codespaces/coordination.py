@@ -297,7 +297,23 @@ def _bookkeeping_run(args: list[str]) -> subprocess.CompletedProcess[str] | None
         return None
 
 
-def journal_claim(kind: str, ref: str, holder_ref: str | None) -> bool:
+def _confirmed_bookkeeping(proc, holder_ref: str, ref: str, **expected) -> bool:
+    try:
+        payload = json.loads(proc.stdout)
+    except (TypeError, ValueError):
+        return False
+    parts = holder_ref.split("#", 1)[0].split("/")
+    return (
+        len(parts) == 3 and all(parts) and isinstance(payload, dict)
+        and not payload.get("deferred") and not payload.get("released_by_earlier_finalize")
+        and payload.get("worktree_id") == parts[2] and payload.get("ref") == ref
+        and all(payload.get(key) == value for key, value in expected.items())
+    )
+
+
+def journal_claim(
+    kind: str, ref: str, holder_ref: str | None, *, confirmed: bool = False,
+) -> bool:
     """Journal any existing agent-worktrees claim kind onto ``holder_ref``.
 
     Best-effort + degrade-safe, matching :func:`journal_obligation`: no
@@ -316,10 +332,14 @@ def journal_claim(kind: str, ref: str, holder_ref: str | None) -> bool:
         log.debug("claims add %s %s degraded (exit %s): %s",
                   kind, ref, proc.returncode, (proc.stderr or "").strip())
         return False
-    return True
+    return not confirmed or _confirmed_bookkeeping(
+        proc, holder_ref, ref, kind=kind, state="active",
+    )
 
 
-def journal_obligation(name: str, holder_ref: str | None) -> bool:
+def journal_obligation(
+    name: str, holder_ref: str | None, *, confirmed: bool = False,
+) -> bool:
     """Journal a CodeSpace obligation onto the BORROWING worktree's ledger.
 
     On borrow, shells ``agent-worktrees claims add codespace <name> --owner-ref
@@ -333,11 +353,11 @@ def journal_obligation(name: str, holder_ref: str | None) -> bool:
     (deferred to the lease mirror), or any error -> ``False`` (never raises,
     never blocks the connect). Idempotent (``claims add`` dedups by ref).
     """
-    return journal_claim(KIND, name, holder_ref)
+    return journal_claim(KIND, name, holder_ref, confirmed=confirmed)
 
 
 def settle_obligation(
-    name: str, holder_ref: str | None, *, released: bool = False,
+    name: str, holder_ref: str | None, *, released: bool = False, confirmed: bool = False,
 ) -> bool:
     """Settle the borrowing worktree's CodeSpace obligation to ``at-rest``.
 
@@ -360,7 +380,9 @@ def settle_obligation(
         log.debug("claims settle for %s degraded (exit %s): %s",
                   name, proc.returncode, (proc.stderr or "").strip())
         return False
-    return True
+    return not confirmed or _confirmed_bookkeeping(
+        proc, holder_ref, name, disposition="released" if released else "at-rest",
+    )
 
 
 def mirror_disposition(
@@ -500,6 +522,18 @@ def list_leases(
     return result
 
 
+def _lease_conflict(key: str, proc, origin: str | None) -> L2Result:
+    record = inspect(key, origin=origin)
+    held = record if record and record.get("state") == "leased" and record.get("live") is not False else {}
+    token = held.get("token", "")
+    if not isinstance(token, str) or len(token) not in (40, 64) or any(c not in "0123456789abcdef" for c in token):
+        token = ""
+    return L2Result(
+        "conflict", holder=str(held.get("holder", "")), token=token,
+        detail=(proc.stderr or "").strip(),
+    )
+
+
 def acquire(
     key: str,
     holder: str,
@@ -539,9 +573,7 @@ def acquire(
             return L2Result("unavailable", detail="Receiver did not confirm a valid fencing token")
         return L2Result("ok", token=token)
     if proc.returncode == _EXIT_CONFLICT:
-        rec = inspect(key, origin=origin)
-        holder_of = str(rec.get("holder", "")) if rec else ""
-        return L2Result("conflict", holder=holder_of, detail=(proc.stderr or "").strip())
+        return _lease_conflict(key, proc, origin)
     if proc.returncode == _EXIT_COORDINATION_REJECTED:
         try:
             payload = json.loads(proc.stderr)
@@ -577,7 +609,7 @@ def renew(
     if proc.returncode == _EXIT_OK:
         return L2Result("ok", token=_parse_token(proc))
     if proc.returncode == _EXIT_CONFLICT:
-        return L2Result("conflict", detail=(proc.stderr or "").strip())
+        return _lease_conflict(key, proc, origin)
     return L2Result("unavailable", detail=(proc.stderr or "").strip())
 
 

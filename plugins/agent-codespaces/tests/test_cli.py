@@ -1166,7 +1166,12 @@ def transport(args, **kwargs):
     elif args[:2] == ["claims", "add"]:
         if not obligations:
             obligations.append({"kind": "codespace", "ref": "venue-0", "state": "active"})
-        data = {"ok": True}
+        data = {"worktree_id": "current-worktree", "kind": "codespace",
+                "ref": "venue-0", "state": "active"}
+    elif args[:2] == ["claims", "settle"]:
+        assert "--released" in args
+        obligations.clear()
+        data = {"worktree_id": "current-worktree", "ref": "venue-0", "disposition": "released"}
     else:
         raise AssertionError(args)
     return subprocess.CompletedProcess(args, 0, json.dumps(data), "")

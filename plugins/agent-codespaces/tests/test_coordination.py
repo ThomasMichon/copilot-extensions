@@ -305,6 +305,45 @@ def test_settle_obligation_degrades(monkeypatch):
     assert coord.settle_obligation("cs-one", None) is False
 
 
+@pytest.mark.parametrize("operation", ["journal", "settle"])
+@pytest.mark.parametrize("bad", [
+    "deferred", "wrong-owner", "wrong-ref", "wrong-state", "finalized", "malformed",
+])
+def test_confirmed_bookkeeping_refuses_unconfirmed_ack(monkeypatch, operation, bad):
+    payload = {
+        "worktree_id": "wt-b", "ref": "cs-one", "kind": "codespace",
+        "state": "active", "disposition": "released",
+    }
+    if bad == "deferred":
+        payload["deferred"] = True
+    elif bad == "wrong-owner":
+        payload["worktree_id"] = "other"
+    elif bad == "wrong-ref":
+        payload["ref"] = "other"
+    elif bad == "wrong-state":
+        payload.update(state="released", disposition="at-rest")
+    elif bad == "finalized":
+        payload["released_by_earlier_finalize"] = True
+    monkeypatch.setattr(
+        coord, "_run", lambda *a, **k: _proc(0, "{" if bad == "malformed" else json.dumps(payload)),
+    )
+    if operation == "journal":
+        assert not coord.journal_obligation("cs-one", "m/p/wt-b", confirmed=True)
+    else:
+        assert not coord.settle_obligation("cs-one", "m/p/wt-b", released=True, confirmed=True)
+
+
+def test_confirmed_bookkeeping_accepts_native_ack(monkeypatch):
+    def run(args, **kw):
+        return _proc(0, json.dumps({
+            "worktree_id": "wt-b", "ref": "cs-one", "kind": "codespace",
+            "state": "active", "disposition": "released",
+        }))
+
+    monkeypatch.setattr(coord, "_run", run)
+    assert coord.journal_obligation("cs-one", "m/p/wt-b#session", confirmed=True)
+    assert coord.settle_obligation("cs-one", "m/p/wt-b#session", released=True, confirmed=True)
+
 def test_renew_conflict_is_reported(monkeypatch):
     monkeypatch.setattr(coord, "_run", lambda *a, **k: _proc(3, stderr="lease lost"))
     assert coord.renew("cs-one", "a" * 40).conflict
