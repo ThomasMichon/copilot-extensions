@@ -10,6 +10,9 @@ on:
       - "plugins/agent-worktrees/scripts/managed_session.py"
       - "plugins/agent-worktrees/scripts/registry_root.py"
       - "plugins/agent-worktrees/tests/test_managed_session.py"
+      - "plugins/agent-worktrees/scripts/hook-facts.ps1"
+      - "plugins/agent-worktrees/scripts/post-tool-hook.ps1"
+      - "plugins/agent-worktrees/tests/test_post_tool_shell.py"
 
 permissions:
   contents: read
@@ -29,7 +32,7 @@ jobs:
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
-      - name: Require actual Windows PowerShell and PowerShell 7 membership controls
+      - name: Require actual Windows PowerShell and PowerShell 7 membership and post-tool controls
         env:
           AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP: "1"
           PYTHONUTF8: "0"
@@ -37,7 +40,8 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py agent-worktrees
           --test-file tests/test_managed_session.py
-          -k prepared_cell_membership
+          --test-file tests/test_post_tool_shell.py
+          -k "prepared_cell_membership or registered_prepared_cell"
           --allow-explicit-tiers --test-timeout 30 --timeout 300
 
   prepared-membership-linux:

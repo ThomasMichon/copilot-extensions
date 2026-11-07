@@ -151,12 +151,12 @@ requirements are not supplied by these files.
 ### Windows read-event consumer
 
 The ordinary PowerShell entry loads the library in the same shell.
-For legacy native Windows `view`, `rg` and `glob` events within the 1 MiB
+For prepared native Windows `view`, `rg` and `glob` events within the 1 MiB
 prepared-event bound, including outstanding late-guidance watches, evaluation
 has no synchronous resident request, command
 discovery or Python fallback. Read events do not need mutation invalidation.
 The native-write subset below shares this shell-safe evaluation. Other tools,
-installation cells and oversized events keep their original entry and
+unprepared installation cells and oversized events keep their original entry and
 behavior. This is not the complete shell-only transition.
 
 The reader checks the original prepared membership and all its input witnesses.
@@ -231,7 +231,8 @@ notification through the existing hook TCP endpoint. The running receiver
 advertises `read-hook-demand-v1` in `hook_capabilities` and its process-local
 `hook_generation` through the same bounded discovery record. This support is
 independent of advisory-row availability, reminder opt-out and late guidance.
-It is currently selected only for legacy native Windows prepared read events.
+It is selected for native Windows prepared read events, including the
+qualified installation-cell subset below.
 
 The version-1 notification contains only `version`, `kind`, `token`,
 `hook_generation` and `deadline`; it carries no tool arguments, session content
@@ -293,7 +294,7 @@ advisory reply, recomputation or lifecycle boot in this notification branch.
 Transport completion is not acceptance or fresh-status proof. Lost/rejected
 notices leave the existing periodic/TTL refresh backstop in charge; they are
 not durably queued. These isolated source controls do not establish installed
-composition, cold/cell/POSIX entry or whole-hook throughput acceptance.
+composition, cold/unprepared-cell/POSIX entry or whole-hook throughput acceptance.
 
 ### Windows native-batch consumer
 
@@ -328,7 +329,7 @@ invalidate their targets and use the original mutation wake.
 Reminders and late-guidance consumption run once per outer event, not per
 call. No current event is replayed, and a lost notification retains the
 existing refresh backstop rather than asserting fresh status. This source
-consumer does not qualify shell batches, installed behavior, cold/cell/POSIX
+consumer does not qualify shell batches, installed behavior, cold/unprepared-cell/POSIX
 entry, complete hook composition or actual throughput.
 
 ### Windows single-shell consumer
@@ -404,7 +405,41 @@ remain authoritative. Accepted reads renew demand without mutation wake;
 accepted mutations use the original invalidation and wake. Lost notifications
 retain the original refresh backstop and never certify fresh status. This
 qualifies only the isolated prepared Windows source consumer, not installed
-composition, cold/cell/POSIX entry or actual throughput.
+composition, cold/unprepared-cell/POSIX entry or actual throughput.
+
+### Prepared installation-cell post-tool consumer
+
+The same registered Windows entry also consumes the complete prepared-cell
+membership described below. Supported reads, native writes, native/read
+batches and single shell events use the existing event normalization,
+notification capabilities, reminder accounting and late-guidance owners.
+They introduce no new wire format, parser, publisher or lifecycle.
+
+Only after current prepared membership succeeds does the shell select the
+runtime directory beside the exact context pointer. That membership has
+already validated the SDK's canonical marketplace/plugin layout and all
+receipt/manifest witnesses. Passive discovery must match that cell's
+marketplace directory identity, exact install receipt and plugin root before
+either notification or advisory-row consumption. Legacy or foreign
+discovery in the selected cell is unavailable, not a reason to try another
+cell or the legacy endpoint. Producer metadata in the advisory view still
+must match the selected discovery and runtime exactly.
+
+Cell reminders retain their original cell-local `nudge-state` directory;
+legacy discovery and reminder locations above are unchanged. Live opt-out
+does not suppress demand or late guidance. Notifications and reminder
+accounting remain once per outer event, and late notices suppress only the
+original disposition counter. Missing rows do not suppress independent
+idle demand or late guidance.
+
+Old or incompatible cell membership, cold admission, directory-source
+namespaces, oversized events and unsupported batches retain their original
+entry route. This warm-path migration does not remove or qualify their
+Python fallback. A qualified warm event with unavailable/old discovery
+stays shell-only and skips the optional notification without retry or replay.
+The existing 1-MiB event/membership, 16-KiB discovery/fact and 50-ms send
+bounds remain unchanged. Source-native controls are not installed,
+composed-latency, POSIX, recovery or actual-throughput acceptance.
 
 ### Prepared Windows membership reuse
 
@@ -481,9 +516,9 @@ field and retain their old cell path. New readers use an old producer's
 association only after its original resolver supplies the required observation;
 they never infer cell support from the schema number alone. An older SDK
 without validated-read capture support supplies no prepared cell observation,
-and retains its normal original-owner admission. This qualifies
-prepared native Windows membership, not complete cell post-tool dispatch,
-shell-only cold reconstruction, installed hooks or composed throughput.
+and retains its normal original-owner admission. This membership proof alone
+does not establish the post-tool consumer above, shell-only cold reconstruction,
+installed hooks or composed throughput.
 
 ## Qualified resident native saves
 
