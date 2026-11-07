@@ -68,12 +68,14 @@ def _write_policy(profile: Path, *, enabled: bool) -> None:
     )
 
 
-def test_resolved_installed_engine_caches_outside_selected_slot(monkeypatch, tmp_path):
+@pytest.mark.parametrize("layout", ["flat", "application"])
+def test_resolved_installed_engine_caches_outside_selected_slot(monkeypatch, tmp_path, layout):
     from worktree_manager import engine_client
 
     root = tmp_path / ".agent-worktrees"
     slot = root / "versions" / "1.2.3"
-    venv.EnvBuilder(with_pip=False).create(slot)
+    environment_root = slot / ".venv" if layout == "application" else slot
+    venv.EnvBuilder(with_pip=False).create(environment_root)
     (slot / ".install-complete.json").write_text(json.dumps({
         "version": slot.name, "completed_at": "2026-11-01T11:00:00Z",
         "pid": 1, "payload_hash": "a" * 64,
@@ -82,7 +84,7 @@ def test_resolved_installed_engine_caches_outside_selected_slot(monkeypatch, tmp
     (root / "deploy-manifest.json").write_text(json.dumps({
         "service": "agent-worktrees", "source": {"plugin": "agent-worktrees"},
     }), encoding="utf-8")
-    site = slot / (
+    site = environment_root / (
         "Lib/site-packages" if os.name == "nt"
         else f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
     )
