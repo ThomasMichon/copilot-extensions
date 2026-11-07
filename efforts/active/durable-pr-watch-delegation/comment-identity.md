@@ -130,6 +130,8 @@ than being reconstructed from today's worktree or an equal-content comment.
    cannot claim that every publisher enforces it.
    The [bounded source inventory](comment-publication-inventory.md) records
    current owner paths and explicit preapproved-body composition qualification.
+   Review the [existing-owner intent binding](comment-intent-binding.md) before
+   admitting structured preparation or changing strict storage/receiver shapes.
 4. **C3 - Observation/receipt correlation:** qualify actual preparation ->
    original native attempt -> retained outcome -> acquisition/mapping, including
    lost results and copied tags, through the existing owners.
