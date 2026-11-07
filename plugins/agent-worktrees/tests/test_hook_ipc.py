@@ -2036,11 +2036,11 @@ def test_session_start_guidance_rejects_state_root_escape(
 def test_reparse_detection_does_not_require_creating_a_link():
     path = SimpleNamespace(
         lstat=lambda: SimpleNamespace(
-            st_mode=hook_client.stat.S_IFDIR,
-            st_file_attributes=hook_client.stat.FILE_ATTRIBUTE_REPARSE_POINT,
+            st_mode=hook_client._RUNTIME.stat.S_IFDIR,
+            st_file_attributes=hook_client._RUNTIME.stat.FILE_ATTRIBUTE_REPARSE_POINT,
         )
     )
-    assert hook_client._is_link_or_reparse(path)
+    assert hook_client._RUNTIME.is_link_or_reparse(path)
 
 
 def test_session_start_guidance_fails_open_on_resolve_loop(
@@ -2224,14 +2224,19 @@ def test_session_start_main_writes_guidance_floor_when_enrichment_fails(
     assert output.err.count("Session guidance degraded") == 1
     assert f"[agent-worktrees] Session guidance degraded (reason: {reason}).\n" in output.err
     assert decided == []
-    content = _guidance_file(tmp_path, "floor-session").read_text(encoding="utf-8")
+    target = _guidance_file(tmp_path, "floor-session")
+    if not runtime:
+        # A payload missing its co-deployed runtime helper keeps the stderr warning.
+        assert not target.exists()
+        return
+    content = target.read_text(encoding="utf-8")
     assert content.startswith("# Agent Worktrees session guidance\n\n")
     assert content.count("[agent-worktrees] Warning:") == 1
     assert f"session guidance is degraded (reason: {reason})" in content
     assert "`get worktree-dir`" in content
     assert "`state-root --pair --json`" in content
     assert "ParamSpec" not in content and "Traceback" not in content
-    assert ("<!-- agent-worktrees:session-guidance " in content) is runtime
+    assert "<!-- agent-worktrees:session-guidance " in content
 
 
 def test_session_start_catalog_matches_native_emitter(monkeypatch, tmp_path):

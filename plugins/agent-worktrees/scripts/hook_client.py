@@ -11,7 +11,6 @@ import re
 import signal
 import shutil
 import socket
-import stat
 import subprocess
 import sys
 import time
@@ -303,51 +302,12 @@ def _machine_context(payload: dict, home: Path) -> str:
     return _RUNTIME.machine_context(context, hostname=socket.gethostname())
 
 
-def _payload_commands() -> tuple[str, list[dict]]:
-    scripts = Path(__file__).resolve().parent
-    windows = os.name == "nt"
-    script = scripts / ("emit-command-catalog.ps1" if windows else "emit-command-catalog.sh")
-    # The generated declaration is shared with the native catalog emitter.
-    prefix = "# payload-command-catalog-contract: "
-    declaration = next(
-        line[len(prefix):]
-        for line in script.read_text(encoding="utf-8").splitlines()
-        if line.startswith(prefix)
-    )
-    contract = json.loads(declaration)
-    if contract["plugin"] != "agent-worktrees":
-        raise ValueError("Catalog declaration belongs to another plugin")
-    suffix = ""
-    shell = "direct"
-    if windows:
-        shim = contract["windowsCatalogShim"]
-        if shim not in {"powershell", "cmd"}:
-            raise ValueError("Unsupported catalog command shim")
-        suffix = ".ps1" if shim == "powershell" else ".cmd"
-        shell = "direct" if shim == "powershell" else "cmd"
-    root = scripts.parent
-    installer = scripts / ("install.ps1" if windows else "install.sh")
-    commands = []
-    for command in contract["commands"]:
-        path = root / (command["relativePath"] + suffix)
-        ready = path.is_file() and installer.is_file()
-        if not windows:
-            ready = ready and os.access(path, os.X_OK)
-        commands.append({
-            "id": command["id"],
-            "argv": [str(path)],
-            "shell": shell,
-            "purpose": command["purpose"],
-            "availability": "ready" if ready else "unavailable",
-        })
-    return contract["plugin"], commands
-
-
 def _command_catalog_context() -> str:
+    scripts = Path(__file__).resolve().parent
     previous_bytecode = sys.dont_write_bytecode
     sys.dont_write_bytecode = True
     try:
-        plugin, commands = _payload_commands()
+        plugin, commands = _RUNTIME.payload_commands(scripts)
         helper = _load_sibling("command_binding.py")
         if helper is None:
             raise ValueError("Payload command binding helper is unavailable")
@@ -358,8 +318,7 @@ def _command_catalog_context() -> str:
             "payload": {"provenance": "payload-local"},
             "commands": commands,
             "binding": helper.binding_for_payload(
-                Path(__file__).resolve().parents[1], plugin,
-                Path.home() / ".agent-worktrees",
+                scripts.parent, plugin, Path.home() / ".agent-worktrees"
             ),
         }
         if callable(add_projection := getattr(_load_sibling("resident_control_projection.py"), "add_to_catalog", None)):
@@ -392,40 +351,6 @@ def _guidance_degraded_reason(error: BaseException | None = None) -> str:
     return "session-start-error"
 
 
-def _guidance_floor(reason: str) -> str:
-    """Return the minimal truthful cue used when enrichment is unavailable."""
-    try:
-        command = next(
-            (
-                item["argv"][0] for item in _payload_commands()[1]
-                if item["id"] == "agent-worktrees" and item["availability"] == "ready"
-            ),
-            "",
-        )
-    except Exception:
-        command = ""
-    invoke = f"`{command}`" if command else "the installed `agent-worktrees` command"
-    return (
-        f"[agent-worktrees] Warning: session guidance is degraded (reason: {reason}); "
-        "the session command catalog is unavailable this session.\n\n"
-        f"Obtain lifecycle facts directly with {invoke}: `get worktree-dir` "
-        "returns this session's managed worktree directory (empty outside one), "
-        "and `state-root --pair --json` returns the resolved state root and any "
-        "paired worktree."
-    )
-
-
-def _is_link_or_reparse(path: Path) -> bool:
-    try:
-        metadata = path.lstat()
-    except OSError:
-        return True
-    return stat.S_ISLNK(metadata.st_mode) or bool(
-        getattr(metadata, "st_file_attributes", 0)
-        & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
-    )
-
-
 def _guidance_content(enriched: dict, home: Path, decision_context: str) -> str:
     registration = _registration_context(enriched, home)
     metadata = enriched.get("_agentWorktrees")
@@ -443,7 +368,9 @@ def _guidance_content(enriched: dict, home: Path, decision_context: str) -> str:
         if not isinstance(catalog, str) or not catalog.startswith(_COMMAND_CATALOG_HEADING):
             catalog = _command_catalog_context()
         if not catalog:
-            catalog = floor = _guidance_floor(_guidance_degraded_reason())
+            catalog = floor = _RUNTIME.guidance_floor(
+                _guidance_degraded_reason(), Path(__file__).resolve().parent
+            )
         for context in (catalog, registration):
             if context and context not in contexts:
                 contexts.append(context)
@@ -462,33 +389,6 @@ def _guidance_content(enriched: dict, home: Path, decision_context: str) -> str:
             + machine + "\n" + marker
         )
     return content
-
-
-def _guidance_target(home: Path, session_id: str) -> Path | None:
-    copilot_root = home / ".copilot"
-    copilot_root.mkdir(exist_ok=True)
-    if _is_link_or_reparse(copilot_root):
-        return None
-    unresolved_state_root = copilot_root / "session-state"
-    unresolved_state_root.mkdir(exist_ok=True)
-    if _is_link_or_reparse(unresolved_state_root):
-        return None
-    state_root = unresolved_state_root.resolve()
-    unresolved_session_root = state_root / session_id
-    unresolved_session_root.mkdir(exist_ok=True)
-    if _is_link_or_reparse(unresolved_session_root):
-        return None
-    session_root = unresolved_session_root.resolve()
-    session_root.relative_to(state_root)
-    instructions_dir = session_root / "instructions"
-    instructions_dir.mkdir(exist_ok=True)
-    if _is_link_or_reparse(instructions_dir):
-        return None
-    target_dir = instructions_dir / "agent-worktrees"
-    target_dir.mkdir(exist_ok=True)
-    if _is_link_or_reparse(target_dir):
-        return None
-    return target_dir / "session-guidance.instructions.md"
 
 
 def _write_session_guidance(
@@ -511,7 +411,7 @@ def _write_session_guidance(
         else _enrich_session_payload(payload)
     )
     try:
-        target = _guidance_target(home, session_id)
+        target = _RUNTIME.guidance_target(home, session_id)
         if target is None:
             return False
         return _RUNTIME.write_guidance(
@@ -528,39 +428,24 @@ def _write_guidance_floor(payload: dict, reason: str, *, home: Path | None = Non
     session_id = payload.get("sessionId")
     if not isinstance(session_id, str) or not _SESSION_IDENTIFIER.fullmatch(session_id):
         return False
-    content = _GUIDANCE_HEADER + _guidance_floor(reason) + "\n"
-    temporary = None
+    metadata = payload.get("_agentWorktrees")
+    owned = {
+        **payload,
+        "_agentWorktrees": {
+            "pluginVersion": _plugin_version(),
+            **(metadata if isinstance(metadata, dict) else {}),
+        },
+    }
     try:
-        target = _guidance_target(home or Path.home(), session_id)
-        if target is None:
-            return False
-        if _RUNTIME is not None:
-            metadata = payload.get("_agentWorktrees")
-            owned = {
-                **payload,
-                "_agentWorktrees": {
-                    "pluginVersion": _plugin_version(),
-                    **(metadata if isinstance(metadata, dict) else {}),
-                },
-            }
-            return _RUNTIME.write_guidance(
-                target, lambda: content + _RUNTIME.guidance_marker(owned),
-                owned, claim_launch=True,
-            )
-        temporary = target.with_name(f".session-guidance.{os.getpid()}.tmp")
-        with open(temporary, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(content)
-        os.replace(temporary, target)
-        temporary = None
-        return True
+        scripts = Path(__file__).resolve().parent
+        content = _GUIDANCE_HEADER + _RUNTIME.guidance_floor(reason, scripts) + "\n"
+        target = _RUNTIME.guidance_target(home or Path.home(), session_id)
+        return target is not None and _RUNTIME.write_guidance(
+            target, lambda: content + _RUNTIME.guidance_marker(owned),
+            owned, claim_launch=True,
+        )
     except Exception:
         return False
-    finally:
-        if temporary is not None:
-            try:
-                temporary.unlink()
-            except OSError:
-                pass
 
 
 def _resident_started(payload: dict, home: Path) -> bool:
