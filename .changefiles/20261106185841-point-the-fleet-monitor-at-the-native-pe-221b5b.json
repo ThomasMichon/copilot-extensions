@@ -1,0 +1,9 @@
+{
+  "comment": "Point the fleet monitor at the native per-project fleet/list readers with derived-state liveness, explicit coverage gaps and bounded remote-read rules instead of an all-projects session-history sweep",
+  "changes": [
+    {
+      "plugin": "agent-roles",
+      "type": "patch"
+    }
+  ]
+}
