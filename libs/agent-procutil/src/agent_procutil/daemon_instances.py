@@ -327,7 +327,7 @@ class DaemonInstanceGuard:
 
     def protect(self) -> DaemonInstanceProtection:
         """Retain current-process work that must settle before retirement."""
-        from ._daemon_instance_store import change_protection
+        from ._daemon_instance_records import change_protection
 
         if self._closed:
             raise ValueError("daemon admission guard is closed")
@@ -356,7 +356,7 @@ class DaemonInstanceProtection:
         self._closed = False
 
     def close(self) -> None:
-        from ._daemon_instance_store import change_protection
+        from ._daemon_instance_records import change_protection
 
         if not self._closed:
             change_protection(self.receipt, -1)
