@@ -14,6 +14,25 @@ from .providers import attribution
 COMMENT_ORIGIN_PROTOCOL = "agent-worktrees.comment-origin/v1"
 
 
+def resolve_comment_origin(
+    source_root: Path, config: cfg.Config, *, visibility: str = "public",
+) -> dict[str, object]:
+    """Resolve one explicitly selected managed producer, without ambient CWD."""
+    root = source_root.resolve(strict=True)
+    if not source_root.is_absolute() or not root.is_dir():
+        raise ValueError("an explicit managed producer root is required")
+    identity = tracking.find_worktree_id_by_cwd(str(root), project=config.repo_name)
+    record = tracking.load_record_by_id(
+        identity, tracking_path=cfg.tracking_dir(config.repo_name),
+    ) if identity else None
+    if (
+        record is None or record.repo != config.repo_name or not record.worktree_path
+        or Path(record.worktree_path).resolve(strict=True) != root
+    ):
+        raise ValueError("selected producer differs from its managed source")
+    return prepare_comment_origin(record, config, visibility=visibility)
+
+
 def add_parsers(sub) -> None:
     parser = sub.add_parser(
         "attribution-prepare", allow_abbrev=False,

@@ -216,6 +216,15 @@ the same sanitized warning contract as managed publication.
 
 ## Compact comment-origin producer
 
+Trusted in-process embeddings may call
+`attribution_prepare_cli.resolve_comment_origin(source_root, config, visibility=...)`
+with their actual source-owner configuration and an absolute exact managed root.
+It resolves the current record in that configured project and requires that
+record's repository/root to match, independently of ambient CWD. A nested
+directory, missing record or differently registered root refuses. The returned
+projection has the same existing comment-origin contract below; this does not
+load an AI profile, authorize a publication or enroll a service.
+
 The optional comment-origin mode produces data for the separately reviewed
 [comment-identity contract](../../../../../efforts/active/durable-pr-watch-delegation/comment-identity.md),
 not a PR-ownership marker or a posted comment:
