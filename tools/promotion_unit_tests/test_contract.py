@@ -90,6 +90,29 @@ def test_noncanonical_or_git_source_is_refused(path):
         relative_file(path)
 
 
+def test_catalog_data_is_hash_bound_but_never_executable_unit_source(tmp_path):
+    name = "libs/payload-invocation/templates/catalog-python.tmpl"
+    data = manifest()
+    content = b"def emitted() -> str:\n    return 'catalog'\n"
+    data["sources"][name] = hashlib.sha256(content).hexdigest()
+    assert admit_manifest(data) == data
+    for source in data["sources"]:
+        path = tmp_path / source
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content if source == name else b"pass\n")
+        data["sources"][source] = hashlib.sha256(path.read_bytes()).hexdigest()
+    verify_sources(tmp_path, data["sources"])
+    (tmp_path / name).write_bytes(content + b"\n")
+    with pytest.raises(UnitEvidenceError, match="changed without admission"):
+        verify_sources(tmp_path, data["sources"])
+    with pytest.raises(UnitEvidenceError, match="source must be"):
+        relative_file(name.replace("catalog-python", "unreviewed"))
+    with pytest.raises(UnitEvidenceError, match="outside the admitted unit packet"):
+        admit_manifest({**data, "nodes": [name + "::test_template"]})
+    with pytest.raises(UnitEvidenceError, match="coverage target"):
+        admit_manifest({**data, "coverage_targets": [name]})
+
+
 @pytest.mark.parametrize("change", [
     {"profile": "full"},
     {"nodes": []},

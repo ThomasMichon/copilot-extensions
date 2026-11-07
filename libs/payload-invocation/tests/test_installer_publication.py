@@ -1,5 +1,10 @@
 """Cell staging and retained backend admission use the real deployment owner."""
 from __future__ import annotations
+from collections.abc import Iterator
+from types import ModuleType
+from typing import Any, cast
+from importlib.machinery import ModuleSpec
+from importlib.abc import Loader
 
 import ast
 import importlib.machinery
@@ -13,16 +18,19 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
+from test_command_binding import PowerShellFactory
 
 from test_command_binding import (
     ROOT, _activate, _snapshot, _write,
-    binding_fixture as binding_fixture,
-    powershell_host as powershell_host,
+    binding_fixture as _binding_fixture,
+    powershell_host as _powershell_host,
 )
 from test_native_publication import SHELLS, _command, _native_fixture, _run
+binding_fixture = _binding_fixture
+powershell_host = _powershell_host
 
 
-def _installer_environment(fixture: dict, shell: str) -> dict:
+def _installer_environment(fixture: dict[str, Any], shell: str) -> dict[str, str]:
     environment = _native_fixture(fixture, shell)
     if os.name != "nt":
         # The relocated child has a fresh CLR; its OS-account lookup must use
@@ -36,8 +44,8 @@ def _installer_environment(fixture: dict, shell: str) -> dict:
 
 
 def _cell(
-    fixture: dict, environment: dict, *, durable_home: Path | None = None,
-) -> tuple[Path, dict]:
+    fixture: dict[str, Any], environment: dict[str, str], *, durable_home: Path | None = None,
+) -> tuple[Path, dict[str, Any]]:
     cell = _activate(fixture, fixture["payload"], durable_home=durable_home)
     _write(fixture["home"] / ".copilot-extensions/installation-mode.json", {
         "schema": "copilot-extensions.installation-mode", "version": 1,
@@ -52,7 +60,7 @@ def _cell(
     return root, arguments
 
 
-def _policy(fixture: dict, root: Path, arguments: dict, state: str) -> None:
+def _policy(fixture: dict[str, Any], root: Path, arguments: dict[str, Any], state: str) -> None:
     if state == "missing":
         return
     primitive = fixture["primitive"]
@@ -75,7 +83,7 @@ def _policy(fixture: dict, root: Path, arguments: dict, state: str) -> None:
 @pytest.mark.parametrize("state", ["managed", "invalid", "foreign", "future"])
 @pytest.mark.parametrize("action", ["install", "update", "repair", "dev", "dev-release"])
 def test_cell_installer_refuses_before_staging(
-    binding_fixture: dict, shell: str, state: str, action: str, powershell_host,
+    binding_fixture: dict[str, Any], shell: str, state: str, action: str, powershell_host: PowerShellFactory,
 ) -> None:
     environment = _installer_environment(binding_fixture, shell)
     root, arguments = _cell(binding_fixture, environment)
@@ -110,7 +118,7 @@ def test_cell_installer_refuses_before_staging(
 @pytest.mark.parametrize("state", ["missing", "standalone"])
 @pytest.mark.parametrize("mode_enabled", [True, False])
 def test_cell_installer_standalone_still_stages(
-    binding_fixture: dict, shell: str, state: str, mode_enabled: bool, powershell_host,
+    binding_fixture: dict[str, Any], shell: str, state: str, mode_enabled: bool, powershell_host: PowerShellFactory,
 ) -> None:
     environment = _installer_environment(binding_fixture, shell)
     root, arguments = _cell(binding_fixture, environment)
@@ -142,7 +150,7 @@ def test_cell_installer_standalone_still_stages(
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows Git Bash")
 @pytest.mark.parametrize("state", ["missing", "standalone"])
 def test_windows_bash_cell_standalone_preserves_staging(
-    binding_fixture: dict, state: str,
+    binding_fixture: dict[str, Any], state: str,
 ) -> None:
     git = shutil.which("git")
     bash = Path(git).resolve().parent.parent / "bin/bash.exe" if git else None
@@ -166,13 +174,13 @@ def test_windows_bash_cell_standalone_preserves_staging(
 
 
 @pytest.fixture
-def backend(binding_fixture: dict, monkeypatch: pytest.MonkeyPatch):
+def backend(binding_fixture: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     scripts = ROOT / "plugins/agent-worktrees/scripts"
     monkeypatch.syspath_prepend(str(scripts))
     spec = importlib.util.spec_from_file_location("publication_backend", scripts / "runtime_install.py")
-    module = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, spec.name, module)
-    spec.loader.exec_module(module)
+    module = importlib.util.module_from_spec(cast(ModuleSpec, spec))
+    monkeypatch.setitem(sys.modules, cast(ModuleSpec, spec).name, module)
+    cast(Loader, cast(ModuleSpec, spec).loader).exec_module(module)
     monkeypatch.setitem(sys.modules, "runtime_install", module)
     monkeypatch.delitem(sys.modules, "runtime_install_modes", raising=False)
     for key, value in binding_fixture["environment"].items():
@@ -182,7 +190,7 @@ def backend(binding_fixture: dict, monkeypatch: pytest.MonkeyPatch):
     # The resolver is unchanged; only its OS-profile identity uses the isolated home.
     real_exec = importlib.machinery.SourceFileLoader.exec_module
 
-    def execute(loader, target):
+    def execute(loader: importlib.machinery.SourceFileLoader, target: ModuleType) -> None:
         real_exec(loader, target)
         if target.__name__ == "_worktrees_installation_context":
             current = target._current_environment
@@ -198,12 +206,12 @@ def backend(binding_fixture: dict, monkeypatch: pytest.MonkeyPatch):
 @pytest.mark.parametrize("state", ["managed", "invalid", "foreign", "future"])
 @pytest.mark.parametrize("entry", ["install", "mode", "settle"])
 def test_direct_backend_refuses_before_product_writes(
-    binding_fixture: dict, backend, monkeypatch: pytest.MonkeyPatch,
+    binding_fixture: dict[str, Any], backend: ModuleType, monkeypatch: pytest.MonkeyPatch,
     cell: bool, state: str, entry: str,
 ) -> None:
     root, arguments = binding_fixture["legacy"], binding_fixture["arguments"]
     if cell:
-        environment = {}
+        environment: dict[str, str] = {}
         root, arguments = _cell(binding_fixture, environment)
         monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", environment["COPILOT_EXTENSIONS_CONTEXT"])
     _policy(binding_fixture, root, arguments, state)
@@ -229,11 +237,11 @@ def test_direct_backend_refuses_before_product_writes(
 @pytest.mark.parametrize("cell", [False, True])
 @pytest.mark.parametrize("state", ["missing", "standalone"])
 def test_backend_standalone_and_policy_recheck(
-    binding_fixture: dict, backend, monkeypatch: pytest.MonkeyPatch, cell: bool, state: str,
+    binding_fixture: dict[str, Any], backend: ModuleType, monkeypatch: pytest.MonkeyPatch, cell: bool, state: str,
 ) -> None:
     root, arguments = binding_fixture["legacy"], binding_fixture["arguments"]
     if cell:
-        environment = {}
+        environment: dict[str, str] = {}
         root, arguments = _cell(binding_fixture, environment)
         monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", environment["COPILOT_EXTENSIONS_CONTEXT"])
     _policy(binding_fixture, root, arguments, state)
@@ -251,9 +259,9 @@ def test_backend_standalone_and_policy_recheck(
 
 
 def test_cell_backend_rechecks_after_actual_publication_locks(
-    binding_fixture: dict, backend, monkeypatch: pytest.MonkeyPatch,
+    binding_fixture: dict[str, Any], backend: ModuleType, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    environment = {}
+    environment: dict[str, str] = {}
     root, arguments = _cell(binding_fixture, environment)
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", environment["COPILOT_EXTENSIONS_CONTEXT"])
     governance = backend.Governance(root, binding_fixture["payload"])
@@ -261,7 +269,7 @@ def test_cell_backend_rechecks_after_actual_publication_locks(
     observed = []
 
     @contextmanager
-    def held(*args, **kwargs):
+    def held(*args: Any, **kwargs: Any) -> Iterator[Any]:
         with original(*args, **kwargs) as lock:
             observed.append(kwargs["kind"])
             if kwargs["kind"] == "install":
@@ -279,7 +287,7 @@ def test_cell_backend_rechecks_after_actual_publication_locks(
 
 
 def test_backend_management_requires_real_live_legacy_lease(
-    binding_fixture: dict, backend, monkeypatch: pytest.MonkeyPatch,
+    binding_fixture: dict[str, Any], backend: ModuleType, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fixture = binding_fixture
     _policy(fixture, fixture["legacy"], fixture["arguments"], "managed")
@@ -299,7 +307,7 @@ def test_backend_management_requires_real_live_legacy_lease(
 
 @pytest.mark.parametrize("state", ["managed", "missing", "standalone"])
 def test_retained_backend_admits_without_source_modules(
-    binding_fixture: dict, backend, state: str,
+    binding_fixture: dict[str, Any], backend: ModuleType, state: str,
 ) -> None:
     fixture = binding_fixture
     retained = fixture["home"] / "retained/.runtime-bootstrap"
@@ -324,9 +332,10 @@ def test_retained_backend_admits_without_source_modules(
     _policy(fixture, fixture["legacy"], fixture["arguments"], state)
     program = (
         "import importlib.machinery,json,sys\n"
+        "from types import ModuleType\n"
         f"sys.path.insert(0,{str(retained)!r})\n"
         "load=importlib.machinery.SourceFileLoader.exec_module\n"
-        "def isolated(loader,module):\n"
+        "def isolated(loader: importlib.machinery.SourceFileLoader,module: ModuleType) -> None:\n"
         " load(loader,module)\n"
         " if module.__name__=='_worktrees_installation_context':\n"
         "  current=module._current_environment\n"

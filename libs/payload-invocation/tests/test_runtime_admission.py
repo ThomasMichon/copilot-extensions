@@ -1,5 +1,6 @@
 """Self-contained SDK packaging, without enabling an installation consumer."""
 from __future__ import annotations
+from typing import Any, cast
 
 import json
 import importlib.util
@@ -18,13 +19,13 @@ from test_generate import _manifest, _required_context_manifest, generator
     ("publish_python_artifacts", "repository adapter"),
     ("unselected_external_tooling", "undeclared toolkit dependency"),
 ])
-def test_packaging_refuses_unowned_dependency_expansion(tmp_path, dependency, error):
+def test_packaging_refuses_unowned_dependency_expansion(tmp_path: Path, dependency: str, error: str) -> None:
     source = generator.TEMPLATES.parent / "runtime_admission.py"
     spec = importlib.util.spec_from_file_location("_toolkit_closure_control", source)
     assert spec and spec.loader
     packager = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(packager)
-    packager.ENTRY_MODULES = ("runtime_profile_policy",)
+    setattr(packager, "ENTRY_MODULES", ("runtime_profile_policy",))
     (tmp_path / "tools").mkdir()
     (tmp_path / "libs").mkdir()
     (tmp_path / "worktree-manager" / "src").mkdir(parents=True)
@@ -35,7 +36,7 @@ def test_packaging_refuses_unowned_dependency_expansion(tmp_path, dependency, er
         packager.expected_files(tmp_path)
 
 
-def _enabled(tmp_path):
+def _enabled(tmp_path: Path) -> Path:
     manifest = _required_context_manifest(tmp_path)
     data = json.loads(manifest.read_text(encoding="utf-8"))
     data["runtimeAdmissionToolkit"] = True
@@ -43,7 +44,7 @@ def _enabled(tmp_path):
     return manifest
 
 
-def test_toolkit_packaging_is_opt_in_and_requires_installation_context(tmp_path):
+def test_toolkit_packaging_is_opt_in_and_requires_installation_context(tmp_path: Path) -> None:
     manifest = _manifest(tmp_path)
     assert not any("_runtime_admission" in path.parts for path in generator.expected_files(manifest))
     data = json.loads(manifest.read_text(encoding="utf-8"))
@@ -57,7 +58,7 @@ def test_toolkit_packaging_is_opt_in_and_requires_installation_context(tmp_path)
         generator.expected_files(manifest)
 
 
-def test_generated_toolkit_imports_and_resources_are_payload_local(tmp_path):
+def test_generated_toolkit_imports_and_resources_are_payload_local(tmp_path: Path) -> None:
     manifest = _enabled(tmp_path)
     generated = generator.expected_files(manifest)
     toolkit = manifest.parent / "scripts" / "_runtime_admission"
@@ -77,6 +78,9 @@ def test_generated_toolkit_imports_and_resources_are_payload_local(tmp_path):
     )
     script = """
 import importlib, importlib.abc, json, pathlib, sys
+from collections.abc import Sequence
+from importlib.machinery import ModuleSpec
+from types import ModuleType
 root = pathlib.Path(sys.argv[1]).resolve()
 sys.path.insert(0, str(root.parent))
 import _runtime_admission
@@ -87,7 +91,7 @@ blocked = {
     "publish_python_artifacts", "promote_release",
 }
 class RejectRepositoryAdapters(importlib.abc.MetaPathFinder):
-    def find_spec(self, fullname, path=None, target=None):
+    def find_spec(self, fullname: str, path: Sequence[str] | None = None, target: ModuleType | None = None) -> ModuleSpec | None:
         if fullname in blocked:
             raise AssertionError("unexpected repository adapter: " + fullname)
 sys.meta_path.insert(0, RejectRepositoryAdapters())
@@ -110,14 +114,14 @@ print("self-contained-admission-toolkit-ok")
     result = subprocess.run(
         [sys.executable, "-I", "-c", script, str(toolkit)],
         cwd=tmp_path, capture_output=True, text=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=cast(Any, subprocess).CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "self-contained-admission-toolkit-ok"
 
 
 @pytest.mark.parametrize("adapter", ["posix", "powershell"])
-def test_generated_toolkit_executes_copied_installation_adapters(tmp_path, adapter):
+def test_generated_toolkit_executes_copied_installation_adapters(tmp_path: Path, adapter: str) -> None:
     if adapter == "posix":
         if os.name == "nt":
             pytest.skip("the POSIX adapter requires a native POSIX host")
@@ -152,7 +156,7 @@ def test_generated_toolkit_executes_copied_installation_adapters(tmp_path, adapt
             key: value for key, value in os.environ.items()
             if key not in {"PYTHONPATH", "COPILOT_PLUGIN_ROOT", "COPILOT_EXTENSIONS_CONTEXT"}
         },
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=cast(Any, subprocess).CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout)["canonical"] == "github:example/marketplace"
@@ -160,7 +164,7 @@ def test_generated_toolkit_executes_copied_installation_adapters(tmp_path, adapt
     assert not (tmp_path / "durable").exists()
 
 
-def test_generated_toolkit_preserves_and_checks_binary_adapter_resource(tmp_path):
+def test_generated_toolkit_preserves_and_checks_binary_adapter_resource(tmp_path: Path) -> None:
     manifest = _enabled(tmp_path)
     assert generator.process_manifest(manifest, check=False) == []
     relative = Path("libs") / "installation-context" / "daemon_instance_runtime.pyz"

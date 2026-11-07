@@ -1,5 +1,7 @@
 """Exercise the actual shared-template adopters before cold first-use writes."""
 from __future__ import annotations
+from typing import Any, cast
+from collections.abc import Callable
 
 import os
 import json
@@ -15,10 +17,11 @@ import pytest
 
 from test_adopter_publication import _adopter, _command
 from test_command_binding import (
-    POWERSHELL, ROOT, _snapshot, _write, binding_fixture as binding_fixture,
+    POWERSHELL, ROOT, _snapshot, _write, binding_fixture as _binding_fixture,
 )
 from test_installer_publication import _policy
 from test_native_publication import _completed_slot, _run
+binding_fixture = _binding_fixture
 
 
 def _release_payload(destination: Path, plugin: str) -> Path:
@@ -55,7 +58,7 @@ def _release_payload(destination: Path, plugin: str) -> Path:
 @pytest.mark.portfolio_tier("T3")
 @pytest.mark.parametrize("older_source", [False, True])
 def test_ssh_restamp_preserves_selected_snapshot_identity(
-    binding_fixture: dict, tmp_path: Path, older_source: bool,
+    binding_fixture: dict[str, Any], tmp_path: Path, older_source: bool,
 ) -> None:
     released = _release_payload(tmp_path / "release", "agent-ssh")
     environment = _adopter(binding_fixture, "agent-ssh", released)
@@ -97,7 +100,7 @@ def test_ssh_restamp_preserves_selected_snapshot_identity(
     ("agent-codespaces", "healthy-unicode"),
 ])
 def test_shared_actual_stamp_first_use_admission(
-    binding_fixture: dict, tmp_path: Path, plugin: str, state: str,
+    binding_fixture: dict[str, Any], tmp_path: Path, plugin: str, state: str,
 ) -> None:
     released = _release_payload(tmp_path / "release", plugin)
     environment = _adopter(binding_fixture, plugin, released)
@@ -117,7 +120,7 @@ def test_shared_actual_stamp_first_use_admission(
         stamp_command += [
             "-InstallDir" if os.name == "nt" else "--install-dir", str(binding_fixture["legacy"]),
         ]
-    stamped = (
+    stamped: subprocess.CompletedProcess[Any] = (
         subprocess.run(
             stamp_command, env=environment, cwd=binding_fixture["home"],
             capture_output=True, timeout=30,
@@ -197,7 +200,7 @@ def test_shared_actual_stamp_first_use_admission(
         ["ssh", "--remote-cmd", 'echo "spaces & pipes | semicolons ; bangs !"']
     )
     command = (
-        [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(wrapper.with_suffix(".ps1")), *forwarded]
+        [cast(str, POWERSHELL), "-NoLogo", "-NoProfile", "-File", str(wrapper.with_suffix(".ps1")), *forwarded]
         if os.name == "nt" else [str(wrapper), *forwarded]
     )
     before = _snapshot(root)
@@ -245,7 +248,7 @@ def test_shared_actual_stamp_first_use_admission(
 
 @pytest.mark.portfolio_tier("T3")
 def test_codespaces_actual_first_use_serializes_one_build(
-    binding_fixture: dict, tmp_path: Path,
+    binding_fixture: dict[str, Any], tmp_path: Path,
 ) -> None:
     released = _release_payload(tmp_path / "release", "agent-codespaces")
     environment = _adopter(binding_fixture, "agent-codespaces", released)
@@ -276,7 +279,7 @@ def test_codespaces_actual_first_use_serializes_one_build(
     suffix = "ps1" if os.name == "nt" else "sh"
     installer = snapshot / f"scripts/install.{suffix}"
     if os.name == "nt":
-        quote = lambda path: "'" + str(path).replace("'", "''") + "'"
+        quote: Callable[[object], str] = lambda path: "'" + str(path).replace("'", "''") + "'"
         installer.write_text(
             f"[IO.File]::AppendAllText({quote(calls)}, \"build`n\")\n"
             "Start-Sleep -Seconds 1\n"
@@ -298,7 +301,7 @@ def test_codespaces_actual_first_use_serializes_one_build(
         environment.pop(key, None)
     wrapper = binding_fixture["home"] / ".local/bin/agent-codespaces"
     command = (
-        [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(wrapper.with_suffix(".ps1")), "version"]
+        [cast(str, POWERSHELL), "-NoLogo", "-NoProfile", "-File", str(wrapper.with_suffix(".ps1")), "version"]
         if os.name == "nt" else [str(wrapper), "version"]
     )
     processes = [
@@ -322,7 +325,7 @@ def test_codespaces_actual_first_use_serializes_one_build(
     "resolver-bin-file", "resolver-directory",
 ])
 def test_actual_restamp_failure_preserves_previous_selection(
-    binding_fixture: dict, tmp_path: Path, plugin: str, failure: str,
+    binding_fixture: dict[str, Any], tmp_path: Path, plugin: str, failure: str,
 ) -> None:
     released = _release_payload(tmp_path / "release", plugin)
     environment = _adopter(binding_fixture, plugin, released)
@@ -381,7 +384,7 @@ def test_actual_restamp_failure_preserves_previous_selection(
 @pytest.mark.parametrize("namespaced", [False, True])
 @pytest.mark.parametrize("managed", [False, True])
 def test_payload_uses_selected_publication_policy(
-    binding_fixture: dict, tmp_path: Path, plugin: str, invocation: str, namespaced: bool, managed: bool,
+    binding_fixture: dict[str, Any], tmp_path: Path, plugin: str, invocation: str, namespaced: bool, managed: bool,
 ) -> None:
     released = _release_payload(tmp_path / "release", plugin) if invocation == "provision" else None
     environment = _adopter(binding_fixture, plugin, released)
@@ -441,7 +444,7 @@ def test_payload_uses_selected_publication_policy(
             if os.name == "nt":
                 script = str(binding_fixture["payload"] / "scripts/runtime-gate.ps1").replace("'", "''")
                 command = [
-                    POWERSHELL, "-NoLogo", "-NoProfile", "-Command",
+                    cast(str, POWERSHELL), "-NoLogo", "-NoProfile", "-Command",
                     f"$limit = 5; & '{script}' prune --max $limit; exit $LASTEXITCODE",
                 ]
             else:
@@ -492,7 +495,7 @@ def test_payload_uses_selected_publication_policy(
 
 
 def _codespaces_actual_provision_preserves_global_commands(
-    fixture: dict, environment: dict, root: Path, *, managed: bool, namespaced: bool,
+    fixture: dict[str, Any], environment: dict[str, str], root: Path, *, managed: bool, namespaced: bool,
 ) -> None:
     environment.pop("COPILOT_PLUGIN_INSTALL_SMOKE", None)
     payload = fixture["payload"]
@@ -564,7 +567,7 @@ def _codespaces_actual_provision_preserves_global_commands(
 
 @pytest.mark.portfolio_tier("T3")
 @pytest.mark.skipif(os.name == "nt", reason="POSIX resolver return status")
-def test_codespaces_payload_resolver_failure_remains_visible(binding_fixture: dict) -> None:
+def test_codespaces_payload_resolver_failure_remains_visible(binding_fixture: dict[str, Any]) -> None:
     environment = _adopter(binding_fixture, "agent-codespaces")
     environment["AGENT_CODESPACES_PAYLOAD_ROOT"] = str(binding_fixture["payload"])
     environment["AGENT_CODESPACES_HOME"] = str(binding_fixture["legacy"])

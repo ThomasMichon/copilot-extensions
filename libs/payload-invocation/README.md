@@ -361,3 +361,35 @@ python libs/payload-invocation/generate.py --all --check
 
 Generated files are committed. CI runs `--all --check` so templates, manifests,
 and payload copies cannot drift.
+
+## Static checking
+
+The canonical pending project also checks four portable in-process catalog
+witnesses (single/multi command and PowerShell/CMD catalog). The fixed
+`python-catalog-inputs.json` declaration binds the real validator and renderer;
+the checker never imports the generator. Diagnostics retain template lines or
+the separate flight-expression source range. These witnesses do not qualify
+actual consumer copies, shell execution, toolkit activation or native runtime
+behavior, and do not change this project's pending status.
+
+The four canonical programs belong to `lib-payload-invocation` in
+`tools/typecheck-projects.json`, checked on Python 3.10 and 3.11.
+The test/helper tree belongs to `lib-payload-invocation-tests`, checked on
+Python 3.11: its native installer fixtures import `tomllib` and the real
+installer backend, which also imports `tomllib`. The packaged admission
+toolkit independently requires 3.11 tooling. These tooling requirements
+do not raise the Python 3.10 floor of ordinary generated command shims.
+The checker uses the existing hash-locked YAML SDK, including official PyYAML
+stubs, for the test suite's YAML boundary.
+
+```text
+python tools/typecheck.py lib-payload-invocation lib-payload-invocation-tests --prepare
+python tools/typecheck.py lib-payload-invocation lib-payload-invocation-tests --strict
+```
+
+Real installer import roots are declared on the test project. Admission remains
+pending until emitted Python source correspondence and the native, candidate
+and generated-copy qualification lanes pass. Checking the physical files alone
+does not check Python embedded in catalog templates or test fixture strings.
+JSON records and dynamically loaded installation modules retain explicit
+dynamic boundaries; the test host factory and subprocess results are typed.
