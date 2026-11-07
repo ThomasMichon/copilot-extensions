@@ -164,9 +164,12 @@ Coverage is explicit, never inferred:
 - **Registration is not checked per host.** Confirm that an empty list comes
   from a host that registers the project before counting it as empty.
 - **Passive read.** `list --passive` makes one bounded attempt to read the
-  host's status-monitor and never starts, recovers, or waits for it, and
-  records no list demand. If the monitor does not answer, the host returns its
-  saved roster and the row carries `availability` (`status: "advisory"`) and
+  host's status-monitor and never starts, recovers, waits for or wakes it, and
+  records no list or producer demand, so repeated sweeps cannot trigger scans
+  or hold off idle retirement. If the monitor does not answer, has not
+  published the project, or predates the demand-free read and rejects it, the
+  host returns its saved roster and the row carries `availability`
+  (`status: "advisory"`) and
   `projection.observed_at`: saved rows that may be stale. A host with no saved
   roster, or an older runtime that rejects `--passive` as an unrecognized
   argument, becomes a `reachable: false` gap. A saved roster never proves a
@@ -1208,10 +1211,15 @@ The internal bounded/advisory reader and explicitly selected saved-preview
 bootstrap retain their separate contracts; saved rows are never labeled current.
 `list --json --passive` selects that bounded reader for unattended and
 cross-host reads such as `fleet`: one resident attempt that never starts,
-recovers or waits for the resident and records no list demand; otherwise the
-saved roster labeled `availability.status: "advisory"` with its
-`projection.observed_at`, or a JSON error (exit 1) when none is saved. It
-cannot be combined with `--follow`, `--glance` or `--refresh`. Runtimes that
+recovers, waits for or wakes the resident and records no list or producer
+demand (the request carries `passive: true`, which the resident honors by
+neither renewing scan demand nor waking its producer for an unpublished
+project); otherwise the saved roster labeled `availability.status: "advisory"`
+with its `projection.observed_at`, or a JSON error (exit 1) when none is saved.
+A resident that predates the marker rejects it as an invalid request; the
+passive read then also returns the labeled saved roster, never a demand read. It
+cannot be combined with `--follow`, `--glance` or `--refresh`, and the feed
+refuses a passive subscription. Runtimes that
 predate it reject `--passive` as an unrecognized argument (exit 2).
 `--stream --follow` holds the engine-owned snapshot/update feed. See the
 [engine/Picker contract](engine-picker-contract.md) for barriers, order,

@@ -465,6 +465,11 @@ one indexed slot; it does not backfill sessions or enumerate the fleet.
 The existing authenticated monitor control endpoint advertises
 `worktrees-current-v1`. Its request carries `contract_version: 1`, project,
 optional status/platform/ID/codename selection and Boolean `include_missing`.
+An optional Boolean `passive: true` marks a demand-free read: the resident
+answers from its publication but neither renews project scan demand nor wakes
+its producer for an unpublished project, and the feed refuses it. Residents
+that predate the field reject it as `invalid-request`; a passive client then
+returns the labeled advisory saved roster, never a demand read.
 Results carry `ok`, `contract_version`, `worktrees` and `projection`:
 schema version, generation, revision, observation timestamp, complete-roster
 and selected-row counts, and quality. Current rows are independently bounded to 64 KiB and omit

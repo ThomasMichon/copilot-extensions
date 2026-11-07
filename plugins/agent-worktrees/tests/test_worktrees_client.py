@@ -355,6 +355,107 @@ def test_passive_list_rejects_follow(capfd):
     assert "--passive cannot be combined" in json.loads(capfd.readouterr().out)["error"]
 
 
+def _serve_passive_resident(tmp_path, monkeypatch, handler):
+    """Serve ``handler`` on the real control transport for a passive ``cmd_list``."""
+    token_path = tmp_path / "token"
+    token_path.write_text("fixture-token")
+    server = control.ControlServer(lambda action, payload: handler(payload), token="fixture-token")
+    server.start()
+    monkeypatch.setattr(
+        client.routing, "read_active_endpoint",
+        lambda *a, **kw: SimpleNamespace(base_url=f"http://127.0.0.1:{server.port}"),
+    )
+    monkeypatch.setattr(control, "control_token_path", lambda runtime_home=None: token_path)
+    monkeypatch.setattr(client.monitor, "_aw_runtime_home", lambda: tmp_path)
+    monkeypatch.setattr(client.monitor, "_status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(list_cli, "_status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(list_cli.cfg, "project_name", lambda: "project")
+    monkeypatch.setattr(
+        client.monitor, "_ensure_status_monitor", lambda: pytest.fail("started the resident"),
+    )
+    monkeypatch.setattr(client.time, "sleep", lambda _: pytest.fail("waited for the resident"))
+    monkeypatch.setattr(
+        list_cli.list_cache, "note_demand", lambda *a, **k: pytest.fail("recorded demand"),
+    )
+    return server
+
+
+def _passive_list(capfd):
+    rc = list_cli.cmd_list(argparse.Namespace(
+        json=True, passive=True, tracking_status="all", all=True, include_other_platforms=True,
+    ))
+    return rc, json.loads(capfd.readouterr().out)
+
+
+def test_passive_list_against_a_running_resident_records_no_producer_demand(
+    tmp_path, monkeypatch, capfd, no_caller_compute,
+):
+    """A passive read of an unpublished project reaches the running resident
+    with the demand-free marker, so it neither renews scan demand nor wakes the
+    producer; an ordinary read of the same project still does both."""
+    wakes = []
+    owner = runtime.WorktreesRuntime(
+        tmp_path / "worktrees-current.sqlite3", wake=SimpleNamespace(set=lambda: wakes.append(1)),
+    )
+    owner.activate()
+    wakes.clear()
+    seen = []
+
+    def handle(payload):
+        seen.append(dict(payload))
+        return owner.handle(payload)
+
+    server = _serve_passive_resident(tmp_path, monkeypatch, handle)
+    try:
+        rc, result = _passive_list(capfd)
+        assert rc == 1 and "worktrees" not in result
+        assert seen and all(payload["passive"] is True for payload in seen)
+        assert wakes == [] and owner.demand_projects() == set()
+
+        with pytest.raises(projection.ProjectionUnavailable):
+            client.read_current(request(), recover=False)
+        assert wakes == [1] and owner.demand_projects() == {"project"}
+    finally:
+        server.close()
+        owner.shutdown()
+
+
+def test_passive_list_falls_back_to_saved_roster_when_an_older_resident_rejects_it(
+    tmp_path, monkeypatch, capfd, no_caller_compute,
+):
+    """A resident that predates the demand-free marker rejects unknown request
+    fields; the passive read returns the labeled advisory saved roster instead
+    of failing or retrying as a demand read."""
+    owner = runtime.WorktreesRuntime(tmp_path / "worktrees-current.sqlite3")
+    owner.activate()
+    owner.publish("project", [{"id": "saved"}], observed_at=1)
+    old_fields = runtime._FIELDS - {"passive"}
+    seen = []
+
+    def older_resident(payload):
+        seen.append(dict(payload))
+        if set(payload) - old_fields:
+            return owner._failure("invalid-request", "invalid current-roster request fields")
+        return owner.handle(payload)
+
+    server = _serve_passive_resident(tmp_path, monkeypatch, older_resident)
+    try:
+        rc, result = _passive_list(capfd)
+        assert rc == 0
+        assert result["worktrees"] == [{"id": "saved"}]
+        assert result["availability"]["status"] == "advisory"
+        assert "rejected the passive read" in result["availability"]["reason"]
+        assert result["projection"]["quality"] == "advisory"
+        assert len(seen) == 1 and owner.demand_projects() == set()
+
+        ordinary = client.read_current(request(), recover=False)
+        assert ordinary["projection"]["quality"] == "current"
+        assert "passive" not in seen[-1]
+    finally:
+        server.close()
+        owner.shutdown()
+
+
 @pytest.mark.parametrize("birth", [None, "12345"])
 def test_confirmed_dead_route_recovers_before_attempting_transport(
     tmp_path, monkeypatch, no_caller_compute, birth,

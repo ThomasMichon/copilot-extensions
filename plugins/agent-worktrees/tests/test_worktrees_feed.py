@@ -235,6 +235,20 @@ def test_legacy_feed_never_receives_unnegotiated_bootstrap(tmp_path):
         owner.shutdown()
 
 
+def test_feed_refuses_a_passive_subscription_without_recording_demand(tmp_path):
+    owner = WorktreesRuntime(tmp_path / "current.sqlite3")
+    owner.activate()
+    owner.publish("project", [{"id": "one"}], observed_at=1)
+    stream = owner.feed.stream(request(passive=True), lambda: False)
+    try:
+        frame = next(stream)
+        assert frame["type"] == "error" and frame["error"]["code"] == "invalid-request"
+        assert owner.demand_projects() == set()
+    finally:
+        stream.close()
+        owner.shutdown()
+
+
 def test_cli_saved_bootstrap_flushes_bounded_transactions_before_connecting(
     tmp_path, monkeypatch, capsys,
 ):

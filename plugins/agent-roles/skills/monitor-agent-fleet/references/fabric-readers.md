@@ -32,13 +32,16 @@ covers **only the selected project**, so one call is incomplete for all-agent
 discovery: active work also lives in other registered projects.
 
 `--passive` makes one bounded attempt to read the host's status-monitor and
-never starts, recovers or waits for it. When the monitor is not answering, the
-host returns its saved roster with `availability.status == "advisory"`; that
-row's `availability` and `projection.observed_at` mark it as saved and possibly
-stale. A host with no saved roster, or an older runtime that rejects
-`--passive` as an unrecognized argument, returns an error that is a coverage
-gap. Do not fall back to a plain or `--cache-only` `list --json`: either may
-start a stopped status-monitor and wait for a fresh publication. A saved or
+never starts, recovers, waits for or wakes it, nor renews its scan demand, so
+repeated sweeps cannot trigger scans or hold off its idle retirement. When the
+monitor is not answering, has not published the project, or predates the
+demand-free read, the host returns its saved roster with
+`availability.status == "advisory"`; that row's `availability` and
+`projection.observed_at` mark it as saved and possibly stale. A host with no
+saved roster, or an older runtime that rejects `--passive` as an unrecognized
+argument, returns an error that is a coverage gap. Do not fall back to a plain
+or `--cache-only` `list --json`: either may start a stopped status-monitor, wait
+for a fresh publication and renew its scan demand. A saved or
 unlabeled roster never proves a delegate's caller gone or terminal: `fleet`
 reports a caller missing from it as `unknown` and keeps the delegate
 non-finalizable (`host-roster-advisory`).

@@ -235,8 +235,12 @@ def read_current(request: dict, *, recover: bool = True, wait: bool = False) -> 
     recovery_pending = False
     try:
         return _resident(request)
-    except ProjectionError:
-        raise
+    except ProjectionError as exc:
+        # A resident that predates the demand-free marker rejects it; a passive
+        # read then degrades to the labeled saved roster, never to a demand read.
+        if request.get("passive") is not True:
+            raise
+        unavailable = f"resident rejected the passive read: {exc}"
     except _ResidentUnready as exc:
         unavailable = str(exc)
         recovery_pending = True
@@ -321,6 +325,8 @@ def emit_current(args) -> int:
         else cfg.detect_platform(),
         "include_missing": bool(getattr(args, "all", False)),
     }
+    if passive:
+        request["passive"] = True
     key = list_cache.cache_key(
         args, project=request["project"], tracking_status=args.tracking_status
     )

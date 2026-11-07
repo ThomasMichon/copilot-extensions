@@ -88,7 +88,7 @@ def test_fabric_reader_inventories_per_project_without_false_zeroes() -> None:
         "covers **only the selected project**",
         "enumerate projects on each target host, never only on the observer",
         "agent-worktrees --project <name> list --json --passive",
-        "never starts, recovers or waits for it",
+        "never starts, recovers, waits for or wakes it, nor renews its scan demand",
         "Do not fall back to a plain or `--cache-only` `list --json`",
         "repos list --strict --json",
         "require `inventory_authority == \"complete\"`",
