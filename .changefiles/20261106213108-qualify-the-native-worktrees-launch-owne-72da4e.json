@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify the native Worktrees launch owner across fresh launch and same-session resume with isolated broker, seed and process receipts",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

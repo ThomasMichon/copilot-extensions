@@ -2347,6 +2347,21 @@ Run the expensive current-runtime matrix explicitly on Windows with
 `python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_native_seed_runtime.py --allow-explicit-tiers --timeout 1000 --plugin-timeout 1600`.
 The existing `native` discovery exclusion keeps it out of ordinary unit CI.
 
+For the actual Worktrees Python launch owner, select
+`tests/native/test_headed_worktrees_copilot.py` with
+`COPILOT_DRIVER_HEADED_MUX_E2E=1`, `COPILOT_NATIVE_TEST_EXECUTABLE` naming an
+existing native Copilot executable, and an existing PSMux/PowerShell installation.
+Run `python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_headed_worktrees_copilot.py --allow-explicit-tiers --timeout 300 --plugin-timeout 600 --test-timeout 180`.
+This focused lane uses the managed test environment, a loopback-only model
+provider, disposable Copilot state and the runner's private mux namespace.
+It checks a literal staged seed, fresh launch and same-session native resume,
+broker prompts, real child PID/birth receipts, seed non-replay and exact
+fixture retirement. Discovery uses a read-only adapter to the real private mux,
+not the host's default server or fabricated successful replies.
+It does not install a runtime or qualify copied setup, the full Manager/embody
+planner, guarded-head recovery, physical terminal input or survival after
+caller cleanup Jobs. Those remain separate acceptance lanes.
+
 The optional native runtime-removal portfolio includes
 `tools/test_installer_engine_uninstall.py`,
 `tools/test_installer_engine_commands.py`,
