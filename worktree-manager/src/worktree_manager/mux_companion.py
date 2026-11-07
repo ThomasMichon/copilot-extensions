@@ -389,6 +389,7 @@ class MuxCompanionApp(CompanionPrMixin, App):
         yield Footer()
 
     def on_mount(self) -> None:
+        self.query_one("#views", TabbedContent).hide_tab("agenda-tab")
         self._timeline_panel.set_demand_visible(False)
         self._reload()
         self.set_interval(5, self._poll_attention)
@@ -548,6 +549,14 @@ class MuxCompanionApp(CompanionPrMixin, App):
     def _update_agenda(self) -> None:
         agenda = self.query_one("#agenda", Static)
         frame = self._data.agenda
+        # The tab exists only for heads that produced an agenda. Loading,
+        # reconnects and errors keep the last settled visibility so it never flickers.
+        if self._data.agenda_error is None and isinstance(frame, dict):
+            views = self.query_one("#views", TabbedContent)
+            if frame.get("availability") == "not-published":
+                views.hide_tab("agenda-tab")
+            else:
+                views.show_tab("agenda-tab")
         # Graph lanes only line up unwrapped, so long rows end in an ellipsis.
         agenda.set_class(
             self._data.agenda_error is None and isinstance(frame, dict)

@@ -7,6 +7,12 @@ publication authority. Manager owns only process lifetime, wire admission and
 presentation. No plugin package is imported and Manager reads no agenda file,
 resident route, token or socket directly.
 
+The tab is offered only for heads that produced an agenda. It starts hidden,
+appears once an `observed` or `head-changed` frame is admitted, and hides again
+on `not-published`. Loading, reconnects and errors keep the last settled
+visibility, so a transient failure never flickers the tab away. Manager infers
+no fallback agenda from conversation history.
+
 After the ordinary current-worktree reload, project comes from `worktree.repo`.
 When that is absent, the constructor's observer project is usable only if its
 worktree ID matches the selected worktree. Exactly one `is_head: true` session
