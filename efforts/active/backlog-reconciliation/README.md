@@ -238,8 +238,11 @@ preserves #2316's complete interactive/loopback and native-session contract as
 an independent proposed planning lane under OPEN #2709. The source remains
 separate and OPEN with its claimant, architecture decision and native owners
 unchanged; no actual receiving, reassignment or retirement is claimed.
-Review the proposal before any additive tracker realization. The complete
-814-issue census remains 85 above fixed 729; Phase 2 stays Active.
+After reviewed #11331, the complete same-parent supplement and direct unchecked
+P1/P2/PV1 references are published in OPEN #2709. Whole live readback preserves
+every incumbent byte, check state, discussion and owner. #2316 stays separate,
+unchanged and OPEN; this is planning, not source acceptance or retirement.
+The complete 815-issue census remains 86 above fixed 729; Phase 2 stays Active.
 
 The [Windows retained-writer intake](<journal/2026/11.07 windows-retained-writer-intake.md>)
 receives complete #11311 directly in OPEN #6917 as independent MR9/MRV10,
@@ -2959,6 +2962,11 @@ Windows-host and real Linux PTY/process-lifetime conditions remain independent.
 Candidate #2318 is CLOSED, non-draft and unmerged; that status is not source
 acceptance or a description of a currently active draft.
 All source and campaign completion checkboxes stay unchanged.
+Actual same-parent planning realization is independently read back: the
+12,669-character supplement retains the complete original and three refinements,
+and the 65,437-character body preserves its 64,909-character incumbent prefix
+exactly. The direct P1/P2/PV1 rows remain unchecked. Only 99 characters of
+body headroom remain; future intake must preserve existing requirements.
 
 The [Windows retained-writer intake](<journal/2026/11.07 windows-retained-writer-intake.md>)
 retains complete #11311 and its source-research refinement in actual #6917.
