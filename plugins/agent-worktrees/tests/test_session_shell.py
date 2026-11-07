@@ -133,7 +133,7 @@ def test_headed_admission_preserves_wrapper_and_literal_native_arguments(launch,
         "bash", str(wrapper),
     ]
     native = ["copilot", "--session-id", "chosen", "--log-dir", "--resume=literal",
-              "-i", "one\n' \" & $literal", r"-C=C:\two words"]
+              "-i", "one\n' \" & $literal", "-C", "--resume=literal-directory", r"-C=C:\two words"]
     command = launch_seed_exec.deferred_command(
         [*prefix, "--", *native], record, admission_only=True, preserve_seed_id="retained",
     )
@@ -162,6 +162,18 @@ def test_headed_admission_preserves_wrapper_and_literal_native_arguments(launch,
     expected = wrapper.read_bytes()
     shutil.rmtree(runtime)
     assert copied.read_bytes() == expected
+
+
+@pytest.mark.parametrize("identity, selected", [
+    ([], None), (["--session-id", "chosen"], "chosen"),
+])
+def test_headed_selection_does_not_promote_a_directory_value_to_a_session(identity, selected):
+    command = ["copilot", *identity, "-C", "--resume=literal-directory"]
+    assert launch_seed_exec._headed_session(command) == selected
+    if selected:
+        from agent_remote_driver.headed.launcher import _native_request
+
+        assert _native_request(command, selected) is None
 
 
 @pytest.mark.parametrize("ambient, environment, mux, legacy", [

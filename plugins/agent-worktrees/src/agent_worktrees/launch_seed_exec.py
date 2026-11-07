@@ -481,7 +481,7 @@ def _headed_session(command: list[str]) -> str | None:
                     return None
                 value = command[index]
             selected.append(value)
-        elif not separator and name in VALUE_OPTIONS:
+        elif not separator and (name in VALUE_OPTIONS or name == "-C"):
             index += 1
         index += 1
     return selected[0] if len(selected) == 1 and selected[0] else None

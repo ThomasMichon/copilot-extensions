@@ -2430,6 +2430,8 @@ passes a literal `--log-dir` value through the real retained archive and
 verifies native exit. The Worktrees copied-wrapper controls call the same
 validator on the delivered native argv; no native Copilot or rollout is
 implied by these finite-process checks.
+The `headed_selection` controls also keep a selector-shaped split `-C` value
+from inventing a conversation, while preserving a real selected conversation.
 
 The optional native runtime-removal portfolio includes
 `tools/test_installer_engine_uninstall.py`,

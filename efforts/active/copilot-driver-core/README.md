@@ -1899,3 +1899,15 @@ exact core table and Worktrees re-export under restored synthetic namespaces,
 without importing application actors. Update only those source hashes and the
 fixture hash; unit nodes, coverage targets, effect restrictions and deadlines
 remain unchanged. The fixed admission still needs the required complete packet.
+
+The normal required unit packet passes at `d264b15e88`, confirming the repaired
+actor-free closure without dropping nodes or restrictions. The source guard
+still identifies a missing Bridge consumer changefile, also found in review:
+the shared core is packaged by Bridge as well as Worktrees and Driver. Add
+that consumer's patch declaration rather than bypassing the release guard.
+
+Worktrees' session detector also needs the same split `-C` value boundary that
+Driver already honors. A selector-shaped directory must not invent a session
+or hide a real one. Four focused detector/copied-wrapper/real-validator
+controls pass in 1.63 seconds (65.95 seconds including preparation and cleanup).
+These narrow corrections still require exact-head review and required CI.
