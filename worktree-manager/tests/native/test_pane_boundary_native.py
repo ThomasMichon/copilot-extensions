@@ -38,8 +38,12 @@ def functions():
     )
 
 
-@pytest.mark.parametrize("failure", ["prompt", "receipt", "publication", "token", "command", "child-exit"])
-def test_wrapper_validation_cancels_and_command_dispatch_preserves_exit(tmp_path, failure):
+@pytest.mark.parametrize(
+    ("failure", "nested"),
+    [(failure, False) for failure in ("prompt", "receipt", "publication", "token", "command", "child-exit")]
+    + [("child-exit", True), ("script-exit", True)],
+)
+def test_wrapper_validation_cancels_and_command_dispatch_preserves_exit(tmp_path, failure, nested):
     pwsh = shutil.which("pwsh")
     assert pwsh, "PowerShell 7 is required"
     probe, boundaries, child = (tmp_path / name for name in ("probe", "boundaries", "child"))
@@ -74,19 +78,34 @@ def test_wrapper_validation_cancels_and_command_dispatch_preserves_exit(tmp_path
     backend = [str(tmp_path / "missing-command")] if failure == "command" else [
         pwsh, "-NoProfile", "-Command", f"[IO.File]::WriteAllText({quote(child)},'started');exit 7",
     ]
+    if failure == "script-exit":
+        payload = tmp_path / "payload.ps1"
+        payload.write_text(
+            f"[IO.File]::WriteAllText({quote(child)},'started');exit 7\n", encoding="utf-8",
+        )
+        backend = [str(payload), "literal argument"]
+    arguments = [
+        "-AwManagerRoot", str(tmp_path / "Manager"), "-AwProject", "example",
+        "-AwWt", "worktree", "-AwMuxSession", "wt-worktree", "-AwPsmuxBin", "test-mux",
+        *controls, *backend,
+    ]
+    entry = [str(driver), *arguments]
+    if nested:
+        manifest = tmp_path / "pane-args.json"
+        manifest.write_text(
+            json.dumps({"version": 1, "wrapper": str(driver), "argv": arguments}), encoding="utf-8",
+        )
+        entry = [str(WRAPPER.with_name("pane-launch.ps1")), "-Manifest", str(manifest)]
     with ExitStack() as locks:
         if failure == "publication":
             locks.enter_context(receipt.open("rb"))
         result = subprocess.run(
-            [pwsh, "-NoProfile", "-NoLogo", "-File", str(driver),
-             "-AwManagerRoot", str(tmp_path / "Manager"), "-AwProject", "example",
-             "-AwWt", "worktree", "-AwMuxSession", "wt-worktree", "-AwPsmuxBin", "test-mux",
-             *controls, *backend],
+            [pwsh, "-NoProfile", "-NoLogo", "-File", *entry],
             cwd=tmp_path, env=dict(os.environ, WORKTREE_PANE_MIN_RUNTIME="0", WORKTREE_PANE_WAIT_TIMEOUT="0"),
             stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=15, **no_window_kwargs(),
         )
-    assert child.exists() is (failure == "child-exit")
-    if failure in {"command", "child-exit"}:
+    assert child.exists() is (failure in {"child-exit", "script-exit"})
+    if failure in {"command", "child-exit", "script-exit"}:
         assert result.returncode == 0, result.stdout + result.stderr
         expected = 127 if failure == "command" else 7
         assert boundaries.read_text(encoding="utf-8").splitlines() == ["start:0", f"end:{expected}"]

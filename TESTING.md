@@ -2519,15 +2519,29 @@ qualification, activation and startup-outcome refusals while accepting native
 path aliases. These are distinct from full native Copilot launch, desktop or
 all-caller-cleanup-Job qualification.
 With both `COPILOT_NATIVE_TEST_EXECUTABLE` and
-`COPILOT_DRIVER_HEADED_MUX_E2E=1`, that same application case also invokes its
-actual packaged Manager launcher through the existing private native
-`manager-no-mux` flow. Fresh and resumed offline Copilot conversations must
+`COPILOT_DRIVER_HEADED_MUX_E2E=1`, the application fixture selects separate
+`manager-no-mux` and `manager-mux` cases through its actual packaged launcher.
+Run each selector in a separate contained invocation; construction and native
+calls share each case's unchanged 300-second deadline, not a combined budget.
+Fresh and resumed offline Copilot conversations must
 expose the common broker, retain one history and publish exact native
 process/exit receipts after disposable Manager source inputs are gone.
-Application construction, native calls and resident cleanup share the existing
-300-second case deadline. The Worktrees resolver remains the managed test
-runtime; this does not qualify an installed Worktrees application, Manager mux
-metadata, desktop attachment or caller cleanup-Job escape.
+The mux case also reads the installed Manager's registry through its own
+interpreter: each live CLI pane must match the private mux incarnation and
+become an exact exit-code tombstone before the next conversation resumes.
+The private adapter embeds its sole allowed write target and log path, and
+reads the current namespace from a fixture-owned file; callbacks and residents
+need not inherit routing variables from a caller that has already returned.
+The constructed cases omit additional warm-reuse launches; the copied-script
+mux control retains that separate coverage. Without the native prerequisites,
+the fixture still constructs only one launcher-discovery case.
+The Worktrees resolver remains the managed test runtime; this does not qualify
+an installed Worktrees application, resident status painting, desktop attachment
+or caller cleanup-Job escape. Manager's focused
+`tests/native/test_pane_boundary_native.py -k validation_cancels` controls
+preserve both native-command and script exit codes when the real pane reader
+enters its wrapper in a nested PowerShell scope. Bash already reads its
+child's `$?`; the automatic-variable shadowing correction is Windows-only.
 
 Manager's `tests/test_shutdown_exit.py` also runs the application probe in
 bounded children with the CPython 3.13 shutdown-workaround branch armed.
