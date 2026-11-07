@@ -18,6 +18,36 @@ DELEGATION_SCHEMA = "copilot-extensions.project-update-delegation"
 DELEGATION_VERSION = 1
 
 
+def _targeted_payload_install_capability(prefix: Path) -> bool:
+    try:
+        import plugin_activation
+        from . import update_acquisition, update_cli, update_driver_cli, update_options, update_runtime
+
+        if any(
+            not Path(module.__file__).resolve().is_relative_to(prefix)
+            for module in (
+                plugin_activation, update_acquisition, update_cli, update_driver_cli,
+                update_options, update_runtime,
+            )
+        ):
+            return False
+        return (
+            callable(getattr(update_acquisition, "acquire", None))
+            and callable(getattr(update_acquisition, "_run_install", None))
+            and callable(getattr(update_cli, "_update_in_plugin_steps", None))
+            and callable(getattr(update_driver_cli, "cmd_update_request", None))
+            and callable(getattr(update_options, "select_plugin_targets", None))
+            and callable(getattr(update_runtime, "_update_registered_plugins", None))
+            and callable(getattr(plugin_activation, "activation_custody", None))
+            and callable(getattr(plugin_activation.ActivationCustody, "preserve", None))
+            and all(callable(getattr(plugin_activation.ActivationPreservation, name, None)) for name in (
+                "confirm_quiescent", "confirm_posix_quiescent", "confirm_not_launched",
+            ))
+        )
+    except (AttributeError, ImportError, OSError, TypeError, ValueError):
+        return False
+
+
 def delegation_capability():
     """Advertise only the selected runtime's usable driver-backed seam."""
     try:
@@ -44,6 +74,7 @@ def delegation_capability():
     return {
         "schema": DELEGATION_SCHEMA, "version": DELEGATION_VERSION,
         "engine_fallback": True, "isolated_runtime_phase": True,
+        "targeted_payload_install": _targeted_payload_install_capability(prefix),
     }
 
 

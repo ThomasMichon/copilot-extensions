@@ -94,7 +94,39 @@ def test_inventory_advertises_delegation_only_with_a_capable_driver(installed, m
     assert capability == ({
         "schema": "copilot-extensions.project-update-delegation",
         "version": 1, "engine_fallback": True, "isolated_runtime_phase": True,
+        "targeted_payload_install": False,
     } if capable else None)
+
+
+@pytest.mark.parametrize("foreign", [False, True])
+def test_targeted_payload_install_requires_local_activation_owner(installed, monkeypatch, tmp_path, foreign):
+    from agent_worktrees import update_acquisition, update_driver_cli
+
+    prefix = installed_capability_runtime(tmp_path, monkeypatch)
+    for module in (update_acquisition, update_cli, update_driver_cli, update_options, update_runtime):
+        monkeypatch.setattr(
+            module, "__file__", str(prefix / "site" / "agent_worktrees" / f"{module.__name__.split('.')[-1]}.py"),
+        )
+    driver = SimpleNamespace(
+        __file__=str(prefix / "site" / "update_driver" / "__init__.py"),
+        UPDATE_AUTHORITY_CAPABILITY="suite-update-authority/v1",
+        current_authority=lambda **_kwargs: None, borrowed_custody=lambda: None,
+        participant_environment=lambda: {}, status=lambda *_a, **_k: None,
+        runtime_command=lambda *_a, **_k: None,
+    )
+    activation = SimpleNamespace(
+        __file__=str((tmp_path / "foreign" if foreign else prefix / "site") / "plugin_activation" / "__init__.py"),
+        activation_custody=lambda *_a, **_k: None,
+        ActivationCustody=SimpleNamespace(preserve=lambda *_a, **_k: None),
+        ActivationPreservation=SimpleNamespace(
+            confirm_quiescent=lambda *_a: None, confirm_posix_quiescent=lambda *_a: None,
+            confirm_not_launched=lambda *_a: None,
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "update_driver", driver)
+    monkeypatch.setitem(sys.modules, "plugin_activation", activation)
+    capability = owner.inventory()["project_controller_delegation"]
+    assert capability["targeted_payload_install"] is (not foreign)
 
 
 def test_inventory_does_not_advertise_an_incomplete_driver(installed, monkeypatch, tmp_path):
