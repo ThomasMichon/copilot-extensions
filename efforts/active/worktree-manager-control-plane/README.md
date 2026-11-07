@@ -5901,3 +5901,17 @@ complete current receiving readback and separate source judgments remain.
   The child fixtures retain the real daemon-health wiring with an isolated
   root and inert process census. These are source controls, not installed or
   live-environment acceptance; current-head review and CI remain required.
+- A later transport review reproduced UTF-8 report corruption through an
+  actual CP1252 parent, for both successful and failed children. Decode
+  synchronous command stdout/stderr explicitly as UTF-8, matching the existing
+  child environment. Both native regressions passed in the first 19 completed
+  result controls. The wider run then hit an older refresh test waiting for
+  an idle state that the current automatic replacement read skips. Retain the
+  real stale-read fence and both command/form paths, but assert the fresh rows
+  without adding a manual refetch. The residual selection passed 34 controls
+  with one existing installed-Workers opt-in skipped; no deadline increased
+  and the interrupted run is not represented as a complete packet pass.
+- Required CI identified the generated admission copy of the new read-lock
+  helper as stale. Regenerated it through the declared Worktrees payload
+  manifest and verified the snapshot; no unrelated archive or source binding
+  is changed.

@@ -761,7 +761,7 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
         try:
             argv = _resolve_command(argv)
             proc = subprocess.run(
-                argv, capture_output=True, text=True, timeout=timeout,
+                argv, capture_output=True, text=True, encoding="utf-8", timeout=timeout,
                 check=False, env=_child_process_env(), creationflags=no_window_flags(),
             )
         except FileNotFoundError:
