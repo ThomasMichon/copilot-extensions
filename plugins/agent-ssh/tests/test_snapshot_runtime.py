@@ -1034,7 +1034,40 @@ def test_native_optional_deadline_reaps_actual_adapter_descendants(tmp_path, mon
     _optional_deadline_controls(tmp_path, payloads, repo)
 
 
+def test_optional_deadline_teardown_never_signals_a_reused_pid(tmp_path, monkeypatch):
+    from agent_ssh import _worktrees
+
+    scripts = tmp_path / "payload" / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "snapshot_runtime.py").write_text("# disposable resolver\n", encoding="utf-8")
+    cleanup = tmp_path / "cleanup"
+    checks = {}
+    phases = iter(("resolution", "execution"))
+
+    def running(pid):
+        checks[pid] = checks.get(pid, 0) + 1
+        # The owned child is gone; a later PID-only lookup sees its replacement.
+        return checks[pid] > 1
+
+    def expired(argv, **kwargs):
+        phase = next(phases)
+        pid = 12345 if phase == "resolution" else 23456
+        (cleanup / f"{phase}.pid").write_text(str(pid), encoding="utf-8")
+        raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+
+    monkeypatch.setattr(
+        sys.modules[__name__], "load", lambda *_: SimpleNamespace(_pid_running=running)
+    )
+    monkeypatch.setattr(_worktrees, "run_caller_owned", expired)
+    monkeypatch.setattr(os, "kill", lambda *_: pytest.fail("PID-only teardown signalled a process"))
+    results = _optional_deadline_controls(cleanup, {"agent-ssh": scripts.parent}, tmp_path)
+    assert checks == {12345: 1, 23456: 1}
+    assert all(result["descendant_reaped"] for result in results)
+
+
 def _optional_deadline_controls(tmp_path, payloads, repo):
+    from unittest.mock import patch
+
     from agent_ssh import _worktrees
 
     tmp_path.mkdir(parents=True, exist_ok=True)
@@ -1075,27 +1108,23 @@ def _optional_deadline_controls(tmp_path, payloads, repo):
             )
         else:
             adapter.write_text(blocked, encoding="utf-8")
-        try:
-            started = time.monotonic()
-            from unittest.mock import patch
-
-            with patch.object(_worktrees, "run_caller_owned", observed):
-                assert _worktrees.state_root(repo, None) == (None, "unavailable")
-            elapsed = time.monotonic() - started
-            assert elapsed < 8  # 5s plus owned cleanup, not a new deadline.
-            assert pid_file.is_file()
-            assert not controls._pid_running(int(pid_file.read_text()))
-            assert expirations == [5] * (len(results) + 1)
-            results.append(
-                {
-                    "phase": phase, "seconds": round(elapsed, 3),
-                    "deadline_seconds": 5, "exception": "TimeoutExpired",
-                    "descendant_reaped": True,
-                }
-            )
-        finally:
-            if pid_file.exists() and controls._pid_running(int(pid_file.read_text())):
-                os.kill(int(pid_file.read_text()), __import__("signal").SIGTERM)
+        # Cleanup belongs to the caller-owned worker and enclosing test Job.
+        # A PID from fixture output is observation, never termination authority.
+        started = time.monotonic()
+        with patch.object(_worktrees, "run_caller_owned", observed):
+            assert _worktrees.state_root(repo, None) == (None, "unavailable")
+        elapsed = time.monotonic() - started
+        assert elapsed < 8  # 5s plus owned cleanup, not a new deadline.
+        assert pid_file.is_file()
+        assert not controls._pid_running(int(pid_file.read_text()))
+        assert expirations == [5] * (len(results) + 1)
+        results.append(
+            {
+                "phase": phase, "seconds": round(elapsed, 3),
+                "deadline_seconds": 5, "exception": "TimeoutExpired",
+                "descendant_reaped": True,
+            }
+        )
     return results
 
 
