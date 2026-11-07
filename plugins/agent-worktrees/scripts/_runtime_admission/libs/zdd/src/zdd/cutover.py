@@ -149,20 +149,12 @@ class CutoverOrchestrator:
         self.activate_successor = activate_successor
         self.serving_health_check = serving_health_check
         self.retire_failed_predecessor = retire_failed_predecessor
-        if retire_failed_predecessor is not None and expected_old is None:
-            raise ValueError("best-effort retirement requires an exact observed predecessor")
-        if type(require_predecessor_retirement) is not bool or (
-            require_predecessor_retirement and (
-                not self_retirement or retire_failed_predecessor is None
-            )
-        ):
-            raise ValueError("required predecessor retirement needs an explicit self-retirement fallback")
-        self.require_predecessor_retirement = require_predecessor_retirement
-        if type(drain_predecessor) is not bool or (
-            not drain_predecessor and retire_failed_predecessor is None
-        ):
-            raise ValueError("skipping predecessor drain requires bounded native retirement")
-        self.drain_predecessor = drain_predecessor
+        from .cutover_drain import validate_retirement_options
+
+        self.require_predecessor_retirement, self.drain_predecessor = validate_retirement_options(
+            require_predecessor_retirement, self_retirement, retire_failed_predecessor,
+            expected_old, drain_predecessor,
+        )
         # Uniform lifecycle log context. ``service`` defaults to the config-dir
         # convention (``~/.agent-bridge`` -> ``agent-bridge``); ``node`` is the
         # source machine. Both are captured once for every emitted record.

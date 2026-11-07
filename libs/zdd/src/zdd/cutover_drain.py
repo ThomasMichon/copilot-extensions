@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from . import lifecycle
 from .routing import Endpoint
@@ -14,6 +14,19 @@ if TYPE_CHECKING:
     from .cutover import CutoverOrchestrator, CutoverResult, _Client
 
 log = logging.getLogger("zdd")
+
+
+def validate_retirement_options(
+    required: bool, self_retirement: bool, callback: Callable[[Endpoint], dict[str, Any]] | None,
+    expected_old: Endpoint | None, drain: bool,
+) -> tuple[bool, bool]:
+    if callback is not None and expected_old is None:
+        raise ValueError("best-effort retirement requires an exact observed predecessor")
+    if type(required) is not bool or (required and (not self_retirement or callback is None)):
+        raise ValueError("required predecessor retirement needs an explicit self-retirement fallback")
+    if type(drain) is not bool or (not drain and callback is None):
+        raise ValueError("skipping predecessor drain requires bounded native retirement")
+    return required, drain
 
 
 def adopt_relay(
