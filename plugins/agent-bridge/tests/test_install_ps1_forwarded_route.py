@@ -47,7 +47,13 @@ def _run_harness(tmp_path: Path, functions: list[str], extra: str) -> subprocess
     link_python.write_text("stub", encoding="utf-8")
     harness = tmp_path / "harness.ps1"
     harness.write_text(
+        # install.ps1 runs under strict mode with errors as stops; the harness must too,
+        # or a $null.Count / missing-property read that throws in production passes here.
+        "Set-StrictMode -Version 2.0\n"
+        "$ErrorActionPreference = 'Stop'\n"
         f"$InstallDir = '{install_dir}'\n"
+        f"$VenvDir = '{install_dir / 'venv'}'\n"
+        f"$VenvPython = '{install_dir / 'venv' / 'Scripts' / 'python.exe'}'\n"
         f"$PidFile = '{install_dir / 'agent-bridge.pid'}'\n"
         f"$LinkPython = '{link_python}'\n"
         "$Port = 9280\n"
@@ -93,13 +99,35 @@ def test_install_ps1_recognizes_forwarded_active_routes(
     assert f"FORWARD={expected}" in result.stdout
 
 
+@pytest.mark.parametrize(
+    ("active", "expected"),
+    [
+        # A live daemon's route has no "forwarded" key: it must still be pinned.
+        ({"bind": "127.0.0.1", "port": 55944, "pid": 12500, "generation": 3},
+         "127.0.0.1|55944|12500|3"),
+        ({"bind": "127.0.0.1", "port": 62254, "forwarded": True}, ""),
+        ({"port": 62254}, ""),  # legacy forward
+    ],
+)
+def test_install_ps1_pins_the_active_daemon_route(
+    tmp_path: Path, active: dict, expected: str,
+) -> None:
+    _write_forward(tmp_path, active)
+    result = _run_harness(
+        tmp_path,
+        ["Get-ActiveSignature"],
+        "Write-Host \"SIGNATURE=[$(Get-ActiveSignature)]\"",
+    )
+    assert f"SIGNATURE=[{expected}]" in result.stdout
+
+
 def test_get_running_process_never_returns_forward_listener(tmp_path: Path) -> None:
     _write_forward(tmp_path, {"bind": "127.0.0.1", "port": 62254, "forwarded": True})
     result = _run_harness(
         tmp_path,
         ["Test-ActiveIsForward", "Get-ActiveEndpoint", "Get-RunningProcess"],
         """
-function Get-Process { return $null }
+function Get-Process { }
 function Get-NetTCPConnection { throw 'must not inspect the forwarded listener' }
 $rp = Get-RunningProcess
 if ($null -eq $rp) { Write-Host 'RUNNING=NULL' } else { Write-Host "RUNNING=$($rp.Id)" }
