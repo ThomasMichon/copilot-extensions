@@ -461,68 +461,68 @@ def test_companion_reservation_barrier_precedes_success_and_preserves_original_r
     with pytest.raises(ValueError, match="intent conflicts"):
         reserve()
     assert path.read_bytes() == before
+    receiver.default_repo.worktree_root = initial_root
+    reserve()
+    assert path.read_bytes() == before
 
 
 @pytest.mark.parametrize("kind", ["session-root", "session-child", "launch-requests", "launch-attempt-owner"])
 def test_incomplete_operational_directory_inventory_refuses_before_custody(checkout, monkeypatch, kind):
-        session = checkout.copilot / "session-state" / "retained"
-        if kind.startswith("session"):
-            session.mkdir(parents=True)
-            (session / "workspace.yaml").write_text(json.dumps({"cwd": str(checkout.source)}))
-            denied = session.parent if kind == "session-root" else session
-        elif kind == "launch-requests":
-            denied = checkout.record.yaml_path.parent / "launch-requests"
-            denied.mkdir()
-            (denied / "request.json").write_text("{}")
-        else:
-            denied = checkout.record.yaml_path.parent / "launch-attempts" / "owner"
-            denied.mkdir(parents=True)
-            (denied / ("a" * 32 + ".json")).write_text("{}")
-        before = checkout.record.yaml_path.read_bytes()
-        original = os.scandir
-        def unreadable(path):
-            if isinstance(path, (str, bytes, Path)) and Path(os.fsdecode(path)) == denied:
-                raise PermissionError("injected incomplete operational inventory")
-            return original(path)
-        with monkeypatch.context() as injection:
-            injection.setattr(os, "scandir", unreadable)
-            with pytest.raises(PermissionError, match="incomplete operational"):
-                relocation.plan(checkout.record.worktree_id, str(checkout.destination), checkout.config)
-        assert checkout.record.yaml_path.read_bytes() == before
-        assert not state.journal_path(checkout.record.yaml_path).exists()
-        assert checkout.source.exists() and not checkout.destination.exists()
+    session = checkout.copilot / "session-state" / "retained"
+    if kind.startswith("session"):
+        session.mkdir(parents=True)
+        (session / "workspace.yaml").write_text(json.dumps({"cwd": str(checkout.source)}))
+        denied = session.parent if kind == "session-root" else session
+    elif kind == "launch-requests":
+        denied = checkout.record.yaml_path.parent / "launch-requests"
+        denied.mkdir()
+        (denied / "request.json").write_text("{}")
+    else:
+        denied = checkout.record.yaml_path.parent / "launch-attempts" / "owner"
+        denied.mkdir(parents=True)
+        (denied / ("a" * 32 + ".json")).write_text("{}")
+    before = checkout.record.yaml_path.read_bytes()
+    original = os.scandir
+    def unreadable(path):
+        if isinstance(path, (str, bytes, Path)) and Path(os.fsdecode(path)) == denied:
+            raise PermissionError("injected incomplete operational inventory")
+        return original(path)
+    with monkeypatch.context() as injection:
+        injection.setattr(os, "scandir", unreadable)
+        with pytest.raises(PermissionError, match="incomplete operational"):
+            relocation.plan(checkout.record.worktree_id, str(checkout.destination), checkout.config)
+    assert checkout.record.yaml_path.read_bytes() == before
+    assert not state.journal_path(checkout.record.yaml_path).exists()
+    assert checkout.source.exists() and not checkout.destination.exists()
 
 
 @pytest.mark.timeout(120)
 def test_cancellation_repeats_parent_barrier_before_terminal_receipt(checkout, monkeypatch):
-        def interrupted(*args):
-            raise OSError("injected prepublication copy interruption")
-        with monkeypatch.context() as injection:
-            injection.setattr(relocation.transfer, "copy", interrupted)
-            with pytest.raises(OSError, match="copy interruption"):
-                relocation.move(checkout.record.worktree_id, str(checkout.destination), checkout.config)
-        stage = Path(state.read(checkout.record.yaml_path)["stage"])
-        original = relocation.durability.directory
-        def failed(path):
-            if path == stage.parent:
-                raise OSError("injected cancellation parent barrier")
-            original(path)
-        with monkeypatch.context() as injection:
-            injection.setattr(relocation.durability, "directory", failed)
-            with pytest.raises(OSError, match="cancellation parent"):
-                relocation.abort(checkout.record.worktree_id, str(checkout.destination), checkout.config)
-        assert state.read(checkout.record.yaml_path)["phase"] == "cancelling"
-        assert not stage.exists() and checkout.source.exists() and not checkout.destination.exists()
-        observed = []
-        def synchronized(path):
-            if path == stage.parent:
-                observed.append(state.read(checkout.record.yaml_path)["phase"])
-            original(path)
-        with monkeypatch.context() as injection:
-            injection.setattr(relocation.durability, "directory", synchronized)
-            result = relocation.abort(checkout.record.worktree_id, str(checkout.destination), checkout.config)
-        assert result["phase"] == "cancelled" and "cancelling" in observed
-        assert checkout.source.exists() and not checkout.destination.exists()
-    receiver.default_repo.worktree_root = initial_root
-    reserve()
-    assert path.read_bytes() == before
+    def interrupted(*args):
+        raise OSError("injected prepublication copy interruption")
+    with monkeypatch.context() as injection:
+        injection.setattr(relocation.transfer, "copy", interrupted)
+        with pytest.raises(OSError, match="copy interruption"):
+            relocation.move(checkout.record.worktree_id, str(checkout.destination), checkout.config)
+    stage = Path(state.read(checkout.record.yaml_path)["stage"])
+    original = relocation.durability.directory
+    def failed(path):
+        if path == stage.parent:
+            raise OSError("injected cancellation parent barrier")
+        original(path)
+    with monkeypatch.context() as injection:
+        injection.setattr(relocation.durability, "directory", failed)
+        with pytest.raises(OSError, match="cancellation parent"):
+            relocation.abort(checkout.record.worktree_id, str(checkout.destination), checkout.config)
+    assert state.read(checkout.record.yaml_path)["phase"] == "cancelling"
+    assert not stage.exists() and checkout.source.exists() and not checkout.destination.exists()
+    observed = []
+    def synchronized(path):
+        if path == stage.parent:
+            observed.append(state.read(checkout.record.yaml_path)["phase"])
+        original(path)
+    with monkeypatch.context() as injection:
+        injection.setattr(relocation.durability, "directory", synchronized)
+        result = relocation.abort(checkout.record.worktree_id, str(checkout.destination), checkout.config)
+    assert result["phase"] == "cancelled" and "cancelling" in observed
+    assert checkout.source.exists() and not checkout.destination.exists()
