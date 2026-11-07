@@ -773,7 +773,13 @@ $resolveArgs += @('resolve') + $CopilotArgs
 Write-SetupLog "Calling agent_worktrees resolve"
 Write-LaunchTrace 'resolve_start'
 
-$jsonOutput = & $VenvPython @resolveArgs
+$savedStartupFinalize = $env:AGENT_WORKTREES_FINALIZE_STARTUP_MANIFEST
+try {
+    $env:AGENT_WORKTREES_FINALIZE_STARTUP_MANIFEST = '1'
+    $jsonOutput = & $VenvPython @resolveArgs
+} finally {
+    $env:AGENT_WORKTREES_FINALIZE_STARTUP_MANIFEST = $savedStartupFinalize
+}
 
 if ($LASTEXITCODE -ne 0) {
     Write-SetupLog "agent_worktrees resolve failed (exit $LASTEXITCODE)" 'ERROR'
@@ -1086,6 +1092,16 @@ if ($plan.cmd) {
         $planCmd[1] -eq '-m' -and $planCmd[2] -eq 'agent_worktrees.launch_seed_exec') {
         $planCmd[0] = $VenvPython
     }
+    if ($planCmd.Count -gt 9 -and
+        [IO.Path]::GetFileNameWithoutExtension($planCmd[0]) -eq 'pwsh' -and
+        $planCmd[3] -eq '-File' -and [IO.Path]::GetFileName($planCmd[4]) -eq 'launch-command.ps1') {
+        $ownerIndex = if ($planCmd[5] -eq '--recovery') { 7 } else { 6 }
+        if ($planCmd[$ownerIndex - 1] -eq '--' -and
+            $planCmd[$ownerIndex + 1] -eq '-m' -and
+            $planCmd[$ownerIndex + 2] -eq 'agent_worktrees.launch_seed_exec') {
+            $planCmd[$ownerIndex] = $VenvPython
+        }
+    }
     for ($i = 0; $i -lt $planCmd.Count - 1; $i++) {
         if ($planCmd[$i] -in @('-RuntimePython', '--runtime-python')) {
             if ($planCmd[$i + 1] -ne $VenvPython) {
@@ -1264,7 +1280,7 @@ if ($ahpArgs.Count -gt 0) {
             $skipNext = $false
             continue
         }
-        if ($arg -eq '--ahp') {
+        if ($arg -in @('--ahp', '--resume')) {
             $skipNext = $true
             continue
         }
@@ -2511,13 +2527,17 @@ try {
                 'GH_TOKEN', $token.Trim(), 'Process'
             )
         }
-        & $cmd[0] $cmd[1..($cmd.Count - 1)]
+        . (Join-Path $PSScriptRoot 'pane-args.ps1')
+        $directStartupManifest = $null
+        $directCommand = New-AwPaneStartupCommand $cmd ([ref]$directStartupManifest) ([string]$plan.record_path)
+        & $directCommand[0] $directCommand[1..($directCommand.Count - 1)]
         $copilotExit = $LASTEXITCODE
     } catch [System.Management.Automation.PipelineStoppedException] {
         $copilotExit = 130  # 128 + SIGINT(2)
         Write-SetupLog "Session interrupted (Ctrl+C)"
     }
 } finally {
+    if ($directStartupManifest) { Remove-AwPaneArgsFile $directStartupManifest }
     foreach ($name in $savedDirectAuth.Keys) {
         [Environment]::SetEnvironmentVariable(
             $name,

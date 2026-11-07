@@ -1078,7 +1078,7 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
                 continue
             fi
             case "$_ARG" in
-                --ahp)
+                --ahp|--resume)
                     _SKIP_NEXT=1
                     ;;
                 --ahp=*|--resume=*)

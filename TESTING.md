@@ -2366,7 +2366,8 @@ stops through the original owner and resumes the same conversation through a
 new broker. Each control checks the exact user history and provider request
 count, with no replay of the rejected prompt. A third `manager-no-mux`
 control invokes the actual Manager `launch-session.ps1` and Worktrees resolver,
-not a synthetic resolved plan, through the explicit no-mux path. It checks
+using an unmodified private copy of the Manager scripts rather than a synthetic
+resolved plan, through the explicit no-mux path. It checks
 the same native history, broker, PID/birth and original-owner exit receipts.
 These controls use ordinary unseeded admission and an explicit native initial
 prompt; they do not claim staged-seed qualification. The existing real
@@ -2404,6 +2405,15 @@ permission grant, checking the native `tasks` and `entries` arrays in the same
 conversation. Missing/failed/invalid reads do not produce an empty snapshot.
 This is SDK read-support qualification, not complete background-agent evidence,
 active-work/schedule mutation coverage or automatic-idle retirement.
+
+Manager's focused `tests/test_pane_startup.py` controls also execute its actual
+persisted AHP-binding and final startup-serialization blocks against copied
+launch commands. Inline and split resume arguments must be replaced, not duplicated;
+literal drive paths and prompt text survive the final consumer. Companion
+controls refresh the inner runtime before serialization, including recovery
+commands. The producer's Windows capability-absence
+control leaves older callers on their legacy path. These are isolated contract
+controls with a synthetic binding/token, not an authenticated AHP connection.
 
 The optional native runtime-removal portfolio includes
 `tools/test_installer_engine_uninstall.py`,

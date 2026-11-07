@@ -65,6 +65,13 @@ Canonical launch-command wrappers remain in the path; on Windows their copied
 startup manifest carries literal argv, including drive-qualified `-C=...`
 values, without a second PowerShell parameter-binding pass. Nonlocal,
 ambiguous and unsupported commands retain their existing path.
+Windows callers opt into the new path only when they own final startup
+serialization. Current Manager declares that ability for the resolver call,
+restores the process environment afterward, and keeps argv visible while
+refreshing the inner runtime and applying the authoritative AHP binding.
+It serializes only at the final launch boundary. Older Manager callers keep
+the existing plan path; older Worktrees providers can ignore the declaration
+without accepting new CLI syntax.
 
 This does not turn unknown mux state into absence or permit a cold seed.
 Admission-only execution cannot claim a pending prompt; a changed prompt

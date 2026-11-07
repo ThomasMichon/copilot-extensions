@@ -106,6 +106,8 @@ def _headed_admission_command(
     from . import session_shell
     from .manager_launch_cli import _worktree_manager_root
 
+    if os.name == "nt" and os.environ.get("AGENT_WORKTREES_FINALIZE_STARTUP_MANIFEST") != "1":
+        return None
     index = _script_index(command)
     if index is None:
         return None
@@ -135,8 +137,7 @@ def _headed_admission_command(
         inner, record_path, admission_only=True, preserve_seed_id=preserve_seed_id,
         correlation=correlation, prepare_native=False,
     )
-    result = [*command[:index], str(prepared.wrapper), *command[index + 1:delimiter + 1], *native]
-    return session_shell.startup_command(result) if os.name == "nt" else result
+    return [*command[:index], str(prepared.wrapper), *command[index + 1:delimiter + 1], *native]
 
 
 def native_setup_index(command: list[str]) -> int | None:

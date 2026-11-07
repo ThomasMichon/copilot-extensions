@@ -119,6 +119,7 @@ def test_headed_admission_preserves_wrapper_and_literal_native_arguments(launch,
     scripts = runtime / "scripts"
     scripts.mkdir()
     monkeypatch.setattr(launch_seed_exec, "os", SimpleNamespace(**{**vars(os), "name": platform_name}))
+    monkeypatch.setenv("AGENT_WORKTREES_FINALIZE_STARTUP_MANIFEST", "1")
     name = "launch-command.ps1" if platform_name == "nt" else "launch-command.sh"
     wrapper = scripts / name
     shutil.copyfile(Path(__file__).resolve().parents[1] / "scripts" / name, wrapper)
@@ -133,6 +134,9 @@ def test_headed_admission_preserves_wrapper_and_literal_native_arguments(launch,
         [*prefix, "--", *native], record, admission_only=True, preserve_seed_id="retained",
     )
     if platform_name == "nt":
+        assert command[5] == "--"
+        assert not list((record.parent / "launch-attempts").glob("*/*.shell/pane-args/*.json"))
+        command = session_shell.startup_command(command)
         copied = Path(command[4])
         assert command[5] == "--startup-manifest"
         manifest = Path(command[6])
@@ -150,6 +154,18 @@ def test_headed_admission_preserves_wrapper_and_literal_native_arguments(launch,
     expected = wrapper.read_bytes()
     shutil.rmtree(runtime)
     assert copied.read_bytes() == expected
+
+
+def test_windows_headed_wrapper_keeps_legacy_callers_off_the_new_transport(launch, monkeypatch):
+    record, _runtime, _assets = launch
+    monkeypatch.setattr(launch_seed_exec, "os", SimpleNamespace(**{**vars(os), "name": "nt"}))
+    monkeypatch.delenv("AGENT_WORKTREES_FINALIZE_STARTUP_MANIFEST", raising=False)
+    assert launch_seed_exec._headed_admission_command(
+        ["pwsh.exe", "-NoProfile", "-NoLogo", "-File", "not-read.ps1", "--",
+         "copilot", "--resume=original"],
+        record, preserve_seed_id=None, correlation=None,
+    ) is None
+    assert not (record.parent / "launch-attempts").exists()
 
 
 @pytest.mark.parametrize("missing", ["native-seed-reply.sh", "native-seed-boundary.sh", "native-seed-setup.sh"])

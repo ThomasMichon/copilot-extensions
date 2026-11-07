@@ -267,6 +267,12 @@ class Mux {
                 AGENT_RT_ROOT=str(runtime_root), WORKTREE_NO_UPDATE="1",
                 WORKTREE_NO_RECONCILE="1", WORKTREE_NO_PROVISION="1",
             )
+            manager_bin = tmp_path / "manager-bin"
+            shutil.copytree(source_root / "worktree-manager" / "bin", manager_bin)
+            manager_script = manager_bin / "launch-session.ps1"
+            assert manager_script.read_bytes() == (
+                source_root / "worktree-manager" / "bin" / "launch-session.ps1"
+            ).read_bytes()
         for leg in ("fresh", "resume"):
             namespace = private_mux_args(tmp_path)
             environment["DRIVER_FIXTURE_MUX_NAMESPACE"] = namespace[1]
@@ -304,7 +310,7 @@ class Mux {
                 )
                 manager_command = [
                     shell, "-NoProfile", "-NonInteractive", "-File",
-                    str(source_root / "worktree-manager" / "bin" / "launch-session.ps1"),
+                    str(manager_script),
                     "--project", "native-copilot", "--worktree-id", tmp_path.name,
                     "--no-mux", "--no-update", "--no-resume", "--no-fast-forward",
                 ]
@@ -373,6 +379,7 @@ class Mux {
 
             state = _until(
                 bound, f"{leg}: Worktrees launch did not bind the common broker",
+                timeout=60 if control == "manager-no-mux" else 30,
                 diagnostic=lambda: (
                     query("capture-pane", "-p", "-t", target).stdout[-8192:]
                     + "\n" + pane_process()
@@ -384,6 +391,15 @@ class Mux {
                             "host_process_start_time", "child_process_start_time",
                         }}
                         for path in attempt.glob("*/headed.json")
+                    ])
+                    + "\n" + json.dumps([
+                        [{"phase": event["phase"], "details": {
+                            key: value for key, value in event.get("details", {}).items()
+                            if key in {"pid", "boundary", "exit_code", "process_exit_code", "receipt_uncertain"}
+                        }} for event in json.loads(
+                            path.read_text(encoding="utf-8")
+                        ).get("events", [])]
+                        for path in record.parent.glob("launch-attempts/*/*.execution.json")
                     ])
                     + "\n" + query(
                         "display-message", "-p", "-t", target,

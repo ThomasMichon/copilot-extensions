@@ -1804,3 +1804,44 @@ native-head recovery. Existing current-runtime wrapper support is checked
 before migration; unsupported forms retain their original path. No installed
 rollout, all-caller Job lifetime, complete pending-work evidence or receiving
 parity is claimed, and the broader parent items remain open.
+
+Review of #11294 found that early Windows serialization hid a stale resume
+argument from Manager's later authoritative AHP-binding rewrite. Defer
+serialization until that existing consumer has finished its runtime/binding
+mutations, rather than introducing an additional manifest reader/rewriter.
+Refresh the inner Python owner as well as exposed runtime arguments, then
+use the existing mux or direct-launch serialization boundary. Inline and split
+resume forms are replaced consistently on Windows and POSIX.
+
+The Windows producer now requires a per-call declaration that its consumer
+owns final serialization. Manager scopes the declaration to resolution and
+restores the prior process environment; older Manager callers retain the
+legacy producer path, and older Worktrees providers can ignore the declaration
+without being asked to accept new CLI syntax. The earlier reader-based
+investigation passed two AHP consumer controls, then an expanded packet
+reported 98 passes, seven platform skips and four extracted-harness failures.
+After correcting their prerequisites, nine selected controls passed. Those
+reader-specific cases are not evidence for the simpler final design: the
+extra reader and its dedicated tests were removed. Focused final-boundary
+contracts and actual native no-mux revalidation remain required before this
+correction is published. Binding/token inputs remain synthetic; no
+authenticated or live AHP effect is authorized or claimed.
+
+The simpler final-boundary design passes eight focused Manager controls in
+17.92 seconds (154.69 seconds including preparation and cleanup). The three
+Windows/POSIX producer/capability controls also pass. Native revalidation
+directly from the source checkout reached a generic process-spawn receipt
+without headed metadata at 30 and 60 seconds; that source-location behavior
+is not qualified by this result and is not declared repaired.
+
+The isolated copied-payload diagnostic then completed the full native flow.
+After removing its temporary command capture, the byte-identical private
+Manager scripts pass fresh/resume through the real resolver and common broker
+in 87.58 seconds (177.38 seconds including preparation and cleanup), including
+exact native history, PID/birth, owner exit and retirement checks. The Manager
+frontend has a sixty-second internal binding wait, within the unchanged
+180-second case, 300-second group and 600-second aggregate limits. No further
+timeout increase or claim of startup stability is made. The copied-payload
+qualification does not stand in for source-checkout, installed, auth-wait,
+attached/new-window or all-caller Job qualification. Current scoped source
+gates pass; the corrected head still needs fresh review and required CI.
