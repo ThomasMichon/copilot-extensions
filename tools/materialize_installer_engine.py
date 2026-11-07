@@ -38,23 +38,42 @@ def _find_symlinked_ancestor(path: Path, root: Path) -> Path | None:
         current = current.parent
 
 
-def derived_file_pairs(canonical_root: Path, dest: Path) -> list[tuple[Path, Path]]:
+def derived_file_pairs(
+    canonical_root: Path, dest: Path, *, copied_consumer: tuple[Path, Path] | None = None,
+) -> list[tuple[Path, Path]]:
     """Declared non-kit assets only; an absent consumer is never created."""
     canonical = canonical_root / "libs" / "installer-engine"
     consumers: dict[Path, set[str]] = {}
     support = ier.support_files(canonical)
     for plugin in ier.ADOPTERS:
-        consumers.setdefault(canonical_root / "plugins" / plugin, set()).update(support)
+        consumer = canonical_root / "plugins" / plugin
+        if copied_consumer is not None and consumer != copied_consumer[0]:
+            continue
+        names = consumers.setdefault(consumer, set())
+        names.update(support)
+        for ext in ("ps1", "sh"):
+            script = consumer / "scripts" / f"install.{ext}"
+            if script.exists() or script.is_symlink():
+                if problem := derived_path_problem(script, canonical_root, required=True):
+                    raise ValueError(problem)
+                ref = ier.find_engine_ref(script, ext)
+                if ref is not None and ier.is_local_ref(ref, consumer):
+                    names.add(ref.file_name)
     for consumer in ier.python_adopter_dirs(canonical_root):
         consumers.setdefault(consumer, set()).update((*ier.PYTHON_FILES, *ier.SUPPORT_FILES))
     for consumer in ier.native_adopter_dirs(canonical_root):
         consumers.setdefault(consumer, set()).update(ier.STANDALONE_NATIVE_FILES)
-    return [
-        (canonical / name, dest / consumer.relative_to(canonical_root) / "scripts" / name)
-        for consumer, names in sorted(consumers.items())
-        if consumer.is_dir() and (dest / consumer.relative_to(canonical_root)).is_dir()
-        for name in sorted(names)
-    ]
+    pairs = []
+    for consumer, names in sorted(consumers.items()):
+        if copied_consumer is not None:
+            if consumer != copied_consumer[0]:
+                continue
+            destination = copied_consumer[1]
+        else:
+            destination = dest / consumer.relative_to(canonical_root)
+        if consumer.is_dir() and destination.is_dir():
+            pairs.extend((canonical / name, destination / "scripts" / name) for name in sorted(names))
+    return pairs
 
 
 def derived_path_problem(path: Path, root: Path, *, required: bool) -> str | None:
@@ -99,13 +118,18 @@ def _read_canonical_snapshot(path: Path, root: Path) -> tuple[bytes, tuple[int, 
     return content, _derived_identity(after), stat.S_IMODE(after.st_mode)
 
 
-def materialize_derived_files(dest: Path, *, canonical_root: Path) -> list[str]:
+def materialize_derived_files(
+    dest: Path, *, canonical_root: Path, copied_consumer: tuple[Path, Path] | None = None,
+) -> list[str]:
     """Refresh approved derived slots in the candidate, never the source tree."""
     plan = []
     canonical: dict[Path, tuple[bytes, tuple[int, ...], int]] = {}
     try:
-        for source, target in derived_file_pairs(canonical_root, dest):
-            previous = canonical_root / target.relative_to(dest)
+        for source, target in derived_file_pairs(canonical_root, dest, copied_consumer=copied_consumer):
+            previous = (
+                canonical_root / target.relative_to(dest) if copied_consumer is None
+                else copied_consumer[0] / target.relative_to(copied_consumer[1])
+            )
             if source not in canonical:
                 if problem := derived_path_problem(source, canonical_root, required=True):
                     return [f"SKIP {problem}"]

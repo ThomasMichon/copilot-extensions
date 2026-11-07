@@ -11,6 +11,12 @@ match either canonical bytes or its source-tree preimage; foreign replacements,
 links, shared inodes and nonordinary paths are refused before copying.
 Native canonical-reference conversion retains its existing source checks.
 The separate invocation owner generates admission-toolkit copies.
+Already-local native references receive the same verified writer refresh.
+The normal and transitive library copy owners also pass the actual canonical
+consumer and copied destination to this verifier. A packaged Update Driver
+therefore receives current Installer assets before its caller can consume it;
+its reviewed library source, not a missing developer mirror, supplies the
+admitted preimage. This works with shared or separate source/candidate roots.
 
 Validation phases are explicit:
 

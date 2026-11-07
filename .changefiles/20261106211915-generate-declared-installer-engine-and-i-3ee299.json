@@ -56,6 +56,14 @@
     {
       "plugin": "copilot-extensions-harness",
       "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "libs/update-driver",
+      "type": "patch"
     }
   ]
 }

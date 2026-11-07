@@ -609,6 +609,10 @@ generates manifest-declared Invocation shims, helpers and admission toolkits.
 Both owners use canonical candidate data and verify the actual written bytes
 before the composition is frozen. Invocation's generator and toolkit packager
 remain pinned executable tooling; candidate copies are not imported.
+Installer refresh also covers already-local writer references and registered
+library consumers copied by direct or transitive vendoring. Those copy owners
+provide their actual canonical source/destination pair, so refreshing a top-level
+standalone alone cannot leave an older packaged helper behind.
 Contributors do not synchronize those derived Dev mirrors to publish canonical
 changes. Dev's Invocation source check validates the producible inventory,
 paths and grammar, while the development install-contract check validates

@@ -1179,6 +1179,38 @@ def test_promotion_refuses_foreign_or_nonordinary_derived_slots_before_writes(tm
     assert untouched.read_bytes() == before
 
 
+@pytest.mark.parametrize("same_root", [True, False], ids=["same-root", "separate-root"])
+@pytest.mark.parametrize("stale", [False, True], ids=["absent", "stale"])
+def test_promotion_refreshes_locally_referenced_native_writers(tmp_path, same_root, stale):
+    import materialize_installer_engine as materializer
+
+    source = tmp_path / "source"
+    _promotion_installer_source(source, stale=False, consumer_names={"agent-vault"})
+    scripts = source / "plugins/agent-vault/scripts"
+    for ext in ("ps1", "sh"):
+        (scripts / f"install.{ext}").write_text(
+            sync_installer_engine.ier.local_line(ext) + "\n", encoding="utf-8",
+        )
+        if stale:
+            (scripts / f"installer-engine.{ext}").write_bytes(b"# reviewed previous writer\n")
+    before = {path.relative_to(source): path.read_bytes() for path in source.rglob("*") if path.is_file()}
+    candidate = source if same_root else tmp_path / "candidate"
+    if not same_root:
+        shutil.copytree(source, candidate)
+    log = materializer.materialize_refs(candidate, canonical_root=source)
+    assert not any(line.startswith("SKIP") for line in log), log
+    for ext in ("ps1", "sh"):
+        relative = Path(f"libs/installer-engine/installer-engine.{ext}")
+        assert (candidate / f"plugins/agent-vault/scripts/installer-engine.{ext}").read_bytes() == before[relative]
+        assert (source / relative).read_bytes() == before[relative]
+        assert sync_installer_engine.ier.is_local_ref(
+            sync_installer_engine.ier.find_engine_ref(candidate / f"plugins/agent-vault/scripts/install.{ext}", ext),
+            candidate / "plugins/agent-vault",
+        )
+    if not same_root:
+        assert before == {path.relative_to(source): path.read_bytes() for path in source.rglob("*") if path.is_file()}
+
+
 @pytest.mark.parametrize("initial", ["absent", "dev-copy"])
 def test_materialized_vault_copied_recognizer_preserves_foreign_commands(tmp_path, monkeypatch, initial):
     import materialize_installer_engine as materializer
