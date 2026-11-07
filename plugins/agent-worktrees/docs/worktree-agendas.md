@@ -107,7 +107,11 @@ another field. `agenda-publish` requests and checks the graph capability
 whenever its input body carries a graph. Revision identity excludes the graph:
 the same committed revision may be republished with or without it (after a
 capability upgrade or rollback) and replaces the cached projection, while any
-other difference is still a `revision-conflict`. The publisher keeps the
+other difference is still a `revision-conflict`. The resident stores the graph
+in its own table, bound to the cached revision identity, so the durable
+agenda cache keeps the graph-free body an older resident can reopen after a
+rollback. A cached graph is rejoined only while its identity still matches the
+cached revision. The publisher keeps the
 active stack, deferred frames and every kept frame's ancestors in the graph,
 and omits the graph when that structure exceeds its bound. The graph never
 grants acceptance, permission or an action.

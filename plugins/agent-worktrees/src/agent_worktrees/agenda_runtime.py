@@ -26,7 +26,20 @@ CREATE TABLE IF NOT EXISTS worktrees_agenda_source (
     PRIMARY KEY (project, worktree_id, session_id)
 );
 """
+# The optional display graph lives beside the cache, bound to the exact cached revision
+# identity, so the cache itself stays readable by residents that predate the graph.
+_GRAPH_SCHEMA = """
+CREATE TABLE IF NOT EXISTS worktrees_agenda_graph (
+    project TEXT NOT NULL, worktree_id TEXT NOT NULL, digest TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    PRIMARY KEY (project, worktree_id)
+);
+"""
 MAX_SOURCES_PER_WORKTREE = 256
+
+
+def _identity_digest(body: dict) -> str:
+    return hashlib.sha256(contract.revision_identity(body).encode("utf-8")).hexdigest()
 
 
 class AgendaRuntime:
@@ -85,6 +98,7 @@ class AgendaRuntime:
                     self._fence(conn)
                     conn.execute(_SCHEMA)
                     conn.execute(_SOURCE_SCHEMA)
+                    conn.execute(_GRAPH_SCHEMA)
                 if self._unsubscribe is None:
                     from . import record_cache
 
@@ -223,6 +237,7 @@ class AgendaRuntime:
                             raise contract.AgendaError(
                                 "durable agenda identity mismatch", "unavailable"
                             )
+                        body = self._with_graph(conn, key, body)
                     head, error = None, None
                     if body is not None or key in self._qualified:
                         try:
@@ -241,6 +256,11 @@ class AgendaRuntime:
                         )
                         conn.execute(
                             "DELETE FROM worktrees_agenda_source "
+                            "WHERE project=? AND worktree_id=?",
+                            (project, wid),
+                        )
+                        conn.execute(
+                            "DELETE FROM worktrees_agenda_graph "
                             "WHERE project=? AND worktree_id=?",
                             (project, wid),
                         )
@@ -296,10 +316,23 @@ class AgendaRuntime:
             "observation": exposed,
         }
 
+    @staticmethod
+    def _with_graph(conn, key, body) -> dict:
+        """Rejoin the cached graph only when it belongs to exactly this cached revision."""
+        row = conn.execute(
+            "SELECT digest, payload FROM worktrees_agenda_graph WHERE project=? AND worktree_id=?",
+            key,
+        ).fetchone()
+        if row is None or body["version"] != 2 or row[0] != _identity_digest(body):
+            return body
+        joined = {**body, "graph": contract.decode(row[1].encode("utf-8"), contract.BODY_BYTES)}
+        contract.observation(joined)
+        return joined
+
     def _source_fence(self, conn, key, body) -> None:
         source = body["source"]
         subject = (*key, source["session"])
-        digest = hashlib.sha256(contract.revision_identity(body).encode("utf-8")).hexdigest()
+        digest = _identity_digest(body)
         previous = conn.execute(
             "SELECT store_id, revision, digest FROM worktrees_agenda_source "
             "WHERE project=? AND worktree_id=? AND session_id=?",
@@ -454,8 +487,20 @@ class AgendaRuntime:
                         self._source_fence(conn, key, body)
                         conn.execute(
                             "INSERT OR REPLACE INTO worktrees_agenda_cache VALUES (?, ?, ?)",
-                            (*key, encoded),
+                            (*key, contract.revision_identity(body)),
                         )
+                        if "graph" in body:
+                            conn.execute(
+                                "INSERT OR REPLACE INTO worktrees_agenda_graph "
+                                "VALUES (?, ?, ?, ?)",
+                                (*key, _identity_digest(body), contract.encode(body["graph"])),
+                            )
+                        else:
+                            conn.execute(
+                                "DELETE FROM worktrees_agenda_graph "
+                                "WHERE project=? AND worktree_id=?",
+                                key,
+                            )
                         if self._head(key) != before:
                             raise contract.AgendaError(
                                 "canonical head changed during publication", "head-changed"

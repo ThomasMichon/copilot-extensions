@@ -7,7 +7,9 @@ from threading import Event
 import pytest
 
 from worktree_manager import agenda_transport as transport
-from worktree_manager.agenda_contract import AgendaFeed, AgendaUnavailable, validate_snapshot
+from worktree_manager.agenda_contract import (
+    AgendaFeed, AgendaPublicationFence, AgendaUnavailable, validate_snapshot,
+)
 from worktree_manager.companion_agenda import agenda_text
 from test_agenda_contract import publication, publication_v2
 
@@ -126,6 +128,36 @@ def test_graph_is_admitted_only_on_cursor_four_and_contract_two():
         candidate["contract_version"] = version
         with pytest.raises(ValueError):
             validate_snapshot(candidate, "example", "selected", "head-a", contract_version=version)
+
+
+@pytest.mark.parametrize("upgrade", [True, False])
+def test_graph_upgrade_or_rollback_does_not_trip_the_publication_fence(upgrade):
+    graphed = graph_publication()
+    plain = deepcopy(graphed)
+    del plain["observation"]["graph"]
+    before, after = (plain, graphed) if upgrade else (graphed, plain)
+    fence = AgendaPublicationFence()
+
+    def feed():
+        return AgendaFeed("example", "selected", "head-a", fence=fence, contract_version=2)
+
+    feed().receive(before)
+    # Reconnect at the same resident sequence, now with (or without) the graph.
+    assert feed().receive(deepcopy(after)) == after
+    # Live update: the resident republished the same revision with the other projection.
+    live = feed()
+    live.receive(deepcopy(after))
+    advanced = {**deepcopy(before), "type": "update", "sequence": 1}
+    assert live.receive(advanced) == advanced
+    rewritten = deepcopy(after)
+    rewritten.update(type="update", sequence=2)
+    rewritten["observation"]["snapshot"]["next_action"] = "Different action"
+    with pytest.raises(ValueError, match="store revision"):
+        live.receive(rewritten)
+    same_sequence = {**deepcopy(advanced), "type": "snapshot"}
+    same_sequence["observation"]["snapshot"]["next_action"] = "Different action"
+    with pytest.raises(ValueError, match="without advancing"):
+        feed().receive(same_sequence)
 
 
 def _frame(graph, index):

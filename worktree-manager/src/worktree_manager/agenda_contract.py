@@ -247,15 +247,26 @@ class AgendaPublicationFence:
     def _content(value: dict) -> str:
         return json.dumps(value, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":"))
 
+    @staticmethod
+    def _identity(observation: dict | None) -> dict | None:
+        # The display graph is negotiated per connection and may be added or dropped
+        # for the same committed revision (upgrade or rollback); it never splits one.
+        if observation is None:
+            return None
+        return {key: value for key, value in observation.items() if key != "graph"}
+
+    def _frame_identity(self, frame: dict) -> str:
+        fields = {key: value for key, value in frame.items() if key not in {"type", "contract_version"}}
+        fields["observation"] = self._identity(fields.get("observation"))
+        return self._content(fields)
+
     def admit(self, frame: dict) -> None:
         if self.last is not None and frame["generation"] == self.last["generation"]:
             if frame["sequence"] < self.last["sequence"]:
                 raise ValueError("agenda reconnect regressed its resident sequence")
-            if frame["sequence"] == self.last["sequence"] and self._content(
-                {key: value for key, value in frame.items() if key not in {"type", "contract_version"}}
-            ) != self._content({
-                key: value for key, value in self.last.items() if key not in {"type", "contract_version"}
-            }):
+            if frame["sequence"] == self.last["sequence"] and (
+                self._frame_identity(frame) != self._frame_identity(self.last)
+            ):
                 raise ValueError("agenda publication changed without advancing its resident sequence")
         observation = frame["observation"]
         if observation is not None and self.observed is not None:
@@ -263,7 +274,8 @@ class AgendaPublicationFence:
                 raise ValueError("agenda source store changed for the selected head")
             if observation["revision"] < self.observed["revision"] or (
                 observation["revision"] == self.observed["revision"]
-                and self._content(observation) != self._content(self.observed)
+                and self._content(self._identity(observation))
+                != self._content(self._identity(self.observed))
             ):
                 raise ValueError("agenda observation regressed or rewrote its store revision")
         # Commit both fences only after all checks; null availability never

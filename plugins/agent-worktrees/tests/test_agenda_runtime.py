@@ -283,6 +283,50 @@ def test_graph_projection_does_not_split_one_committed_revision(owned):
     assert rejected["error"]["code"] == "revision-conflict"
 
 
+def test_graph_is_stored_beside_a_cache_older_residents_can_still_read(owned):
+    owner, *_rest = owned
+    assert owner.agendas.publish(publication(owner, graphed(), contract_version=2))["ok"] is True
+
+    def durable():
+        with sqlite3.connect(owner.store.db_path) as conn:
+            cached = conn.execute("SELECT payload FROM worktrees_agenda_cache").fetchone()[0]
+            graphs = conn.execute("SELECT count(*) FROM worktrees_agenda_graph").fetchone()[0]
+        return json.loads(cached), graphs
+
+    # A graph-unaware resident reopening the cache sees exactly the fields it knows.
+    cached, graphs = durable()
+    assert cached == observation_v2() and graphs == 1
+    owner.close_admission("superseded")
+    successor = WorktreesRuntime(owner.store.db_path)
+    successor.activate()
+    try:
+        successor.publish("project", [{"id": "full-worktree-id"}], observed_at=2)
+        assert successor.agendas.read(request(contract_version=2, graph=1))[
+            "observation"
+        ] == graphed()
+        successor.close_admission("superseded")
+        # A rolled-back resident advances the cache without touching the graph table.
+        with sqlite3.connect(owner.store.db_path) as conn:
+            conn.execute(
+                "UPDATE worktrees_agenda_cache SET payload=?",
+                (contract.observation(observation_v2(2)),),
+            )
+        upgraded = WorktreesRuntime(owner.store.db_path)
+        upgraded.activate()
+        try:
+            upgraded.publish("project", [{"id": "full-worktree-id"}], observed_at=3)
+            stale = upgraded.agendas.read(request(contract_version=2, graph=1))
+            assert stale["observation"] == observation_v2(2)
+            assert upgraded.agendas.publish(
+                publication(upgraded, observation_v2(2), contract_version=2)
+            )["ok"] is True
+            assert durable()[1] == 0
+        finally:
+            upgraded.shutdown()
+    finally:
+        successor.shutdown()
+
+
 def test_cli_publication_of_a_graph_requests_and_accepts_its_echo(monkeypatch, capsys):
     from agent_worktrees import agenda_cli as cli
 
