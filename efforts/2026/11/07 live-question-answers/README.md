@@ -120,8 +120,9 @@ document the existing trusted-operator boundary.
   as though that remaining native compatibility qualification ran.
 - [x] Run affected lint, unit/contract checks and mandatory source gates;
   audit public artifacts for private context.
-- [x] Deferred to `#6917` (MR9/MRV10): qualify the separate Windows full-capture
-  retained-writer fixture deadline without weakening the existing assertion.
+- [x] Deferred to `#6917`: qualify the separate Windows full-capture
+  retained-writer fixture deadline under MR9/MRV10 without weakening the
+  existing assertion.
 - [x] Verify actual provider merge and resolve every remaining gate or
   transfer it explicitly to a named tracked objective.
 
