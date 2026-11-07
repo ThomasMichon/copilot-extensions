@@ -121,6 +121,18 @@ def test_submit_revalidates_and_forwards_only_selected_target(inventory, monkeyp
     assert len(calls) == 1
 
 
+def test_diagnostic_refuses_unrelated_component_target(monkeypatch):
+    from worktree_manager import doctor_cli
+
+    monkeypatch.setattr(ui.engine_client, "accept_inherited_engine_command", lambda: "")
+    monkeypatch.setattr(
+        doctor_cli, "cmd_doctor", lambda *args: pytest.fail("unrelated target reached Manager diagnostics"),
+    )
+    with pytest.raises(SystemExit) as error:
+        ui.main(["doctor", "guide"])
+    assert error.value.code == 2
+
+
 def test_manager_plugin_submission_uses_engine_identity_not_manager_queue(inventory, monkeypatch):
     import update_driver
 

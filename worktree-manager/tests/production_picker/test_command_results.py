@@ -200,6 +200,60 @@ def test_ordinary_command_timeout_retains_terse_compatibility(monkeypatch):
     assert not ok and message == str(subprocess.TimeoutExpired(argv, 2))[:200]
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="native ANSI-locale parent")
+@pytest.mark.parametrize("returncode", [0, 7])
+@pytest.mark.parametrize("child_encoding", ["utf8", "inherited-cp1252", "raw-cp1252"])
+def test_ansi_parent_preserves_utf8_child_report(tmp_path, returncode, child_encoding):
+    report = "\u2713 ready \u00e9 \u2014" if child_encoding == "utf8" else "caf\u00e9"
+    diagnostic = "\u2717 diagnostic \u00e9" if child_encoding == "utf8" else "diagnostic \u00e9"
+    if child_encoding == "raw-cp1252":
+        child = (
+            f"import sys; sys.stdout.buffer.write({report.encode('cp1252')!r}); "
+            f"sys.stderr.buffer.write({diagnostic.encode('cp1252')!r}); "
+            f"raise SystemExit({returncode})"
+        )
+        report = report.encode("cp1252").decode("utf-8", errors="replace")
+        diagnostic = diagnostic.encode("cp1252").decode("utf-8", errors="replace")
+    else:
+        child = (
+            f"import sys; print({report!r}); print({diagnostic!r}, file=sys.stderr); "
+            f"raise SystemExit({returncode})"
+        )
+    parent = tmp_path / "ansi_parent.py"
+    parent_override = (
+        "os.environ['PYTHONIOENCODING'] = 'cp1252'\n" if child_encoding == "inherited-cp1252" else ""
+    )
+    parent.write_text(
+        "import json,os,subprocess,sys\n"
+        "sys.path[:0] = json.loads(sys.argv[1])\n"
+        f"{parent_override}"
+        "from worktree_manager.production_picker.picker_tui import pivots,tasks\n"
+        "encoding = subprocess._text_encoding()\n"
+        "if encoding.lower() != 'cp1252':\n"
+        " print(json.dumps({'unsupported_encoding':encoding})); raise SystemExit(0)\n"
+        "reg = pivots.parse_manifest({'label':'Fixture','list':['provider']},"
+        "name='fixture',source_path='fixture.json')\n"
+        f"ok,message = tasks.RegisteredPivotRuntime(reg).run_resolved("
+        f"[sys.executable,'-c',{child!r}],preserve_output=True)\n"
+        "print(json.dumps({'ok':ok,'message':message,'encoding':encoding}))\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [sys.executable, "-X", "utf8=0", str(parent), json.dumps(sys.path)],
+        capture_output=True, text=True, encoding="utf-8", timeout=10,
+        creationflags=tasks.no_window_flags(),
+    )
+    assert result.returncode == 0, result.stderr
+    observation = json.loads(result.stdout)
+    if "unsupported_encoding" in observation:
+        pytest.skip(f"native parent locale is {observation['unsupported_encoding']}, not CP1252")
+    assert observation["encoding"].lower() == "cp1252"
+    assert observation["ok"] is (returncode == 0)
+    assert report in observation["message"] and diagnostic in observation["message"]
+    if returncode:
+        assert "exit 7" in observation["message"]
+
+
 @pytest.mark.parametrize("form", [False, True])
 def test_completed_text_action_invalidates_an_older_inflight_list(
     tmp_path, monkeypatch, form,
@@ -253,9 +307,7 @@ def test_completed_text_action_invalidates_an_older_inflight_list(
             assert runtime._scope_generations["original-scope"] > generation
             assert runtime._gen == 0 and "other-scope" not in runtime._scope_generations
             release.set()
-            await _wait(pilot, lambda: finished.is_set() and runtime.get("original-scope")[0] == "idle")
-            runtime.ensure("original-scope")
-            await _wait(pilot, lambda: runtime.get("original-scope")[0] == "ready")
+            await _wait(pilot, lambda: finished.is_set() and runtime.get("original-scope")[0] == "ready")
             assert runtime.get("original-scope")[1] == [{"id": "after-command"}]
             assert calls == ["original-scope", "original-scope"]
 

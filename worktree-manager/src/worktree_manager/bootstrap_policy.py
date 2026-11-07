@@ -82,9 +82,9 @@ def inspect_policy() -> BootstrapPolicy:
 
 
 def _guard_command() -> list[str]:
-    from .self_install import running_payload_dir
+    from .self_install import _runtime_scripts
 
-    scripts = running_payload_dir() / "scripts"
+    scripts = _runtime_scripts()
     if os.name == "nt":
         host = shutil.which("pwsh") or shutil.which("powershell")
         script = scripts / "bootstrap-killswitch-guard.ps1"
