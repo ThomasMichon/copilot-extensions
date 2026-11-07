@@ -361,6 +361,15 @@ _Operator-required outcome; agent-recommended slices and validation._
   and preserve exact explicit admission/native receipts.
   Normal host enrollment, automatic edits, other publishers, acquisition/DB
   mapping, provider and installed/shadow acceptance remain open.
+- [x] Deliver the finite optional selected-edit allocation library (#11374),
+  binding actual protected generation/source and native-author evidence to
+  same-owner original receipts. Stable logical identity, fresh write identity,
+  selected legacy edits and original-key recovery are source-qualified;
+  receiver activation and all-publisher/installed acceptance remain open.
+- [ ] Qualify the separately selected
+  [owned-edit receiver extension](comment-intent-binding.md#optional-owned-edit-receiver-extension)
+  through the existing CLI/native/Fleet/Gateway consumers, preserving baseline
+  fresh allocation, explicit-ID/v1/v2 and receiver rollback semantics.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -909,6 +918,13 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
+- [x] Qualify selected owned/legacy edit library allocation, repeated protected
+  native edit chains, original receipts, exact scope/source/native baseline,
+  conflicting/unknown history refusal, duplicate targets and lost-result/
+  restart recovery (#11374; 150 coupled cases, including 20 focused edit
+  cases). Existing receiver refusal stays unchanged; this is synthetic source
+  qualification, not automatic consumer or provider/installed adoption.
+
 - [ ] Resolve the [comment-identity validation obligations](comment-identity.md#validation-obligations)
   through the real owning preparation, publication, receipt and acquisition
   boundaries, with explicit surface/provider coverage and evidence tiers.
@@ -1035,6 +1051,30 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-07 - Bind selected edits through original native custody
+
+- #11374 actually merged as `a7aafaadeedf78c1c5f13cbd2b7bf29b54d6b858`
+  after exact-head Copilot approval with no open issues and latest CI
+  `42415394987`, including required PR gate `128533318728`, passed.
+  Managed completion retained the source backup and reconciled the one
+  actually merged commit.
+- The optional library reuses the actual protected source validator,
+  current native-author/baseline checks, same replay transaction and original
+  receipt owner. It preserves one logical identity across intentional writes,
+  permits only explicitly selected genuine legacy edits, and refuses copied/
+  unbound metadata, conflicting histories, potentially matching unknown
+  effects and duplicate selected native targets.
+- The bounded four-file packet passes 150 cases with cleanup verified;
+  20 focused edit cases include actual shared composition, owner files,
+  protected synthetic native effects and original receipt projection.
+  Fatal lint, module, documentation and installation contracts pass.
+  Pending plugin typing under #9807 is not a strict-project pass.
+- Re-read the canonical parent and credit only this finite library leaf.
+  Continue the separately reviewed optional receiver extension, preserving
+  baseline fresh allocation and missing/rolled-back support refusal.
+  Both the parent and #11128 remain open; no normal host enrollment,
+  all-publisher/provider/installed adoption, live effect or rollout is inferred.
 
 ### 2026-11-07 - Review selected owned-edit binding before consumer activation
 
