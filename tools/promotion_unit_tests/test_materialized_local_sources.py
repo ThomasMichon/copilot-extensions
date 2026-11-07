@@ -94,9 +94,15 @@ def test_materialized_closure_refuses_file_uri_sources(tmp_path, kind):
         )
 
 
-def test_materializer_refuses_missing_standalone_manifest(tmp_path):
+def test_materializer_refuses_missing_standalone_manifest(tmp_path, monkeypatch):
     (tmp_path / "worktree-manager").mkdir()
     (tmp_path / "plugins" / "skill-only").mkdir(parents=True)
+
+    def refuse_copy(*args, **kwargs):
+        raise AssertionError("A missing standalone manifest must refuse before copying")
+
+    monkeypatch.setattr(materializer, "materialize_installer_engine_refs", refuse_copy)
+    monkeypatch.setattr(materializer.mpiv, "materialize", refuse_copy)
     log = materializer.materialize(tmp_path, canonical_root=tmp_path)
     assert (
         len(log) == 1 and log[0].startswith("SKIP local source") and "missing" in log[0]

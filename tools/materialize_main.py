@@ -535,6 +535,12 @@ def materialize(
 
     ``canonical_root`` is a parameter (not hardcoded to ``REPO``) so a test
     can point it at an isolated tree instead of the real checkout."""
+    standalone = {dest / extra for extra in _EXTRA_CONSUMER_DIRS}
+    for consumer in sorted(standalone):
+        if consumer.is_dir() and not (consumer / "pyproject.toml").is_file():
+            problems = uer.materialized_local_source_problems(consumer)
+            if problems:
+                return [f"SKIP {problem}" for problem in problems]
     human_sources = mie.validate_human_output_sources(canonical_root)
     log = [
         f"SKIP {pointer_path}: retired directory-pointer kind still present -- refusing"
@@ -553,7 +559,6 @@ def materialize(
         dest, canonical_root=canonical_root, human_sources=human_sources,
     ))
     consumers = sorted((dest / "plugins").glob("*"))
-    standalone = {dest / extra for extra in _EXTRA_CONSUMER_DIRS}
     consumers.extend(sorted(standalone))
     for consumer in consumers:
         manifest = consumer / "pyproject.toml"
