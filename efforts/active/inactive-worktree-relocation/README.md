@@ -723,3 +723,14 @@ adopter pilot feedback gates subsequent widening.
   CLI/roundtrip acceptance remained passing: **5 focused native controls**.
   This tightens the original receiving-authority invariant; it adds no
   inactive category, runtime effect or allocation preference.
+
+### 2026-11-07 — Native relative Git registration paths
+- The next diagnostics identified relative Git administration backpointers
+  resolved against the invoking process rather than their owning administrative
+  directory. Resolve those paths from Git's actual owner without weakening the
+  final recorded-checkout/Git-family comparison.
+- Native Git relative-worktree repair produced a real relative backpointer;
+  retained authority and old-root publication passed, while a redirected
+  relative backpointer refused. Together with platform-boundary and actual CLI
+  controls the focused packet passed **5 cases**, with no simulated native lane.
+  The first-slice scope and wider Active completion gate remain unchanged.
