@@ -411,6 +411,74 @@ incoming readiness and complete current selection define replacement success;
 preserve user state and session keepers, keep automatic inhibition separate,
 and leave delayed central-only retirement independent of setup completion.
 
+### Normal setup credential-gate continuation
+
+This is an **agent-recommended review-first integration contract**, reserved
+under [#11123](https://github.com/ThomasMichon/copilot-extensions/issues/11123#issuecomment-6705270257),
+not implemented configuration syntax or an allocation of the retained #6030
+setup, Vault, enrollment or lifecycle source. It closes the Machine Fleet
+vision's selected-module composition and credential-owner custody intent.
+
+The actual caller is
+[`repository_continuity.run`](../../../plugins/agent-worktrees/src/agent_worktrees/repository_continuity.py):
+it describes the selected SSH inputs, then may apply bootstrap enrollment before
+[`repository_ssh_setup.run`](../../../plugins/agent-worktrees/src/agent_worktrees/repository_ssh_setup.py).
+[`ssh_setup.describe`](../../../fleet-manager/src/fleet_manager/ssh_setup.py)
+currently requires existing identity/public-key file references. Neither caller
+invokes Vault key preparation or protected local installation. The
+[`agent-vault/runtime` readiness adapter](../../../plugins/agent-vault/src/agent_vault/installer_readiness.py)
+correctly treats a healthy configured locked Vault as runtime-ready; that result
+does not establish an available database, existing key entry or usable signing.
+Relabeling locked runtime health as failure would fix the wrong contract.
+
+**Chosen integration:** make the explicitly activated Vault/key prerequisite
+part of the existing selected setup operation, before any new enrollment,
+host configuration, application activation or profile/authorization effects.
+Resolve the selected installed Vault through its owning invocation/configuration
+contract, not ambient PATH, another installation, a private executable adapter,
+or direct parsing of its database. Keep default, outbound-only and non-Vault
+key selections unchanged. A healthy existing connection is not revoked or
+reinstalled because its Vault subsequently locks.
+
+Inspection resolves public selection and supported capabilities without starting
+Vault, prompting, reading key material or writing files. It must not claim that
+such an inspection proves credential readiness. Explicit apply consumes the
+existing reuse-only `ssh-key prepare` and `ssh-key install` contracts with
+`--require-running`, after the selected Vault owner completes its separately
+authorized provisioning/activation. Match their public identity and protected
+file references to the same inspected setup inputs before continuing. No
+initialization flags, secret-bearing argv/output, alternative local-key fallback
+or new signer are added. Unsupported executable contracts refuse before effects;
+older/default selections retain their supported behavior.
+
+| Prerequisite or interruption | Required setup result and recovery |
+|-----------------------------|------------------------------------|
+| Vault not explicitly selected | Do not inspect or activate Vault; preserve the existing selected key owner |
+| Selected runtime absent, unhealthy or replacing | Report the owner's unavailable runtime gate; do not self-provision through a shim or substitute another installation |
+| Database unconfigured, unavailable or not yet synchronized | Report configuration or input availability separately; resume the same selection after its owner supplies the existing database |
+| Selected Vault locked | Pause for its explicit attended unlock; no implicit prompt, local-file bypass, enrollment or key replacement |
+| Entry absent, malformed or legacy attachment-only | Preserve the database and existing identity; synchronization/selection repair is not permission to initialize or convert an entry |
+| Protected file publication incomplete or outcome unknown | Retain the same entry, directory and original outcome; reconcile before retry, then use the owner's matching partial-pair recovery |
+| Valid pair available | Continue the original setup operation; public metadata or file creation alone is not SSH, enrollment or logon acceptance |
+
+The existing operation/readiness owner carries actionable waiting/refused/unknown
+outcomes through the normal Manager/engine/Fleet front door, rather than erasing
+`needs_unlock` into a generic subprocess failure. Attended unlock and OneDrive
+sign-in remain with their existing owners and their own authorization. Resume
+revalidates the selected public inputs and preserves original enrollment,
+generation and operation state; it never rotates a key or blindly repeats an
+uncertain effect. No second prerequisite daemon, journal or supervisor is added.
+
+Three existing
+[`test_ssh_key_keepass_live.py`](../../../plugins/agent-vault/tests/test_ssh_key_keepass_live.py)
+controls pass on Windows in26.61s using a disposable KeePass database, isolated
+service and synthetic keys. They cover missing-entry refusal, explicit fixture
+initialization, fresh-process reuse, legacy preservation, protected installation,
+native OpenSSH key consumption, matching partial recovery and locked refusal
+even with local files. This qualifies the current Vault consumer seam, not the
+missing setup integration, a production installation, OneDrive synchronization,
+an existing encrypted signer or logon/reconnect. No runtime change is included.
+
 ## Plan
 
 ### Phase 1 - Reviewed integration and ownership
@@ -420,6 +488,9 @@ and leave delayed central-only retirement independent of setup completion.
   credential, SSH and host-role lifecycle owners. #11286 merged the approved
   contract at `38d8e519f6e0a00c7615e004c47aab61c9f09696`; implementation
   and installed/native acceptance remain open.
+- [ ] Review the [normal setup credential gate](#normal-setup-credential-gate-continuation)
+  before runtime wiring. Retain the selected Vault/key owner and #6030 setup
+  integration; ordinary runtime health is not credential readiness.
 - [ ] Review the [selected-role setup contract](role-host-setup.md), then admit
   its bounded implementation through the existing construction and lifecycle
   owners rather than relabel client installation or foreground serving.
@@ -490,6 +561,10 @@ and leave delayed central-only retirement independent of setup completion.
   not managed setup, enrollment or an adopted installation.
 - [ ] Wire the accepted role setup entry point to admitted target-local
   lifecycle/enrollment/authorization/profile effects.
+- [ ] Integrate the explicitly activated Vault/key prerequisite before new
+  enrollment and SSH setup effects, with truthful attended waiting and
+  same-selection recovery. Do not revoke healthy connections or change
+  non-Vault/default setup when credential access is unavailable.
 - [ ] Consume the harness-selected continuity source and delegated first-touch
   or confirmation path before assuming a Gateway connection or SSH transport.
 - [ ] Persist stage outcomes, desired/applied digests, owner generation and
@@ -523,6 +598,20 @@ not installation, credential or live-adoption authority.
 
 ## Validation Plan
 
+- [x] Qualify the existing Vault SSH preparation/materialization seam with an
+  actual disposable KeePass backend and fresh CLI processes on Windows:
+  three controls pass in26.61s, including locked refusal with existing local
+  files, missing/legacy entries, native OpenSSH consumption and matching
+  partial recovery. This is current-source consumer proof, not normal setup,
+  installed Vault, production synchronization or an encrypted-key signer.
+- [ ] Prove the normal selected Manager/engine/Fleet setup stops before new
+  enrollment, host/profile writes or activation when its activated Vault/key
+  prerequisite is absent, locked, malformed or unavailable. Preserve healthy
+  existing connections and unchanged non-Vault/default/outbound-only behavior.
+  Exercise explicit attended resume, input changes and unknown publication
+  through the same owner/front door without duplicate enrollment or key
+  replacement; qualify the packaged source-denying consumer and actual
+  permitted OneDrive/sign-in lane separately.
 - [x] Qualify the bounded current-logon Windows source listener with a real
   noninteractive command, expected user SID/session and non-elevated token,
   using synthetic protected keys and `IdentityAgent=none`. The final four
@@ -622,6 +711,31 @@ setup/apply, enrollment, live rollout, lifecycle takeover or implementation
 completion is asserted.
 
 ## Journal
+
+### 2026-11-07 - Vault consumer qualified; normal setup credential gate proposed
+
+- Comment6705270257 reserves only the additive credential-gate contract,
+  validation obligations and journal. Existing #6030 setup, Vault,
+  enrollment and lifecycle source/effect custody remains unchanged.
+- The actual normal caller may apply enrollment before SSH application setup.
+  Fleet currently consumes existing SSH file references; neither normal caller
+  invokes Vault preparation. Selected runtime health and usable key readiness
+  are distinct, including when a configured Vault is healthy but locked.
+- Three existing real disposable KeePass/CLI controls pass on Windows in26.61s.
+  Missing/legacy entries and locked reuse fail explicitly; synthetic creation,
+  fresh-process reuse, protected local installation, native OpenSSH consumption
+  and partial recovery pass without changing the encrypted database on reuse.
+  Current source and leased prepared dependencies run under the canonical
+  containment/cleanup boundary;60s item and180s aggregate limits are retained.
+- Proposed the selected credential prerequisite before new enrollment,
+  host/profile effects and activation, with explicit attended waiting,
+  unchanged defaults and healthy connections, and same-operation recovery.
+  The implementation must preserve specific owner failures through the
+  normal setup front door rather than count runtime health as key availability.
+- No production Vault/key access, installation, sign-in, OneDrive operation,
+  service/configuration change, UAC, remote effect or rollout occurred.
+  Source-denying installed setup, actual synchronization/encrypted signer and
+  cold-logon/reconnect remain open; this evidence does not close #6030 or #11123.
 
 ### 2026-11-07 - User-logon contract reviewed; command qualification selected
 
