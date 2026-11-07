@@ -1,0 +1,9 @@
+{
+  "comment": "Synchronize shared wheel build declarations for Manager controller resources",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

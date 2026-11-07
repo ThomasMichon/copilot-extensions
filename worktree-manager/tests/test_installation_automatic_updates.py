@@ -33,6 +33,31 @@ def test_read_only_default_has_an_actionable_existing_controller(switch_home: Pa
     assert Path(command[-1]).name.startswith("bootstrap-killswitch-guard.")
 
 
+def test_packaged_runtime_controller_works_without_a_legacy_payload(
+    switch_home: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import shutil
+    import worktree_manager
+
+    package = switch_home / "package"
+    scripts = package / "_runtime_assets" / "scripts"
+    scripts.mkdir(parents=True)
+    canonical = Path(__file__).resolve().parents[2] / "libs" / "bootstrap-killswitch"
+    for name in ("bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1", "killswitch_mutation.py"):
+        shutil.copy2(canonical / name, scripts / name)
+    monkeypatch.setattr(worktree_manager, "__file__", str(package / "__init__.py"))
+    monkeypatch.setattr(self_install, "running_payload_dir", lambda: switch_home / "absent-payload")
+    before = {path: path.read_bytes() for path in scripts.iterdir()}
+    row = policy.configuration_row()
+    assert row["bootstrap_control"], row["card"]["body"]
+    blocked = policy.set_enabled(False, expected=row["policy_revision"])
+    assert blocked.enabled is False
+    cleared = policy.set_enabled(True, expected=blocked.revision)
+    assert cleared.enabled is True and not any(path.exists() for path in cleared.paths)
+    assert before == {path: path.read_bytes() for path in scripts.iterdir()}
+    assert not (switch_home / "absent-payload").exists()
+
+
 def test_real_canonical_controller_disables_then_clears_central_and_legacy(
     switch_home: Path,
 ) -> None:
@@ -238,9 +263,14 @@ def test_downlevel_controller_never_receives_unconditional_mutation(
 def test_materialized_payload_keeps_both_canonical_controllers(
     switch_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import worktree_manager
+
     source = Path(__file__).resolve().parents[1]
     payload = tmp_path / "payload"
     self_install._copy_payload(source, payload)
+    legacy_package = tmp_path / "legacy-package"
+    legacy_package.mkdir()
+    monkeypatch.setattr(worktree_manager, "__file__", str(legacy_package / "__init__.py"))
     monkeypatch.setattr(self_install, "running_payload_dir", lambda: payload)
     canonical = source.parent / "libs/bootstrap-killswitch"
     for name in ("bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1", "killswitch_mutation.py"):

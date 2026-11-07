@@ -5837,3 +5837,40 @@ complete current receiving readback and separate source judgments remain.
   onboarding lanes; #3005, #8545/#356, #542 and the remaining workbench waves
   retain their original scope, custody and acceptance. No runtime, credential,
   installation, live environment, service or rollout action was performed.
+
+### 2026-11-06 - Explicit Manager diagnostic action claim
+
+- `shiny-actuator` reserved #11245 after fresh open health/doctor issue and PR
+  searches. This is a bounded follow-up to completed #8877, closing the existing
+  Configuration Workbench installation-and-updates intent without taking its
+  remaining native or installed acceptance.
+- Reuse the native Manager doctor text report from an explicitly activated
+  Manager-row action in Installation & Updates. Preserve observation-only JSON
+  behavior, selected-engine context, existing command/result boundaries and
+  non-mutating browse. Show diagnostic-specific pending and terminal messages,
+  not configuration application or a claim that every application is healthy.
+- Qualify production navigation and explicit activation, successful and failed
+  native reports, real child-command transport and isolated-state preservation.
+  Other component health, authentication, first-task admission, live receiving
+  and rollout remain separate outcomes; no new supervisor or readiness schema
+  is introduced.
+- The affected sealed-package packet exposed the existing bootstrap-control
+  lookup using a legacy payload's `scripts` directory instead of Manager's
+  runtime-resource resolver. Include the bounded resolver correction and a
+  real canonical-controller packaged-resource regression in this same source
+  slice; do not waive the failed control or alter controller policy.
+- Qualify actual wheel and source-distribution delivery as well as lookup:
+  the canonical build-resource declaration also omitted the controller pair
+  and mutation helper. Retain its exact-byte mirrored build helpers and their
+  required changefiles; other applications' resource selection is unchanged.
+- Source candidate `81f3bc744` passed the affected installation, automatic
+  controls, doctor and production Configuration packet: 96 passed, with four
+  existing opt-in Workers cases unrun because no dispatch interpreter was
+  selected. The native diagnostic success/failure, selected-cell context,
+  packaged controller and retained-payload fallback controls are included.
+- Both actual Manager and Worktrees wheel/source-distribution round trips
+  passed, including canonical controller bytes and source immutability.
+  Ruff, installation/documentation contracts, seven changed source-module
+  limits and exact three-helper mirror checks passed. These are isolated
+  source and artifact controls, not deployed application, native sign-in or
+  complete fresh-machine acceptance; required PR review and CI remain.

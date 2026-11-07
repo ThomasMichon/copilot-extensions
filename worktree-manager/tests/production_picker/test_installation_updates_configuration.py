@@ -235,6 +235,143 @@ def test_native_pivot_uses_existing_contract_and_exact_row_target():
     assert not pivots.entry_matches(update.when, {"updatable": False})
 
 
+@pytest.mark.parametrize("ok", [True, False])
+def test_production_diagnostic_is_explicit_read_only_and_preserves_outcome(tmp_path, monkeypatch, ok):
+    from worktree_manager import doctor_cli
+
+    monkeypatch.setattr(tasks, "ACTION_TIMEOUT", 2)
+    monkeypatch.setattr(tasks, "STRICT_OPTIONS_COMMAND_TIMEOUT", 1)
+    original = tmp_path / "config.toml"
+    original.write_text("[maintenance]\nautomatic = false\n", encoding="utf-8")
+    before = original.read_bytes()
+    calls = []
+    started = threading.Event()
+    release = threading.Event()
+    row = {
+        "id": "worktree-manager", "title": "Worktree Manager", "updatable": True,
+        "card": {"title": "Manager", "body": "Installed versions are not live-health proof."},
+    }
+
+    def read(runtime, ctx):
+        return "ready", [dict(row)], "", {}
+
+    def doctor(rest):
+        assert rest == [] and threading.current_thread() is not threading.main_thread()
+        print("Native diagnostic report: " + ("checks passed" if ok else "required prerequisite MISSING"))
+        return 0 if ok else 1
+
+    def execute(runtime, argv, **kwargs):
+        calls.append(list(argv))
+        started.set()
+        assert release.wait(5), "Diagnostic result was never released"
+        assert argv[-2:] == ["doctor", "worktree-manager"]
+        captured = StringIO()
+        start = argv.index("worktree_manager.installation_updates") + 1
+        with redirect_stdout(captured), redirect_stderr(captured):
+            code = ui.main(list(argv[start:]))
+        return code == 0, captured.getvalue()
+
+    monkeypatch.setattr(ui.engine_client, "accept_inherited_engine_command", lambda: "")
+    monkeypatch.setattr(doctor_cli, "cmd_doctor", doctor)
+    monkeypatch.setattr(tasks.RegisteredPivotRuntime, "_exec_list", read)
+    monkeypatch.setattr(tasks.RegisteredPivotRuntime, "run_resolved", execute)
+
+    async def run():
+        app = PickerApp(_fixture_source(), live=False)
+        try:
+            async with app.run_test(size=(118, 40)) as pilot:
+                scr = app.query_one(PickerScreen)
+                await _wait_for_initial_setup(pilot, scr)
+                scr._open_cfgmenu()
+                await pilot.pause()
+                index = next(
+                    i for i, item in enumerate(scr.pivots)
+                    if getattr(item.get("pivot"), "name", None) == ui.PIVOT_NAME
+                )
+                for _ in range(len(scr.pivots) + 1):
+                    if scr.htab == index:
+                        break
+                    scr._rotate_config_section(1)
+                    await pilot.pause()
+                assert scr.htab == index
+                reg = scr._reg_pivot()
+                runtime = scr._pivot_runtime(reg)
+                runtime.ensure("")
+                await _wait(pilot, lambda: runtime.get("")[0] == "ready" and bool(scr._task_rows()))
+                assert not calls and not started.is_set() and original.read_bytes() == before
+                scr.sel = ("T", 0)
+                scr.refresh()
+                await pilot.pause()
+                visible = [action for action in reg.actions if pivots.entry_matches(action.when, row)]
+                chosen = next(i for i, action in enumerate(visible) if action.key == "doctor")
+                scr._open_task_menu()
+                await _wait(pilot, lambda: isinstance(app.screen, TaskMenuScreen))
+                assert not calls
+                app.screen.dismiss(chosen)
+                await _wait(
+                    pilot, lambda: isinstance(app.screen, ConfigurationResultScreen) and started.is_set(),
+                )
+                pending = str(app.screen.query_one("#config-result", Static).render())
+                assert "read-only" in pending.lower() and "Applying configuration" not in pending
+                assert app.screen.pending
+                release.set()
+                await _wait(pilot, lambda: not app.screen.pending)
+                rendered = str(app.screen.query_one("#config-result", Static).render())
+                assert "Native diagnostic report" in rendered
+                assert ("Diagnostics completed" if ok else "Diagnostics failed or are incomplete") in rendered
+                assert "configuration saved" not in rendered.lower()
+                assert original.read_bytes() == before and len(calls) == 1
+                app.screen.action_close()
+                await _wait(pilot, lambda: not isinstance(app.screen, ConfigurationResultScreen))
+                assert app.query_one(PickerScreen) is scr and scr.htab == index
+        finally:
+            release.set()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("ready", [True, False])
+def test_diagnostic_runs_native_report_through_actual_child_transport(tmp_path, monkeypatch, ready):
+    home = tmp_path / "home"
+    home.mkdir()
+    sentinel = home / "config.toml"
+    sentinel.write_text("unchanged = true\n", encoding="utf-8")
+    wrapper = tmp_path / "diagnostic.py"
+    wrapper.write_text(
+        "from pathlib import Path\n"
+        "from types import SimpleNamespace as N\n"
+        "from worktree_manager import doctor_cli as d, installation_updates as ui\n"
+        f"d.detect_baseline=lambda:[N(name='git',present={ready!r},satisfied={ready!r},"
+        "optional=False,version='1' if " + repr(ready) + " else None,min_required='1',path=None,notes=None)]\n"
+        "d.core_status=lambda:N(state='installed',runtime_dir='fixture',runtime_present=True,"
+        "venv_present=True,binstub='fixture',installed=True)\n"
+        "d.self_status=lambda:N(installed_version='fixture',binstub='fixture',root=Path('fixture'))\n"
+        "d.coverage=lambda:N(source_kind='checkout',ok=True,uncovered=(),phantom=(),published_prereq_gaps=())\n"
+        "d.mis_registered_repos=lambda:[]\n"
+        "d.daemon_health.doctor_report=lambda **kw:{'findings':[]}\n"
+        "raise SystemExit(ui.main())\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("PYTHONIOENCODING", "utf-8")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(ui.engine_client, "_INHERITED_ENGINE_COMMAND", None)
+    reg = ui.configuration_pivot()
+    action = next(action for action in reg.actions if action.key == "doctor")
+    assert pivots.entry_matches(action.when, {"id": "worktree-manager"})
+    assert not pivots.entry_matches(action.when, {"id": "guide"})
+    argv = list(pivots.format_template(action.run, {"id": "worktree-manager"}))
+    argv = [sys.executable, "-B", str(wrapper), *argv[4:]]
+    before = {path: path.read_bytes() for path in home.rglob("*") if path.is_file()}
+    runtime = tasks.RegisteredPivotRuntime(reg)
+    ok, message = runtime.run_resolved(argv, preserve_output=True)
+    assert ok is ready, message
+    assert "doctor" in message and "prerequisites:" in message
+    assert ("prerequisites satisfied" if ready else "MISSING") in message
+    assert before == {path: path.read_bytes() for path in home.rglob("*") if path.is_file()}
+
+
 def test_unresponsive_engine_preserves_manager_rows_through_production_list(tmp_path, monkeypatch):
     import time
 
@@ -264,7 +401,8 @@ def test_unresponsive_engine_preserves_manager_rows_through_production_list(tmp_
     assert ui.ENGINE_INVENTORY_TIMEOUT < tasks.LIST_TIMEOUT
 
 
-def test_selected_cell_context_survives_actual_configuration_transport(tmp_path, monkeypatch):
+@pytest.mark.parametrize("operation", ["update", "doctor"])
+def test_selected_cell_context_survives_actual_configuration_transport(tmp_path, monkeypatch, operation):
     from _installation_context_fixtures import namespaced_fixture, write_json
     from worktree_manager import engine_client
     from worktree_manager.production_picker.picker_tui import pivot_list_command
@@ -297,14 +435,20 @@ def test_selected_cell_context_survives_actual_configuration_transport(tmp_path,
     )
     wrapper = tmp_path / "inventory.py"
     wrapper.write_text(
+        "import json,os\n"
         "from pathlib import Path\n"
-        "from worktree_manager import agent_plugin_runtime as apr,installation_updates as ui\n"
+        "from worktree_manager import agent_plugin_runtime as apr,doctor_cli,installation_updates as ui\n"
         f"apr._canonical_os_profile=lambda environment:Path({str(home)!r})\n"
         f"apr._durable_home=lambda ic,environment:Path({str(home / '.copilot-extensions')!r})\n"
         "ic=apr._load_installation_context()\n"
         "apr._load_installation_context=lambda:ic\n"
         # This transport fixture models an ordinary profile, not native WSL registration.
         "ic._is_wsl_guest=lambda:False\n"
+        "def diagnostic(args):\n"
+        " assert args == []\n"
+        " print(json.dumps({'context':os.environ.get('COPILOT_EXTENSIONS_CONTEXT')}))\n"
+        " return 0\n"
+        "doctor_cli.cmd_doctor=diagnostic\n"
         "raise SystemExit(ui.main())\n"
     )
     monkeypatch.setenv("HOME", str(home))
@@ -332,14 +476,16 @@ def test_selected_cell_context_survives_actual_configuration_transport(tmp_path,
     row = next(row for row in rows if row["id"] == "guide")
     assert row["payload"] == "cell" and row["enabled"] == "active"
     assert str(install.parent) in row["source"]
-    update = next(action for action in reg.actions if action.key == "update")
-    argv = list(pivots.format_template(update.run, {"id": "guide"}))
+    action = next(action for action in reg.actions if action.key == operation)
+    target = "guide" if operation == "update" else "worktree-manager"
+    argv = list(pivots.format_template(action.run, {"id": target}))
     argv = [sys.executable, "-B", str(wrapper), *argv[4:]]
     ok, message = runtime.run_resolved(argv, preserve_output=True)
     assert ok, message
-    assert json.loads(message) == {
-        "request_id": "cell-request", "state": "pending", "exit_code": None, "context": str(install),
-    }
+    expected = {"context": str(install)}
+    if operation == "update":
+        expected.update(request_id="cell-request", state="pending", exit_code=None)
+    assert json.loads(message) == expected
     assert before == {p: p.read_bytes() for p in home.rglob("*") if p.is_file()}
 
 

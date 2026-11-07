@@ -63,6 +63,16 @@ machine scope. Browsing and refreshing are read-only and run off the UI thread:
 they do not install prerequisites, start services/workers, request credentials
 or enroll automatic maintenance.
 
+The **Worktree Manager** row also offers **Inspect Manager setup (read-only)**.
+Only explicit activation runs the existing native doctor text report, off the
+UI thread. The result retains its output and success/failure status; closing it
+returns to Configuration and refreshes the originating view. It never requests
+daemon repair, setup, an update or authentication. The report covers Manager's
+existing prerequisite, core, daemon, catalog and registration observations;
+command completion is not proof of every application's health or first-task
+readiness. Other components retain their own diagnostic owners, and the
+standalone observation-only `doctor --json` behavior is unchanged.
+
 ### Automatic update controls
 
 The same workspace has two independently confirmed local controls:
@@ -83,6 +93,8 @@ control never clears the other, starts an update, enrolls recurring maintenance
 or stops work already admitted. Missing/unreadable/invalid controller state is
 visible; an invalid legacy switch retains its documented fail-open reader
 semantics rather than being presented as a reliable pause.
+The canonical controller comes from the running Manager's runtime resources;
+retained-payload scripts remain the fallback for older source layouts.
 
 Confirmations compare the exact viewed bytes inside a bounded writer lock.
 The switch's canonical Bash, PowerShell and optional Machines CLI writers
