@@ -110,9 +110,16 @@ def behavior_identity(cfg) -> str:
     return hashlib.sha256(json.dumps(selected, sort_keys=True, allow_nan=False).encode()).hexdigest()
 
 
+def data_auth_matches(payload, required: bool) -> bool:
+    return (
+        payload.get("data_auth_required") is required
+        and payload.get("data_token_match_v1") is required
+    )
+
+
 def accept_readiness(
     payload, *, handle, version: str, config_identity: str,
-    active=False, expected_behavior: str | None = None,
+    active=False, expected_behavior: str | None = None, expected_data_auth: bool | None = None,
 ) -> bool:
     from zdd.diagnostics import process_start_time
 
@@ -128,6 +135,7 @@ def accept_readiness(
         and payload.get("version") == version and payload.get("status") == "ok"
         and payload.get("runtime_config_identity") == config_identity
         and (expected_behavior is None or payload.get("runtime_behavior_identity_v1") == expected_behavior)
+        and (expected_data_auth is None or data_auth_matches(payload, expected_data_auth))
         and slot.get("pid") == handle.pid and slot.get("process_start_time") == birth
         and (not active or slot.get("role") == "active")
         and process_start_time(handle.pid) == birth
@@ -281,6 +289,7 @@ def run_coordinator(
         return accept_readiness(
             payload, handle=handle, version=__version__, config_identity=identity, active=active,
             expected_behavior=behavior,
+            expected_data_auth=None if start_if_missing else token is not None,
         )
 
     if old is not None:
@@ -293,7 +302,10 @@ def run_coordinator(
         ):
             raise RuntimeError("incumbent effective configuration or native ownership is unconfirmed")
         if old.version == __version__ and (
-            start_if_missing or payload.get("runtime_behavior_identity_v1") == behavior
+            start_if_missing or (
+                payload.get("runtime_behavior_identity_v1") == behavior
+                and data_auth_matches(payload, token is not None)
+            )
         ):
             verify_selected()
             if (

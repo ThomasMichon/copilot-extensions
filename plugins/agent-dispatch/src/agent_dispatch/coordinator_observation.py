@@ -158,6 +158,7 @@ def observe(
                 health, handle=handle, version=endpoint.version,
                 config_identity=config_identity(cfg), active=True,
                 expected_behavior=behavior_identity(cfg) if require_behavior else None,
+                expected_data_auth=(token is not None) if require_behavior else None,
             )
             or routing.read_table(root, strict=True) != table
             or _route_owner_state(endpoint) != "matching"

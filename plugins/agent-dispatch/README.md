@@ -216,10 +216,13 @@ birth, effective configuration and route identity. The version-1 behavior
 fingerprint covers sweep cadence, orphan grace and handoff-fallback settings
 without including credentials. An incumbent lacking or differing in that
 fingerprint is not reused, even when its code generation matches; a verified
-owner can instead be transitioned to the selected configuration. Health
-advertises only whether data authentication is required; when a token is configured, an
-unauthenticated health request must also be rejected, including by older
-coordinators that lack the advertisement. Legacy discovery or an unverified
+owner can instead be transitioned to the selected configuration. Health reports
+whether data authentication is required and whether the request matched the
+actual data token, without exposing credentials. When a token is configured,
+an unauthenticated health request must also be rejected. An older owner without
+the match signal can be admitted for guarded replacement but is not reported
+ready or reused. A data token equal to the control token is invalid; replacement
+fails without disturbing the incumbent. Legacy discovery or an unverified
 endpoint is not treated as inactive. Local control uses loopback without
 environment proxies and does not pass update-driver custody to the daemon.
 `--apply` reuses the existing guarded coordinator cutover without starting an

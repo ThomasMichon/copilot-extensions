@@ -276,6 +276,7 @@ def test_reconcile_rechecks_selected_generation_before_reusing_coordinator(tmp_p
                 "status": "ok", "version": source_start.__version__,
                 "runtime_config_identity": source_start.config_identity(cfg),
                 "runtime_behavior_identity_v1": source_start.behavior_identity(cfg),
+                "data_auth_required": False, "data_token_match_v1": False,
                 "slot": {"pid": os.getpid(), "process_start_time": birth, "role": "active"},
             }
 
@@ -584,7 +585,10 @@ def test_coordinator_legacy_listener_uses_native_bind_evidence(monkeypatch, occu
 
 
 @pytest.mark.parametrize(
-    "changed", ["none", "version", "birth", "config", "route", "remote", "auth", "auth-type", "behavior"],
+    "changed", [
+        "none", "version", "birth", "config", "route", "remote", "auth", "auth-type",
+        "data-mismatch", "data-missing", "data-type", "behavior",
+    ],
 )
 def test_coordinator_observation_requires_authenticated_generation_and_birth(
     tmp_path, monkeypatch, changed,
@@ -608,7 +612,7 @@ def test_coordinator_observation_requires_authenticated_generation_and_birth(
     health = {
         "status": "ok", "version": version, "runtime_config_identity": source_start.config_identity(cfg),
         "runtime_behavior_identity_v1": source_start.behavior_identity(cfg),
-        "data_auth_required": True,
+        "data_auth_required": True, "data_token_match_v1": True,
         "slot": {"pid": pid, "process_start_time": birth, "role": "active", "active": active.copy()},
     }
     if changed == "version":
@@ -623,6 +627,12 @@ def test_coordinator_observation_requires_authenticated_generation_and_birth(
         health["data_auth_required"] = False
     elif changed == "auth-type":
         health["data_auth_required"] = "yes"
+    elif changed == "data-mismatch":
+        health["data_token_match_v1"] = False
+    elif changed == "data-missing":
+        health.pop("data_token_match_v1")
+    elif changed == "data-type":
+        health["data_token_match_v1"] = "yes"
     elif changed == "behavior":
         health["runtime_behavior_identity_v1"] = "different"
 
@@ -705,6 +715,7 @@ def test_reconcile_checks_same_generation_behavior(tmp_path, monkeypatch, behavi
     )
     health = {
         "status": "ok", "version": source_start.__version__, "data_auth_required": False,
+        "data_token_match_v1": False,
         "runtime_config_identity": source_start.config_identity(cfg),
         "slot": {"pid": pid, "process_start_time": birth, "role": "active"},
     }
@@ -799,6 +810,190 @@ def test_coordinator_observation_challenges_legacy_auth_enforcement(tmp_path, mo
                     cfg, tmp_path, run_dir=tmp_path, token="fixture-token", environment={},
                     require_behavior=False,
                 )
+
+
+@pytest.mark.parametrize(
+    ("configured", "supplied", "expected"),
+    [
+        ("fixture-data", "fixture-data", True),
+        ("fixture-data", "fixture-control", False),
+        ("fixture-other", "fixture-other", True),
+        (None, None, False),
+    ],
+)
+def test_coordinator_health_reports_actual_data_token_match(
+    tmp_path, configured, supplied, expected,
+):
+    import httpx
+    from fastapi.testclient import TestClient
+    from agent_dispatch.client import DispatchClient
+    from agent_dispatch.coordinator import create_app
+    from agent_dispatch.queue import TaskQueue
+
+    app = create_app(
+        TaskQueue(tmp_path / "tasks.db"), token=configured, control_token="fixture-control",
+        sweep_interval=0, verification_interval=0,
+    )
+    with TestClient(app) as service:
+        def send(request):
+            response = service.request(request.method, request.url.path, headers=request.headers)
+            return httpx.Response(response.status_code, content=response.content, request=request)
+
+        with DispatchClient(
+            "http://127.0.0.1", token=supplied, transport=httpx.MockTransport(send),
+        ) as client:
+            health = client.health()
+        assert health["data_auth_required"] is (configured is not None)
+        assert health["data_token_match_v1"] is expected
+
+
+@pytest.mark.parametrize(
+    ("selected_token", "legacy", "expected"),
+    [
+        ("fixture-data", False, "reused"),
+        ("fixture-control", False, "transitioned"),
+        ("fixture-data", True, "transitioned"),
+        ("fixture-control", True, "transitioned"),
+        (None, False, "reused"),
+        (None, True, "transitioned"),
+    ],
+)
+def test_reconcile_reuses_only_proven_data_auth(
+    tmp_path, monkeypatch, selected_token, legacy, expected,
+):
+    import httpx
+    from fastapi.testclient import TestClient
+    from agent_dispatch import client, coordinator_observation, coordinator_status, source_start
+    from agent_dispatch.config import Config
+    from agent_dispatch.coordinator import create_app
+    from agent_dispatch.queue import TaskQueue
+    from zdd import cutover, diagnostics, routing
+
+    cfg = Config(host="127.0.0.1", db_path=str(tmp_path / "tasks.db"), token=selected_token)
+    pid = os.getpid()
+    birth = diagnostics.process_start_time(pid)
+    assert birth
+    routing.publish_active(
+        tmp_path, bind="127.0.0.1", port=43123, pid=pid,
+        version=source_start.__version__, process_start_time=birth,
+    )
+    active = routing.read_table(tmp_path, strict=True)["active"]
+    app = create_app(
+        TaskQueue(tmp_path / "tasks.db"),
+        token=None if selected_token is None else "fixture-data",
+        control_token="fixture-control", sweep_interval=0, verification_interval=0,
+    )
+    app.state.runtime_config_identity = source_start.config_identity(cfg)
+    app.state.runtime_behavior_identity_v1 = source_start.behavior_identity(cfg)
+    monkeypatch.setattr(coordinator_status, "_slot_descriptor", lambda _state: {
+        "pid": pid, "process_start_time": birth, "role": "active", "active": active,
+    })
+
+    class Orchestrator:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def run(self, **_kwargs):
+            return SimpleNamespace(to_dict=lambda: {"ok": True, "status": "transitioned"})
+
+    monkeypatch.setattr(cutover, "CutoverOrchestrator", Orchestrator)
+    with TestClient(app) as service:
+        def local_client(url, *, token, timeout):
+            def send(request):
+                response = service.request(request.method, request.url.path, headers=request.headers)
+                if legacy and response.status_code == 200:
+                    payload = response.json()
+                    payload.pop("data_token_match_v1", None)
+                    return httpx.Response(response.status_code, json=payload, request=request)
+                return httpx.Response(response.status_code, content=response.content, request=request)
+
+            return client.DispatchClient(url, token=token, timeout=timeout, transport=httpx.MockTransport(send))
+
+        monkeypatch.setattr(coordinator_observation, "_local_client", local_client)
+        assert coordinator_observation.observe(
+            cfg, tmp_path, run_dir=tmp_path, token=selected_token, environment={},
+            require_behavior=False,
+        ) == {"state": "ready", "generation": source_start.__version__}
+        if expected == "reused":
+            assert coordinator_observation.observe(
+                cfg, tmp_path, run_dir=tmp_path, token=selected_token, environment={},
+            ) == {"state": "ready", "generation": source_start.__version__}
+        else:
+            with pytest.raises(coordinator_observation.ServingObservationError):
+                coordinator_observation.observe(
+                    cfg, tmp_path, run_dir=tmp_path, token=selected_token, environment={},
+                )
+        result = source_start.run_coordinator(
+            cfg, tmp_path, token=selected_token,
+            spawn_passive=lambda _port: pytest.fail("fixture must not spawn"),
+            pick_free_port=lambda: 43124, timeout=1.0, verify_selected=lambda: None,
+            start_if_missing=False, confirm_inactive=lambda _table: True,
+        )
+    assert result["status"] == expected
+
+
+@pytest.mark.parametrize("match", [True, False, None])
+def test_reconcile_successor_requires_proven_data_auth(tmp_path, monkeypatch, match):
+    from agent_dispatch import coordinator_observation, source_start
+    from agent_dispatch.client_errors import DispatchError
+    from agent_dispatch.config import Config
+    from zdd import cutover, diagnostics, routing
+
+    cfg = Config(host="127.0.0.1", db_path=str(tmp_path / "tasks.db"), token="fixture-data")
+    pid = os.getpid()
+    birth = diagnostics.process_start_time(pid)
+    assert birth
+    routing.publish_active(
+        tmp_path, bind="127.0.0.1", port=43123, pid=pid,
+        version="previous", process_start_time=birth,
+    )
+
+    class Client:
+        def __init__(self, url, *, token, timeout):
+            self.url = url
+            self.token = token
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def health(self):
+            if self.token is None:
+                raise DispatchError(401, "missing credential")
+            successor = self.url.endswith(":43124")
+            result = {
+                "status": "ok",
+                "version": source_start.__version__ if successor else "previous",
+                "runtime_config_identity": source_start.config_identity(cfg),
+                "runtime_behavior_identity_v1": source_start.behavior_identity(cfg),
+                "data_auth_required": True,
+                "slot": {"pid": pid, "process_start_time": birth, "role": "active"},
+            }
+            if successor and match is not None:
+                result["data_token_match_v1"] = match
+            return result
+
+    class Orchestrator:
+        def __init__(self, *_args, **kwargs):
+            self.spawn = kwargs["spawn_passive"]
+            self.probe = kwargs["health_check"]
+
+        def run(self, **_kwargs):
+            self.spawn(43124)
+            ready = self.probe("127.0.0.1", 43124)
+            return SimpleNamespace(to_dict=lambda: {"ok": True, "ready": ready})
+
+    monkeypatch.setattr(coordinator_observation, "_local_client", Client)
+    monkeypatch.setattr(cutover, "CutoverOrchestrator", Orchestrator)
+    result = source_start.run_coordinator(
+        cfg, tmp_path, token="fixture-data",
+        spawn_passive=lambda _port: SimpleNamespace(pid=pid, poll=lambda: None),
+        pick_free_port=lambda: 43124, timeout=1.0, verify_selected=lambda: None,
+        start_if_missing=False, confirm_inactive=lambda _table: True,
+    )
+    assert result["ready"] is (match is True)
 
 
 def test_reconcile_refuses_same_generation_without_configured_auth(tmp_path, monkeypatch):
