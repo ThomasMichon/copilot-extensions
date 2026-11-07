@@ -22,7 +22,10 @@ def validate_pending(value, raw: dict) -> dict:
         for name, progress in records.items():
             if (
                 not isinstance(name, str) or not name or name == RETURN_KEY
-                or set(progress) != {"holder", "lease", "phase"}
+                or not {"holder", "lease", "phase"} <= set(progress) <= {
+                    "holder", "lease", "phase", "obligation_active",
+                }
+                or type(progress.get("obligation_active", False)) is not bool
                 or progress["phase"] not in ("prepared", "released")
                 or not lease._same_holder_ref(progress["holder"], progress["holder"])
                 or progress["lease"] != raw.get(name)
@@ -70,9 +73,14 @@ def _original_holder(name: str, held: lease.Lease, shared: dict) -> str | None:
     if not isinstance(holder, str) or not lease._same_holder_ref(holder, holder):
         return None
     owner = lease._claim_owner(held)
+    same_epoch = (
+        shared.get("state") == "leased" and shared.get("token") == held.lease_token
+        and len(held.lease_token) in (40, 64)
+        and all(character in "0123456789abcdef" for character in held.lease_token)
+    )
     if (
         held.host == lease._this_host()
-        and lease.resolve_owner_worktree() == owner
+        and (lease.resolve_owner_worktree() == owner or same_epoch)
         and lease._same_holder_ref(coordination.owner_ref(), holder)
     ):
         return holder
@@ -84,12 +92,17 @@ def _original_holder(name: str, held: lease.Lease, shared: dict) -> str | None:
     except (TypeError, ValueError):
         return None
     owners = payload.get("owners") if isinstance(payload, dict) else None
-    if not isinstance(owners, list) or not os.path.isabs(owner):
+    if not isinstance(owners, list):
         return None
     matches = [
         item for item in owners if isinstance(item, dict)
-        and isinstance(path := item.get("worktree_path") or item.get("path"), str)
-        and os.path.normcase(os.path.normpath(path)) == os.path.normcase(os.path.normpath(owner))
+        and (
+            same_epoch
+            or not os.path.isabs(owner) and os.path.normpath(owner) == item.get("worktree_id")
+            or isinstance(path := item.get("worktree_path") or item.get("path"), str)
+            and os.path.isabs(path) == os.path.isabs(owner)
+            and os.path.normcase(os.path.normpath(path)) == os.path.normcase(os.path.normpath(owner))
+        )
         and lease._same_holder_ref(item.get("qualified_ref") or item.get("owner_ref"), holder)
     ]
     return holder if len(matches) == 1 else None
@@ -111,16 +124,21 @@ def _release_claim(name: str, owner: str, expected: lease.Lease | None) -> bool:
     if held is None or lease._claim_owner(held) != owner:
         return False
     if held.lease_token:
-        shared = None if progress and progress["phase"] == "released" else coordination.inspect(name)
+        shared = None if progress else coordination.inspect(name)
         if progress:
             holder = progress["holder"]
         else:
             holder = _original_holder(name, held, shared) if shared else None
         if not holder:
             raise RuntimeError(f"Return of '{name}' is unconfirmed; original owner and local claim are retained")
-        from .driving_worktrees import _qualified_claim_refs
+        from .driving_worktrees import _qualified_claim_states
 
-        refs = _qualified_claim_refs(holder)
+        states = _qualified_claim_states(holder)
+        obligation_active = states.get(name) in ("active", "at-rest")
+        released = progress and (
+            progress["phase"] == "released"
+            or progress.get("obligation_active") and states.get(name) == "released"
+        )
         if not progress and not (
             shared and (
                 shared.get("state") == "leased" and shared.get("token") == held.lease_token
@@ -129,9 +147,13 @@ def _release_claim(name: str, owner: str, expected: lease.Lease | None) -> bool:
         ):
             raise RuntimeError(f"Shared ownership of '{name}' changed; local claim is retained")
         if not progress:
-            progress = {"holder": holder, "lease": asdict(held), "phase": "prepared"}
+            progress = {
+                "holder": holder, "lease": asdict(held), "phase": "prepared",
+                "obligation_active": obligation_active,
+            }
             _save_progress(name, held, progress)
-        if progress["phase"] != "released":
+        if not released:
+            shared = shared if shared is not None else coordination.inspect(name)
             if not shared or not lease._same_holder_ref(shared.get("holder"), holder):
                 raise RuntimeError(f"Shared ownership of '{name}' changed; local claim is retained")
             if shared.get("state") == "leased" and shared.get("token") == held.lease_token:
@@ -140,8 +162,13 @@ def _release_claim(name: str, owner: str, expected: lease.Lease | None) -> bool:
             elif shared.get("state") != "released" or shared.get("live") is not False:
                 raise RuntimeError(f"Shared ownership of '{name}' changed; local claim is retained")
             progress = {**progress, "phase": "released"}
-            _save_progress(name, held, progress)
-        if name in refs and not coordination.settle_obligation(name, holder, released=True, confirmed=True):
+            try:
+                _save_progress(name, held, progress)
+            except OSError:
+                # The release ACK is still known in this invocation. Finish
+                # through the original native ledger and durable local cleanup.
+                pass
+        if obligation_active and not coordination.settle_obligation(name, holder, released=True, confirmed=True):
             raise RuntimeError(f"Original-owner settlement of '{name}' is unconfirmed; local claim is retained")
     with lease._lease_lock():
         records = lease._read_records(lease.LEASE_FILE, lease.Lease, fail_closed=True)

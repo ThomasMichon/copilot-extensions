@@ -12,9 +12,12 @@ def claim_guard(name: str):
     from . import lease
 
     root = lease.LEASE_FILE.parent / "claim-locks"
-    root.mkdir(parents=True, exist_ok=True)
     path = root / (hashlib.sha256(name.encode("utf-8")).hexdigest() + ".lock")
-    descriptor = os.open(path, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+        descriptor = os.open(path, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    except OSError as error:
+        raise lease.CoordinationRejected(f"CodeSpace '{name}' claim/return guard is unavailable") from error
     locked = False
     try:
         if os.fstat(descriptor).st_size == 0:
@@ -30,7 +33,7 @@ def claim_guard(name: str):
 
                 fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
-            raise RuntimeError(f"CodeSpace '{name}' claim/return is busy") from None
+            raise lease.CoordinationRejected(f"CodeSpace '{name}' claim/return is busy") from None
         locked = True
         yield
     finally:
@@ -49,12 +52,19 @@ def serialize_claim(position: int = 0):
     def decorate(function):
         @wraps(function)
         def guarded(*args, **kwargs):
+            from . import lease
             from .claim_return import pending_returns
 
             name = kwargs.get("codespace", args[position] if len(args) > position else "")
             with claim_guard(name):
-                if name in pending_returns():
-                    raise RuntimeError(f"CodeSpace '{name}' has an unsettled return; local claim is retained")
+                try:
+                    pending = pending_returns()
+                except lease.ProviderAdmissionError as error:
+                    raise lease.CoordinationRejected(str(error)) from error
+                if name in pending:
+                    raise lease.CoordinationRejected(
+                        f"CodeSpace '{name}' has an unsettled return; local claim is retained",
+                    )
                 return function(*args, **kwargs)
 
         return guarded

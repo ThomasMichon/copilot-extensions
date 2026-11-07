@@ -666,7 +666,15 @@ retains legacy own-venue reuse; an explicitly returned venue must be reserved
 again. The selected account is retained before an uncertain attempt, and strict
 binding writes preserve additive fields, other records and corrupt-state bytes.
 Qualified ownership is read through the selected Worktrees runtime, not an
-installed sibling Python package. Failed or malformed ledger reads refuse;
+installed sibling Python package or a directory-basename identity guess.
+Native anchor IDs may differ from their repository directory names.
+Cross-caller return matches the stored native worktree ID or native-recorded
+path together with its complete qualified reference; it does not resolve a
+relative owner against the returning caller's directory.
+An older noncanonical owner label can also be linked by its exact active
+fencing token and unique qualified native owner. An unmatched epoch or an
+already-released lease without an identifiable original owner remains unknown.
+Failed or malformed ledger reads refuse;
 an omitted inventory row does not hide a matching bound obligation.
 Admission classifies every matching obligation; one returned venue cannot hide
 another uncertain acquisition. Holder equality includes machine, project and
@@ -687,6 +695,8 @@ per-CodeSpace local OS-held exclusion. Return holds it through native settlement
 and local cleanup; ordinary claim journaling stays inside it too, outside the
 short lease-file transaction. Concurrent operations report busy, and a process
 exit releases the guard without deleting or age-stealing its lock identity.
+Busy, unsettled or malformed return coordination is a blocking rejection for
+SSH and attached/detached Copilot admission, not optional bookkeeping.
 Generic and bulk return also pin their preselected local snapshots; a delayed
 selection cannot release a replacement claim from the same owner.
 The existing `leases.json` retains pending returns in the reserved
@@ -695,6 +705,20 @@ owner and prepared/confirmed-release phase. Ordinary lease records keep their
 legacy shape. After confirmed release, a settlement retry uses that saved
 owner without rereleasing or inspecting a later borrower's lease. Unknown
 progress or settlement retains custody; unrelated current writes preserve it.
+If publishing the released phase fails after a positive shared-release ACK,
+the same invocation may still finish through confirmed native settlement and
+durable local cleanup. Prepared progress records whether the original native
+obligation was active. Its later explicit `released` transition can recover a
+failed cleanup without inspecting or releasing the successor; a missing entry
+or a legacy entry already released before this return is not that evidence.
+If neither the release phase nor native settlement is confirmed durably,
+retain the original claim. An owning caller may confirm its completed return
+through the existing qualified `claims settle <name> --owner-ref <original-ref>
+--released --json` operation, then retry normal return; do not settle an unknown
+operation, remove the ledger entry, hand-edit progress or release a successor.
+Legacy claims lacking the recorded active obligation retain uncertainty until
+their original return can be established; no automatic recovery is promised
+from absent evidence.
 Older tolerant readers still see ordinary holders; older strict admission
 readers refuse the extra entry. Older writers do not join the new exclusion
 and may discard progress: serialize mixed-version writers during rollout or

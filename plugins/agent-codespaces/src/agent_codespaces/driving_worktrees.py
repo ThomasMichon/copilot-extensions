@@ -53,7 +53,14 @@ def codespace_claim_owner_worktrees(codespace_names: Iterable[str]) -> dict[str,
     }
 
 
-def _qualified_claim_refs(holder: str, owner: str | None = None) -> set[str]:
+def _qualified_claim_refs(holder: str) -> set[str]:
+    return {
+        name for name, state in _qualified_claim_states(holder).items()
+        if state != "released"
+    }
+
+
+def _qualified_claim_states(holder: str) -> dict[str, str]:
     """Read one complete qualified owner's ledger, never treating failure as absence."""
     from . import coordination
 
@@ -62,8 +69,6 @@ def _qualified_claim_refs(holder: str, owner: str | None = None) -> set[str]:
         if len(parts) != 3 or any(not part for part in parts):
             raise RuntimeError("Workstream ownership identity is malformed")
         machine, project, worktree = parts
-        if owner and owner.rstrip("/\\").replace("\\", "/").rsplit("/", 1)[-1] != worktree:
-            raise RuntimeError("Workstream ownership identity does not match the caller")
         result = coordination._run(["--project", project, "claims", worktree, "--json"])
         if result is None or result.returncode:
             detail = (result.stderr or "").strip()[:500] if result is not None else "selected runtime unavailable"
@@ -87,7 +92,7 @@ def _qualified_claim_refs(holder: str, owner: str | None = None) -> set[str]:
             not isinstance(readiness, dict) or readiness.get("ready") is not True
         ):
             raise RuntimeError("Workstream ownership coordination is not ready")
-        refs: set[str] = set()
+        states: dict[str, str] = {}
         for claim in payload["outbound"]:
             if (
                 not isinstance(claim, dict) or not isinstance(claim.get("kind"), str)
@@ -99,11 +104,11 @@ def _qualified_claim_refs(holder: str, owner: str | None = None) -> set[str]:
             if (
                 not isinstance(claim.get("ref"), str) or not claim["ref"].strip()
                 or claim.get("state") not in ("active", "at-rest", "released")
+                or claim["ref"] in states
             ):
                 raise RuntimeError("Workstream ownership contains an unknown CodeSpace claim")
-            if claim["state"] != "released":
-                refs.add(claim["ref"])
-        return refs
+            states[claim["ref"]] = claim["state"]
+        return states
     raise RuntimeError("Workstream ownership identity is missing")
 
 
@@ -112,7 +117,7 @@ def _workstream_claim_refs(owner: str | None) -> set[str]:
 
     holder = coordination.owner_ref()
     if holder:
-        return _qualified_claim_refs(holder, owner)
+        return _qualified_claim_refs(holder)
     if not owner:
         return set()
     try:

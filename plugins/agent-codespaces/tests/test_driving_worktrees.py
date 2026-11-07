@@ -208,6 +208,28 @@ def test_native_workstream_ownership_uses_selected_runtime_without_python_peer(m
     assert seen == [["--project", "project", "claims", "wt-a", "--json"]]
 
 
+@pytest.mark.parametrize("claims", [[], [{"kind": "codespace", "ref": "retained", "state": "active"}]])
+def test_native_anchor_identity_does_not_depend_on_directory_basename(monkeypatch, claims):
+    from agent_codespaces import coordination
+
+    monkeypatch.setitem(sys.modules, "agent_worktrees", None)
+    monkeypatch.setattr(coordination, "owner_ref", lambda: "machine/project/@anchor")
+    seen = []
+
+    def run(args, **kwargs):
+        seen.append(args)
+        return subprocess.CompletedProcess(args, 0, json.dumps({
+            "version": 1, "machine": "machine", "repo": "project",
+            "worktree_id": "@anchor", "outbound": claims,
+        }), "")
+
+    monkeypatch.setattr(coordination, "_run", run)
+    assert driving_worktrees._workstream_claim_refs("different-repository-directory") == {
+        claim["ref"] for claim in claims
+    }
+    assert seen == [["--project", "project", "claims", "@anchor", "--json"]]
+
+
 @pytest.mark.parametrize("response", [
     None,
     subprocess.CompletedProcess([], 1, "", "owner unavailable"),
