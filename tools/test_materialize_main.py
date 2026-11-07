@@ -2060,8 +2060,11 @@ def test_materialize_nested_uv_editable_refs_refuses_stale_mismatched_content(tm
 
 
 @pytest.mark.parametrize("plugin", ["agent-pull-requests", "agent-dispatch", "agent-index"])
-def test_materialize_installer_engine_ref_into_copies_and_rewrites(tmp_path: Path, plugin: str):
+def test_materialize_installer_engine_ref_into_copies_and_rewrites(
+    tmp_path: Path, plugin: str, monkeypatch: pytest.MonkeyPatch,
+):
     assert plugin in ier.ADOPTERS
+    monkeypatch.setattr(ier, "PYTHON_ADOPTERS", ())
     root = tmp_path / "repo"
     engine = root / "libs" / "installer-engine"
     engine.mkdir(parents=True)
@@ -2082,7 +2085,8 @@ def test_materialize_installer_engine_ref_into_copies_and_rewrites(tmp_path: Pat
         source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=root,
     )
 
-    assert sum(1 for line in log if line.startswith("OK")) == 2
+    assert not any(line.startswith("SKIP") for line in log), log
+    assert sum(1 for line in log if line.startswith("OK")) == 4
     assert (consumer / "scripts" / "installer-engine.sh").read_text() == "# canonical sh\n"
     assert (consumer / "scripts" / "installer-engine.ps1").read_text() == "# canonical ps1\n"
     assert (consumer / "scripts" / "install.sh").read_text(encoding="utf-8").splitlines() == [
