@@ -220,7 +220,7 @@ def test_snapshot_control_launches_disable_bytecode_writes(monkeypatch):
         dependency_commands = [
             line for line in source.splitlines() if "installer_dependency_policy.py" in line
         ]
-        assert len(dependency_commands) == 6
+        assert len(dependency_commands) == 5
         assert all(" -I -B " in line for line in dependency_commands)
     assert '"$py" -I -B "$vr"' in sh
     assert "@('-I', '-B', $vr," in ps

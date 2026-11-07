@@ -4948,7 +4948,7 @@
         "plugins/agent-dispatch/src/agent_dispatch/spawn_diagnostics.py": "370d3f57d33db75e42e98441426fe46ea56b8706db8bd8fbb1089b3efaac43aa",
         "plugins/agent-machines/scripts/cell_installer.py": "041a28230551d926c65ff00866213f5944ff5d1e0596c75e37ffa8cd0af64795",
         "plugins/agent-machines/src/agent_machines/git_config_transaction.py": "5b054f3f2c2270672c55bab7de114e5e05541235d94553c4c1de2a06b26fe38d",
-        "plugins/agent-machines/tests/test_cell_installer.py": "de004be5b70e1d4bed4945e766f393c167db0682979853eba4fa40814e01bf14",
+        "plugins/agent-machines/tests/test_cell_installer.py": "e1177f891e89e37c7f23226c179db5721ec665ca894ca3d88c4b376f7d8c907f",
         "plugins/agent-mcp/src/agent_mcp/home.py": "62c504a90b38853728e6cc5371ca28ffd77668c23abdae61e32b913e191ed108",
         "plugins/agent-worktrees/scripts/anchor_shell_parser.py": "503f15d7f67ccea54b69e474214fff2c262fdb6c0e989bba423e8e45af1c3763",
         "plugins/agent-worktrees/scripts/anchor_write_guard.py": "cf354630e43adfc9e04cd86f3f5d0461bba9aeedb2d9edf85083c19c3f170d69",
