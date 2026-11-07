@@ -341,15 +341,20 @@ _Operator-required outcome; agent-recommended slices and validation._
   adoption, allocation/correlation and installed qualification remain open.
   The [prepared-intent binding refinement](comment-intent-binding.md) addresses
   the missing structured admission fact before new storage/publisher behavior.
-  Its next [durable pre-approval selection refinement](comment-intent-binding.md#durable-pre-approval-selection-and-allocation)
-  precedes automatic allocation or another strict storage/publisher change;
-  retaining a caller-supplied ID does not allocate or recover it.
+  The reviewed [durable pre-approval selection refinement](comment-intent-binding.md#durable-pre-approval-selection-and-allocation)
+  precedes automatic allocation and strict storage/publisher changes.
+  Its finite owner data leaves below do not qualify producer adoption.
 - [x] Deliver the finite optional prepared-intent source binding: explicit
   storage (#11207), native execution/original receipts (#11214), negotiated
   workspace submission (#11224) and host-bound local preparation before
   preview/approval (#11237). Caller-retained GUIDs and actual profile/source
   owners remain required; this is not automatic all-publisher adoption,
   allocation, acquisition/DB mapping or installed/provider qualification.
+- [x] Deliver finite pre-approval owner retention (#11251) and fresh
+  comment/reply allocation (#11253), committing exact final bytes before
+  preview and separating pending selection from execution admission.
+  Actual producer/receiver integration, automatic owned/legacy edit binding
+  and complete all-forge/installed adoption remain open.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -903,6 +908,13 @@ or silently expanding a bounded source claim.
   boundaries, with explicit surface/provider coverage and evidence tiers.
   Preserve every existing attention, native, installed and shadow gate.
 
+- [x] Qualify the finite pre-approval owner data path through actual shared
+  preparation, original-key restart/lost-result recovery, contention,
+  immutable input, explicit exact admission/native receipts, strict reader
+  lifecycle and capacity: 187 coupled cases (#11253).
+  Bodyless votes remain bodyless; automatic edits refuse rather than infer
+  native identity. This is not producer/wire, provider or installed acceptance.
+
 - [x] Qualify the finite local preparation -> exact preview -> explicit
   native/Gateway submission -> durable reopen and confirmed retry source
   path for comments, replies and owned edits (#11237; 133 coupled cases).
@@ -1011,11 +1023,15 @@ callback an implicit credential store.
 
 ### 2026-11-06 - Allocate fresh identities inside original-selection custody
 
+- #11253 actually merged as `0bd34706744af9755aa75db2f6cca0d162f7ad77`
+  after exact-head Copilot approval with no open issues and the latest
+  current-head CI and required PR gate green. Managed source reconciliation
+  retained its backup; the parent remains Active.
 - #11251 actually merged as `911bfa164602526aecc7347016554a83cb59a8ca`
   after exact-head Copilot approval with no open issues and the latest
   current-head CI and required PR gate green. Managed source reconciliation
   preserved its backup and retained the active parent/source custody.
-- The next bounded source leaf adds allocation for new comments/replies
+- The finite source leaf adds allocation for new comments/replies
   through that same original-selection transaction. The trusted host resolves
   policy/profile/source before entry and supplies only bounded synchronous
   pure composition under the lock. Original-key recovery avoids allocation
