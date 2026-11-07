@@ -19,6 +19,7 @@ from enum import Enum
 from agent_procutil import no_window_flags
 
 from .config import RUNTIME_DIR, CodespacesConfig, RepoConfig
+from .creation import _create_codespace_via_rest, _is_interactive_prompt_failure
 from .worktrees import ContextRefused, validate_context
 from .owner_inventory import qualified_account_listing as qualified_account_listing
 from .owner_inventory import decode_listing
@@ -578,75 +579,6 @@ def resolve_devcontainer_path(
         repo, len(paths), paths, chosen, repo,
     )
     return chosen
-
-
-# Substrings in `gh codespace create` stderr that mean it aborted on an
-# interactive prompt it could not show in a headless (no-TTY) shell -- the
-# org-billing consent gate on org-paid repos (#151). Matched case-insensitively.
-_INTERACTIVE_PROMPT_MARKERS = ("failed to prompt", "no terminal")
-
-
-def _is_interactive_prompt_failure(stderr: str) -> bool:
-    """Whether ``gh codespace create`` stderr indicates a headless prompt abort."""
-    low = (stderr or "").lower()
-    return any(marker in low for marker in _INTERACTIVE_PROMPT_MARKERS)
-
-
-def _create_codespace_via_rest(
-    repo: str,
-    machine: str,
-    location: str,
-    account: str | None,
-    *,
-    branch: str | None = None,
-    display_name: str | None = None,
-    devcontainer_path: str | None = None,
-    environment: dict | None = None,
-) -> str:
-    """Create a CodeSpace via the REST API (no TTY gate) -- #151 fallback.
-
-    ``POST /repos/{repo}/codespaces`` has no interactive billing/permissions
-    prompt, so it succeeds headlessly where ``gh codespace create`` aborts.
-    ``multi_repo_permissions_opt_out=true`` skips the multi-repo permissions
-    consent (the REST analogue of ``--default-permissions``). Returns the
-    created CodeSpace name (state ``Queued``); the caller's wait loop handles
-    provisioning. Raises ``RuntimeError`` if the REST call fails or returns no
-    name.
-    """
-    from .allocation import creation_environment
-
-    args = [
-        "gh", "api", "--method", "POST",
-        f"repos/{repo}/codespaces",
-        "-f", f"machine={machine}",
-        "-f", f"location={location}",
-        "-F", "multi_repo_permissions_opt_out=true",
-        "--jq", ".name",
-    ]
-    if branch:
-        args.extend(["-f", f"ref={branch}"])
-    if display_name:
-        args.extend(["-f", f"display_name={display_name}"])
-    if devcontainer_path:
-        args.extend(["-f", f"devcontainer_path={devcontainer_path}"])
-
-    log.info("Creating codespace via REST API (#151 fallback): %s", " ".join(args))
-    result = subprocess.run(
-        args, capture_output=True, text=True, timeout=300,
-        creationflags=_creation_flags(),
-        env=environment if environment is not None else creation_environment(repo, account)[1],
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            "gh codespace create hit an interactive prompt headlessly and the "
-            f"REST API fallback also failed: {result.stderr.strip()}"
-        )
-    name = result.stdout.strip()
-    if not name:
-        raise RuntimeError(
-            f"REST API codespace create returned no name (stdout={result.stdout!r})"
-        )
-    return name
 
 
 def create_codespace(
