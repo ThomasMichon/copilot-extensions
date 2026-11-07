@@ -104,8 +104,11 @@ class OperationLock:
     Callers must separately journal any work that outlives that custody.
     """
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, byte_zero: bool = False) -> None:
+        if type(byte_zero) is not bool:
+            raise ValueError("byte_zero must be a boolean")
         self.path = Path(path)
+        self._byte_zero = byte_zero
         self._file: BinaryIO | None = None
         self._owner: tuple[int, threading.Thread] | None = None
         self._key: tuple[int, int, int] | None = None
@@ -171,7 +174,15 @@ class OperationLock:
                 self._key = key
                 self._owner = (os.getpid(), threading.current_thread())
                 try:
-                    _acquire_os_lock(stream)
+                    if self._byte_zero and os.name == "nt":
+                        import msvcrt
+
+                        if os.fstat(stream.fileno()).st_size == 0:
+                            stream.write(b"\0")
+                        stream.seek(0)
+                        msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+                    else:
+                        _acquire_os_lock(stream)
                 except OSError as error:
                     if error.errno in (errno.EACCES, errno.EAGAIN):
                         raise OperationLockedError(f"another process holds {self.path}") from error
