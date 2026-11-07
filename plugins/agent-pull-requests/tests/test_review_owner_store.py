@@ -1,13 +1,19 @@
 """Actual single-store adoption/intent/receipt consumers, with no backend effects."""
 
+from __future__ import annotations
+
 import copy
+import hashlib
+import importlib
 import json
+from pathlib import Path
 import threading
 import time
 
 import pytest
 
 from agent_pull_requests import watch_replay_store as storage
+from agent_pull_requests import review_intent
 from agent_pull_requests.review_workspace import _digest
 from agent_pull_requests.watch_replay import ConsumerScope
 from agent_pull_requests.watch_replay_store import ReplayStore, ReplayStoreInvalid, ReplayServiceIdentity
@@ -42,6 +48,262 @@ def store(tmp_path):
     result.provision()
     result.adopt_review_operations(lifecycle_checkpoint=lambda: None, expires_at=expires())
     return result
+
+
+@pytest.fixture
+def prepared_intent(monkeypatch: pytest.MonkeyPatch) -> dict:
+    root = Path(__file__).resolve().parents[3]
+    monkeypatch.syspath_prepend(str(root / "plugins/ai-attribution/scripts"))
+    attribution_profile = importlib.import_module("attribution_profile")
+    comment_preparation = importlib.import_module("comment_preparation")
+
+    prepared = comment_preparation.prepare(
+        "Selected prepared finding.", attribution_profile.validate({"version": 1}),
+        {"domain": "forge", "visibility": "public", "activity": "comment", "required": True},
+        {"protocol": "agent-worktrees.comment-origin/v1", "privacy": "public",
+         "origin": {"codename": "bolted-circuit"}, "effects": "none"},
+        comment_id="11111111-1111-4111-8111-111111111111",
+        write_id="22222222-2222-4222-8222-222222222222",
+    )
+    value = selected("prepared-review")
+    value["version"] = 2
+    value["actions"][0].update(
+        body=prepared["body"],
+        preparation={"identity": prepared["identity"], "body_id": prepared["body_id"]},
+    )
+    return value
+
+
+def test_prepared_intent_requires_explicit_owner_extension_and_keeps_old_parser_strict(
+    store: ReplayStore, prepared_intent: dict,
+) -> None:
+    before = store.path.read_bytes()
+    with pytest.raises(ValueError, match="invalid review intent"):
+        review_intent.intent(prepared_intent)
+    with pytest.raises(ReplayStoreInvalid, match="explicit storage adoption"):
+        store.admit_review(prepared_intent, expires_at=expires())
+    assert store.path.read_bytes() == before
+    assert store.adopt_prepared_reviews(
+        lifecycle_checkpoint=lambda: None, expires_at=expires(),
+    ) == {"status": "adopted", "review_intent_versions": [1, 2]}
+    admitted = store.admit_review(prepared_intent, expires_at=expires())
+    restarted = ReplayStore(store.root, store.namespace)
+    assert restarted.inspect_review("prepared-review", SCOPE, expires_at=expires()) == admitted["operation"]
+    assert restarted.admit_review(prepared_intent, expires_at=expires())["status"] == "existing"
+    assert restarted.adopt_prepared_reviews(
+        lifecycle_checkpoint=lambda: None, expires_at=expires(),
+    )["status"] == "already_adopted"
+
+
+def test_prepared_extension_preserves_unknown_legacy_receipts_and_excludes_old_readers(
+    store: ReplayStore, prepared_intent: dict,
+) -> None:
+    class LegacyReader(ReplayStore):
+        def _validate_owner(self, document: dict) -> None:
+            if "review_intent_version" in document:
+                raise ReplayStoreInvalid("old strict envelope does not support prepared reviews")
+            super()._validate_owner(document)
+
+    store.admit_review(selected(), expires_at=expires())
+    begun = store.begin_review_action("selected-review", SCOPE, "comment-a", expires_at=expires())
+    store.record_review_receipt(
+        "selected-review", SCOPE, "comment-a", begun["action"]["attempt_id"],
+        response(thread_id=20), expires_at=expires(), confirm=False,
+    )
+    legacy = LegacyReader(store.root, store.namespace)
+    assert legacy.observation_targets(expires_at=expires()) == ()
+    before = store.path.read_bytes()
+
+    def held() -> None:
+        raise RuntimeError("existing incompatible reader has not drained")
+
+    with pytest.raises(RuntimeError, match="drained"):
+        store.adopt_prepared_reviews(lifecycle_checkpoint=held, expires_at=expires())
+    assert store.path.read_bytes() == before
+    retained = json.loads(before)["reviews"]
+    store.adopt_prepared_reviews(lifecycle_checkpoint=lambda: None, expires_at=expires())
+    assert json.loads(store.path.read_bytes())["reviews"] == retained
+    with pytest.raises(ReplayStoreInvalid, match="invalid persisted replay state"):
+        legacy.observation_targets(expires_at=expires())
+    store.admit_review(prepared_intent, expires_at=expires())
+    assert store.inspect_review("selected-review", SCOPE, expires_at=expires())["actions"][0]["state"] == "unknown"
+
+
+@pytest.mark.parametrize("change", ["body", "guid", "source", "hash", "extra"])
+def test_prepared_binding_refuses_mismatched_metadata_without_mutating_owner(
+    store: ReplayStore, prepared_intent: dict, change: str,
+) -> None:
+    store.adopt_prepared_reviews(lifecycle_checkpoint=lambda: None, expires_at=expires())
+    action = prepared_intent["actions"][0]
+    if change == "body":
+        action["body"] = "Changed " + action["body"]
+    elif change == "guid":
+        action["preparation"]["identity"]["comment_id"] = "not-a-public-guid"
+    elif change == "source":
+        action["preparation"]["identity"]["source"]["origin"]["worktree"] = "not-public"
+    elif change == "hash":
+        action["preparation"]["body_id"] = "f" * 64
+    else:
+        action["preparation"]["unrecognized"] = True
+    before = store.path.read_bytes()
+    with pytest.raises(ValueError):
+        store.admit_review(prepared_intent, expires_at=expires())
+    assert store.path.read_bytes() == before
+
+
+@pytest.mark.parametrize("layout", [
+    "Selected.\n\n{marker}\n\n{marker}",
+    "Selected.\n\n```text\n{marker}",
+    "Selected.\n\n~~~text\n{marker}",
+    "Selected.\n\n```bad`info\n<!-- agent-comment:v1 c=foreign w=foreign -->\n```\n\n{marker}",
+    "<!-- harmless ` --> <!-- agent-comment:v1 c=foreign w=foreign --> ` -->\n\n{marker}",
+])
+def test_prepared_admission_rejects_literal_boundaries_the_shared_producer_refuses(
+    store: ReplayStore, prepared_intent: dict, layout: str,
+) -> None:
+    comment_preparation = importlib.import_module("comment_preparation")
+    store.adopt_prepared_reviews(lifecycle_checkpoint=lambda: None, expires_at=expires())
+    action = prepared_intent["actions"][0]
+    marker = action["body"].splitlines()[-1]
+    action["body"] = layout.format(marker=marker)
+    action["preparation"]["body_id"] = hashlib.sha256(action["body"].encode()).hexdigest()
+    complete = {
+        "protocol": comment_preparation.PROTOCOL,
+        **action["preparation"], "body": action["body"], "effects": "none",
+    }
+    with pytest.raises(ValueError):
+        comment_preparation._previous(complete)
+    before = store.path.read_bytes()
+    with pytest.raises(ValueError):
+        store.admit_review(prepared_intent, expires_at=expires())
+    assert store.path.read_bytes() == before
+
+
+def test_actual_shared_preparation_literal_examples_remain_admissible_and_repeatable(
+    store: ReplayStore, prepared_intent: dict,
+) -> None:
+    comment_preparation = importlib.import_module("comment_preparation")
+    attribution_profile = importlib.import_module("attribution_profile")
+    identity = prepared_intent["actions"][0]["preparation"]["identity"]
+    example = "<!-- agent-comment:v1 c=example w=example -->"
+    draft = f"> {example}\n\n```html\n{example}\n```\n\nInline `{example}`.\n\nSelected."
+    prepared = comment_preparation.prepare(
+        draft, attribution_profile.validate({"version": 1}),
+        {"domain": "forge", "visibility": "public", "activity": "comment", "required": True},
+        identity["source"], comment_id=identity["comment_id"], write_id=identity["write_id"],
+    )
+    assert comment_preparation._previous(prepared) == prepared
+    prepared_intent["actions"][0].update(
+        body=prepared["body"], preparation={"identity": prepared["identity"], "body_id": prepared["body_id"]},
+    )
+    store.adopt_prepared_reviews(lifecycle_checkpoint=lambda: None, expires_at=expires())
+    store.admit_review(prepared_intent, expires_at=expires())
+    restarted = ReplayStore(store.root, store.namespace)
+    retained = restarted.inspect_review("prepared-review", SCOPE, expires_at=expires())
+    assert retained["intent"] == prepared_intent
+    assert restarted.admit_review(prepared_intent, expires_at=expires())["status"] == "existing"
+
+
+def test_prepared_binding_remains_immutable_and_write_identity_cannot_move_to_new_operation(
+    store: ReplayStore, prepared_intent: dict,
+) -> None:
+    store.adopt_prepared_reviews(lifecycle_checkpoint=lambda: None, expires_at=expires())
+    store.admit_review(prepared_intent, expires_at=expires())
+    before = store.path.read_bytes()
+    changed = copy.deepcopy(prepared_intent)
+    changed["actions"][0]["body"] = "New profile " + changed["actions"][0]["body"]
+    changed["actions"][0]["preparation"]["body_id"] = hashlib.sha256(
+        changed["actions"][0]["body"].encode(),
+    ).hexdigest()
+    with pytest.raises(ValueError, match="different immutable intent"):
+        store.admit_review(changed, expires_at=expires())
+    reused = copy.deepcopy(prepared_intent)
+    reused["operation_id"] = "replacement-operation"
+    with pytest.raises(ValueError, match="write identity"):
+        store.admit_review(reused, expires_at=expires())
+    assert store.path.read_bytes() == before
+
+
+def test_prepared_metadata_is_not_accepted_in_a_legacy_intent_or_bodyless_vote(
+    store: ReplayStore, prepared_intent: dict,
+) -> None:
+    store.adopt_prepared_reviews(lifecycle_checkpoint=lambda: None, expires_at=expires())
+    legacy = copy.deepcopy(prepared_intent)
+    legacy["version"] = 1
+    with pytest.raises(ValueError, match="unsupported or malformed"):
+        store.admit_review(legacy, expires_at=expires())
+    prepared_intent["actions"][1]["preparation"] = copy.deepcopy(prepared_intent["actions"][0]["preparation"])
+    with pytest.raises(ValueError, match="unsupported or malformed"):
+        store.admit_review(prepared_intent, expires_at=expires())
+
+
+def test_prepared_extension_is_independent_of_existing_journal_attention_and_capture_layouts(
+    store: ReplayStore, prepared_intent: dict,
+) -> None:
+    from agent_pull_requests.attention_store import AttentionStore
+    from agent_pull_requests.conversation_store import ConversationStore
+    from agent_pull_requests.feedback_capture_store import FeedbackCaptureStore
+
+    store.adopt_prepared_reviews(lifecycle_checkpoint=lambda: None, expires_at=expires())
+    admitted = store.admit_review(prepared_intent, expires_at=expires())["operation"]
+    adopters = (
+        ConversationStore(store).adopt, AttentionStore(store).adopt,
+        FeedbackCaptureStore(store).adopt, FeedbackCaptureStore(store).adopt_readback,
+    )
+    for version, adopt in enumerate(adopters, start=3):
+        adopt(lifecycle_checkpoint=lambda: None, expires_at=expires())
+        document = json.loads(store.path.read_bytes())
+        assert document["version"] == version and document["review_intent_version"] == 2
+        assert store.inspect_review("prepared-review", SCOPE, expires_at=expires()) == admitted
+    restarted = ReplayStore(store.root, store.namespace)
+    assert restarted.inspect_review("prepared-review", SCOPE, expires_at=expires()) == admitted
+
+
+def test_duplicate_prepared_logical_comment_or_write_in_one_selection_refuses(
+    store: ReplayStore, prepared_intent: dict,
+) -> None:
+    store.adopt_prepared_reviews(lifecycle_checkpoint=lambda: None, expires_at=expires())
+    duplicate = copy.deepcopy(prepared_intent["actions"][0])
+    duplicate["id"] = "different-action"
+    duplicate.update(kind="reply", thread_id=20)
+    prepared_intent["actions"].append(duplicate)
+    before = store.path.read_bytes()
+    with pytest.raises(ValueError, match="distinct comment and write"):
+        store.admit_review(prepared_intent, expires_at=expires())
+    assert store.path.read_bytes() == before
+
+
+def test_prepared_bytes_count_toward_existing_review_capacity_without_starving_receipts(
+    tmp_path: Path, prepared_intent: dict,
+) -> None:
+    limited = ReplayStore(tmp_path.resolve(), "limited-prepared")
+    limited.provision()
+    limited.adopt_review_operations(
+        lifecycle_checkpoint=lambda: None, expires_at=expires(), review_bytes=13000,
+    )
+    limited.adopt_prepared_reviews(lifecycle_checkpoint=lambda: None, expires_at=expires())
+    admitted = limited.admit_review(prepared_intent, expires_at=expires())["operation"]
+    assert admitted["reserved_bytes"] > len(review_intent.encoded(admitted["intent"]))
+    another = copy.deepcopy(prepared_intent)
+    another["operation_id"] = "another-prepared"
+    action = another["actions"][0]
+    identity = action["preparation"]["identity"]
+    for field, replacement in (
+        ("comment_id", "44444444-4444-4444-8444-444444444444"),
+        ("write_id", "55555555-5555-4555-8555-555555555555"),
+    ):
+        action["body"] = action["body"].replace(identity[field], replacement)
+        identity[field] = replacement
+    action["preparation"]["body_id"] = hashlib.sha256(action["body"].encode()).hexdigest()
+    with pytest.raises(ValueError, match="capacity"):
+        limited.admit_review(another, expires_at=expires())
+    begun = limited.begin_review_action("prepared-review", SCOPE, "comment-a", expires_at=expires())
+    confirmed = limited.record_review_receipt(
+        "prepared-review", SCOPE, "comment-a", begun["action"]["attempt_id"],
+        response(thread_id=20, comment_id=1), expires_at=expires(),
+    )
+    assert confirmed["state"] == "confirmed"
+    assert limited.execute(CONSUMER, "pending", {}, expires_at=expires()) == {"events": [], "more": False}
 
 
 def response(**ids):
