@@ -217,7 +217,12 @@ def test_original_name_retirement_is_recoverable_before_complete(checkout, monke
             raise OSError("injected retirement rename interruption")
     def synchronized(path):
         if path == checkout.source.parent:
-            raise OSError("injected retirement parent-sync interruption")
+            retained = state.read(checkout.record.yaml_path)
+            retirement = checkout.source.with_name(
+                checkout.source.name + ".retiring-" + Path(retained["stage"]).name.rsplit("-", 1)[1],
+            )
+            if not retirement.exists():
+                raise OSError("injected retirement parent-sync interruption")
         original_directory(path)
     with monkeypatch.context() as injection:
         injection.setattr(relocation.durability, "replace" if cut == "rename" else "directory",
