@@ -47,6 +47,7 @@ from . import engine_client as ec
 from . import companion_client as cc
 from . import companion_observations as co
 from . import companion_attention as ca
+from . import companion_pr_state as cpr
 from .companion_head_observation import observation_details, observation_text
 from .companion_recovery import (
     CompanionData as _CompanionData,
@@ -247,6 +248,15 @@ class MuxCompanionApp(App):
         padding: 1 2;
     }
 
+    #pr-controls {
+        height: auto;
+        margin: 0 2;
+    }
+
+    #pr-association {
+        width: 1fr;
+    }
+
     #claims {
         height: 1fr;
         margin: 0 2;
@@ -298,6 +308,14 @@ class MuxCompanionApp(App):
         self._observation_cancel = Event()
         self._observation_owner: _CompanionData | None = None
         self._attention_cancel = Event()
+        self._pr_cancel = Event()
+        self._pr_generation = 0
+        self._pr_owner: _CompanionData | None = None
+        self._pr_fact: dict | None = None
+        self._pr_error: str | None = "not-loaded"
+        self._pr_selected: cpr.Association | None = None
+        self._pr_read: cpr.PointRead | None = None
+        self._pr_busy = False
         self._attention_busy = False
         self._attention_next = 0.0
         self._agenda_cancel = Event()
@@ -348,6 +366,9 @@ class MuxCompanionApp(App):
                 with VerticalScroll():
                     yield Static(agenda_text(None, "loading"), id="agenda")
             with TabPane("Graph", id="topology-tab"):
+                with Horizontal(id="pr-controls"):
+                    yield Select([], prompt="Inspect one recorded PR", id="pr-association")
+                    yield Button("Re-read PR", id="pr-read-btn", disabled=True)
                 with VerticalScroll():
                     yield Static(id="topology")
             with TabPane("Recovery", id="recovery-tab"):
@@ -423,6 +444,7 @@ class MuxCompanionApp(App):
         self._observation_cancel.set()
         self._attention_cancel.set()
         self._agenda_cancel.set()
+        self._reset_pr_state("closed")
         self._agenda_generation += 1
         self._data.agenda = None
         self._data.agenda_error = "subscription closed"
@@ -460,6 +482,7 @@ class MuxCompanionApp(App):
             await self._agenda_worker.wait()
             self._agenda_worker = None
         self._observation_cancel.set()
+        self._reset_pr_state()
         self._attention_cancel.set()
         self._attention_busy = False
         self._attention_next = 0.0
@@ -493,6 +516,7 @@ class MuxCompanionApp(App):
             self._sync_timeline(reconcile=reconcile_timeline)
         if self.query_one("#views", TabbedContent).active == "topology-tab":
             self._load_observations()
+            self._load_pr_associations()
 
     def _start_agenda(self) -> None:
         data = self._data
@@ -571,6 +595,8 @@ class MuxCompanionApp(App):
         if event.pane.id == "topology-tab" and not self._loading:
             if self._observation_owner is not self._data:
                 self._load_observations()
+            if self._pr_owner is not self._data:
+                self._load_pr_associations()
 
     def on_subway_timeline_history_requested(self, message: SubwayTimeline.HistoryRequested) -> None:
         if message.token.identity.provider is Provider.AGENDA:
@@ -649,6 +675,96 @@ class MuxCompanionApp(App):
     async def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "bridge-feed" and isinstance(event.value, str):
             await self._bridge_attachment.choose(event.value)
+        elif event.select.id == "pr-association":
+            self._select_pr(event.value if isinstance(event.value, str) else None)
+
+    def _reset_pr_state(self, error: str | None = "not-loaded") -> None:
+        """Invalidate associations, selection and any in-flight point read."""
+        self._pr_cancel.set()
+        self._pr_generation += 1
+        self._pr_owner = None
+        self._pr_fact = None
+        self._pr_error = error
+        self._pr_selected = None
+        self._pr_read = None
+        self._pr_busy = False
+
+    @work(exclusive=True, group="pr-associations")
+    async def _load_pr_associations(self) -> None:
+        data = self._data
+        self._pr_owner = data
+        worktree_id = data.worktree.get("id")
+        if not cpr.supported(data.bundle) or not isinstance(worktree_id, str) or not worktree_id:
+            self._update_pr_controls()
+            return
+        cancelled = Event()
+        self._pr_cancel = cancelled
+        generation = self._pr_generation
+        self._pr_error = "loading"
+        self._update_topology()
+        try:
+            fact = await asyncio.to_thread(
+                cpr.read_associations, worktree_id, runner=self._owned_read_runner(cancelled),
+            )
+        except ec.EngineError as exc:
+            fact, error = None, str(exc)
+        else:
+            error = None
+        finally:
+            cancelled.set()
+        if generation != self._pr_generation or self._data is not data:
+            return
+        self._pr_fact, self._pr_error = fact, error
+        self._update_pr_controls()
+        self._update_topology()
+
+    def _update_pr_controls(self) -> None:
+        associations, _ = cpr.admitted(self._pr_fact)
+        select = self.query_one("#pr-association", Select)
+        with self.prevent(Select.Changed):
+            select.set_options((item.label, item.pr_id) for item in associations)
+        select.disabled = not associations
+        self.query_one("#pr-read-btn", Button).disabled = (
+            self._pr_selected is None or self._pr_busy
+        )
+
+    def _select_pr(self, pr_id: str | None) -> None:
+        associations, _ = cpr.admitted(self._pr_fact)
+        selected = next((item for item in associations if item.pr_id == pr_id), None)
+        if selected is None or (self._pr_selected is not None and selected.key == self._pr_selected.key):
+            return
+        self._pr_selected, self._pr_read, self._pr_busy = selected, None, False
+        self._start_pr_read()
+
+    def _start_pr_read(self) -> None:
+        """One explicit finite read of the selected, still-admitted association."""
+        selected = self._pr_selected
+        associations, _ = cpr.admitted(self._pr_fact)
+        if selected is None or self._pr_busy or selected.key not in {item.key for item in associations}:
+            return
+        self._pr_cancel.set()
+        self._pr_generation += 1
+        self._pr_busy = True
+        self._update_pr_controls()
+        self._update_topology()
+        self._read_pr(selected, self._pr_generation)
+
+    @work(exclusive=True, group="pr-point-read")
+    async def _read_pr(self, selected: cpr.Association, generation: int) -> None:
+        cancelled = Event()
+        self._pr_cancel = cancelled
+        try:
+            result = await asyncio.to_thread(
+                cpr.point_read, selected, runner=self._owned_read_runner(cancelled),
+            )
+        finally:
+            cancelled.set()
+        if generation != self._pr_generation or self._pr_selected is None \
+                or self._pr_selected.key != selected.key:
+            return
+        self._pr_read, self._pr_busy = result, False
+        self._update_pr_controls()
+        self._update_topology()
 
     @work(exclusive=True, group="session-observations")
     async def _load_observations(self) -> None:
@@ -681,6 +797,11 @@ class MuxCompanionApp(App):
         self.query_one("#topology", Static).update(topology_view(
             data.worktree, data.bundle, data.session_observation,
             data.bundle_error or data.observation_error,
+            pr_state={
+                "declared": cpr.supported(data.bundle), "fact": self._pr_fact,
+                "error": None if self._pr_error == "not-loaded" else self._pr_error,
+                "selected": self._pr_selected, "read": self._pr_read, "busy": self._pr_busy,
+            },
         ))
 
     def _poll_attention(self, *, force=False) -> None:
@@ -792,6 +913,7 @@ class MuxCompanionApp(App):
         self.query_one("#summary", Static).update(_summary_text(self._data))
         self._update_attention()
         self._update_topology()
+        self._update_pr_controls()
         evidence, resources = _claims_view(self._data)
         self.query_one("#claims-evidence", Static).update(evidence)
         claims_table = self.query_one("#claims", DataTable)
@@ -895,6 +1017,8 @@ class MuxCompanionApp(App):
             self.action_refresh()
         elif event.button.id == "cutover-btn":
             self._cut_over()
+        elif event.button.id == "pr-read-btn":
+            self._start_pr_read()
         elif event.button.id == "view-btn" and not self._navigating:
             self._navigate()
 
