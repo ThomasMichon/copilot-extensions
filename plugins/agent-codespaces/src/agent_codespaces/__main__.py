@@ -2939,9 +2939,10 @@ def _gh_auth_status(environment: dict | None = None) -> tuple[int, str]:
     """
     import subprocess as sp
     from agent_procutil import no_window_kwargs
+    args = ["gh", "auth", "status"] + (["--active", "--hostname", "github.com"] if environment is not None else [])
     try:
         r = sp.run(
-            ["gh", "auth", "status"],
+            args,
             capture_output=True, text=True, timeout=20, env=environment, **no_window_kwargs(),
         )
     except FileNotFoundError:

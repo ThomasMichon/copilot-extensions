@@ -626,7 +626,7 @@ class TestCreateScopeGate:
         observed = []
 
         def run(argv, **kwargs):
-            assert argv == ["gh", "auth", "status"]
+            assert argv == ["gh", "auth", "status", "--active", "--hostname", "github.com"]
             observed.append(kwargs.get("env"))
             return SimpleNamespace(
                 returncode=0, stdout="codespace" if allowed else "repo", stderr="",

@@ -665,6 +665,9 @@ and use the admitted environment, not an unrelated ambient token.
 Bound status and activation prefer saved account credentials, or verify that an
 environment-only credential belongs to that same account before using it. A
 different environment identity never satisfies a bound-account lookup.
+Fully qualified repository requests preserve the owner when matching claims
+and bindings; logical short names retain their host-repository aliases. The
+selected creation-scope check excludes unrelated saved logins and hosts.
 
 For unmapped repositories, a valid `GH_TOKEN` or `GITHUB_TOKEN` needs no saved
 login: admission verifies its account and retains that credential through

@@ -118,6 +118,11 @@ existing resource ownership, not solve quota pressure by destructive cleanup.
 
 ## Journal
 
+### 2026-11-07 - Qualified repository and scope isolation
+- Reproduced owner-prefix loss selecting a same-basename foreign repository's binding, and unrelated saved-login failure blocking a valid selected creation credential.
+- Preserved explicit repository owners in both claim-to-account and claim-to-venue matching while retaining logical host aliases. Selected creation-scope checks inspect only the active environment credential on github.com.
+- The prior environment-only status/start finding is already covered by the passing complete consumer regression and the saved-first, verified-account token helper; no second change to that corrected path is needed.
+
 ### 2026-11-07 - Bound consumer continuity and context protection
 - Reproduced six failures across environment-only create-to-status continuity, explicit-account stop context refusal and ordinary creation's account-resolution exit code.
 - Kept saved account credentials first, permitting environment credentials in strict status and activation only after verifying the same account identity. Preserved binding authority and refused foreign environment credentials.

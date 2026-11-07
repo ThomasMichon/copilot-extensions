@@ -74,6 +74,22 @@ def test_resolve_workstream_box_claim_not_in_pool_returns_none(monkeypatch):
     ) is None
 
 
+def test_fully_qualified_workstream_rejects_another_repository_owner(monkeypatch):
+    from agent_codespaces import account_binding
+
+    fake = types.ModuleType("fake_claims_owner")
+    fake.claims_of_owner = lambda owner, kind: ["cs-fork"]
+    _install_fake_claims_owner(monkeypatch, fake)
+    monkeypatch.setattr("agent_codespaces.lease.resolve_owner_worktree", lambda: "wt-a")
+    monkeypatch.setattr(account_binding, "list_bindings", lambda: [
+        account_binding.AccountBinding("cs-fork", "fork-account", 0, "other/web-codespaces"),
+    ])
+    assert driving_worktrees.current_workstream_account("expected/web") is None
+    assert driving_worktrees.resolve_workstream_box(
+        [_Member("cs-fork", "other/web-codespaces")], "expected/web", "wt-a",
+    ) is None
+
+
 def test_resolve_workstream_box_no_claims_returns_none(monkeypatch):
     fake = types.ModuleType("fake_claims_owner")
     fake.claims_of_owner = lambda owner, kind: []

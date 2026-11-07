@@ -6,6 +6,18 @@ from collections.abc import Iterable
 from typing import Any
 
 
+def _matches_workstream_repo(repo: str, repository: str | None) -> bool:
+    from .config import _repo_matches_codespace
+
+    if not repository:
+        return False
+    owner = repo.strip().casefold().rpartition("/")[0]
+    return (
+        (not owner or repository.strip().casefold().rpartition("/")[0] == owner)
+        and _repo_matches_codespace(repo, repository)
+    )
+
+
 def _choose_owner(owners: list[dict]) -> str:
     if len(owners) == 1:
         return str(owners[0].get("worktree_id") or "")
@@ -70,13 +82,11 @@ def resolve_workstream_box(
         return None
     if not refs:
         return None
-    from .config import _repo_matches_codespace
-
     by_name = {m.name: m for m in members}
     candidates = sorted(
         name for name in refs
         if (m := by_name.get(name)) is not None
-        and _repo_matches_codespace(repo, m.repository)
+        and _matches_workstream_repo(repo, m.repository)
     )
     return candidates[0] if candidates else None
 
@@ -115,13 +125,11 @@ def current_workstream_account(repo: str) -> str | None:
     if not refs:
         return None
     from .account_binding import list_bindings
-    from .config import _repo_matches_codespace
-
     bindings = sorted(list_bindings(), key=lambda binding: binding.codespace)
     return next((
         binding.account for binding in bindings
         if binding.codespace in refs and binding.account
-        and _repo_matches_codespace(repo, binding.repo)
+        and _matches_workstream_repo(repo, binding.repo)
     ), None)
 
 
