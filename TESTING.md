@@ -9624,6 +9624,24 @@ Follow the same contract so it stays safe-by-default and reproducible:
 
 ## Optional native registration inspection
 
+The additive native installer runtime-only seam has focused controls in
+`tests/test_runtime_install_driver.py` and `tests/test_installer_config.py`.
+Select both through `tools/run-plugin-tests.py agent-worktrees` with
+`--allow-explicit-tiers -k runtime_only`. Driver controls preserve the exact
+admitted flag through participant re-entry and reject contradictory arguments
+before bootstrap. Real shell controls retain ordinary existing-config inference,
+skip it on repeated runtime-only selections, and exercise the actual front-door
+parser's pre-admission refusal. These checks do not construct a runtime or
+qualify a fresh native installation; keep that separate disposable-host evidence
+and higher-level caller migration explicit.
+The manual `worktrees-runtime-only` portfolio runs this selection plus the
+existing native driver re-entry and default scaffold controls on Linux and
+Windows. Supply the branch and exact `source_sha`; mandatory native cases
+cannot be missing or skipped. The copied cold-driver payload excludes unrelated
+library test trees and retains the original item and child deadlines. A bounded
+diagnostic snapshot reports its real request state and log without changing
+custody, readiness or settlement.
+
 The `registration-inspection` portfolio in `installation-context-full.yml`
 runs only the focused native registration reader/CLI and incoming bootstrap controls on Linux and
 Windows. Supply the published branch and its exact `source_sha`; both jobs

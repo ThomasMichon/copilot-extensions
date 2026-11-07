@@ -2366,6 +2366,42 @@ removed slot. See the
 [Manager removal operation](../worktree-manager/README.md#remove-an-owned-installation)
 for invocation, supported-target limits, result statuses and rollback behavior.
 
+### Worktrees runtime-only installer composition
+
+The native Worktrees shell installers accept `install` and `update` with
+`-RuntimeOnly` (PowerShell) or `--runtime-only` (POSIX). This explicitly
+suppresses project-name inference and project-specific adoption, configuration,
+registration, hooks and shortcuts. An explicit project name or a different
+action is rejected before lifecycle admission, staging or runtime effects.
+Omission retains the existing defaults; it is not an implicit runtime-only
+request because an existing project configuration can match the caller's CWD.
+
+This mode uses the ordinary runtime constructor, readiness, activation,
+execution-driver custody and shared machine integration. It is not the lean
+`provision` action, an alternative builder or permission to update a host.
+Shared configuration migration and global binstub reconciliation retain their
+existing behavior. Runtime readiness does not claim that a project has been
+registered or that a higher-level installation is complete. A composing caller
+can subsequently use the canonical registration writer with the inspected
+project name, absolute repository root and preserved policy.
+
+The adjacent `scripts/installer-contract.json` declares the
+`agent-worktrees.native-installer` contract, version 1, and capability
+`runtime-only-v1`, including the actions and exact shell spellings. Read it
+from the **same selected payload as the installer that will execute**.
+This is a payload-native boundary, not a declaration about an older installed
+CLI or a running daemon; do not infer support from package versions, a newer
+payload elsewhere or a tool command on PATH. The flag is not an addition to
+the installed `agent-worktrees install` command's own parser.
+
+Provider rollout precedes caller migration. Providers retain old syntax and
+defaults; consumers requiring non-adoption must select this capability before
+effects. A missing, invalid or unsupported declaration, including provider
+rollback to an older payload, requires a truthful pre-effect incompatibility
+result. Do not trial an effectful new invocation and replay an older form, or
+substitute a reserved project name. No old form is retired by this additive
+contract.
+
 ## Update-flow robustness — self-stage, watchdog, completion markers (#935)
 
 The runtime is (re)installed by **four** cooperating mechanisms, and the danger is

@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 import yaml
@@ -22,6 +23,76 @@ SPEC = importlib.util.spec_from_file_location(
 assert SPEC is not None and SPEC.loader is not None
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
+
+
+@pytest.mark.parametrize("outcome", ["passed", "failed", "skipped", "missing", "source-mismatch"])
+def test_runtime_only_portfolio_refuses_incomplete_native_evidence(
+    tmp_path, monkeypatch, capsys, outcome,
+):
+    import xml.etree.ElementTree as ET
+
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
+    )
+    job = workflow["jobs"]["worktrees-runtime-only-linux"]
+    step = next(value for value in job["steps"] if value.get("id") == "composition")
+    shells = ("powershell.exe", "pwsh") if os.name == "nt" else ("bash",)
+    names = [
+        "test_native_runtime_only_survives_driver_admission[" + action + "]"
+        for action in ("install", "update")
+    ]
+    for shell in shells:
+        names.append("test_runtime_only_suppresses_existing_project_inference_without_changing_defaults[" + shell + "]")
+        for conflict in ("project", "action"):
+            names.append("test_runtime_only_frontdoor_refuses_before_native_admission[" + conflict + "-" + shell + "]")
+    if os.name == "nt":
+        names.extend(
+            "test_real_cold_driver_and_native_reentry_use_the_same_owner[" + case + "]"
+            for case in ("False-False", "False-True", "True-False")
+        )
+    calls = []
+
+    def run(arguments, **kwargs):
+        calls.append(arguments)
+        if arguments[0] == "git":
+            return subprocess.CompletedProcess(arguments, 0, "a" * 40 + "\n", "")
+        reports = Path(arguments[arguments.index("--junit-dir") + 1])
+        reports.mkdir(parents=True)
+        suite = ET.Element("testsuite")
+        for name in names[:-1] if outcome == "missing" else names:
+            case = ET.SubElement(suite, "testcase", name=name)
+            if outcome == "skipped":
+                ET.SubElement(case, "skipped")
+        ET.ElementTree(suite).write(reports / "synthetic-controls.xml")
+        return subprocess.CompletedProcess(
+            arguments, 17 if outcome == "failed" else 0,
+            "runner progress\n", "runner diagnostic\n",
+        )
+
+    package = ModuleType("agent_procutil")
+    process = ModuleType("agent_procutil.owned_process")
+    process.run_caller_owned = run
+    monkeypatch.setitem(sys.modules, package.__name__, package)
+    monkeypatch.setitem(sys.modules, process.__name__, process)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path / "runner-temp"))
+    monkeypatch.setenv("GITHUB_ENV", str(tmp_path / "job-environment"))
+    monkeypatch.setenv("GITHUB_SHA", "a" * 40)
+    monkeypatch.setenv("WORKTREES_RUNTIME_ONLY_SOURCE", (
+        "b" * 40 if outcome == "source-mismatch" else "a" * 40
+    ))
+    body = compile(step["run"], "<runtime-only-workflow>", "exec")
+    if outcome == "passed":
+        exec(body, {})
+    else:
+        expected = subprocess.CalledProcessError if outcome == "failed" else AssertionError
+        with pytest.raises(expected):
+            exec(body, {})
+    assert len(calls) == (1 if outcome == "source-mismatch" else 2)
+    if outcome == "failed":
+        captured = capsys.readouterr()
+        assert "runner progress" in captured.out
+        assert "runner diagnostic" in captured.err
 
 
 def test_bridge_historical_guards_preserve_selection_and_failure_diagnostics():

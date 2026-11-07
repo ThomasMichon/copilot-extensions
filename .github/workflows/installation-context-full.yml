@@ -50,11 +50,12 @@ on:
           - worktrees-git-probes
           - related-knowledge
           - registration-inspection
+          - worktrees-runtime-only
           - codespaces-installer
           - fleet-client-generations
         default: context
       source_sha:
-        description: Exact published checkpoint; required for HTTP-52 capture and registration inspection
+        description: Exact published checkpoint; required for source-pinned native portfolios
         required: false
         type: string
 
@@ -586,6 +587,92 @@ jobs:
     timeout-minutes: 20
     env: *registration-inspection-env
     steps: *registration-inspection-steps
+  worktrees-runtime-only-linux:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'worktrees-runtime-only'
+    name: Worktrees runtime-only composition (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env: &worktrees-runtime-only-env
+      UV_PYTHON: "3.12"
+      WORKTREES_RUNTIME_ONLY_SOURCE: ${{ inputs.source_sha }}
+    steps: &worktrees-runtime-only-steps
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Qualify exact-head native shell and execution-driver composition
+        id: composition
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          import re
+          import sys
+          import xml.etree.ElementTree as ET
+          sys.path.insert(0, str(Path("libs/agent-procutil/src").resolve()))
+          from agent_procutil.owned_process import run_caller_owned
+
+          expected = os.environ["WORKTREES_RUNTIME_ONLY_SOURCE"]
+          assert re.fullmatch(r"[0-9a-f]{40}", expected), "Supply the exact source_sha"
+          head = run_caller_owned(["git", "rev-parse", "HEAD"], timeout=30)
+          head.check_returncode()
+          assert head.stdout.strip() == expected == os.environ["GITHUB_SHA"]
+          print("qualification-source=" + expected, flush=True)
+          reports = Path(os.environ["RUNNER_TEMP"]) / "worktrees-runtime-only"
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
+              print("WORKTREES_RUNTIME_ONLY_REPORTS=" + str(reports), file=output)
+          result = run_caller_owned([
+              sys.executable, str(Path("tools") / "run-plugin-tests.py"), "agent-worktrees",
+              "--test-file", "tests/test_installer_config.py",
+              "--test-file", "tests/test_runtime_install_driver.py",
+              "--allow-explicit-tiers", "--junit-dir", str(reports),
+              "-k", "runtime_only or real_cold_driver_and_native_reentry or shell_scaffold",
+          ], env={**os.environ, "PYTEST_ADDOPTS": "--capture=tee-sys"},
+              timeout=900, max_stdout_bytes=16 * 1024 * 1024,
+              max_stderr_bytes=16 * 1024 * 1024)
+          print(result.stdout, end="", flush=True)
+          print(result.stderr, end="", file=sys.stderr, flush=True)
+          result.check_returncode()
+          cases = [
+              case for report in reports.rglob("*.xml")
+              for case in ET.parse(report).getroot().iter("testcase")
+          ]
+          required = {
+              "test_native_runtime_only_survives_driver_admission[" + action + "]"
+              for action in ("install", "update")
+          }
+          shells = ("powershell.exe", "pwsh") if os.name == "nt" else ("bash",)
+          for shell in shells:
+              required.add("test_runtime_only_suppresses_existing_project_inference_without_changing_defaults[" + shell + "]")
+              for conflict in ("project", "action"):
+                  required.add("test_runtime_only_frontdoor_refuses_before_native_admission[" + conflict + "-" + shell + "]")
+          if os.name == "nt":
+              for case in ("False-False", "False-True", "True-False"):
+                  required.add("test_real_cold_driver_and_native_reentry_use_the_same_owner[" + case + "]")
+          assert cases
+          assert all(case.find(tag) is None for case in cases for tag in ("failure", "error"))
+          for name in required:
+              matches = [case for case in cases if case.get("name") == name]
+              assert len(matches) == 1 and matches[0].find("skipped") is None, name
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.composition.outcome != 'skipped'
+        with:
+          name: worktrees-runtime-only-${{ runner.os }}-${{ github.sha }}
+          path: ${{ env.WORKTREES_RUNTIME_ONLY_REPORTS }}
+          if-no-files-found: error
+  worktrees-runtime-only-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'worktrees-runtime-only'
+    name: Worktrees runtime-only composition (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env: *worktrees-runtime-only-env
+    steps: *worktrees-runtime-only-steps
   worktrees-git-probes-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'worktrees-git-probes'
     name: Worktrees Git probe packet (Linux)
