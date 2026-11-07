@@ -124,6 +124,34 @@ def test_render_text_keeps_subqueue_whose_parent_item_was_bounded_out() -> None:
     assert "Early child" in text
 
 
+def test_replay_refuses_a_home_another_adopter_initialized(tmp_path: Path) -> None:
+    outline = {"source": {"kind": "task", "ref": "fixture"}, "items": [
+        {"action": "Asserted done", "status": "done"}, {"action": "Next"}]}
+    request, roots = OUTLINE.expand(outline)
+    home = tmp_path / "lane"
+    home.mkdir()
+    OUTLINE._Replay(home, request, "authored").run(roots)
+    revision = importlib.import_module("agenda_store").read(home)["revision"]
+
+    with pytest.raises(AGENDA.AgendaError, match="initialized by another operation"):
+        OUTLINE._Replay(home, request, "authored")
+
+    assert importlib.import_module("agenda_store").read(home)["revision"] == revision
+
+
+def test_from_effort_keeps_wrapped_and_long_checkbox_text(tmp_path: Path) -> None:
+    readme = tmp_path / "README.md"
+    long_tail = " ".join(f"word{index}" for index in range(80))
+    readme.write_text("# Demo\n\n## Plan\n\n- [ ] Validate the derivation\n  and the backfill graph.\n"
+                      f"- [ ] Long {long_tail}\n", encoding="utf-8")
+
+    items = OUTLINE.from_effort(readme)["items"][0]["children"]
+
+    assert items[0]["action"] == "Validate the derivation and the backfill graph."
+    assert items[1]["action"].endswith("word79")
+    assert len(items[1]["label"]) <= OUTLINE.LABEL_LIMIT
+
+
 def test_from_effort_outlines_open_remainder(tmp_path: Path) -> None:
     readme = tmp_path / "efforts" / "active" / "demo" / "README.md"
     readme.parent.mkdir(parents=True)
@@ -187,6 +215,12 @@ def test_backfill_reconstructs_requests_todos_and_carried_work(tmp_path: Path) -
     assert states["Open work carried from earlier requests"] == "queued"
     actions = {value["action"] for value in result["request"]["change"]["board"]["items"].values()}
     assert "Deduplicating rows" in actions
+
+
+@pytest.mark.parametrize("content", ["修复解析器", "Исправь парсер", "ok 修复解析器"])
+def test_non_english_requests_are_not_acknowledgements(content: str) -> None:
+    assert not BACKFILL.acknowledgement(content)
+    assert BACKFILL.acknowledgement("ok, thanks!")
 
 
 def test_backfill_cli_reports_sessions_without_operator_requests(tmp_path: Path) -> None:

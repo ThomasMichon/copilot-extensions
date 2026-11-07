@@ -211,7 +211,10 @@ class _Replay:
         self.prefix = request["operation_id"]
         self.board = request["change"]["board"]["items"]
         self.warnings: list[str] = []
-        store.mutate(home, request, session=session, actor=actor)
+        _, created = store.mutate(home, request, session=session, actor=actor)
+        if not created:
+            # A concurrent adopter initialized this home first; replaying would advance its cursor.
+            raise AgendaError("state home was initialized by another operation; outline progress was not replayed")
 
     def _cursor(self) -> tuple[str, str, str]:
         cursor = self.store.read(self.home)["documents"]["cursor"]
@@ -343,13 +346,31 @@ def render_text(rendered: dict[str, Any], title: str | None = None) -> str:
     return "\n".join(lines)
 
 
+_ITEM_START = re.compile(r"^(\s*)[-*+]\s+\[[ xX]\]\s+(.*)$")
+_BLOCK_START = re.compile(r"^\s*(?:[-*+]\s|\d+[.)]\s|#|```|~~~|>)")
+
+
+def _checkbox_body(lines: list[str], number: int) -> str:
+    """The complete text of the checkbox on 1-based line `number`, joining its wrapped lines."""
+    match = _ITEM_START.match(lines[number - 1])
+    if match is None:
+        raise AgendaError(f"effort line {number} is not a checklist item")
+    indent, parts = len(match.group(1)), [match.group(2).strip()]
+    for line in lines[number:]:
+        if not line.strip() or _BLOCK_START.match(line) or len(line) - len(line.lstrip()) <= indent:
+            break
+        parts.append(line.strip())
+    return " ".join(parts)
+
+
 def from_effort(readme: Path, *, worktree: str | None = None) -> dict[str, Any]:
     """Outline the open remainder of an effort: one item per Plan/Validation section with open work."""
     sys.path.insert(0, str(SCRIPTS.parents[1] / "planning-efforts" / "scripts"))
     from effort_digest import open_items, parse_sections
 
     readme = readme.resolve()
-    remaining = open_items(parse_sections(readme.read_text(encoding="utf-8")))
+    text = readme.read_text(encoding="utf-8")
+    remaining = open_items(parse_sections(text))
     if not remaining:
         raise AgendaError("effort has no open Plan or Validation Plan items")
     groups: dict[str, list[dict[str, Any]]] = {}
@@ -357,8 +378,8 @@ def from_effort(readme: Path, *, worktree: str | None = None) -> dict[str, Any]:
         groups.setdefault(entry["section"], []).append(entry)
     items = []
     for section, entries in groups.items():
-        children = [{"action": entry["text"], "source_ref": f"{section} (line {entry['line']})"}
-                    for entry in entries]
+        children = [{"action": action, "label": clip(action), "source_ref": f"{section} (line {entry['line']})"}
+                    for entry in entries for action in [_checkbox_body(text.splitlines(), entry["line"])]]
         heading = section.split(" > ")[-1]
         if len(children) == 1:
             items.append(children[0])

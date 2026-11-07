@@ -74,8 +74,8 @@ def _requests(events: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
 
 
 def acknowledgement(content: str) -> bool:
-    words = re.findall(r"[a-z']+", content.lower())
-    return len(content) <= ACK_LIMIT and all(word in ACK_WORDS for word in words)
+    words = re.findall(r"[^\W\d_]+(?:'[^\W\d_]+)*", content.casefold())
+    return bool(words) and len(content) <= ACK_LIMIT and all(word in ACK_WORDS for word in words)
 
 
 def _todos(database: Path) -> list[dict[str, Any]]:
