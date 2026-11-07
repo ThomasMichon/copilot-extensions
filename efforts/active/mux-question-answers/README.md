@@ -103,15 +103,15 @@ runtime remediation, elevated operation or destructive cleanup is authorized.
 
 ## Validation Plan
 
-- [ ] Focused parser and orchestration cases cover valid choice/freeform,
+- [x] Focused parser and orchestration cases cover valid choice/freeform,
   permissions, ambiguous/multiple questions, stale inspection, changed pane/
   process/screen, concurrent callers, terminal-first resolution, key failure,
   timeout, mismatched/stale echo and unknown outcomes without retry.
-- [ ] Actual authenticated HTTP/CLI and unsupported-provider controls preserve
+- [x] Actual authenticated HTTP/CLI and unsupported-provider controls preserve
   native preference and legacy syntax; audit admission precedes key effects.
 - [ ] Use fixture-owned mux namespaces for actual Windows and POSIX command
   qualification. Never target a pre-existing session or shared mux shutdown.
-- [ ] Run affected lint, unit/contract, install, type-admission and documentation
+- [x] Run affected lint, unit/contract, install, type-admission and documentation
   gates; keep exhaustive source capture outside required fast unit CI.
 - [ ] Verify source merge, release inclusion, selected installed generation,
   actual synthetic answer and same-session continuation on both authorized
@@ -157,3 +157,18 @@ runtime remediation, elevated operation or destructive cleanup is authorized.
   A preissued inspection cannot turn an unknown sibling result into a retry.
 - The current HTTP-52 controlled portfolio expands to 310 cases. Qualification
   must be captured and independently verified before publication readiness.
+
+### 2026-11-07 - Complete current source qualification
+
+- The explicit collector now executes all 310 declared cases; its newly linked
+  25 mux cases also passed separately through that same collector.
+- Source-pinned run 42420734839 passed full capture and independent no-write
+  verification. Its first historical-guard attempt hit the existing 30-second
+  reproducibility-test deadline; one same-source failed-job retry passed every
+  historical guard and canonical export without changing a timeout or limit.
+- The native publication owner materialized 155 verified current outputs.
+  The independent local contract guard passed with two contracts and 1,066
+  retained fixtures. No historical generation was rewritten.
+- The new backend also resolved an actual selected-owner Windows binding
+  read-only. This is not an installed answer claim: normal review/CI, source
+  merge, promotion, authorized updates and both installed live proofs remain.
