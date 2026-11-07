@@ -240,6 +240,70 @@ The repository script request/result protocol and ordinary client-only setup
 remain unchanged. Source qualification is not release, live enrollment or
 fresh-adopter acceptance.
 
+### Explicit owning Vault SSH key
+
+Declaration version `4` adds a required `ssh_key` to each context. `null`
+retains the version-three behavior. A selected object has exactly
+`argv`, `configuration_root`, `entry`, `directory` and `fingerprint`.
+`argv` is the owning Vault's fully launchable argument array, with an absolute
+executable first; a bare `.ps1`, `.cmd` or `.bat` is not an executable.
+Supply that payload's explicit native launcher and its arguments when needed,
+never another same-named Vault on `PATH`. Arguments are bounded and passed
+without command-string evaluation. The configuration root and dedicated key
+directory are normalized absolute/home-relative references; the entry is the
+original bounded Vault entry, and the fingerprint is canonical unpadded
+`SHA256:<digest>`. A nonnull key selection requires a nonnull SSH setup request.
+Inspection binds this declaration to the trusted source without accessing Vault.
+
+The actual Fleet receiver must additionally support
+`continuity-ssh-key-reference-v1` and `continuity-ssh-key-pin-v1`.
+Its read-only `--key-references-only` inspection validates scope, policy, paths,
+host state and Source selection before key files exist. The returned version-two
+description includes only `key_files.identity_file` and `key_files.public_key_file`,
+which must exactly match the selected directory's `id_ed25519` and
+`id_ed25519.pub`. This option cannot be used with `--apply`.
+
+For a participant needing enrollment or SSH installation, explicit apply queries
+the selected Vault's `agent-vault.invocation` version-one contract with
+`--configuration-root`. Both `configuration-root-v1` and
+`ssh-key-install-pin-v1` are required before credential access. The adapter then
+uses `ssh-key prepare --require-running` followed by
+`ssh-key install --require-running --expected-fingerprint` for that exact entry
+and directory. It accepts only reuse of the pinned public identity. Actual
+Fleet key inspection carries the same fingerprint and request digest before
+new enrollment and through configuration preparation/construction checks.
+Old receivers refuse; setup never drops the selection, scope or pin.
+The entry is passed as one `--entry=<value>` argument so a valid
+dash-prefixed entry remains a value rather than another CLI option.
+
+This gate does not provision, start, unlock or initialize Vault, fetch a
+credential through an identity cache, use an existing plaintext key as fallback,
+or repair permissions. Explicit provisioning inhibition is retained in the
+bounded, captured child invocation. Locked Vaults, unavailable services and
+unsynchronized entries return actionable waiting outcomes for separately
+attended owner work. Conflicting keys, unsafe locations and unsupported contracts
+refuse; unknown/partial effects retain the original entry, directory and
+enrollment operation for reconciliation. Receiver stdout/stderr diagnostics are
+never forwarded. Key installation is reuse-only, including partial-pair recovery,
+not permission to rotate an identity or invent another operation.
+An inherited identity-cache `AGENT_VAULT_PINNED_CONTEXT` is removed only in this
+SSH child so it cannot override the explicit configuration root. Native Vault
+configuration selectors and the caller's environment remain unchanged.
+
+A currently authenticated, converged selected SSH application is returned ready
+without credential calls or reinstallation, even if Vault is now locked.
+It still requires actual read-only Fleet key inspection with both the selected
+public fingerprint and original request digest, followed by source
+requalification; a changed key or request is not healthy selected readiness.
+The same pinned inspection is required when the application becomes ready
+during Vault preparation or bootstrap; late readiness does not restore the
+reference-only shortcut or skip either pin.
+Check-only calls perform no key installation. Default, outbound-only and
+nonnull-SSH/null-key contexts retain their existing behavior.
+Source tests and a captured synthetic Vault process qualify this adapter seam;
+they do not prove installed Vault, synchronized storage, live fleet enrollment
+or interactive logon. Those remain separately qualified owner operations.
+
 PowerShell receives `-RequestFile <path>`; Bash receives
 `--request-file <path>`. The selected runtime must already be available.
 Execution uses the selected checkout as cwd with inherited stdio. No command
