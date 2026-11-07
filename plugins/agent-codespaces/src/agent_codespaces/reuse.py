@@ -52,7 +52,7 @@ def workstream_mode(name: str, local, shared) -> str:
     ):
         return "unknown"
     if remote is None:
-        return "own"
+        return "unknown" if held.lease_token else "own"
     holder = coordination.owner_ref()
     return (
         "own" if remote.state == "leased" and remote.live and holder

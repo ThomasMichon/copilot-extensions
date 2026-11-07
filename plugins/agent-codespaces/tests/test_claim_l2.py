@@ -26,11 +26,20 @@ def leases(monkeypatch, tmp_path):
         "state": "leased", "holder": "m/p/w",
         "token": lease_mod._read_leases()[name].lease_token,
     })
-    monkeypatch.setattr(coord, "_run", lambda args, **kw: subprocess.CompletedProcess(
-        args, 0, json.dumps({
-            "worktree_id": "w", "ref": args[2], "disposition": "released",
-        }), "",
-    ))
+    def run(args, **kwargs):
+        if args[:3] == ["--project", "p", "claims"]:
+            payload = {
+                "version": 1, "machine": "m", "repo": "p", "worktree_id": "w",
+                "outbound": [
+                    {"kind": "codespace", "ref": name, "state": "active"}
+                    for name in lease_mod._read_leases()
+                ],
+            }
+        else:
+            payload = {"worktree_id": "w", "ref": args[2], "disposition": "released"}
+        return subprocess.CompletedProcess(args, 0, json.dumps(payload), "")
+
+    monkeypatch.setattr(coord, "_run", run)
     return tmp_path
 
 
@@ -257,6 +266,11 @@ def test_return_from_another_caller_settles_original_qualified_owner(leases, mon
             payload = {"kind": "codespace", "ref": "cs-one", "owners": [{
                 "worktree_path": owner, "qualified_ref": "m/p/w", "state": "active",
             }]}
+        elif args[:3] == ["--project", "p", "claims"]:
+            payload = {
+                "version": 1, "machine": "m", "repo": "p", "worktree_id": "w",
+                "outbound": [{"kind": "codespace", "ref": "cs-one", "state": "active"}],
+            }
         else:
             assert args == [
                 "claims", "settle", "cs-one", "--owner-ref", "m/p/w", "--json", "--released",

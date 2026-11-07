@@ -27,12 +27,12 @@ def venue(monkeypatch, tmp_path):
     monkeypatch.setattr(lease, "_DEPLOY_HOLDS_FILE", tmp_path / "deploy-holds.json")
     monkeypatch.setattr(lease, "ensure_runtime_dir", lambda: None)
     monkeypatch.setattr(lease, "_this_host", lambda: "test-host")
-    monkeypatch.setattr(lease, "resolve_owner_worktree", lambda: "new-worktree")
+    monkeypatch.setattr(lease, "resolve_owner_worktree", lambda **kwargs: "new-worktree")
     monkeypatch.setattr(account_binding, "BINDINGS_FILE", tmp_path / "bindings.json")
     monkeypatch.setattr(account_binding, "_LOCK_FILE", tmp_path / "bindings.lock")
     monkeypatch.setattr(account_binding, "ensure_runtime_dir", lambda: None)
     monkeypatch.setattr(worktrees, "validate_context", lambda: None)
-    monkeypatch.setattr(coordination, "owner_ref", lambda: "machine/project/new-worktree")
+    monkeypatch.setattr(coordination, "owner_ref", lambda **kwargs: "machine/project/new-worktree")
     readiness = coordination.PreflightResult(
         "ready", capabilities=frozenset({coordination.RELEASED_ONLY_CAPABILITY}),
     )
@@ -64,27 +64,34 @@ def venue(monkeypatch, tmp_path):
         "holder": shared[name].holder, "token": shared[name].token,
     })
     events = []
+    ledger = {"new-worktree": set()}
+
     def ownership(args, **kwargs):
-        assert args == ["--project", "project", "claims", "new-worktree", "--json"]
-        outbound = (
-            [{"kind": "codespace", "ref": "returned", "state": "active"}]
-            if any(event[0] == "journal" for event in events)
-            and not any(event[0] == "settle" for event in events) else []
-        )
+        assert args[:3] == ["--project", "project", "claims"] and args[-1] == "--json"
+        worktree = args[3]
+        outbound = [
+            {"kind": "codespace", "ref": name, "state": "active"}
+            for name in sorted(ledger.get(worktree, ()))
+        ]
         return subprocess.CompletedProcess(args, 0, json.dumps({
             "version": 1, "machine": "machine", "repo": "project",
-            "worktree_id": "new-worktree", "outbound": outbound,
+            "worktree_id": worktree, "outbound": outbound,
         }), "")
 
     monkeypatch.setattr(coordination, "_run", ownership)
-    monkeypatch.setattr(
-        coordination, "journal_obligation",
-        lambda name, holder, **kwargs: events.append(("journal", name, holder)) or True,
-    )
-    monkeypatch.setattr(
-        coordination, "settle_obligation",
-        lambda name, holder, **kwargs: events.append(("settle", name, holder)) or True,
-    )
+
+    def journal(name, holder, **kwargs):
+        events.append(("journal", name, holder))
+        ledger.setdefault(holder.rsplit("/", 1)[-1], set()).add(name)
+        return True
+
+    def settle(name, holder, **kwargs):
+        events.append(("settle", name, holder))
+        ledger[holder.rsplit("/", 1)[-1]].discard(name)
+        return True
+
+    monkeypatch.setattr(coordination, "journal_obligation", journal)
+    monkeypatch.setattr(coordination, "settle_obligation", settle)
 
     def acquire(name, holder, **kwargs):
         assert kwargs == {"released_only": True, "preflight_result": readiness}
@@ -109,6 +116,7 @@ def venue(monkeypatch, tmp_path):
     retained.write_bytes(b"uncommitted prior effort work\n")
     return SimpleNamespace(
         rows=rows, shared=shared, events=events, config=config, retained=retained, root=tmp_path,
+        ledger=ledger,
     )
 
 
@@ -178,6 +186,69 @@ def test_unsupported_receiver_preserves_baseline_without_new_invocation(venue, m
     assert venue.events == []
     assert "owned" in capsys.readouterr().err
 
+
+@pytest.mark.parametrize("evidence", ["unavailable", "omitted"])
+def test_tokened_workstream_needs_shared_evidence_even_with_spare_slots(venue, monkeypatch, capsys, evidence):
+    assert cli.main(["create", "example/project", "--no-wait"]) == 0
+    capsys.readouterr()
+    venue.config.max_owned_codespaces = 31
+    if evidence == "unavailable":
+        monkeypatch.setattr(coordination, "list_leases", lambda **kw: None)
+    else:
+        venue.shared.pop("returned")
+    before = list(venue.events)
+    assert cli.main(["create", "example/project", "--no-wait"]) == 4
+    assert "unconfirmed" in capsys.readouterr().err
+    assert venue.events == before
+
+
+@pytest.mark.parametrize("evidence", [None, {}])
+def test_tokenless_local_workstream_retains_legacy_optional_peer_fallback(venue, monkeypatch, evidence):
+    from agent_codespaces import reuse
+    import time
+
+    local = {"returned": lease.Lease(
+        "returned", "new-worktree", 1, "test-host", time.time(), time.time(),
+        worktree="new-worktree",
+    )}
+    assert reuse.workstream_mode("returned", local, evidence) == "own"
+
+
+@pytest.mark.parametrize("journaled", [False, True])
+def test_ordinary_cli_claim_and_legacy_tokened_claim_return_from_empty_ledger(venue, monkeypatch, capsys, journaled):
+    monkeypatch.setattr(lease, "active_worktree_ids", lambda: {"new-worktree"})
+
+    def acquire(name, holder, **kwargs):
+        assert not kwargs
+        venue.shared[name] = coordination.L2Lease(
+            name, holder, True, token="b" * 40, state="leased",
+        )
+        return coordination.L2Result("ok", token="b" * 40)
+
+    monkeypatch.setattr(coordination, "acquire", acquire)
+    if journaled:
+        assert cli.main(["claim", "returned", "--owner", "new-worktree"]) == 0
+        assert any(event[0] == "journal" for event in venue.events)
+    else:
+        lease.claim("returned", "new-worktree", holder_ref="machine/project/new-worktree")
+        assert not any(event[0] == "journal" for event in venue.events)
+    assert cli.main(["release-claim", "returned", "--owner", "new-worktree"]) == 0
+    assert venue.shared["returned"].state == "released"
+    assert lease.get_lease("returned") is None
+    assert any(event[0] == "settle" for event in venue.events) is journaled
+    capsys.readouterr()
+
+
+def test_tokened_legacy_return_does_not_infer_absence_from_unreadable_ledger(venue, monkeypatch, capsys):
+    assert cli.main(["create", "example/project", "--no-wait"]) == 0
+    capsys.readouterr()
+    before = lease.LEASE_FILE.read_bytes()
+    monkeypatch.setattr(coordination, "_run", lambda *a, **kw: None)
+    with pytest.raises(RuntimeError, match="ownership lookup"):
+        lease.release_claim("returned", "new-worktree")
+    assert lease.LEASE_FILE.read_bytes() == before
+    assert venue.shared["returned"].state == "leased"
+    assert not any(event[0] in ("release", "settle") for event in venue.events)
 
 def test_quota_retry_reserves_the_returned_venue_instead_of_creating_again(venue, monkeypatch, capsys):
     venue.config.max_owned_codespaces = 31
@@ -370,7 +441,8 @@ def test_return_settles_original_owner_before_another_workstream_reuses(venue, m
     from agent_codespaces import driving_worktrees
 
     current = ["new-worktree"]
-    obligations = {"new-worktree": set(), "second-worktree": set()}
+    obligations = venue.ledger
+    obligations["second-worktree"] = set()
     monkeypatch.setattr(lease, "resolve_owner_worktree", lambda: current[0])
     monkeypatch.setattr(coordination, "owner_ref", lambda: f"machine/project/{current[0]}")
     monkeypatch.setattr(driving_worktrees, "_workstream_claim_refs", lambda owner: obligations[current[0]])

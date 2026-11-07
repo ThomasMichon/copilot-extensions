@@ -49,12 +49,15 @@ def release_claim(name: str, owner: str) -> bool:
         holder = _original_holder(name, held, shared) if shared else None
         if not holder:
             raise RuntimeError(f"Return of '{name}' is unconfirmed; original owner and local claim are retained")
+        from .driving_worktrees import _qualified_claim_refs
+
+        refs = _qualified_claim_refs(holder)
         if shared.get("state") == "leased" and shared.get("token") == held.lease_token:
             if not coordination.release(name, held.lease_token).ok:
                 raise RuntimeError(f"Shared return of '{name}' is unconfirmed; local claim is retained")
         elif shared.get("state") != "released" or shared.get("live") is not False:
             raise RuntimeError(f"Shared ownership of '{name}' changed; local claim is retained")
-        if not coordination.settle_obligation(name, holder, released=True, confirmed=True):
+        if name in refs and not coordination.settle_obligation(name, holder, released=True, confirmed=True):
             raise RuntimeError(f"Original-owner settlement of '{name}' is unconfirmed; local claim is retained")
     with lease._lease_lock():
         records = lease._read_records(lease.LEASE_FILE, lease.Lease, fail_closed=True)

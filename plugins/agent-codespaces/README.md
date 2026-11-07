@@ -677,6 +677,11 @@ owner's ledger before removing the unchanged local claim. Unknown return or
 deferred settlement reports failure and retains local custody, including through
 generic and bulk release. A quota retry that discovers a returned venue uses
 the same reservation flow rather than creating again.
+Tokened own-workstream reuse also requires shared evidence; only tokenless
+legacy local claims retain the optional-peer fallback. Ordinary `claim` journals
+responsibility like the connection path. Return accepts a missing legacy ledger
+entry only after a complete qualified native read confirms absence or prior
+release, never after a failed lookup.
 The existing per-target lifecycle lock covers final inventory/user checks,
 local reservation, binding confirmation and eligibility-marker removal, so a
 managed destructive operation cannot interleave with that commit sequence.
