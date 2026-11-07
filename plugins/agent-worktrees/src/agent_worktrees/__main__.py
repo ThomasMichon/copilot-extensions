@@ -461,22 +461,16 @@ def _build_active_paths(
             if rec.worktree_path and sessions.mux_session_name(rec.worktree_id) in mux_sessions:
                 active.add(sessions._normalize_path(rec.worktree_path))
     else:
-        # Batch list unavailable (mux missing or blocked): prefer the #4057
-        # cached liveness hint on the record (a free read, stamped by the
-        # authoritative verify at the action moments) when it is a FRESH
-        # ``True`` -- that short-circuits the slow per-worktree probe. A
-        # missing hint OR a fresh cached ``False`` both still fall through to
-        # the authoritative ``has_mux_session`` probe (cleanup-toctou-
-        # revalidation effort): a cached negative is not proof a session
-        # hasn't attached since the stamp, so it must never be trusted on its
-        # own to skip the fallback check.
+        # A fresh positive hint conservatively preserves activity. Negatives
+        # cannot establish absence. Only TMux may use per-session fallback;
+        # passive PSMux CLI execution can reap live servers during startup.
         for rec in records:
             if not rec.worktree_path:
                 continue
             hint = _fresh_mux_live_hint(rec)
             if hint is True:
                 active.add(sessions._normalize_path(rec.worktree_path))
-            elif sessions.has_mux_session(rec.worktree_id):
+            elif sessions.platform.system() != "Windows" and sessions.has_mux_session(rec.worktree_id):
                 active.add(sessions._normalize_path(rec.worktree_path))
     # #4057/#1416 bare-resume blind spot: a bare-resumed Copilot (cwd=home) is
     # invisible to BOTH the lock scan above (its session isn't registered under
@@ -3088,7 +3082,13 @@ def _monitor_sweep(
     if mux_bin:
         live = _monitor_list_sessions(mux_bin)
         if live is None:
-            if roster_failure is not None:
+            if sessions._is_psmux(mux_bin) and roster_publisher is not None:
+                # Publish independent facts without discovering, pruning or painting panes.
+                for project in sorted(picker_projects or set()):
+                    with project_lock if project_lock is not None else contextlib.nullcontext():
+                        cfg.set_active_project(project)
+                        roster_publisher()
+            if roster_failure is not None and not sessions._is_psmux(mux_bin):
                 roster_failure(RuntimeError("mux-session enumeration unavailable"))
             return -1
         from .status_monitor_discovery import discover_connected_worktrees

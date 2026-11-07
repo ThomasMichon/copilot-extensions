@@ -1729,6 +1729,35 @@ def test_sweep_transient_mux_failure_holds(tmp_path, monkeypatch):
     assert (reg / "wt-a").exists()  # registry untouched
 
 
+@pytest.mark.parametrize("stdout,stderr", [
+    ("wt-other:1:$1:100\nmalformed\n", ""),
+    ("wt-other:1:$1:100\nwt-other:2:$2:200\n", ""),
+    ("", "one server could not be queried"),
+])
+def test_sweep_incomplete_native_listing_preserves_registry_and_roster(
+    tmp_path, monkeypatch, stdout, stderr,
+):
+    import subprocess
+
+    reg = tmp_path / "reg"
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
+    m._register_session_for_monitor("wt-a", "/w/a", session_incarnation="$1:100")
+    monkeypatch.setattr(status_monitor_runtime, "_core_helper", lambda _name, local: local)
+    monkeypatch.setattr(m, "_monitor_list_sessions", status_monitor_runtime._monitor_list_sessions)
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda command, **kwargs: subprocess.CompletedProcess(command, 0, stdout, stderr),
+    )
+    failures = []
+    assert m._monitor_sweep(
+        "tmux", "T", "P", set(),
+        roster_publisher=lambda: pytest.fail("partial observation published current rows"),
+        roster_failure=failures.append,
+    ) == -1
+    assert (reg / "wt-a").read_text() == "/w/a"
+    assert failures
+
+
 def test_sweep_mux_failure_labels_all_published_and_initial_demanded_rosters(tmp_path, monkeypatch):
     from agent_worktrees.worktrees_runtime import WorktreesRuntime
 
@@ -1755,6 +1784,26 @@ def test_sweep_mux_failure_labels_all_published_and_initial_demanded_rosters(tmp
         assert owner.handle(request)["error"]["message"] == "mux-session enumeration unavailable"
     finally:
         owner.shutdown()
+
+
+def test_psmux_sweep_publishes_independent_rosters_without_probing_or_pruning(tmp_path, monkeypatch):
+    import subprocess
+
+    reg = tmp_path / "reg"
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
+    m._register_session_for_monitor("wt-a", "/w/a", session_incarnation="$1:100")
+    monkeypatch.setattr(status_monitor_runtime, "_core_helper", lambda _name, local: local)
+    monkeypatch.setattr(m, "_monitor_list_sessions", status_monitor_runtime._monitor_list_sessions)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: pytest.fail("passive PSMux execution"))
+    projects = []
+    assert m._monitor_sweep(
+        "psmux", "T", "P", set(), picker_projects={"project"},
+        catalog_observer=lambda _: pytest.fail("unknown catalog observed as complete"),
+        roster_publisher=lambda: projects.append(m.cfg.project_name()),
+        roster_failure=lambda _: pytest.fail("independent roster marked failed"),
+    ) == -1
+    assert projects == ["project"]
+    assert (reg / "wt-a").read_text() == "/w/a"
 
 
 def _wire_monitor_handoff_session(tmp_path, monkeypatch):
@@ -5348,9 +5397,23 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
 
     dial_results = []
     wake_at_reply = []
+    start_errors = []
 
     class _DialingServer(hook_ipc.HookIpcServer):
+        handler_settled = threading.Event()
+
+        def _on_request_finished(self) -> None:
+            super()._on_request_finished()
+            self.handler_settled.set()
+
         def start(self) -> None:
+            try:
+                self._start_and_dial()
+            except Exception as error:
+                start_errors.append(repr(error))
+                raise
+
+        def _start_and_dial(self) -> None:
             # Dial AFTER the real (single) start() production calls --
             # production's own _start_request_surfaces() does
             # `HookIpcServer(_decide); hook_server.start()`, so dialing
@@ -5410,6 +5473,7 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
                         assert conn.recv(1) == b""
                     else:
                         dial_results.append(conn.recv(1) == b"")
+                assert self.handler_settled.wait(1), "request handler did not settle"
                 assert self.has_recent_hook_demand() is (
                     kind not in {"native-unadmitted", "batch-unadmitted", "shell-unadmitted"}
                 )
@@ -5419,6 +5483,7 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
 
     assert m.cmd_status_monitor(argparse.Namespace(interval=5)) == 0
 
+    assert not start_errors, start_errors
     assert dial_results == [True], "the real wire round-trip must be accepted"
     assert len(bound) == 1
     # The loop may legitimately consume the event while draining after start().

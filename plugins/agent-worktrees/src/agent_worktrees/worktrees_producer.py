@@ -7,6 +7,7 @@ import time
 from . import config as cfg
 from . import reclaim, sessions, tracking, push_timeout, git_ops
 from .worktrees_current_rows import materialize
+from .mux_list_result import MuxObservationUnavailable
 
 
 def publish_active_project(
@@ -47,8 +48,13 @@ def _publish_active_project(
     if observe_records is not None:
         observe_records(project, records)
     session_ctx = sessions.scan_sessions_fast(records)
-    mux_map = sessions.mux_status_many([rec.worktree_id for rec in records])
-    if managed_mux_cache is not None:
+    try:
+        mux_map = sessions.mux_status_many([rec.worktree_id for rec in records])
+        mux_observed = True
+    except MuxObservationUnavailable:
+        mux_map = {}
+        mux_observed = False
+    if managed_mux_cache is not None and mux_observed:
         from .mux_link import MAPPING_STALE_AFTER_SECONDS
 
         now = time.time()

@@ -21,6 +21,15 @@ plugins. It is the one piece that must work *before* the plugins do.
 
 ## Picker notices and diagnostics
 
+Mux uncertainty is separate from process liveness: `MUX(?)` means last-known
+mux hosting cannot be confirmed, and `HOST(?)` means a live process's hosting
+is unknown. Neither is a zero-client detached session or proof of a safe cold
+launch. Passive PSMux CLI discovery, attachment refresh and status validation
+are unavailable rather than executing commands that can perform startup cleanup.
+Existing mappings and counts are preserved, not revalidated. See
+[preservation-first recovery](../plugins/agent-worktrees/docs/mux.md#preserve-first-when-discovery-is-unavailable)
+for the scope, older-consumer limitation and separately authorized recovery.
+
 The Picker reserves two fixed notice rows for Knowledge setup and cached-source
 refresh status. Updates to these notices do not insert entries into the worktree
 list or move its selection. Claim-coverage warnings appear as a compact warning

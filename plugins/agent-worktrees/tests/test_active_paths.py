@@ -65,11 +65,21 @@ def test_active_paths_fall_back_when_batch_unavailable():
     def _has(wt_id):
         return wt_id == "aaaa"
 
-    with patch("agent_worktrees.sessions._list_mux_sessions", return_value=None), \
+    with patch("agent_worktrees.sessions.platform.system", return_value="Linux"), \
+         patch("agent_worktrees.sessions._list_mux_sessions", return_value=None), \
          patch("agent_worktrees.sessions.has_mux_session", side_effect=_has):
         active = cli._build_active_paths(recs, session_ctx=_empty_ctx())
 
     assert active == {"/tmp/a"}
+
+
+def test_windows_passive_classification_does_not_fall_back_to_psmux():
+    rec = _rec("aaaa", path="/tmp/a")
+    with patch("agent_worktrees.sessions.platform.system", return_value="Windows"), \
+         patch("agent_worktrees.sessions._list_mux_sessions", return_value=None), \
+         patch("agent_worktrees.sessions.has_mux_session") as probe:
+        cli._build_active_paths([rec], session_ctx=_empty_ctx())
+    probe.assert_not_called()
 
 
 def test_active_paths_union_lock_and_mux():

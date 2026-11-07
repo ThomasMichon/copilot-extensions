@@ -29,6 +29,8 @@ def mux_attached_clients(
     misleading ``0`` (see #4564 -- the field this closes). Only a clean,
     zero-exit ``list-clients`` call is trusted to report the real count,
     including a genuine zero (an empty-but-successful listing)."""
+    if not mux_discovery.passive_cli_supported(mux_bin):
+        return None
     try:
         result = subprocess.run(
             [mux_bin, *mux_args, "list-clients", "-t", session],
@@ -44,7 +46,7 @@ def mux_attached_clients(
             "Mux attachment probe failed using %s for %s: %s", mux_bin, session, exc
         )
         return None
-    if result.returncode != 0:
+    if result.returncode != 0 or (result.stderr or "").strip():
         logging.getLogger(__name__).debug(
             "Mux attachment probe using %s for %s exited with code %s",
             mux_bin, session, result.returncode,

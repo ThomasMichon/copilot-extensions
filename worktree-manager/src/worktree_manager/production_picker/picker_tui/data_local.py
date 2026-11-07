@@ -275,6 +275,7 @@ def _merge_reconcile_row(
 ) -> None:
     if not isinstance(reconcile_row, dict):
         return
+    raw["mux_observation_unavailable"] = preserve_mux
     for field in _GROUP_C_FIELDS:
         if field in reconcile_row:
             raw[field] = reconcile_row[field]

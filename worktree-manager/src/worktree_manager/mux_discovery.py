@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 from datetime import datetime
+from pathlib import PureWindowsPath
 
 from agent_procutil import no_window_kwargs
 
@@ -15,6 +16,11 @@ from .mux_mapping_registry import MuxMappingRegistry
 
 KIND = "mux-discover-v1"
 LOG = logging.getLogger(__name__)
+
+
+def passive_cli_supported(binary: str) -> bool:
+    """PSMux startup cleanup makes nominal read commands unsafe to observe with."""
+    return PureWindowsPath(binary).stem.casefold() != "psmux"
 
 
 def confirm_creation_cli(payload: dict) -> dict:
@@ -180,6 +186,27 @@ def _is_empty_tmux_listing(binary: str, result: subprocess.CompletedProcess[str]
     )
 
 
+def legacy_session_presence(binary: str, session: str, probe) -> bool | None:
+    """Classify a bounded legacy probe without turning failures into retirement."""
+    if not passive_cli_supported(binary):
+        return None
+    try:
+        result = probe()
+        stdout = result.stdout.decode(errors="replace") if isinstance(result.stdout, bytes) else result.stdout
+        stderr = result.stderr.decode(errors="replace") if isinstance(result.stderr, bytes) else result.stderr
+        if result.returncode == 0:
+            return None if (stderr or "").strip() else True
+        evidence = subprocess.CompletedProcess(result.args, result.returncode, stdout, stderr)
+        if _is_empty_tmux_listing(binary, evidence) or (
+            result.returncode == 1 and not (stdout or "").strip()
+            and (stderr or "").strip() == f"can't find session: {session}"
+        ):
+            return False
+        return None
+    except Exception:
+        return None
+
+
 def confirm_native_session(
     payload: dict, *, connected_only: bool, timeout_s: float = 2.0,
     require_worktree_path: bool = True,
@@ -189,6 +216,8 @@ def confirm_native_session(
     if not _valid_native_incarnation(payload.get("session_incarnation")):
         LOG.warning("Refusing malformed native mux identity for %s", name)
         return {"applied": False, "reason": "session-unconfirmed"}
+    if not passive_cli_supported(payload["mux_bin"]):
+        return {"applied": False, "reason": "enumeration-unavailable"}
     try:
         probe = run_mux_child(
             [payload["mux_bin"], "list-panes", "-a", "-F",
@@ -206,7 +235,7 @@ def confirm_native_session(
         ):
             return {"applied": False, "reason": "session-absent"}
         return {"applied": False, "reason": "enumeration-unavailable"}
-    if not isinstance(probe.stdout, str):
+    if not isinstance(probe.stdout, str) or (probe.stderr or "").strip():
         return {"applied": False, "reason": "session-unconfirmed"}
     rows = [line.split("\t", 3) for line in probe.stdout.splitlines() if line.strip()]
     if any(
