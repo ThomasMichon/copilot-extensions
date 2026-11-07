@@ -691,3 +691,23 @@ adopter pilot feedback gates subsequent widening.
   The design and public scope now name this staged platform boundary explicitly.
   The generic umbrella/effort stay Active; review/CI/merge and subsequent adopter
   qualification remain separate, with no rollout or broader inactive work.
+
+### 2026-11-07 — Current-source native cross-volume crash requalification
+- Settled the prior failed synthetic fixture through its resource owner without
+  fabricating the lost original Git/ledger/journal. Its protected failure
+  evidence remains intact; no adopter data or retained worktree was involved.
+- The corrected focused test at source `24728105d2` completed a real Windows
+  two-volume outward/return flow with original Git, ledger and journal retained
+  outside runner teardown through terminal result.
+- Abruptly exited a newly owned child after destination publication, verified
+  dead/reused caller incarnation and read-only recovery, refused cancellation
+  after publication, then completed the original operation without a new stage.
+  On return, abruptly exited after source-retirement rename and recovered that
+  same original operation from its retained retirement copy.
+- The focused native case passed. Final raw content manifest, ignored bytes,
+  branch/HEAD, worktree identity and creation nonce matched the original;
+  terminal journal was `complete`. Successful external fixture cleanup was
+  confirmed while the complete primary authority and proof remained retained.
+- This closes the previously held source fixture requalification item, not
+  the broader objective or an adopter/runtime approval. Fresh exact-head CI and
+  actual review remain required before merging the existing first-slice PR.

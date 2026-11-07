@@ -184,9 +184,10 @@ External-volume qualification also requires
 private fixture parent on the primary filesystem. Its Git objects, record and
 recovery journal stay outside runner teardown, so a failed external copy does
 not lose its recovery authority. The caller retains that primary evidence and
-cleans it only after positively confirmed completion. The combined two-leg
-native control has its own 120-second item budget; production probes are not
-weakened.
+cleans it only after positively confirmed completion. The two-leg native control
+also abruptly exits owned children after publication and retirement rename,
+then verifies original-operation recovery and retained primary authority.
+It has its own 300-second item budget; production probes are not weakened.
 
 Source tests, required PR CI, source merge, Main promotion, selected-runtime
 qualification and actual operator migration are different gates. Normal rollout
