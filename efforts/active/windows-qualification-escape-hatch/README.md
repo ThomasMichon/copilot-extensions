@@ -205,3 +205,17 @@ dispatching a workflow.
 Eight targeted CLI controls also passed after tightening invalid-workspace
 error handling; these supplement the 54-control run above rather than
 claiming another full transport run.
+
+### 2026-11-07 - Implementation review
+
+Opened #11187 through the normal Dev PR flow. Required checks passed at its
+first head; Copilot identified inherited Git selectors escaping the selected
+root, unconfirmed reused transport tips after contention, and missing tool
+tier enforcement. Focused real Git/pytest consumers reproduced all three.
+
+Reused the existing repository-identity environment scrubber for command
+boundaries, persisted reused tips as confirmed, and loaded the portfolio
+guard for tool execution with private pytest scratch. All 59 focused controls
+now pass, including the new cross-worktree, descendant-contention and actual
+T3/T4 opt-in regressions. Review, refreshed CI, promotion and live hosted
+acceptance remain open; no qualification ref or run has been created.

@@ -7,6 +7,7 @@ import base64
 from contextlib import nullcontext
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -403,6 +404,45 @@ def test_same_request_operations_exclude_duplicate_resume_but_other_requests_rem
                 pytest.fail("the same request cannot have two mutation owners")
         with client_module.request_lock(other):
             assert (directory / "state.json").is_file()
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.parametrize("explicit", [False, True])
+def test_actual_tool_consumer_enforces_explicit_tiers(tmp_path, monkeypatch, explicit):
+    import plugin_test_containment as containment
+    root = tmp_path / "candidate"
+    tools = root / "tools"
+    tools.mkdir(parents=True)
+    (tools / "test_tiers.py").write_text(
+        "from pathlib import Path\n"
+        "import pytest\n"
+        "@pytest.mark.portfolio_tier('T3')\n"
+        "def test_native_tier():\n"
+        "    Path(__file__).with_name('t3-ran').write_text('executed')\n"
+        "@pytest.mark.portfolio_tier('T4')\n"
+        "def test_external_tier():\n"
+        "    Path(__file__).with_name('t4-ran').write_text('executed')\n",
+        encoding="utf-8",
+    )
+    run = containment.run_contained
+
+    def fixture_dependencies(argv, **kwargs):
+        # Supply the real policy module to a tiny candidate fixture, without
+        # changing the worker's argv or bypassing pytest's plugin loading.
+        kwargs["env"]["PYTHONPATH"] = os.pathsep.join((str(tools), str(worker.ROOT / "tools")))
+        return run(argv, **kwargs)
+    monkeypatch.setattr(containment, "run_contained", fixture_dependencies)
+    output = tmp_path / "evidence"
+    output.mkdir()
+    assert worker.tool_tests(root, {
+        "kind": "tools", "files": ["tools/test_tiers.py"], "k": "",
+        "full": False, "explicit_tiers": explicit,
+    }, output) == 0
+    cases = worker.junit_cases(output / "junit")
+    assert len(cases) == 2
+    assert {case["outcome"] for case in cases} == {"passed" if explicit else "skipped"}
+    assert (tools / "t3-ran").exists() is explicit
+    assert (tools / "t4-ran").exists() is explicit
 
 
 def test_manual_workflow_never_adds_required_ci_or_candidate_write_credentials():

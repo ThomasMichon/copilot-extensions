@@ -73,6 +73,11 @@ def tool_tests(root: Path, selected: dict, output: Path) -> int:
     with TestSandbox(prefix="windows-qualification-tools-") as directory:
         sandbox = Path(directory)
         env = isolated_environment(os.environ, sandbox, allow_explicit_tiers=selected["explicit_tiers"])
+        env["PYTHONPATH"] = str(root / "tools")
+        argv.extend((
+            "-p", "pytest_portfolio_guard", "--basetemp=" + str(sandbox / "pytest"),
+            "-o", "cache_dir=" + str(sandbox / "pytest-cache"),
+        ))
         return run_contained(argv, cwd=root, env=env, sandbox=sandbox, limits=Limits(wall_seconds=600))
 
 

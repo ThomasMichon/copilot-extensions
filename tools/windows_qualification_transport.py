@@ -13,12 +13,15 @@ from windows_qualification_contract import TRANSPORT_MARKER, TRANSPORT_REF, cano
 
 def command(argv: list[str], *, cwd: Path, data: str | None = None, check=True):
     """Run a bounded, caller-owned, captured command without a shell."""
-    source = str(Path(__file__).resolve().parents[1] / "libs/agent-procutil/src")
-    if source not in sys.path:
-        sys.path.insert(0, source)
+    root = Path(__file__).resolve().parents[1]
+    for relative in ("libs/agent-procutil/src", "plugins/agent-worktrees/src"):
+        source = str(root / relative)
+        if source not in sys.path:
+            sys.path.insert(0, source)
     from agent_procutil.owned_process import run_caller_owned
+    from agent_worktrees.git_repository_environment import repository_identity_env
     result = run_caller_owned(
-        argv, cwd=cwd, input_text=data, timeout=90,
+        argv, cwd=cwd, input_text=data, timeout=90, env=repository_identity_env(),
         max_stdout_bytes=8 * 1024 * 1024, max_stderr_bytes=1024 * 1024,
     )
     if check and result.returncode:
@@ -97,6 +100,7 @@ class Transport:
             if previous:
                 self.validate_tip(previous)
                 if self.git("merge-base", "--is-ancestor", candidate, previous, check=False).returncode == 0:
+                    persist({"envelope_sha": previous, "phase": "transport-confirmed"})
                     return previous
             parents = (["-p", previous] if previous else []) + ["-p", candidate]
             body = canonical({"format": TRANSPORT_MARKER, "candidate": candidate}) + "\n"
