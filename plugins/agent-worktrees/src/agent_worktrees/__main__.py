@@ -4097,8 +4097,7 @@ class _ResidentHookPolicy:
     def native_batch_targets(self, payload: dict, *, include_shell: bool = False) -> list[str] | None:
         from .hook_ipc import HookUnavailable
 
-        forms = self._module("tool_call_forms.py")
-        if forms is None:
+        if (forms := self._module("tool_call_forms.py")) is None:
             raise HookUnavailable
         try:
             if include_shell:
