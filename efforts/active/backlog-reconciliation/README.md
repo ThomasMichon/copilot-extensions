@@ -233,6 +233,14 @@ implementation authority, resource custody or the fixed checkpoint.
 
 ## Plan
 
+The [caller-owned transport planning proposal](<journal/2026/11.07 caller-owned-transport-planning.md>)
+preserves #2316's complete interactive/loopback and native-session contract as
+an independent proposed planning lane under OPEN #2709. The source remains
+separate and OPEN with its claimant, architecture decision and native owners
+unchanged; no actual receiving, reassignment or retirement is claimed.
+Review the proposal before any additive tracker realization. The complete
+814-issue census remains 85 above fixed 729; Phase 2 stays Active.
+
 The [Windows retained-writer intake](<journal/2026/11.07 windows-retained-writer-intake.md>)
 receives complete #11311 directly in OPEN #6917 as independent MR9/MRV10,
 preserving the reported fifteen-second deadline, native serializer and claim
@@ -2942,6 +2950,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [caller-owned transport planning proposal](<journal/2026/11.07 caller-owned-transport-planning.md>)
+requires complete current receiving/original qualification and preservation of
+the incumbent body, every check state, discussion, assignment and custodian
+before an additive planning realization. The claimant's draft-PR, Windows-host
+and real Linux PTY/process-lifetime conditions remain independent and pending.
+All source and campaign completion checkboxes stay unchanged.
 
 The [Windows retained-writer intake](<journal/2026/11.07 windows-retained-writer-intake.md>)
 retains complete #11311 and its source-research refinement in actual #6917.
