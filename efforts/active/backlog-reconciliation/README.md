@@ -233,6 +233,12 @@ implementation authority, resource custody or the fixed checkpoint.
 
 ## Plan
 
+The [branch-observation and streaming follow-through](<journal/2026/11.06 branch-observation-and-streaming-followthrough.md>)
+verifies #11219's newly merged finite source repair without adding a rollout
+gate, while preserving #11210's whole streaming acceptance and #11245's
+OPEN implementation provider. Protected sources remain withheld. The
+813-whole checkpoint stays 84 above fixed 729; Phase 2 and custody stay Active.
+
 After reviewed #11252 and complete actual #6394 receiving/readback, #11181
 is separately retired NOT_PLANNED without technical completion or custody
 release. Two complete equal scans measure 812 whole OPEN, 83 above fixed
@@ -2870,6 +2876,12 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [branch-observation and streaming follow-through](<journal/2026/11.06 branch-observation-and-streaming-followthrough.md>)
+separates exact-head provider review/CI, inspected source and attributed test
+reports from release, installed behavior and whole streaming acceptance.
+The source-only completion candidate still requires a separate fresh tracker
+judgment; all original check states and source/resource custodians remain.
 
 The [board-waiter receiving matrix](board-waiter-receiving-cohort.md)
 preserves the author's withdrawn universal claim, complete affected-module
