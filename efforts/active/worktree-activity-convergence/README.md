@@ -268,6 +268,31 @@ focus, selection, range anchors and action targets.
 
 ## Journal
 
+### 2026-11-07 - Implementation review and unit admission corrections
+- #11257 opened through the managed publication flow. The first current-head
+  review identified two concrete gaps: native fingerprints used unqualified
+  IDs across sources, and the explicit live filter only checked lifecycle
+  labels. Fingerprints now retain source-qualified selection identity and
+  status filtering receives the existing canonical live-signal predicate.
+- Same-ID cross-source reordering now proves display order, keyed focus,
+  multiselection, anchor and actual highlighted action target together. A real
+  canonical finalized-row descriptor with an attached mux proves that live
+  filtering retains explicit-finalization display. The focused Manager
+  controls/list packet passed 22 tests; the prior rebased connected flow and
+  controls passed 9.
+- Required CI correctly refused changed bytes in four previously admitted
+  source files. The manifest retains its exact inventory and effect/coverage
+  rules, refreshes those source hashes, and adds eight actor-free optional
+  worktree-change handler controls to its existing fixture.
+- An optional complete native unit-packet attempt exposed host-identity
+  discovery in the associated-application marker fixture before reaching the
+  new controls. That fixture now supplies the synthetic marker environment.
+  Focused hook controls passed 74 tests and the corrected marker module
+  passed 8; this is not a complete native unit-packet result. Required
+  current-head CI remains the complete portable-unit evidence owner.
+- Review, required CI, merge, Main promotion and the selected installed
+  consumer remain open delivery gates; no deployment is implied.
+
 ### 2026-11-07 - Source qualification complete; delivery remains open
 - Canonical Windows backend packets passed: 321 passed / 4 skipped, followed
   by the corrected residual groups at 183 passed and 135 passed. A

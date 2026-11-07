@@ -47,13 +47,14 @@ class ListView:
         """Explicitly select which lifecycle rows are visible."""
         self.status_index = (self.status_index + 1) % len(self.STATUSES)
 
-    def accepts_status(self, row) -> bool:
+    def accepts_status(self, row, live: Callable[[object], bool] | None = None) -> bool:
         """Unlike text search, an explicit status filter may hide live rows."""
         state = row.get("state")
+        is_live = live(row) if live is not None else state == "ACTIVE"
         return (
             self.status_index == 0
-            or self.status_index == 1 and state == "ACTIVE"
-            or self.status_index == 2 and state not in {"ACTIVE", "FINAL", "MERGED"}
+            or self.status_index == 1 and is_live
+            or self.status_index == 2 and not is_live and state not in {"FINAL", "MERGED"}
             or self.status_index == 3 and state in {"FINAL", "MERGED"}
         )
 

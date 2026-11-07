@@ -488,7 +488,7 @@ class PickerScreenModelMixin:
         if self._kind() != "worktrees":
             return cols, sections
         return cols, [(label, self.list_view.filter(
-            [row for row in rows if self.list_view.accepts_status(row)],
+            [row for row in rows if self.list_view.accepts_status(row, derive.wt_row_always_visible)],
             ("title", "id", "id4", "state", "status_markers"),
             keep=derive.wt_row_always_visible)) for label, rows in sections]
     def _wt_visible_records(self):

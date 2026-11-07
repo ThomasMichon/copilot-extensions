@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import datetime
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -116,5 +117,100 @@ def test_native_controls_combine_completed_preserve_focus_and_disclose_hidden_li
             await pilot.pause()
             assert scr.list_view.status_index == 0
             assert len(scr._wt_visible_records()) == 3
+
+    asyncio.run(run())
+
+
+def test_same_id_cross_source_reorder_keeps_native_display_and_action_target_together(monkeypatch):
+    monkeypatch.setattr(derive, "NOW", datetime(2026, 11, 7, 1))
+    local = ("fixture-a", "Win")
+    machines = [local, ("fixture-b", "Win")]
+    raws = [
+        {"id": "same-worktree", "title": title, "state": "wip", "status": "active",
+         "started_at": "2026-11-01T00:00:00", "session_count": 1,
+         "message_activity": {"version": 1, "last_message_at": timestamp}}
+        for title, timestamp in (
+            ("Source A target", "2026-11-07T00:59:00"),
+            ("Source B target", "2026-11-07T00:50:00"),
+        )
+    ]
+    source = SimpleNamespace(
+        LOCAL=local, LOCAL_LABEL="Fixture", bucket=derive.bucket, for_machine=derive.for_machine,
+        is_local=lambda m, e: (m, e) == local,
+        machines=lambda: [(m, m, e, True) for m, e in machines],
+        load=lambda: [derive.norm(raw, *machine) for raw, machine in zip(raws, machines)],
+    )
+
+    async def run():
+        app = PickerApp(source, live=False)
+        async with app.run_test(size=(118, 32)) as pilot:
+            scr = app.query_one(PickerScreen)
+            await _wait_for_initial_setup(scr, pilot)
+            scr.machine_idx = 0
+            scr.load_delay = {index: 0 for index in scr.load_delay}
+            scr.sel, scr.wt_anchor = ("L", 0), 0
+            scr.refresh()
+            scr._sync_focus_to_sel()
+            await pilot.pause()
+            before = [row["selection_id"] for row in scr._wt_visible_records()]
+            assert len(before) == 2 and before[0] != before[1]
+            scr.wt_sel.replace({before[0]})
+            raws[1]["message_activity"]["last_message_at"] = "2026-11-07T01:00:00"
+            scr._wt_remap(lambda: setattr(scr, "data", source.load()))
+            scr.refresh()
+            await pilot.pause()
+            native = scr.query_one("#nf-body-data")
+            assert [row["selection_id"] for row in scr._wt_visible_records()] == before[::-1]
+            assert list(native._l_rows) == before[::-1]
+            assert scr._selected_record()["selection_id"] == before[0]
+            assert scr._wt_visible_records()[scr.wt_anchor]["selection_id"] == before[0]
+            assert scr.wt_sel.ids == {before[0]}
+            assert native.highlighted == native._stops.index(scr.sel)
+            assert "Source A target" in native.get_option_at_index(native.highlighted + 1).prompt.plain
+
+    asyncio.run(run())
+
+
+def test_live_status_filter_preserves_finalized_attached_mux(monkeypatch):
+    from agent_worktrees import __main__ as main, git_ops, tracking
+
+    monkeypatch.setattr(derive, "NOW", datetime(2026, 11, 7, 1))
+    monkeypatch.setattr("agent_worktrees.finalized_checkout.matches", lambda record: True)
+    local = ("fixture-host", "Win")
+    record = tracking.WorktreeRecord(
+        worktree_id="fixture-final", branch="worktree/fixture-final",
+        worktree_path=str(Path("fixture-checkout").resolve()), repo="fixture",
+        machine=local[0], platform="windows", started_at="2026-11-01T00:00:00",
+        last_resumed_at=None, resume_count=0, title="Fixture",
+        status="finalized", completed_at=None,
+    )
+    raw = main._worktree_to_dict(record, state_info=git_ops.WorktreeStateInfo(
+        state=git_ops.WorktreeState.COMPLETED,
+    ))
+    rows = [
+        derive.norm({
+            **raw, "id": name, "title": name, "session_count": 1,
+            "mux_session": live, "mux_attached": live,
+        }, *local)
+        for name, live in (("final-live", True), ("final-stopped", False))
+    ]
+    assert rows[0]["state"] == "FINAL" and rows[0]["mux_live"]
+    source = SimpleNamespace(
+        LOCAL=local, LOCAL_LABEL="Fixture", bucket=derive.bucket, for_machine=derive.for_machine,
+        is_local=lambda m, e: (m, e) == local,
+        machines=lambda: [("Fixture", *local, True)], load=lambda: rows,
+    )
+
+    async def run():
+        app = PickerApp(source, live=False)
+        async with app.run_test(size=(118, 32)) as pilot:
+            scr = app.query_one(PickerScreen)
+            await _wait_for_initial_setup(scr, pilot)
+            scr.list_view.status_index = 1
+            scr.refresh()
+            await pilot.pause()
+            assert [row["id"] for row in scr._wt_visible_records()] == ["final-live"]
+            scr.list_view.status_index = 3
+            assert {row["id"] for row in scr._wt_visible_records()} == {"final-live", "final-stopped"}
 
     asyncio.run(run())

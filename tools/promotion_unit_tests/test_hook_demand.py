@@ -34,6 +34,7 @@ def api(monkeypatch):
     owner.generation = "a" * 32
     owner._read_demand_admitted = None
     owner._native_mutation_decide = None
+    owner._worktree_changed = None
     owner._read_demand_lock = threading.RLock()
 
     def dispatch(change=None):
@@ -112,6 +113,41 @@ def test_send_only_read_demand_keeps_original_admission_and_expiry(api, case):
 ])
 def test_native_mutation_is_bounded_send_only_and_never_replies_on_refusal(api, case):
     _assert_native_mutation_boundary(api, case, "nativeToolMutation")
+
+
+@pytest.mark.parametrize("case", [
+    "current", "generation", "closed", "revoked", "legacy", "deadline", "payload", "version",
+])
+def test_worktree_change_is_optional_send_only_and_never_invokes_policy(api, case):
+    seen = []
+    cwd = str(SOURCE.parent)
+
+    def change(request, server, handler):
+        request.clear()
+        request.update(
+            version=1, token="expected", kind="worktreeChanged",
+            hook_generation=api.owner.generation, deadline=101.0, payload={"cwd": cwd},
+        )
+        api.owner._worktree_changed = seen.append
+        server.decide = lambda *_a: pytest.fail("worktree change invoked policy")
+        if case == "generation":
+            request["hook_generation"] = "b" * 32
+        elif case == "closed":
+            server.admission_closed = True
+        elif case == "revoked":
+            api.owner._read_demand_admitted = lambda: False
+        elif case == "legacy":
+            api.owner._worktree_changed = None
+        elif case == "deadline":
+            request["deadline"] = float("nan")
+        elif case == "payload":
+            request["payload"]["cwd"] = "relative-worktree"
+        elif case == "version":
+            request["version"] = True
+
+    assert api.dispatch(change) is None
+    assert seen == ([cwd] if case == "current" else [])
+    assert api.owner.has_recent_hook_demand() is (case == "current")
 
 
 @pytest.mark.parametrize("case", [

@@ -26,7 +26,10 @@ def _worktree_fingerprint(rows):
     fields = ("id", "title", "state", "age_secs", "used_at", "used", "sess",
               "activity", "live_intent", "live_rest", "status_markers",
               "_manager_scope", "_manager_scope_state")
-    return tuple(tuple(row.get(field) for field in fields) for row in rows)
+    return tuple(
+        (row.get("selection_id") or row.get("id"), *(row.get(field) for field in fields[1:]))
+        for row in rows
+    )
 
 
 class _PickerSegment(Widget):

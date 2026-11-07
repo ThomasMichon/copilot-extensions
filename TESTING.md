@@ -5096,6 +5096,11 @@ the same monotonic idle grace. Generation, admission, malformed and expired
 notifications cannot renew it or invoke policy. Actual sockets, the final
 idle-check/drain interleaving and Windows shell delivery remain in the explicit
 Worktrees consumer packet, not this actor-free inventory.
+The same in-memory handler fixture covers optional `worktreeChanged` delivery:
+current generation/admission accepts the wake, while stale, closed, legacy,
+malformed and expired frames neither reply nor invoke tool policy. Associated
+application-marker units supply a synthetic marker environment; dependency
+evaluation must not discover the test host's identity.
 The PowerShell SDK and Bridge resume fixtures compile immutable admitted source
 once per test session, then execute that code in fresh per-case module globals.
 They do not share module state, results, provider observations or qualification
