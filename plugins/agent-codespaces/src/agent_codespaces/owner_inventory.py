@@ -83,7 +83,7 @@ def credential(account: str | None) -> str:
         token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
         if not token:
             result = subprocess.run(
-                ["gh", "auth", "token"], capture_output=True, text=True,
+                ["gh", "auth", "token", "--hostname", "github.com"], capture_output=True, text=True,
                 timeout=10, **no_window_kwargs(),
             )
             token = result.stdout.strip() if result.returncode == 0 else None
@@ -173,7 +173,7 @@ def decode_listing(stdout, *, qualified=False):
 
 
 def qualified_environment(account) -> dict[str, str]:
-    env = dict(os.environ)
+    env = dict(os.environ, GH_HOST="github.com")
     env["GH_TOKEN"] = credential(account)
     env.pop("GITHUB_TOKEN", None)
     return env

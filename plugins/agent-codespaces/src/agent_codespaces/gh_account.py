@@ -117,7 +117,7 @@ def token_for_account(login: str | None) -> str | None:
 
 @functools.lru_cache(maxsize=64)
 def _token_for_account(login: str | None) -> str | None:
-    """Mint a ``gh`` OAuth token for ``login`` via ``gh auth token --user``.
+    """Mint a GitHub.com token for ``login``, independent of ambient ``GH_HOST``.
 
     Returns None when ``gh`` is unavailable or ``login`` is not an
     authenticated ``gh`` account (caller then uses ambient auth).
@@ -126,7 +126,7 @@ def _token_for_account(login: str | None) -> str | None:
         return None
     try:
         result = subprocess.run(
-            ["gh", "auth", "token", "--user", login],
+            ["gh", "auth", "token", "--hostname", "github.com", "--user", login],
             capture_output=True, text=True, timeout=10,
             creationflags=_creation_flags(),
         )
@@ -151,6 +151,7 @@ def env_for_account(login: str | None, base: dict | None = None) -> dict:
     if token:
         # GH_TOKEN wins in gh; drop a stale GITHUB_TOKEN so it can't shadow it.
         env["GH_TOKEN"] = token
+        env["GH_HOST"] = "github.com"
         env.pop("GITHUB_TOKEN", None)
     elif login:
         from .picker_auth import credential_env

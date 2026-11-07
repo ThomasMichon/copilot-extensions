@@ -9,7 +9,8 @@ from urllib.parse import quote
 
 from agent_procutil import no_window_flags
 
-from . import gh_account, launch_policy, lifecycle
+from . import launch_policy, lifecycle
+from .allocation import verified_account_token
 
 
 def add_start_parser(sub: argparse._SubParsersAction) -> None:
@@ -32,6 +33,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             identity = subprocess.run(
                 ["gh", "api", "user", "--jq", ".login"], capture_output=True,
                 text=True, timeout=30, creationflags=no_window_flags(),
+                env=dict(os.environ, GH_HOST="github.com"),
             )
         except (OSError, subprocess.SubprocessError) as error:
             raise RuntimeError("Cannot resolve the authenticated CodeSpace owner") from error
@@ -46,10 +48,10 @@ def cmd_start(args: argparse.Namespace) -> int:
     if lifecycle.classify_state(state or "") == "failed":
         raise RuntimeError(f"CodeSpace cannot activate from state {state}")
     if state == "Shutdown":
-        token = gh_account.token_for_account(account)
+        token = verified_account_token(account)
         if not token:
             raise RuntimeError("Cannot authenticate the CodeSpace owner; refusing ambient fallback")
-        env = dict(os.environ, GH_TOKEN=token)
+        env = dict(os.environ, GH_TOKEN=token, GH_HOST="github.com")
         env.pop("GITHUB_TOKEN", None)
         try:
             done = subprocess.run(
