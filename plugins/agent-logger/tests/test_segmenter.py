@@ -212,19 +212,54 @@ def test_format_digest_streams_identically_to_a_turn_list(tmp_path: Path, max_to
     assert expected.endswith(f"[digest truncated at {max_total} chars]") == (max_total != 10**9)
 
 
-def test_write_segments_removes_its_files_when_the_turn_stream_fails(tmp_path: Path) -> None:
+def _failing_after(session_dir: Path, turns: int, exc: BaseException):
+    for i, turn in enumerate(collate.TurnStream(session_dir, None, 40)):
+        if i == turns:
+            raise exc
+        yield turn
+
+
+@pytest.mark.parametrize("exc", [RuntimeError("transcript read failed"), KeyboardInterrupt()])
+def test_write_segments_keeps_completed_segments_when_the_turn_stream_fails(
+    tmp_path: Path, capsys, exc: BaseException,
+) -> None:
     session_dir = _many_turns_session(tmp_path / "s", 6)
+    complete = tmp_path / "complete"
+    collate.write_segments({}, {}, [], collate.TurnStream(session_dir, None, 40), [], None, complete, 1, 40)
     out = tmp_path / "out"
+    out.mkdir()
+    (out / "00-context.md").write_text("stale context from an earlier run", encoding="utf-8")
 
-    def failing_turns():
-        for i, turn in enumerate(collate.TurnStream(session_dir, None, 40)):
-            if i == 4:
-                raise RuntimeError("transcript read failed")
-            yield turn
+    with pytest.raises(type(exc)):
+        collate.write_segments({}, {}, [], _failing_after(session_dir, 4, exc), [], None, out, 1, 40)
 
-    with pytest.raises(RuntimeError, match="transcript read failed"):
-        collate.write_segments({}, {}, [], failing_turns(), [], None, out, 1, 40)
-    assert list(out.iterdir()) == []
+    # Turns 1-3 were in segments closed before the failure; segment 04 was
+    # still open, and no 00-context.md presents the run as complete.
+    survived = _read_dir(out)
+    assert sorted(survived) == ["01-turns.md", "02-turns.md", "03-turns.md"]
+    assert survived == {name: data for name, data in _read_dir(complete).items() if name in survived}
+    assert "kept 3 completed segment(s)" in capsys.readouterr().err
+
+
+def test_write_to_nas_records_no_manifest_for_an_interrupted_digest(tmp_path: Path, monkeypatch) -> None:
+    session_dir = _many_turns_session(tmp_path / "s", 6)
+
+    class FailingStream(collate.TurnStream):
+        def __iter__(self):
+            for i, turn in enumerate(super().__iter__()):
+                if i == 4:
+                    raise OSError("archive member truncated")
+                yield turn
+
+    monkeypatch.setattr(collate, "TurnStream", FailingStream)
+    nas = tmp_path / "nas"
+    with pytest.raises(OSError, match="truncated"):
+        collate.write_to_nas(session_dir, "sid-1", "box", nas, None, 40, 1, backfill=False)
+
+    digest = nas / "box" / "sid-1" / "full"
+    assert sorted(p.name for p in digest.iterdir()) == ["01-turns.md", "02-turns.md", "03-turns.md"]
+    assert not collate._has_full_digest(digest.parent)
+    assert not (digest.parent / "index.yaml").exists()
 
 
 @pytest.mark.parametrize("tail_turns", [0, 3, 50])

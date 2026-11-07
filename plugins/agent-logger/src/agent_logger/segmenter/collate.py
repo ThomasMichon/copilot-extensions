@@ -23,7 +23,8 @@ The session can be specified as:
 
 Single-file mode writes the full digest to stdout.
 Segmented mode writes numbered files to --output-dir:
-  - 00-context.md  (metadata + checkpoints + stats — always present)
+  - 00-context.md  (metadata + checkpoints + stats — written last; its
+    presence marks a complete digest)
   - 01-turns.md, 02-turns.md, ...  (transcript segments, split at turn
     boundaries, each ≤ --segment-size chars)
 
@@ -35,6 +36,7 @@ single-file mode) rather than by the transcript size.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import sys
@@ -776,7 +778,7 @@ def write_segments(
     Returns a list of created file paths (relative to output_dir).
 
     Layout:
-      00-context.md   — metadata + checkpoints + stats (always present)
+      00-context.md   — metadata + checkpoints + stats (written last, on success)
       01-turns.md     — first batch of turns
       02-turns.md     — next batch, etc.
 
@@ -786,15 +788,17 @@ def write_segments(
     ``turns`` may be a lazy iterable such as a :class:`TurnStream`: each turn
     is appended to its segment file as soon as it is produced, so only one
     turn is held in memory. ``00-context.md`` is written after the last turn,
-    so ``session_start`` is read only then. If writing fails, the files this
-    call created are removed.
+    so ``session_start`` is read only then, and its presence marks a complete
+    digest. If the run fails or is interrupted, segments already closed are
+    kept as partial progress; the still-open segment and any ``00-context.md``
+    are removed and the original exception propagates.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     stats = TurnStats()
     segment_names: list[str] = []
-    written: list[Path] = []
     seg_fh: TextIO | None = None
     seg_chars = 0
+    ctx_file = output_dir / "00-context.md"
 
     try:
         # ── Turn segments ──
@@ -811,9 +815,7 @@ def write_segments(
             if seg_fh is None:
                 seg_num = len(segment_names) + 1
                 fname = f"{seg_num:02d}-turns.md"
-                seg_path = output_dir / fname
-                written.append(seg_path)
-                seg_fh = open(seg_path, "w", encoding="utf-8")
+                seg_fh = open(output_dir / fname, "w", encoding="utf-8")
                 segment_names.append(fname)
                 seg_fh.write(f"# Transcript Segment {seg_num}\n\n")
                 seg_chars = 0
@@ -826,7 +828,7 @@ def write_segments(
             seg_fh.close()
             seg_fh = None
 
-        # ── Context file (always written) ──
+        # ── Context file (the completion marker, written last) ──
         ctx_parts: list[str] = []
         ctx_parts.extend(_format_metadata(workspace, session_start, cutoff_time, since_time))
         ctx_parts.extend(_format_checkpoints(checkpoints))
@@ -840,14 +842,25 @@ def write_segments(
         ctx_parts.append("contains a consecutive batch of turns. Read them in order to")
         ctx_parts.append("reconstruct the full session.\n")
 
-        ctx_file = output_dir / "00-context.md"
-        written.append(ctx_file)
         ctx_file.write_text("\n".join(ctx_parts), encoding="utf-8")
     except BaseException:
+        # Closed segments hold whole turns and are kept. The open segment and
+        # the context file (the completion marker) are removed so an
+        # interrupted run never reads as a complete digest.
+        unfinished = [ctx_file]
         if seg_fh is not None:
-            seg_fh.close()
-        for path in written:
-            path.unlink(missing_ok=True)
+            with contextlib.suppress(OSError):
+                seg_fh.close()
+            unfinished.append(output_dir / segment_names.pop())
+        for path in unfinished:
+            with contextlib.suppress(OSError):
+                path.unlink(missing_ok=True)
+        if segment_names:
+            print(
+                f"collate: interrupted; kept {len(segment_names)} completed segment(s) in "
+                f"{output_dir}; digest incomplete (no 00-context.md)",
+                file=sys.stderr,
+            )
         raise
 
     return ["00-context.md", *segment_names]

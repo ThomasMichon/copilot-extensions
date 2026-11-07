@@ -360,7 +360,11 @@ mid-stream (for example a corrupt archive) exits nonzero after partial output,
 which callers already discard. `collate-session` and `ramp-up-session` stream
 the same way: turns are written to segment files as they are parsed, the stdout
 digest stops retaining turn text once it passes its size cap, and `read_member`
-is reserved for small sidecar members.
+is reserved for small sidecar members. If collation fails or is interrupted
+part-way, segment files already closed are kept as partial progress, the
+unfinished segment is removed, and neither `00-context.md` nor the
+`manifest.yaml`/`index.yaml` entry is written, so the run is never presented as
+a complete digest.
 
 The registration side (`scripts/register-cold-store-provider.sh` /
 `.ps1`, run from `sessionStart`) drops
