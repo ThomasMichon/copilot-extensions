@@ -229,8 +229,10 @@ legacy writer committed a never-started suite request after that guard, a
 capability-verified retry terminally refuses that request instead of letting it
 strand the queue. A pending row with any execution evidence remains an
 unresolved fence, is never replayed or terminally refused, and uses the
-existing restart-confirmed or explicitly authorized repair recovery. Unrelated
-pending work remains pending and must settle before the initial schema upgrade.
+existing restart-confirmed or explicitly authorized repair recovery. Waiters
+on that row or queued behind it receive the fence without needing a worker
+handle or timeout. Unrelated pending work remains pending and must settle
+before the initial schema upgrade.
 A missing guard or database, malformed selection, or uncertain execution refuses
 rather than restoring legacy mode. Neither inspection nor switching starts an
 update or a service.

@@ -779,6 +779,24 @@ def test_waiter_reports_fenced_pending_request(area):
     assert status(request.id, root=root).state == "interrupted"
 
 
+@pytest.mark.parametrize("target", ["uncertain", "later"])
+def test_waiter_reports_pending_execution_evidence_without_worker_or_timeout(area, monkeypatch, target):
+    from update_driver import core
+
+    root = area / "state"
+    uncertain = sample(area)
+    later = sample(area, argv=("later",))
+    with closing(sqlite3.connect(root / "queue.sqlite3")) as db, db:
+        db.execute(
+            "UPDATE requests SET started_at=1,error='unconfirmed' WHERE id=?", (uncertain.id,),
+        )
+    monkeypatch.setattr(core.time, "sleep", lambda _seconds: pytest.fail("fenced waiter slept"))
+    with pytest.raises(InterruptedError):
+        wait(uncertain.id if target == "uncertain" else later.id, root=root)
+    assert status(uncertain.id, root=root).state == "pending"
+    assert status(later.id, root=root).state == "pending"
+
+
 def test_participant_live_forged_stale_and_missing(area):
     sample(area)
     root = area / "state"

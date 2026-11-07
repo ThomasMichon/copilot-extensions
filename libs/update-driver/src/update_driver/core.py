@@ -946,13 +946,13 @@ def wait(
         _assert_foundation_clear(_root(root))
         if status(request_id, root=root).state != request.state:
             continue
-        if request.state == "pending" and request.error:
-            raise SpawnError(request.error)
         if request.state == "pending" and any(
-            item.state in {"interrupted", "blocked"} and item.unresolved
+            item.state in {"pending", "interrupted", "blocked"} and item.unresolved
             for item in status(root=root)
         ):
             raise InterruptedError("installation queue fenced by unsettled prior transaction")
+        if request.state == "pending" and request.error:
+            raise SpawnError(request.error)
         if request.state == "pending" and worker is not None:
             code = worker.poll()
             if code is not None:
