@@ -159,7 +159,12 @@ def test_agenda_tab_is_offered_only_for_heads_that_published(synthetic_peer, tmp
                 await until(pilot, lambda: "Not published" in widget(app))
                 await pilot.pause()
                 assert agenda_tab_hidden(app) and views.active != "agenda-tab"
-                await pilot.press("escape")
+                # A head change after not-published must not reveal an empty tab.
+                send(second, {
+                    **publication(3, kind="update"), "availability": "head-changed", "observation": None,
+                })
+                await until(pilot, lambda: "Refresh required" in widget(app))
+                assert agenda_tab_hidden(app)
                 assert await asyncio.to_thread(second.recv, 1) == b""
     asyncio.run(check())
 
