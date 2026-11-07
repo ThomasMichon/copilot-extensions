@@ -46,6 +46,7 @@ from .command_transport import (
 from .configuration_context import run_list
 from .pivots import RegisteredPivot, format_template, parse_list_payload as parse_list_payload
 from .pivot_requests import PivotRequestsMixin
+from .registered_scopes import action_scopes
 
 #: Hard cap on how long a pivot's ``list``/action command may run.
 LIST_TIMEOUT = 20.0
@@ -707,10 +708,11 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
         """Run one action's argv template against ``ctx``. Returns
         ``(ok, message)`` -- never raises, so the caller can surface the result
         in the status line."""
-        return self.run_resolved(format_template(action.run, ctx))
+        return self.run_resolved(format_template(action.run, ctx), scopes=action_scopes(ctx))
 
     def run_resolved(
         self, argv: Sequence[str], *, preserve_output: bool = False,
+        scopes: Sequence[str] | None = None,
     ) -> tuple[bool, str]:
         """Run an **already-substituted** argv (A5 form path + the shared sync
         run path). Resolves ``argv[0]`` on ``PATH`` and executes, returning
@@ -719,9 +721,12 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
         ``{field.<name>}`` + entry tokens in one safe pass via
         :func:`format_form_template`, or a plain template via
         :func:`format_template`). ``preserve_output`` retains full receipts on
-        both success and failure for full-content contributed command results."""
+        both success and failure for full-content contributed command results.
+        Captured ``scopes`` are rechecked immediately before command invocation;
+        omitted scopes preserve independent read and retained-request recovery."""
         proc, error = self._invoke_resolved(
-            argv, timeout=ACTION_TIMEOUT, **({"preserve_output": True} if preserve_output else {}),
+            argv, timeout=ACTION_TIMEOUT, scopes=scopes,
+            **({"preserve_output": True} if preserve_output else {}),
         )
         if proc is None:
             return False, error
@@ -733,10 +738,12 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
 
     def run_json_resolved(
         self, argv: Sequence[str], *, timeout: float | None = None,
+        scopes: Sequence[str] | None = None,
     ) -> tuple[bool, str]:
         """Run a declared JSON command without mixing successful stdout and stderr."""
         proc, error = self._invoke_resolved(
             argv, timeout=ACTION_TIMEOUT if timeout is None else timeout, preserve_output=True,
+            scopes=scopes,
         )
         if proc is None:
             return False, error
@@ -749,6 +756,7 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
 
     def _invoke_resolved(
         self, argv: Sequence[str], *, timeout: float, preserve_output: bool = False,
+        scopes: Sequence[str] | None = None,
     ) -> tuple[subprocess.CompletedProcess[str] | None, str]:
         argv = list(argv)
         if picker_review.active():
@@ -759,6 +767,8 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
             argv = _resolve_command(argv)
             environment = _child_process_env()
             environment["PYTHONIOENCODING"] = "utf-8"
+            if scopes is not None and not self.actions_ready(scopes):
+                return None, "Source read is not current; refresh and reopen this action."
             proc = subprocess.run(
                 argv, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
                 check=False, env=environment, creationflags=no_window_flags(),
@@ -808,9 +818,7 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
             return (False, "empty action command")
         try:
             argv = _resolve_command(argv)
-            scopes = ctx.get("_manager_refresh_scopes")
-            if scopes is None and "_manager_scope" in ctx:
-                scopes = (ctx["_manager_scope"],)
+            scopes = action_scopes(ctx)
             if scopes is not None and not self.actions_ready(scopes):
                 return False, "Source read is not current; refresh and reopen this action."
             proc = self._spawn_stream(argv)

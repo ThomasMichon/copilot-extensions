@@ -10,7 +10,7 @@ from .create_action_screen import CreateActionScreen
 from .background import run_background
 from .inbox import ensure_inbox
 from .engine_form_drafts import PivotFormDraftActionsMixin
-from .registered_scopes import actions_ready, read_scope, request_scopes
+from .registered_scopes import action_scopes, actions_ready, read_scope, request_scopes
 from .steering import PivotCardScreen, PivotFormScreen, SubmitErrorScreen, _normalize_form_fields, _steer_draft_path
 
 log = logging.getLogger("agent-worktrees.picker")
@@ -316,7 +316,7 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
             argv = _pivots.format_template(action.run, ctx)
 
             def work():
-                result = rt.run_resolved(argv, preserve_output=True)
+                result = rt.run_resolved(argv, preserve_output=True, scopes=action_scopes(ctx))
                 for scope in scopes:
                     rt.invalidate(scope)
                 return result
@@ -571,11 +571,12 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
             try:
                 if retained_request is not None:
                     from .engine_form_requests import run_retained_request
-                    ok, msg = run_retained_request(*retained_request)
+                    ok, msg = run_retained_request(
+                        *retained_request, runtime=rt, scopes=action_scopes(ctx),
+                    )
                 else:
-                    ok, msg = (
-                        rt.run_resolved(argv, preserve_output=True) if text_result
-                        else rt.run_resolved(argv)
+                    ok, msg = rt.run_resolved(
+                        argv, preserve_output=text_result, scopes=action_scopes(ctx),
                     )
             except Exception as exc:  # never let a delivery attempt vanish silently
                 ok, msg = False, f"{type(exc).__name__}: {exc}"

@@ -102,12 +102,16 @@ by EOF or a nonzero exit remain an incomplete read. Older Managers may time out 
 refresh after updating the consumer rather than claiming the partial read ready.
 Held subscriptions retain their existing first-publication and lifetime rules.
 View-wide executable actions remain unavailable until the consumer has a successful current
-read with no replacement pending. Confirmation and progress-command dispatch
-recheck the captured scopes, as does row execution; a partial summary cannot authorize repair. Partial
+read with no replacement pending. Confirmation and final command dispatch
+recheck the captured scopes, including queued synchronous, progress, Configuration
+and new form commands; a partial summary cannot authorize repair. Partial
 rows and read-only detail cards remain available for inspection.
 The internal `recover-forms` view action also remains available during pending
 or failed board reads: it opens local retained responses without querying or
 executing the provider.
+Explicit receipt checks and identical-request retries from retained-request
+recovery do not depend on a current board read; they retain their original
+provider/action and request validation.
 
 Version-1 compatibility also covers the existing declarative fields:
 

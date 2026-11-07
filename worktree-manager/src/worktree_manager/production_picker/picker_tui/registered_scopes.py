@@ -51,6 +51,14 @@ def actions_ready(runtime, scopes):
     )
 
 
+def action_scopes(context):
+    """Return captured read custody, without inventing it for independent commands."""
+    scopes = context.get("_manager_refresh_scopes")
+    if scopes is None and "_manager_scope" in context:
+        scopes = (context["_manager_scope"],)
+    return scopes
+
+
 def _read_state(states):
     states = tuple(states)
     if not states:

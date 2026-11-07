@@ -100,6 +100,35 @@ def test_finite_actions_require_successful_completion_and_no_replacement(
         runtime.close()
 
 
+def test_view_command_checks_all_captured_scopes_after_command_resolution(tmp_path, monkeypatch):
+    canary = tmp_path / "ran"
+    reg = pivots.parse_manifest({
+        "label": "Fixture", "list": ["provider", "{machine}"],
+        "view_actions": [{
+            "label": "Change", "run": [sys.executable, "-c",
+                                     f"from pathlib import Path; Path({str(canary)!r}).touch()"],
+        }],
+    }, name="fixture", source_path="fixture")
+    runtime = tasks.RegisteredPivotRuntime(reg)
+    for scope in ("host-a", "host-b"):
+        runtime._cache[scope] = ("ready", [], "")
+    resolve = tasks._resolve_command
+
+    def replacement_starts(argv):
+        runtime._inflight.add("host-b")
+        return resolve(argv)
+
+    monkeypatch.setattr(tasks, "_resolve_command", replacement_starts)
+    try:
+        ok, message = runtime.run_action(
+            reg.view_actions[0], {"_manager_refresh_scopes": ("host-a", "host-b")},
+        )
+        assert not ok and "Source read is not current" in message
+        assert not canary.exists()
+    finally:
+        runtime.close()
+
+
 @pytest.mark.parametrize("state", ["ready", "pending", "error"])
 def test_queued_row_progress_rechecks_its_captured_scope_before_spawn(tmp_path, state):
     canary = tmp_path / "ran"
@@ -130,6 +159,57 @@ def test_queued_row_progress_rechecks_its_captured_scope_before_spawn(tmp_path, 
         elif state == "error":
             runtime._cache[""] = ("error", [], "replacement failed")
         ok, message = runtime.run_action_stream(action, queued[0], lambda *_: None)
+        if state == "ready":
+            assert ok and canary.read_text() == "ran"
+        else:
+            assert not ok and "Source read is not current" in message
+            assert not canary.exists()
+    finally:
+        runtime.close()
+
+
+@pytest.mark.parametrize("kind", ["command", "text", "configuration", "form"])
+@pytest.mark.parametrize("state", ["ready", "pending", "error"])
+def test_queued_row_commands_recheck_the_origin_before_dispatch(tmp_path, monkeypatch, kind, state):
+    canary = tmp_path / "ran"
+    action = {
+        "key": "change", "label": "Change",
+        "run": [sys.executable, "-c",
+                f"from pathlib import Path; Path({str(canary)!r}).write_text('ran')"],
+    }
+    if kind == "text":
+        action["result_view"] = "text"
+    elif kind == "form":
+        action.update(kind="form", fields_from="card.fields")
+    scope = "" if kind == "configuration" else "host-b"
+    reg = pivots.parse_manifest({
+        "label": "Fixture", "scope": "global" if not scope else "machine",
+        "placement": "config" if kind == "configuration" else "left",
+        "list": ["provider", "list", *(["{machine}"] if scope else [])],
+        "actions": [action],
+    }, name="fixture", source_path="fixture")
+    runtime = tasks.RegisteredPivotRuntime(reg)
+    runtime._cache[scope] = ("ready", [], "")
+    screen = engine(runtime, reg)
+    queued = []
+    monkeypatch.setattr(screen, "_run_bg", lambda _label, work, *_a, **_kw: queued.append(work))
+    monkeypatch.setattr(screen, "_run_command_result", lambda _label, work, *_a: queued.append(work))
+    monkeypatch.setattr(screen, "_run_configuration_command", lambda _label, work, *_a: queued.append(work))
+    monkeypatch.setattr(screen, "_open_progress", lambda: None)
+    monkeypatch.setattr(
+        screen, "_open_pivot_form",
+        lambda reg, action, _rec, ctx, title: screen._run_pivot_form_submit(reg, action, ctx, title, {}),
+    )
+    try:
+        screen._run_task_action(reg, reg.actions[0], {"id": "one", "_manager_scope": scope})
+        assert len(queued) == 1
+        screen.machine_idx = 1
+        runtime._cache["host-a"] = ("ready", [], "")
+        if state == "pending":
+            runtime._inflight.add(scope)
+        elif state == "error":
+            runtime._cache[scope] = ("error", [], "replacement failed")
+        ok, message = queued[0]()
         if state == "ready":
             assert ok and canary.read_text() == "ran"
         else:
