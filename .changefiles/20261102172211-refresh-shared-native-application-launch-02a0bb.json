@@ -1,0 +1,21 @@
+{
+  "comment": "Refresh shared native application launcher resources",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/pr",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/chat",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/ssh",
+      "type": "patch"
+    }
+  ]
+}

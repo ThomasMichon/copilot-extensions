@@ -31,7 +31,7 @@ def test_bootstrap_cache_is_prepared_through_seasoned_install(
     monkeypatch.setattr(runner, "_plugin_dir", lambda _name: plugin)
     monkeypatch.setattr(runner, "VENV_ROOT", tmp_path / "venvs")
     monkeypatch.setattr(runner, "_has_pyproject", lambda _name: True)
-    monkeypatch.setattr(runner, "_has_dev_extra", lambda _name: True)
+    monkeypatch.setattr(runner, "has_dev_extra", lambda _project: True)
     monkeypatch.setattr(runner, "_dep_fingerprint", lambda _name: "current")
     venv = runner.VENV_ROOT / name
     venv.mkdir(parents=True)
