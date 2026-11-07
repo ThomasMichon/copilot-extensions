@@ -233,6 +233,13 @@ implementation authority, resource custody or the fixed checkpoint.
 
 ## Plan
 
+After reviewed #11272, complete actual #6917 receiving and separate fresh
+judgments, #11263/#11266 are retired NOT_PLANNED without technical completion
+or custody release. The [receiving follow-through](<journal/2026/11.06 independent-managed-validation-intake.md>)
+records two equal complete scans: 812 whole OPEN, 83 above fixed 729,
+and 1,039 audited closure outcomes. Phase 2 continues with bounded study of
+new provider evidence under #5293; its original completion gate stays intact.
+
 The [independent managed-validation intake](<journal/2026/11.06 independent-managed-validation-intake.md>)
 preserves complete #11263/#11266 directly in OPEN #6917 as independent
 MR7/MR8 and MRV8/MRV9 lanes. Existing acceptance, check states, discussions,
@@ -2891,6 +2898,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [reviewed receiving follow-through](<journal/2026/11.06 independent-managed-validation-intake.md>)
+resolves only the two separate tracking judgments after exact-head review/CI
+and independent current whole-parent audits. #6917's technical lanes and all
+custodians remain open; #5293's new linked merge is a bounded research input,
+not whole-program acceptance. Campaign completion remains unchanged at
+812 whole OPEN.
 
 The [independent managed-validation intake](<journal/2026/11.06 independent-managed-validation-intake.md>)
 records actual complete receiving and readback, not fixture repair, accepted
