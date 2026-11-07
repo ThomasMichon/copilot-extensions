@@ -589,6 +589,12 @@ idempotent and can heal a partial install. Required Python must return a
 successful, supported version from the exact discovered executable; a found
 but unusable or unqualified Python remains a prerequisite gap. Detection does
 not reorder candidates, substitute a private runtime or repair public PATH.
+Windows also requires a working PowerShell 7 (`pwsh`) host for the native core
+installer. A missing, older or unqualified host stops setup before core or
+repository work. As with Git, setup reports a manual system-package command;
+it does not run WinGet or request elevation for this prerequisite. Install the
+reported package, open a fresh terminal, and retry. POSIX setup does not require
+PowerShell.
 The core install is never
 reimplemented — the Worktree Manager locates and calls agent-worktrees' own
 `install.{ps1,sh}`. Core detection uses the same read-only, installation-context-
