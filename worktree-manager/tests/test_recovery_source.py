@@ -595,7 +595,7 @@ def test_unattributable_engine_uses_native_fresh_installation(tmp_path, monkeypa
         (artifact / "scripts" / f"install.{extension}").write_text(
             "# AGENT_WORKTREES_TARGETED_UPDATE repair\n", encoding="utf-8",
         )
-    prepared = SimpleNamespace(payload=artifact)
+    prepared = SimpleNamespace(payload=artifact, install_source=None)
     primitive = SimpleNamespace(_current_environment=lambda **kw: ({}, str(tmp_path)))
     monkeypatch.setattr(update_bootstrap, "_policy_sdk", lambda *args: (
         None, None, {"_ordinary": lambda path: None}, {}, primitive,
