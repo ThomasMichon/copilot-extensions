@@ -151,7 +151,9 @@ redirected ledgers, replaced records and missing/unrelated Git proof still refus
 
 Each companion repository's effective configuration selects its new allocation
 root. New paired intent freezes the original parent incarnation/owner,
-companion identity, anchor and target before carving. Recovery uses that owned
+companion identity, anchor and target before carving. Its complete bytes are
+published exclusively and its parent synchronized before allocation can proceed;
+identical retry reuses it and conflicting intent is never overwritten. Recovery uses that owned
 intent after defaults change. Historical no-intent companions retain the
 original anchor-derived rule, not today's allocation preference. Immutable
 creation receipts are not rewritten and retries never silently re-carve.

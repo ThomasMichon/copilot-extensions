@@ -637,3 +637,21 @@ adopter pilot feedback gates subsequent widening.
 - The source umbrella and effort remain Active. This safety correction does
   not add inactive WIP support, authorize activation or settle the separately
   held external-fixture disposition.
+
+### 2026-11-07 — Missing originals and durable companion reservations
+- Completed reviewer diagnostics identified a missing-original recovery path,
+  stat-only stream bounds and companion reservation publication without a
+  durable parent barrier. Corrections stay within the existing first-flow and
+  mixed-root prerequisites, not additional inactive categories.
+- Missing source data before owned retirement now refuses rather than adopting
+  an earlier destination snapshot. Actual stream reads must match the admitted
+  stat size, so concurrent growth/shrink cannot evade the bounded inventory.
+- Companion intent is completely written/synchronized under a temporary name,
+  published exclusively and parent-synchronized before returning to allocation.
+  Exact retries reuse the immutable original; changed-default conflicts refuse
+  rather than silently selecting another companion root.
+- The six focused native failure controls passed. Existing companion consumers,
+  original creation-receipt replay and actual CLI/roundtrip acceptance passed
+  **30 controls**. No operator data, runtime, default or real worktree moved.
+  The source objective remains Active and actual current-head review/CI/merge
+  are still required; no disposition or rollout authority is inferred.
