@@ -1481,7 +1481,7 @@ def test_session_start_reuses_registration_with_command_catalog(
         (
             "",
             "",
-            "No current agent-worktrees session guidance was available.",
+            "session guidance is degraded (reason: command-catalog-unavailable)",
         ),
         (
             "x" * 4096,
@@ -2136,6 +2136,104 @@ def test_session_start_catalog_reports_missing_binding_helper(monkeypatch, capsy
     )
 
 
+def _guidance_file(home: Path, session_id: str) -> Path:
+    return (
+        home / ".copilot" / "session-state" / session_id / "instructions"
+        / "agent-worktrees" / "session-guidance.instructions.md"
+    )
+
+
+def test_session_start_catalog_import_error_keeps_guidance_floor(
+    monkeypatch, tmp_path, capsys
+):
+    def binding_for_payload(*_):
+        raise ImportError("cannot import name 'ParamSpec' from 'typing'")
+
+    monkeypatch.setattr(
+        hook_client, "_load_sibling",
+        lambda _: SimpleNamespace(binding_for_payload=binding_for_payload),
+    )
+    original_bytecode = sys.dont_write_bytecode
+    assert hook_client._command_catalog_context() == ""
+    assert sys.dont_write_bytecode == original_bytecode
+    assert capsys.readouterr().err == (
+        "[agent-worktrees] Command catalog unavailable: "
+        "cannot import name 'ParamSpec' from 'typing'\n"
+    )
+
+    monkeypatch.setattr(hook_client, "_registration_context", lambda *_: "")
+    assert hook_client._write_session_guidance(
+        {"sessionId": "session-1", "cwd": str(tmp_path)}, home=tmp_path
+    )
+    content = _guidance_file(tmp_path, "session-1").read_text(encoding="utf-8")
+    assert content.count("[agent-worktrees] Warning:") == 1
+    assert "session guidance is degraded (reason: command-catalog-unavailable)" in content
+    payload_command = _SCRIPT.parents[1] / "bin" / "payload" / (
+        "agent-worktrees.ps1" if os.name == "nt" else "agent-worktrees"
+    )
+    assert f"`{payload_command}`: `get worktree-dir`" in content
+    assert "`state-root --pair --json`" in content
+    assert "ParamSpec" not in content
+    assert "## Current machine identity" in content
+
+
+class _OldInterpreter:
+    version_info = (3, 9, 5, "final", 0)
+
+    def __getattr__(self, name):
+        return getattr(sys, name)
+
+
+@pytest.mark.parametrize(
+    ("interpreter", "runtime", "reason"),
+    (
+        ("old", True, "unsupported-interpreter"),
+        ("current", True, "import-error"),
+        ("current", False, "runtime-helper-unavailable"),
+    ),
+)
+def test_session_start_main_writes_guidance_floor_when_enrichment_fails(
+    monkeypatch, tmp_path, capsys, interpreter, runtime, reason
+):
+    monkeypatch.setattr(hook_client, "_managed_session_admitted", lambda *_: True)
+    payload = {
+        "sessionId": "floor-session", "cwd": str(tmp_path),
+        "timestamp": 1000, "source": "new",
+    }
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+
+    def enrich(_):
+        raise ImportError("cannot import name 'ParamSpec' from 'typing'")
+
+    decided = []
+    floor = hook_client._write_guidance_floor
+    monkeypatch.setattr(
+        hook_client, "_write_guidance_floor",
+        lambda value, reason: floor(value, reason, home=tmp_path),
+    )
+    monkeypatch.setattr(hook_client, "_enrich_session_payload", enrich)
+    monkeypatch.setattr(hook_client, "decide", lambda *args: decided.append(args) or {})
+    if interpreter == "old":
+        monkeypatch.setattr(hook_client, "sys", _OldInterpreter())
+    if not runtime:
+        monkeypatch.setattr(hook_client, "_RUNTIME", None)
+
+    assert hook_client.main(["sessionStart"]) == 0
+    output = capsys.readouterr()
+    assert json.loads(output.out) == {}
+    assert output.err.count("Session guidance degraded") == 1
+    assert f"[agent-worktrees] Session guidance degraded (reason: {reason}).\n" in output.err
+    assert decided == []
+    content = _guidance_file(tmp_path, "floor-session").read_text(encoding="utf-8")
+    assert content.startswith("# Agent Worktrees session guidance\n\n")
+    assert content.count("[agent-worktrees] Warning:") == 1
+    assert f"session guidance is degraded (reason: {reason})" in content
+    assert "`get worktree-dir`" in content
+    assert "`state-root --pair --json`" in content
+    assert "ParamSpec" not in content and "Traceback" not in content
+    assert ("<!-- agent-worktrees:session-guidance " in content) is runtime
+
+
 def test_session_start_catalog_matches_native_emitter(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
@@ -2268,7 +2366,10 @@ def test_session_start_catalog_exists_before_lifecycle_decision(
     text = path.read_text()
     assert "canonical fixture catalog" in text
     assert ("final lifecycle context" in text) is not decision_fails
-    assert json.loads(capsys.readouterr().out) == {}
+    assert "session guidance is degraded" not in text
+    output = capsys.readouterr()
+    assert json.loads(output.out) == {}
+    assert "Session guidance degraded" not in output.err
 
 
 def test_first_install_never_invokes_legacy_bootstrap_output(monkeypatch, tmp_path):
@@ -2485,6 +2586,7 @@ def test_windows_session_hook_rejects_windowsapps_python_alias():
     )
     command = hooks["hooks"]["sessionStart"][0]["powershell"]
     assert "WindowsApps" in command
+    assert "sys.exit(sys.version_info < (3, 10))" in command
     assert "$ran = ($LASTEXITCODE -eq 0)" in command
     assert "-not $env:COPILOT_EXTENSIONS_CONTEXT" in command
     bash = hooks["hooks"]["sessionStart"][0]["bash"]

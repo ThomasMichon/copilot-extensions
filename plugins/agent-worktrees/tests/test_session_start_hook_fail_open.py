@@ -604,6 +604,70 @@ def test_powershell_lifecycle_hook_ignores_windowsapps_alias(
     assert marker.read_text(encoding="utf-8") == "sessionStart"
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows command resolution regression")
+@pytest.mark.parametrize("supported_available", [True, False])
+def test_powershell_lifecycle_hook_prefers_supported_python(
+    tmp_path: Path,
+    supported_available: bool,
+):
+    powershell = _powershell()
+    home = tmp_path / "home"
+    cwd = tmp_path / "cwd"
+    plugin_root = tmp_path / "plugin"
+    scripts = plugin_root / "scripts"
+    old_bin = tmp_path / "old-python"
+    supported = tmp_path / "supported-args.txt"
+    unsupported = tmp_path / "unsupported-args.txt"
+    for directory in (home, cwd, scripts, old_bin):
+        directory.mkdir(parents=True)
+    (scripts / "hook_client.py").write_text(
+        "from pathlib import Path\n"
+        "import sys\n"
+        f"Path({str(supported)!r}).write_text(' '.join(sys.argv[1:]), encoding='utf-8')\n"
+        "print('{}', end='')\n",
+        encoding="utf-8",
+    )
+    # An older interpreter fails the version probe but can still run the client.
+    (old_bin / "python.cmd").write_text(
+        "@echo off\r\n"
+        'if "%~1"=="-I" exit /b 1\r\n'
+        f'>"{unsupported}" echo %~2\r\n'
+        "echo {}\r\n",
+        encoding="utf-8",
+    )
+    command = next(
+        str(hook["powershell"])
+        for hook in _hooks("sessionStart")
+        if "hook_client.py" in str(hook["powershell"])
+    )
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    env["USERPROFILE"] = str(home)
+    env["COPILOT_PROJECT_DIR"] = str(cwd)
+    env["COPILOT_PLUGIN_ROOT"] = str(plugin_root)
+    candidates = [str(old_bin)]
+    if supported_available:
+        candidates.append(str(Path(sys.executable).parent))
+    env["PATH"] = os.pathsep.join(candidates)
+
+    result = subprocess.run(
+        [powershell, "-NoLogo", "-NoProfile", "-Command", command],
+        cwd=cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    if supported_available:
+        assert supported.read_text(encoding="utf-8") == "sessionStart"
+        assert not unsupported.exists()
+    else:
+        assert unsupported.read_text(encoding="utf-8").strip() == "sessionStart"
+        assert not supported.exists()
+
+
 def test_register_session_powershell_coalesces_context_and_fails_open(
     tmp_path: Path,
 ):
