@@ -1,0 +1,181 @@
+# Mux Reliability and Recovery
+
+- **Slug:** `mux-reliability-recovery`
+- **Repo:** copilot-extensions
+- **Branch(es):** independent reviewed plan and implementation PRs
+- **Created:** 2026-11-06
+- **Status:** Draft
+- **Vision:** [Session Hosting](../../../visions/session-hosting/README.md), [Worktree Lifetime](../../../visions/plugins/agent-worktrees/README.md), [Picker](../../../visions/picker/README.md)
+- **Umbrella issue:** #11255
+- **Related owners:** #7212, #4564, #10627, #8669
+
+## Guiding Intent
+
+Preserve durable work and running mux-backed sessions when discovery is
+unavailable. Observation failures must remain visible uncertainty rather than
+turning into a false death verdict, a misleading plain-process badge, or
+authority to replace or retire a session.
+
+This closes existing vision intent: provider-owned execution identity and
+capability-honest observation, durable agency independent of presentation, and
+explicit uncertainty. It does not create another hosting provider, process
+registry, maintenance daemon or deployment authority.
+
+## Participants
+
+| Participant | Role in this effort | Reached via |
+|-------------|---------------------|-------------|
+| Source driver | Reviewed plan, implementation, focused validation and PR stewardship | Managed source worktree; public issue #11255 |
+| Automated reviewer | Independent plan and exact-source review | Repository PR review |
+
+## Coordination
+
+- **Topology:** sequential plan and bounded implementation PRs.
+- **Host (owns PRs):** Source driver.
+- **Delegates:** none assigned.
+- **Handoff:** retain the canonical README, current slice, tests, PR state and
+  unresolved effects; never infer operational authority from this plan.
+- Existing attachment isolation/native-process liveness (#7212), attached-client
+  accounting (#4564), launch readiness (#10627), and installation-independent
+  hosting (#8669) remain with their current owners. This campaign owns the
+  discovery-failure preservation seam, not those broader programs.
+
+## Context
+
+Public upstream reports establish concrete failure classes:
+
+- [psmux/psmux#622](https://github.com/psmux/psmux/issues/622): a failed
+  `has-session` can delete a live server's port registration, after which
+  another invocation can reap its server and children. The report's later
+  controlled comparison verifies the destructive sequence on 3.3.8 and
+  preservation on 3.4.0.
+- [psmux/psmux#546](https://github.com/psmux/psmux/issues/546): a timestamp
+  heuristic can unregister a live server before its PID anchor is checked.
+- [psmux/psmux#650](https://github.com/psmux/psmux/issues/650): cross-logon
+  access failures can be mistaken for process death and delete registration.
+- [psmux/psmux#809](https://github.com/psmux/psmux/issues/809): an incomplete
+  listing can look successful even on 3.4.0. A newer release alone is not
+  proof of every observation guarantee.
+
+These are reproducible public failure classes, not proof of any particular
+incident's root cause. A surviving process or existing connection does not
+establish that a new attachment can connect. A newer on-disk executable does
+not upgrade already-running servers.
+
+The implementation must respect the existing owner split: the hosting/Driver
+boundary owns provider-specific execution and control; Manager presents and
+composes it; Worktrees retains durable agency and bounded observations.
+Existing compatibility adapters must not become a second hosting owner.
+The [architecture principles](../../../docs/patterns/README.md) require
+non-destructive observation, literal failures, economical evidence and
+preserved ownership. Additive interfaces follow
+[service-contract evolution](../../../docs/patterns/service-contract-evolution.md).
+
+## Request
+
+The operator asked:
+
+> Great. Help make an effort to add improvements and mitigations, and then start implementations
+
+This follows the question:
+
+> How can we mitigate or recover?
+
+The phased source implementation and validation below are
+**agent-recommended decomposition**, not an assertion that the operator
+approved changes to running services, installations or sessions.
+
+## Scope Approvals
+
+- **Source:** the operator's verbatim request above, 2026-11-06.
+- **Authorized interpretation:** create the reviewed effort and start
+  task-relevant source improvements, tests, documentation and normal issue/PR
+  delivery in this repository.
+- **Excluded effects:** no live PSMux or harness upgrade, service/polling
+  changes, process termination, terminal takeover, registry reconstruction,
+  shared-host destructive reproduction, access changes or credential export.
+- Review of this plan does not grant those effects. A later operational phase
+  must obtain its own bounded authorization and preserve then-current owners.
+- An unknown prior effect must be reconciled, not replayed. Routine in-scope
+  code revisions and validation do not require a new blanket approval.
+
+## Plan
+
+### Phase 1 - Reviewed intent and owner map
+
+- [ ] Land this proposal through the repository's review and CI gate before
+  implementation.
+- [ ] Trace the existing mux observation, classification and recovery consumers;
+  select the smallest owner-correct change and retain related issue ownership.
+
+### Phase 2 - Non-destructive observation
+
+- [ ] Remove hazardous PSMux CLI execution from the selected passive observation
+  path. Reuse an existing bounded non-mutating host-owned read when available;
+  otherwise expose the unavailable capability rather than probing by execution.
+- [ ] Distinguish complete confirmed absence from unavailable, partial,
+  malformed, access-denied and timed-out evidence. Keep last-known hosting
+  attributable and explicitly stale/uncertain; never promote it to live proof.
+- [ ] Preserve independent TMux behavior and supported legacy readers. No
+  per-render subprocess, broad scan, process registry or parallel control path.
+
+### Phase 3 - Truthful presentation and preservation
+
+- [ ] Carry degraded mux observation to the existing Picker consumer instead of
+  presenting it as confidently non-mux `PROC`. Client count, hosting identity,
+  process liveness and attachment reachability remain distinct.
+- [ ] Ensure uncertainty cannot authorize automatic mapping retirement, cleanup,
+  duplicate launch, restart or attachment takeover in the changed consumers.
+  Keep pre-existing ownership and destructive-action gates intact.
+
+### Phase 4 - Recovery guidance and source delivery
+
+- [ ] Document preservation-first recovery: retain working attachments and
+  durable work, distinguish detach from death, establish installed/running build
+  evidence without unsafe version probes, and perform individually authorized
+  recovery rather than global cleanup or guessed metadata repair.
+- [ ] Land implementation through exact-source review and required CI; record
+  source/release/rollout separately. No rollout is required or claimed here.
+- [ ] Resolve every Plan/Validation item or transfer it to a named tracked
+  objective, then mark Done and archive through the normal effort lifecycle.
+
+## Validation Plan
+
+- [ ] Focused units prove unavailable/partial observations cannot become
+  confirmed absence, stale positives stay uncertain, and ordinary live/dead
+  and non-mux process cases retain their intended meaning.
+- [ ] A fake-provider or isolated real consumer boundary proves passive PSMux
+  observation does not execute startup cleanup and preserves unrelated session
+  state. Never run upstream destructive repro scripts against live sessions.
+- [ ] Focused mixed-version tests cover optional/additive evidence, legacy
+  absence and rollback without silently weakening a required safety semantic.
+- [ ] Changed lifecycle consumers retain original ownership and reject
+  uncertainty-driven retirement/replacement; a live replacement is not cleared.
+- [ ] Changed Picker rows distinguish reachable mux, detached mux, uncertain
+  mux hosting and genuine process-only hosting without render-time probes.
+- [ ] Run required source lint/type/install-contract gates and exact-source CI.
+  Record native/clean-room lanes exercised and explicitly explain unavailable
+  lanes; unit success is not a claim of live-host recovery.
+- [ ] Re-read the canonical effort after each merge, update only the gates it
+  actually closes, and verify final issue/effort disposition.
+
+## Proposal
+
+Implement a narrow preservation-first observation contract through the
+existing owners, followed by its presentation and recovery documentation.
+Prefer extending an existing result with optional bounded diagnostic evidence
+over adding a mandatory preflight command, new daemon or duplicated registry.
+Determine the exact adapter after source tracing; validate the real consumer,
+not only its parser. Deployment and repairs to running sessions are separate.
+
+## Journal
+
+### 2026-11-06 - Proposal
+
+- Claimed #11255 after searching current mux/discovery issues and open PRs.
+- Verified public PSMux reports and preserved the distinction between known
+  failure classes and unproven incident attribution.
+- Allocated an isolated source worktree without launching a mux or new agent.
+- Captured and re-read the Request, Guiding Intent and Plan against the
+  operator's words; agent recommendations and operational exclusions are explicit.
+- Implementation awaits the reviewed-plan gate.
