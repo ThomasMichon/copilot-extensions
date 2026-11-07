@@ -382,6 +382,9 @@ _Operator-required outcome; agent-recommended slices and validation._
   existing owners, then bind one explicitly selected authenticated host route.
   Injected factories and observation credentials do not satisfy these exits;
   default watch-only and native read-only hosting stay unchanged.
+  Review the [provider-first writer expansion](comment-producer-enrollment.md#provider-first-protected-writer-expansion)
+  before changing credential/provider contracts; its implementation and
+  mixed-version/rotation/unknown-effect controls remain open.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
