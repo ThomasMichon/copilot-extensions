@@ -89,6 +89,7 @@ def _run(args: argparse.Namespace) -> int:
             ttl_seconds=args.ttl,
             context=context,
             retries=args.retries,
+            released_only=args.released_only,
         )
         _print(snapshot, pretty=args.pretty)
         return 0
@@ -159,6 +160,10 @@ def _parser() -> argparse.ArgumentParser:
         )
         command.add_argument("--ttl", type=int, help="lease TTL in seconds")
         command.add_argument("--retries", type=int, help="bounded acquisition CAS retries")
+        command.add_argument(
+            "--released-only", action="store_true",
+            help="acquire only absent or explicitly released leases; never take over expired holders",
+        )
         command.add_argument(
             "--context", action="append", default=[], metavar="KEY=VALUE",
             help="bounded non-sensitive diagnostic context",

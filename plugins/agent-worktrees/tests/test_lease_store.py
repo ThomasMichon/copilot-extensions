@@ -24,6 +24,67 @@ from agent_worktrees.lease_store import GitLeaseStore, LeaseConflict, LeaseLost
 from conftest import _published_seed_environment
 
 
+@pytest.mark.parametrize("released", [False, True])
+def test_released_only_acquisition_never_takes_over_expired_hold(monkeypatch, released):
+    from dataclasses import replace
+
+    client = store(LeaseSettings(origin="https://example.invalid/state.git"))
+    monkeypatch.setattr(client, "inspect", lambda *args: None)
+    transitions = []
+
+    def transition(item, expected, record):
+        transitions.append((expected, record.event))
+        return "a" * 40
+
+    monkeypatch.setattr(client, "_transition", transition)
+    previous = client.acquire("codespace", "reusable", "first", ttl_seconds=60)
+    if released:
+        previous = replace(
+            previous, live=False,
+            record=replace(previous.record, state="released", event="release"),
+        )
+    else:
+        previous = replace(previous, live=False)
+    monkeypatch.setattr(client, "inspect", lambda *args: previous)
+    transitions.clear()
+
+    if released:
+        acquired = client.acquire("codespace", "reusable", "next", released_only=True)
+        assert acquired.record.holder == "next"
+        assert transitions == [(previous.oid, "acquire")]
+    else:
+        with pytest.raises(LeaseConflict) as error:
+            client.acquire("codespace", "reusable", "next", released_only=True)
+        assert error.value.snapshot is previous
+        assert transitions == []
+        acquired = client.acquire("codespace", "reusable", "next")
+        assert acquired.record.event == "takeover"
+
+
+def test_released_only_rechecks_holder_after_cas_race(monkeypatch):
+    from dataclasses import replace
+    from agent_worktrees.lease_store import _CASConflict
+
+    client = store(LeaseSettings(origin="https://example.invalid/state.git"))
+    monkeypatch.setattr(client, "inspect", lambda *args: None)
+    monkeypatch.setattr(client, "_transition", lambda *args: "a" * 40)
+    previous = client.acquire("codespace", "reusable", "racer")
+    expired = replace(previous, live=False)
+    observations = iter([None, expired])
+    monkeypatch.setattr(client, "inspect", lambda *args: next(observations))
+    transitions = []
+
+    def lose_race(*args):
+        transitions.append(args)
+        raise _CASConflict()
+
+    monkeypatch.setattr(client, "_transition", lose_race)
+    with pytest.raises(LeaseConflict) as error:
+        client.acquire("codespace", "reusable", "next", released_only=True, retries=1)
+    assert error.value.snapshot is expired
+    assert len(transitions) == 1
+
+
 def git(
     *args: str,
     cwd: Path | None = None,
