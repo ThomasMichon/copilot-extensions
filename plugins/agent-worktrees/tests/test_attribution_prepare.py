@@ -300,3 +300,52 @@ def test_real_lazy_dispatch_declares_comment_mode_and_rejects_abbreviated_flag(t
         capture_output=True, text=True, timeout=20,
     )
     assert typo.returncode == 2 and "unrecognized arguments" in typo.stderr
+
+
+def test_actual_comment_origin_composes_through_independent_profile_owner(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str],
+) -> None:
+    import argparse
+    import json
+    import os
+    import subprocess
+    import sys
+
+    record, config = fixture(True)
+    config.repo_name = "fixture"
+    monkeypatch.setattr(cli.cfg, "load_config", lambda path: config)
+    monkeypatch.setattr(cli.cfg, "tracking_dir", lambda name: Path("fixture"))
+    monkeypatch.setattr(cli.tracking, "find_worktree_id_by_cwd", lambda *args, **kwargs: "fixture")
+    monkeypatch.setattr(cli.tracking, "load_record_by_id", lambda *args, **kwargs: record)
+    args = argparse.Namespace(config=None, body_file=None, tag=None, omit_source=False,
+                              json=True, comment_origin=True, visibility=None)
+    assert cli.cmd_attribution_prepare(args) == 0
+    origin = json.loads(capfd.readouterr().out)
+    repo = tmp_path / "target"
+    (repo / ".github").mkdir(parents=True)
+    (repo / ".github" / "ai-attribution.json").write_text(json.dumps({
+        "version": 1, "rules": [{"header": "[Selected profile] "}],
+    }))
+    payload = {
+        "draft": "Selected reply.", "source": origin,
+        "context": {"domain": "forge", "visibility": "public", "activity": "reply", "required": True},
+        "comment_id": "11111111-1111-4111-8111-111111111111",
+        "write_id": "22222222-2222-4222-8222-222222222222",
+    }
+    script = Path(__file__).resolve().parents[2] / "ai-attribution" / "scripts" / "comment_preparation.py"
+    env = {**os.environ, "HOME": str(tmp_path / "home"), "USERPROFILE": str(tmp_path / "home"),
+           "XDG_CONFIG_HOME": str(tmp_path / "config"), "APPDATA": str(tmp_path / "config"),
+           "COPILOT_CUSTOM_INSTRUCTIONS_DIRS": ""}
+    result = subprocess.run(
+        [sys.executable, str(script), "--repo", str(repo)], input=json.dumps(payload),
+        env=env, capture_output=True, text=True, timeout=20,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stderr
+    prepared = json.loads(result.stdout)
+    assert prepared["body"].startswith("[Selected profile] Selected reply.")
+    assert prepared["identity"]["source"] == origin
+    assert prepared["body"].count("<!-- agent-comment:v1") == 1
+    assert "cn=bolted-circuit" in prepared["body"]
+    assert "private-tree" not in prepared["body"] and "agent-worktrees:source" not in prepared["body"]
+    assert prepared["effects"] == "none"

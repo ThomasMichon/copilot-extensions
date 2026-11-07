@@ -397,10 +397,10 @@ function Send-PostToolReadDemand {
             $Discovery.hook_endpoint -isnot [string] -or
             $Discovery.hook_endpoint -cnotmatch '^127\.0\.0\.1:([0-9]{1,5})$' -or
             $Discovery.hook_token -isnot [string] -or
-            $Discovery.hook_token -cnotmatch '^[A-Za-z0-9_-]{1,256}$' -or
-            $Discovery.installReceipt -or $Discovery.marketplaceId -or $Discovery.pluginRoot) { return }
+            $Discovery.hook_token -cnotmatch '^[A-Za-z0-9_-]{1,256}$') { return }
         $port = [int]($Discovery.hook_endpoint.Substring(10))
         if ($port -lt 1 -or $port -gt 65535) { return }
+        if (-not [Net.Sockets.Socket]::OSSupportsIPv4) { return }
         $request = @{
             version = 1; kind = 'readHookDemand'; token = $Discovery.hook_token
             hook_generation = $Discovery.hook_generation
@@ -418,7 +418,7 @@ function Send-PostToolReadDemand {
         if ($bytes.Length -gt $limit) { return }
         $clock = [Diagnostics.Stopwatch]::StartNew()
         $client = [Net.Sockets.TcpClient]::new()
-        if (-not $client.ConnectAsync('127.0.0.1', $port).Wait(50)) { return }
+        if (-not $client.ConnectAsync([Net.IPAddress]::Loopback, $port).Wait(50)) { return }
         $remaining = 50 - [int]$clock.ElapsedMilliseconds
         if ($remaining -le 0) { return }
         $null = $client.GetStream().WriteAsync($bytes, 0, $bytes.Length).Wait($remaining)
@@ -428,10 +428,42 @@ function Send-PostToolReadDemand {
     }
 }
 
+function Get-PostToolRuntimeRoot {
+    if ($env:COPILOT_EXTENSIONS_CONTEXT) {
+        $runtime = Get-ManagedWorktreesRuntimeRoot
+    } else {
+        $registryHome = if ($env:AGENT_HOME -and $env:AGENT_HOME.Trim()) {
+            $env:AGENT_HOME.Trim()
+        } else { $env:USERPROFILE }
+        $runtime = [IO.Path]::Combine($registryHome, '.agent-worktrees')
+    }
+    $null = Get-PreparedWorktreesPath $runtime
+    return $runtime
+}
+
+function Test-PostToolDiscoveryContext {
+    param([Collections.IDictionary]$Discovery, [string]$RuntimeRoot)
+    if ($null -eq $Discovery) { return $false }
+    if (-not $env:COPILOT_EXTENSIONS_CONTEXT) {
+        return -not ($Discovery.installReceipt -or $Discovery.marketplaceId -or $Discovery.pluginRoot)
+    }
+    try {
+        # Prepared admission already validated the SDK's exact cell layout and receipt bytes.
+        $cell = [IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($RuntimeRoot))
+        return $Discovery.marketplaceId -is [string] -and
+            [string]::Equals($Discovery.marketplaceId, [IO.Path]::GetFileName($cell), [StringComparison]::Ordinal) -and
+            [string]::Equals(
+                (Get-PreparedWorktreesPath $Discovery.installReceipt),
+                (Get-PreparedWorktreesPath $env:COPILOT_EXTENSIONS_CONTEXT), [StringComparison]::Ordinal) -and
+            [string]::Equals(
+                (Get-PreparedWorktreesPath $Discovery.pluginRoot),
+                (Get-PreparedWorktreesPath $RuntimeRoot), [StringComparison]::Ordinal)
+    } catch { return $false }
+}
+
 function Invoke-PreparedPostToolRead {
     param([string]$Raw)
-    if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT -or
-        $env:COPILOT_EXTENSIONS_CONTEXT) { return $null }
+    if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { return $null }
     try {
         if ($Raw.Length -gt 1048576) { return $null }
         $event = ConvertFrom-ManagedWorktreesJson $Raw
@@ -471,16 +503,19 @@ function Invoke-PreparedPostToolRead {
         if ($session -isnot [string] -or
             $session -cnotmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$') { return ,@{} }
         $sessionHome = [IO.Path]::Combine($env:USERPROFILE, '.copilot', 'session-state', $session)
-        if (-not (Test-PreparedManagedWorktreesSession -Raw $Raw)) { return ,@{} }
+        if (-not (Test-PreparedManagedWorktreesSession -Raw $Raw)) {
+            if ($env:COPILOT_EXTENSIONS_CONTEXT) { return $null }
+            return ,@{}
+        }
         if ($event.ContainsKey('cwd')) { $cwd = $event['cwd'] }
         elseif ($event.ContainsKey('workingDirectory')) { $cwd = $event['workingDirectory'] }
         else { $cwd = $env:COPILOT_PROJECT_DIR }
         $cwd = Get-PreparedWorktreesPath $cwd
-        $registryHome = if ($env:AGENT_HOME -and $env:AGENT_HOME.Trim()) {
-            $env:AGENT_HOME.Trim()
-        } else { $env:USERPROFILE }
-        $runtime = Get-PreparedWorktreesPath ([IO.Path]::Combine($registryHome, '.agent-worktrees'))
+        $runtime = Get-PostToolRuntimeRoot
         $discovery = Read-PostToolBoundedJson ([IO.Path]::Combine($runtime, 'status-monitor.lock')) 16384
+        if (-not (Test-PostToolDiscoveryContext -Discovery $discovery -RuntimeRoot $runtime)) {
+            $discovery = $null
+        }
         if ($nativeWrite -or $nativeBatch -or $shellTool) {
             $mutation = @{ cwd = $cwd; sessionId = $session }
             if ($nativeBatch) { $mutation.toolCalls = $calls }
@@ -529,11 +564,7 @@ function Invoke-PreparedPostToolReminders {
         if (-not [string]::Equals($cwd, $root, [StringComparison]::Ordinal) -and
             -not $cwd.StartsWith($root + '\', [StringComparison]::Ordinal)) { return ,@{} }
         $null = Get-PreparedWorktreesPath $locator['projectRoot']
-        $registryHome = if ($env:AGENT_HOME -and $env:AGENT_HOME.Trim()) {
-            $env:AGENT_HOME.Trim()
-        } else { $env:USERPROFILE }
-        $runtime = [IO.Path]::Combine($registryHome, '.agent-worktrees')
-        $null = Get-PreparedWorktreesPath $runtime
+        $runtime = Get-PostToolRuntimeRoot
         if ($null -eq $discovery) { return ,@{} }
         $view = Read-PostToolHookFacts -Discovery $discovery -RuntimeRoot $runtime `
             -ProjectRoot $locator['projectRoot'] -Project $binding['project'] `

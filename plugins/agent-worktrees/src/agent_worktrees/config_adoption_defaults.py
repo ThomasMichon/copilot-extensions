@@ -24,10 +24,11 @@ def resolve_adoption_defaults(name: str, platform: str) -> dict[str, Any]:
     start = acquisition.registry_call_started()
     reader = None
     try:
-        from . import installer
+        from . import config, projects_registry, registry_paths
 
-        reader = installer.read_projects_registry
-        proj = (reader().get("projects") or {}).get(name)
+        reader = projects_registry.read_projects_registry
+        path = registry_paths.registry_path("projects.yaml", legacy_root=config.install_dir())
+        proj = (reader(path).get("projects") or {}).get(name)
         if isinstance(proj, dict):
             if "default_branch" not in out and proj.get("default_branch"):
                 out["default_branch"] = str(proj["default_branch"])
@@ -36,7 +37,7 @@ def resolve_adoption_defaults(name: str, platform: str) -> dict[str, Any]:
     except Exception as exc:
         acquisition.registry_call_failed("adoption-projects-registry", exc)
     finally:
-        if reader is not None and reader is not getattr(installer, "_ORIGINAL_PROJECTS_READER", None):
+        if reader is not None and reader is not getattr(projects_registry, "_ORIGINAL_PROJECTS_READER", None):
             acquisition.opaque_source("adoption-projects-registry")
         acquisition.registry_call_finished(start, "adoption-projects-registry", stage="projects-registry")
     return out
