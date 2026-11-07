@@ -637,14 +637,15 @@ Machine type and location default by convention (`largePremiumLinux` / `EastUs`)
 and can be overridden per-repo in `.copilot-extensions/agent-codespaces/config.yaml`. After the
 CodeSpace is Available, any `on_create` provisioning hooks from that config run
 automatically. Without `--force-create`, `create` first consults the pool
-planner: it reuses a suitable idle CodeSpace or refuses when the configured core
-budget is already under pressure.
+planner: it returns this workstream's valid retained venue instead of creating
+a new one, or refuses when local capacity is unknown or under pressure. It does
+not borrow an unrelated idle venue.
 
 Allocation and ordinary creation also enforce `defaults.max_owned_codespaces`
 (conservative policy default 30) under the target repository's selected account.
 Stopped venues still consume owned slots; stopping one only frees running
 cores. Failed, malformed or truncated selected-account inventory refuses
-ordinary creation with pressure (exit 4), rather than falling through to a
+new compute with pressure (exit 4), rather than falling through to a
 blind provider call. Unknown machine costs also refuse additional compute;
 a stopped claimed venue needs known wake headroom.
 `--force-create` explicitly bypasses local capacity/reuse policy, not provider
@@ -678,6 +679,13 @@ Allocation metadata checks include display names and branch text before pool
 parsing.
 Default creation also retains the selected account during availability polling
 and the admitted token through post-create provisioning SSH.
+A recycle recommendation is advisory, not freed capacity: ordinary creation
+refuses until safe recycling has actually occurred and inventory is refreshed,
+rather than relying on a provider's higher quota to enforce the local core
+budget. A partial selected-account view can still advise already-running own
+venue reuse without additional compute, but cannot admit creation or a stopped
+venue's wake; its headroom is unqualified. Invalid native configuration reports
+a diagnostic error and can be repaired before retrying, without silent defaults.
 
 For unmapped repositories, a valid `GH_TOKEN` or `GITHUB_TOKEN` needs no saved
 login: admission verifies its account and retains that credential through

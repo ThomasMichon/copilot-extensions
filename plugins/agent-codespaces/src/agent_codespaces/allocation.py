@@ -93,8 +93,9 @@ def allocation_context(repo: str) -> tuple[str, dict]:
 
 def list_account_codespaces(
     account: str, *, environment: dict | None = None,
+    allow_partial: bool = False,
 ) -> list[CodespaceInfo]:
-    """Require a complete, credential-pinned single-account allocation view."""
+    """Credential-pinned inventory; partial views cannot admit new compute."""
     from .lifecycle import _list_codespaces_under
 
     try:
@@ -103,7 +104,7 @@ def list_account_codespaces(
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise RuntimeError(f"CodeSpace account inventory failed: {exc}") from exc
-    if len(rows) >= 50:
+    if len(rows) >= 50 and not allow_partial:
         raise RuntimeError("CodeSpace account inventory is truncated at the 50-venue listing limit")
     if any(
         value is not None and not isinstance(value, str)
@@ -134,14 +135,15 @@ def creation_environment(
 def pool_inventory(rows, account, environment, *, listing):
     supplied = rows is not None
     if rows is None:
-        rows = list_account_codespaces(account, environment=environment) if account else listing()
+        rows = list_account_codespaces(account, environment=environment, allow_partial=True) if account else listing()
+    complete = bool(account) and (supplied or len(rows) < 50)
     if account:
         rows = [row for row in rows if row.account.casefold() == account.casefold()]
     counts: dict[str, int] = {}
     for row in rows:
         key = row.account.casefold() or "ambient"
         counts[key] = counts.get(key, 0) + 1
-    return rows, counts, bool(account) or (supplied and len(counts) <= 1)
+    return rows, counts, complete or (not account and supplied and len(counts) <= 1)
 
 
 def stop_context(name, account, token, *, listing, status_lookup):
@@ -269,7 +271,7 @@ def plan_allocation(
         if mine is not None:
             cost = 0 if mine.running else mine.cores
             if not mine.running and (
-                cost <= 0 or budget.unknown_cores_count or headroom < cost
+                not budget.owned_inventory_complete or cost <= 0 or budget.unknown_cores_count or headroom < cost
             ):
                 return AllocationDecision(
                     action=ALLOC_PRESSURE, codespace=None,
@@ -283,9 +285,9 @@ def plan_allocation(
                     f"for {repo}" + (
                         " (already running; no extra budget)" if mine.running
                         else f" (stopped; boots on connect, {cost} core(s))"
-                    )
+                    ) + ("; inventory incomplete, no new compute admitted" if not budget.owned_inventory_complete else "")
                 ),
-                headroom_cores=headroom, needed_cores=cost,
+                headroom_cores=headroom if budget.owned_inventory_complete else 0, needed_cores=cost,
             )
     if not budget.owned_inventory_complete:
         return AllocationDecision(

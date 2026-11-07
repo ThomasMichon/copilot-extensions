@@ -118,6 +118,12 @@ existing resource ownership, not solve quota pressure by destructive cleanup.
 
 ## Journal
 
+### 2026-11-07 - Local budget, partial reuse and configuration repair
+- Reproduced six failures: creating before executing recycle advice, truncated inventory blocking running own-venue reuse, incomplete wake headroom and invalid native configuration escaping as a traceback.
+- Ordinary creation now refuses unexecuted recycle advice rather than spending above the local core budget. Partial inventory remains explicitly incomplete and permits only no-cost running reuse, never creation or stopped wake.
+- Native configuration errors report a diagnostic refusal; the existing layered-file regression repairs the policy and retries successfully without resetting state.
+- Rebased onto current dev, preserving the upstream-removed unrelated effort row rather than restoring it. All 374 affected CLI, pool, configuration and lifecycle tests, touched-Python lint and the 13-plugin install contract passed. Fresh exact-head CI/review remain required; no provider, venue or deployment effects occurred.
+
 ### 2026-11-07 - Default creation and provisioning continuity
 - Reproduced four environment-only cases where creation without no-wait used merged discovery instead of its selected account.
 - Retained the selected account through availability polling and the admitted token in the post-create SSH source. Extended the existing complete consumer regression through default provisioning and teardown before status/start, with both token variables and an ambient enterprise host.

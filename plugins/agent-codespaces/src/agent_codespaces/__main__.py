@@ -1096,7 +1096,7 @@ def main(argv: list[str] | None = None) -> int:
     except ContextRefused as error:
         print(f"[BLOCKED] CodeSpace installation context refused: {error}", file=sys.stderr)
         return _COORDINATION_EXIT
-    except RuntimeError as e:
+    except (RuntimeError, ValueError) as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
@@ -3983,7 +3983,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
             )
             print(decision.codespace)   # machine-readable: the box to reuse
             return 0
-        if decision is not None and decision.action == pool_mod.ALLOC_PRESSURE:
+        if decision is not None and decision.action in (pool_mod.ALLOC_PRESSURE, pool_mod.ALLOC_RECYCLE):
             print(f"[pressure] {decision.reason}", file=sys.stderr)
             print(
                 "Reuse an eligible venue, resolve unknown capacity, or pass "
@@ -3992,8 +3992,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return _ALLOC_PRESSURE_EXIT
-        # CREATE / RECYCLE -> proceed; a RECYCLE's reclaim is handled by the
-        # on-quota retry below.
+        # Only CREATE admits compute; recycle advice is not executed capacity.
 
     else:
         account, environment = allocation_context(args.repo)

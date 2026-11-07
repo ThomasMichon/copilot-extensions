@@ -736,6 +736,28 @@ class TestCreateReuseGuard:
         create.assert_not_called()
         assert "pool full" in capsys.readouterr().err
 
+    def test_recycle_advice_cannot_spend_cores_before_recycling(self, monkeypatch):
+        from types import SimpleNamespace
+        from agent_codespaces import __main__ as cli
+        from agent_codespaces.config import CodespacesConfig
+        from agent_codespaces.lifecycle import CodespaceInfo
+        from agent_codespaces.pool import build_pool
+        from agent_codespaces.status import STATE_PRUNABLE
+
+        view = build_pool(
+            codespaces=[CodespaceInfo(
+                "old", "old", "other/project", "main", "Available", "custom64core", "selected-owner",
+            )],
+            leases=[], markers={"old": STATE_PRUNABLE}, l2_leases={}, clean_records={}, live={},
+        )
+        monkeypatch.setattr(cli, "load_merged_config", CodespacesConfig)
+        monkeypatch.setattr(cli.pool_mod, "build_pool", lambda **kw: view)
+        monkeypatch.setattr("agent_codespaces.driving_worktrees.resolve_current_workstream_box", lambda *a: None)
+        monkeypatch.setattr(cli, "_require_codespace_scope", lambda *a, **kw: None)
+        with patch.object(cli, "create_codespace", return_value=SimpleNamespace(name="over-budget")) as create:
+            assert main(["create", "example/project", "--no-wait"]) == 4
+        create.assert_not_called()
+
     def test_force_create_bypasses_the_guard(self):
         import agent_codespaces.__main__ as m
         from agent_codespaces.pool import ALLOC_REUSE
@@ -953,7 +975,8 @@ def test_account_resolution_failure_uses_admission_exit(monkeypatch, command, ex
 
 
 @pytest.mark.parametrize("command", ["create", "allocate"])
-def test_unmapped_workstream_reuses_bound_account_after_active_switch(monkeypatch, capsys, command):
+@pytest.mark.parametrize("inventory_count", [1, 50])
+def test_unmapped_workstream_reuses_bound_account_after_active_switch(monkeypatch, capsys, command, inventory_count):
     import sys
     from types import ModuleType, SimpleNamespace
 
@@ -997,6 +1020,12 @@ def test_unmapped_workstream_reuses_bound_account_after_active_switch(monkeypatc
                 display_name="", branch="main",
                 state="Available", machine="basicLinux32gb", account=account,
             ),
+            *[
+                lifecycle.CodespaceInfo(
+                    name=f"stopped-{index}", display_name="", repository="other/project", branch="main",
+                    state="Shutdown", machine="basicLinux32gb", account=account,
+                ) for index in range(inventory_count - 1)
+            ],
         ] if account == "original-owner" else []
 
     monkeypatch.setattr(lifecycle, "_list_codespaces_under", listing)

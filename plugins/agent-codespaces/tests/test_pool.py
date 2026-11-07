@@ -1313,6 +1313,39 @@ def test_plan_running_own_box_reuses_at_owned_limit():
     assert decision.codespace == "mine"
 
 
+def test_incomplete_inventory_allows_running_reuse_but_not_wake():
+    from agent_codespaces.pool import ALLOC_PRESSURE, ALLOC_REUSE, plan_allocation
+
+    for state, expected in (("Available", ALLOC_REUSE), ("Shutdown", ALLOC_PRESSURE)):
+        members, budget = build_pool(
+            codespaces=[_cs("mine", state=state, repo="o/web-codespaces")],
+            leases=[], markers={}, l2_leases={}, clean_records={}, live={},
+        )
+        budget.owned_inventory_complete = False
+        assert plan_allocation(
+            members, budget, repo="web", new_cores=8, workstream_box="mine",
+        ).action == expected
+
+
+def test_partial_provider_view_never_admits_new_compute(monkeypatch):
+    from agent_codespaces import lifecycle
+    from agent_codespaces.pool import ALLOC_PRESSURE, plan_allocation
+
+    rows = [_cs(f"stopped-{index}", state="Shutdown") for index in range(50)]
+    for row in rows:
+        row.account = "selected-owner"
+    monkeypatch.setattr(lifecycle, "_list_codespaces_under", lambda *a, **kw: rows)
+    members, budget = build_pool(
+        account="selected-owner", environment={"GH_TOKEN": "fixture-token"}, max_owned_codespaces=100,
+        leases=[], markers={}, l2_leases={}, clean_records={}, live={},
+    )
+    assert budget.owned_inventory_complete is False
+    assert budget.to_dict()["owned_headroom"] is None
+    decision = plan_allocation(members, budget, repo="web", new_cores=8)
+    assert decision.action == ALLOC_PRESSURE
+    assert "incomplete" in decision.reason
+
+
 def test_plan_recycle_stale_running_when_full_then_create():
     from agent_codespaces.pool import ALLOC_RECYCLE
     d = _plan(
