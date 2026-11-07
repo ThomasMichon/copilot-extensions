@@ -127,6 +127,13 @@ lifecycle retries only resume/close on that pin, even after reselection, never
 another retirement attempt. Shutdown closes work admission and retains its
 resident custody until those pins settle; persistent native resume failure is
 an explicit unresolved shutdown, not a discarded handle or successful cleanup.
+The generation protects its own daemon-instance record before acquiring a native
+retirement pin and releases that protection only after pin cleanup settles.
+A later successor therefore cannot cold-retire the owner of an unresolved
+resume. Pending recovery prevents new writer acquisition or further cold
+attempts, but never suppresses successor detection: an already-ready generation
+still closes admission, drains admitted work and transfers its writer before
+waiting for its retained pins during shutdown.
 
 Health's additive `predecessor_retirement` and
 `writer_predecessor_retirement` report `grace`, `exited`,

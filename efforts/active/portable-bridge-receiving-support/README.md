@@ -1106,3 +1106,34 @@ implementation. The exact support closure follows the consumer trace and tests.
   then passes 107 cases with one Linux-only skip and no held-cleanup diagnostic.
   Linux-native, installed whole-update and external acceptance remain separate.
   No live service was changed. Review and exact-head CI remain required.
+
+### 2026-11-06 - Supersede ready writers without losing pending pin owners
+
+- An already-ready generation could retain an older donor's failed resume
+  while still holding the writer. Returning before successor detection left
+  its credential admission open after another generation published discovery.
+  The new regression reproduced that ordering failure. Recovery still runs
+  first, but only new admission and further cold attempts wait for settlement;
+  supersession continues to close admission, drain and transfer the writer.
+- A three-generation native control also confirmed that a later incoming
+  generation could pause the middle owner of an unresolved older pin. The
+  control substituted refusal at the child census, avoiding actual owner loss.
+  Before pin acquisition, the middle generation now protects its own existing
+  daemon-instance record. It retains that protection through failed resume or
+  registry release, settling the same handles rather than attempting retirement
+  again. The later successor remains ready but refuses protected retirement.
+- Added a current-process protection handle to the existing registry owner,
+  using its existing counted `protected` field and native identity check.
+  No new marker, lease protocol, worker or watchdog is introduced. Existing
+  cleanup already holds every nonzero protection count. Changefiles cover
+  the shared library and every physical or editable consumer.
+- The final generation/predecessor/request-settlement/resident-lifetime packet
+  passes 110 cases with one Linux-only skip. The shared admission/protection
+  packet passes 54 cases. Source lint, install contract, documentation, headless,
+  module-size and changefile-presence guards pass. Earlier exact-source
+  evidence is not relabelled as a repeated whole portfolio.
+- These are contained source/Windows-native controls, not Linux-native,
+  macOS, installer clean-room, installed whole-update or external acceptance.
+  Those tiers remain open because this source correction has not passed
+  review, CI, merge and release. No live service was changed; the source and
+  parent efforts remain Active.

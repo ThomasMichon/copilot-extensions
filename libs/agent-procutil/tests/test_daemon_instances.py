@@ -171,6 +171,59 @@ def test_reservation_admission_and_nested_custody(instance_store):
     assert store.inspect(root)[0]["state"] == "finished"
 
 
+def test_current_process_protection_is_counted_and_retained_until_each_release(instance_store):
+    root, runtime = instance_store
+    guard = store.admit("fixture", runtime_root=runtime, source=__file__, purpose="production")
+    try:
+        first = guard.protect()
+        second = guard.protect()
+        assert store.inspect(root)[0]["protected"] == "2"
+        assert store.cleanup(guard.receipt).reason == "protected-work"
+        first.close()
+        first.close()
+        assert store.inspect(root)[0]["protected"] == "1"
+        with second:
+            assert store.cleanup(guard.receipt).reason == "protected-work"
+        assert store.inspect(root)[0]["protected"] == "0"
+        assert store.cleanup(guard.receipt).status == "live"
+    finally:
+        guard.close()
+    with pytest.raises(ValueError, match="closed"):
+        guard.protect()
+
+
+def test_protection_release_failure_retains_the_original_handle(instance_store, monkeypatch):
+    root, runtime = instance_store
+    guard = store.admit("fixture", runtime_root=runtime, source=__file__, purpose="production")
+    protection = guard.protect()
+    write = store._write
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(store, "_write", lambda *_: (_ for _ in ()).throw(OSError("fixture")))
+            with pytest.raises(OSError):
+                protection.close()
+        assert store.inspect(root)[0]["protected"] == "1"
+        protection.close()
+        assert store.inspect(root)[0]["protected"] == "0"
+    finally:
+        monkeypatch.setattr(store, "_write", write)
+        protection.close()
+        guard.close()
+
+
+def test_protection_cannot_mutate_another_native_process_record(instance_store, monkeypatch):
+    root, runtime = instance_store
+    guard = store.admit("fixture", runtime_root=runtime, source=__file__, purpose="production")
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(store.ProcessIdentity, "current", lambda: store.ProcessIdentity(123, "foreign"))
+            with pytest.raises(ValueError, match="admitted process"):
+                guard.protect()
+        assert store.inspect(root)[0]["protected"] == "0"
+    finally:
+        guard.close()
+
+
 def test_production_never_expires_and_cleanup_never_stops_live(instance_store, monkeypatch):
     root, runtime = instance_store
     guard = store.admit("fixture", runtime_root=runtime, source=__file__, purpose="production")

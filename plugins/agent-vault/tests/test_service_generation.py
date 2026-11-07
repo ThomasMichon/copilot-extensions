@@ -69,6 +69,82 @@ def test_retirement_releases_writer_before_nonsettling_transport_cleanup(
             controller.writer.release()
 
 
+def test_ready_writer_supersedes_while_retaining_unsettled_resume_custody(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_vault import cutover, service
+
+    monkeypatch.setattr(service, "run_dir", lambda: tmp_path / "run")
+    monkeypatch.setattr(generation, "home_dir", lambda: tmp_path)
+    monkeypatch.setattr(generation, "selected", lambda: False)
+    monkeypatch.setattr(generation, "selected_generation", lambda: "successor")
+    monkeypatch.setattr(generation, "read_endpoint", lambda _: SimpleNamespace(pid=123))
+    monkeypatch.setattr(generation, "endpoint_health", lambda _: {
+        "ok": True, "pid": 123, "generation_protocol": generation.PROTOCOL,
+        "runtime_generation": "successor",
+    })
+    monkeypatch.setattr(cutover, "build_auth_state", lambda _: {"fixture": True})
+    vault = service.VaultService()
+    work = {object()}
+    controller = generation.ServiceGeneration(vault, SimpleNamespace(work=work), [], [])
+    controller.writer.acquire()
+    controller.has_writer = True
+    pin = object()
+    recovered = False
+
+    def recover() -> bool:
+        assert controller.predecessor.recovery_process is pin
+        if recovered:
+            controller.predecessor.recovery_process = None
+        return recovered
+
+    controller.predecessor = SimpleNamespace(recovery_process=pin, recover=recover)
+    transfers = []
+
+    def transfer(status: dict, payload: dict, *, writer_released: bool = False) -> bool:
+        assert not controller.has_writer and not vault._runtime_can_work and not work
+        assert controller.predecessor.recovery_process is pin
+        transfers.append(writer_released)
+        return True
+
+    monkeypatch.setattr(generation, "send_auth_state", transfer)
+
+    async def exercise() -> None:
+        nonlocal recovered
+        await controller.tick()
+        await controller.tick()
+        assert not vault._runtime_can_work and not vault._shutdown
+        assert controller.has_writer and not transfers
+        assert vault.handle_request({"action": "has", "entry": "late"}) == {
+            "ok": False, "error": "service_transition", "retryable": True,
+        }
+        work.clear()
+        await controller.tick()
+        assert transfers == [True] and vault._shutdown
+        assert controller.predecessor.recovery_process is pin
+        incoming = generation.ServiceGeneration(SimpleNamespace(), SimpleNamespace(), [], [])
+        incoming.writer.acquire()
+        incoming.writer.release()
+        settling = asyncio.create_task(controller.settle_retirements())
+        try:
+            await asyncio.sleep(.01)
+            assert not settling.done()
+            assert controller.predecessor.recovery_process is pin
+            recovered = True
+            await asyncio.wait_for(settling, 2)
+            assert controller.predecessor.recovery_process is None
+        finally:
+            if not settling.done():
+                settling.cancel()
+                await asyncio.gather(settling, return_exceptions=True)
+
+    try:
+        asyncio.run(exercise())
+    finally:
+        if controller.has_writer:
+            controller.writer.release()
+
+
 @pytest.mark.parametrize("change", ("selection", "endpoint", "installation"))
 def test_current_controller_cannot_retire_after_selection_or_discovery_changes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str,
@@ -637,7 +713,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 root, identity, port, mode = Path(sys.argv[1]), sys.argv[2], int(sys.argv[3]), sys.argv[4]
-if mode in {"hung-cleanup", "hung-work", "bounded-successor", "prepared-successor", "rollback-successor", "resume-failure-successor", "passive-legacy", "backend-work"}:
+if mode in {"hung-cleanup", "hung-work", "bounded-successor", "prepared-successor", "rollback-successor", "resume-failure-successor", "retirement-probe-successor", "passive-legacy", "backend-work"}:
     sys.path.insert(0, str(root / "versions" / identity))
 os.environ.update(
     AGENT_VAULT_HOME=str(root), AGENT_VAULT_RUN_DIR=str(root / "run"),
@@ -649,8 +725,13 @@ os.environ.pop("AGENT_VAULT_INSTALLATION_ID", None)
 from agent_vault import service, service_generation as generation
 from agent_vault import service_handoff
 from agent_vault import service_predecessor
-if mode in {"bounded-successor", "prepared-successor", "rollback-successor", "resume-failure-successor"}:
+if mode in {"bounded-successor", "prepared-successor", "rollback-successor", "resume-failure-successor", "retirement-probe-successor"}:
     service_predecessor.GRACE_SECONDS = 3
+if mode == "retirement-probe-successor":
+    def held_retirement(pid):
+        (root / "pin-owner.retirement").touch()
+        return True
+    service_predecessor._has_children = held_retirement
 if mode == "resume-failure-successor":
     from agent_procutil.process_retirement import PinnedProcess, RetirementRefused
     close = PinnedProcess.close
@@ -889,6 +970,7 @@ def _start(root: Path, identity: str, port: int, mode: str = "normal") -> subpro
         if mode in {
             "hung-cleanup", "hung-work", "bounded-successor", "prepared-successor",
             "rollback-successor", "resume-failure-successor",
+            "retirement-probe-successor",
             "passive-legacy", "backend-work",
         }
         else Path(generation.__file__).with_name("service.py")
@@ -1106,6 +1188,51 @@ assert (root / "current-version").read_text().strip() == "newer"
                 pending.result(timeout=2)
         finally:
             _settle(tmp_path, children)
+
+
+@pytest.mark.skipif(os.name != "nt" and sys.platform != "linux", reason="Native pinned recovery")
+def test_native_later_successor_cannot_retire_the_owner_of_a_pending_resume(tmp_path: Path) -> None:
+    for identity in ("newer", "middle", "older"):
+        _stage_generation(tmp_path, identity)
+    (tmp_path / "current-version").write_text("newer")
+    old = _start(tmp_path, "newer", 0, "hung-cleanup")
+    children = [old]
+    try:
+        _until(lambda: _endpoint(tmp_path) is not None, children)
+        (tmp_path / "current-version").write_text("middle")
+        middle = _start(tmp_path, "middle", 0, "resume-failure-successor")
+        children.append(middle)
+        _until(lambda: (_endpoint(tmp_path) or {}).get("pid") == middle.pid, children)
+        target = _target(_endpoint(tmp_path))
+        _until(
+            lambda: (
+                (status := _send(target, {"action": "ping"}))["accepting_work"]
+                and status["predecessor_retirement"] == "refused-native-resume"
+            ), children,
+        )
+        (tmp_path / "current-version").write_text("older")
+        incoming = _start(tmp_path, "older", 0, "retirement-probe-successor")
+        children.append(incoming)
+        _until(lambda: (_endpoint(tmp_path) or {}).get("pid") == incoming.pid, children)
+        target = _target(_endpoint(tmp_path))
+        _until(lambda: (tmp_path / "resume.shutdown").exists(), children)
+        _until(
+            lambda: _send(target, {"action": "ping"})["predecessor_retirement"] != "grace",
+            children,
+        )
+        status = _send(target, {"action": "ping"})
+        assert status["accepting_work"]
+        assert status["predecessor_retirement"] in {"refused-owner", "refused-owner-or-selection"}
+        assert not (tmp_path / "pin-owner.retirement").exists()
+        assert middle.poll() is None and old.poll() is None
+        (tmp_path / "resume.release").touch()
+        middle.communicate(timeout=6)
+        assert middle.returncode == 0
+        (tmp_path / "newer.stop").touch()
+        old.communicate(timeout=3)
+        assert old.returncode == 0
+    finally:
+        _settle(tmp_path, children)
 
 
 @pytest.mark.skipif(os.name != "nt" and sys.platform != "linux", reason="Native pinned recovery")

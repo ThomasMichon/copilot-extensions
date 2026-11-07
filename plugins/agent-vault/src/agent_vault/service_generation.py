@@ -430,8 +430,7 @@ class ServiceGeneration:
         )
 
     async def tick(self) -> None:
-        if not await self._recover_predecessors():
-            return
+        recovery_settled = await self._recover_predecessors()
         if self.retiring is not None:
             await self._retire()
             return
@@ -451,7 +450,7 @@ class ServiceGeneration:
             else:
                 self.superseded = 0
             return
-        if not selected() or endpoint is None:
+        if not recovery_settled or not selected() or endpoint is None:
             return
         previous_exited = self.predecessor_retirement in {"exited", "cold-retired"}
         if self.previous and not previous_exited:
@@ -504,7 +503,10 @@ class ServiceGeneration:
             (self.predecessor, "predecessor_retirement"),
             (self.writer_predecessor, "writer_predecessor_retirement"),
         ):
-            if target is not None and getattr(target, "recovery_process", None) is not None:
+            if target is not None and (
+                getattr(target, "recovery_process", None) is not None
+                or getattr(target, "protection", None) is not None
+            ):
                 if await settle_owned(asyncio.to_thread(target.recover)):
                     setattr(self, status, "refused-native-retirement")
                 else:

@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import Callable
 
 from agent_procutil._daemon_instance_identity import identity_state, path_identity
-from agent_procutil.daemon_instances import inspect_instances
+from agent_procutil.daemon_instances import (
+    DaemonInstanceProtection, admit_daemon_instance, inspect_instances,
+)
 from agent_procutil.process_retirement import PinnedProcess, RetirementRefused
 
 from .config import installation_id
@@ -32,6 +34,7 @@ class Predecessor:
         self.record = dict(record)
         self.registry_root = registry_root
         self.recovery_process: PinnedProcess | None = None
+        self.protection: DaemonInstanceProtection | None = None
 
     @classmethod
     def capture(
@@ -118,13 +121,15 @@ class Predecessor:
 
     def retire(self, current: Callable[[], bool]) -> str:
         """Revalidate selection and central-role custody at the native mutation."""
-        if self.recovery_process is not None:
+        if self.recovery_process is not None or self.protection is not None:
             return "refused-native-resume"
         try:
             if self.exited():
                 return "exited"
             if not current() or not self._owned(inspect_instances(self.registry_root)):
                 return "refused-owner-or-selection"
+            with admit_daemon_instance("agent-vault") as custody:
+                self.protection = custody.protect()
             with PinnedProcess(self.pid, self.record["birth"]) as process:
                 if process.exited():
                     return "exited"
@@ -141,16 +146,21 @@ class Predecessor:
                 self.recovery_process = process
                 return "refused-native-resume"
             return "refused-native-retirement"
+        finally:
+            if self.recovery_process is None:
+                self.recover()
 
     def recover(self) -> bool:
         """Settle only the retained pin's resume/close, never repeat retirement."""
-        if self.recovery_process is None:
-            return True
         try:
-            self.recovery_process.close()
+            if self.recovery_process is not None:
+                self.recovery_process.close()
+                self.recovery_process = None
+            if self.protection is not None:
+                self.protection.close()
+                self.protection = None
         except (OSError, ValueError, RuntimeError):
             return False
-        self.recovery_process = None
         return True
 
 

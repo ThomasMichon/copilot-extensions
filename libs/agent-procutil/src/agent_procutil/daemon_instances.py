@@ -325,6 +325,15 @@ class DaemonInstanceGuard:
 
         add_artifact(self.receipt, Path(path))
 
+    def protect(self) -> DaemonInstanceProtection:
+        """Retain current-process work that must settle before retirement."""
+        from ._daemon_instance_store import change_protection
+
+        if self._closed:
+            raise ValueError("daemon admission guard is closed")
+        change_protection(self.receipt, 1)
+        return DaemonInstanceProtection(self.receipt)
+
     def close(self) -> None:
         from ._daemon_instance_store import close_guard
 
@@ -333,6 +342,27 @@ class DaemonInstanceGuard:
             self._closed = True
 
     def __enter__(self) -> DaemonInstanceGuard:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
+
+
+class DaemonInstanceProtection:
+    """One current-process protection; failed release retains the same handle."""
+
+    def __init__(self, receipt: DaemonInstanceReceipt) -> None:
+        self.receipt = receipt
+        self._closed = False
+
+    def close(self) -> None:
+        from ._daemon_instance_store import change_protection
+
+        if not self._closed:
+            change_protection(self.receipt, -1)
+            self._closed = True
+
+    def __enter__(self) -> DaemonInstanceProtection:
         return self
 
     def __exit__(self, *_: object) -> None:

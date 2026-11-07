@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -31,6 +32,9 @@ def owned(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(predecessor, "identity_state", lambda *args: "matching")
     monkeypatch.setattr(predecessor, "peer_identity", lambda _: SimpleNamespace())
     monkeypatch.setattr(predecessor, "_has_children", lambda _: False)
+    monkeypatch.setattr(predecessor, "admit_daemon_instance", lambda _: nullcontext(
+        SimpleNamespace(protect=lambda: SimpleNamespace(close=lambda: None)),
+    ))
     endpoint = Endpoint("tcp", "127.0.0.1:12345", pid=123, installation_id="fixture-installation")
     return endpoint, tmp_path, record
 
@@ -246,13 +250,45 @@ def test_failed_resume_retains_the_original_pin_until_recovery_settles(
     assert captured.retire(lambda: True) == "refused-native-resume"
     pin = captured.recovery_process
     assert pin is not None
+    protection = captured.protection
+    assert protection is not None
     assert not captured.recover()
     assert captured.recovery_process is pin
+    assert captured.protection is protection
     assert captured.retire(lambda: pytest.fail("No second retirement attempt")) == "refused-native-resume"
     failed = False
     assert captured.recover()
     assert captured.recovery_process is None
+    assert captured.protection is None
     assert events == ["pin", "pause", "resume", "resume", "resume"]
+
+
+def test_failed_protection_release_is_retried_without_repeating_retirement(
+    owned, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    endpoint, root, _ = owned
+    captured = predecessor.Predecessor.capture(endpoint, root)
+    assert captured is not None
+    releases = []
+
+    def release() -> None:
+        releases.append("release")
+        if len(releases) == 1:
+            raise OSError("fixture registry unavailable")
+
+    protection = SimpleNamespace(close=release)
+    monkeypatch.setattr(predecessor, "admit_daemon_instance", lambda _: nullcontext(
+        SimpleNamespace(protect=lambda: protection),
+    ))
+    monkeypatch.setattr(
+        predecessor, "PinnedProcess",
+        lambda *_: nullcontext(SimpleNamespace(exited=lambda: True)),
+    )
+    assert captured.retire(lambda: True) == "exited"
+    assert captured.recovery_process is None and captured.protection is protection
+    assert captured.retire(lambda: pytest.fail("No repeated native retirement")) == "refused-native-resume"
+    assert captured.recover() and captured.protection is None
+    assert releases == ["release", "release"]
 
 
 @pytest.mark.parametrize("image", ("system-console", "foreign-console", "backend"))

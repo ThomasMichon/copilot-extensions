@@ -719,6 +719,18 @@ def add_artifact(receipt: DaemonInstanceReceipt, artifact: Path) -> None:
         _write(path, record)
 
 
+def change_protection(receipt: DaemonInstanceReceipt, delta: int) -> None:
+    with _locked(receipt, wait_seconds=1) as path:
+        record = _read(path)
+        if record.get("state") != "running" or not ProcessIdentity.current().matches(record):
+            raise ValueError("daemon protection belongs to the admitted process")
+        count = int(record.get("protected", "0"))
+        if delta not in (-1, 1) or not 0 <= count + delta <= 64:
+            raise ValueError("daemon protection count is outside its bound")
+        record.update(protected=str(count + delta), updated=str(_wall_clock()))
+        _write(path, record)
+
+
 def close_guard(receipt):
     global _admitted
     with _local_lock:
