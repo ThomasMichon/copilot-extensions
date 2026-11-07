@@ -2954,8 +2954,10 @@ sources, transferring owners or turning partial/planning gains into completion.
 The [caller-owned transport planning proposal](<journal/2026/11.07 caller-owned-transport-planning.md>)
 requires complete current receiving/original qualification and preservation of
 the incumbent body, every check state, discussion, assignment and custodian
-before an additive planning realization. The claimant's draft-PR, Windows-host
-and real Linux PTY/process-lifetime conditions remain independent and pending.
+before an additive planning realization. The claimant's original review,
+Windows-host and real Linux PTY/process-lifetime conditions remain independent.
+Candidate #2318 is CLOSED, non-draft and unmerged; that status is not source
+acceptance or a description of a currently active draft.
 All source and campaign completion checkboxes stay unchanged.
 
 The [Windows retained-writer intake](<journal/2026/11.07 windows-retained-writer-intake.md>)
