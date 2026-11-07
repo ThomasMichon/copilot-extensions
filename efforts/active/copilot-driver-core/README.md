@@ -2416,3 +2416,84 @@ attachment/new-window, guarded-head/auth-wait, all caller cleanup Jobs, receivin
 and native pending-work acceptance remain open under #10765. Documentation
 impact is the existing `TESTING.md` recipe and these explicit evidence limits;
 no production behavior, dependency, wire contract or installation policy changes.
+
+### 2026-11-07 - Constructed Manager no-mux composition merged
+
+#11360 merged at 19:11:33 UTC as
+`68656f29d9ae126b37d8dfad5226d38557c4ae0a`. Copilot approves exact head
+`c02fe24e71a1b969f3f423f41b0878e0545cd26a` with no active findings, inline
+comments or review threads. Final-head CI `42404552097` passes guards, units
+with coverage and the required PR gate; lockdown, attribution and identifier
+checks also pass. The managed merge uses the ordinary authorized Maintainer
+review exception, not a CI bypass. Its rebase adds only an unrelated terminal
+refresh fixture correction; the constructed application/native inputs are
+unchanged from qualification.
+
+Re-read the parent Plan and Validation Plan after merge and keep its broad
+gates open. Preserve the source workspace and continue with the constructed
+Manager mux-backed/metadata consumer. Its private adapter must carry its own
+routing when a resident or callback outlives the original caller; inherited
+caller environment alone is not that receiving contract. Caller cleanup-Job,
+external attachment and native pending-work gates remain separate.
+
+### 2026-11-07 - Constructed mux metadata exposes nested exit shadowing
+
+Make the private native adapter carry its exact Manager target and command-log
+path, with a fixture-owned namespace file instead of inherited caller routing.
+The existing copied Manager mux fresh/resume/reuse control passes in 129.88
+seconds (200.28 including preparation and cleanup).
+
+Extend the constructed application with a separately selected mux case. Read
+its actual installed registry through its own interpreter; require exact live
+pane/incarnation attribution and an exit tombstone matching the native execution
+receipt. The first run finds a real defect: the native backend reports exit 1
+but the pane tombstone records 127. A small real-process differential reproduces
+the class without an application build: direct wrapper entry preserves exit 7,
+whereas nested script entry records 127.
+
+PowerShell updates the global native-exit automatic variable; the wrapper's
+local reset shadows it when the real pane reader calls the wrapper in another
+script scope. Reset and read the global variable explicitly. Eight focused
+native controls pass, including native-command and script exits through the
+real pane-launch reader. Bash already captures its child's exit status and
+requires no matching behavior change.
+
+The constructed rerun passes its fresh-leg metadata/exit comparison, then
+fails the resumed pane's existing 30-second startup receipt deadline. Its
+cleanup independently retains a reused-process identity rather than signaling
+it. Neither failure is a passing qualification or permission to widen limits,
+force cleanup, or claim complete caller acceptance. Preserve the parent gates
+while completing the serial constructed flow.
+
+A subsequent serial capture reaches the fresh broker, live mapping and prompt
+but lacks the original caller's process-spawned receipt within its existing
+window. A bounded diagnostic capture instead publishes that receipt but does
+not bind the common broker before startup expiry. These are distinct failed
+observations, not a proven common cause or successful full application flow.
+Remove the temporary core diagnostic; retain bounded failure output and make
+the fixture select its actual attempt directory before reporting early states.
+The nested exit fix and its focused controls remain valid; constructed
+fresh/resume qualification and all broader parent gates remain open.
+
+The final serial constructed mux capture passes fresh and resume in 257.33
+seconds (325.98 including preparation and cleanup), within the unchanged
+300-second case budget with settled lifecycle cleanup. It verifies the common
+broker, one native history, exact process births, installed live mappings and
+matching exit tombstones after disposable Manager source inputs are removed.
+Keep bounded failure diagnostics, including one pre-broker process snapshot,
+for the distinct intermittent startup failures observed before that capture;
+the exit-code fix does not claim to resolve those failures.
+
+Validation tiers: the eight focused real-reader exit controls cover the changed
+PowerShell behavior; the constructed application is the simple consumer and
+clean-first-touch lane. The copied mux control separately covers warm reuse.
+These are isolated native Windows flows, not a productive desktop, installed
+Worktrees adoption, external receiving or survival after all caller cleanup
+Jobs. Those remaining lanes retain their existing parent validation items.
+
+Final source lint and the 13-plugin install-contract gate pass. The adjacent
+pane argument/startup controls pass 82 cases with three platform skips in
+183.62 seconds (197.59 including preparation and cleanup). An initial capture
+used an unnecessarily short 120-second group budget and was terminated after
+57 passes; the successful capture uses the normal 300-second group budget,
+without changing any per-test or native application deadline.
