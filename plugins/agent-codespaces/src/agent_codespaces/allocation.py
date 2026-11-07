@@ -158,11 +158,14 @@ def plan_creation(
     from .worktrees import ContextRefused
 
     try:
-        local = reuse.local_snapshot()
+        local, pending = reuse.local_custody_snapshot()
     except ContextRefused:
         raise
     except RuntimeError:
-        local = None
+        return AllocationDecision(
+            action=ALLOC_PRESSURE, codespace=None,
+            reason="local CodeSpace custody is unconfirmed; reconcile retained claims before creation",
+        )
     shared = coordination.list_leases(strict=True)
 
     members, budget = pool.build_pool(
@@ -188,8 +191,11 @@ def plan_creation(
     )
     workstream = None
     identity = current_workstream_identity()
-    for name in resolve_current_workstream_boxes(members, repo, account, identity=identity):
-        mode = reuse.workstream_mode(name, local, shared, identity=identity)
+    retained, returning = reuse.retained_claims(local, pending, identity)
+    for name in resolve_current_workstream_boxes(
+        members, repo, account, identity=identity, retained=retained,
+    ):
+        mode = "unknown" if name in returning else reuse.workstream_mode(name, local, shared, identity=identity)
         if mode == "unknown":
             return AllocationDecision(
                 action=ALLOC_PRESSURE, codespace=None,

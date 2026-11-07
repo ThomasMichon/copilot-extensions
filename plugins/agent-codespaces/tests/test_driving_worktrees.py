@@ -167,7 +167,7 @@ def test_current_workstream_account_reports_malformed_binding(monkeypatch):
 def test_current_workstream_account_refuses_ambiguous_accounts(monkeypatch):
     from agent_codespaces import account_binding
 
-    monkeypatch.setattr(driving_worktrees, "_workstream_claim_refs", lambda owner: {"a", "b"})
+    monkeypatch.setattr(driving_worktrees, "_workstream_claim_refs", lambda owner, **kw: {"a", "b"})
     monkeypatch.setattr(account_binding, "list_bindings", lambda **kw: [
         account_binding.AccountBinding("a", "first", 0, "o/web"),
         account_binding.AccountBinding("b", "second", 0, "o/web"),

@@ -31,11 +31,32 @@ def _local_records() -> dict[str, lease.Lease]:
 
 def local_snapshot() -> dict[str, lease.Lease]:
     """Keep expired and unknown local holders; expiry is not a return."""
+    return local_custody_snapshot()[0]
+
+
+def local_custody_snapshot() -> tuple[dict[str, lease.Lease], dict]:
+    """Read retained claims and pending returns under one store transaction."""
+    from .claim_return import pending_returns
+
     try:
         with lease._lease_lock():
-            return _local_records()
+            return _local_records(), pending_returns()
     except OSError as error:
         raise RuntimeError("Local CodeSpace ownership is unavailable") from error
+
+
+def retained_claims(local, pending, identity: WorkstreamIdentity) -> tuple[set[str], set[str]]:
+    """Include caller custody even when native bookkeeping has been retired."""
+    owner, holder = identity
+    owned = {
+        name for name, held in local.items()
+        if owner and lease._claim_owner(held) == owner
+    }
+    returning = {
+        name for name, progress in pending.items()
+        if name in owned or lease._same_holder_ref(progress["holder"], holder)
+    }
+    return owned | returning, returning
 
 
 def workstream_mode(name: str, local, shared, *, identity: WorkstreamIdentity | None = None) -> str:

@@ -222,24 +222,26 @@ def resolve_current_workstream_box(
 
 def resolve_current_workstream_boxes(
     members: Iterable[Any], repo: str, account: str | None = None,
-    *, identity: WorkstreamIdentity | None = None,
+    *, identity: WorkstreamIdentity | None = None, retained: set[str] | None = None,
 ) -> tuple[str, ...]:
     """Return every matching responsibility, including inventory omissions."""
     identity = current_workstream_identity() if identity is None else identity
+    refs = _workstream_claim_refs(identity[0], identity=identity) | (retained or set())
     return _boxes_from_refs(
-        members, repo, _workstream_claim_refs(identity[0], identity=identity), account,
+        members, repo, refs, account,
     )
 
 
 def current_workstream_account(repo: str) -> str | None:
     """Keep an unmapped workstream on its claimed venue's persisted account."""
-    try:
-        from .lease import resolve_owner_worktree
+    from . import reuse
 
-        owner = resolve_owner_worktree()
-    except Exception:
-        owner = None
-    refs = _workstream_claim_refs(owner)
+    identity = current_workstream_identity()
+    refs = _workstream_claim_refs(identity[0], identity=identity)
+    if any(identity):
+        local, pending = reuse.local_custody_snapshot()
+        retained, _ = reuse.retained_claims(local, pending, identity)
+        refs |= retained
     if not refs:
         return None
     from .account_binding import list_bindings

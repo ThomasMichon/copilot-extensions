@@ -20,6 +20,7 @@ def venue(monkeypatch, tmp_path):
     from agent_codespaces import account_binding, pool, status, worktrees
     from ssh_manager import locks
 
+    original_context = allocation.allocation_context
     monkeypatch.delenv("AGENT_CODESPACES_DISABLE_CLAIM", raising=False)
     monkeypatch.setitem(sys.modules, "agent_worktrees", None)
     monkeypatch.setattr(locks, "locks_dir", lambda: tmp_path / "target-locks")
@@ -122,6 +123,7 @@ def venue(monkeypatch, tmp_path):
     return SimpleNamespace(
         rows=rows, shared=shared, events=events, config=config, retained=retained, root=tmp_path,
         ledger=ledger,
+        original_context=original_context,
     )
 
 
@@ -861,6 +863,108 @@ def test_native_ledger_retirement_does_not_authorize_successor_cleanup_after_loc
     assert vars(venue.shared["returned"]) == later
     assert sum(event[0] == "settle" for event in venue.events) == int(original_active)
     assert sum(event[0] == "release" for event in venue.events) == 1
+    venue.config.max_owned_codespaces = 31
+    events = list(venue.events)
+    for argv in (
+        ["allocate", "example/project", "--json"],
+        ["create", "example/project", "--no-wait"],
+    ):
+        assert cli.main(argv) == 4
+        capsys.readouterr()
+    assert lease.LEASE_FILE.read_bytes() == before
+    assert venue.events == events
+    assert vars(venue.shared["returned"]) == later
+
+
+@pytest.mark.parametrize("state", ["own", "successor", "missing-shared", "local-only"])
+def test_caller_local_custody_counts_without_active_native_ledger(venue, monkeypatch, capsys, state):
+    assert cli.main(["create", "example/project", "--no-wait"]) == 0
+    capsys.readouterr()
+    venue.ledger["new-worktree"].clear()
+    venue.config.max_owned_codespaces = 31
+    if state == "successor":
+        venue.shared["returned"] = coordination.L2Lease(
+            "returned", "other-machine/project/successor", True, token="d" * 40, state="leased",
+        )
+    elif state in ("missing-shared", "local-only"):
+        monkeypatch.setattr(coordination, "list_leases", lambda **kw: None)
+        if state == "local-only":
+            records = lease._read_leases()
+            records["returned"].lease_token = ""
+            lease._write_leases(records)
+    before = lease.LEASE_FILE.read_bytes()
+    events = list(venue.events)
+    expected = 0 if state in ("own", "local-only") else 4
+    assert cli.main(["allocate", "example/project", "--json"]) == expected
+    decision = json.loads(capsys.readouterr().out)
+    assert decision["action"] == ("reuse" if expected == 0 else "pressure")
+    assert cli.main(["create", "example/project", "--no-wait"]) == expected
+    capsys.readouterr()
+    assert lease.LEASE_FILE.read_bytes() == before
+    assert venue.events == events
+
+
+@pytest.mark.parametrize("relocated", [False, True])
+def test_pending_return_preserves_account_after_native_ledger_retirement(
+    venue, monkeypatch, capsys, relocated,
+):
+    from agent_codespaces import gh_account, owner_inventory
+
+    assert cli.main(["create", "example/project", "--no-wait"]) == 0
+    capsys.readouterr()
+    write = lease._write_private_json
+
+    def failed_cleanup(path, payload):
+        if path == lease.LEASE_FILE and "returned" not in payload:
+            raise OSError("cleanup publication unavailable")
+        write(path, payload)
+
+    monkeypatch.setattr(lease, "_write_private_json", failed_cleanup)
+    with pytest.raises(OSError, match="cleanup"):
+        lease.release_claim("returned", "new-worktree")
+    assert venue.ledger["new-worktree"] == set()
+    monkeypatch.setattr(lease, "_write_private_json", write)
+    venue.shared["returned"] = coordination.L2Lease(
+        "returned", "other-machine/project/successor", True, token="d" * 40, state="leased",
+    )
+    if relocated:
+        monkeypatch.setattr(lease, "resolve_owner_worktree", lambda **kw: "relocated-caller-path")
+    for variable in ("GH_TOKEN", "GITHUB_TOKEN"):
+        monkeypatch.delenv(variable, raising=False)
+    monkeypatch.setattr(gh_account, "account_for_repo", lambda repo: None)
+    monkeypatch.setattr(gh_account, "active_account", lambda: "different-active-account")
+    selected = []
+    monkeypatch.setattr(owner_inventory, "qualified_environment", lambda account: (
+        selected.append(account) or {"GH_TOKEN": "fixture-" + account}
+    ))
+    monkeypatch.setattr(allocation, "allocation_context", venue.original_context)
+    venue.config.max_owned_codespaces = 31
+    before = lease.LEASE_FILE.read_bytes()
+    shared = vars(venue.shared["returned"]).copy()
+    events = list(venue.events)
+    for argv in (
+        ["allocate", "example/project", "--json"],
+        ["create", "example/project", "--no-wait"],
+    ):
+        assert cli.main(argv) == 4
+        capsys.readouterr()
+    assert selected == ["selected", "selected"]
+    assert lease.LEASE_FILE.read_bytes() == before
+    assert vars(venue.shared["returned"]) == shared
+    assert venue.events == events
+
+
+def test_unreadable_local_custody_cannot_admit_replacement_with_spare_slots(venue, capsys):
+    venue.config.max_owned_codespaces = 31
+    lease.LEASE_FILE.write_text("{", encoding="utf-8")
+    for argv in (
+        ["allocate", "example/project", "--json"],
+        ["create", "example/project", "--no-wait"],
+    ):
+        assert cli.main(argv) == 4
+        capsys.readouterr()
+    assert lease.LEASE_FILE.read_text(encoding="utf-8") == "{"
+    assert venue.events == []
 
 
 def test_quota_retry_reserves_the_returned_venue_instead_of_creating_again(venue, monkeypatch, capsys):

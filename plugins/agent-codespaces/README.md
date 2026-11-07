@@ -683,6 +683,11 @@ Admission classifies every matching obligation; one returned venue cannot hide
 another uncertain acquisition. Holder equality includes machine, project and
 worktree, ignoring only the session suffix. Unmapped obligations spanning
 accounts require an explicit repository-account selection.
+Caller-owned local claims and pending returns also participate independently of
+the native ledger, including after its entry is released or removed. Pending
+returns remain unresolved even with spare owned slots; unreadable local custody
+refuses admission rather than becoming an empty snapshot. The same retained
+custody preserves account selection across an active-account switch.
 Each plan resolves the caller path and qualified reference once and shares that
 pair with obligation classification and candidate selection. Known missing
 identity is retained within that plan, not probed again per venue. The next
@@ -699,6 +704,8 @@ finalization history is diagnostic data, not a failed active-claim ACK or
 restoration of those old resources. Return accepts a missing legacy ledger
 entry only after a complete qualified native read confirms absence or prior
 release, never after a failed lookup.
+Shared fencing tokens must be raw JSON strings with the supported object-ID
+shape; numeric values are never coerced into apparently valid tokens.
 Claim, advisory borrow, heartbeat, sequential reservation and return share a
 per-CodeSpace local OS-held exclusion. Return holds it through native settlement
 and local cleanup; ordinary claim journaling stays inside it too, outside the

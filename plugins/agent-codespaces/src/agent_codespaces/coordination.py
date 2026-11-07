@@ -457,7 +457,8 @@ def _parse_token(proc: subprocess.CompletedProcess[str]) -> str:
         data = json.loads(proc.stdout)
     except (ValueError, TypeError):
         return ""
-    return str(data.get("token", "")) if isinstance(data, dict) else ""
+    token = data.get("token") if isinstance(data, dict) else None
+    return token if isinstance(token, str) else ""
 
 
 def inspect(key: str, *, origin: str | None = None) -> dict | None:

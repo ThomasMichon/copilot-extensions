@@ -99,7 +99,7 @@ def test_released_only_uses_selected_receiver_and_never_replays_baseline(monkeyp
     ]
 
 
-@pytest.mark.parametrize("token", [None, 42, "", "not-an-oid"])
+@pytest.mark.parametrize("token", [None, 42, int("1" * 40), int("1" * 64), "", "not-an-oid"])
 def test_released_only_does_not_report_success_without_valid_token(monkeypatch, token):
     readiness = coord.PreflightResult(
         "ready", capabilities=frozenset({coord.RELEASED_ONLY_CAPABILITY}),

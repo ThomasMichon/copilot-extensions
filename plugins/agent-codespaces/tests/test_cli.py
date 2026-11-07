@@ -991,12 +991,12 @@ def test_unmapped_workstream_reuses_bound_account_after_active_switch(monkeypatc
     monkeypatch.setitem(sys.modules, "agent_worktrees", peer)
     monkeypatch.setattr("agent_codespaces.lease.resolve_owner_worktree", lambda: "fixture-worktree")
     now = time.time()
-    monkeypatch.setattr(reuse, "local_snapshot", lambda: {
+    monkeypatch.setattr(reuse, "local_custody_snapshot", lambda: ({
         "retained-venue": lease.Lease(
             "retained-venue", "", 1, lease._this_host(), now, now,
             worktree="fixture-worktree",
         ),
-    })
+    }, {}))
     monkeypatch.setattr(account_binding, "list_bindings", lambda **kw: [
         account_binding.AccountBinding("retained-venue", "original-owner", 0, "example/project"),
     ])
@@ -1197,6 +1197,41 @@ with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.St
                   holder="other-machine/project/next-worktree")
     later = dict(record)
     settlement_unknown = False
+    write = lease._write_private_json
+    def fail_final_cleanup(path, payload):
+        if path == lease.LEASE_FILE and "venue-0" not in payload:
+            raise OSError("final cleanup publication unavailable")
+        write(path, payload)
+    lease._write_private_json = fail_final_cleanup
+    try:
+        lease.release_claim("venue-0", "current-worktree")
+    except OSError as error:
+        assert "cleanup" in str(error)
+    else:
+        raise AssertionError("unconfirmed local cleanup")
+    lease._write_private_json = write
+    assert not obligations and lease.get_lease("venue-0") is not None
+    from agent_codespaces import gh_account, owner_inventory
+    pinned_context = allocation.allocation_context
+    config_factory = cli.load_merged_config
+    allocation.allocation_context = native_context
+    gh_account.account_for_repo = lambda repo: None
+    gh_account.active_account = lambda: "new-active-owner"
+    for variable in ("GH_TOKEN", "GITHUB_TOKEN"):
+        os.environ.pop(variable, None)
+    retained_accounts = []
+    owner_inventory.qualified_environment = lambda account: (
+        retained_accounts.append(account) or {"GH_TOKEN": "fixture-" + account}
+    )
+    cli.load_merged_config = lambda: CodespacesConfig(
+        default_machine_type="premiumLinux", max_owned_codespaces=31,
+    )
+    assert cli.main(["allocate", "example/project", "--json"]) == 4
+    assert cli.main(["create", "example/project", "--no-wait"]) == 4
+    assert retained_accounts == ["fixture-owner", "fixture-owner"]
+    assert record == later
+    allocation.allocation_context = pinned_context
+    cli.load_merged_config = config_factory
     returned = lease.release_claim("venue-0", "current-worktree")
 assert reused == 0 and connected.lease_token == "b" * 40 and returned
 assert record == later
