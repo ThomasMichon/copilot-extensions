@@ -842,6 +842,7 @@ def test_environment_only_credentials_reach_inventory_and_creation(monkeypatch, 
     for name in ("GH_TOKEN", "GITHUB_TOKEN"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv(variable, "environment-fixture-token")
+    monkeypatch.setenv("GH_HOST", "github.example.com")
     monkeypatch.setattr(gh_account, "account_for_repo", lambda repo: None)
     monkeypatch.setattr("agent_codespaces.driving_worktrees.current_workstream_account", lambda repo: bound)
     monkeypatch.setattr(
@@ -885,6 +886,7 @@ def test_environment_only_credentials_reach_inventory_and_creation(monkeypatch, 
         nonlocal state
         environment = kwargs["env"]
         observed.append((argv[1:3], environment.get("GH_TOKEN"), environment.get("GITHUB_TOKEN")))
+        assert environment.get("GH_HOST") == "github.com"
         if argv[1:3] == ["api", "user"]:
             value = json.dumps({"login": "environment-owner"})
         elif argv[1:3] == ["codespace", "list"]:

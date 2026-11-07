@@ -33,6 +33,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             identity = subprocess.run(
                 ["gh", "api", "user", "--jq", ".login"], capture_output=True,
                 text=True, timeout=30, creationflags=no_window_flags(),
+                env=dict(os.environ, GH_HOST="github.com"),
             )
         except (OSError, subprocess.SubprocessError) as error:
             raise RuntimeError("Cannot resolve the authenticated CodeSpace owner") from error
@@ -50,7 +51,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         token = verified_account_token(account)
         if not token:
             raise RuntimeError("Cannot authenticate the CodeSpace owner; refusing ambient fallback")
-        env = dict(os.environ, GH_TOKEN=token)
+        env = dict(os.environ, GH_TOKEN=token, GH_HOST="github.com")
         env.pop("GITHUB_TOKEN", None)
         try:
             done = subprocess.run(

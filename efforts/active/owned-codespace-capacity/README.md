@@ -118,6 +118,11 @@ existing resource ownership, not solve quota pressure by destructive cleanup.
 
 ## Journal
 
+### 2026-11-07 - Host pin and remaining text metadata
+- Reproduced seven failures covering display/branch field shapes and an ambient enterprise host redirecting GitHub.com identity/admission.
+- Validated remaining pool text metadata and pinned GitHub.com across credential discovery, verification, qualified inventory, creation and bound status/activation, without changing global authentication.
+- The four affected source suites passed 241 tests; 36 final foundation/fallback/native activation controls passed after pinning the fallback credential command. Touched-Python lint and the 13-plugin install contract passed. Fresh exact-head CI/review remain required; no live authentication, venue or deployment effects occurred.
+
 ### 2026-11-07 - Malformed metadata and discovery continuity
 - Reproduced six failures covering malformed allocation metadata/binding fields and devcontainer discovery losing the normalized admitted environment.
 - Kept malformed metadata as an actionable admission failure and passed the admitted environment through devcontainer discovery before creation, including explicit-account selection.

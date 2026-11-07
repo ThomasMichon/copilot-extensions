@@ -671,6 +671,10 @@ selected creation-scope check excludes unrelated saved logins and hosts.
 Malformed allocation metadata or account-binding fields produce an actionable
 refusal, not an uncaught parser failure. Devcontainer discovery and creation
 share the admitted account environment rather than rediscovering credentials.
+GitHub.com identity verification, qualified inventory, creation, bound status
+and activation pin their host independently of an ambient enterprise `GH_HOST`.
+Allocation metadata checks include display names and branch text before pool
+parsing.
 
 For unmapped repositories, a valid `GH_TOKEN` or `GITHUB_TOKEN` needs no saved
 login: admission verifies its account and retains that credential through

@@ -22,7 +22,7 @@ ALLOC_PRESSURE = "pressure"
 def _environment_context(ambient: str, *, timeout: float = 10) -> tuple[str, dict]:
     from agent_procutil import no_window_kwargs
 
-    environment = dict(os.environ)
+    environment = dict(os.environ, GH_HOST="github.com")
     environment["GH_TOKEN"] = ambient
     environment.pop("GITHUB_TOKEN", None)
     try:
@@ -107,7 +107,8 @@ def list_account_codespaces(
         raise RuntimeError("CodeSpace account inventory is truncated at the 50-venue listing limit")
     if any(
         value is not None and not isinstance(value, str)
-        for row in rows for value in (row.repository, row.machine, row.last_used_at)
+        for row in rows
+        for value in (row.repository, row.machine, row.last_used_at, row.display_name, row.branch)
     ):
         raise RuntimeError("Malformed CodeSpace allocation metadata")
     return rows
@@ -119,7 +120,7 @@ def creation_environment(
     if environment is not None:
         if not account:
             raise RuntimeError("An admitted environment requires a verified account")
-        return account, environment
+        return account, dict(environment, GH_HOST="github.com")
     from . import gh_account
 
     account = account or gh_account.account_for_repo(repo)
@@ -155,7 +156,7 @@ def stop_context(name, account, token, *, listing, status_lookup):
             environment = qualified_environment(account)
             token = environment["GH_TOKEN"]
         else:
-            environment = dict(os.environ)
+            environment = dict(os.environ, GH_HOST="github.com")
             environment["GH_TOKEN"] = token
             environment.pop("GITHUB_TOKEN", None)
         exists, state = status_lookup(name, account, token=token)

@@ -315,7 +315,7 @@ def _get_codespace_status_under(
                 f"could not mint an authenticated gh token for account {account} "
                 "-- refusing to fall back to ambient auth for this strict lookup"
             )
-        env = dict(os.environ)
+        env = dict(os.environ, GH_HOST="github.com")
         env["GH_TOKEN"] = token
         env.pop("GITHUB_TOKEN", None)
 

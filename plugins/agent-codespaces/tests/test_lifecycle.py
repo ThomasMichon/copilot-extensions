@@ -92,6 +92,8 @@ class TestListCodespaces:
     '[{"name":"venue","state":"Available","machineName":{}}]',
     '[{"name":"venue","state":"Available","repository":[]}]',
     '[{"name":"venue","state":"Available","lastUsedAt":42}]',
+    '[{"name":"venue","state":"Available","displayName":42}]',
+    '[{"name":"venue","state":"Available","gitStatus":{"ref":{}}}]',
 ])
 def test_allocation_listing_refuses_malformed_success(monkeypatch, response):
     monkeypatch.setattr(
@@ -104,6 +106,31 @@ def test_allocation_listing_refuses_malformed_success(monkeypatch, response):
     )
     with pytest.raises(RuntimeError, match="Malformed"):
         allocation.list_account_codespaces("selected-owner")
+
+
+def test_qualified_inventory_environment_pins_github_host(monkeypatch):
+    from agent_codespaces import owner_inventory
+
+    monkeypatch.setenv("GH_HOST", "github.example.com")
+    monkeypatch.setattr(owner_inventory, "credential", lambda account: "fixture-token")
+    assert owner_inventory.qualified_environment("selected-owner")["GH_HOST"] == "github.com"
+
+
+def test_qualified_inventory_credential_lookup_pins_github_host(monkeypatch):
+    from agent_codespaces import owner_inventory
+
+    monkeypatch.setenv("GH_HOST", "github.example.com")
+    for name in ("GH_TOKEN", "GITHUB_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+
+    def run(argv, **kwargs):
+        assert argv == ["gh", "auth", "token", "--hostname", "github.com"]
+        return MagicMock(returncode=0, stdout="fixture-token")
+
+    monkeypatch.setattr(owner_inventory.subprocess, "run", run)
+    environment = owner_inventory.qualified_environment(None)
+    assert environment["GH_HOST"] == "github.com"
+    assert environment["GH_TOKEN"] == "fixture-token"
 
 
 def test_allocation_listing_keeps_selected_owner_and_marks_truncation(monkeypatch):
@@ -229,7 +256,7 @@ def test_strict_status_refuses_an_environment_token_for_another_owner(monkeypatc
 
 class TestCreateCodespace:
     def test_devcontainer_discovery_retains_admitted_account_environment(self, monkeypatch):
-        admitted = {"GH_TOKEN": "selected-fixture-token"}
+        admitted = {"GH_TOKEN": "selected-fixture-token", "GH_HOST": "github.com"}
         monkeypatch.setattr(gh_account, "env_for_repo", lambda repo: {"GH_TOKEN": "foreign-fixture-token"})
         observed = []
 
