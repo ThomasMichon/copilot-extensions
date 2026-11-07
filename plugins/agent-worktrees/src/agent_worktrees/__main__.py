@@ -4107,44 +4107,18 @@ class _ResidentHookPolicy:
             return {}
         return {"additionalContext": text} if text else {}
 
-    def native_batch_targets(self, payload: dict) -> list[str] | None:
+    def native_batch_targets(self, payload: dict, *, include_shell: bool = False) -> list[str] | None:
         from .hook_ipc import HookUnavailable
 
         forms = self._module("tool_call_forms.py")
         if forms is None:
             raise HookUnavailable
         try:
+            if include_shell:
+                return forms.mixed_mutation_targets(payload, allowed_tools=_HOOK_WRITE_TOOLS | _HOOK_SHELL_TOOLS | {"view", "rg", "glob"}, classify=self.mutation_targets)
             return forms.native_mutation_targets(payload, write_tools=_HOOK_WRITE_TOOLS, cwd=_hook_payload_cwd(payload))
         except ValueError as exc:
             raise HookUnavailable from exc
-
-    def mixed_batch_targets(self, payload: dict) -> list[str] | None:
-        from .hook_ipc import HookUnavailable
-
-        forms = self._module("tool_call_forms.py")
-        if forms is None:
-            raise HookUnavailable
-        try:
-            events = forms.tool_events(payload, strict=True)
-        except ValueError as exc:
-            raise HookUnavailable from exc
-        if any(
-            not isinstance(event.get("toolName"), str)
-            or event["toolName"].lower() not in _HOOK_WRITE_TOOLS | _HOOK_SHELL_TOOLS | {"view", "rg", "glob"}
-            for event in events
-        ):
-            raise HookUnavailable
-        targets = []
-        for event in events:
-            selected = self.mutation_targets(event)
-            if selected is None:
-                return None
-            for target in selected:
-                if target not in targets:
-                    if len(targets) >= forms.MAX_CALLS:
-                        return None
-                    targets.append(target)
-        return targets
 
     def mutation_targets(self, payload: dict) -> list[str] | None:
         tool = str(payload.get("toolName") or payload.get("tool_name") or "").lower()
@@ -4201,12 +4175,7 @@ def _resident_hook_decision(
             from .hook_ipc import HookUnavailable
 
             raise HookUnavailable
-        if kind == "mixedToolBatchMutation":
-            targets = policy.mixed_batch_targets(payload)
-        elif kind == "nativeToolBatchMutation":
-            targets = policy.native_batch_targets(payload)
-        else:
-            targets = policy.mutation_targets(payload)
+        targets = policy.native_batch_targets(payload, include_shell=kind == "mixedToolBatchMutation") if batch else policy.mutation_targets(payload)
         if targets is None:
             segment_cache.invalidate_all()
         else:

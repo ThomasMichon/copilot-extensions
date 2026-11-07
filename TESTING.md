@@ -233,7 +233,8 @@ target overflow, read-only no-wake and live managed admission. The registered
 consumer's `mixed-` cases cover targeted writes beside shell reads,
 conservative shell writes/unknown arguments, separate capability rollback,
 wrong-generation/closed/missing discovery, wire overflow and a non-replying
-peer. Unit-only CI adds twelve in-memory mixed-notification boundary cases;
+peer. Unit-only CI adds twelve in-memory mixed-notification boundary cases and two
+original-normalizer aggregation/refusal cases;
 real shell/IPC/monitor execution stays in the explicit packet.
 
 The separately path-gated `prepared-membership-native.yml` lane also selects

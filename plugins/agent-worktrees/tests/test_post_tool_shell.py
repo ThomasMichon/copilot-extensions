@@ -569,6 +569,33 @@ def test_registered_prepared_cell_post_tool_uses_selected_original_owners(
         pytest.skip(f"{shell} is unavailable")
     fixture = prepared_read_event
     invalidated, notices, synchronous = [], [], []
+    diagnostic = os.environ.get("AGENT_WORKTREES_TEST_SEND_DIAGNOSTIC") == "1" and case == "read"
+    if diagnostic:
+        library = fixture["payload_root"] / "scripts" / "hook-facts.ps1"
+        text = library.read_text(encoding="utf-8")
+        replacements = {
+            "    $client = $null\n": "    $client = $null\n    $diag = @{ phase = 'validation' }\n",
+            "        $client = [Net.Sockets.TcpClient]::new()\n":
+                "        $client = [Net.Sockets.TcpClient]::new()\n"
+                "        $diag.allocated_ms = $clock.Elapsed.TotalMilliseconds\n        $diag.phase = 'connect'\n",
+            "        $remaining = 50 - [int]$clock.ElapsedMilliseconds\n":
+                "        $diag.connected_ms = $clock.Elapsed.TotalMilliseconds\n"
+                "        $remaining = 50 - [int]$clock.ElapsedMilliseconds\n"
+                "        $diag.remaining_ms = $remaining\n        $diag.phase = 'remaining'\n",
+            "        $null = $client.GetStream().WriteAsync($bytes, 0, $bytes.Length).Wait($remaining)\n":
+                "        $diag.phase = 'write'\n"
+                "        $diag.write_completed = $client.GetStream().WriteAsync($bytes, 0, $bytes.Length).Wait($remaining)\n"
+                "        $diag.written_ms = $clock.Elapsed.TotalMilliseconds\n        $diag.phase = 'done'\n",
+            "    } catch {} finally {\n        if ($null -ne $client) { $client.Dispose() }\n":
+                "    } catch { $diag.error = $_.Exception.GetType().FullName } finally {\n"
+                "        if ($null -ne $client) { $client.Dispose() }\n"
+                "        if ($null -ne $clock) { $diag.final_ms = $clock.Elapsed.TotalMilliseconds }\n"
+                "        [Console]::Error.WriteLine('send_stages=' + (ConvertTo-Json $diag -Compress))\n",
+        }
+        for before, after in replacements.items():
+            assert text.count(before) == 1, before
+            text = text.replace(before, after)
+        library.write_text(text, encoding="utf-8")
     received, release = threading.Event(), threading.Event()
     policy = main._ResidentHookPolicy(main._load_hook_client_module())
     target = str(fixture["home"] / "changed")
@@ -694,6 +721,11 @@ def test_registered_prepared_cell_post_tool_uses_selected_original_owners(
             input=json.dumps(payload), text=True, capture_output=True, timeout=10,
             env=fixture["env"], **no_window_kwargs(),
         )
+        if diagnostic:
+            print(f"diagnostic_received={received.wait(2)}; {result.stderr}")
+            lines = result.stderr.splitlines(keepends=True)
+            assert sum(line.startswith("send_stages=") for line in lines) == 1, result.stderr
+            result.stderr = "".join(line for line in lines if not line.startswith("send_stages="))
         assert result.returncode == 0, result.stderr
         assert result.stderr.startswith("entry_seconds="), result.stderr
         print(f"{shell}/cell/{case}: {result.stderr.strip()}")
