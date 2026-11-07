@@ -277,7 +277,7 @@ source "$SCRIPT_DIR/source-runtime.sh"
     ("incremental", 1, False), ("fresh", 0, False),
     ("fresh", 1, False), ("fresh", 1, True),
 ])
-def test_native_fresh_owner_settlement_failure_is_not_best_effort(
+def test_native_incoming_publication_failure_is_not_best_effort(
     tmp_path: Path, language: str, mode: str, exit_code: int, no_reap: bool,
 ) -> None:
     scripts = tmp_path / "payload/scripts"
@@ -290,7 +290,7 @@ def test_native_fresh_owner_settlement_failure_is_not_best_effort(
         f"from pathlib import Path\nPath({str(tripwire)!r}).write_text('unexpected')\n"
         "raise RuntimeError('ambient retirement primitive must not load')\n", encoding="utf-8",
     )
-    (scripts / "reap_versions.py").write_text(
+    (scripts / "publish_incoming.py").write_text(
         "import json,sys\nfrom pathlib import Path\nimport agent_procutil\n"
         f"Path({str(observed)!r}).write_text(json.dumps(sys.argv[1:]))\n"
         f"sys.exit({exit_code})\n", encoding="utf-8",
@@ -308,8 +308,8 @@ $VenvPython={q(sys.executable)}
 $env:AGENT_MCP_NO_VERSION_REAP='{1 if no_reap else ""}'
 function Write-Ok($value) {{ }}
 function Invoke-Hidden {{ param($FilePath,$ArgList) & $FilePath @ArgList; $global:LASTEXITCODE=$LASTEXITCODE }}
-{_function('agent-mcp', 'Invoke-RuntimeOwnerSettlement', language)}
-Invoke-RuntimeOwnerSettlement
+{_function('agent-mcp', 'Publish-IncomingMcp', language)}
+Publish-IncomingMcp
 Write-Output 'CONTINUED'
 """
     else:
@@ -323,8 +323,8 @@ VENV_PYTHON={q(sys.executable)}
 AGENT_MCP_NO_VERSION_REAP='{1 if no_reap else ""}'
 _ok() {{ :; }}
 _fail() {{ echo "$*" >&2; }}
-{_function('agent-mcp', '_settle_runtime_owners', language)}
-_settle_runtime_owners || exit 1
+{_function('agent-mcp', '_publish_incoming_mcp', language)}
+_publish_incoming_mcp || exit 1
 echo CONTINUED
 """
     result = _run(
@@ -332,23 +332,18 @@ echo CONTINUED
         environment={**os.environ, "PYTHONPATH": str(ambient.parent)},
     )
     assert not tripwire.exists()
-    if mode == "incremental":
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert not observed.exists()
-    else:
-        assert (result.returncode == 0) == (exit_code == 0), result.stdout + result.stderr
-        arguments = json.loads(observed.read_text(encoding="utf-8"))
-        assert "--fresh" in arguments
-        assert "--reset-control" in arguments
-        assert ("--check-only" in arguments) is no_reap
-        assert ("CONTINUED" in result.stdout) == (exit_code == 0)
+    assert (result.returncode == 0) == (exit_code == 0), result.stdout + result.stderr
+    arguments = json.loads(observed.read_text(encoding="utf-8"))
+    assert not {"--fresh", "--reset-control", "--force", "--check-only"} & set(arguments)
+    assert "--root" in arguments
+    assert ("CONTINUED" in result.stdout) == (exit_code == 0)
 
 
 # Keep pytest outside the child's existing deadline and owned teardown.
 @pytest.mark.timeout(90)
 @pytest.mark.parametrize("language", ["ps1", "sh"])
 @pytest.mark.parametrize("socket_override", [False, True])
-def test_native_fresh_settlement_resets_the_actual_distinct_control_home(
+def test_native_incoming_adapter_preserves_distinct_legacy_control_home(
     tmp_path: Path, language: str, socket_override: bool,
 ) -> None:
     scripts = tmp_path / "payload/scripts"
@@ -357,10 +352,21 @@ def test_native_fresh_settlement_resets_the_actual_distinct_control_home(
         ROOT / "libs" / name / "src"
         for name in ("single-instance-lease", "zdd", "agent-procutil", "update-driver")
     ]
-    real_script = ROOT / "plugins/agent-mcp/scripts/reap_versions.py"
-    (scripts / "reap_versions.py").write_text(
+    real_script = ROOT / "plugins/agent-mcp/scripts/publish_incoming.py"
+    observed = tmp_path / "publication.json"
+    (scripts / "publish_incoming.py").write_text(
         "import runpy,sys\n"
         f"sys.path[:0] = {list(map(str, roots))!r}\n"
+        "import json\nfrom pathlib import Path\n"
+        "from agent_mcp import cutover\n"
+        "from agent_mcp.forward import _serve_handle\n"
+        "def setup():\n"
+        f"    Path({str(observed)!r}).write_text(json.dumps({{'handle':_serve_handle(None)}}))\n"
+        "cutover._installed_slot = lambda: ('fixture',Path('fixture'),Path('fixture'))\n"
+        "cutover._configured_readiness = lambda: {'state':'empty'}\n"
+        "cutover._run_slot_startup = lambda *a,**k: {'ok':True,'skipped':'fixture has no installed slot'}\n"
+        "def intent():\n    setup()\n    return False\n"
+        "cutover.source_serving_intent = intent\n"
         f"runpy.run_path({str(real_script)!r}, run_name='__main__')\n", encoding="utf-8",
     )
     root = tmp_path / "code"
@@ -387,8 +393,8 @@ $InstallDir={q(root)}
 $VenvPython={q(sys.executable)}
 function Write-Ok($value) {{ }}
 function Invoke-Hidden {{ param($FilePath,$ArgList) & $FilePath @ArgList; $global:LASTEXITCODE=$LASTEXITCODE }}
-{_function('agent-mcp', 'Invoke-RuntimeOwnerSettlement', language)}
-Invoke-RuntimeOwnerSettlement
+{_function('agent-mcp', 'Publish-IncomingMcp', language)}
+Publish-IncomingMcp
 """
     else:
         script = f"""
@@ -400,63 +406,32 @@ INSTALL_DIR={q(root)}
 VENV_PYTHON={q(sys.executable)}
 _ok() {{ :; }}
 _fail() {{ echo "$*" >&2; }}
-{_function('agent-mcp', '_settle_runtime_owners', language)}
-_settle_runtime_owners || exit 1
+{_function('agent-mcp', '_publish_incoming_mcp', language)}
+_publish_incoming_mcp || exit 1
 """
     result = _run(tmp_path, language, script, environment={
         **os.environ, "AGENT_MCP_HOME": str(home), "AGENT_MCP_NO_VERSION_REAP": "",
         "AGENT_MCP_SERVE_SOCKET": str(control_home / "serve.sock") if socket_override else "",
     })
     assert result.returncode == 0, result.stdout + result.stderr
-    assert not (control_home / "active.json").exists()
-    assert not (control_home / "serve.sock.endpoint").exists()
+    assert (control_home / "active.json").read_bytes() == b"{"
+    assert (control_home / "serve.sock.endpoint").read_bytes() == b"corrupt"
+    expected = control_home / "serve.sock" if socket_override \
+        else home / "current" / "serve.sock"
+    assert Path(json.loads(observed.read_text())["handle"]) == expected
     if socket_override:
         assert (home / "active.json").read_bytes() == b"not the socket home"
     assert (home / "configuration.json").read_bytes() == b"keep"
     assert (root / "active.json").read_bytes() == b"not the control home"
 
 
-@pytest.mark.parametrize("shell_name", ["pwsh", "powershell"])
-@pytest.mark.parametrize("phase", ["incremental-reap", "cutover"])
-def test_native_owner_settlement_best_effort_failures_use_an_available_warning(
-        tmp_path: Path, monkeypatch, shell_name: str, phase: str,
-) -> None:
-        host = shutil.which(shell_name)
-        if not host:
-            pytest.skip(f"Native {shell_name} unavailable")
-        monkeypatch.setattr(sys.modules[__name__], "_host", lambda _: host)
-        text = (ROOT / "plugins/agent-mcp/scripts/init.ps1").read_text(encoding="utf-8")
-        loggers = "\n".join(re.findall(r"(?m)^function Write-(?:Ok|Skip)\b[^\n]*$", text))
-        if phase == "incremental-reap":
-            begin = text.index("    $ReapScript = Join-Path")
-            fragment = text[begin:text.index("    # Collect the now-idle", begin)]
-            response = "$global:LASTEXITCODE=1; return ''"
-            warning = "Version-reap incomplete"
-        else:
-            cutover = re.search(r"(?m)^if \(\$VersionedRuntime .*AGENT_MCP_NO_CUTOVER\) \{", text)
-            assert cutover
-            begin = cutover.start()
-            fragment = text[begin:text.index("# agent-mcp-specific (NOT part", begin)]
-            response = """return '{"skipped":false,"ok":false,"error":"fixture failure"}'"""
-            warning = "Cutover attempted"
-        script = f"""
-Set-StrictMode -Version 2.0
-$ErrorActionPreference='Stop'
-$WarningPreference='Stop'
-$VersionedRuntime=$true
-$script:RuntimeConstructionSession=[pscustomobject]@{{Construction='incremental'}}
-$VenvPython='fixture-only-unused'
-$InstallDir={_quote(tmp_path, 'ps1')}
-$env:AGENT_MCP_NO_CUTOVER=''
-function Invoke-Hidden {{ param($FilePath,$ArgList) {response} }}
-{loggers}
-{fragment}
-Write-Output 'CONTINUED'
-"""
-        result = _run(tmp_path, "ps1", script)
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert "CONTINUED" in result.stdout
-        assert warning in result.stdout
+@pytest.mark.parametrize("language", ["ps1", "sh"])
+def test_ordinary_native_entry_has_no_retirement_dispatch(language):
+    text = (ROOT / "plugins/agent-mcp/scripts" / f"init.{language}").read_text(encoding="utf-8")
+    assert "reap_versions.py" not in text
+    assert "--reset-control" not in text
+    assert "--require-live" not in text
+    assert "publication is complete" in text
 
 
 @pytest.mark.parametrize("plugin", PLUGINS)
@@ -716,6 +691,7 @@ try {
     if ($chosen -ne $SrcVersion) { throw 'construction was planned twice' }
     Assert-SourceRuntime
     if (-not $script:RuntimeConstructionReuse) {
+        New-Item -ItemType Directory -Path $VenvDir -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $VenvDir 'constructed') -Value 'new'
         [void](Invoke-VersionedMarkComplete)
     }
@@ -744,6 +720,7 @@ _versioned_slot_clean
 [[ "$chosen" == "$SRC_VERSION" ]]
 _assert_source_runtime
 if [[ "$_RUNTIME_CONSTRUCTION_REUSE" != 1 ]]; then
+    mkdir -p "$VENV_DIR"
     printf new > "$VENV_DIR/constructed"
     _versioned_mark_complete
 fi
@@ -775,7 +752,7 @@ _runtime_construction_finish
     else:
         assert version.startswith(selected + ".repair.") and mode == "fresh"
         candidate = root / "versions" / version
-        assert (candidate / "constructed").is_file()
+        assert (candidate / ".venv" / "constructed").is_file()
         assert json.loads((candidate / ".install-complete.json").read_text())["version"] == version
     if recovering:
         before.pop(Path("deploy-manifest.json"), None)
@@ -785,7 +762,7 @@ _runtime_construction_finish
         assert completion.is_fifo()
     if condition == "fallback-directory":
         assert (root / "last-known-good").is_dir()
-        assert (root / "versions" / selected / "constructed").is_file()
+        assert (root / "versions" / selected / ".venv" / "constructed").is_file()
 
 
 @pytest.mark.parametrize("plugin", PLUGINS)

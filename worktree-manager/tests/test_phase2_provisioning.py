@@ -83,6 +83,26 @@ def test_python_prerequisite_requires_a_successful_supported_version(
     assert PrereqStatus("fixture-tool", present=True, min_required="1.0").satisfied
 
 
+@pytest.mark.parametrize(
+    "returncode,output,satisfied",
+    [(0, "unknown version", False), (1, "PowerShell 7.4.0", False),
+     (0, "PowerShell 6.2.7", False), (0, "PowerShell 7.4.0", True)],
+)
+def test_pwsh_prerequisite_requires_a_successful_supported_version(
+    monkeypatch, returncode, output, satisfied,
+):
+    import subprocess
+
+    from worktree_manager import prereqs
+
+    monkeypatch.setattr(prereqs, "_which", lambda name: ("pwsh", "selected-pwsh"))
+    monkeypatch.setattr(
+        prereqs.subprocess, "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args, returncode, output, ""),
+    )
+    assert detect_prereq(Prereq("pwsh", min="7.0")).satisfied is satisfied
+
+
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("process")
 def test_python_prerequisite_probes_the_exact_discovered_executable(monkeypatch):
@@ -167,6 +187,100 @@ def test_detect_baseline_covers_catalog():
     statuses = detect_baseline()
     names = {s.name for s in statuses}
     assert {"git", "python3", "uv"} <= names
+
+
+@pytest.mark.parametrize("os_", ["windows", "macos", "linux"])
+@pytest.mark.parametrize("pwsh_present", [False, True])
+def test_setup_requires_pwsh_only_for_the_windows_core(
+    monkeypatch, capsys, os_, pwsh_present,
+):
+    from worktree_manager import prereqs, provision, setup_cli as cli
+    from worktree_manager.core_install import CoreInstallResult, CoreStatus
+
+    monkeypatch.setattr(prereqs, "current_os", lambda: os_)
+    monkeypatch.setattr(provision, "current_os", lambda: os_)
+    monkeypatch.setattr(
+        prereqs, "_which",
+        lambda name: (name, None if name == "pwsh" and not pwsh_present else f"fixture-{name}"),
+    )
+    monkeypatch.setattr(prereqs, "_probe_version", lambda path: "99.0")
+    monkeypatch.setattr(
+        provision.subprocess, "run",
+        lambda *a, **k: pytest.fail("system-package guidance must not execute an installer"),
+    )
+    monkeypatch.setattr(
+        cli, "core_status",
+        lambda: CoreStatus("installed", True, True, None, "fixture-core"),
+    )
+    monkeypatch.setattr(cli, "install_command", lambda: ["fixture-native-installer"])
+    calls = []
+
+    def install(**kwargs):
+        calls.append("core")
+        return CoreInstallResult(None, False, reason="already-installed")
+
+    def repository(args):
+        calls.append("repository")
+        return 0
+
+    monkeypatch.setattr(cli, "install_core", install)
+    monkeypatch.setattr(cli.repository_bootstrap, "run", repository)
+    blocked = os_ == "windows" and not pwsh_present
+    assert main(["setup", "--apply", "--repository", "https://example.invalid/repo"]) == (
+        1 if blocked else 0
+    )
+    assert calls == ([] if blocked else ["core", "repository"])
+    output = capsys.readouterr().out
+    if blocked:
+        assert "prerequisites still needed: pwsh" in output
+        assert "Microsoft.PowerShell" in output
+        assert "fresh terminal" in output
+        assert "core installation was not attempted" in output
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("process")
+def test_native_setup_missing_pwsh_stops_before_installers_and_repository(tmp_path):
+    import os
+    import subprocess
+    import sys
+
+    from agent_procutil import no_window_kwargs
+
+    entered = tmp_path / "owner-entered"
+    driver = """
+import dataclasses,pathlib,sys
+from worktree_manager import prereqs,provision,setup_cli as cli
+from worktree_manager.core_install import CoreStatus
+catalog = prereqs.load_catalog()
+selected = tuple(p for p in catalog.baseline_prereqs if p.name == 'pwsh')
+assert selected, 'Windows core host must be declared in the real catalog'
+prereqs.load_catalog = lambda: dataclasses.replace(catalog, baseline_prereqs=selected)
+prereqs.current_os = lambda: 'windows'
+provision.current_os = lambda: 'windows'
+def forbidden(*args, **kwargs):
+    pathlib.Path(sys.argv[1]).touch()
+    raise AssertionError('missing host reached an installer or repository')
+provision.subprocess.run = forbidden
+cli.install_core = forbidden
+cli.repository_bootstrap.run = forbidden
+cli.core_status = lambda: CoreStatus('absent', False, False, None, 'fixture-core')
+raise SystemExit(cli.cmd_setup(['--apply', '--repository', 'https://example.invalid/repo'], banner='Fixture'))
+"""
+    environment = {
+        **os.environ, "PATH": str(tmp_path), "AGENT_HOME": str(tmp_path),
+        "USERPROFILE": str(tmp_path), "HOME": str(tmp_path),
+    }
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    result = subprocess.run(
+        [sys.executable, "-c", driver, str(entered)], cwd=tmp_path, env=environment,
+        capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "prerequisites still needed: pwsh" in result.stdout
+    assert "Microsoft.PowerShell" in result.stdout
+    assert not entered.exists()
 
 
 def test_missing_filters_unsatisfied():

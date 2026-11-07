@@ -1932,6 +1932,57 @@ Ordinary callers retain their existing relative-limit API.
 pure registry-value comparison. The containment module re-exports its public
 environment API in both package and standalone import modes; the registry
 reader, refusal errors and native Job lifecycle remain in the original owner.
+Preparation resolves UV configuration before redirecting user directories,
+using the dependency owner's configuration reader, precedence merge and private
+snapshot writer. Existing UV credential inputs remain available without
+restoring host service roots or changing feed admission policy.
+Preparation additionally requires the **selected UV executable** to support
+`uv auth dir`. The preparation owner uses the dependency owner's executable
+and environment qualification to capture one UTF-8 absolute
+authentication-directory path before home isolation; an explicit
+`UV_CREDENTIALS_DIR` must be absolute and agree with that metadata.
+The read-only metadata operation receives only authentication-location and
+native execution inputs, not host service/installation participants or ambient
+GitHub tokens. It has a 20-second owned bound including a five-second cleanup
+reserve, with 32 KiB stdout and 16 KiB stderr ceilings. Unconfirmed cleanup
+retains its native custody and preparation sandbox. Unsupported, missing,
+malformed or failed metadata refuses **before installation**, with an actionable
+selected-tool requirement; it never guesses UV defaults or retries authlessly.
+Select compatible UV in the invocation's existing tooling context or correct
+the explicit directory input. No OS/user tool upgrade is automatic, and this
+is a test-preparation capability contract, not a global installer version floor.
+
+Only UV preparation receives the captured location through `UV_CREDENTIALS_DIR`;
+capture never reads or copies credential contents. Actor environments reset
+that variable to their own private directory, including host-state opt-ins.
+An independently qualified private fixture may supply its own synthetic
+authentication input after isolation. Configured resolver/keyring settings
+remain within the existing dependency owner, but external keyring state is
+**unqualified**: this does not claim to restore file-backed or native keyring
+contexts. The opt-in
+`COPILOT_EXTENSIONS_UV_AUTH_QUALIFICATION=1` control in
+`tools/test_preparation_auth_context.py` uses only an offline synthetic store;
+its selected-UV result is independent native qualification, not promotion-unit
+actor admission.
+The same preparation boundary retains the qualified **netrc location**, not its
+contents. UV's [documented rule](https://docs.astral.sh/uv/concepts/authentication/http/#netrc-files)
+is explicit `NETRC`, otherwise `~/.netrc`; the existing native-feed owner uses
+original `HOME` on POSIX and `USERPROFILE` on Windows for that home. Preparation
+requires an absolute explicit `NETRC` or absolute original home, and refuses
+unqualified locations rather than guessing an OS fallback. A missing file is
+not manufactured or populated. Actors always receive a private `NETRC` file
+location, including Windows case aliases and host-state opt-ins. The opt-in
+netrc fixture uses only an owned loopback index, synthetic credentials and
+selected UV resolution without installation or external network access; it
+checks default/explicit preparation success and actor refusal.
+Windows Job teardown reuses procutil's pinned-member native-exit barrier.
+Zero active-process accounting alone does not prove that native exit or pending
+I/O has completed. Unconfirmed retirement retains the same Job witnesses on
+`UnreapedProcessError.job`; it cannot publish successful settlement flags.
+An expired whole bound still requests termination of that exact owned Job,
+without starting another verification interval or claiming settlement.
+Unavailable preliminary accounting remains unclean, but cannot skip the exact
+owned cleanup attempt within the same original bound.
 
 The qualified stage publishes source/scope/origin-bound work-completion evidence
 only after actual candidate and worker exits within the original work cutoff.

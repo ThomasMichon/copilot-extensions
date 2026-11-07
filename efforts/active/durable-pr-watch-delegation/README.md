@@ -993,6 +993,21 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-11-06 - Review original prepared-intent binding before its data extension
+
+- #11203 actually merged as `93d33164b35f5ce7f34928ecad959c3e1330c7f5`
+  after exact-head Copilot approval with no open issues and the latest required
+  CI green. The source worktree reconciled through its normal completion path.
+- The refinement names the missing structured admission fact separately from
+  opaque-body preservation. It retains actual preparation before approval,
+  immutable original GUIDs/bytes/source, strict owner/receiver compatibility
+  and original native receipts without upgrading tags into actor/version,
+  handled or feedback-echo proof.
+- Re-read the parent Plan/Validation and begin the finite existing-owner data
+  admission leaf. Executing producer/receiver composition, native correlation,
+  other surfaces/providers and installed qualification remain open; review
+  of the contract does not implement or activate them.
+
 ### 2026-11-06 - Qualify explicit prepared-body consumption before admission changes
 
 - #11197 actually merged as `106bebee5ce46eb290ffb4cc28c8821c5ab77564`

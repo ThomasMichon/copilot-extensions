@@ -600,6 +600,9 @@ def test_real_group_processes_release_readonly_files_before_cleanup(
 def test_explicit_reinstall_invalidates_uv_cached_path_dependency_wheels(
     tmp_path, monkeypatch, reinstall, cached,
 ):
+    import plugin_test_environment as preparation
+    monkeypatch.setattr(preparation, "capture_preparation_auth",
+                        lambda *args, **kwargs: {"UV_CREDENTIALS_DIR": str(tmp_path / "fixture-auth")})
     plugin = tmp_path / "plugin"
     plugin.mkdir()
     monkeypatch.setattr(runner, "_plugin_dir", lambda _name: plugin)
@@ -623,6 +626,12 @@ def test_explicit_reinstall_invalidates_uv_cached_path_dependency_wheels(
         return subprocess.CompletedProcess(command, 0)
 
     def install(uv, arguments, **kwargs):
+        environment = kwargs.pop("env")
+        private = Path(environment["COPILOT_EXTENSIONS_TEST_SANDBOX"])
+        for key in ("HOME", "USERPROFILE", "APPDATA", "XDG_CONFIG_HOME"):
+            assert Path(environment[key]).is_relative_to(private)
+        assert environment["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
+        assert "COPILOT_EXTENSIONS_CONTEXT" not in environment
         assert kwargs == {
             "cwd": plugin, "trusted_source_roots": (runner.REPO,), "check": True,
             "retained_resource_roots": (),
@@ -655,6 +664,9 @@ def selectable_tests(tmp_path, monkeypatch):
     ("agent-dispatch", "service-gateway"), ("agent-ssh", ""),
 ])
 def test_preparation_selects_same_checkout_fleet_dependency(tmp_path, monkeypatch, name, extra):
+    import plugin_test_environment as preparation
+    monkeypatch.setattr(preparation, "capture_preparation_auth",
+                        lambda *args, **kwargs: {"UV_CREDENTIALS_DIR": str(tmp_path / "fixture-auth")})
     monkeypatch.setattr(runner, "REPO", tmp_path)
     monkeypatch.setattr(runner, "VENV_ROOT", tmp_path / "venvs")
     plugin = tmp_path / "plugins" / name
@@ -729,6 +741,13 @@ def test_dispatch_preparation_fingerprints_same_checkout_replay_dependency(tmp_p
 def test_manager_bridge_is_prepared_only_by_the_test_runner(
     tmp_path, monkeypatch, bridge_fails, cached_editable,
 ):
+    import plugin_test_environment as preparation
+    monkeypatch.setattr(preparation, "capture_preparation_auth",
+                        lambda *args, **kwargs: {"UV_CREDENTIALS_DIR": str(tmp_path / "fixture-auth")})
+    for key in ("HOME", "USERPROFILE", "APPDATA", "XDG_CONFIG_HOME", "AGENT_BRIDGE_CONFIG_DIR"):
+        monkeypatch.setenv(key, str(tmp_path / "host-state"))
+    for key in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE"):
+        monkeypatch.setenv(key, "fixture-host-participant")
     manager = tmp_path / "worktree-manager"
     manager.mkdir()
     (manager / "pyproject.toml").write_text(
@@ -777,6 +796,15 @@ def test_manager_bridge_is_prepared_only_by_the_test_runner(
     assert manager_options["non_editable"] is True
     assert manager_options["cwd"] == manager
     arguments, options = calls[1]
+    for installation in (manager_options, options):
+        environment = installation["env"]
+        private = Path(environment["COPILOT_EXTENSIONS_TEST_SANDBOX"])
+        for key in ("HOME", "USERPROFILE", "APPDATA", "XDG_CONFIG_HOME", "AGENT_BRIDGE_CONFIG_DIR"):
+            assert Path(environment[key]).is_relative_to(private)
+        assert environment["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
+        assert "COPILOT_EXTENSIONS_CONTEXT" not in environment
+        assert "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE" not in environment
+    assert options["env"] == manager_options["env"]
     assert arguments[arguments.index(str(bridge)) - 1] == "-e"
     assert "non_editable" not in options
     assert options["cwd"] == bridge and options["trusted_source_roots"] == (tmp_path,)
@@ -937,6 +965,12 @@ def test_manager_explicit_native_selection_remains_available():
     assert runner._test_file_groups("worktree-manager", 25, test_files=files) == [
         [root / value for value in files],
     ]
+    files = tuple(sorted(
+        path.relative_to(root).as_posix() for path in (root / "tests" / "native").glob("test_*.py")
+    ))
+    groups = runner._test_file_groups("worktree-manager", 25, test_files=files)
+    assert all(0 < len(group) <= 25 for group in groups)
+    assert [path for group in groups for path in group] == [root / value for value in files]
 
 
 @pytest.fixture
@@ -1878,6 +1912,12 @@ def test_worker_launch_uses_canonical_headlessness(monkeypatch, tmp_path):
 
 @pytest.mark.parametrize("has_project", [False, True])
 def test_fresh_preparation_attributes_repository_sources(monkeypatch, tmp_path, has_project):
+    import agent_procutil.owned_process as owned_process
+    import plugin_test_environment as preparation
+    monkeypatch.setattr(owned_process, "run_caller_owned",
+                        lambda *args, **kwargs: pytest.fail("pure preparation test attempted native execution"))
+    monkeypatch.setattr(preparation, "capture_preparation_auth",
+                        lambda *args, **kwargs: {"UV_CREDENTIALS_DIR": str(tmp_path / "fixture-auth")})
     plugin = tmp_path / "plugins" / "example"
     plugin.mkdir(parents=True)
     if has_project:
