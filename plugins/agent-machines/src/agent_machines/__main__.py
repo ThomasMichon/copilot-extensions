@@ -358,16 +358,24 @@ def _cmd_installer_readiness(args: argparse.Namespace) -> int:
 def _cmd_installation_repair(args: argparse.Namespace) -> int:
     from .installation_repair import repair
     from .installation_repair_admission import RepairAdmissionError
+    from .installation_repair_process import caller_owned_readiness
 
     try:
-        result = repair(
-            args.project_root, modules=args.module, apply=args.apply,
-            required=args.required,
-            expected_plan_digest=args.expected_plan_digest,
-            readiness_timeout=args.readiness_timeout, installer_timeout=args.installer_timeout,
-            confirm_restart=args.confirm_restart,
-        )
-    except RepairAdmissionError as error:
+        enclosing = getattr(args, "caller_owned_readiness", False)
+        if enclosing and (
+            not args.required or args.apply or args.confirm_restart or args.expected_plan_digest
+        ):
+            raise RepairAdmissionError("caller-owned readiness requires read-only required selection")
+        with caller_owned_readiness(enclosing):
+            result = repair(
+                args.project_root, modules=args.module, apply=args.apply,
+                required=args.required,
+                expected_plan_digest=args.expected_plan_digest,
+                readiness_timeout=args.readiness_timeout, installer_timeout=args.installer_timeout,
+                confirm_restart=args.confirm_restart,
+            )
+        result["callerOwnedReadiness"] = enclosing
+    except (RepairAdmissionError, ValueError) as error:
         print(f"agent-machines: {error}", file=sys.stderr)
         return 1
     print(json.dumps(result, sort_keys=True))
@@ -853,6 +861,10 @@ def _build_parser() -> argparse.ArgumentParser:
         help="select every required enabled owner module and its prerequisites",
     )
     installation_repair.add_argument("--apply", action="store_true")
+    installation_repair.add_argument(
+        "--caller-owned-readiness", action="store_true",
+        help="read required modules inside the explicit caller's native containment",
+    )
     installation_repair.add_argument("--expected-plan-digest")
     installation_repair.add_argument(
         "--confirm-restart", metavar="PENDING_DIGEST",

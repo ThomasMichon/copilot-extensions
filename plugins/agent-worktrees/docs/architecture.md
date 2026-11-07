@@ -1,5 +1,47 @@
 # Agent Worktrees -- Architecture
 
+## Required-application New admission
+
+An opted-in repository's `require_application_readiness` extends the existing
+native New preflight after knowledge coordination readiness, before allocation
+and initial structured-request admission. Creation-time rechecking precedes the
+started marker, preserving retained request/allocation identity through refusal.
+Source-only allocation, existing-session and recovery paths remain unchanged.
+
+For repositories with a native tool profile, admission uses the profile owner's
+same prospective settings projection read-only. The anchor must already expose
+that roster before Machines observes applications. A changed projection or
+profile input refuses; native project registration remains the settings writer.
+The checked input travels in the internal launch preflight through New's later
+tool staging and projection refresh, which reject drift before settings writes.
+An absent profile is also retained without introducing a registry/Git scan.
+
+After New prepares the actual checkout, a second owner observation checks that
+checkout's effective required roster before constructing a launch plan, retaining
+the original checked profile input. This covers differences introduced by the
+selected Git tree, local settings or paired preparation, including deferred
+instruction projection. Refusal preserves the allocated worktree and existing
+recovery protocol rather than allocating another New identity. Each observation
+has its own bounded selection/read/cleanup budget; allocation and preparation
+are not claimed to fit inside either observation's deadline.
+Unconfirmed native cleanup is not an ordinary recoverable preparation refusal:
+the original `OwnedCleanupError` escapes with its process/Job custody and retry
+operation intact, annotated with the already-allocated worktree identity.
+
+`application_admission` selects the existing Machines owner through validated
+same-cell peer launch with retained build identity or the legacy owner's exact
+completed interpreter. It reads support from that selected runtime, then
+consumes only the existing read-only required-module conductor result for the
+exact source repository. Caller-owned timeout/stream/cleanup bounds apply;
+unavailable, malformed, incomplete or changed observations refuse. No payload
+version or PATH command certifies support, and no repair or authentication
+operation runs. The [configuration contract](config-reference.md#required-applications-before-new-authoring)
+owns adoption, rollback and remediation; Machines retains inventory, module
+classification, readiness and restart truth. The capability-qualified
+caller-owned read keeps POSIX probes in the enclosing native group rather than
+separate sessions; the outer owner settles that complete lifetime before return.
+Standalone Machines observation and explicit repair retain their existing owners.
+
 ## Related/config acquisition reports
 
 The existing value APIs retain their signatures, return shapes and fallback

@@ -164,6 +164,8 @@ def test_installation_repair_required_selects_only_required_closure(repair_fixtu
     home, project, _, configure, identity = repair_fixture
     configure(classification="optional", dependencies=("agent-example/base",) if dependency else ())
     result = repair_api.repair(project, home=home, required=True)
+    assert result["projectRoot"] == str(project.resolve())
+    assert result["requiredSelection"] is True
     expected = ["child"] if not dependency else ["base", "child"]
     assert result["selected"] == [identity + "::agent-example/" + name for name in expected]
     assert result["status"] == "observed" and not result["requiredSatisfied"]
@@ -1221,6 +1223,96 @@ def test_installation_repair_process_timeout(tmp_path):
     assert result.exit_code is not None
 
 
+def test_caller_owned_readiness_borrows_verified_posix_group_without_detaching(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from agent_machines import installation_repair_process as process_api
+
+    monkeypatch.setattr(process_api, "os", SimpleNamespace(
+        name="posix", getppid=lambda: 100, getpgrp=lambda: 100, getsid=lambda pid: 100,
+    ))
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(kwargs)
+        assert kwargs["borrow_parent_scope"] is True and kwargs["binary"] is True
+        return subprocess.CompletedProcess(argv, 0, b"observed", b"")
+
+    monkeypatch.setattr(process_api, "run_caller_owned", run)
+    monkeypatch.setattr(process_api, "spawn_sync_in_kill_on_close_job", lambda *a, **k: pytest.fail("new group"))
+    with process_api.caller_owned_readiness(True):
+        result = process_api.run_action(
+            ["probe"], cwd=tmp_path, environment={}, timeout=1, readonly=True,
+        )
+    assert result.stdout == b"observed" and len(calls) == 1
+    assert not process_api._termination.caller_owned_readiness
+
+
+def test_caller_owned_readiness_refuses_a_foreign_group_before_probes(monkeypatch):
+    from types import SimpleNamespace
+    from agent_machines import installation_repair_process as process_api
+
+    monkeypatch.setattr(process_api, "os", SimpleNamespace(
+        name="posix", getppid=lambda: 100, getpgrp=lambda: 200, getsid=lambda pid: 200,
+    ))
+    with pytest.raises(ValueError, match="enclosing parent's native group"):
+        with process_api.caller_owned_readiness(True):
+            pytest.fail("unowned scope admitted")
+
+
+@pytest.mark.parametrize("extra", [
+    ["--apply"], ["--expected-plan-digest", "unselected"], ["--confirm-restart", "unselected"],
+])
+def test_caller_owned_readiness_never_admits_repair_or_restart_effects(monkeypatch, extra):
+    from agent_machines.__main__ import main
+
+    monkeypatch.setattr(repair_api, "repair", lambda *a, **k: pytest.fail("effectful selection"))
+    assert main(["installation-repair", "--required", "--caller-owned-readiness", *extra]) == 1
+
+
+@pytest.mark.timeout(30)
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.contract("agent_machines.caller_owned_required_readiness")
+def test_outer_required_read_timeout_reaps_nested_probe(repair_fixture):
+    import shlex
+    from agent_procutil.owned_process import run_caller_owned
+
+    home, project, payload, _, _ = repair_fixture
+    marker = home / "nested-probes.json"
+    helper = payload / "scripts" / "held-probe.py"
+    helper.write_text(
+        "import json,os,subprocess,sys,time\nfrom pathlib import Path\n"
+        "from agent_procutil import no_window_kwargs\n"
+        "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'],"
+        "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,"
+        "**no_window_kwargs())\n"
+        f"Path({str(marker)!r}).write_text(json.dumps([os.getpid(),child.pid]))\n"
+        "time.sleep(60)\n", encoding="utf-8",
+    )
+    if os.name == "nt":
+        (payload / "scripts" / "action.ps1").write_text(
+            f"& '{sys.executable.replace(chr(39), chr(39) * 2)}' "
+            f"'{str(helper).replace(chr(39), chr(39) * 2)}'\nexit $LASTEXITCODE\n",
+            encoding="utf-8",
+        )
+    else:
+        (payload / "scripts" / "action.sh").write_text(
+            f"#!/usr/bin/env bash\nexec {shlex.quote(sys.executable)} {shlex.quote(str(helper))}\n",
+            encoding="utf-8",
+        )
+    environment = ordinary_environment(os.environ, home=home, payload=payload)
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_caller_owned(
+            [sys.executable, "-m", "agent_machines", "installation-repair",
+             "--project-root", str(project), "--required", "--caller-owned-readiness"],
+            cwd=project, env=environment, timeout=10,
+            max_stdout_bytes=65536, max_stderr_bytes=65536,
+        )
+    assert marker.is_file(), "the aggregate timeout must exercise an already-running probe"
+    for pid in json.loads(marker.read_text()):
+        _assert_process_stopped(pid, timeout=0)
+
+
 def test_installation_repair_process_cancellation_reaps_started_process(tmp_path, monkeypatch):
     from agent_machines import installation_repair_process as process_api
 
@@ -1267,8 +1359,11 @@ def test_installation_repair_process_reaps_inherited_pipe_descendant(tmp_path):
     )
     assert marker.is_file()
     assert result.status == "timeout"
-    pid = int(marker.read_text())
-    deadline = time.monotonic() + 5
+    _assert_process_stopped(int(marker.read_text()))
+
+
+def _assert_process_stopped(pid, *, timeout=5):
+    deadline = time.monotonic() + timeout
     while True:
         if os.name == "nt":
             import ctypes

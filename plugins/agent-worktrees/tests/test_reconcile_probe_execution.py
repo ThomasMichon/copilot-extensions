@@ -60,6 +60,27 @@ def test_probe_uses_isolated_current_python_without_native_shell(tmp_path, monke
     assert calls[0][-2:] == ["--context", str(context)]
 
 
+def test_selected_probe_retains_the_callers_aggregate_execution_budget(tmp_path, monkeypatch):
+    from agent_procutil.owned_process import OwnedExecutionBudget
+    from agent_worktrees import installation_probe
+
+    budget = OwnedExecutionBudget.from_timeout(60, cleanup_reserve=5)
+    calls = []
+
+    def owned(command, **kwargs):
+        calls.append(kwargs)
+        assert kwargs["budget"] is budget and kwargs["timeout"] == 15
+        return subprocess.CompletedProcess(command, 0, '{"allowMutation":true}', "")
+
+    monkeypatch.setattr(installation_probe, "run_caller_owned", owned)
+    monkeypatch.setattr(installation_probe.subprocess, "run", lambda *a, **k: pytest.fail("unbudgeted probe"))
+    result = reconcile._run_installation_mode_helper(
+        "agent-machines", tmp_path, tmp_path / "installation_context.py",
+        tmp_path / "legacy", context=None, budget=budget,
+    )
+    assert result == {"allowMutation": True} and len(calls) == 1
+
+
 def test_prelaunch_omits_only_foreign_pr_overlays(tmp_path, monkeypatch):
     from types import SimpleNamespace
 

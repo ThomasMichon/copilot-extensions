@@ -262,6 +262,29 @@ before applying its digest. Older runtimes reject the unknown option; retain
 that unsupported outcome without retrying a weaker selection. Payload versions
 alone do not establish receiver support. No existing form is deprecated.
 
+The installed distribution's `agent_machines/installation-repair-v1.json`
+declares version-1 required selection, read-only observation and project-root
+identity. Qualify this descriptor from the exact selected runtime, not an
+available payload. Ordinary results add `projectRoot` (the resolved selected
+repository path) and `requiredSelection` (a boolean). Consumers requiring that
+selection must check both, `apply: false`, `requiredSatisfied`, interruption,
+selection refusal, outcomes and pending restarts; exit zero alone is not ready.
+Existing explicit-module callers may ignore the additive fields. No old syntax
+or result meaning is removed, and an older runtime without the declaration is
+unsupported for a caller requiring these semantics, not an empty requirement.
+
+An enclosing finite caller can select `--required --caller-owned-readiness`
+only after the selected runtime declares `caller_owned_readiness: 1`. This
+read-only form acknowledges `callerOwnedReadiness: true` and refuses apply,
+plan-digest and restart-confirmation combinations. On POSIX it requires the
+caller's direct native parent/session group, and readiness probes borrow that
+scope instead of detaching into separate sessions; the enclosing owner must
+settle the complete group before returning. Windows retains nested Job
+containment. Ordinary standalone reads and explicit repair keep their prior
+ownership. This mode is not install authority or permission to borrow an
+unowned scope. An old runtime lacking support is incompatible; do not retry
+without containment.
+
 Review the returned closure and `planDigest`, then apply that exact selection:
 
 ```text
