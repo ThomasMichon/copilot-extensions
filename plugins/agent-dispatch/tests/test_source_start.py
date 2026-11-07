@@ -697,6 +697,87 @@ def test_behavior_identity_excludes_credentials(tmp_path):
     )
 
 
+@pytest.mark.parametrize("incumbent_base", ["runtime", "caller"])
+def test_relative_database_matches_the_coordinator_working_directory(
+    tmp_path, monkeypatch, incumbent_base,
+):
+    from agent_dispatch import coordinator_observation, source_start
+    from agent_dispatch.config import Config
+    from zdd import diagnostics, routing
+
+    runtime = tmp_path / "runtime"
+    caller = tmp_path / "caller"
+    runtime.mkdir()
+    caller.mkdir()
+    routes = tmp_path / "routes"
+    cfg = Config(host="127.0.0.1", db_path=str(Path("data") / "tasks.db"))
+    pid = os.getpid()
+    birth = diagnostics.process_start_time(pid)
+    assert birth
+    routing.publish_active(
+        routes, bind="127.0.0.1", port=43123, pid=pid,
+        version=source_start.__version__, process_start_time=birth,
+    )
+    active = routing.read_table(routes, strict=True)["active"]
+    monkeypatch.chdir(runtime if incumbent_base == "runtime" else caller)
+    incumbent_identity = source_start.config_identity(cfg)
+    monkeypatch.chdir(caller)
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(runtime))
+    health = {
+        "status": "ok", "version": source_start.__version__,
+        "runtime_config_identity": incumbent_identity,
+        "runtime_behavior_identity_v1": source_start.behavior_identity(cfg),
+        "data_auth_required": False, "data_token_match_v1": False,
+        "slot": {"pid": pid, "process_start_time": birth, "role": "active", "active": active},
+    }
+
+    class Client:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def health(self):
+            return health
+
+    monkeypatch.setattr(coordinator_observation, "_local_client", Client)
+
+    def observe():
+        return coordinator_observation.observe(
+            cfg, routes, run_dir=tmp_path / "run", token=None, environment={},
+        )
+
+    def reconcile():
+        return source_start.run_coordinator(
+            cfg, routes, token=None, spawn_passive=lambda _port: pytest.fail("unexpected spawn"),
+            pick_free_port=lambda: 43124, timeout=1.0, verify_selected=lambda: None,
+            start_if_missing=False, confirm_inactive=lambda _table: True,
+        )
+
+    if incumbent_base == "runtime":
+        assert observe() == {"state": "ready", "generation": source_start.__version__}
+        assert reconcile()["status"] == "reused"
+    else:
+        with pytest.raises(coordinator_observation.ServingObservationError):
+            observe()
+        with pytest.raises(RuntimeError, match="effective configuration"):
+            reconcile()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows drive-relative paths")
+def test_drive_relative_database_cannot_be_bound_to_a_service_directory(tmp_path):
+    from agent_dispatch import source_start
+    from agent_dispatch.config import Config
+
+    cfg = Config(db_path=tmp_path.drive + "queue.db")
+    with pytest.raises(ValueError, match="drive-relative"):
+        source_start.config_identity(cfg, base_dir=tmp_path)
+
+
 @pytest.mark.parametrize(("behavior", "expected"), [
     ("missing", "transitioned"), ("different", "transitioned"), ("matching", "reused"),
 ])

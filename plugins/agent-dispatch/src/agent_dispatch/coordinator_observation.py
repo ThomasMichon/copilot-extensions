@@ -16,6 +16,7 @@ from types import SimpleNamespace
 from zdd import breadcrumb, routing
 
 from . import rendezvous
+from .install_paths import install_dir
 from .source_start import _route_owner_state, accept_readiness, behavior_identity, config_identity
 
 SCHEMA = "agent-dispatch.coordinator-serving-observation"
@@ -156,7 +157,7 @@ def observe(
             not isinstance(slot, dict) or slot.get("active") != raw
             or not accept_readiness(
                 health, handle=handle, version=endpoint.version,
-                config_identity=config_identity(cfg), active=True,
+                config_identity=config_identity(cfg, base_dir=install_dir()), active=True,
                 expected_behavior=behavior_identity(cfg) if require_behavior else None,
                 expected_data_auth=(token is not None) if require_behavior else None,
             )

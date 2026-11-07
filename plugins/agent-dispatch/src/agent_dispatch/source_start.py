@@ -86,10 +86,15 @@ def require_selected_generation() -> Path:
     return _require_selected_facts(facts, owner="Coordinator")
 
 
-def config_identity(cfg) -> str:
+def config_identity(cfg, *, base_dir: Path | None = None) -> str:
     # Authentication is exercised by the probe, not serialized into health.
+    database = Path(cfg.db_path).expanduser()
+    if base_dir is not None and not database.is_absolute():
+        if database.drive:
+            raise ValueError("drive-relative coordinator database is ambiguous")
+        database = Path(base_dir).expanduser().resolve() / database
     selected = {
-        "database": str(Path(cfg.db_path).expanduser().resolve()),
+        "database": str(database.resolve()),
         "host": cfg.host,
         "pool_publication": cfg.pool_publication_enabled,
     }
@@ -190,7 +195,7 @@ def run_coordinator(
         from .coordinator_observation import _loopback
 
         _loopback(old.client_host)
-    identity = config_identity(cfg)
+    identity = config_identity(cfg, base_dir=install_dir())
     behavior = behavior_identity(cfg) if not start_if_missing else None
     handles = {}
 

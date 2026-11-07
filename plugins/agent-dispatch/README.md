@@ -214,9 +214,12 @@ reports a verified local serving generation, an evidenced inactive state, or
 an explicit unknown result. Observation checks routed process liveness and
 birth, effective configuration and route identity. The version-1 behavior
 fingerprint covers sweep cadence, orphan grace and handoff-fallback settings
-without including credentials. An incumbent lacking or differing in that
-fingerprint is not reused, even when its code generation matches; a verified
-owner can instead be transitioned to the selected configuration. Health reports
+without including credentials. A relative database path is compared against
+the coordinator's installed working directory, not the invoking shell; an
+incumbent using a different database is not admitted. An incumbent lacking or
+differing in the fingerprint is not reused, even when its code generation
+matches; a verified owner can instead be transitioned to the selected
+configuration. Health reports
 whether data authentication is required and whether the request matched the
 actual data token, without exposing credentials. When a token is configured,
 an unauthenticated health request must also be rejected. An older owner without
