@@ -1483,3 +1483,42 @@ hosted result remains valid for its original source only. This reconciled
 closure still requires fresh hosted controls, canonical writer, independent
 same-source reproduction, contract verification and receipt-bound artifact
 return before refreshing #11016 for review and required CI.
+
+### 2026-11-07 - Reconciled 270-case hosted packet accepted
+
+Exact source `312c243959b8f1ed6181839336d37b4aab1d3ee2` passes the five
+focused lookup/log controls in hosted
+[run 42338419548](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42338419548).
+The complete packet, request `c0a2f2d751ed445f81437a338ed355fe`, then qualifies
+in [run 42338550494](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42338550494),
+attempt 1, artifact `13561445297`, protected controller
+`de36510694d459d212e0d1854e3f5e975969d634`.
+The result client validates the original request, source, selection,
+controller, Windows platform and run/attempt binding. Result-manifest SHA-256:
+`26a72ac28835a2fd12a21a11715c04abf95e682e67424a651436f14c502d788b`.
+
+The canonical writer passes both real-owner controls in 50.51 seconds and all
+268 protocol/CLI controls in 115.82 seconds. Runner-inclusive durations are
+88.14 and 126.11 seconds. Independent same-source no-write reproduction passes
+the same complete portfolio in 48.85 and 122.42 seconds, with runner-inclusive
+durations of 80.36 and 133.64 seconds. No skips, stitched selections, local
+prewarming or enlarged limits are used. The existing per-capture aggregate,
+group, item, native-parent, observer and execution-closure requirements pass.
+
+The separate contract verifier accepts 2 contracts and 1,054 fixtures.
+All worker phases complete at 553.828 seconds: canonical capture at 272.313,
+independent reproduction at 533.672, contract verification at 547.969 and
+export at 553.688. The disposable hosted image is Windows Server 2025 AMD64,
+`win25-vs2026` / `20261103.298.1`, Python 3.12.10.
+The source-owned materializer verifies export-manifest SHA-256
+`ecafd077bb39c195e64480aeae30120321b162a261f9383c98a0734124ed4780`,
+the actual export receipt, exact source and all input preimages before
+publishing all 143 outputs. Earlier qualified sources and failed requests
+remain retained under their own identities.
+
+Refreshed installation, library synchronization, documentation, headless
+launch, daemon census, changefile, effort-structure and changed-Python F/E9
+checks pass. This remains source qualification, not productive-session or
+fleet deployment. Refresh #11016's evidence, review and exact-head CI next;
+the complete parent acceptance matrix and the conditional peer-unblock
+notification remain owned by this effort.
