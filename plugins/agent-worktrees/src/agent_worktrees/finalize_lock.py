@@ -1,7 +1,7 @@
 """Mechanical extraction of finalization locking helpers from ``finalize.py``.
 
-The lifecycle implementation is shared. Structured-output callers may supply
-a stale-warning sink without redirecting process-global output streams.
+This sibling module exists only to control ``finalize.py`` module size. The
+``FinalizeLock`` implementation was moved verbatim with no behavioral changes.
 """
 
 from __future__ import annotations
@@ -11,7 +11,6 @@ import sys
 import time
 import uuid
 from pathlib import Path
-from typing import Callable
 
 from . import locks, output, tracking
 
@@ -25,12 +24,10 @@ class FinalizeLock:
         timeout: float = 120,
         *,
         stale_after: float | None = None,
-        on_stale: Callable[[str], None] | None = None,
     ) -> None:
         self.lock_path = lock_path
         self.timeout = timeout
         self.stale_after = timeout if stale_after is None else stale_after
-        self.on_stale = output.warn if on_stale is None else on_stale
         self.owner_pid = os.getpid()
         self.owner_start_time = locks.process_start_time(self.owner_pid) or ""
         self.token = (
@@ -112,7 +109,7 @@ class FinalizeLock:
                                 raise TimeoutError("Timed out waiting for finalization lock.")
                             # Retain the guard across stale proof and exclusive claim.
                             self._claim()
-                            self.on_stale(
+                            output.warn(
                                 f"Stale lock detected (age: {int(age)}s) -- breaking."
                             )
                             return

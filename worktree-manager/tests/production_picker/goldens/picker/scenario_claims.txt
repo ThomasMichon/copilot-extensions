@@ -1,9 +1,8 @@
 <<TOPBAR>>
   WORKTREES                                                                                           ⚙ Configuration
 ───────────────────────────────────────────────────────── ▲ ──────────────────────────────────────────────────────────
- Machine  Ctrl ◀▶                                                             ● 0 active · 1 unfinished · 0 completed
+ Machine  Ctrl ◀▶                                                                      ● 0 active · 1 recent · 0 done
     All     anomalous-potato Win ✓
-  f Status: all  g Group: Active/Recent  s Sort: used  / Search
 
    + New worktree…     ✕ Clean     ⟳ Sync     creates on anomalous-potato Win  (this host)
 
@@ -15,7 +14,8 @@
   ── Recent ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 ☐ c001   WIP        3h     3h     -            -s 8t   ⚠ #4821
       Add the retry budget
-
+  ── Completed ───────────────────────────────────────────────────────────────────────────────────────────────────────
+    (none)
 
 
 

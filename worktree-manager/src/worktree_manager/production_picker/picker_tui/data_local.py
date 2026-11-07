@@ -275,21 +275,11 @@ def _merge_reconcile_row(
 ) -> None:
     if not isinstance(reconcile_row, dict):
         return
-    preserve_mux = (
-        preserve_mux or bool(reconcile_row.get("mux_observation_unavailable"))
-        or not all(field in reconcile_row for field in _GROUP_C_MUX_FIELDS)
-    )
-    raw["mux_observation_unavailable"] = preserve_mux
-    if not preserve_mux:
-        provenance = raw.get("fact_provenance")
-        if isinstance(provenance, dict):
-            raw["fact_provenance"] = {key: value for key, value in provenance.items() if key != "mux"}
-        raw.pop("mux_last_known", None)
     for field in _GROUP_C_FIELDS:
-        if preserve_mux and field in _GROUP_C_MUX_FIELDS:
-            continue
-        elif field in reconcile_row:
+        if field in reconcile_row:
             raw[field] = reconcile_row[field]
+        elif preserve_mux and field in _GROUP_C_MUX_FIELDS:
+            continue
         else:
             raw.pop(field, None)
 

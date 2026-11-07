@@ -30,15 +30,6 @@ string equality, rendering, formatting, JSON and SQLite representation on every
 supported interpreter. Python 3.11+ uses native `enum.StrEnum`; Python 3.10 uses
 a private string/enum base without adding a dependency or changing stored states.
 
-Windows source-validation and construction helpers require a usable Python
-3.11+, independently of the runtime package's 3.10 floor. The installer retains
-native admission's executable, or qualifies all PATH applications, launcher
-registrations/version selectors and standard Python installation roots, skipping
-WindowsApps aliases and unsupported candidates. Runtime, server and engine venv
-fallbacks carry the selected base explicitly, including `uv --python`; signed
-runtime-base preference is unchanged. No compatible helper interpreter is an
-explicit failure, not permission to modify global PATH or install Python.
-
 ## What ships today
 
 - **Runtime service**: FastAPI service on loopback with an OS-assigned port,

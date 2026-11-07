@@ -24,10 +24,6 @@ _REPLY_FIELDS = {
 _TRANSIENT_ERRORS = {"disconnected", "unavailable", "unready", "draining", "superseded"}
 _TEMPORARY_CLOSURES = _TRANSIENT_ERRORS - {"superseded"}
 CONTRACT_VERSIONS = (1, 2)
-GRAPH_CAPABILITY = "worktree-agendas-graph-v1"
-GRAPH_VERSIONS = (1,)
-_GRAPH_FRAME_STATES = {"active", "deferred", "closed", "idle"}
-_GRAPH_ITEM_STATES = {"done", "queued", "running", "replanning", "waiting", "closed"}
 
 
 class AgendaUnavailable(ValueError):
@@ -113,11 +109,8 @@ def validate_snapshot(
     if len(json.dumps(observation, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) + 1 > MAX_BODY_BYTES:
         raise ValueError("agenda observation exceeds its body bound")
     source, snapshot = observation.get("source"), observation.get("snapshot")
-    fields = {"schema", "version", "source", "revision", "committed_at", "snapshot"}
-    if "graph" in observation and observation.get("version") == 2 and contract_version == 2:
-        fields.add("graph")
     if (
-        set(observation) != fields
+        set(observation) != {"schema", "version", "source", "revision", "committed_at", "snapshot"}
         or
         observation.get("schema") != "efforts.agenda-observation"
         or type(observation.get("version")) is not int or observation["version"] not in (1, 2)
@@ -160,87 +153,6 @@ def validate_snapshot(
     for field in ("next_action", "next_revisit_at"):
         if snapshot[field] is not None and not isinstance(snapshot[field], str):
             raise ValueError(f"agenda snapshot has invalid {field}")
-    if "graph" in observation:
-        validate_graph(observation["graph"], observation["revision"])
-
-
-def _graph_text(value, *, optional: bool = False) -> bool:
-    return (optional and value is None) or (isinstance(value, str) and bool(value))
-
-
-def _graph_member(value, known) -> bool:
-    # Only strings can name a state or reference; containers must not reach hash lookups.
-    return isinstance(value, str) and value in known
-
-
-def validate_graph(value, revision: int) -> None:
-    """Admit the optional display graph: frame tree, item queues, stack, cursor, history."""
-    if not isinstance(value, dict) or set(value) != {
-        "version", "revision", "cursor", "frames", "items", "history", "omitted",
-    }:
-        raise ValueError("agenda graph has invalid fields")
-    if type(value["version"]) is not int or value["version"] not in GRAPH_VERSIONS:
-        raise ValueError("agenda graph has an unsupported version")
-    if type(value["revision"]) is not int or value["revision"] != revision:
-        raise ValueError("agenda graph revision disagrees with its observation")
-    frames, items, history = value["frames"], value["items"], value["history"]
-    if not all(isinstance(entry, list) for entry in (frames, items, history)):
-        raise ValueError("agenda graph has invalid collections")
-    known: set[str] = set()
-    for frame in frames:
-        if (
-            not isinstance(frame, dict)
-            or set(frame) != {"id", "parent", "via", "state", "label", "returns"}
-            or not _graph_text(frame["id"]) or frame["id"] in known
-            or not _graph_text(frame["label"]) or not _graph_member(frame["state"], _GRAPH_FRAME_STATES)
-            or (frame["parent"] is None) != (frame["via"] is None)
-            or (frame["parent"] is None) != (frame["returns"] is None)
-            or (frame["parent"] is not None and (
-                not _graph_member(frame["parent"], known) or not _graph_text(frame["via"])
-                or not _graph_text(frame["returns"])
-            ))
-        ):
-            raise ValueError("agenda graph has an invalid or out-of-order frame")
-        known.add(frame["id"])
-    seen: dict[str, str] = {}
-    for item in items:
-        if (
-            not isinstance(item, dict)
-            or set(item) != {"id", "frame", "label", "state", "attempts"}
-            or not _graph_text(item["id"]) or item["id"] in seen or not _graph_member(item["frame"], known)
-            or not _graph_text(item["label"]) or not _graph_member(item["state"], _GRAPH_ITEM_STATES)
-            or type(item["attempts"]) is not int or not 0 <= item["attempts"] <= MAX_INTEGER
-        ):
-            raise ValueError("agenda graph has an invalid, duplicated or orphaned item")
-        seen[item["id"]] = item["frame"]
-    cursor = value["cursor"]
-    if not isinstance(cursor, dict) or set(cursor) != {"frame", "item", "stack"}:
-        raise ValueError("agenda graph has an invalid cursor")
-    stack = cursor["stack"]
-    if (
-        not isinstance(stack, list) or any(not _graph_member(frame, known) for frame in stack)
-        or (cursor["frame"] is None) != (not stack)
-        or (stack and cursor["frame"] != stack[-1])
-        or (cursor["item"] is not None and (
-            not _graph_member(cursor["item"], seen) or seen[cursor["item"]] != cursor["frame"]
-        ))
-    ):
-        raise ValueError("agenda graph cursor is not the top of a known stack")
-    for entry in history:
-        if (
-            not isinstance(entry, dict) or set(entry) != {"at", "kind", "frame", "item", "text"}
-            or not _utc(entry["at"]) or not _graph_text(entry["kind"])
-            or not _graph_text(entry["text"])
-            or not _graph_text(entry["frame"], optional=True)
-            or not _graph_text(entry["item"], optional=True)
-        ):
-            raise ValueError("agenda graph has an invalid history entry")
-    omitted = value["omitted"]
-    if (
-        not isinstance(omitted, dict) or set(omitted) != {"frames", "items", "history"}
-        or any(type(count) is not int or not 0 <= count <= MAX_INTEGER for count in omitted.values())
-    ):
-        raise ValueError("agenda graph has invalid omission counts")
 
 
 class AgendaPublicationFence:
@@ -254,26 +166,15 @@ class AgendaPublicationFence:
     def _content(value: dict) -> str:
         return json.dumps(value, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":"))
 
-    @staticmethod
-    def _identity(observation: dict | None) -> dict | None:
-        # The display graph is negotiated per connection and may be added or dropped
-        # for the same committed revision (upgrade or rollback); it never splits one.
-        if observation is None:
-            return None
-        return {key: value for key, value in observation.items() if key != "graph"}
-
-    def _frame_identity(self, frame: dict) -> str:
-        fields = {key: value for key, value in frame.items() if key not in {"type", "contract_version"}}
-        fields["observation"] = self._identity(fields.get("observation"))
-        return self._content(fields)
-
     def admit(self, frame: dict) -> None:
         if self.last is not None and frame["generation"] == self.last["generation"]:
             if frame["sequence"] < self.last["sequence"]:
                 raise ValueError("agenda reconnect regressed its resident sequence")
-            if frame["sequence"] == self.last["sequence"] and (
-                self._frame_identity(frame) != self._frame_identity(self.last)
-            ):
+            if frame["sequence"] == self.last["sequence"] and self._content(
+                {key: value for key, value in frame.items() if key not in {"type", "contract_version"}}
+            ) != self._content({
+                key: value for key, value in self.last.items() if key not in {"type", "contract_version"}
+            }):
                 raise ValueError("agenda publication changed without advancing its resident sequence")
         observation = frame["observation"]
         if observation is not None and self.observed is not None:
@@ -281,8 +182,7 @@ class AgendaPublicationFence:
                 raise ValueError("agenda source store changed for the selected head")
             if observation["revision"] < self.observed["revision"] or (
                 observation["revision"] == self.observed["revision"]
-                and self._content(self._identity(observation))
-                != self._content(self._identity(self.observed))
+                and self._content(observation) != self._content(self.observed)
             ):
                 raise ValueError("agenda observation regressed or rewrote its store revision")
         # Commit both fences only after all checks; null availability never

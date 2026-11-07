@@ -123,13 +123,7 @@ def _cmd_diagnose(args: argparse.Namespace) -> int:
     import asyncio
 
     from .diagnose import diagnose
-    from .incoming import AdmissionRefused, require_selected
 
-    try:
-        require_selected()
-    except AdmissionRefused as exc:
-        print(f"agent-mcp diagnose: {exc}", file=sys.stderr)
-        return 1
     printer = (lambda _line: None) if args.json else print
     report = asyncio.run(
         diagnose(args.name, list_tools=not args.no_tools, printer=printer)
@@ -390,14 +384,12 @@ def _emit_call_output(text: str, structured: object | None, is_error: bool,
 
 
 async def _run_call(cfg, tool: str, arguments: dict) -> int:
-    from .incoming import require_selected
     from .client import (
         OneShotSession,
         result_is_error,
         result_structured,
         result_text,
     )
-    require_selected()
     async with OneShotSession(cfg) as sess:
         result = await sess.call_tool(tool, arguments)
     return _emit_call_output(result_text(result), result_structured(result),
@@ -412,7 +404,7 @@ def _try_serve_call(bridge_ref: str, tool: str, arguments: dict,
     real upstream/config error), or ``None`` when the daemon is unavailable so
     the caller falls back to the stateless one-shot cold path.
     """
-    from . import incoming, ipc
+    from . import ipc
     socket = None if no_serve else ipc.serve_socket_if_available()
     if socket is None:
         return None
@@ -428,9 +420,6 @@ def _try_serve_call(bridge_ref: str, tool: str, arguments: dict,
     import asyncio
     try:
         resp = asyncio.run(ipc.call_via_socket(socket, ref, tool, arguments))
-    except (incoming.AdmissionRefused, incoming.OutcomeUnknown) as exc:
-        print(f"agent-mcp call: {exc}", file=sys.stderr)
-        return 1
     except OSError:
         return None  # socket vanished/refused -> fall back to cold path
     if not resp.get("ok"):
@@ -443,7 +432,6 @@ def _try_serve_call(bridge_ref: str, tool: str, arguments: dict,
 def _cmd_call(args: argparse.Namespace) -> int:
     from .client import UpstreamError
     from .config import ConfigError, load_config
-    from .incoming import AdmissionRefused
     try:
         if args.stub:
             if not args.manifest:
@@ -480,7 +468,7 @@ def _cmd_call(args: argparse.Namespace) -> int:
     import asyncio
     try:
         return asyncio.run(_run_call(cfg, tool, arguments))
-    except (UpstreamError, AdmissionRefused) as exc:
+    except UpstreamError as exc:
         print(f"agent-mcp call: {exc}", file=sys.stderr)
         return 1
 
@@ -491,9 +479,6 @@ def _cmd_call(args: argparse.Namespace) -> int:
 
 async def _run_materialize(cfg) -> list[dict]:
     from .client import OneShotSession
-    from .incoming import require_selected
-
-    require_selected()
     async with OneShotSession(cfg) as sess:
         return await sess.list_tools()
 
@@ -537,9 +522,6 @@ def _try_serve_materialize(bridge_ref: str, *, no_serve: bool) -> list[dict] | N
     try:
         resp = asyncio.run(ipc.list_tools_via_socket(socket, ref))
     except OSError:
-        from .incoming import require_selected
-
-        require_selected()
         return None  # socket vanished/refused -> fall back to cold path
     if not isinstance(resp, dict) or not resp.get("ok"):
         # A malformed/skewed daemon could return non-dict JSON in principle;
@@ -563,7 +545,6 @@ def _cmd_materialize(args: argparse.Namespace) -> int:
     from . import materialize as _materialize
     from .client import UpstreamError
     from .config import ConfigError, load_config
-    from .incoming import AdmissionRefused
     try:
         cfg = load_config(args.name)
     except ConfigError as exc:
@@ -574,15 +555,11 @@ def _cmd_materialize(args: argparse.Namespace) -> int:
     # redundant fresh upstream process -- it opens/reuses the bridge's warm
     # session as needed, not only when one already exists. Falls through to
     # the cold spawn when no daemon is reachable or it reports an error.
-    try:
-        tools = _try_serve_materialize(args.name, no_serve=args.no_serve)
-    except AdmissionRefused as exc:
-        print(f"agent-mcp materialize: {exc}", file=sys.stderr)
-        return 1
+    tools = _try_serve_materialize(args.name, no_serve=args.no_serve)
     if tools is None:
         try:
             tools = asyncio.run(_run_materialize(cfg))
-        except (UpstreamError, AdmissionRefused) as exc:
+        except UpstreamError as exc:
             print(f"agent-mcp materialize: {exc}", file=sys.stderr)
             return 1
 

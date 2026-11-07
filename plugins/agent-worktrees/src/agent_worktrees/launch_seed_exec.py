@@ -10,7 +10,6 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path, PureWindowsPath
-from uuid import uuid4
 
 from agent_procutil import no_window_kwargs
 
@@ -62,18 +61,13 @@ def deferred_command(
     environment: dict[str, str] | None = None,
     mux: bool = False,
 ) -> list[str]:
-    native = None
-    if admission_only and prepare_native and native_resume_session is None:
-        native = _headed_admission_command(
-            command, record_path, preserve_seed_id=preserve_seed_id, correlation=correlation,
-            environment=environment, mux=mux,
-        )
-    if native is None and prepare_native:
-        native = _native_setup_command(
-            command, record_path, seed_id=seed_id, admission_only=admission_only,
-            preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
-            correlation=correlation, environment=environment, mux=mux,
-        )
+    native = _native_setup_command(
+        command, record_path, seed_id=seed_id, admission_only=admission_only,
+        preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
+        correlation=correlation,
+        environment=environment,
+        mux=mux,
+    ) if prepare_native else None
     if native is not None:
         if os.name == "posix" and (environment or {}).get("BASH_ENV") == "":
             utility = shutil.which("env", path=os.defpath)
@@ -96,56 +90,6 @@ def deferred_command(
     if correlation:
         prefix += correlation.options()
     return [*prefix, "--", *command]
-
-
-def _posix_environment_allows_native(environment: dict[str, str] | None, mux: bool) -> bool:
-    if mux and "BASH_ENV" not in (environment or {}):
-        return False
-    return not (environment or {}).get("BASH_ENV", os.environ.get("BASH_ENV"))
-
-
-def _headed_admission_command(
-    command: list[str], record_path: Path, *, preserve_seed_id: str | None,
-    correlation: launch_execution.Correlation | None,
-    environment: dict[str, str] | None = None, mux: bool = False,
-) -> list[str] | None:
-    from . import session_shell
-    from .manager_launch_cli import _worktree_manager_root
-
-    if os.name == "nt" and os.environ.get("AGENT_WORKTREES_FINALIZE_STARTUP_MANIFEST") != "1":
-        return None
-    if os.name == "posix" and not _posix_environment_allows_native(environment, mux):
-        return None
-    index = _script_index(command)
-    if index is None:
-        return None
-    wrapper = Path(command[index])
-    canonical = installer.install_dir() / "scripts" / (
-        "launch-command.ps1" if os.name == "nt" else "launch-command.sh"
-    )
-    delimiter = _wrapper_delimiter(command, index)
-    if wrapper.resolve() != canonical.resolve() or delimiter is None:
-        return None
-    if os.name == "nt" and (
-        index != 4 or {arg.casefold() for arg in command[1:3]} != {"-noprofile", "-nologo"}
-        or session_shell.STARTUP_MANIFEST_MARKER not in wrapper.read_text(
-            encoding="utf-8-sig",
-        ).splitlines()
-    ):
-        return None
-    inner = command[delimiter + 1:]
-    if _headed_session(inner) is None:
-        return None
-    prepared = session_shell.prepare(
-        record_path.absolute(), wrapper.absolute(),
-        installation_roots=(installer.install_dir().absolute(), _worktree_manager_root().absolute()),
-        attempt_id=correlation.attempt_id if correlation else None,
-    )
-    native = deferred_command(
-        inner, record_path, admission_only=True, preserve_seed_id=preserve_seed_id,
-        correlation=correlation, prepare_native=False,
-    )
-    return [*command[:index], str(prepared.wrapper), *command[index + 1:delimiter + 1], *native]
 
 
 def native_setup_index(command: list[str]) -> int | None:
@@ -235,7 +179,9 @@ def _native_setup_command(
     if posix and not copy_only:
         from .launch_seed_contract import supports_posix_setup
 
-        if not _posix_environment_allows_native(environment, mux):
+        if mux and "BASH_ENV" not in (environment or {}):
+            return None
+        if (environment or {}).get("BASH_ENV", os.environ.get("BASH_ENV")):
             return None
         try:
             for value in (str(record_path), *command):
@@ -251,9 +197,8 @@ def _native_setup_command(
                 VALUE_OPTIONS | SETUP_VALUE_OPTIONS | {"-C", "--execution-directory"}
             )
             option += 2 if takes_value else 1
-        if not supports_posix_setup(
-            installer.install_dir(), **({"admission_only": True} if admission_only else {}),
-        ):
+        # Finite native setup cannot retain the admission-only owner's fence.
+        if admission_only or not supports_posix_setup(installer.install_dir()):
             return None
     elif not copy_only:
         from .manager_launch_cli import _usable_worktree_manager_launcher_dir
@@ -449,8 +394,6 @@ def launch(
     native_resume_session: str | None = None,
     correlation: launch_execution.Correlation | None = None,
 ) -> int:
-    if (invoke or admission_only) and _headed_session(command) is not None and correlation is None:
-        correlation = launch_execution.Correlation(uuid4().hex, uuid4().hex)
     def work(execution=None):
         return _admitted_launch(
             record_path, command, invoke=invoke, seed_id=seed_id, admission_only=admission_only,
@@ -458,85 +401,6 @@ def launch(
             execution=execution,
         )
     return launch_execution.run(record_path, correlation, work) if correlation else work()
-
-
-def _headed_session(command: list[str]) -> str | None:
-    if not command or Path(command[0]).name.lower() not in {"copilot", "copilot.exe"}:
-        return None
-    selected = []
-    index = 1
-    while index < len(command):
-        name, separator, value = command[index].partition("=")
-        if name == "--":
-            break
-        if name in {
-            "--acp", "--stdio", "-p", "--prompt", "--connect", "--ahp", "--continue",
-            "--environment-host", "--environment-compute-id", "--help", "-h", "--version", "-v",
-        }:
-            return None
-        if name in {"--session-id", "--resume"}:
-            if not separator:
-                index += 1
-                if index == len(command) or command[index].startswith("-"):
-                    return None
-                value = command[index]
-            selected.append(value)
-        elif not separator and name in VALUE_OPTIONS:
-            index += 1
-        index += 1
-    return selected[0] if len(selected) == 1 and selected[0] else None
-
-
-def _launch_headed(
-    record_path: Path, prepared: PreparedLaunch, execution: launch_execution.Execution,
-    session_id: str, *, admission_only: bool = False, preserve_seed_id: str | None = None,
-) -> int:
-    from agent_remote_driver.headed.caller import execute
-    from . import launch_seed_native
-
-    subject = execution.subject
-    correlation = launch_execution.Correlation(
-        subject["attempt_id"], subject["resolution_id"], subject["parent_id"],
-    )
-
-    def admit() -> None:
-        launch_seed_native.admit(record_path, correlation, subject["operation_id"])
-
-    def spawned(pid: int, birth: str) -> None:
-        launch_seed_native.spawned(
-            record_path, correlation, subject["operation_id"],
-            pid=pid, process_start_time=birth,
-        )
-
-    attempt = record_path.parent / "launch-attempts" / subject["attempt_id"] / subject["operation_id"]
-    try:
-        def run(check):
-            return execute(
-                prepared.argv, session_id=session_id, attempt_directory=attempt,
-                state_file=attempt / "headed.json", cwd=os.getcwd(),
-                environment=prepared.environment or os.environ.copy(),
-                admit=check, spawned=spawned, interactive=_interactive_console(),
-            )
-        if admission_only:
-            with launch_seed_native.admission(
-                record_path, correlation, subject["operation_id"], admission_only=True,
-                preserve_seed_id=preserve_seed_id, require_cold_stop=False,
-            ) as check:
-                code, certain = run(check)
-        else:
-            code, certain = run(admit)
-    except OSError as exc:
-        restored = launch_seed_state.restore(record_path, prepared.receipt) if prepared.receipt else None
-        print(f"Could not start headed coordinator: {exc}; seed restoration: {restored}", file=sys.stderr)
-        return 3
-    execution.process_exit_code = code
-    execution.failed = execution.failed or not certain
-    if not certain:
-        print(
-            "Headed native receipt is unconfirmed; the original handoff was not replayed or restored.",
-            file=sys.stderr,
-        )
-    return code if code or certain else 3
 
 
 def _admitted_launch(
@@ -549,7 +413,7 @@ def _admitted_launch(
         preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
     ):
         return 3
-    if admission_only and (native_resume_session is not None or _headed_session(command) is None):
+    if admission_only:
         with launch_admission.guard(record_path):
             return _launch(
                 record_path, command, invoke=invoke, seed_id=seed_id, admission_only=True,
@@ -557,11 +421,7 @@ def _admitted_launch(
                 native_resume_session=native_resume_session,
                 execution=execution,
             )
-    return _launch(
-        record_path, command, invoke=invoke, seed_id=seed_id, admission_only=admission_only,
-        preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
-        execution=execution,
-    )
+    return _launch(record_path, command, invoke=invoke, seed_id=seed_id, execution=execution)
 
 
 def _valid_request(
@@ -708,16 +568,6 @@ def _launch(
     )
     if isinstance(prepared, int):
         return prepared
-    headed_session = _headed_session(prepared.argv) if (
-        invoke or admission_only and native_resume_session is None
-    ) else None
-    if headed_session is not None:
-        if execution is None:
-            raise ValueError("Headed execution requires the original launch attempt")
-        return _launch_headed(
-            record_path, prepared, execution, headed_session,
-            admission_only=admission_only, preserve_seed_id=preserve_seed_id,
-        )
     argv, receipt, child_environment = prepared.argv, prepared.receipt, prepared.environment
     try:
         if os.name != "nt" and not invoke and not admission_only and execution is None:

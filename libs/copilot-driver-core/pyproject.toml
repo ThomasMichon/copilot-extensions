@@ -13,7 +13,6 @@ dependencies = [
     "agent-procutil",
     "agent-repository-policy",
     "agent-zdd",
-    "agent-single-instance-lease",
     "websockets>=15,<16",
 ]
 
@@ -24,13 +23,9 @@ exclude-newer = "7 days"
 agent-procutil = { path = "../agent-procutil", editable = true }
 agent-repository-policy = { path = "../repository-policy", editable = true }
 agent-zdd = { path = "../zdd", editable = true }
-agent-single-instance-lease = { path = "../single-instance-lease", editable = true }
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.setuptools.package-data]
-"agent_remote_driver.headed" = ["*.mjs"]
 
 [tool.ruff]
 target-version = "py310"

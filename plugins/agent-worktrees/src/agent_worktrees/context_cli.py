@@ -353,11 +353,6 @@ def cmd_get(args: argparse.Namespace) -> int:
             session_cwd = None
             _core_helper("_activate_project_for_path", status_updater_cli._activate_project_for_path)(None)
 
-    if key == "checkout-relocation":
-        from .checkout_relocation import capabilities
-
-        print(json.dumps(capabilities()))
-        return 0
     if key == "execution-identity":
         from .execution_identity_read import cmd_get_execution_identity
 

@@ -296,16 +296,22 @@ def apply_status_options(entry: dict, values: dict) -> bool:
     return all_ok
 
 
-def _mux_session_alive(mux_bin: str, session: str) -> bool | None:
-    """Keep unknown presence separate from a confirmed missing legacy target."""
-    return mux_discovery.legacy_session_presence(
-        mux_bin, session, lambda: run_mux_child(
+def _mux_session_alive(mux_bin: str, session: str) -> bool:
+    """Bounded, best-effort probe of whether ``session`` genuinely still
+    exists on the real mux server (``has-session``, supported by both tmux
+    and psmux). Never raises; a probe failure reads as "not alive" -- the
+    safe direction, since the caller's only use of this is to avoid writing
+    into a session that may no longer exist."""
+    try:
+        result = run_mux_child(
             [mux_bin, "has-session", "-t", session],
             capture_output=True,
             timeout=5,
             **no_window_kwargs(),
-        ),
-    )
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
 
 
 def status_push_key(payload: dict) -> str:
@@ -495,12 +501,10 @@ def build_compute(
             # same probe forever.
             # Discovered mappings already passed the identity-aware enumeration;
             # only legacy mappings still need the name-only liveness probe.
-            if not entry.get("native_session_incarnation"):
-                present = _mux_session_alive(entry["mux_bin"], entry["mux_session"])
-                if present is False:
-                    return mux_discovery.retire_missing_mapping(registry, entry)
-                if present is None:
-                    return {"applied": False, "reason": "enumeration-unavailable"}
+            if not entry.get("native_session_incarnation") and not _mux_session_alive(
+                entry["mux_bin"], entry["mux_session"],
+            ):
+                return mux_discovery.retire_missing_mapping(registry, entry)
 
             # Recheck immediately before the actual write (Copilot review
             # finding): a concurrent CLI register/remove could still have

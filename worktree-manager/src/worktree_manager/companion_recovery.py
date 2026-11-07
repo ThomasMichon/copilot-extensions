@@ -31,8 +31,6 @@ class CompanionData:
     agenda: dict | None = None
     agenda_error: str | None = "not-loaded"
     agenda_pending: bool = False
-    engine_command: list[str] | None = None
-    """The exact runtime whose status bundle declared optional contracts."""
 
 
 def load_current_worktree(cwd: str | None = None, *, runner=None) -> CompanionData:
@@ -53,11 +51,6 @@ def load_current_worktree(cwd: str | None = None, *, runner=None) -> CompanionDa
             engine_command = ec.engine_base_command()
             if engine_command is None:
                 raise ec.EngineError("The selected engine is unavailable.")
-        except ec.EngineError as exc:
-            data.sessions_error = data.bundle_error = str(exc)
-            engine_command = None
-    if worktree_id and engine_command is not None:
-        try:
             snapshot = ec.list_worktree_session_snapshot(
                 None, worktree_id, runner=runner, engine_command=engine_command
             )
@@ -75,9 +68,7 @@ def load_current_worktree(cwd: str | None = None, *, runner=None) -> CompanionDa
         except ec.EngineError as exc:
             data.sessions_error = str(exc)
         try:
-            data.bundle = cc.worktree_status_bundle(
-                None, worktree_id, runner=runner, engine_command=engine_command)
-            data.engine_command = list(engine_command)
+            data.bundle = cc.worktree_status_bundle(None, worktree_id, runner=runner)
         except ec.EngineError as exc:
             data.bundle_error = str(exc)
     worktree_path = payload.get("path")

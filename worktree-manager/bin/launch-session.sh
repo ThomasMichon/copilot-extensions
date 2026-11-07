@@ -388,77 +388,6 @@ resolve_runtime_python() {
     printf '%s\n' "$AW_PY"
 }
 
-_aw_mux_core() {
-    local mode="$1"
-    shift
-    local -a command=("$PYTHON" -I -X utf8 -c '
-import json, sys
-from pathlib import Path
-try:
-    from agent_procutil.owned_process import run_caller_owned
-except ImportError:
-    raise SystemExit(4 if sys.argv[1] == "select" else 3)
-
-def unique(pairs):
-    value = {}
-    for key, item in pairs:
-        if key in value:
-            raise ValueError("Duplicate mux reply property")
-        value[key] = item
-    return value
-
-try:
-    if sys.argv[1] == "select":
-        reply = run_caller_owned(
-            [sys.executable, "-I", "-X", "utf8", "-m", "agent_remote_driver.mux_creation", "--describe-contract"],
-            timeout=10, max_stdout_bytes=65536, max_stderr_bytes=4096,
-        )
-        if reply.returncode != 0:
-            raise SystemExit(4)
-        core = json.loads(reply.stdout, object_pairs_hook=unique)
-        if (
-            not isinstance(core, dict) or core.get("contract") != "copilot-driver.mux-creation"
-            or type(core.get("version")) is not int or core["version"] != 1
-            or not isinstance(core.get("operations"), list)
-            or "posix-tmux-create-or-join" not in core["operations"]
-        ):
-            raise SystemExit(4)
-        for name in ("python", "entrypoint"):
-            path = Path(core[name])
-            if not path.is_absolute() or not path.is_file():
-                raise ValueError("Selected mux runtime is unavailable")
-        print(json.dumps(core))
-    elif sys.argv[1] == "create":
-        core = json.loads(sys.argv[2], object_pairs_hook=unique)
-        request = {"version": 1, "binary": sys.argv[3], "session": sys.argv[4], "argv": sys.argv[5:]}
-        reply = run_caller_owned(
-            [core["python"], "-I", "-X", "utf8", core["entrypoint"], "--create"],
-            input_text=json.dumps(request), timeout=40, max_stdout_bytes=65536, max_stderr_bytes=4096,
-        )
-        result = json.loads(reply.stdout, object_pairs_hook=unique)
-        if (
-            not isinstance(result, dict) or set(result) != {"contract", "version", "status"}
-            or result["contract"] != "copilot-driver.mux-creation"
-            or type(result["version"]) is not int or result["version"] != 1
-            or result["status"] not in ("created", "joined", "rejected", "unknown")
-            or (reply.returncode == 0) != (result["status"] in ("created", "joined"))
-        ):
-            raise ValueError("Mux result is unconfirmed")
-        print(result["status"])
-        raise SystemExit(reply.returncode)
-    else:
-        raise ValueError("Unknown mux operation")
-except Exception:
-    raise SystemExit(3)
-' "$mode" "$@")
-    if [[ "${_AHP_RESUME_AVAILABLE:-0}" == 1 ]]; then
-        env -u GH_TOKEN -u GITHUB_TOKEN -u AGENT_WORKTREES_AHP_AUTH_TOKEN \
-            -u COPILOT_CLI_ENABLED_FEATURE_FLAGS "${command[@]}"
-    else
-        "${command[@]}"
-    fi
-}
-
 # Runs a best-effort `agent_worktrees` preflight subcommand (knowledge
 # composition, marketplace overrides, ...) with retry-and-reresolve.
 #
@@ -1069,35 +998,15 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
     fi
 
     if [[ "$_AHP_RESUME_AVAILABLE" == "1" ]]; then
-        if ! _VALUE_OPTIONS=$("$PYTHON" -c '
-from agent_worktrees.native_arguments import VALUE_OPTIONS, SETUP_VALUE_OPTIONS
-print("|" + "|".join(sorted(VALUE_OPTIONS | SETUP_VALUE_OPTIONS | {"-C", "--execution-directory"})) + "|")
-'); then
-            setup_log ERROR "Could not load native argument boundaries for the AHP binding."
-            exit 3
-        fi
         _FILTERED_CMD=()
         _SKIP_NEXT=0
-        _KEEP_NEXT=0
         _HAS_EXPERIMENTAL=0
-        for _ARG_INDEX in "${!CMD_ARRAY[@]}"; do
-            _ARG="${CMD_ARRAY[$_ARG_INDEX]}"
-            if [[ "$_KEEP_NEXT" == "1" ]]; then
-                _FILTERED_CMD+=("$_ARG")
-                _KEEP_NEXT=0
-                continue
-            fi
+        for _ARG in "${CMD_ARRAY[@]}"; do
             if [[ "$_SKIP_NEXT" == "1" ]]; then
                 _SKIP_NEXT=0
                 continue
             fi
             case "$_ARG" in
-                --resume)
-                    _NEXT_ARG="${CMD_ARRAY[$((_ARG_INDEX + 1))]:-}"
-                    if [[ $((_ARG_INDEX + 1)) -lt ${#CMD_ARRAY[@]} && "$_NEXT_ARG" != -* ]]; then
-                        _SKIP_NEXT=1
-                    fi
-                    ;;
                 --ahp)
                     _SKIP_NEXT=1
                     ;;
@@ -1109,9 +1018,6 @@ print("|" + "|".join(sorted(VALUE_OPTIONS | SETUP_VALUE_OPTIONS | {"-C", "--exec
                     ;;
                 *)
                     _FILTERED_CMD+=("$_ARG")
-                    if [[ "$_VALUE_OPTIONS" == *"|$_ARG|"* ]]; then
-                        _KEEP_NEXT=1
-                    fi
                     ;;
             esac
         done
@@ -1184,15 +1090,6 @@ print("|" + "|".join(sorted(VALUE_OPTIONS | SETUP_VALUE_OPTIONS | {"-C", "--exec
             activity_log mux_failed "$WORKTREE_ID" mux=tmux reason=not_found exit_code=1
             echo "ERROR: tmux is required for interactive sessions but was not found. Use --no-mux to request a direct session explicitly." >&2
             exit 1
-        fi
-        AW_MUX_CORE=""
-        AW_MUX_CORE_SELECTION=0
-        AW_MUX_CORE="$(_aw_mux_core select)" || AW_MUX_CORE_SELECTION=$?
-        if [[ "$AW_MUX_CORE_SELECTION" == 4 ]]; then
-            AW_MUX_CORE=""
-        elif [[ "$AW_MUX_CORE_SELECTION" != 0 ]]; then
-            setup_log ERROR "Selected mux core support is unconfirmed; no creation attempted"
-            exit 3
         fi
 
         # tmux/psmux parse `.` in a target spec as the `window.pane` separator,
@@ -1298,7 +1195,7 @@ print("|" + "|".join(sorted(VALUE_OPTIONS | SETUP_VALUE_OPTIONS | {"-C", "--exec
 
         # If a tmux session already exists for this worktree, join it.
         # The attacher gets the shared view; no post-exit responsibility.
-        _aw_join_existing_tmux() {
+        if tmux has-session -t "=$TMUX_SESS" 2>/dev/null; then
             aw_assert_cold_resume live-known
             echo "Joining existing session: $TMUX_SESS"
             activity_log mux_attached "$WORKTREE_ID" mux=join
@@ -1320,9 +1217,6 @@ print("|" + "|".join(sorted(VALUE_OPTIONS | SETUP_VALUE_OPTIONS | {"-C", "--exec
                 echo "ERROR: Failed to attach to existing tmux session '$TMUX_SESS' (exit code $TMUX_ATTACH_EXIT)." >&2
             fi
             exit "$TMUX_ATTACH_EXIT"
-        }
-        if tmux has-session -t "=$TMUX_SESS" 2>/dev/null; then
-            _aw_join_existing_tmux
         fi
 
         # Create a new tmux session for this worktree.
@@ -1396,7 +1290,6 @@ print("|" + "|".join(sorted(VALUE_OPTIONS | SETUP_VALUE_OPTIONS | {"-C", "--exec
             [[ -r "$PANE_WRAPPER" ]] || exit 3
         fi
         AHP_TOKEN_FILE=""
-        TMUX_CREATION_UNCERTAIN=0
         if [[ "$_AHP_RESUME_AVAILABLE" == "1" ]]; then
             if [[ ! -r "$PANE_WRAPPER" ]]; then
                 setup_log ERROR "AHP tmux launch requires the pane wrapper at $PANE_WRAPPER"
@@ -1416,10 +1309,8 @@ print("|" + "|".join(sorted(VALUE_OPTIONS | SETUP_VALUE_OPTIONS | {"-C", "--exec
                 exit 3
             fi
             trap '
-                if [[ "${TMUX_CREATION_UNCERTAIN:-0}" != 1 ]]; then
-                    [[ -z "${AHP_TOKEN_FILE:-}" ]] || rm -f -- "$AHP_TOKEN_FILE"
-                    [[ -z "${AHP_TOKEN_DIR:-}" ]] || rmdir "$AHP_TOKEN_DIR" 2>/dev/null || true
-                fi
+                [[ -z "${AHP_TOKEN_FILE:-}" ]] || rm -f -- "$AHP_TOKEN_FILE"
+                [[ -z "${AHP_TOKEN_DIR:-}" ]] || rmdir "$AHP_TOKEN_DIR" 2>/dev/null || true
             ' EXIT
         fi
         if [[ -r "$PANE_WRAPPER" ]]; then
@@ -1461,28 +1352,6 @@ print("|" + "|".join(sorted(VALUE_OPTIONS | SETUP_VALUE_OPTIONS | {"-C", "--exec
         for _copilot_arg in "${COPILOT_PASSTHROUGH[@]+"${COPILOT_PASSTHROUGH[@]}"}"; do
             [[ "$_copilot_arg" == "--stdio" ]] && TMUX_RETRY_PROMPT=0
         done
-        if [[ -n "$AW_MUX_CORE" ]]; then
-            aw_assert_cold_resume
-            TMUX_CREATE_TOTAL_ATTEMPTS=1
-            TMUX_RETRY_CYCLE=0
-            TMUX_CREATION_UNCERTAIN=1
-            TMUX_CORE_STATUS="$(_aw_mux_core create "$AW_MUX_CORE" "$(type -P tmux)" "$TMUX_SESS" \
-                new-session -d -s "$TMUX_SESS" -c "${WORK_DIR:-.}" \
-                "${TMUX_ENV_FLAGS[@]+"${TMUX_ENV_FLAGS[@]}"}" "${PANE_CMD[@]}")"
-            TMUX_CREATE_EXIT=$?
-            if [[ "$TMUX_CREATE_EXIT" == 0 ]]; then
-                TMUX_CREATION_UNCERTAIN=0
-                if [[ "$TMUX_CORE_STATUS" == joined ]]; then
-                    if [[ -n "$AHP_TOKEN_FILE" ]]; then
-                        rm -f -- "$AHP_TOKEN_FILE"
-                        rmdir "$AHP_TOKEN_DIR" 2>/dev/null || true
-                    fi
-                    _aw_join_existing_tmux
-                fi
-            elif [[ "$TMUX_CORE_STATUS" == rejected ]]; then
-                TMUX_CREATION_UNCERTAIN=0
-            fi
-        fi
         while [[ "$TMUX_RETRY_CYCLE" == "1" ]]; do
             TMUX_RETRY_CYCLE=0
             for ((TMUX_CREATE_ATTEMPT=1;
@@ -1519,13 +1388,6 @@ print("|" + "|".join(sorted(VALUE_OPTIONS | SETUP_VALUE_OPTIONS | {"-C", "--exec
         done
         if [[ "$TMUX_CREATE_EXIT" -ne 0 ]]; then
             set -e
-            if [[ "$TMUX_CREATION_UNCERTAIN" == 1 ]]; then
-                setup_log ERROR "tmux creation outcome is unconfirmed; original handoffs retained without retry"
-                activity_log mux_failed "$WORKTREE_ID" mux=tmux reason=create_uncertain \
-                    "exit_code=$TMUX_CREATE_EXIT"
-                echo "ERROR: tmux creation outcome is unconfirmed. The worktree and original handoffs are retained; inspect them before retrying." >&2
-                exit "$TMUX_CREATE_EXIT"
-            fi
             RECOVERY_PROJECT="${LAUNCH_PROJECT:-agent-worktrees}"
             RECOVERY_COMMAND="$RECOVERY_PROJECT --worktree-id $WORKTREE_ID"
             PRESERVED_PATH="${STATUS_PATH:-${WORK_DIR:-.}}"

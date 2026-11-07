@@ -181,40 +181,6 @@ def test_powershell_launcher_contains_unwrap():
     assert "$plan = $plan.launch" in text
 
 
-@pytest.mark.skipif(os.name != "posix", reason="Native Bash AHP binding")
-@pytest.mark.parametrize("literal_args", [
-    ["-i", "--resume", "--model", "--ahp=literal", "--agent", "--experimental"],
-    ["--interactive", "--resume=literal", "--model", "--ahp"],
-])
-def test_shell_ahp_binding_preserves_literal_option_values(tmp_path, literal_args):
-    source = _LAUNCH_SCRIPT.read_text(encoding="utf-8")
-    start = source.index('    if [[ "$_AHP_RESUME_AVAILABLE" == "1" ]]; then\n        if ! _VALUE_OPTIONS=')
-    mutate = source[start:source.index("    # Identity vars", start)]
-    command = ["copilot", "--resume", "original", "--resume", "", "--resume", "--model", "selected",
-               *literal_args, "--resume=passthrough"]
-    code = "\n".join([
-        "set -euo pipefail",
-        "CMD_ARRAY=(" + shlex.join(command) + ")",
-        "_AHP_RESUME_AVAILABLE=1; _AHP_ENDPOINT=http://127.0.0.1:1234; _AHP_SESSION=authoritative",
-        f"PYTHON={shlex.quote(sys.executable)}; setup_log() {{ :; }}",
-        mutate,
-        '"$PYTHON" -c \'import json,sys; print(json.dumps(sys.argv[1:]))\' "${CMD_ARRAY[@]}"',
-    ])
-    environment = dict(os.environ, PYTHONPATH=str(
-        _BIN.parents[1] / "plugins" / "agent-worktrees" / "src",
-    ))
-    environment.pop("BASH_ENV", None)
-    result = subprocess.run(
-        ["/bin/bash", "-c", code], cwd=tmp_path, env=environment,
-        capture_output=True, text=True, timeout=15,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert json.loads(result.stdout) == [
-        "copilot", "--model", "selected", *literal_args, "--experimental",
-        "--ahp", "http://127.0.0.1:1234", "--resume=authoritative",
-    ]
-
-
 @pytest.mark.parametrize("command", [
     ["bash", "default-setup.sh"],
     ["pwsh", "-File", "default-setup.ps1"],

@@ -70,13 +70,6 @@ allocating a console, preserves exit status, and can return stderr separately
 for precise refusal diagnostics. Its PowerShell 5.1 argument encoding preserves
 empty/quoted arguments without unnecessarily quoting Python launcher selectors.
 Source selection and deferred stamping support a host exposing only `py.exe`.
-Native driver ingress qualifies an existing Python 3.11+ physical base before
-any driver action: application commands, launcher-listed local or UNC paths,
-compatible launcher selectors when listing is unavailable, then standard
-Windows installation roots. It skips WindowsApps aliases without changing PATH
-or installing Python. Removal still requires the base outside the target runtime.
-Selector results use ASCII-safe JSON so redirected legacy Python output can
-preserve non-ASCII installation paths.
 
 Because plugins are pulled **independently** from the marketplace, the file
 cannot be a shared runtime import — it must physically exist in each plugin. So

@@ -284,7 +284,7 @@ def test_utf8_domain_byte_bound_is_not_a_character_limit(saved):
     event = receipt(events)
     disposition = next(item for item in event.after.domains if item.domain == "disposition")
     assert disposition.data is None and event.coverage == "partial"
-    assert yaml.safe_load(path.read_text(encoding="utf-8"))["summary"] == record.summary
+    assert yaml.safe_load(path.read_text())["summary"] == record.summary
     assert event.saved_sha256 == hashlib.sha256(path.read_bytes()).hexdigest()
 
 

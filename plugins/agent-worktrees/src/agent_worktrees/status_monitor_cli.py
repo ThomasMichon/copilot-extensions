@@ -92,7 +92,13 @@ def add_parsers(sub) -> None:
 
 @daemon_entrypoint("agent-worktrees-status-monitor", source=__file__, purpose="production")
 def cmd_status_monitor(args: argparse.Namespace) -> int:
-    """Elected, demand-aware publisher; native/mux events bypass the interval backstop."""
+    """One resident, coalescing tracker for every ``wt-*`` session's status bar.
+
+    Replaces N per-session ``status-updater`` loops with a single sweep on the
+    interval. Single-active on the host via a liveness lock; idle-exits after a
+    short run of sweeps with no managed session, Picker heartbeat, or recent
+    list demand; self-retires when a newer runtime supersedes it.
+    """
     import shutil
     import threading
     import time
@@ -419,7 +425,6 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     ),
                     read_demand_lock=state_lock,
                     native_mutation_decide=_decide,
-                    worktree_changed=resident_push.notify,
                 )
                 hook_server.start()
             except Exception:
@@ -496,8 +501,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
 
     managed_mux_runtime = mux_link.InProcessRuntime()
     managed_mux_runtime.start(
-        _core_helper("_aw_runtime_home", status_monitor_runtime._aw_runtime_home)() / "managed-mux-cache.json",
-        on_change=lambda entry: resident_push.notify(entry.get("worktree_path")),
+        _core_helper("_aw_runtime_home", status_monitor_runtime._aw_runtime_home)() / "managed-mux-cache.json"
     )
 
     def _lock_extra() -> dict:
@@ -520,7 +524,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         if classify_server is not None and published_lock:
             extra.update(classify_daemon.rendezvous_fields(classify_server))
         if tracking_write_server is not None and published_lock:
-            extra.update(tracking_write.rendezvous_fields(tracking_write_server), checkout_relocation_writer_generation=1)
+            extra.update(tracking_write.rendezvous_fields(tracking_write_server))
         if published_lock:
             extra.update(
                 hook_facts_version=2,
@@ -896,7 +900,6 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     config_cache_for_project=_config_cache_for_project,
                     roster_publisher=lambda: publish_active_project(
                         worktrees_runtime, observe_records=allocation_linker.observe,
-                        managed_mux_cache=managed_mux_runtime.cache,
                         **({"cleanup_owner": segment_cache} if core.git_ops._windows_observation() else {}),
                     ),
                     roster_failure=worktrees_runtime.producer_failed,

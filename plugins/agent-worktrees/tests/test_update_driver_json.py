@@ -84,42 +84,6 @@ def test_protocol_output_limit_fails_without_silent_truncation():
     assert buffer.getvalue() == ""
 
 
-@pytest.mark.parametrize("mode", ["standalone", "project"])
-@pytest.mark.parametrize("verb", ["stage", "reconcile"])
-def test_json_update_requests_obey_selected_authority(tmp_path, monkeypatch, mode, verb):
-    import sys
-    import update_driver
-    from update_driver import core
-
-    tmp_path = tmp_path.resolve()
-    root = tmp_path / "driver"
-    update_driver.change_authority(
-        mode, project="example" if mode == "project" else "", root=root, timeout=5,
-        verify_capabilities=lambda _deadline: True,
-    )
-    monkeypatch.setattr(core, "default_root", lambda: root)
-    monkeypatch.setattr(update_driver, "borrowed_custody", lambda: None)
-    monkeypatch.setattr(boundary.cfg, "active_project", lambda: None)
-    monkeypatch.setattr(boundary.cfg, "install_dir", lambda: tmp_path)
-    monkeypatch.setattr(boundary.update_driver_cli, "_request_context", lambda **_kwargs: ())
-    monkeypatch.setattr(
-        update_driver, "runtime_command",
-        lambda module, flags=(): ((sys.executable, "-m", module, *flags), {}),
-    )
-    monkeypatch.setattr(update_driver, "ensure_worker", lambda *_args, **_kwargs: None)
-    arguments = _args(apply=verb == "reconcile", detach=True)
-    result = (
-        boundary.cmd_stage_request(arguments) if verb == "stage"
-        else boundary.cmd_reconcile_request(arguments)
-    )
-    requests = update_driver.status(root=root)
-    if mode == "project":
-        assert result == 1 and not requests
-    else:
-        assert result == 0 and len(requests) == 1
-        assert requests[0].spec.authority == "standalone"
-
-
 @pytest.mark.parametrize("emit_json", [False, True])
 def test_early_stage_failure_preserves_unleased_status_and_stdout_contract(
     tmp_path, monkeypatch, capsys, emit_json,
@@ -138,9 +102,7 @@ def test_early_stage_failure_preserves_unleased_status_and_stdout_contract(
     result = capsys.readouterr()
     assert "synthetic custody refusal" in result.err
     if emit_json:
-        failure = json.loads(result.out)
-        assert failure["reason"] == "update-driver"
-        assert "request_id" not in failure and "log_path" not in failure
+        assert json.loads(result.out)["reason"] == "update-driver"
     else:
         assert result.out == ""
     assert status.read_bytes() == original
@@ -245,51 +207,6 @@ def test_driver_refusal_replaces_previous_success_status(tmp_path, monkeypatch, 
     assert "synthetic custody refusal" in failed["message"]
     assert failed["updated_at"]
     assert json.loads(capsys.readouterr().out)["ok"] is False
-
-
-@pytest.mark.parametrize("verb", ["stage-update", "reconcile-plugins"])
-def test_worker_start_failure_retains_admitted_json_identity(
-    tmp_path, monkeypatch, capsys, verb,
-):
-    import update_driver
-
-    request = SimpleNamespace(
-        id="fixture-admitted", log_path=tmp_path / "request.log",
-        state="pending", exit_code=None,
-    )
-    calls = []
-
-    def enqueue(*args, **kwargs):
-        calls.append("enqueue")
-        return request
-
-    def refuse(*args, **kwargs):
-        calls.append("spawn")
-        raise update_driver.SpawnError("fixture worker launch refused")
-
-    monkeypatch.setattr(update_driver, "borrowed_custody", lambda: None)
-    monkeypatch.setattr(boundary.cfg, "active_project", lambda: None)
-    monkeypatch.setattr(boundary.cfg, "install_dir", lambda: tmp_path)
-    monkeypatch.setattr(boundary.update_driver_cli, "_invocation_cwd", lambda: tmp_path)
-    monkeypatch.setattr(update_driver, "runtime_command", lambda *args: (("synthetic",), {}))
-    monkeypatch.setattr(update_driver, "enqueue", enqueue)
-    monkeypatch.setattr(update_driver, "ensure_worker", refuse)
-    monkeypatch.setattr(
-        update_driver, "wait", lambda *args, **kwargs: pytest.fail("failed worker was awaited"),
-    )
-    monkeypatch.setattr(
-        update_driver, "drain", lambda *args, **kwargs: pytest.fail("refusal became a fallback"),
-    )
-    args = _args(detach=True, json=True, repo=str(tmp_path), status=str(tmp_path / "status.json"))
-    assert boundary._run_request(
-        verb, ["--json"], args, lambda _args: pytest.fail("caller executed installation"),
-    ) == 1
-    receipt = json.loads(capsys.readouterr().out)
-    assert receipt["ok"] is False and receipt["reason"] == "update-driver"
-    assert "fixture worker launch refused" in receipt["message"]
-    assert receipt["request_id"] == request.id
-    assert receipt["log_path"] == str(request.log_path)
-    assert calls == ["enqueue", "spawn"]
 
 
 def test_killswitch_noop_reports_reason_without_requiring_executor_result(tmp_path, monkeypatch, capsys):
@@ -477,9 +394,8 @@ def test_real_manual_custody_covers_inner_reconcile_under_active_auto_hold(
 
 
 def test_actual_empty_inventory_apply_uses_worker_and_retains_json(tmp_path, monkeypatch):
-    import subprocess
     import sys
-    from agent_procutil.owned_process import run_caller_owned
+    from agent_procutil.owned_process import run_owned
     import update_driver
 
     home, repo = tmp_path / "home", tmp_path / "repo"
@@ -489,36 +405,15 @@ def test_actual_empty_inventory_apply_uses_worker_and_retains_json(tmp_path, mon
         monkeypatch.setenv(key, str(home))
     for key in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "AGENT_WORKTREES_PAYLOAD_ROOT"):
         monkeypatch.delenv(key, raising=False)
-    queue_root = home / ".copilot-extensions" / "update-driver"
-    try:
-        result = run_caller_owned(
-            [sys.executable, "-m", "agent_worktrees", "reconcile-plugins", "--repo", str(repo), "--apply"],
-            timeout=20, max_stdout_bytes=65536, max_stderr_bytes=65536,
-        )
-    except subprocess.TimeoutExpired as error:
-        requests = update_driver.status(root=queue_root)
-        details = {
-            "requests": [
-                (request.id, request.state, request.exit_code, request.error)
-                for request in requests
-            ],
-            "stdout": error.stdout,
-            "stderr": error.stderr,
-        }
-        for name, log in [
-            ("worker_log", queue_root / "worker.log"),
-            *((f"request_{request.id}", request.log_path) for request in requests),
-        ]:
-            if log.is_file():
-                with log.open("rb") as stream:
-                    stream.seek(0, 2)
-                    stream.seek(max(0, stream.tell() - 4096))
-                    details[name] = stream.read(4096).decode("utf-8", errors="replace")
-        pytest.fail(f"{error}\n{details}")
+    result = run_owned(
+        [sys.executable, "-m", "agent_worktrees", "reconcile-plugins", "--repo", str(repo), "--apply"],
+        timeout=20,
+    )
     assert result.returncode == 0, result.stderr
     assert "Update request " in result.stderr
     summary = json.loads(result.stdout)
     assert isinstance(summary, dict) and summary["executed"] == []
+    queue_root = home / ".copilot-extensions" / "update-driver"
     assert (queue_root / "queue.sqlite3").is_file()
     requests = update_driver.status(root=queue_root)
     assert len(requests) == 1

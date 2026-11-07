@@ -23,15 +23,10 @@ def _repair_namespace_matches(record: tracking.WorktreeRecord, config: cfg.Confi
     if not root.is_absolute() or not checkout.is_absolute() or checkout.is_symlink():
         return False
     expected = root.resolve() if anchor else root.resolve() / record.worktree_id
-    current_namespace = (
+    return (
         checkout.resolve() == expected
         and (not checkout.exists() or checkout.is_dir())
     )
-    if current_namespace or anchor:
-        return current_namespace
-    from .retained_checkout import matches
-
-    return matches(record, config)
 
 
 def _observed_original_owner(record: tracking.WorktreeRecord, config: cfg.Config) -> bool:
@@ -139,10 +134,11 @@ def require_companion_receiver(
     entry = repos.find_repo(root.repo)
     if entry is None:
         raise ValueError("retained companion has no repository registration")
-    if repos.normalize_class(entry.repo_class) in {"worktree", "knowledge"}:
-        allocation_root = Path(receiving.default_repo.worktree_root).expanduser()
-        if not allocation_root.is_absolute() or allocation_root.is_symlink():
-            raise ValueError("retained companion has an invalid receiving allocation root")
+    if repos.normalize_class(entry.repo_class) in {"worktree", "knowledge"} and (
+        Path(receiving.default_repo.worktree_root).resolve()
+        != Path(cfg.derive_worktree_root(root.path)).resolve()
+    ):
+        raise ValueError("retained companion conflicts with the receiving worktree root")
     if not _observed_original_owner(record, receiving):
         creation_identity.require_same_machine_identity(receiving, record.machine_identity)
         if not execution_spaces.require_owner_identity(record.execution_machine, receiving, canonical_ref=False):

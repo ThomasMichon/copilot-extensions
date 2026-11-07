@@ -6,7 +6,6 @@ from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
-import os
 import time
 
 import pytest
@@ -26,19 +25,6 @@ from agent_bridge.transport import SpawnTarget
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     http47_binding_validation.finish()
-
-
-@pytest.fixture
-def native_file_symlink():
-    def create(path, target, *, target_is_directory=False):
-        try:
-            path.symlink_to(target, target_is_directory=target_is_directory)
-        except OSError as error:
-            if os.name == "nt" and getattr(error, "winerror", None) == 1314:
-                pytest.skip("native symlink creation requires Windows privilege")
-            raise
-
-    return create
 
 
 @pytest.fixture(autouse=True)

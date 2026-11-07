@@ -245,9 +245,17 @@ async def capture_async(
             if manager_update_state is not None:
                 scr._manager_update_state_pinned = True
                 scr.manager_update_state = manager_update_state
-        # Setup completion is not a painted frame; capture must not rely on an idle tick.
-        scr.refresh()
-        await pilot.pause()
+            # Force a real repaint before capturing: ``capture_screen`` reads
+            # the compositor's LAST-PAINTED frame (``screen._compositor``),
+            # not a fresh render, so plainly assigning these attributes is
+            # not enough by itself -- whichever frame happened to already be
+            # painted (or not) before this point is what would otherwise be
+            # captured. ``refresh()`` + one more pause lets the compositor
+            # actually paint these values before the snapshot is taken; the
+            # pin above keeps that pause from letting a still-pending poll
+            # win the race back.
+            scr.refresh()
+            await pilot.pause()
         return capture_screen(scr, title=title)
 
 
@@ -353,8 +361,6 @@ async def capture_frames_async(
                 await pilot.pause()
             if update_state is not None:
                 scr.update_state = update_state
-            scr.refresh()
-            await pilot.pause()
             frames.append(capture_screen(scr, title=title))
     return frames
 

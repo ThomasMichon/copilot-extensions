@@ -68,14 +68,12 @@ def _write_policy(profile: Path, *, enabled: bool) -> None:
     )
 
 
-@pytest.mark.parametrize("layout", ["flat", "application"])
-def test_resolved_installed_engine_caches_outside_selected_slot(monkeypatch, tmp_path, layout):
+def test_resolved_installed_engine_caches_outside_selected_slot(monkeypatch, tmp_path):
     from worktree_manager import engine_client
 
     root = tmp_path / ".agent-worktrees"
     slot = root / "versions" / "1.2.3"
-    environment_root = slot / ".venv" if layout == "application" else slot
-    venv.EnvBuilder(with_pip=False).create(environment_root)
+    venv.EnvBuilder(with_pip=False).create(slot)
     (slot / ".install-complete.json").write_text(json.dumps({
         "version": slot.name, "completed_at": "2026-11-01T11:00:00Z",
         "pid": 1, "payload_hash": "a" * 64,
@@ -84,7 +82,7 @@ def test_resolved_installed_engine_caches_outside_selected_slot(monkeypatch, tmp
     (root / "deploy-manifest.json").write_text(json.dumps({
         "service": "agent-worktrees", "source": {"plugin": "agent-worktrees"},
     }), encoding="utf-8")
-    site = environment_root / (
+    site = slot / (
         "Lib/site-packages" if os.name == "nt"
         else f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
     )
@@ -156,37 +154,6 @@ def test_resolved_installed_engine_caches_outside_selected_slot(monkeypatch, tmp
     )
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)[0] == 84
-
-
-@pytest.mark.parametrize("layout", ["flat", "application"])
-def test_selected_environment_monitor_is_reused_without_spawning(tmp_path, monkeypatch, layout):
-    from worktree_manager.production_picker import monitor_roots
-
-    root = tmp_path / ".agent-worktrees"
-    slot = root / "versions" / "1.2.3"
-    environment = slot / ".venv" if layout == "application" else slot
-    python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    python.parent.mkdir(parents=True)
-    python.touch()
-    (slot / ".install-complete.json").write_text("{}")
-    (root / "current-version").write_text(slot.name)
-    (root / "deploy-manifest.json").write_text(json.dumps({
-        "service": "agent-worktrees", "source": {"plugin": "agent-worktrees"},
-    }))
-    monkeypatch.setenv("AGENT_HOME", str(tmp_path))
-    monkeypatch.setattr(monitor_roots, "automatic_maintenance_enabled", lambda: True)
-    monkeypatch.setattr(monitor_roots, "status_monitor_enabled", lambda: True)
-    monkeypatch.setattr(monitor_roots, "_lock_is_live", lambda data: True)
-    monkeypatch.setattr(monitor_roots, "_read_lock", lambda path: {
-        "pid": 123, "start_time": "1", "prefix": str(environment), "mux": True,
-    })
-    monkeypatch.setattr(
-        monitor_roots, "_spawn_status_monitor",
-        lambda argv: pytest.fail("the selected environment already has a healthy monitor"),
-    )
-    assert monitor_roots._current_engine_prefix() == os.path.realpath(environment)
-    for _ in range(2):
-        assert monitor_roots.ensure_status_monitor_running() is True
 
 
 @pytest.fixture(autouse=True)

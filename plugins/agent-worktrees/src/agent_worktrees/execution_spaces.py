@@ -278,37 +278,16 @@ def require_current_execution_space(config: Any) -> None:
     current_execution_context(config)
 
 
-def require_record_mutation(record: Any, config: Any, *, recover_receiving: bool = True) -> None:
+def require_record_mutation(record: Any, config: Any) -> None:
     from . import record_machine_identity, tracking
-    from . import config as cfg
 
     if record is None:
         return
-    from .checkout_relocation_state import require_idle
-
-    paths = {Path(record.yaml_path)} if getattr(record, "yaml_path", None) is not None else set()
-    worktree_id = getattr(record, "worktree_id", None)
-    repo_name = getattr(record, "repo", None)
-    if (
-        isinstance(repo_name, str) and repo_name and repo_name == getattr(config, "repo_name", None)
-        and isinstance(worktree_id, str)
-        and Path(worktree_id).name == worktree_id and "/" not in worktree_id and "\\" not in worktree_id
-    ):
-        paths.add(cfg.project_dir(repo_name) / "worktrees" / f"{worktree_id}.yaml")
-    for path in paths:
-        try:
-            require_idle(path)
-        except (ValueError, OSError) as exc:
-            raise ExecutionSpaceError(str(exc)) from exc
     require_current_execution_space(config)
     if (
         not getattr(record, "receiving_allocation_present", False)
         and getattr(record, "owner_ref", None) and getattr(record, "creation_nonce", None)
     ):
-        if not recover_receiving:
-            raise ExecutionSpaceError(
-                "read-only proof cannot recover missing receiving allocation metadata; inspect through its owner"
-            )
         from .receiving_allocation import recover_missing
 
         try:

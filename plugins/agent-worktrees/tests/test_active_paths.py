@@ -12,8 +12,6 @@ from __future__ import annotations
 import types
 from unittest.mock import patch
 
-import pytest
-
 from agent_worktrees import __main__ as cli
 from agent_worktrees import tracking
 
@@ -67,25 +65,11 @@ def test_active_paths_fall_back_when_batch_unavailable():
     def _has(wt_id):
         return wt_id == "aaaa"
 
-    with patch("agent_worktrees.sessions.platform.system", return_value="Linux"), \
-         patch("agent_worktrees.sessions._list_mux_sessions", return_value=None), \
+    with patch("agent_worktrees.sessions._list_mux_sessions", return_value=None), \
          patch("agent_worktrees.sessions.has_mux_session", side_effect=_has):
         active = cli._build_active_paths(recs, session_ctx=_empty_ctx())
 
     assert active == {"/tmp/a"}
-
-
-@pytest.mark.parametrize("hint", [None, False, True])
-def test_windows_passive_classification_does_not_fall_back_to_psmux(hint):
-    rec = _rec("aaaa", path="/tmp/a")
-    rec.mux_live = hint
-    rec.mux_live_at = "2020-01-01T00:00:00"
-    with patch("agent_worktrees.sessions.platform.system", return_value="Windows"), \
-         patch("agent_worktrees.sessions._list_mux_sessions", return_value=None), \
-         patch("agent_worktrees.sessions.has_mux_session") as probe:
-        active = cli._build_active_paths([rec], session_ctx=_empty_ctx())
-    assert active == set()
-    probe.assert_not_called()
 
 
 def test_active_paths_union_lock_and_mux():
@@ -116,10 +100,3 @@ def test_active_paths_include_hosted_session_bindings():
         active = cli._build_active_paths([rec], session_ctx=_empty_ctx())
 
     assert active == {"/tmp/a"}
-
-
-@pytest.mark.parametrize("signal", ["session_bridge_live", "session_ahp_live", "execution_leg_live"])
-def test_legacy_picker_keeps_independent_host_liveness_when_mux_is_unknown(signal):
-    from agent_worktrees.picker_support import derive
-
-    assert derive._sess({"mux_observation_unavailable": True, signal: True}) == "HOST(?)"

@@ -22,79 +22,9 @@ REPOSITORY = Path(__file__).resolve().parents[3]
 prepared_native_runtime_source = runtime_fixture.native_runtime_source
 
 
-def _copy_native_checkout(plugin: Path, repository: Path, checkout: Path) -> None:
-    assert plugin in (repository, repository / "plugins/agent-worktrees")
-    assert not checkout.is_relative_to(repository)
-    if plugin == repository:
-        shutil.copytree(
-            plugin, checkout / "plugins/agent-worktrees",
-            ignore=shutil.ignore_patterns(".git"),
-        )
-    else:
-        shutil.copytree(repository, checkout)
-
-
-@pytest.mark.parametrize("standalone", [False, True])
-def test_native_checkout_preserves_both_frozen_layouts(tmp_path, standalone):
-    repository = tmp_path / "source"
-    plugin = repository if standalone else repository / "plugins/agent-worktrees"
-    plugin.mkdir(parents=True)
-    (plugin / "pyproject.toml").write_text("frozen package", encoding="utf-8")
-    (repository / ".git").mkdir()
-    if not standalone:
-        (repository / "libs").mkdir()
-        (repository / "libs/dependency").write_text("frozen dependency", encoding="utf-8")
-    (tmp_path / "unrelated").write_text("not source", encoding="utf-8")
-    checkout = tmp_path / "checkout"
-    _copy_native_checkout(plugin, repository, checkout)
-    assert (checkout / "plugins/agent-worktrees/pyproject.toml").read_text() == "frozen package"
-    assert not (checkout / "unrelated").exists()
-    assert not (checkout / "plugins/agent-worktrees/.git").exists()
-    if not standalone:
-        assert (checkout / "libs/dependency").read_text() == "frozen dependency"
-
-
-def test_native_checkout_refuses_recursive_destination(tmp_path):
-    plugin = tmp_path / "source"
-    plugin.mkdir()
-    checkout = plugin / "checkout"
-    with pytest.raises(AssertionError):
-        _copy_native_checkout(plugin, plugin, checkout)
-    assert not checkout.exists()
-
-
-def test_native_checkout_resolves_standalone_git_root(tmp_path, monkeypatch):
-    plugin = tmp_path / "source"
-    plugin.mkdir()
-    (plugin / "pyproject.toml").write_text("frozen package", encoding="utf-8")
-    hooks = tmp_path / "empty-hooks"
-    hooks.mkdir()
-    git = shutil.which("git")
-    assert git is not None
-    unrelated = tmp_path / "unrelated"
-    monkeypatch.setenv("GIT_DIR", str(unrelated / ".git"))
-    monkeypatch.setenv("GIT_WORK_TREE", str(unrelated))
-    environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
-    environment.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
-    subprocess.check_call(
-        [git, "-C", str(plugin), "init", "-q", "--template", str(hooks)],
-        env=environment, **no_window_kwargs(),
-    )
-    repository = Path(subprocess.check_output(
-        [git, "-C", str(plugin), "rev-parse", "--show-toplevel"],
-        env=environment, text=True, **no_window_kwargs(),
-    ).strip()).resolve()
-    checkout = tmp_path / "checkout"
-    _copy_native_checkout(plugin, repository, checkout)
-    assert (checkout / "plugins/agent-worktrees/pyproject.toml").read_bytes() == (
-        plugin / "pyproject.toml"
-    ).read_bytes()
-    assert not unrelated.exists()
-
-
 @pytest.mark.timeout(1500)
 def test_native_prepared_source_preserves_managed_global_owner(
-    tmp_path, prepared_native_runtime_source, capsys,
+    tmp_path, prepared_native_runtime_source,
 ):
     uv = shutil.which("uv")
     if uv is None:
@@ -129,8 +59,7 @@ def test_native_prepared_source_preserves_managed_global_owner(
 
     def run(command, label, timeout=120):
         started = time.monotonic()
-        with capsys.disabled():
-            print(f"Native source phase: {label} (budget {timeout}s)", flush=True)
+        print(f"Native source phase: {label} (budget {timeout}s)", flush=True)
         completed = subprocess.run(
             command, cwd=project, env=environment, capture_output=True, text=True,
             timeout=timeout, **no_window_kwargs(),
@@ -138,18 +67,12 @@ def test_native_prepared_source_preserves_managed_global_owner(
         assert completed.returncode == 0, (
             f"{label}: {completed.stdout}\n{completed.stderr}"
         )
-        with capsys.disabled():
-            print(f"Native source phase passed: {label} ({time.monotonic() - started:.3f}s)", flush=True)
+        print(f"Native source phase passed: {label} ({time.monotonic() - started:.3f}s)", flush=True)
         return completed.stdout
 
     plugin, _commit = prepared_native_runtime_source
-    git = shutil.which("git")
-    assert git is not None
-    repository = Path(run(
-        [git, "-C", str(plugin), "rev-parse", "--show-toplevel"], "resolve frozen repository",
-    ).strip()).resolve()
     checkout = tmp_path / "checkout"
-    _copy_native_checkout(plugin, repository, checkout)
+    shutil.copytree(plugin.parents[1], checkout)
     shutil.copytree(
         REPOSITORY / "libs/installer-engine", checkout / "libs/installer-engine",
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache"),
@@ -162,12 +85,13 @@ def test_native_prepared_source_preserves_managed_global_owner(
     isolate_account_profile(copied_plugin, home)
     hooks = tmp_path / "empty-hooks"
     hooks.mkdir()
+    git = shutil.which("git")
+    assert git is not None
     git_prefix = [
         git, "-C", str(checkout), "-c", f"core.hooksPath={hooks}",
         "-c", "user.name=Runtime test", "-c", "user.email=runtime-test@example.invalid",
         "-c", "commit.gpgsign=false", "-c", "core.longpaths=true",
     ]
-    run([*git_prefix, "init", "-q", "--template", str(hooks)], "initialize isolated source")
     run([*git_prefix, "add", "--all", "--force", "."], "stage isolated source")
     run([*git_prefix, "commit", "--allow-empty", "-qm", "Isolated native source fixture"],
         "commit isolated source")
@@ -212,8 +136,7 @@ def test_native_prepared_source_preserves_managed_global_owner(
             "--", *command,
         ]
 
-    native_shell = "ps1" if os.name == "nt" else "sh"
-    shell, executable = next(host for host in hosts if host[0] == native_shell)
+    shell, executable = hosts[0]
     run(provision(owner, shell, executable), "provision release owner", 300)
     previous = (root / "current-version").read_text().strip()
     before = json.loads((root / "deploy-manifest.json").read_text())

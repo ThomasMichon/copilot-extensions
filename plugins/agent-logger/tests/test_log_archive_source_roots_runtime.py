@@ -424,9 +424,6 @@ def test_source_roots_runtime_non_retiring_cli_preserves_repository_settings(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     cfg, raw = _setup(tmp_path, monkeypatch)
-    # Machine-wide config outranks base organization config, so leave the
-    # local destination to the repository for this repository-settings case.
-    _write_policy(cfg, lambda d: d["sync"]["targets"]["local"].pop("path"))
     monkeypatch.setenv("AGENT_LOGGER_HOME", str(cfg.home))
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)

@@ -380,12 +380,6 @@ def test_authoritative_mux_parser_rejects_partial_and_duplicate_evidence():
     for text in ("unparsed", "work:-1", "work:bad", "work:0\nwork:1"):
         with pytest.raises(ValueError, match="absence is unconfirmed"):
             mux.parse_session_counts(text, strict=True)
-    for text in (
-        "work:1:$1:123\nunparsed", "work:1:$1:123\nwork:0:$2:456",
-        "work:bad:$1:123", "work:1:invalid:123",
-    ):
-        with pytest.raises(ValueError, match="absence is unconfirmed"):
-            mux.parse_monitor_sessions(text, strict=True)
 
 
 def test_authoritative_presence_requires_success_or_confirmed_absence():
@@ -398,10 +392,9 @@ def test_authoritative_presence_requires_success_or_confirmed_absence():
     ):
         assert mux.confirmed_has_session("wt-one", CompletedProcess([], 1, "", message)) is False
     for binary in ("psmux", r"C:\Tools\PSMUX.EXE"):
-        with pytest.raises(RuntimeError, match="absence is unconfirmed"):
-            mux.confirmed_has_session(
-                "wt-one", CompletedProcess([], 1, b"", b""), binary=binary,
-            )
+        assert mux.confirmed_has_session(
+            "wt-one", CompletedProcess([], 1, b"", b""), binary=binary,
+        ) is False
     for result in (
         CompletedProcess([], 1, "", "permission denied"),
         CompletedProcess([], 1, "", "can't find session: wt-other"),

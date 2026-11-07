@@ -151,13 +151,6 @@ managed tuple records must also match the receiving project's absolute worktree
 namespace before lookup or resume can prepare a launch. Adopted external Git
 worktrees retain their independent registration and existing checkout paths;
 they are not forced into the managed allocation directory.
-Retained ordinary managed checkouts may also prove that namespace through their
-actual receiving ledger, original identity, current execution owner, registered
-linked checkout/branch and receiving Git family after allocation defaults change.
-This does not authorize arbitrary directories or relax physical/environment,
-project or ledger checks. Missing, redirected or unrelated proof still refuses.
-New allocation and original-intent companion recovery are distinct; see
-[checkout relocation and mixed roots](checkout-relocation.md).
 Derived names retain their observation provenance: a physical customization
 ending in `-win` or `-wsl` is not reparsed as an explicit environment choice.
 Parent-obligation settlement uses the same validated execution owner, including

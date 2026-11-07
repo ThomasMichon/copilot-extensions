@@ -25,28 +25,8 @@ TCP attachment; it is generated when omitted and shared with the WS adapter.
 The Python launch helper returns it on `HostHandle` without including it in
 the handle's diagnostic representation. Only explicit legacy execution retains
 optional authentication.
-The ordinary app and compact receiving archive also provide explicit headed
-execution inside a caller-owned terminal or mux pane:
-
-```powershell
-agent-remote-driver --mode headed --session-id <native-session-id> --attempt-directory <original-attempt> --state-file <private-state-file> --cwd <execution-workspace> -- copilot --session-id <native-session-id>
-```
-
-The core retains its launch-injected SDK extension in that original attempt,
-owns the exact native child and exposes the same broker after native PID/session
-binding. The ordinary app can add `--ws-port 0`; the compact archive remains
-TCP-only. `prepare_headed_command` retains a content-addressed receiving core
-and selects a physical base interpreter before caller launch, without retaining
-the caller's venv. It does not allocate a workspace, mux or second launch journal.
-This coordinator is available explicitly; Manager, Worktrees and headed Bridge
-caller convergence remains in progress.
-
-The original interactive seed stays in native argv and is never resent through
-the SDK. Detach or SDK connection loss does not retire the native session;
-connection loss reports `control_unavailable` and cannot re-hook automatically.
-Explicit authorized stop addresses the retained native child, never a mux name.
-Native creation, SDK binding, input readiness, prompt acceptance and restoration
-are distinct; complete history restoration is not qualified by this entrypoint.
+It does not advertise headed execution. Child process readiness
+is not native session binding or prompt acceptance.
 
 Local launches export the core into their retained runtime directory
 and execute it with a physical base interpreter, independently of the caller's

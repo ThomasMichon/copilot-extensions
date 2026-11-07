@@ -1,9 +1,0 @@
-{
-  "comment": "Respect canonical native option values in the retained headed validator.",
-  "changes": [
-    {
-      "plugin": "agent-remote-driver",
-      "type": "patch"
-    }
-  ]
-}

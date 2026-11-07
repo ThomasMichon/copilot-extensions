@@ -115,38 +115,17 @@ async def request_via_socket(socket_path: str | Path, request: dict) -> dict | N
     auth token on the TCP transport. Returns ``None`` if the daemon closes
     without replying. Raises ``OSError`` if the daemon can't be reached.
     """
-    from . import execution_context, incoming
-
-    req = dict(request)
-    application = req.get("op") in {"call", "list"}
-    if application:
-        admission = await asyncio.to_thread(incoming.ensure_current, socket_path)
-        req.update(await asyncio.to_thread(
-            execution_context.request_fields, socket_path, req.get("bridge"),
-        ))
-        if admission is not None:
-            req["generation"] = admission.generation
-            req["runtime_root"] = admission.root
     reader, writer, token = await _connect(socket_path)
-    sent = False
     try:
-        req = await _qualified_request(reader, writer, token, req)
+        req = await _qualified_request(reader, writer, token, request)
         if token is not None:
             req["token"] = token
-        sent = True
         writer.write((json.dumps(req) + "\n").encode())
         await writer.drain()
         line = await reader.readline()
         if not line:
-            if req.get("op") == "call":
-                raise incoming.OutcomeUnknown("warm call outcome unknown; no cold replay")
             return None
-        reply = json.loads(line)
-        return incoming.validate_call_reply(reply) if req.get("op") == "call" else reply
-    except (OSError, ValueError) as exc:
-        if sent and req.get("op") == "call":
-            raise incoming.OutcomeUnknown("warm call outcome unknown; no cold replay") from exc
-        raise
+        return json.loads(line)
     finally:
         await aclose_writer(writer)
 
@@ -185,13 +164,8 @@ async def call_via_socket(socket_path: str | Path, bridge: str, tool: str,
         socket_path,
         {"op": "call", "bridge": bridge, "tool": tool, "arguments": arguments},
     )
-    from .incoming import validate_call_reply
-
-    validate_call_reply(resp)
-    if resp["ok"] is False and resp.get("shared_execution") is False:
-        from .execution_context import SharingUnavailable
-
-        raise SharingUnavailable("shared execution refused before effects")
+    if resp is None:
+        raise OSError("serve socket closed without a response")
     return resp
 
 
@@ -224,17 +198,11 @@ async def open_attached_session(socket_path: str | Path, bridge: str | Path):
     multiplexer). Raises ``OSError`` if the daemon can't be reached or refuses
     the attach, so a consumer falls back to a direct, in-process bridge.
     """
-    from . import execution_context, incoming
-
-    admission = await asyncio.to_thread(incoming.ensure_current, socket_path)
-    fields = await asyncio.to_thread(execution_context.request_fields, socket_path, bridge)
     reader, writer, token = await _connect(socket_path)
-    req: dict = {"op": "attach", "bridge": str(bridge)}
-    req.update(fields)
-    if admission is not None:
-        req.update(generation=admission.generation, runtime_root=admission.root)
     try:
-        req = await _qualified_request(reader, writer, token, req)
+        req = await _qualified_request(
+            reader, writer, token, {"op": "attach", "bridge": str(bridge)},
+        )
     except BaseException:
         await aclose_writer(writer)
         raise

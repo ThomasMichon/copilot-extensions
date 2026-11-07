@@ -59,7 +59,6 @@ def _run_request(
     import update_driver as driver
 
     backend = "engine-" + verb
-    admitted_request = None
     try:
         custody = driver.borrowed_custody()
         if custody is not None:
@@ -89,15 +88,9 @@ def _run_request(
                         _publish_result(request, text)
                         return code
         project, cwd = cfg.active_project(), update_driver_cli._invocation_cwd()
-        context = update_driver_cli._request_context()
-        selected = update_driver_cli._current_authority(
-            driver,
-            context=dict(context).get("COPILOT_EXTENSIONS_CONTEXT", ""), cwd=str(cwd),
-        )
         spec = driver.RequestSpec(
             backend=backend, argv=tuple(flags), project=project or "", cwd=str(cwd),
-            source=str(cfg.install_dir().resolve()), context=context,
-            authority="standalone" if selected.configured and selected.mode == "standalone" else "",
+            source=str(cfg.install_dir().resolve()), context=update_driver_cli._request_context(),
         )
         project_args = ["--project", project] if project else []
         invocation = [*project_args, verb, *flags]
@@ -119,7 +112,6 @@ def _run_request(
                 context_keys=update_driver_cli._CONTEXT_KEYS,
             ),
         )
-        admitted_request = request
         print(f"Update request {request.id}; log: {request.log_path}", file=sys.stderr)
         worker_process = None
         if retained_dev:
@@ -154,11 +146,6 @@ def _run_request(
     except (driver.DriverError, driver.ParticipantError, OSError, ValueError) as error:
         print(f"Update driver: {error}", file=sys.stderr)
         failure = {"ok": False, "reason": "update-driver", "message": str(error)}
-        if admitted_request is not None:
-            failure.update({
-                "request_id": admitted_request.id,
-                "log_path": str(admitted_request.log_path),
-            })
         # Stage's lease has unwound here; never publish an unleased stage record.
         try:
             if verb == "reconcile-plugins":

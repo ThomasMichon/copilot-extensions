@@ -9,7 +9,7 @@ import pytest
 import yaml
 from test_tracking_save_capture import saved as saved
 
-from agent_worktrees import paired_claims, record_cache, tracking, worktree_notifications
+from agent_worktrees import paired_claims, record_cache, tracking
 from agent_worktrees import tracking_save_capture as capture
 from agent_worktrees import tracking_save_notifications as notifications
 
@@ -27,7 +27,6 @@ def probe(path):
 def test_notifications_follow_all_actual_record_holds(saved, monkeypatch, kind):
     record, path = saved
     seen = []
-    native = []
     lock = tracking._RecordLock(path)
     if kind == "degraded":
         monkeypatch.setattr(lock, "_acquire_sidecar_blocking", lambda: False)
@@ -38,11 +37,6 @@ def test_notifications_follow_all_actual_record_holds(saved, monkeypatch, kind):
         assert yaml.safe_load(path.read_text())["title"] == "persisted"
         seen.append(snapshot.title)
 
-    def native_changed(cwd):
-        assert probe(path) and not lock.acquired
-        native.append(cwd)
-
-    monkeypatch.setattr(worktree_notifications, "notify_worktree_changed", native_changed)
     unsubscribe = record_cache.observe_writes(delivered)
     try:
         with lock:
@@ -58,9 +52,8 @@ def test_notifications_follow_all_actual_record_holds(saved, monkeypatch, kind):
             else:
                 tracking.save_record(record, path)
             record.title = "not written after save"
-            assert seen == [] and native == []
+            assert seen == []
         assert seen == ["persisted"]
-        assert native == [record.worktree_path]
     finally:
         unsubscribe()
 
@@ -92,7 +85,6 @@ def test_pair_guard_finishes_logical_cleanup_after_sibling_release_before_dispat
 
     monkeypatch.setattr(paired_claims, "_lifecycle_guard", logical_guard)
     seen = []
-    native = []
 
     def delivered(actual_path, snapshot):
         assert not active[0], "physical release ran before the pair's logical cleanup"
@@ -101,34 +93,15 @@ def test_pair_guard_finishes_logical_cleanup_after_sibling_release_before_dispat
             assert active[0]
         seen.append(snapshot.title)
 
-    def native_changed(cwd):
-        assert not active[0] and probe(path) and probe(sibling)
-        native.append(cwd)
-
-    monkeypatch.setattr(worktree_notifications, "notify_worktree_changed", native_changed)
     unsubscribe = record_cache.observe_writes(delivered)
     try:
         with paired_claims.lifecycle_guard(record):
             record.title = "paired save"
             tracking.save_record(record, path)
-            assert seen == [] and native == []
+            assert seen == []
         assert seen == ["paired save"] and not active[0]
-        assert native == [record.worktree_path]
     finally:
         unsubscribe()
-
-
-def test_native_change_bursts_coalesce_after_holds_without_selected_capture(tmp_path, monkeypatch):
-    seen = []
-    monkeypatch.setattr(worktree_notifications, "notify_worktree_changed", seen.append)
-    monkeypatch.setattr(
-        capture, "project", lambda *args: pytest.fail("native wake captured optional record evidence"),
-    )
-    with notifications.hold():
-        for index in range(notifications.MAX_CHANGED_PATHS + 1):
-            notifications.worktree_changed(str(tmp_path / f"worktree-{index}"))
-        assert seen == []
-    assert seen == [None]
 
 
 def test_save_guard_encloses_entire_nested_guard_cleanup(saved, tmp_path, monkeypatch):

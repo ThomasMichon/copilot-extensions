@@ -292,7 +292,6 @@ def queued(monkeypatch, tmp_path):
     import update_driver
     from worktree_manager import __main__ as manager
     from worktree_manager import engine_client
-    from update_driver.authority import UpdateAuthority
 
     seen = {}
     request = SimpleNamespace(
@@ -313,7 +312,6 @@ def queued(monkeypatch, tmp_path):
         pytest.fail("ordinary caller executed the installer")
 
     monkeypatch.setattr(update_driver, "borrowed_custody", lambda: None)
-    monkeypatch.setattr(update_driver, "current_authority", lambda **_kwargs: UpdateAuthority())
     monkeypatch.setattr(update_driver, "enqueue", enqueue)
     monkeypatch.setattr(update_driver, "runtime_command", lambda module, args=(): (
         (str(tmp_path / "python.exe"), "-m", module, *args), {},
@@ -324,72 +322,6 @@ def queued(monkeypatch, tmp_path):
     monkeypatch.setattr(engine_client, "get_value", lambda *_args: "")
     monkeypatch.setattr(manager, "_cmd_update", forbidden)
     return seen, request
-
-
-def test_standalone_authority_skips_controller_before_manager_enqueue(queued, monkeypatch):
-    import update_driver
-    from update_driver.authority import selection
-    from worktree_manager import engine_client
-
-    seen, _request = queued
-    monkeypatch.setattr(update_driver, "current_authority", lambda **_kwargs: selection("standalone"))
-    monkeypatch.setattr(
-        engine_client, "get_value",
-        lambda *_args: pytest.fail("standalone authority probed a project controller"),
-    )
-    assert driver.cmd_update_request(["--project", "example"]) == 6
-    assert "--no-project-controller" in seen["spec"].argv
-    assert "--no-project-controller" in seen["runner"].argv
-
-
-def test_downlevel_driver_refuses_cleanly_without_queueing(queued, monkeypatch, capsys):
-    import update_driver
-
-    seen, _request = queued
-    monkeypatch.delattr(update_driver, "current_authority")
-    assert driver.cmd_update_request([]) == 1
-    assert "spec" not in seen
-    assert "lacks authority support" in capsys.readouterr().err
-
-
-def test_project_authority_hands_manager_updates_to_its_selected_project(queued, monkeypatch):
-    import update_driver
-    from update_driver.authority import selection
-    from worktree_manager import engine_client
-
-    seen, _request = queued
-    calls = []
-    monkeypatch.setattr(
-        update_driver, "current_authority", lambda **_kwargs: selection("project", "harness"),
-    )
-    monkeypatch.setattr(
-        engine_client, "get_value",
-        lambda project, key: "tools/update.py" if (project, key) == (
-            "harness", "update-controller",
-        ) else pytest.fail("wrong project controller probed"),
-    )
-    monkeypatch.setattr(
-        engine_client, "run_engine_passthrough",
-        lambda project, args, **kwargs: calls.append((project, args, kwargs)) or 47,
-    )
-    assert driver.cmd_update_request(["--project", "different", "--force"]) == 47
-    assert calls == [("harness", ["update", "--force"], {})]
-    assert "spec" not in seen
-
-
-@pytest.mark.parametrize("flags", [[], ["--no-project-controller"], ["--target", "worktree-manager"]])
-def test_project_authority_never_falls_back_to_manager(queued, monkeypatch, flags):
-    import update_driver
-    from update_driver.authority import selection
-    from worktree_manager import engine_client
-
-    seen, _request = queued
-    monkeypatch.setattr(
-        update_driver, "current_authority", lambda **_kwargs: selection("project", "harness"),
-    )
-    monkeypatch.setattr(engine_client, "get_value", lambda *_args: "")
-    assert driver.cmd_update_request(flags) == 1
-    assert "spec" not in seen
 
 
 @pytest.mark.parametrize("observer", [
@@ -530,96 +462,6 @@ def test_project_controller_routes_borrowed_request_before_manager_source(
     assert calls == [("example", ["update", "--force"])]
 
 
-def test_borrowed_standalone_authority_stays_standalone(queued, monkeypatch, tmp_path):
-    import update_driver
-    from update_driver.authority import selection
-    from worktree_manager import __main__ as manager, engine_client
-
-    class Custody:
-        request_id = "synthetic-request"
-        root = tmp_path
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            pass
-
-        def assert_owned(self):
-            pass
-
-    request = SimpleNamespace(
-        state="running",
-        spec=update_driver.RequestSpec(
-            "manager", project="example", cwd=str(tmp_path), source="selected",
-            authority="standalone",
-        ),
-    )
-    calls = []
-    monkeypatch.setattr(update_driver, "borrowed_custody", lambda: Custody())
-    monkeypatch.setattr(update_driver, "status", lambda *_args, **_kwargs: request)
-    monkeypatch.setattr(update_driver, "current_authority", lambda **_kwargs: selection("standalone"))
-    monkeypatch.setattr(
-        engine_client, "get_value",
-        lambda *_args: pytest.fail("standalone authority probed a project controller"),
-    )
-    monkeypatch.setattr(driver, "_source_key", lambda: "selected")
-    monkeypatch.setattr(manager, "_cmd_update", lambda flags: calls.append(flags) or 8)
-    assert driver.cmd_update_request(["--project", "example"]) == 8
-    assert "--no-project-controller" in calls[0]
-
-
-@pytest.mark.parametrize(("parent_flags", "child_flags", "expected"), [
-    ((), ("--no-project-controller",), 8),
-    ((), ("--target", "agent-bridge"), 8),
-    ((), ("--target=agent-bridge",), 8),
-    (("--no-project-controller",), ("--target", "agent-bridge"), 1),
-    (("--target", "agent-bridge"), ("--target", "agent-bridge"), 1),
-])
-def test_borrowed_project_authority_allows_controller_delegation(
-    queued, monkeypatch, tmp_path, parent_flags, child_flags, expected,
-):
-    import update_driver
-    from update_driver.authority import selection
-    from worktree_manager import __main__ as manager, engine_client
-
-    class Custody:
-        request_id = "synthetic-request"
-        root = tmp_path
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            pass
-
-        def assert_owned(self):
-            pass
-
-    request = SimpleNamespace(
-        state="running",
-        spec=update_driver.RequestSpec(
-            "engine", parent_flags, project="example", cwd=str(tmp_path), authority="project",
-        ),
-    )
-    calls = []
-    monkeypatch.setattr(update_driver, "borrowed_custody", lambda: Custody())
-    monkeypatch.setattr(update_driver, "status", lambda *_args, **_kwargs: request)
-    monkeypatch.setattr(
-        update_driver, "current_authority", lambda **_kwargs: selection("project", "example"),
-    )
-    monkeypatch.setattr(
-        engine_client, "get_value",
-        lambda *_args: pytest.fail("delegated bypass re-entered the controller"),
-    )
-    monkeypatch.setattr(manager, "_cmd_update", lambda flags: calls.append(flags) or 8)
-    assert driver.cmd_update_request(["--project", "example", *child_flags]) == expected
-    if expected == 8:
-        assert all(flag in calls[0] for flag in child_flags)
-    else:
-        assert not calls
-
-
 def test_ordinary_update_only_enqueues_and_observes_canonical_exit(queued):
     seen, request = queued
     assert driver.cmd_update_request(["--force", "--project", "example"]) == 6
@@ -702,12 +544,8 @@ def test_source_identity_expands_home_before_freezing_selection(
     assert not list(caller.iterdir())
 
 
-@pytest.mark.parametrize("configured", [False, True])
-def test_self_install_request_uses_app_slot_workspace_and_retains_finite_owner(
-    queued, monkeypatch, tmp_path, configured,
-):
+def test_self_install_request_uses_app_slot_workspace_and_retains_finite_owner(queued, monkeypatch, tmp_path):
     import update_driver
-    from update_driver.authority import selection
     from worktree_manager import runtime_identity, self_install
 
     seen, _request = queued
@@ -728,38 +566,12 @@ def test_self_install_request_uses_app_slot_workspace_and_retains_finite_owner(
         lambda: pytest.fail("app-only installation cannot select a source workspace"),
     )
     monkeypatch.setattr(update_driver, "drain", lambda: seen.update(drained=True))
-    if configured:
-        monkeypatch.setattr(update_driver, "current_authority", lambda **_kwargs: selection("standalone"))
     assert driver.self_install_request(lambda: pytest.fail("observer executed install")) == 6
     assert seen["spec"].cwd == str(slot) and seen["runner"].cwd == str(slot)
     assert seen["spec"].project == str(slot.parent.parent)
     assert dict(seen["spec"].context)["WORKTREE_MANAGER_ROOT"] == str(slot.parent.parent)
     assert seen["runner"].argv[-2:] == ("self-install", "--apply")
-    assert seen["spec"].authority == ("standalone" if configured else "")
     assert seen["drained"]
-
-
-def test_self_install_reports_project_authority_refusal(queued, monkeypatch, tmp_path, capsys):
-    import update_driver
-    from update_driver.authority import selection
-    from worktree_manager import runtime_identity, self_install
-
-    @contextmanager
-    def no_custody():
-        yield None
-
-    def refuse(*_args, **_kwargs):
-        raise update_driver.StateError("authority refusal")
-
-    monkeypatch.setattr(
-        self_install, "_runtime_installer", lambda: SimpleNamespace(_installation_custody=no_custody),
-    )
-    monkeypatch.setattr(runtime_identity, "running_application_slot", lambda: tmp_path)
-    monkeypatch.setattr(self_install, "default_root", lambda: tmp_path)
-    monkeypatch.setattr(update_driver, "current_authority", lambda **_kwargs: selection("project", "example"))
-    monkeypatch.setattr(update_driver, "enqueue", refuse)
-    assert driver.self_install_request(lambda: pytest.fail("unowned installation ran")) == 1
-    assert "authority refusal" in capsys.readouterr().err
 
 
 def test_fresh_repair_is_queued_without_running_in_the_observer(queued, monkeypatch):

@@ -32,12 +32,9 @@ Registered archive suffixes include default ``.tar.gz`` and optional ``.zip``.
 
 from __future__ import annotations
 
-import io
 import json
 import stat
-from collections.abc import Iterator
 from pathlib import Path
-from typing import TextIO
 
 from agent_logger import sessions
 from agent_logger.config import Config, load_config
@@ -236,82 +233,41 @@ def query_reviewer_sessions(
     return refs
 
 
-def iter_events(ref: SessionRef) -> Iterator[dict]:
-    """Lazily parse ``events.jsonl`` into event objects, one line at a time.
+def _read_events(ref: SessionRef) -> list[dict]:
+    """Parse ``events.jsonl`` into a list of event objects.
 
     Malformed or non-object lines are skipped rather than failing the whole
-    fetch -- one corrupt line must not deny the caller everything else. Only
-    one line is held at a time, so memory stays bounded for any transcript.
+    fetch -- one corrupt line must not deny the caller everything else.
     """
-    with sessions.open_events_stream(ref) as lines:
-        if lines is None:
-            return
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                event = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(event, dict):
-                yield event
+    buf = sessions.open_events_lines(ref)
+    if buf is None:
+        return []
+    events: list[dict] = []
+    for line in buf:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(event, dict):
+            events.append(event)
+    return events
 
 
-def _session_metadata(ref: SessionRef) -> dict:
+def build_session_payload(ref: SessionRef) -> dict:
+    """Build the ``{"session": {...}, "events": [...]}`` response body."""
     ws = sessions.read_workspace(ref)
     origin = sessions.read_origin(ref)
-    return {
+    session = {
         "session_id": ref.id,
         "cwd": ws.get("cwd") or None,
         "project": origin.get("source_repo") if isinstance(origin, dict) else None,
         "created_at": ws.get("created_at") or None,
         "updated_at": ws.get("updated_at") or None,
     }
-
-
-def build_session_payload(ref: SessionRef) -> dict:
-    """Build the ``{"session": {...}, "events": [...]}`` response body in memory.
-
-    Prefer :func:`write_session_payload` for transcript-sized sessions.
-    """
-    return {"session": _session_metadata(ref), "events": list(iter_events(ref))}
-
-
-def write_session_payload(ref: SessionRef, out: TextIO) -> None:
-    """Stream the ``{"session": ..., "events": [...]}`` body to ``out``.
-
-    Output is byte-identical to ``json.dumps(build_session_payload(ref))``, but
-    events are serialized and written one at a time, so neither the transcript
-    nor the encoded response is ever held whole in memory. The event stream is
-    opened before anything is written, so an unreadable member fails cleanly.
-    """
-    session = _session_metadata(ref)
-    events = iter_events(ref)
-    try:
-        first = next(events, None)
-        out.write('{"session": ' + json.dumps(session) + ', "events": [')
-        if first is not None:
-            out.write(json.dumps(first))
-            for event in events:
-                out.write(", ")
-                out.write(json.dumps(event))
-        out.write("]}")
-    finally:
-        events.close()
-
-
-def write_session_json(session_id: str, out: TextIO) -> int:
-    """Resolve ``session_id`` and stream its JSON payload to ``out``.
-
-    Returns the cold-store-provider exit code: ``0`` found (payload written),
-    :data:`NOT_FOUND_EXIT_CODE` not found (nothing written).
-    """
-    ref = resolve_session(session_id)
-    if ref is None:
-        return NOT_FOUND_EXIT_CODE
-    write_session_payload(ref, out)
-    return 0
+    return {"session": session, "events": _read_events(ref)}
 
 
 def fetch_session_json(session_id: str) -> tuple[int, str]:
@@ -319,9 +275,9 @@ def fetch_session_json(session_id: str) -> tuple[int, str]:
 
     ``exit_code`` follows the cold-store-provider contract: ``0`` found (with
     a JSON ``stdout`` payload), :data:`NOT_FOUND_EXIT_CODE` not found (empty
-    ``stdout``). Buffers the whole payload; the CLI streams via
-    :func:`write_session_json` instead.
+    ``stdout``).
     """
-    buf = io.StringIO()
-    code = write_session_json(session_id, buf)
-    return code, buf.getvalue()
+    ref = resolve_session(session_id)
+    if ref is None:
+        return NOT_FOUND_EXIT_CODE, ""
+    return 0, json.dumps(build_session_payload(ref))

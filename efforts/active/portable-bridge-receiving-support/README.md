@@ -1220,34 +1220,3 @@ implementation. The exact support closure follows the consumer trace and tests.
   whole-update and selected consumer checks. No rollout authority is inferred
   from this source merge. The effort stays Active and the worktree remains
   owned for the continuing acceptance, not finalized at this phase boundary.
-
-### 2026-11-06 - Promoted Vault passes an ordinary Windows update; Bridge migration remains external
-
-- Promotion run `42322133225` succeeded. The generated Main commit
-  `24500b417df023a44ae8009d74358e955101fcb8` contains the seven corrected
-  Vault modules and three retained native-custody SDK modules from the admitted
-  source. Vault's released version is `0.1.230-dev1`; the regenerated release
-  was checked by its actual content rather than source-commit ancestry.
-- A separately authorized ordinary whole-suite update reached the released
-  Vault installer and completed that component successfully. Fresh strict
-  discovered-endpoint health agrees with the selected runtime generation,
-  reports `accepting_work: true`, `auth_handoff: no-unexpired-state` and
-  `predecessor_retirement: exited`. The service remains locked; no unlock or
-  credential operation was needed for this consumer proof.
-- The same whole-suite request completed nonzero because incoming Bridge
-  failed before health during old-schema initialization and its cutover
-  exceeded the deadline. The prior Bridge remained healthy and selected.
-  Its database and retained sessions were preserved without a reset, live
-  schema patch or manual service restart.
-- The matching state-preserving migration belongs to the existing external
-  contributor's #11153 and issue #11144. That PR remains approved but blocked
-  by its required contract guard. Feedback is on the original PR: refresh
-  the affected source bindings, exercise representative populated old state
-  through normal readers, and retain refusal for damaged current schemas.
-  No competing implementation or takeover was created.
-- This establishes the bounded Windows selected-Vault transition, not a
-  successful whole installation, production cleanup-Job lifetime matrix,
-  installer clean-room, native Linux/macOS, credential backend or external
-  ACP/muxed receiving acceptance. Those gates remain open. Next is the
-  existing Bridge owner's reviewed migration and containing release, then
-  authorized ordinary update and receiving-consumer qualification.

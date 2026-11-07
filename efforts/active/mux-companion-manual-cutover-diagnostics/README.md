@@ -477,7 +477,7 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       in #10920, plans
       an optional exact-association, explicit passive point-read using the
       existing snapshot owner. #10935 delivers R1's declared on-demand
-      association fact; #11194 delivers R2's optional one-PR consumer.
+      association fact; R2's optional one-PR consumer is next.
       Claims alone remain unknown PR-state evidence;
       full live topology and every native/installed gate remain open.
 - [x] Implement explicit CLI/summary pane switching with attention indicators
@@ -645,13 +645,6 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       check; the complete root and six linked contracts were read immediately
       afterward. R2's consumer, joint PR-state validation and every original
       parent gate remain open.
-- [x] Step 6 finite PR-association consumer (R2 of the
-      [PR-state realization](sidecar-pr-state.md)): the Graph presents recorded
-      associations separately and performs one explicit, cancellable passive
-      `pr-watch snapshot` point read per operator selection. #11194 merged after
-      independent review and every required green check. Joint PR-state
-      validation rows 1-4, full live topology and every original parent gate
-      remain open.
 
 - [x] Step 7 finite activity-evidence distinction: actual ACP callback reports,
       owner-qualified start occurrences and canonical resource claims retain
@@ -803,7 +796,6 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
-- [2026-11-06 - R2 PR-association consumer merged](sidecar-pr-state.md#2026-11-06---r2-consumer-source-merged)
 - [2026-11-06 - R1 PR-association provider merged](sidecar-pr-state.md#2026-11-06---r1-provider-source-merged)
 - [2026-11-05 - Optional expected-head Recovery consumer](journal/2026/11.05-companion-expected-head-display.md)
 - [2026-11-05 - Passive independent expected-head provider](journal/2026/11.05-companion-expected-head-reader.md)

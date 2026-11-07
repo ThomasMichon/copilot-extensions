@@ -29,20 +29,20 @@ def test_mux_attached_clients_counts_list_clients_lines(monkeypatch):
         "run",
         _fake_run_factory(list_clients_lines=["/dev/pts/1: wt-1", "/dev/pts/2: wt-1"]),
     )
-    assert mux_attached_clients.mux_attached_clients("tmux", "wt-1") == 2
+    assert mux_attached_clients.mux_attached_clients("psmux", "wt-1") == 2
 
 
 def test_mux_attached_clients_reports_zero_for_empty_but_successful_listing(monkeypatch):
     monkeypatch.setattr(subprocess, "run", _fake_run_factory(list_clients_lines=[]))
-    assert mux_attached_clients.mux_attached_clients("tmux", "wt-1") == 0
+    assert mux_attached_clients.mux_attached_clients("psmux", "wt-1") == 0
 
 
 def test_mux_attached_clients_returns_none_on_nonzero_exit(monkeypatch, caplog):
     caplog.set_level("DEBUG", logger=mux_attached_clients.__name__)
     monkeypatch.setattr(subprocess, "run", _fake_run_factory(list_clients_ok=False))
-    assert mux_attached_clients.mux_attached_clients("tmux", "wt-1") is None
+    assert mux_attached_clients.mux_attached_clients("psmux", "wt-1") is None
     assert caplog.records[-1].levelname == "DEBUG"
-    assert "tmux" in caplog.text and "wt-1" in caplog.text
+    assert "psmux" in caplog.text and "wt-1" in caplog.text
 
 
 def test_mux_attached_clients_returns_none_on_exception(monkeypatch, caplog):
@@ -50,9 +50,9 @@ def test_mux_attached_clients_returns_none_on_exception(monkeypatch, caplog):
         raise OSError("no such binary")
 
     monkeypatch.setattr(subprocess, "run", _fake_run)
-    assert mux_attached_clients.mux_attached_clients("tmux", "wt-1") is None
+    assert mux_attached_clients.mux_attached_clients("psmux", "wt-1") is None
     assert caplog.records[-1].levelname == "WARNING"
-    assert "tmux" in caplog.text and "wt-1" in caplog.text
+    assert "psmux" in caplog.text and "wt-1" in caplog.text
 
 
 def _entry(**overrides) -> dict:
@@ -474,22 +474,4 @@ def test_probe_replaces_undecodable_output_when_counting_lines(monkeypatch):
         return subprocess.CompletedProcess(argv, 0, stdout=text)
 
     monkeypatch.setattr(subprocess, "run", run)
-    assert mux_attached_clients.mux_attached_clients("tmux", "wt-1") == 2
-
-
-@pytest.mark.parametrize("native", [False, True])
-@pytest.mark.parametrize("binary", ["psmux", r"C:\Tools\PSMux.exe"])
-def test_passive_psmux_observation_never_executes_or_retires(
-    monkeypatch, tmp_path, native, binary,
-):
-    registry = MuxMappingRegistry(tmp_path / "mapping.json")
-    entry = _entry(mux_bin=binary, attached_clients=7)
-    if native:
-        entry.update(session_incarnation="$1:100", native_session_incarnation="$1:100")
-    registry.register(entry)
-    before = registry.snapshot()
-    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: pytest.fail("passive PSMux execution"))
-    monkeypatch.setattr(mux_discovery, "run_mux_child",
-                        lambda *a, **kw: pytest.fail("passive PSMux execution"))
-    mux_attached_clients.AttachedClientObserver().observe(registry)
-    assert registry.snapshot() == before
+    assert mux_attached_clients.mux_attached_clients("psmux", "wt-1") == 2

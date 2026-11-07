@@ -68,7 +68,6 @@ def _enqueue_fixture_update(monkeypatch, scope, **values):
 def queued(monkeypatch, tmp_path):
     import update_driver
     from agent_worktrees import project_update_controller
-    from update_driver.authority import UpdateAuthority
 
     seen = {}
     request = SimpleNamespace(
@@ -89,7 +88,6 @@ def queued(monkeypatch, tmp_path):
         pytest.fail("ordinary caller entered the update executor")
 
     monkeypatch.setattr(update_driver, "borrowed_custody", lambda: None)
-    monkeypatch.setattr(update_driver, "current_authority", lambda **_kwargs: UpdateAuthority())
     monkeypatch.setattr(update_driver, "enqueue", enqueue)
     monkeypatch.setattr(update_driver, "runtime_command", lambda module, args=(): (
         (str(tmp_path / "python.exe"), "-m", module, *args), {},
@@ -112,75 +110,6 @@ def test_ordinary_update_queues_before_manager_discovery(queued):
     assert seen["spec"].project == "example"
     assert seen["runner"].argv[-4:] == ("--project", "example", "update", "--force")
     assert seen["wait"] == request.id
-
-
-def test_downlevel_driver_refuses_cleanly_without_queueing(queued, monkeypatch, capsys):
-    import update_driver
-
-    seen, _request = queued
-    monkeypatch.delattr(update_driver, "current_authority")
-    assert boundary.cmd_update_request(_args()) == 1
-    assert "spec" not in seen
-    assert "lacks authority support" in capsys.readouterr().err
-
-
-def test_explicit_standalone_authority_bypasses_the_controller_through_manager(
-    queued, monkeypatch,
-):
-    import update_driver
-    from agent_worktrees import project_update_controller
-    from update_driver.authority import selection
-
-    seen, _request = queued
-    monkeypatch.setattr(update_driver, "current_authority", lambda **_kwargs: selection("standalone"))
-    monkeypatch.setattr(
-        project_update_controller, "probe_for_submission",
-        lambda *_args, **_kwargs: pytest.fail("standalone mode probed a project controller"),
-    )
-    monkeypatch.setenv("AGENT_WORKTREES_INTERNAL_PROJECT_CONTROLLER", "1")
-    assert boundary.cmd_update_request(_args()) == 4
-    assert seen["spec"].authority == "standalone"
-    assert "--no-project-controller" in seen["spec"].argv
-    assert "--no-project-controller" in seen["runner"].argv
-
-
-def test_project_authority_routes_to_the_selected_project(queued, monkeypatch):
-    import update_driver
-    from agent_worktrees import project_update_controller
-    from update_driver.authority import selection
-
-    seen, _request = queued
-    probes = []
-    monkeypatch.setattr(
-        update_driver, "current_authority", lambda **_kwargs: selection("project", "harness"),
-    )
-    monkeypatch.setattr(boundary.cfg, "active_project", lambda: "different")
-    monkeypatch.setattr(boundary, "_request_context", lambda **_kwargs: ())
-    monkeypatch.setattr(
-        project_update_controller, "probe_for_submission",
-        lambda _args, **kwargs: probes.append(kwargs) or True,
-    )
-    assert boundary.cmd_update_request(_args()) == 4
-    assert probes[0]["project"] == "harness"
-    assert seen["spec"].project == "harness"
-    assert seen["spec"].authority == "project"
-    assert seen["runner"].argv[-3:] == ("--project", "harness", "update")
-
-
-@pytest.mark.parametrize("options", [{}, {"no_project_controller": True}, {"target": "agent-bridge"},
-                                      {"phase": "runtimes"}])
-def test_project_authority_never_queues_a_standalone_fallback(queued, monkeypatch, options):
-    import update_driver
-    from agent_worktrees import project_update_controller
-    from update_driver.authority import selection
-
-    seen, _request = queued
-    monkeypatch.setattr(
-        update_driver, "current_authority", lambda **_kwargs: selection("project", "example"),
-    )
-    monkeypatch.setattr(project_update_controller, "probe_for_submission", lambda *_a, **_kw: False)
-    assert boundary.cmd_update_request(_args(**options)) == 1
-    assert "spec" not in seen
 
 
 @pytest.mark.parametrize("route", ["shortcut", "no-manager", "direct"])

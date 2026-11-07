@@ -548,7 +548,7 @@ def test_actual_local_resume_alias_grid_preserves_record(tmp_path, monkeypatch, 
 
 
 @pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell consumer unavailable")
-def test_cold_resume_plan_obeys_native_evidence_at_powershell_boundary(
+def test_cold_resume_plan_executes_with_exact_prompt_at_powershell_boundary(
     tmp_path: Path, monkeypatch,
 ):
     from agent_procutil.owned_process import run_caller_owned
@@ -564,11 +564,7 @@ def test_cold_resume_plan_obeys_native_evidence_at_powershell_boundary(
     )
     _stub_launch_plumbing(monkeypatch, config)
     consumer = tmp_path / "capture.ps1"
-    marker = tmp_path / "consumer-started"
-    consumer.write_text(
-        "[IO.File]::WriteAllText('" + str(marker).replace("'", "''") + "', 'started')\n"
-        "ConvertTo-Json -InputObject @($args) -Compress\n", encoding="utf-8",
-    )
+    consumer.write_text("ConvertTo-Json -InputObject @($args) -Compress\n", encoding="utf-8")
     monkeypatch.setattr(
         m, "_build_launch_cmd",
         lambda *_a, **_k: [
@@ -593,15 +589,7 @@ def test_cold_resume_plan_obeys_native_evidence_at_powershell_boundary(
         )
     except subprocess.TimeoutExpired as error:
         pytest.fail(f"Native seed handoff timed out: stdout={error.stdout!r}; stderr={error.stderr!r}")
-    if os.name == "nt":
-        assert proc.returncode == 3, proc.stderr
-        assert "Could not verify cold Copilot handoff" in proc.stderr
-        staged = launch_seed_state.peek(tmp_path / "wt-a.yaml")
-        assert staged.text == seed and staged.handoff_id is None
-        assert not marker.exists()
-        return
     assert proc.returncode == 0, proc.stderr
-    assert marker.read_text(encoding="utf-8") == "started"
     assert json.loads(proc.stdout.splitlines()[-1]) == ["--resume=history-s1", "--interactive", seed]
     assert tracking.load_record(tmp_path / "wt-a.yaml").pending_seed is None
     assert launch_seed_state.peek(tmp_path / "wt-a.yaml") is None

@@ -383,7 +383,7 @@ def test_spawn_serve_host_launches_through_spawn_daemon(tmp_path, monkeypatch):
 @pytest.mark.parametrize("socket_arg, env_socket, expected", [
     ("rel/serve.sock", None, ("rel", "serve.sock")),
     (None, "env/serve.sock", ("env", "serve.sock")),
-    (None, None, ("home", "current", "serve.sock")),
+    (None, None, ("home", "serve.sock")),
 ])
 def test_ensure_serve_polls_the_absolute_path_the_host_binds(
     tmp_path, monkeypatch, socket_arg, env_socket, expected,
@@ -496,7 +496,7 @@ def test_serve_handle_is_never_dereferenced_to_one_generation(tmp_path, monkeypa
 
 
 def test_spawned_host_inherits_the_fixed_handle_not_its_target(tmp_path, monkeypatch):
-    handle = str(tmp_path / "current" / "serve.sock")
+    handle = str(tmp_path / "serve.sock")
     monkeypatch.setenv("AGENT_MCP_SERVE_SOCKET", handle)
     _handle_dereferences_to(monkeypatch, handle, str(tmp_path / "gen-1" / "serve.sock"))
 

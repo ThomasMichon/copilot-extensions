@@ -445,29 +445,6 @@ def test_http48_observer_scope_does_not_relax_the_http47_child_portfolio(tmp_pat
         verify_interpreters(tmp_path, {})
 
 
-@pytest.mark.parametrize("fault", [None, "missing-entry", "missing-observer", "extra-observer"])
-def test_partitioned_capture_requires_every_declared_observer_entry(tmp_path, fault):
-    from bridge_http47_runtime import verify_interpreters
-
-    count = {"missing-observer": 1, "extra-observer": 3}.get(fault, 2)
-    for pid in range(1, count + 1):
-        events = [{"kind": "start", "pid": pid, "parent": 0, "observer": True}]
-        if not (fault == "missing-entry" and pid == 2):
-            events.append({"kind": "observer-entry", "distribution": "pytest", "source": "pytest/__main__.py"})
-        (tmp_path / f"{pid}.jsonl").write_text(
-            "".join(json.dumps(event) + "\n" for event in events), encoding="utf-8",
-        )
-    if fault:
-        with pytest.raises(ValueError, match="observer entrypoint"):
-            verify_interpreters(tmp_path, {}, expected_roles=frozenset(), expected_observers=2)
-    else:
-        assert verify_interpreters(
-            tmp_path, {}, expected_roles=frozenset(), expected_observers=2,
-        )["roles"] == ["observer"]
-        with pytest.raises(ValueError, match="observer entrypoint"):
-            verify_interpreters(tmp_path, {}, expected_roles=frozenset())
-
-
 @pytest.mark.parametrize("future_generation", [48, 49, 50, 51])
 def test_http47_historical_current_hashes_are_not_future_source_inputs(
     historical_repository: tuple[Path, str], monkeypatch: pytest.MonkeyPatch, future_generation,

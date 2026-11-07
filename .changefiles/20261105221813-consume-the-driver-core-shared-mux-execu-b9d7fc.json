@@ -1,9 +1,0 @@
-{
-  "comment": "Consume the Driver core shared execution closure and route launch-selected headed inbox delivery through its retained common broker without direct SDK fallback",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

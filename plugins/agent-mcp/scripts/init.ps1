@@ -80,7 +80,6 @@ if ($env:OS -eq 'Windows_NT' -and
         -Plugin 'agent-mcp' -Action $Action -Options $driverOptions
     if (-not $driverEntry.Participant -or $driverEntry.ExitCode -ne 0) { exit $driverEntry.ExitCode }
     $driverPython = $driverEntry.Python
-    $script:McpBootstrapPython = $driverPython
     $driverArguments = $driverEntry.Arguments
 }
 if ($Action -eq 'broker-remove') {
@@ -350,15 +349,6 @@ if ($SrcVersion) {
 }
 # === end install-contract:v3 versioned-venv ===
 
-# MCP's installed callback owner supports nested slot environments. Keep this
-# choice outside the shared installer blocks and inside construction custody.
-if ($VersionedRuntime) {
-    $VenvDir = Join-Path $VenvDir '.venv'
-    $VenvPython = Join-Path $VenvDir $(if ($env:OS -eq 'Windows_NT') { 'Scripts\python.exe' } else { 'bin/python' })
-    $LinkDir = $VenvDir
-    $LinkPython = $VenvPython
-}
-
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 
 # === install-contract:v3 strip-trampolines -- keep byte-identical across plugins ===
@@ -392,88 +382,23 @@ function Remove-ConsoleTrampolines {
 # === install-contract:v4 marker/toss helpers (#935) ===
 function Get-BootstrapPython {
     param([switch]$ExternalOnly)
-    # Construction helpers share the native driver's 3.11 floor, not the
-    # package's 3.10 floor. External callers must run outside the slot.
-    $probe = @'
-import json,sys
-assert sys.version_info >= (3,11)
-print(json.dumps(sys._base_executable if sys.argv[1] == 'base' else sys.executable))
-'@
-    $mode = if ($ExternalOnly) { 'base' } else { 'executable' }
-    $resolve = {
-        param([string]$Candidate)
-        if (-not $Candidate -or $Candidate -match '[\\/]WindowsApps[\\/]') { return $null }
-        try {
-            $nativeError = ''
-            $output = Invoke-Hidden -FilePath $Candidate -ArgList @(
-                '-I', '-S', '-B', '-c', $probe, $mode
-            ) -ErrorOutput ([ref]$nativeError)
-            if ($LASTEXITCODE -eq 0) {
-                $selected = ($output | Out-String) | ConvertFrom-Json
-                if ($selected -and $selected -notmatch '[\\/]WindowsApps[\\/]' -and
-                    (Test-Path -LiteralPath $selected -PathType Leaf)) { return $selected }
-            }
-        } catch { }
-        return $null
-    }
+    <# A python to run the stdlib-only versioned_runtime.py helper (#935).
+       Prefers the freshly-built slot venv python ($VenvDir, present at
+       mark-complete before the link is swapped), then the active link's
+       python, then a real base python via the `py` launcher -- avoiding the
+       Windows Store 'python' alias stub. Returns $null if none. #>
     foreach ($d in @($VenvDir, $LinkDir)) {
         if ($ExternalOnly) { break }
-        if ($d) {
-            foreach ($rel in 'Scripts\python.exe', 'bin/python') {
-                $p = Join-Path $d $rel
-                if (Test-Path -LiteralPath $p -PathType Leaf) {
-                    $selected = & $resolve $p
-                    if ($selected) { return $selected }
-                }
-            }
-        }
+        # Windows venv layout first; `bin/python` is the POSIX layout pwsh sees off Windows.
+        if ($d) { foreach ($rel in 'Scripts\python.exe', 'bin/python') { $p = Join-Path $d $rel; if (Test-Path $p) { return $p } } }
     }
-    $preferred = Get-Variable McpBootstrapPython -Scope Script -ValueOnly -ErrorAction SilentlyContinue
-    $selected = & $resolve $preferred
-    if ($selected) { return $selected }
-    $candidates = @()
-    foreach ($name in 'python3', 'python') {
-        $candidates += @(Get-Command $name -All -CommandType Application -ErrorAction SilentlyContinue |
-            Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' } |
-            ForEach-Object { $_.Source })
+    if (Get-Command py -ErrorAction SilentlyContinue) {
+        $exe = (Invoke-Hidden -FilePath py -ArgList @('-3', '-c', 'import sys; print(sys.executable)') | Out-String).Trim()
+        if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { return $exe }
     }
-    foreach ($launcher in @(Get-Command py -All -CommandType Application -ErrorAction SilentlyContinue |
-            Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' })) {
-        try {
-            $nativeError = ''
-            $listed = Invoke-Hidden -FilePath $launcher.Source -ArgList @('-0p') -ErrorOutput ([ref]$nativeError)
-            $launcherMatches = @()
-            if ($LASTEXITCODE -eq 0) {
-                $launcherMatches = @([regex]::Matches("$listed", '(?m)((?:[A-Za-z]:[\\/]|\\\\).*python(?:[0-9.]*)?\.exe)"?\s*$'))
-            }
-            if ($launcherMatches.Count) {
-                foreach ($match in $launcherMatches) { $candidates += $match.Groups[1].Value }
-            } else {
-                foreach ($version in '3.13', '3.12', '3.11', '3') {
-                    $exe = Invoke-Hidden -FilePath $launcher.Source -ArgList @(
-                        "-$version", '-I', '-S', '-B', '-c', 'import json,sys; print(json.dumps(sys.executable))'
-                    ) -ErrorOutput ([ref]$nativeError)
-                    if ($LASTEXITCODE -eq 0 -and $exe) { $candidates += ($exe | Out-String) | ConvertFrom-Json }
-                }
-            }
-        } catch { }
-    }
-    if ($env:OS -eq 'Windows_NT') {
-        $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)})
-        if ($env:LOCALAPPDATA) { $roots += Join-Path $env:LOCALAPPDATA 'Programs\Python' }
-        foreach ($root in $roots) {
-            if (-not $root) { continue }
-            $candidates += @(Get-ChildItem -LiteralPath $root -Filter 'Python3*' -Directory -ErrorAction SilentlyContinue |
-                Sort-Object Name -Descending |
-                ForEach-Object { Join-Path $_.FullName 'python.exe' })
-        }
-    }
-    foreach ($candidate in @($candidates | Select-Object -Unique)) {
-        $selected = & $resolve $candidate
-        if ($selected) {
-            $script:McpBootstrapPython = $selected
-            return $selected
-        }
+    foreach ($cand in 'python3', 'python') {
+        $c = Get-Command $cand -ErrorAction SilentlyContinue
+        if ($c -and $c.Source -notmatch 'WindowsApps') { return $c.Source }
     }
     return $null
 }
@@ -517,7 +442,7 @@ function Invoke-VersionedSlotClean {
         -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir) `
         -Footprint (Join-Path $PSScriptRoot 'uninstall-profile.json') -Plugin 'agent-mcp'
     $script:SrcVersion = $script:RuntimeConstructionSession.Version
-    $script:VenvDir = Join-Path (Join-Path (Join-Path $InstallDir 'versions') $SrcVersion) '.venv'
+    $script:VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
     $script:VenvPython = Join-Path $VenvDir $(if ($env:OS -eq 'Windows_NT') { 'Scripts\python.exe' } else { 'bin/python' })
     $script:LinkDir = $VenvDir
     Assert-SourceRuntime
@@ -534,15 +459,14 @@ function Invoke-VersionedMarkComplete {
     return $true
 }
 
-function Publish-IncomingMcp {
-    if (-not $VersionedRuntime) { return }
-    $incomingError = ''
-    Invoke-Hidden -FilePath $VenvPython -ArgList @(
-        '-I', (Join-Path $PSScriptRoot 'publish_incoming.py'), '--root', $InstallDir
-    ) -ErrorOutput ([ref]$incomingError) | Out-Null
-    if ($incomingError) { [Console]::Error.Write($incomingError) }
-    if ($LASTEXITCODE -ne 0) { throw 'Incoming MCP generation failed readiness/publication; live custody retained' }
-    Write-Ok 'Incoming MCP selection qualified; serving activation follows policy'
+function Invoke-RuntimeOwnerSettlement {
+    if (-not $VersionedRuntime -or $script:RuntimeConstructionSession.Construction -ne 'fresh') { return }
+    $arguments = @('-I', (Join-Path $PSScriptRoot 'reap_versions.py'), '--root', $InstallDir,
+        '--link-name', '.venv', '--fresh', '--reset-control')
+    if ($env:AGENT_MCP_NO_VERSION_REAP) { $arguments += '--check-only' }
+    Invoke-Hidden -FilePath $VenvPython -ArgList $arguments | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Fresh MCP replacement could not settle its old runtime owners and control state' }
+    Write-Ok 'Old MCP runtime owners and control state settled'
 }
 
 # === end install-contract:v4 marker/toss helpers ===
@@ -581,8 +505,7 @@ function Deploy-SelfProvisioningBinstub {
     # agent-mcp ships a SINGLE self-provisioning .cmd (no .ps1): it is spawned by
     # Copilot as a bare ``command: agent-mcp`` stdio MCP server, where a .cmd
     # forwards stdin verbatim (a .ps1 shim does not) and wins PATHEXT/PowerShell
-    # resolution. Resolve the built slot through its canonical marker owner; if
-    # no slot is built yet (a
+    # resolution. Fast-path the built slot python; if no slot is built yet (a
     # ``stamp`` deferred the venv), provision on first use from the slot-local
     # snapshot (``init.ps1 provision``) then dispatch. Opt out with
     # AGENT_MCP_NO_SELFPROVISION=1. POSIX gets its sh shim. (#1393)
@@ -649,11 +572,15 @@ echo [agent-mcp] provisioning did not yield a runtime.>&2
 exit /b 1
 :_resolve
 set "_PY="
+set "_VER="
+if exist "%_ROOT%\current-version" set /p _VER=<"%_ROOT%\current-version"
+if defined _VER if exist "%_ROOT%\versions\%_VER%\Scripts\python.exe" set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
+if defined _PY goto :eof
 if not exist "%_ROOT%\bin\resolve-runtime.ps1" goto :eof
 set "_PSX=powershell"
 where pwsh >nul 2>&1
 if %ERRORLEVEL%==0 set "_PSX=pwsh"
-for /f "usebackq delims=" %%p in (`%_PSX% -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$env:AGENT_RT_ROOT=$env:_ROOT; . (Join-Path $env:_ROOT 'bin\resolve-runtime.ps1') -TraceMode read-only; if ($AgentRtPy) { [Console]::Out.WriteLine($AgentRtPy) }" 2^>nul`) do set "_PY=%%p"
+for /f "usebackq delims=" %%p in (`%_PSX% -NoProfile -ExecutionPolicy Bypass -Command "$env:AGENT_RT_ROOT='%_ROOT%'; . '%_ROOT%\bin\resolve-runtime.ps1'; if ($AgentRtPy) { $AgentRtPy }" 2^>nul`) do set "_PY=%%p"
 goto :eof
 '@
     [System.IO.File]::WriteAllText($cmdPath, $cmdContent, $utf8NoBom)
@@ -874,12 +801,28 @@ if (-not (Test-Path $PkgSrcDir)) {
 
 $hasWinget = $null -ne (Get-Command winget -ErrorAction SilentlyContinue)
 
-$pythonCmd = Get-BootstrapPython -ExternalOnly
+# Find a Python interpreter (skip Windows Store aliases that aren't real)
+$pythonCmd = $null
+foreach ($candidate in @('python', 'python3', 'py')) {
+    $found = Get-Command $candidate -ErrorAction SilentlyContinue
+    if ($found) {
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $testOut = & $found.Source --version 2>&1
+            if ($LASTEXITCODE -eq 0 -and $testOut -match 'Python') {
+                $pythonCmd = $found.Source
+            }
+        } catch { }
+        $ErrorActionPreference = $prevEAP
+        if ($pythonCmd) { break }
+    }
+}
 if (-not $pythonCmd) {
-    Write-Fail 'MCP setup requires an existing Python 3.11+ bootstrap interpreter'
+    Write-Fail 'Python not found on PATH (need 3.10+)'
     Write-Host '  Install Python from https://python.org or via winget:' -ForegroundColor DarkGray
     Write-Host '    winget install Python.Python.3.13' -ForegroundColor DarkGray
-    throw 'MCP setup requires an existing Python 3.11+ bootstrap interpreter'
+    throw 'Python not found on PATH (need 3.10+)'
 }
 Write-Ok "Python: $pythonCmd"
 
@@ -937,7 +880,7 @@ if ($Force -or -not (Test-Path $VenvPython)) {
         if (Get-Command uv -ErrorAction SilentlyContinue) {
             Write-Step 'Creating venv via uv...'
             Invoke-VersionedSlotClean
-            Invoke-Hidden -FilePath uv -ArgList @('venv', $VenvDir, '--python', $pythonCmd, '--allow-existing') | Out-Null
+            Invoke-Hidden -FilePath uv -ArgList @('venv', $VenvDir, '--allow-existing') | Out-Null
             if ($LASTEXITCODE -ne 0) {
                 Write-Step 'uv venv failed -- falling back to python -m venv'
                 Invoke-Hidden -FilePath $pythonCmd -ArgList @('-m', 'venv', $VenvDir) | Out-Null
@@ -1048,9 +991,87 @@ if ($VersionedRuntime) {
 }
 # === end install-contract:v3 versioned-venv activate ===
 
-# Incoming readiness is required; incumbent extinction is not. Never invoke
-# reset-control or forced drain as incoming admission.
-Publish-IncomingMcp
+# agent-mcp-specific (Phase 2, agent-mcp-graceful-cutover): before the hard
+# reap below, give a live `serve` daemon on a stale (non-current) version a
+# graceful zero-downtime handoff instead of just killing it. `--require-live`
+# makes this call safe to run unconditionally on every activation: it never
+# starts a resident daemon where none was running (serve is optional,
+# on-demand warmth, not a registered service), and no-ops if the live daemon
+# is already on this exact version. Only a genuinely live, differently-
+# versioned daemon actually cuts over here; the reap step right after this
+# still runs unchanged as the safety net for anything cutover didn't handle
+# (a pre-feature daemon with no control channel, a failed cutover, or a
+# leaked/orphaned bridge tree that was never a `serve` daemon at all).
+# Best-effort: never fails the install. Opt out with AGENT_MCP_NO_CUTOVER.
+# The CLI's own defaults (60s health / 300s drain) are tuned for a human
+# operator explicitly watching a manual `agent-mcp cutover`; an unattended
+# activation pass must not silently block for up to ~6 minutes on a lightly-
+# used bridge, so this uses much shorter install-appropriate defaults
+# (still overridable, e.g. for a host with slow-starting upstream MCP
+# servers) via AGENT_MCP_CUTOVER_HEALTH_TIMEOUT / AGENT_MCP_CUTOVER_DRAIN_TIMEOUT.
+if ($VersionedRuntime -and $script:RuntimeConstructionSession.Construction -ne 'fresh' -and -not $env:AGENT_MCP_NO_CUTOVER) {
+    $cutoverHealthTimeout = if ($env:AGENT_MCP_CUTOVER_HEALTH_TIMEOUT) { $env:AGENT_MCP_CUTOVER_HEALTH_TIMEOUT } else { '15' }
+    $cutoverDrainTimeout = if ($env:AGENT_MCP_CUTOVER_DRAIN_TIMEOUT) { $env:AGENT_MCP_CUTOVER_DRAIN_TIMEOUT } else { '30' }
+    try {
+        $cutoverArgs = @(
+            '-I', '-X', 'utf8', '-m', 'agent_mcp', 'cutover', '--require-live', '--force', '--json',
+            '--health-timeout', $cutoverHealthTimeout, '--drain-timeout', $cutoverDrainTimeout
+        )
+        $cutoverJson = Invoke-Hidden -FilePath $VenvPython -ArgList $cutoverArgs
+        $cutoverArg = (($cutoverJson | Out-String).Trim())
+        if ($cutoverArg) {
+            $cutoverResult = $cutoverArg | ConvertFrom-Json
+            if ($cutoverResult.skipped) {
+                Write-Skip "Cutover skipped: $($cutoverResult.skipped)"
+            } elseif ($cutoverResult.ok) {
+                Write-Ok "Cut over the live serve daemon to the new version (routing flipped; old drained + retired)"
+            } else {
+                Write-Warning "Cutover attempted -- $($cutoverResult.error)" -WarningAction Continue
+            }
+        }
+    } catch { Write-Skip "Cutover skipped ($($_.Exception.Message))" }
+}
+
+# agent-mcp-specific (NOT part of the byte-identical activate block above): reap
+# processes still running from a now-stale (non-current) slot -- leaked/orphaned
+# bridge trees or a warmth daemon from the prior version -- so an upgrade never
+# leaves "two runtime versions resident". Best-effort; opt out with
+# AGENT_MCP_NO_VERSION_REAP. Runs via the new slot's own python, so it is
+# attributed to the current version and never reaps itself.
+Invoke-RuntimeOwnerSettlement
+if ($VersionedRuntime -and $script:RuntimeConstructionSession.Construction -ne 'fresh' -and -not $env:AGENT_MCP_NO_VERSION_REAP) {
+    $ReapScript = Join-Path $PSScriptRoot 'reap_versions.py'
+    try {
+        # Use the plain (one 'version:pid' per line) output, not --json: under this
+        # script's Set-StrictMode 2.0, an empty ConvertFrom-Json array collapses so
+        # a later .Count throws. @(...) of the lines is always a countable array.
+        $reapLines = (Invoke-Hidden -FilePath $VenvPython -ArgList @('-I', $ReapScript, '--root', $InstallDir, '--link-name', '.venv')) -split "`r?`n"
+        if ($LASTEXITCODE -ne 0) { throw 'Old MCP runtime retirement was not confirmed' }
+        $reaped = @($reapLines | Where-Object { $_ -and $_.ToString().Trim() })
+        if ($reaped.Count -gt 0) {
+            $stale = ($reaped | ForEach-Object { ($_ -split ':', 2)[0] } | Sort-Object -Unique) -join ', '
+            Write-Ok "Reaped $($reaped.Count) stale-version process(es) from: $stale"
+        }
+    } catch { Write-Warning "Version-reap incomplete ($($_.Exception.Message))" -WarningAction Continue }
+    # Collect the now-idle stale version *directories* the reap above freed. The
+    # process-reap alone leaves the dirs on disk (the primitive's gc deliberately
+    # protects any slot a live process runs from), so without this step stale
+    # slots accumulate unbounded across upgrades. --protect-pids keeps the current
+    # version + any slot a live process still runs from; --min-age-days is a
+    # recency floor so a concurrent peer install's freshly-built (not-yet-live)
+    # slot is never reaped mid-build. Best-effort; runs via the new slot's python.
+    try {
+        $gcJson = & $VenvPython $VrScript --root $InstallDir --link-name '.venv' `
+            --json gc --protect-pids --min-age-days 0.05 2>$null
+        $gcArg = (($gcJson | Out-String).Trim())
+        $gcCountError = ''
+        $gcN = (Invoke-Hidden -FilePath $VenvPython -ArgList @(
+            '-c', 'import sys,json; a=sys.argv[1] if len(sys.argv)>1 else ""; print(len(json.loads(a).get("removed",[])) if a.strip()[:1]=="{" else 0)', $gcArg
+        ) -ErrorOutput ([ref]$gcCountError) | Out-String).Trim()
+        if ($gcCountError) { [Console]::Error.Write($gcCountError) }
+        if ([int]$gcN -gt 0) { Write-Ok "Collected $gcN stale version dir(s)" }
+    } catch { Write-Skip "Version-gc skipped ($($_.Exception.Message))" }
+}
 
 # -- 4. Deploy binstub -------------------------------------------------
 
@@ -1149,7 +1170,6 @@ if ($pathDirs -contains $LocalBin) {
     }
 }
 
-Write-Skip 'Predecessor retirement and slot collection deferred; incoming publication is complete'
 Write-Host '  Try: agent-mcp version' -ForegroundColor DarkGray
 exit 0
 } catch {

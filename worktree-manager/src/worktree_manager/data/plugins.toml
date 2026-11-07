@@ -39,7 +39,6 @@ prereqs = [
     { name = "git", min = "2.15", notes = "Git with worktree support", provision = "system" },
     { name = "python3", min = "3.10", notes = "Python 3.10+", provision = "system" },
     { name = "uv", notes = "Astral uv — venvs + package installs", provision = "script" },
-    { name = "pwsh", min = "7.0", notes = "PowerShell 7 — required by the Windows core installer", provision = "system", platforms = ["windows"] },
     { name = "psmux", notes = "Terminal multiplexer for interactive sessions", optional = true, provision = "script" },
 ]
 

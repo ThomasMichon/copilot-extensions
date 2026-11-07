@@ -5066,27 +5066,6 @@ Those libraries remain complete construction inputs and contribute to source
 identity; unbundled libraries still require their associated distributions.
 Existing feed policy, artifact seasoning, source identity and installation
 custody still apply; a local snapshot is not independent authorization.
-
-An application may declare a first-party SDK association in its existing
-`pyproject.toml`, separately from its ordinary dependency/extra declaration:
-
-```toml
-[tool.copilot-extensions.application-sources]
-fleet-manager = "standalone:fleet-manager"
-```
-
-Values use the existing canonical project selectors, not registry URLs or UV
-vendored-library paths. The selected application wheel carries this source
-constraint into native profile derivation. Only applicable dependencies require
-their declared associated input; an unselected optional extra stays inert.
-A missing input or a wheel from another project refuses before registry
-compilation/acquisition, even if its distribution name matches. The existing
-repeated `--project` source preparation supplies complete associated applications
-through their normal builders/resources. Dependency-age attribution resolves
-the same explicit declaration to the actual contained, inventoried application,
-checks its distribution/version/extras and audits its external closure. A familiar
-package name without that source declaration is not an exemption.
-
 Worktrees' Windows-native source entry accepts optional `-InputTimeout` with
 `-InstallSource`; its existing native driver and Python consumer forward this
 as `--input-timeout`. The positive finite duration defaults to 600 seconds.

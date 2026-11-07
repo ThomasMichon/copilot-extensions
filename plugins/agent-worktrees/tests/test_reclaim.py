@@ -97,15 +97,12 @@ class TestDetachedMuxReclaim:
         # wt-less mux(5) dropped.
         assert kept == [1, 2, 4]
 
-    def test_filter_preserves_mux_when_reachability_is_unknown(self, monkeypatch):
+    def test_filter_treats_mux_query_error_as_unreachable(self, monkeypatch):
         found = [{"pid": 2, "worktree_id": "wtA", "homing": "mux"}]
         def _boom(ids):
             raise RuntimeError("psmux not available")
         monkeypatch.setattr(reclaim.sessions, "mux_status_many", _boom)
-        assert reclaim.filter_stop_unreachable(found) == []
-        monkeypatch.setattr(reclaim, "mux_ancestors_of",
-                            lambda *a: pytest.fail("unknown mux must not be torn down"))
-        assert reclaim.teardown_detached_mux(found, table={}) == []
+        assert [f["pid"] for f in reclaim.filter_stop_unreachable(found)] == [2]
 
     def test_teardown_kills_detached_server_not_warm_pool(self, monkeypatch):
         # server 295 hosts the reaped copilot's pane; it also pre-spawned a

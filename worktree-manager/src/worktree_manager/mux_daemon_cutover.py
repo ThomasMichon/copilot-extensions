@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from agent_procutil import no_window_kwargs, spawn_daemon
+from agent_procutil import spawn_daemon
 from agent_procutil.daemon_instances import DaemonInstanceSpec
 from zdd import breadcrumb, diagnostics, routing
 
@@ -140,9 +140,7 @@ def _pid_matches_root(pid: int, *, root: Path) -> bool:
             "Get-CimInstance Win32_Process -Filter \"ProcessId=%d\" | "
             "ForEach-Object { $_.CommandLine }" % pid,
         ]
-        out = subprocess.run(  # noqa: S603
-            argv, capture_output=True, text=True, timeout=10, check=False, **no_window_kwargs(),
-        )
+        out = subprocess.run(argv, capture_output=True, text=True, timeout=10, check=False)  # noqa: S603
         cmdline = (out.stdout or "").strip()
         if not cmdline:
             return False
@@ -167,7 +165,6 @@ def _pid_matches_root(pid: int, *, root: Path) -> bool:
         text=True,
         timeout=5,
         check=False,
-        **no_window_kwargs(),
     )  # noqa: S603
     cmdline = (out.stdout or "").strip()
     if not cmdline:
@@ -179,19 +176,14 @@ def _pid_matches_root(pid: int, *, root: Path) -> bool:
 
 
 class ControlClient:
-    def __init__(
-        self, base_url: str, *, root: Path | None = None, timeout: float = 5.0,
-        token: str | None = None,
-    ):
+    def __init__(self, base_url: str, *, root: Path | None = None, timeout: float = 5.0):
         parsed = urlparse(base_url)
         if parsed.scheme not in ("http", "") or not parsed.hostname or parsed.port is None:
             raise ValueError(f"invalid mux-daemon cutover URL: {base_url!r}")
-        if token is not None and (not isinstance(token, str) or not token.strip()):
-            raise ValueError("invalid mux-daemon control credential")
         self.host = parsed.hostname
         self.port = int(parsed.port)
         self.base_url = base_url
-        self.token = token if token is not None else load_or_create_control_token(root)
+        self.token = load_or_create_control_token(root)
         self.root = root if root is not None else default_root()
         self.timeout = timeout
 
@@ -307,12 +299,7 @@ def spawn_passive(slot: Path, *, root: Path, port: int):
 
 def _health_check(host: str, port: int, *, root: Path, generation: str | None = None) -> bool:
     try:
-        from .mux_serving_observation import _existing_token
-
-        token, _identity = _existing_token(root)
-        status = ControlClient(
-            f"http://{routing.format_authority(host, port)}", root=root, token=token,
-        ).health()
+        status = ControlClient(f"http://{routing.format_authority(host, port)}", root=root).health()
         return (
             (status.get("status") == "ready" if generation is not None else status.get("status") != "draining")
             and (generation is None or status.get("runtime_generation") == generation)
@@ -346,9 +333,7 @@ def _iter_mux_daemon_pids() -> set[int]:
             "Get-CimInstance Win32_Process -ErrorAction Stop | "
             "ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }",
         ]
-        out = subprocess.run(  # noqa: S603
-            argv, capture_output=True, text=True, timeout=10, check=False, **no_window_kwargs(),
-        )
+        out = subprocess.run(argv, capture_output=True, text=True, timeout=10, check=False)  # noqa: S603
         if out.returncode != 0:
             raise OSError(f"native mux process census failed (exit {out.returncode})")
         hits: set[int] = set()
@@ -369,7 +354,6 @@ def _iter_mux_daemon_pids() -> set[int]:
         text=True,
         timeout=5,
         check=False,
-        **no_window_kwargs(),
         env=_ps_env_without_width_override(),
     )
     if out.returncode != 0:

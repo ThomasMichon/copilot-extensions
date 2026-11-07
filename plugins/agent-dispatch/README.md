@@ -179,9 +179,8 @@ slot. Current-version, last-known-good and complete-slot fallback order is
 unchanged. UTF-8 markers may include a Windows BOM; redirected slots and
 environment directories are refused. This does not change daemon cutover.
 
-Runtime identity also recognizes flat or nested `.venv` reconstructed slots
-with an exact package-qualified repair suffix, as well as Source profile and
-repair suffixes. An installed standalone wrapper supplies the package
+Source identity also recognizes nested `.venv` environments and their exact
+profile/repair suffixes. An installed standalone wrapper supplies the package
 version only when its own physical Source slot matches; unrelated wrapper
 metadata cannot override the plugin version. A Dispatch process loaded from a
 physical application environment selects relaunches from that application's
@@ -542,15 +541,6 @@ The installer requires a valid Python Software Foundation Authenticode signature
 and probes the executable in isolation for supported 64-bit CPython 3.10+.
 It uses that base before PATH or launcher discovery, without changing the global
 Python default, PATH, or other plugins' interpreter selection.
-
-Source-validation and construction helpers separately require Python 3.11+.
-The Windows installer retains native admission's executable for these helpers,
-or qualifies compatible PATH applications, launcher registrations/version
-selectors and standard Python installation roots, excluding WindowsApps
-aliases. An explicit signed 3.10+ choice still controls the runtime venv; it
-does not lower the helper floor. Without an explicit runtime choice, venv
-fallbacks carry the qualified helper base, including `uv --python`. Failure to
-find a compatible helper is explicit and never changes global PATH or Python.
 
 After a qualified candidate publishes, Dispatch atomically stores the choice in
 `base-python.json` under its runtime root. Later updates use that preference

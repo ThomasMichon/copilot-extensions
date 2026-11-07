@@ -1961,7 +1961,7 @@ def test_action_row_caption_tracks_focused_button():
             await pilot.pause()
             assert "creates on" in caption_for(scr, "N")
             assert "cleans" in caption_for(scr, "K")
-            assert "synchronizes" in caption_for(scr, "SY")
+            assert "fast-forwards" in caption_for(scr, "SY")
             # Unfocused row falls back to the New caption.
             assert "creates on" in scr.new_worktree_row(118, False, 0).plain
 
@@ -4028,10 +4028,8 @@ def test_tui_renders_local_worktrees():
 
     async def run():
         app = PickerApp(src, live=False)
-        async with app.run_test(size=(118, 36)) as pilot:
+        async with app.run_test(size=(118, 36)) as pilot:  # noqa: F841
             scr = app.query_one(PickerScreen)
-            await _wait_for_initial_setup(pilot, scr)
-            await pilot.pause()
             out = pcap.screen_to_text(scr)
             assert "Worktree Manager" in out
             # Canonical state vocabulary (test-chamber #1290).
@@ -6092,7 +6090,6 @@ def test_live_loader_local_streams_without_blocking_start(monkeypatch):
     from worktree_manager.production_picker.picker_tui import data_ssh
 
     monkeypatch.setenv("AGENT_WORKTREES_PICKER_STREAM", "0")
-    monkeypatch.setattr(data_ssh, "_ssh_log", lambda *args, **kwargs: None)
     sentinel = [{"id4": "abcd", "machine": "anomalous-potato", "env": "Win"}]
     gate = threading.Event()
 
@@ -7387,17 +7384,6 @@ def test_native_list_sticky_no_reflow_flicker(monkeypatch):
                     if y < len(nl._kinds) and nl._kinds[y] == "section":
                         saw_section_at_top = True
 
-            # Arrow steps advance two-line rows and can skip a band at some
-            # viewport heights. Exercise the exact native scroll boundary too.
-            for index, kind in enumerate(nl._kinds):
-                if kind == "section" and index > 0:
-                    nl.scroll_to(y=index, animate=False)
-                    await pilot.pause()
-                    y = int(getattr(nl.scroll_offset, "y", 0) or 0)
-                    if y > 0:
-                        displays_while_scrolled.append(st.display)
-                        saw_section_at_top |= y == index
-
             # The whole point of the repro: we actually scrolled past a section
             # header sitting at the top of the viewport...
             assert saw_section_at_top
@@ -8502,7 +8488,6 @@ def test_registered_pivot_inserted_between_worktrees_and_maintenance(tmp_path, m
             await pilot.pause()
             assert scr.htabs == [
                 "Worktrees", "Tasks", "Maintenance", "Profiles", "Installation & Updates",
-                "Authentication",
             ]
             assert scr._kind(1) == "registered"
             assert scr._kind(2) == "maintenance"     # built-ins shifted, not renumbered logic
@@ -10675,16 +10660,13 @@ def test_actions_worker_finishes_quietly_after_resume_exits(tmp_path, monkeypatc
                 scr._open_submenu()
                 assert await asyncio.to_thread(started.wait, 1)
                 worker = next(
-                    thread for thread in scr._bg_threads
+                    thread for thread in threading.enumerate()
                     if thread.name == "pivot-action:Actions" and thread.is_alive())
                 await pilot.pause()
                 menu = _sub_menu(scr)
                 assert menu is not None
                 assert menu._actions[0] == "Resume"
-                # The pending menu is intentionally inert; model an already
-                # decided Resume exiting while its older probe is still held.
-                app.result = {"action": "resume", "worktree_id": wt_id}
-                app.exit()
+                await pilot.press("enter")
                 await pilot.pause()
 
             assert app.result["action"] == "resume"
@@ -10878,7 +10860,7 @@ def test_contributed_config_section_in_cfgmenu_and_runs(tmp_path, monkeypatch):
             assert not _cfg_menu_open(scr)
             labels = [scr.htabs[index] for index in scr._config_pivots()]
             assert labels[0] == "Profiles"
-            assert labels[1:] == ["SSH", "MCP", "Installation & Updates", "Authentication"]
+            assert labels[1:] == ["SSH", "MCP", "Installation & Updates"]
 
             await pilot.press("right")
             await pilot.pause()

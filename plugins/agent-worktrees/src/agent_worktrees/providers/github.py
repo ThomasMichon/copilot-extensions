@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Callable
+from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse
 from urllib.parse import quote
 
@@ -201,14 +202,39 @@ class GitHubProvider:
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
     ) -> PullResult:
         """Read the exact head and GitHub's HTTP ``Date`` in one response."""
-        from .github_observation import observe_head
-        return observe_head(self, repo, number, api_base=api_base, token=token, run=run_cli)
-
-    def observe_branch(self, repo, branch, *, api_base="", token=None):
-        """Read an exact authoritative remote branch tip, never local Git state."""
-        from .github_observation import observe_branch
-        return observe_branch(
-            self, repo, branch, api_base=api_base, token=token, run=run_cli,
+        host = self.authority_endpoint(api_base)
+        proc = run_cli(
+            [
+                "gh", "api", "--hostname", host, "--include",
+                f"/repos/{repo}/pulls/{number}",
+            ],
+            env=self._env(token),
+        )
+        if proc.returncode != 0:
+            detail = proc.stderr.strip() or proc.stdout.strip()
+            raise ProviderError(f"gh PR #{number} observation failed: {detail}")
+        marker = "\n{"
+        body_at = proc.stdout.find(marker)
+        if body_at < 0:
+            raise ProviderError(f"gh PR #{number} observation was malformed.")
+        headers = proc.stdout[:body_at]
+        body = proc.stdout[body_at + 1:]
+        date_header = ""
+        for line in headers.splitlines():
+            name, sep, value = line.partition(":")
+            if sep and name.strip().lower() == "date":
+                date_header = value.strip()
+        try:
+            data = json.loads(body)
+            observed_at = parsedate_to_datetime(date_header).isoformat()
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise ProviderError(
+                f"gh PR #{number} observation lacked valid server evidence."
+            ) from exc
+        return PullResult(
+            number=int(data.get("number", number)),
+            head_sha=str((data.get("head") or {}).get("sha", "")),
+            observed_at=observed_at,
         )
 
     def publish_source_marker(

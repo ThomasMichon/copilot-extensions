@@ -9,7 +9,7 @@
   contract** as a local one.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-11-06
+- **Last revised:** 2026-10-08
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) (install
   topology, the credential-relay path, the `codespace:` resolver) · the plugin's
   [`README`](../../../plugins/agent-codespaces/README.md) and its skills
@@ -54,9 +54,9 @@ Two promises sit under everything:
   a successor agent can pick up what a vanished one was doing.
 
 And one scarcity truth shapes the whole model: **CodeSpaces are a finite, shared
-budget, not an infinite cloud.** An account has independent ceilings for owned
-venues (including stopped ones) and concurrently-running cores, and every agent
-on every machine draws from the **same** pool. So the provider is not only a *factory* of venues but a
+budget, not an infinite cloud.** An account has a bounded compute quota (a fixed
+ceiling of concurrently-running cores), and every agent on every machine draws
+from the **same** pool. So the provider is not only a *factory* of venues but a
 **steward of a scarce resource**: it allocates within the budget without
 exceeding it, **reuses** an existing suitable venue before paying to create
 another, **cycles out** venues that have gone stale so their budget returns to
@@ -189,23 +189,16 @@ through one seam (`launch-check`), so the two paths can never disagree. The gate
 read or checked, refuses the launch rather than slipping a worker past it.
 
 ### The venue pool — a finite, budget-bounded, shared resource
-The set of an account's CodeSpaces is a **pool** drawn against independent
-**owned-venue and running-core budgets**. Stopping a venue returns compute
-capacity, not an owned slot. The provider treats that pool as a resource to
-**allocate within, not exceed**: it knows what the selected account owns, what
-each member costs against each budget, and how much headroom remains — so a request is satisfied by **reusing**
+The set of an account's CodeSpaces is a **pool** drawn against a **bounded core
+budget**. The provider treats that pool as a resource to **allocate within, not
+exceed**: it knows what the pool contains, what each member costs against the
+budget, and how much headroom remains — so a request is satisfied by **reusing**
 a suitable idle member when one exists, by **recycling** a stale member to free
 budget, or by **creating** a new one only when the budget allows, and by
 **surfacing pressure** when it does not. The pool is **shared across every agent
 and every machine** on the account, so its accounting is a single shared truth,
-not a per-box guess. Incomplete inventory or unknown quota is reported as
-uncertainty, not free capacity; quota policy can adapt to account-specific
-limits rather than assuming one provider ceiling for every account.
-
-A venue may serve several efforts over time without a permanent one-effort
-assignment. Reuse includes read-only work and review that does not build.
-Admission preserves retained work, configuration compatibility and existing
-custody: incompatible active agents must not drive the same venue concurrently.
+not a per-box guess. (The per-machine advisory lease is today's partial
+realization; the north star is a pool coordinated across the whole account.)
 
 ### CodeSpace state — the disposition every venue carries
 Every venue in the pool has a **derivable disposition** that says whether it is
@@ -367,21 +360,16 @@ owner-only, its command is pinned to an absolute path and run contained from one
 directory, and a resident bridge that predates the gate is reported.
 
 ### bounded-shared-pool
-The account's CodeSpaces are managed as a **finite pool against independent
-owned-venue and running-core budgets**, shared across every agent and machine.
-The provider **accounts for** stopped as well as running owned venues, keeps
-account-specific capacity distinct from merged-account discovery, and satisfies a venue request
+The account's CodeSpaces are managed as a **finite pool against a bounded core
+budget**, shared across every agent and machine. The provider **accounts for**
+what the pool holds and how much budget remains, and satisfies a venue request
 **within** that budget — never blindly creating past the quota. When the pool is
 saturated it **reuses, recycles, or reports the pressure** rather than failing
 opaquely or over-provisioning.
 
 ### reuse-over-recreate
 A venue request prefers **reusing an existing suitable idle CodeSpace** (right
-repo, compatible, healthy, safely available) over paying to **create** a fresh
-one. Suitability is based on the requested work, including read-only and
-no-build review use, not permanent ownership by one effort. Sequential reuse
-preserves earlier efforts' work and custody; an idle appearance alone never
-authorizes taking over a live or unknown holder. Creation is the
+repo, healthy, unheld) over paying to **create** a fresh one. Creation is the
 fallback when nothing fits, not the default — so the pool's scarce budget is
 spent on genuinely new need, not on redundant duplicates of a venue that already
 exists.

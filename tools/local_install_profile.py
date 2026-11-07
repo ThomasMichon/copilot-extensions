@@ -25,8 +25,7 @@ from installer_wheel_inputs import WheelLimits, _check_deadline, inspect_archive
 from installer_wheel_snapshot import retain_wheel_inputs
 
 from build_toolchain_lock import _query_marker_environment
-from application_sources import application_sources
-from promotion_python_artifacts import project_key, validate_manifest, validate_wheel_sources
+from promotion_python_artifacts import validate_manifest, validate_wheel_sources
 from runtime_profile import SCHEMA, ProfileError, _reachable, _requirement, validate_profile
 from runtime_profile_wheels import profile_wheel_inputs
 from runtime_source_lock import _wheel_pins, dependencies
@@ -45,20 +44,16 @@ def registry_roots(wheels: dict, root: str, environment: dict, *, deadline: floa
     """Project external roots from the actual applicable first-party metadata."""
     selected: dict[str, set[str]] = {}
     registry = set()
-    pending = [(_requirement(root, deadline), {""}, {})]
+    pending = [(_requirement(root, deadline), {""})]
     while pending:
         _check_deadline(deadline)
-        requirement, parent_extras, sources = pending.pop()
+        requirement, parent_extras = pending.pop()
         if requirement.marker and not any(
             requirement.marker.evaluate({**environment, "extra": extra})
             for extra in parent_extras
         ):
             continue
         name = canonicalize_name(requirement.name)
-        if name in sources and (
-            name not in wheels or wheels[name].get("source_project") != sources[name]
-        ):
-            raise ProfileError(f"{name}: selected associated application source is missing or different")
         if name not in wheels:
             requirement.marker = None
             registry.add(str(requirement))
@@ -74,7 +69,7 @@ def registry_roots(wheels: dict, root: str, environment: dict, *, deadline: floa
             continue
         selected[name] = extras | (previous or set())
         pending.extend(
-            (_requirement(text, deadline), {"", *selected[name]}, wheel.get("application_sources", {}))
+            (_requirement(text, deadline), {"", *selected[name]})
             for text in wheel["requires_dist"]
         )
     return sorted(registry)
@@ -106,12 +101,9 @@ def _associated_first_party(
         for name, (directory, _metadata) in embedded.items()
     ):
         raise ProfileError("embedded first-party sources differ from the selected source closure")
-    metadata = dependencies._toml(selected.payload / "pyproject.toml")
-    application = canonicalize_name(metadata["project"]["name"])
-    try:
-        sources = application_sources(metadata)
-    except ValueError as exc:
-        raise ProfileError(str(exc)) from exc
+    application = canonicalize_name(
+        dependencies._toml(selected.payload / "pyproject.toml")["project"]["name"],
+    )
     archives = {
         row["filename"]: source_inputs._member(snapshot, project["wheels"] + "/" + row["filename"])
         for row in entries
@@ -153,8 +145,6 @@ def _associated_first_party(
                 "requires_dist": list(facts.requires_dist),
                 "provides_extras": list(facts.provides_extras),
             }
-            if name == application:
-                result[name].update(source_project=project_key(manifest), application_sources=sources)
         retained.verify()
     if result.keys() != declared.keys() - embedded.keys():
         raise ProfileError("associated wheels do not complete the declared first-party source set")

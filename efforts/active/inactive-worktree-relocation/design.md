@@ -17,11 +17,6 @@ Publish and qualify that vertical flow early, with explicit refusals for
 unsupported retained-session/pair/WIP shapes. Separately authorized adoption
 starts with older completed worktrees; its feedback precedes widening.
 The initial restriction is staged delivery, not a permanent exclusion of WIP.
-The first qualified relocation activation is native Windows. Other platforms
-must advertise unavailability and refuse before custody until their bounded
-copy owner and native filesystem/process qualification are established. This
-does not disable portable mixed-root identity/allocation compatibility or close
-the cross-platform acceptance gate.
 
 ## Existing seams and mixed-root authority
 

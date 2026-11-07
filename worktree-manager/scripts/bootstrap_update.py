@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 import sys
@@ -22,7 +21,7 @@ def execute(args, driver, *, source_digest: str) -> int:
     from runtime_install import _bootstrap_hold_path, _source_digest, engine
     from worktree_manager.update_python_path import finish_update
     from worktree_manager.update_driver_cli import (
-        _CONTEXT_KEYS, _current_authority, _report, _source_key, _update_context_directory, parse_options,
+        _CONTEXT_KEYS, _report, _source_key, _update_context_directory, parse_options,
         request_context, request_source_anchor,
     )
     from worktree_manager.engine_acquisition_budget import TIMEOUT_ENV, acquisition_timeout
@@ -31,29 +30,17 @@ def execute(args, driver, *, source_digest: str) -> int:
     options, forwarded = parse_options(observer_command[1:])
     if _request_control(options, forwarded):
         raise ValueError("Request inspection and recovery must run outside installation submission")
+    command = ["update", *forwarded]
     budget = options.engine_acquisition_timeout
     if budget is None and options.target is None:
         budget = os.environ.get(TIMEOUT_ENV)
     if budget is not None:
-        budget = str(acquisition_timeout({TIMEOUT_ENV: budget}))
+        command.extend([
+            "--engine-acquisition-timeout", str(acquisition_timeout({TIMEOUT_ENV: budget})),
+        ])
     source_anchor = request_source_anchor()
     context = {**request_context(), "WORKTREE_MANAGER_ROOT": str(args.root.resolve())}
     _update_context_directory(context)
-    try:
-        selected = _current_authority(
-            driver, context=context.get("COPILOT_EXTENSIONS_CONTEXT", ""), cwd=source_anchor,
-        )
-    except (OSError, RuntimeError, ValueError) as error:
-        print(f"Update driver: {error}", file=sys.stderr)
-        return 1
-    if selected.configured and selected.mode == "project":
-        print("Update driver: bootstrap update is disabled by project authority", file=sys.stderr)
-        return 1
-    if selected.configured and "--no-project-controller" not in forwarded:
-        forwarded = [*forwarded, "--no-project-controller"]
-    command = ["update", *forwarded]
-    if budget is not None:
-        command.extend(["--engine-acquisition-timeout", budget])
     admitted_source = _source_key()
     hold_path = _bootstrap_hold_path()
     selected_payload = args.payload.resolve()
@@ -93,7 +80,6 @@ def execute(args, driver, *, source_digest: str) -> int:
         source=admitted_source, context=tuple(context.items()),
         repair=not options.auto,
         killswitch_path=hold_path,
-        authority="standalone" if selected.configured else "",
     )
     runner = driver.TrustedRunner(
         tuple(arguments), str(payload), context_keys=_CONTEXT_KEYS,
@@ -115,37 +101,28 @@ def execute(args, driver, *, source_digest: str) -> int:
         request = driver.enqueue(spec, runner=runner, coalesce_running=False)
     print(f"Update request {request.id}; log: {request.log_path}", file=sys.stderr)
     worker = None
-    try:
-        if options.supervised_debug:
-            driver.drain()
-        else:
-            environment = {
-                **os.environ, "GIT_TERMINAL_PROMPT": "0",
-                "GH_PROMPT_DISABLED": "1", "GCM_INTERACTIVE": "never",
-            }
-            packages = {
-                engine._package_name(package): package for package in engine._package_roots(payload)
-            }
-            worker = driver.ensure_worker(
-                (
-                    sys.executable, "-I", "-S", "-B", "-X", "utf8",
-                    str(payload / "scripts" / "bootstrap_update.py"),
-                ),
-                cwd=payload, env=environment,
-                python_bootstrap_root=packages["agent-procutil"] / "src",
-            )
-        if not options.detach:
-            result = driver.wait(request.id, output=sys.stderr, worker=worker)
-    except Exception as error:
-        if options.json:
-            print(json.dumps({
-                "request_id": request.id, "log_path": str(request.log_path),
-                "state": request.state, "exit_code": request.exit_code, "error": str(error),
-            }))
-        raise
+    if options.supervised_debug:
+        driver.drain()
+    else:
+        environment = {
+            **os.environ, "GIT_TERMINAL_PROMPT": "0",
+            "GH_PROMPT_DISABLED": "1", "GCM_INTERACTIVE": "never",
+        }
+        packages = {
+            engine._package_name(package): package for package in engine._package_roots(payload)
+        }
+        worker = driver.ensure_worker(
+            (
+                sys.executable, "-I", "-S", "-B", "-X", "utf8",
+                str(payload / "scripts" / "bootstrap_update.py"),
+            ),
+            cwd=payload, env=environment,
+            python_bootstrap_root=packages["agent-procutil"] / "src",
+        )
     if options.detach:
         _report(request, as_json=options.json)
         return 0
+    result = driver.wait(request.id, output=sys.stderr, worker=worker)
     if result.state != "completed" or result.exit_code is None:
         raise RuntimeError(f"Bootstrap update did not complete: {result.state}")
     return finish_update(observer_command, result.exit_code)

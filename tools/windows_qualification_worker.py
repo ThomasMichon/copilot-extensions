@@ -120,7 +120,7 @@ def execute(root: Path, value: dict, output: Path) -> dict:
             save()
             print(f"[winqual] {name}: {row['status']}", flush=True)
 
-    def owned(argv, timeout, *, allow_empty=False):
+    def owned(argv, timeout):
         from agent_procutil.owned_process import run_caller_owned
         index = len(result["phases"])
         try:
@@ -144,13 +144,6 @@ def execute(root: Path, value: dict, output: Path) -> dict:
         (output / f"phase-{index}.stderr.log").write_text(completed.stderr, encoding="utf-8")
         print(completed.stdout, end="", flush=True)
         print(completed.stderr, end="", file=sys.stderr, flush=True)
-        if (
-            allow_empty and completed.returncode == 5
-            and any((output / "junit").rglob("*.xml"))
-            and not junit_cases(output / "junit")
-        ):
-            result["incomplete_reason"] = "empty-selection"
-            return completed
         if completed.returncode:
             raise ValueError(f"selected command failed ({completed.returncode})")
         return completed
@@ -180,7 +173,7 @@ def execute(root: Path, value: dict, output: Path) -> dict:
             phase("contained-tool-tests", lambda: owned([
                 sys.executable, str(Path(__file__)), "tools",
                 "--candidate", str(root), "--output", str(output),
-            ], 720, allow_empty=True))
+            ], 720))
         else:
             phase("bridge-http52-canonical-capture", lambda: owned([
                 sys.executable, str(root / "tools/capture_bridge_http52.py"),
@@ -250,12 +243,10 @@ def main() -> int:
             stream.write("source_sha=" + value["source_sha"] + "\n")
         return 0
     if args.operation == "tools":
-        candidate = args.candidate.resolve()
-        sys.path.insert(0, str(candidate / "tools"))
-        validate_files(candidate, value["selection"])
+        validate_files(args.candidate.resolve(), value["selection"])
         if value["selection"]["kind"] != "tools":
             raise ValueError("tool worker requires a tools request")
-        return tool_tests(candidate, value["selection"], args.output.resolve())
+        return tool_tests(args.candidate.resolve(), value["selection"], args.output.resolve())
     result = execute(args.candidate.resolve(), value, args.output.resolve())
     return 0 if result["outcome"] == "qualified" else 1
 

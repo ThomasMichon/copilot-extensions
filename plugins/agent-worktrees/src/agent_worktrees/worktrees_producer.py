@@ -2,53 +2,14 @@
 
 from __future__ import annotations
 
-import contextlib
-import sys
 import time
 
 from . import config as cfg
 from . import reclaim, sessions, tracking, push_timeout, git_ops
 from .worktrees_current_rows import materialize
-from .mux_list_result import MuxObservationUnavailable
 
 
-def publish_project_rosters(
-    projects, *, interval, project_lock, lifecycle_priority, governance,
-    segment_cache, config_cache_for_project, roster_publisher, warm_list_cache,
-) -> None:
-    from . import __main__ as core, config_cache
-
-    for project in sorted(projects):
-        core._wait_for_lifecycle_priority(lifecycle_priority)
-        with project_lock if project_lock is not None else contextlib.nullcontext():
-            try:
-                core._status_monitor_recheck(governance, "pre-mutation:warm-list-cache")
-                cfg.set_active_project(project)
-                with config_cache.project_scope(config_cache_for_project, project):
-                    if roster_publisher is not None:
-                        roster_publisher()
-                    else:
-                        warm_list_cache(
-                            interval=interval,
-                            **({"cleanup_owner": segment_cache}
-                               if segment_cache is not None and git_ops._windows_observation() else {}),
-                        )
-            except core._StatusMonitorGovernanceDeferred:
-                raise
-            except git_ops.push_timeout.ObservationCleanupError as exc:
-                if segment_cache is None:
-                    raise
-                segment_cache.retain_unclaimed_cleanup(project, None, exc)
-                if roster_publisher is not None:
-                    print(f"current-roster publication failed for {project}: {exc}", file=sys.stderr)
-            except Exception as exc:
-                if roster_publisher is not None:
-                    print(f"current-roster publication failed for {project}: {exc}", file=sys.stderr)
-
-
-def publish_active_project(
-    runtime, *, observe_records=None, cleanup_owner=None, managed_mux_cache=None,
-) -> int:
+def publish_active_project(runtime, *, observe_records=None, cleanup_owner=None) -> int:
     project = cfg.project_name()
     if cleanup_owner is not None and git_ops._windows_observation():
         try:
@@ -58,55 +19,26 @@ def publish_active_project(
                 cfg.project_dir(project) / "config.yaml", project=project,
             ).default_repo
             return cleanup_owner.run_observation(
-                project, repo.anchor, None,
-                lambda: publish_active_project(
-                    runtime, observe_records=observe_records, managed_mux_cache=managed_mux_cache,
-                ),
+                project, repo.anchor, None, lambda: publish_active_project(runtime, observe_records=observe_records),
             )
         except push_timeout.ObservationCleanupPending as error:
             runtime.publication_failed(project, error)
             raise
     try:
-        return _publish_active_project(
-            runtime, project, observe_records=observe_records, managed_mux_cache=managed_mux_cache,
-        )
+        return _publish_active_project(runtime, project, observe_records=observe_records)
     except Exception as exc:
         runtime.publication_failed(project, exc)
         raise
 
 
-def _publish_active_project(
-    runtime, project: str, *, observe_records=None, managed_mux_cache=None,
-) -> int:
+def _publish_active_project(runtime, project: str, *, observe_records=None) -> int:
     from . import __main__ as core
 
     records = tracking.list_records(cfg.tracking_dir(project))
     if observe_records is not None:
         observe_records(project, records)
     session_ctx = sessions.scan_sessions_fast(records)
-    try:
-        mux_map = sessions.mux_status_many([rec.worktree_id for rec in records])
-        mux_observed = True
-    except MuxObservationUnavailable:
-        mux_map = {}
-        mux_observed = False
-    # Fresh receipt alone cannot qualify cached counts during observation loss.
-    if managed_mux_cache is not None and mux_observed:
-        from .mux_link import MAPPING_STALE_AFTER_SECONDS
-
-        now = time.time()
-        for record in records:
-            entry = managed_mux_cache.get(project, record.worktree_id)
-            received_at = entry.get("received_at") if entry else None
-            if (
-                not entry or not entry.get("live")
-                or isinstance(received_at, bool) or not isinstance(received_at, (int, float))
-                or now - received_at > MAPPING_STALE_AFTER_SECONDS
-            ):
-                continue
-            mux_map[record.worktree_id] = sessions.MuxInfo(
-                exists=True, clients=entry["attached_clients"],
-            )
+    mux_map = sessions.mux_status_many([rec.worktree_id for rec in records])
     repo = cfg.load_config(cfg.project_dir(project) / "config.yaml", project=project).default_repo
     state_map = core._classify_records_live(records, session_ctx, repo=repo)
     bare_orphan_wts = reclaim.bare_orphan_worktree_ids()

@@ -77,14 +77,6 @@ Windows setup probes optional Python-launcher versions quietly when choosing a
 signed base interpreter. Unavailable candidates are verbose diagnostics; actual
 venv creation and package-install failures retain their normal error reporting.
 
-Windows setup requires an existing Python 3.11+ for its construction helpers
-(the runtime package retains its Python 3.10+ minimum). It preserves the native
-driver's selected interpreter and otherwise checks all application candidates
-on PATH, the Python launcher and standard Python install roots, skipping older
-interpreters and WindowsApps aliases. The selected executable also reaches the
-venv fallback, including `uv --python`; signed-base preference is unchanged.
-This selection does not install Python or change PATH.
-
 The Windows `init.ps1` installer declares its requested UTF-8 human-output
 boundary for the updater's existing timed adapter. Construction-shell and GC
 count diagnostics pass through the existing dual-stream native helper without
@@ -1214,7 +1206,7 @@ Tunables (all optional):
 | `AGENT_MCP_PARENT_WATCHDOG_GRACE` | `10` | hard-exit backstop after signalling, seconds (`0` = graceful-only) |
 | `AGENT_MCP_REAP_DESCENDANTS` | on | `0`/`false`/`off` disables the Windows kill-on-close job |
 | `AGENT_MCP_BRIDGE_IDLE_TIMEOUT` | `300` | idle self-reap seconds when a bridge config doesn't set `idle_timeout` (`<=0` disables) |
-| `AGENT_MCP_NO_VERSION_REAP` | unset | legacy installer opt-out; ordinary installation does not invoke retirement, and explicit reaper inspection requires `--check-only` |
+| `AGENT_MCP_NO_VERSION_REAP` | unset | set to skip the on-upgrade reap of stale-version bridges (see below) |
 
 **Why the watchdog and not a direct launch?** The obvious "just don't interpose
 `cmd.exe`" fixes — a native `agent-mcp.exe` console-script launcher, or launching
@@ -1228,12 +1220,15 @@ deliberate, and the **parent-death watchdog is the portable teardown mechanism**
 it fires no matter which launcher (the `cmd` shim, or a `uv`/venv `python` trampoline
 above the bridge) is the one the runtime kills.
 
-**Incoming publication is not retirement.** Ordinary installation publishes the
-incoming generation without invoking version reaping, forced drain, control-home
-reset or slot collection. Existing clients and their launch-owned slots remain
-available. Uncertain old ownership cannot veto healthy incoming publication.
-See [incoming publication](docs/incoming-publication.md) for admission, explicit
-inhibition and the separate session-handover boundary.
+**Version-reap on upgrade.** A leaked/orphaned bridge — or a `serve` warmth daemon —
+from a *previous* runtime version would otherwise keep its whole `~/.agent-mcp/versions/<old>`
+tree resident across an upgrade (garbage collection deliberately *protects* any slot
+with a live process). So when the installer activates a new version it also **reaps
+processes still running from any non-current slot** (`scripts/reap_versions.py`, an
+agent-mcp-local companion that reuses the shared versioned-runtime primitive's
+slot-attribution helpers to map each live pid to a slot and terminate the stale
+trees). The now-current slot and the installer itself are never touched. Set
+`AGENT_MCP_NO_VERSION_REAP` to opt out.
 
 ## CLI → MCP: the `cli` server type
 
@@ -1491,7 +1486,7 @@ cold-start — spawn the runner + protocol negotiation (`server/discover` or
 legacy `initialize`) — on **every** invocation.
 `serve` runs a resident daemon that keeps one **warm session per bridge** and
 answers `call`/`list` requests over a local IPC socket (default handle
-`$AGENT_MCP_HOME/current/serve.sock`), so repeated calls skip the cold-start entirely.
+`$AGENT_MCP_HOME/serve.sock`), so repeated calls skip the cold-start entirely.
 
 - **Cross-platform IPC** — on POSIX the daemon binds an **AF_UNIX** socket at
   that path (gated by file permissions). On **Windows** (no asyncio AF_UNIX) it
@@ -1503,8 +1498,7 @@ answers `call`/`list` requests over a local IPC socket (default handle
   when the daemon is absent it **falls back to the stateless one-shot path**.
   So `serve` is an *optional accelerator, never a dependency*. Bypass it with
   `--no-serve` / `AGENT_MCP_NO_SERVE=1`; point elsewhere with
-  `AGENT_MCP_SERVE_SOCKET` as described in
-  [incoming publication](docs/incoming-publication.md).
+  `AGENT_MCP_SERVE_SOCKET`.
 - **Warm pool** — sessions open lazily on first use, are reused, serialized
   per caller repository/configuration source for single-server configurations, evicted after `--idle-timeout`
   (default 300s), and reopened if the upstream dies. Routed calls to distinct

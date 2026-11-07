@@ -654,7 +654,7 @@ def test_manager_acts_on_production_picker_resume_decision_with_seed_prompt(
 
 def test_manager_acts_on_production_picker_refresh_decision(monkeypatch):
     """The "Update available" gesture (`action: refresh`) must (1) thread the
-    resolved project through the durable update request, mirroring every other decision
+    resolved project through to `_cmd_update`, mirroring every other decision
     branch here, and (2) loop back to reopen the very same Picker afterward
     instead of ending the whole `worktree-manager` process -- a prior bug
     (#worktree-manager-update-loop) `return`ed `_cmd_update`'s own exit code
@@ -670,14 +670,11 @@ def test_manager_acts_on_production_picker_refresh_decision(monkeypatch):
 
     monkeypatch.setattr(runner, "run", fake_run)
     calls = []
-    from worktree_manager import update_driver_cli
-
     monkeypatch.setattr(
-        update_driver_cli,
-        "cmd_update_request",
+        entrypoint,
+        "_cmd_update",
         lambda rest: calls.append(rest) or 0,
     )
-    monkeypatch.setattr(entrypoint, "_cmd_update", lambda _rest: pytest.fail("bypassed update authority"))
 
     assert entrypoint._run_production_picker("demo") == 0
     assert calls == [["--project", "demo"]]
@@ -700,14 +697,11 @@ def test_manager_acts_on_production_picker_manager_update_decision(monkeypatch):
 
     monkeypatch.setattr(runner, "run", fake_run)
     calls = []
-    from worktree_manager import update_driver_cli
-
     monkeypatch.setattr(
-        update_driver_cli,
-        "cmd_update_request",
+        entrypoint,
+        "_cmd_update",
         lambda rest: calls.append(rest) or 0,
     )
-    monkeypatch.setattr(entrypoint, "_cmd_update", lambda _rest: pytest.fail("bypassed update authority"))
 
     assert entrypoint._run_production_picker("demo") == 0
     assert calls == [["--project", "demo"]]
@@ -722,7 +716,7 @@ def test_production_picker_restores_priority_before_dispatch_and_reboosts_on_ref
     dispatched launch (which spawns the real workload as this process's
     child) never inherits the boost. On a refresh/manager-update loop-back,
     the Picker must be re-boosted before its second `runner.run` call too."""
-    from worktree_manager import process_priority, update_driver_cli
+    from worktree_manager import process_priority
 
     events: list[str] = []
     monkeypatch.setattr(
@@ -747,8 +741,8 @@ def test_production_picker_restores_priority_before_dispatch_and_reboosts_on_ref
 
     monkeypatch.setattr(runner, "run", fake_run)
     monkeypatch.setattr(
-        update_driver_cli,
-        "cmd_update_request",
+        entrypoint,
+        "_cmd_update",
         lambda rest: events.append("dispatch") or 0,
     )
 

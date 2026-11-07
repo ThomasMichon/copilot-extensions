@@ -8,7 +8,7 @@ daemon and CLI land in a subsequent slice.
 
 from __future__ import annotations
 
-from .source_build import _SOURCE_VERSION, effective_runtime_version
+from .source_build import effective_runtime_version
 
 __all__ = ["Status", "Task", "TaskError", "TaskQueue", "worker_id_for"]
 
@@ -47,8 +47,7 @@ def _resolve_version() -> str:
     except PackageNotFoundError:
         pass
     else:
-        selected = effective_runtime_version(wrapper)
-        if selected != wrapper and _SOURCE_VERSION.fullmatch(selected):
+        if effective_runtime_version(wrapper) != wrapper:
             return wrapper
     try:
         from ._build_info import BUILD_INFO

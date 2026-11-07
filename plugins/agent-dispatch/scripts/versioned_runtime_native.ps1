@@ -32,31 +32,12 @@ print(json.dumps(str(python)))
         try {
             $nativeError = ''
             $listed = Invoke-Hidden -FilePath $launcher.Source -ArgList @('-0p') -ErrorOutput ([ref]$nativeError)
-            $launcherMatches = @()
             if ($LASTEXITCODE -eq 0) {
-                $launcherMatches = @([regex]::Matches("$listed", '(?m)((?:[A-Za-z]:[\\/]|\\\\).*python(?:[0-9.]*)?\.exe)"?\s*$'))
-            }
-            if ($launcherMatches.Count) {
-                foreach ($match in $launcherMatches) { $candidates += $match.Groups[1].Value }
-            } else {
-                foreach ($version in '3.13', '3.12', '3.11', '3') {
-                    $exe = Invoke-Hidden -FilePath $launcher.Source -ArgList @(
-                        "-$version", '-I', '-S', '-B', '-c', 'import json,sys; print(json.dumps(sys.executable))'
-                    ) -ErrorOutput ([ref]$nativeError)
-                    if ($LASTEXITCODE -eq 0 -and $exe) { $candidates += ($exe | Out-String) | ConvertFrom-Json }
+                foreach ($match in [regex]::Matches("$listed", '(?m)([A-Za-z]:[\\/].*python(?:[0-9.]*)?\.exe)"?\s*$')) {
+                    $candidates += $match.Groups[1].Value
                 }
             }
         } catch { }
-    }
-    if ($env:OS -eq 'Windows_NT') {
-        $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)})
-        if ($env:LOCALAPPDATA) { $roots += Join-Path $env:LOCALAPPDATA 'Programs\Python' }
-        foreach ($installationRoot in $roots) {
-            if (-not $installationRoot) { continue }
-            $candidates += @(Get-ChildItem -LiteralPath $installationRoot -Filter 'Python3*' -Directory -ErrorAction SilentlyContinue |
-                Sort-Object Name -Descending |
-                ForEach-Object { Join-Path $_.FullName 'python.exe' })
-        }
     }
     foreach ($candidate in @($candidates | Select-Object -Unique)) {
         try {

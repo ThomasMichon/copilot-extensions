@@ -80,21 +80,6 @@ def feed_argv(source):
 
 
 class CurrentFeedMixin:
-    def _feed_normalize(self, source, row):
-        return {
-            **derive.norm(
-                row, source.machine, source.env,
-                source_kind=source.source_kind, source_id=source.source_id,
-                source_label=source.source_label,
-                source_metadata={
-                    "provider": source.provider, "target_id": source.target_id,
-                    "instance_id": source.instance_id, "venue": dict(source.venue),
-                },
-                source_capabilities=source.capabilities,
-            ),
-            "raw": row,
-        }
-
     def _publish_source_records(self, source, records):
         """Publish a complete roster and its incarnation under the caller's lock."""
         self._records[source.cache_key] = records
@@ -139,8 +124,6 @@ class CurrentFeedMixin:
             previous = {row["id"]: row for row in self._records.get(source.cache_key, [])}
         records = []
         for row in rows:
-            if availability is not None:
-                row = {**row, "_availability": availability}
             old = previous.get(row["id"])
             old_raw = {} if old is None else old["raw"]
             if old is not None and {
@@ -148,7 +131,17 @@ class CurrentFeedMixin:
             } == {key: value for key, value in row.items() if key != "_projection"}:
                 records.append({**old, **derive.time_fields(row), "raw": row})
                 continue
-            records.append(self._feed_normalize(source, row))
+            normalized = derive.norm(
+                {**row, "_availability": None}, source.machine, source.env,
+                source_kind=source.source_kind, source_id=source.source_id,
+                source_label=source.source_label,
+                source_metadata={
+                    "provider": source.provider, "target_id": source.target_id,
+                    "instance_id": source.instance_id, "venue": dict(source.venue),
+                },
+                source_capabilities=source.capabilities,
+            )
+            records.append({**normalized, "raw": row})
         with self._lock:
             if self._feed_current(source, gen):
                 if advisory:
@@ -180,7 +173,7 @@ class CurrentFeedMixin:
                 records = []
                 for row in self._records[source.cache_key]:
                     raw = {**row["raw"], "_availability": {"status": "stale", "reason": reason}}
-                    records.append(self._feed_normalize(source, raw))
+                    records.append({**row, "raw": raw})
                 self._records[source.cache_key] = records
 
     def _feed_once(self, source, gen) -> str:

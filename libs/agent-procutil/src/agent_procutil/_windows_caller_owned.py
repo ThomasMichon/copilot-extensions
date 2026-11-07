@@ -12,7 +12,6 @@ from functools import lru_cache
 import math
 import os
 import subprocess
-import sys
 import time
 
 from agent_procutil import JobHandle, _build_job_extended_limit_info, _configure_job_api, _kernel32
@@ -491,7 +490,6 @@ def spawn(
                     os.set_handle_inheritable(msvcrt.get_osfhandle(fd), True)
                 if launch_deadline is not None:
                     remaining(launch_deadline)
-                sys.audit("subprocess.Popen", application, argv, cwd, kwargs.get("env"))
                 creation_attempted = True
                 if not kernel.CreateProcessW(
                     application, command, None, None, True,

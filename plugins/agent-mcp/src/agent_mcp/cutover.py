@@ -115,7 +115,6 @@ class _CutoverContext:
     old_control_token: str | None
     token_by_port: dict[int, str]
     config_home: Path | None = None
-    fixed_socket: Path | None = None
 
 
 def spawn_passive_daemon(ctx: _CutoverContext, control_port: int) -> subprocess.Popen:
@@ -154,8 +153,6 @@ def spawn_passive_daemon(ctx: _CutoverContext, control_port: int) -> subprocess.
            "--socket", str(socket_path),
            "--passive", "--control-port", str(control_port)]
     env_overrides = daemon_env_overrides(home)
-    if ctx.fixed_socket is not None:
-        env_overrides["AGENT_MCP_SERVE_SOCKET"] = os.path.abspath(ctx.fixed_socket)
     env_overrides["AGENT_MCP_CONTROL_TOKEN"] = ctx.new_control_token
     env_overrides.update(windowless_python_env(python))
     home.mkdir(parents=True, exist_ok=True)
@@ -337,7 +334,7 @@ def source_fixed_socket() -> Path:
     from . import ipc, sockio
 
     return Path(sockio.absolute_handle(
-        ipc.default_socket_path(),
+        os.environ.get("AGENT_MCP_SERVE_SOCKET") or ipc.default_socket_path(),
     ))
 
 
@@ -394,13 +391,11 @@ def source_handle_state(fixed: Path) -> tuple:
 def source_serving_intent() -> bool:
     """Observe optional serving before selection changes; this is not permission."""
     from zdd import routing
-    from . import sockio
 
     fixed = source_fixed_socket()
     return bool(
         routing.read_active_endpoint(fixed.parent)
         or _fixed_handle_has_live_listener(fixed.parent, fixed=fixed)
-        or sockio.legacy_serving_hint(fixed)
     )
 
 
@@ -633,19 +628,16 @@ def run_source_startup(*, health_timeout: float = 60.0) -> dict:
     return _run_slot_startup(layout, layout[0], health_timeout=health_timeout)
 
 
-def _run_slot_startup(
-    layout: tuple, physical_version: str, *, health_timeout: float,
-    fixed_socket: str | Path | None = None,
-) -> dict:
+def _run_slot_startup(layout: tuple, physical_version: str, *, health_timeout: float) -> dict:
     from zdd import CutoverLock, routing
     from zdd.diagnostics import process_start_time
 
-    from . import ipc, serve, sockio, source_serving
+    from . import ipc, serve, source_serving
 
     if not 0 < health_timeout <= 3600:
         raise ControlError("Source startup requires a bounded positive health timeout")
     _require_selected(layout)
-    fixed = Path(sockio.absolute_handle(fixed_socket)) if fixed_socket is not None else source_fixed_socket()
+    fixed = source_fixed_socket()
     home = fixed.parent
     home.mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + health_timeout
@@ -656,7 +648,7 @@ def _run_slot_startup(
         raw = table.get("active")
         previous = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
 
-        def refuse_existing_owner(current_raw, *, qualify_installation=True):
+        def refuse_existing_owner(current_raw):
             current = (
                 routing.Endpoint.from_dict(current_raw) if isinstance(current_raw, dict)
                 else None
@@ -676,15 +668,13 @@ def _run_slot_startup(
                 or process_start_time(owner) != current.process_start_time
             ):
                 return "MCP data listener has an unknown or foreign native owner"
-            if qualify_installation and current is not None and routing._pid_alive(current.pid):
-                source_serving.require_installation_owner(fixed, current, Path(layout[2]))
             return None
 
-        refusal = refuse_existing_owner(raw, qualify_installation=False)
+        refusal = refuse_existing_owner(raw)
         if refusal:
             raise routing.ActivePublicationRefused(refusal)
         reusable = source_serving.ready_owner(
-            fixed, previous, physical_version, runtime_root=Path(layout[2]), deadline=deadline,
+            fixed, previous, physical_version, deadline=deadline,
         )
         _require_selected(layout)
         if reusable is not None:
@@ -711,7 +701,7 @@ def _run_slot_startup(
             generation += 1
         ctx = _CutoverContext(
             home, candidate_socket, home / f"serve-g{generation}.log",
-            secrets.token_hex(16), None, {}, config_home=ipc.default_home_dir(), fixed_socket=fixed,
+            secrets.token_hex(16), None, {}, config_home=ipc.default_home_dir(),
         )
         port = pick_free_port()
         process = spawn_passive_daemon(ctx, port)
@@ -733,7 +723,6 @@ def _run_slot_startup(
                     and not reply.get("draining") and reply.get("pid") == process.pid
                     and reply.get("version") == physical_version
                     and reply.get("data_socket") == str(ctx.new_socket_path)
-                    and source_serving.installation_matches(reply, Path(layout[2]))
                 ):
                     break
                 if process.poll() is not None or time.monotonic() >= deadline:
@@ -763,7 +752,7 @@ def _run_slot_startup(
             serve.flip_data_handle(ctx.new_socket_path, legacy_path=fixed, expected_state=handle)
             return {
                 "ok": True, "pid": process.pid, "version": physical_version,
-                "data_socket": str(ctx.new_socket_path), "runtime_root": str(layout[2]),
+                "data_socket": str(ctx.new_socket_path),
             }
         except BaseException as error:
             if publication_attempted:
@@ -892,8 +881,6 @@ def run_cutover(*, health_timeout: float = 60.0, drain_timeout: float = 300.0,
         new_control_token=secrets.token_hex(16),
         old_control_token=old_token,
         token_by_port={},
-        config_home=ipc.default_home_dir(),
-        fixed_socket=ipc.default_socket_path(),
     )
     if current is not None and old_token is not None:
         ctx.token_by_port[current.port] = old_token

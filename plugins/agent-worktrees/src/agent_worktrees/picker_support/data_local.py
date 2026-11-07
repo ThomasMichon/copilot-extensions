@@ -351,7 +351,7 @@ def load(
         bridge_live_wts = reclaim.live_bridge_worktrees()
     except Exception:
         bridge_live_wts = set()
-    mux_map = sessions.mux_status_for_display([r.worktree_id for r in records])
+    mux_map = sessions.mux_status_many([r.worktree_id for r in records])
     state_map = _classify_records(records, session_ctx) if classify else {}
     out = []
     for rec in records:
@@ -455,7 +455,7 @@ def refresh_one(worktree_id: str, machine: str | None = None,
         bridge_live_wts = reclaim.live_bridge_worktrees()
     except Exception:
         bridge_live_wts = set()
-    mux_map = sessions.mux_status_for_display([rec.worktree_id])
+    mux_map = sessions.mux_status_many([rec.worktree_id])
     # Explicit Refresh is authoritative for LIVENESS, not just the session-render
     # cache: resolve the live bound/mux truth NOW and write it onto the record
     # (in-memory + persisted) BEFORE the active-path / classify / row build below
@@ -475,11 +475,10 @@ def refresh_one(worktree_id: str, machine: str | None = None,
         _now_iso = _dt.datetime.now().isoformat(timespec="seconds")
         rec.bound_live = _live_bound
         rec.bound_live_at = _now_iso
+        rec.mux_live = _live_mux
+        rec.mux_live_at = _now_iso
         tracking.stamp_bound_live(rec.worktree_id, _live_bound)
-        if _mi is not None and getattr(_mi, "observed", True):
-            rec.mux_live = _live_mux
-            rec.mux_live_at = _now_iso
-            tracking.stamp_mux_live(rec.worktree_id, _live_mux, sync=True)
+        tracking.stamp_mux_live(rec.worktree_id, _live_mux, sync=True)
     except Exception:
         pass
     config = cfg.load_config()

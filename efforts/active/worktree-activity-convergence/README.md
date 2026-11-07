@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** dependency-ordered PRs against `dev`
 - **Created:** 2026-11-07
-- **Status:** Active
+- **Status:** Draft
 - **Vision:** `visions/picker/README.md` (`live-not-snapshot`, informed selection); `visions/plugins/agent-worktrees/README.md` (resident authoritative live-state database)
 - **Umbrella issue:** #11195
 - **Related owners:** #5953 retirement; #6748 publication convergence; #2619 event-driven production
@@ -110,46 +110,46 @@ Implementation choices below are **agent-recommended** ways to realize the
 requested outcomes; proposed support is not a claim of installed capability.
 
 ### P0 - Reviewed intent and bounded ownership
-- [x] Confirm current source, deployed/provider capabilities and existing
+- [ ] Confirm current source, deployed/provider capabilities and existing
   issue/PR/file custody; distinguish a source defect from missing delivery.
-- [x] Review and merge this proposal before functional implementation (#11199).
+- [ ] Review and merge this proposal before functional implementation.
 
 ### P1 - Trustworthy lifecycle completion
-- [x] Reproduce the first-attempt Reclaim failure through its actual action,
+- [ ] Reproduce the first-attempt Reclaim failure through its actual action,
   engine, resident publication and Picker consumer path.
-- [x] Make one action wait for confirmed retirement and authoritative row
+- [ ] Make one action wait for confirmed retirement and authoritative row
   convergence, or retain an explicit pending/failed outcome. Do not retry
   termination merely to obtain publication or optimistically erase live facts.
-- [x] Correct mux classification using the actual owning mux/provider facts,
+- [ ] Correct mux classification using the actual owning mux/provider facts,
   including managed Windows muxes and conventional tmux/PSMux; preserve safe
   Stop/Reclaim/Repair eligibility.
-- [x] Keep newly concurrent, foreign, reused-PID, caller and reachable mux
+- [ ] Keep newly concurrent, foreign, reused-PID, caller and reachable mux
   owners protected rather than chasing them to manufacture a cleared row.
 
 ### P2 - Conversation recency and explicit view controls
-- [x] Publish/use the canonical most-recent worktree message-activity fact,
+- [ ] Publish/use the canonical most-recent worktree message-activity fact,
   including relevant registered sessions, rather than resume time, heartbeat,
   record mtime or an unrelated observation timestamp.
-- [x] Use the same timestamp for USED display and recency sorting, with
+- [ ] Use the same timestamp for USED display and recency sorting, with
   timezone-correct comparison and documented legacy/unavailable fallbacks.
-- [x] Keep Active separate and combine Recent plus Completed by default;
+- [ ] Keep Active separate and combine Recent plus Completed by default;
   expose discoverable Sort, Group and Status-filter controls alongside search.
-- [x] Preserve source/ownership boundaries, hidden-row policy, stable focus,
+- [ ] Preserve source/ownership boundaries, hidden-row policy, stable focus,
   multiselection and exact action targets across filtering and live reordering.
   Explicit status filters must disclose their active state, including when
   they hide otherwise visible live rows.
-- [x] If a new wire fact or operation is required, review its concrete
+- [ ] If a new wire fact or operation is required, review its concrete
   provider-first expansion and actual-runtime negotiation before enabling the
   caller. Preserve strict unknown-argument rejection, old/new combinations,
   rollback and truthful missing support; do not relabel an existing fact.
 
 ### P3 - Event-driven launch and connected flow
-- [x] Notify the existing resident from the successful authoritative
+- [ ] Notify the existing resident from the successful authoritative
   start/resume mutation boundary, including paths not launched by an agent tool.
-- [x] Push the resulting qualified row/delta through the existing feed and UI
+- [ ] Push the resulting qualified row/delta through the existing feed and UI
   intake to already-open Manager instances without periodic-poll, reconnect or
   caller-side fleet-scan dependence.
-- [x] Prove the connected start/message/Reclaim sequence with polling disabled,
+- [ ] Prove the connected start/message/Reclaim sequence with polling disabled,
   including independent open consumers, delayed events and a concurrent owner.
   Keep destructive effects separate from publication confirmation.
 
@@ -167,26 +167,26 @@ requested outcomes; proposed support is not a claim of installed capability.
 
 ## Validation Plan
 
-- [x] Fail-first Reclaim regression: confirmed native exit, bound-state cleanup
+- [ ] Fail-first Reclaim regression: confirmed native exit, bound-state cleanup
   and gated publication are separate; release publication and converge the
   same qualified row without another destructive operation or source reconnect.
-- [x] Isolated native owned-process fixture: delayed child/root exit, stale
+- [ ] Isolated native owned-process fixture: delayed child/root exit, stale
   locks, unreachable mux residue and concurrent owner; preserve reachable mux,
   caller, foreign and reused-PID controls and retain unconfirmed outcomes.
-- [x] Mux fixtures cover managed Windows and conventional mux ownership,
+- [ ] Mux fixtures cover managed Windows and conventional mux ownership,
   partial/stale observations and the actual process ancestry/owner boundary;
   absence of evidence must not fabricate a bare or stopped session.
-- [x] Message-recency cases cover an old but just-used worktree, completed
+- [ ] Message-recency cases cover an old but just-used worktree, completed
   work, multiple registered sessions, user/assistant activity, timezone/skew,
   missing/legacy facts and non-message observation/heartbeat controls.
-- [x] Real native Textual controls/goldens cover default Active/unified Recent,
+- [ ] Real native Textual controls/goldens cover default Active/unified Recent,
   Sort/Group/Status/search, narrow terminals, sticky headers, stable selection,
   source-colliding IDs, modal updates and independent action eligibility.
-- [x] Actual start/resume mutation to resident to held feed to open Picker
+- [ ] Actual start/resume mutation to resident to held feed to open Picker
   integration passes with periodic producers and UI reload/reconnect disabled;
   test repeated starts, multiple consumers, delayed/out-of-order updates and
   truthful owner/source replacement.
-- [x] Any changed contract has focused old/new producer/consumer, capability,
+- [ ] Any changed contract has focused old/new producer/consumer, capability,
   rollback and unsupported-operation controls, not package-version assumptions.
 - [ ] Run the existing contained runners, applicable native lanes, lint,
   module-size/install/contract checks and mandatory exact-head CI. Record
@@ -207,221 +207,7 @@ The concrete message-fact compatibility and any shared receipt boundary remain
 implementation-review gates, not permission to bypass existing contract or
 source ownership.
 
-### Current notification slice (agent-recommended)
-
-Reuse the existing authenticated loopback hook transport. A serving owner
-advertises `worktree-change-v1` only when its worktree-change callback is present.
-The send-only `worktreeChanged` frame retains version, token, owner generation
-and a one-second expiry, with one `cwd` payload: an absolute path of at most
-4,096 UTF-8 bytes, or null for a coalesced owned-roster wake. Stale generations,
-malformed frames and closed/unadmitted owners
-decline it without a tool-policy invocation or reply.
-
-Native record commits defer bounded metadata-only wakes through the existing
-record/pair release owner, without opting into full-record or receipt capture.
-Post-Reclaim confirmation sends once even when its hints were unchanged.
-Both send only after checking
-that actual endpoint capability; a missing/legacy owner neither boots a
-service nor receives guessed new syntax. Sending is not acceptance or
-publication acknowledgement. Reclaim still proves the same current source's
-cleared row; it does not repeat termination to obtain that proof.
-
-Existing `mux-live-v1` wire shapes remain unchanged. Committed mapping fact
-changes or restored freshness wake publication; timestamp-only heartbeats do
-not. The resident producer consumes its own fresh, project-qualified managed
-mux cache as well as native mux observations.
-
-This slice does not implement a new source-qualified receipt API, private
-reducer or alternate consumer store. The concrete message-fact contract remains
-part of P2 review.
-
-### Message and view expansion (agent-recommended)
-
-The provider adds the optional bounded `message_activity` object, version 1,
-with `last_message_at` or null. Registered, non-detached session message events
-and the passive extension's message-only timestamp supply it; no observation,
-intent, heartbeat or filesystem time is relabeled as a message. The existing
-turns cache gains compatible metadata and rebuilds legacy entries once.
-Stable logs neither decode history again nor rewrite unchanged metadata.
-Windows file identity uses the existing native opened-handle stamp.
-
-The receiver selects the actual object's supported version, not a package
-version. Absent, invalid or unknown optional facts retain the legacy
-resume/completion/start fallback; display and sort use the same usable instant.
-The old strict advisory validator can report expanded saved rows unavailable,
-but an elected rolled-back provider can publish its own legacy rows normally.
-This is a data expansion and capability-gated optional wake, not new CLI syntax
-or a mandatory policy whose enforcement an old consumer could silently lose.
-No prior field or operation is retired.
-
-The only projection declaration change is admission of this bounded object in
-the current row's existing field/type sets. It does not occupy reserved F2
-receipt operations, F3 private reducer/source-store wiring, or their shared
-entry/import hunks.
-
-The view's default groups are Active and unified Recent. Explicit status and
-group choices remain local to the window; they do not create machine
-preferences. Status counts remain independent of grouping. Native row
-fingerprints follow visible order, so a message-driven reorder cannot be
-mistaken for a content-only repaint. Existing source-qualified keys preserve
-focus, selection, range anchors and action targets.
-
 ## Journal
-
-### 2026-11-07 - Unchanged-roster hot path and immediate native repaint
-- The subsequent exact-head review resolved the admission findings and raised
-  a performance risk without an open severity finding. Direct inspection
-  confirmed that the new unconditional focus remap would group/sort the
-  visible roster on every live tick, even for unchanged loader rows.
-- Loader admission now compares the proposed row set first. Only changed
-  rows remap focus, and a real change immediately requests the full native
-  repaint on the next UI tick; it does not wait for a cosmetic pulse.
-  Initial setup and incomplete-prefix replacement retain their prior
-  default behavior. No new service, source revision API or network poll was
-  introduced.
-- The actual-tick work-count control proves three unchanged ticks perform no
-  remap or refresh, while a new message-driven reorder remaps once,
-  immediately refreshes, and preserves focus, multiselection and anchor.
-  The combined connected/native-control/setup-prefix packet passed 19 tests.
-- This removes the introduced hot-path work, not the broader renderer's
-  remaining performance budget. Current-head required CI and review will
-  refresh before source merge; release and installed acceptance remain open.
-
-### 2026-11-07 - Final-idle and selected-lock admission corrections
-- The next exact-head review identified a final-idle admission gap and a
-  missing check on the Node sender's actual rendezvous lock. Worktree-change
-  admission, callback and demand renewal now share the existing final-idle
-  lock, with the existing 50 ms acquisition bound and a deadline recheck.
-  The sender applies the existing legacy/namespaced lock-identity semantics
-  before opening a socket, not merely consistency within the session catalog.
-- Real Node transport fixtures passed for both modes, including mismatched
-  lock receipts, marketplaces and roots and an assertion that rejected
-  targets are not dialed. The shared legacy rule still ignores a root-only
-  marker when both namespaced markers are absent.
-- The actual final-idle-gap fixture covers both read demand and worktree
-  changes; late admission is refused before its callback while normal wakes
-  retain demand. All 6 idle controls passed. Its 5-second loop clock now
-  starts at the first loop wait, separately from cold fixture/bootstrap
-  work; the outer test/operation bounds and production clocks are unchanged.
-- The connected event-only publication into two consumers and the open
-  native Picker passed again. Actor-free handler controls passed 76 tests,
-  including contention and expiry after lock acquisition; exact source/node
-  admission retains the complete rejection and coverage contracts.
-- Review and required CI must pass on the new head before merge. The
-  implementation is not released or installed yet.
-
-### 2026-11-07 - Cross-timezone and repeated-hour corrections
-- The second review confirmed both native-selection fixes, then identified
-  two previously missed recency defects. Historical naive message values now
-  normalize in the producer before caching/publication, preserving existing
-  offset-bearing representations. USED display and ordering compare UTC
-  instants rather than naive local wall times; unrelated pulse/AGE semantics
-  remain unchanged.
-- A real message-log/cache read under a synthetic UTC-minus-seven producer
-  clock is consumed under a UTC clock. Repeated-hour cases prove actual ages
-  of 80, 60 and 20 minutes and correct ordering. The focused Manager packet,
-  including the connected event-only flow, passed 13 tests. The backend
-  message/record-release packet passed 36.
-- The upstream rebase retained the existing checkout-relocation writer
-  generation and location-preservation hook. Their combined source hashes,
-  not either side's old hashes, bind unit admission. The owned message-field
-  serialization remains one ordinary inline dictionary so module growth
-  stays inside its strict existing ceiling.
-- Required current-head review/CI must run again after publication; source
-  release, local rollout and installed-consumer acceptance remain open.
-
-### 2026-11-07 - Implementation review and unit admission corrections
-- #11257 opened through the managed publication flow. The first current-head
-  review identified two concrete gaps: native fingerprints used unqualified
-  IDs across sources, and the explicit live filter only checked lifecycle
-  labels. Fingerprints now retain source-qualified selection identity and
-  status filtering receives the existing canonical live-signal predicate.
-- Same-ID cross-source reordering now proves display order, keyed focus,
-  multiselection, anchor and actual highlighted action target together. A real
-  canonical finalized-row descriptor with an attached mux proves that live
-  filtering retains explicit-finalization display. The focused Manager
-  controls/list packet passed 22 tests; the prior rebased connected flow and
-  controls passed 9.
-- Required CI correctly refused changed bytes in four previously admitted
-  source files. The manifest retains its exact inventory and effect/coverage
-  rules, refreshes those source hashes, and adds eight actor-free optional
-  worktree-change handler controls to its existing fixture.
-- An optional complete native unit-packet attempt exposed host-identity
-  discovery in the associated-application marker fixture before reaching the
-  new controls. That fixture now supplies the synthetic marker environment.
-  Focused hook controls passed 74 tests and the corrected marker module
-  passed 8; this is not a complete native unit-packet result. Required
-  current-head CI remains the complete portable-unit evidence owner.
-- Review, required CI, merge, Main promotion and the selected installed
-  consumer remain open delivery gates; no deployment is implied.
-
-### 2026-11-07 - Source qualification complete; delivery remains open
-- Canonical Windows backend packets passed: 321 passed / 4 skipped, followed
-  by the corrected residual groups at 183 passed and 135 passed. A
-  platform-initialization subprocess in one fixture is now pinned separately
-  from its no-mux-query assertion. Sixty-second per-item diagnostic bounds
-  retain the production operation deadlines and process containment.
-- Final Manager controls, connected event-only flow and capture packet:
-  44 passed. Native navigation, incremental repaint and large-viewport
-  checks: 14 passed. Additional feed/list/control and capture/bare-orphan
-  groups supplied independent passing coverage; these are not a claim that
-  the entire portfolio ran in one uninterrupted sequence.
-- A real queued-highlight race could overwrite keyed focus after a live
-  reorder: native events now reject superseded indices and replaced option
-  objects. The regression explicitly delivers a pre-rebuild highlight after
-  message reordering. Genuine native arrow, multiselection and scroll-home
-  behavior remains covered. Initial native mounting also refreshes the
-  children, and capture requests a paint rather than relying on a later tick.
-- Ruff F/E9, whitespace, module-size, install-contract, documentation and
-  effort-structure checks passed. The changed runtime scopes remain pending
-  MyPy admission. An optional broader probe passed 37 admitted projects for
-  both declared platforms, but the unrelated service-index checker exceeded
-  its existing 120-second limit; no full-portfolio typecheck pass is claimed.
-- First-touch behavior uses empty, isolated record/session stores and real
-  selected-peer transports, not an installer/bootstrap change. No external
-  development venue was needed for this local native consumer. The authorized
-  installed-runtime check remains after review, merge and Main promotion.
-- P4 and the exact-head CI/rollout validation items remain open. No live
-  operator worktree was reclaimed and no installed runtime has been patched.
-
-### 2026-11-07 - Functional candidate and contained consumer qualification
-- Implemented record/mux mutation wakes through the existing resident,
-  release-safe metadata dispatch, managed-mux publication, message recency and
-  explicit list controls. No alternate service, roster or receipt store was
-  introduced.
-- The connected fixture exercises an authoritative saved Resume, managed mux
-  changes and message activity through actual hook/held-feed sockets and the
-  real producer into two independent consumers and an already-open native
-  Textual Picker. Periodic production, UI repoll and reconnect are disabled.
-  A gated post-Reclaim publication converges after release with one mocked
-  native retirement, not another destructive action. Separate existing
-  owned-process tests cover actual native exit and identity/concurrent-owner
-  protections.
-- Native event-subscription and selected-peer fixtures cover message-only
-  sidecars, root/delegate distinctions, the real catalog field layout,
-  unsupported peers and source/installation mismatch. Incremental metadata
-  cases cover partial lines, replacement, unchanged-log work counts and
-  timezone ordering.
-- The expanded native corpus exposed stale fixtures: invalid runtime
-  generation identity, an assertion racing socket-handler completion,
-  capture before the first painted setup, and outdated configuration/decision
-  expectations. Fixtures retain the actual current contracts; no runtime
-  admission or lifecycle guard was weakened.
-- Final contained runner packets and current-head publication gates remain
-  open at this checkpoint. The campaign is Active, not Done. No live operator
-  session was reclaimed or updated.
-
-### 2026-11-07 - Proposal accepted; bounded implementation begins
-- #11199 merged after exact-head Copilot approval and required green checks.
-  The source workspace was pulled forward through the managed continuation.
-- Initial implementation uses the existing managed-mux observation and
-  producer paths; no reserved receipt/reducer implementation is taken over.
-  Reconcile any further shared boundary before editing it.
-- The source and deployed engine already contain native-exit and publication
-  waits. A wait alone does not prove a mutation wakes the producer; that
-  connected behavior remains to be reproduced.
-- All implementation, integrated validation and authorized rollout gates remain
-  open. No live operator process was reclaimed.
 
 ### 2026-11-07 - Request captured and proposal prepared
 - Captured both original requests and the operator's layout/rollout choices.

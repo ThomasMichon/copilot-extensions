@@ -86,10 +86,7 @@ def test_serve_keeps_all_home_consumers_bound_after_chdir(tmp_path, selection):
     socket_arg = (
         str(Path("link") / ".." / "state" / "serve.sock") if selection == "socket-parent" else ""
     )
-    bound_socket = (
-        Path(os.path.abspath(launch / socket_arg))
-        if socket_arg else bound_home / "current" / "serve.sock"
-    )
+    bound_socket = Path(os.path.abspath(launch / socket_arg)) if socket_arg else bound_home / "serve.sock"
     script = textwrap.dedent("""
         import argparse
         import json
@@ -128,12 +125,12 @@ def test_serve_keeps_all_home_consumers_bound_after_chdir(tmp_path, selection):
                 assert Path.cwd() == expected.resolve()
                 assert os.environ["AGENT_MCP_HOME"] == str(bound_home)
                 assert sockio.default_home_dir() == bound_home
-                assert sockio.default_socket_path() == bound_home / "current" / "serve.sock"
+                assert sockio.default_socket_path() == bound_home / "serve.sock"
                 assert self.socket_path == bound_socket
-                assert self._config_dir().resolve() == bound_socket.parent.resolve()
-                assert (bound_socket.parent / "active.json").is_file()
-                assert (bound_socket.parent / "active.lock").is_file()
-                assert (bound_socket.parent / "agent-mcp-serve.lock").is_file()
+                assert self._config_dir().resolve() == expected.resolve()
+                assert (expected / "active.json").is_file()
+                assert (expected / "active.lock").is_file()
+                assert (expected / "agent-mcp-serve.lock").is_file()
                 assert config.load_config("fixture").timeout == 17
                 assert materialize.default_dest() == bound_home / "materialized"
                 assert len(materialize._source_digest_key()) >= 32

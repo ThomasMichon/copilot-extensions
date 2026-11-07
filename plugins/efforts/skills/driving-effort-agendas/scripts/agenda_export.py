@@ -25,7 +25,6 @@ from typing import Any, Iterator
 from agenda import AgendaError, _object, _time, decode
 import agenda_history as history
 import agenda_history_contract as wire
-from agenda_v2_graph import attach as attach_graph
 from agenda_operations import fields
 import agenda_store as store
 import agenda_store_v2 as owner
@@ -313,8 +312,6 @@ def _delivery_matches(observation: dict, state: dict, source: dict, budget: _Bud
             "revision": state["revision"], "committed_at": state["committed_at"],
             "snapshot": asdict(project(state["documents"], state["records"], now=at)),
         }
-        if "graph" in observation:
-            candidate = attach_graph(candidate, state["documents"], state["records"], store.encode)
         if len(store.encode(candidate).encode()) + 1 > 32768:
             candidate = {
                 "schema": "efforts.agenda-undeliverable", "version": 1, "revision": state["revision"],

@@ -91,14 +91,10 @@ class PickerConfigurationMixin:
             runtime.repoll(scope)
             self._refresh_knowledge_readiness()
 
-        from worktree_manager.installation_updates import (
-            PIVOT_NAME, diagnostic_result_screen, request_result_screen,
-        )
+        from worktree_manager.installation_updates import PIVOT_NAME, request_result_screen
 
         if reg.name == PIVOT_NAME and action.key == "update":
             self._run_command_result(action.label, work, reload, request_result_screen(action.label))
-        elif reg.name == PIVOT_NAME and action.key == "doctor":
-            self._run_command_result(action.label, work, reload, diagnostic_result_screen(action.label))
         else:
             self._run_configuration_command(action.label, work, reload)
 

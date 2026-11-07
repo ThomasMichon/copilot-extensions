@@ -110,8 +110,6 @@ class FeedbackCaptures:
             operation = retained.get(capture["operation_id"])
             if operation is None:
                 raise ValueError("feedback capture requires its original review operation")
-            if operation.get("selection", {}).get("stage") == "prepared":
-                raise ValueError("feedback capture requires execution admission")
             intent = operation["intent"]
             if (
                 capture["intent_id"] != operation["intent_id"]

@@ -5,11 +5,7 @@
 . "${BASH_SOURCE[0]%/*}/native-seed-boundary.sh"
 
 _aw_native_setup_require_contract() {
-    if [[ "${LAUNCH_SEED_PREPARATION:-seed}" == admission ]]; then
-        aw_native_seed_supports_posix_admission "$LAUNCH_SEED_NATIVE_ROOT"
-    else
-        aw_native_seed_supports_posix_setup "$LAUNCH_SEED_NATIVE_ROOT"
-    fi
+    aw_native_seed_supports_posix_setup "$LAUNCH_SEED_NATIVE_ROOT"
 }
 
 _aw_native_setup_prepare() {
@@ -27,7 +23,7 @@ _aw_native_setup_finish() {
 }
 
 aw_native_setup_begin() {
-    [[ "$LAUNCH_SEED_PREPARATION" == seed || "$LAUNCH_SEED_PREPARATION" == admission ]] || return 3
+    [[ "$LAUNCH_SEED_PREPARATION" == seed ]] || return 3
     [[ -n "$LAUNCH_SEED_RECORD" && "$LAUNCH_SEED_NATIVE_ROOT" == /* ]] || return 3
     [[ -z "$(builtin trap -p EXIT)" ]] || return 3
     if [[ -n "$LAUNCH_ATTEMPT_ID$LAUNCH_RESOLUTION_ID$LAUNCH_PARENT_ID" ]]; then
@@ -42,7 +38,6 @@ aw_native_setup_begin() {
         --phase setup --output-format nul --environment-reply execution-hint
         --record "$LAUNCH_SEED_RECORD" --pid "$$"
     )
-    [[ "$LAUNCH_SEED_PREPARATION" != admission ]] || arguments+=(--admission-only)
     [[ -z "$LAUNCH_SEED_ID" ]] || arguments+=(--seed-id "$LAUNCH_SEED_ID")
     [[ -z "$LAUNCH_SEED_PRESERVE_ID" ]] || arguments+=(--preserve-seed-id "$LAUNCH_SEED_PRESERVE_ID")
     [[ -z "$LAUNCH_NATIVE_RESUME_SESSION" ]] || arguments+=(--native-resume-session "$LAUNCH_NATIVE_RESUME_SESSION")
@@ -81,39 +76,22 @@ _aw_native_setup_backend_environment() {
 }
 
 aw_native_setup_backend() {
-    local code=0 completion="" status="" index entry hint="" availability=0
+    local code=0 completion="" status="" index entry hint=""
     # Bash waits in the foreground with the original terminal. Only its direct
     # child exec-replaces Python; the finite provider timeout must never own it.
     trap : INT
-    if [[ -z "$LAUNCH_SEED_ID" && "${LAUNCH_SEED_PREPARATION:-seed}" != admission ]]; then
+    if [[ -z "$LAUNCH_SEED_ID" ]]; then
         "$@" || code=$?
         return "$code"
     fi
     _aw_native_setup_require_contract || return 3
-    local -a backend_options=() admission_options=()
-    aw_native_seed_supports_posix_headed "$LAUNCH_SEED_NATIVE_ROOT" || availability=$?
-    if [[ "$availability" == 0 ]]; then
-        backend_options=(--backend-mode headed-live-owner-v1)
-    elif [[ "$availability" != 4 ]]; then
-        printf 'Native POSIX backend support is unconfirmed; no backend started.\n' >&2
-        return 3
-    fi
     completion="$(_aw_native_seed_control mktemp "${BASH_SOURCE[0]%/*}/.native-seed-exec.XXXXXXXX")" || return 3
     local -a preparation=(
         --phase prepare --output-format nul --environment-reply execution-hint
-        --record "$LAUNCH_SEED_RECORD"
+        --record "$LAUNCH_SEED_RECORD" --seed-id "$LAUNCH_SEED_ID"
         --launch-attempt-id "$LAUNCH_ATTEMPT_ID" --launch-resolution-id "$LAUNCH_RESOLUTION_ID"
         --launch-parent-id "$LAUNCH_PARENT_ID"
     )
-    if [[ "${LAUNCH_SEED_PREPARATION:-seed}" == admission ]]; then
-        admission_options=(--admission-only)
-        [[ -z "$LAUNCH_SEED_PRESERVE_ID" ]] || admission_options+=(--preserve-seed-id "$LAUNCH_SEED_PRESERVE_ID")
-        [[ -z "$LAUNCH_NATIVE_RESUME_SESSION" ]] || admission_options+=(--native-resume-session "$LAUNCH_NATIVE_RESUME_SESSION")
-        backend_options+=("${admission_options[@]}")
-        preparation+=("${admission_options[@]}")
-    else
-        preparation+=(--seed-id "$LAUNCH_SEED_ID")
-    fi
     if ! _aw_native_setup_prepare "$LAUNCH_SEED_NATIVE_ROOT" "${preparation[@]}" -- "$@"; then
         _aw_native_seed_control rm -f -- "$completion"
         return 3
@@ -135,7 +113,6 @@ aw_native_setup_backend() {
             "${AW_NATIVE_SEED_RUNTIME[@]}" -m agent_worktrees.launch_seed_native
             --contract-version 1 --root "$LAUNCH_SEED_NATIVE_ROOT" --phase exec
             --completion-file "$completion" --backend-environment-fd 3
-            ${backend_options[@]+"${backend_options[@]}"}
             "${callback[@]}" -- "${AW_NATIVE_SEED_ARGV[@]}"
         )
         _aw_native_seed_control env -u PYTHONPATH -u PYTHONHOME -u VIRTUAL_ENV -u __PYVENV_LAUNCHER__ \

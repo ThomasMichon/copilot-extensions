@@ -7,8 +7,6 @@ and ``data/plugins.toml``.
 
 from __future__ import annotations
 
-import pytest
-
 from worktree_manager.catalog import (
     KINDS,
     Catalog,
@@ -49,14 +47,6 @@ def test_baseline_prereqs_present():
     cat = load_catalog()
     baseline = {pr.name for pr in cat.baseline_prereqs}
     assert {"git", "python3", "uv"} <= baseline
-
-
-@pytest.mark.parametrize("platforms", ["windows", ["win"], [None]])
-def test_invalid_prerequisite_platforms_are_not_silently_excluded(platforms):
-    from worktree_manager.catalog import _prereq
-
-    with pytest.raises(ValueError, match="platforms"):
-        _prereq({"name": "pwsh", "platforms": platforms})
 
 
 def test_all_prereqs_dedups_and_prefers_required():

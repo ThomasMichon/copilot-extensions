@@ -47,7 +47,6 @@ from . import engine_client as ec
 from . import companion_client as cc
 from . import companion_observations as co
 from . import companion_attention as ca
-from .companion_pr_panel import CompanionPrMixin
 from .companion_head_observation import observation_details, observation_text
 from .companion_recovery import (
     CompanionData as _CompanionData,
@@ -177,7 +176,7 @@ def _closure_explanation(row: dict) -> list[str]:
     return lines
 
 
-class MuxCompanionApp(CompanionPrMixin, App):
+class MuxCompanionApp(App):
     """Summary, Claims and secondary Recovery for the CURRENT worktree, plus
     explicit, human-gated actions ("Cut over", "Refresh") -- see the module
     docstring for the exact boundary. Styled to match the Worktree Manager's
@@ -248,20 +247,6 @@ class MuxCompanionApp(CompanionPrMixin, App):
         padding: 1 2;
     }
 
-    #agenda.agenda-graph {
-        text-wrap: nowrap;
-        text-overflow: ellipsis;
-    }
-
-    #pr-controls {
-        height: auto;
-        margin: 0 2;
-    }
-
-    #pr-association {
-        width: 1fr;
-    }
-
     #claims {
         height: 1fr;
         margin: 0 2;
@@ -313,7 +298,6 @@ class MuxCompanionApp(CompanionPrMixin, App):
         self._observation_cancel = Event()
         self._observation_owner: _CompanionData | None = None
         self._attention_cancel = Event()
-        self._init_pr_state()
         self._attention_busy = False
         self._attention_next = 0.0
         self._agenda_cancel = Event()
@@ -364,9 +348,6 @@ class MuxCompanionApp(CompanionPrMixin, App):
                 with VerticalScroll():
                     yield Static(agenda_text(None, "loading"), id="agenda")
             with TabPane("Graph", id="topology-tab"):
-                with Horizontal(id="pr-controls"):
-                    yield Select([], prompt="Inspect one recorded PR", id="pr-association")
-                    yield Button("Re-read PR", id="pr-read-btn", disabled=True)
                 with VerticalScroll():
                     yield Static(id="topology")
             with TabPane("Recovery", id="recovery-tab"):
@@ -442,7 +423,6 @@ class MuxCompanionApp(CompanionPrMixin, App):
         self._observation_cancel.set()
         self._attention_cancel.set()
         self._agenda_cancel.set()
-        self._reset_pr_state("closed")
         self._agenda_generation += 1
         self._data.agenda = None
         self._data.agenda_error = "subscription closed"
@@ -462,10 +442,6 @@ class MuxCompanionApp(CompanionPrMixin, App):
             self._refresh_view(reload=False)
             return
         self._loading = True
-        # Invalidate PR state before any await so no late point read is admitted.
-        self._reset_pr_state()
-        self._update_pr_controls()
-        self._update_topology()
         self._timeline_sync_revision += 1
         self._rich_agenda_attachment.stop_now()
         self._timeline_attachment.stop_now()
@@ -517,7 +493,6 @@ class MuxCompanionApp(CompanionPrMixin, App):
             self._sync_timeline(reconcile=reconcile_timeline)
         if self.query_one("#views", TabbedContent).active == "topology-tab":
             self._load_observations()
-            self._load_pr_associations()
 
     def _start_agenda(self) -> None:
         data = self._data
@@ -546,15 +521,9 @@ class MuxCompanionApp(CompanionPrMixin, App):
         )
 
     def _update_agenda(self) -> None:
-        agenda = self.query_one("#agenda", Static)
-        frame = self._data.agenda
-        # Graph lanes only line up unwrapped, so long rows end in an ellipsis.
-        agenda.set_class(
-            self._data.agenda_error is None and isinstance(frame, dict)
-            and isinstance(frame.get("observation"), dict) and "graph" in frame["observation"],
-            "agenda-graph",
-        )
-        agenda.update(agenda_text(frame, self._data.agenda_error))
+        self.query_one("#agenda", Static).update(agenda_text(
+            self._data.agenda, self._data.agenda_error,
+        ))
 
     def _receive_agenda(self, data, generation, cancelled, frame, error) -> None:
         if (
@@ -602,8 +571,6 @@ class MuxCompanionApp(CompanionPrMixin, App):
         if event.pane.id == "topology-tab" and not self._loading:
             if self._observation_owner is not self._data:
                 self._load_observations()
-            if self._pr_owner is not self._data:
-                self._load_pr_associations()
 
     def on_subway_timeline_history_requested(self, message: SubwayTimeline.HistoryRequested) -> None:
         if message.token.identity.provider is Provider.AGENDA:
@@ -682,8 +649,6 @@ class MuxCompanionApp(CompanionPrMixin, App):
     async def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id == "bridge-feed" and isinstance(event.value, str):
             await self._bridge_attachment.choose(event.value)
-        elif event.select.id == "pr-association":
-            self._select_pr(event.value if isinstance(event.value, str) else None)
 
     @work(exclusive=True, group="session-observations")
     async def _load_observations(self) -> None:
@@ -716,7 +681,6 @@ class MuxCompanionApp(CompanionPrMixin, App):
         self.query_one("#topology", Static).update(topology_view(
             data.worktree, data.bundle, data.session_observation,
             data.bundle_error or data.observation_error,
-            pr_state=self._pr_topology_state(),
         ))
 
     def _poll_attention(self, *, force=False) -> None:
@@ -828,7 +792,6 @@ class MuxCompanionApp(CompanionPrMixin, App):
         self.query_one("#summary", Static).update(_summary_text(self._data))
         self._update_attention()
         self._update_topology()
-        self._update_pr_controls()
         evidence, resources = _claims_view(self._data)
         self.query_one("#claims-evidence", Static).update(evidence)
         claims_table = self.query_one("#claims", DataTable)
@@ -932,8 +895,6 @@ class MuxCompanionApp(CompanionPrMixin, App):
             self.action_refresh()
         elif event.button.id == "cutover-btn":
             self._cut_over()
-        elif event.button.id == "pr-read-btn":
-            self._start_pr_read()
         elif event.button.id == "view-btn" and not self._navigating:
             self._navigate()
 

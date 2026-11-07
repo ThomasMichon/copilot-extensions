@@ -760,11 +760,9 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
             return None, "empty action command"
         try:
             argv = _resolve_command(argv)
-            environment = _child_process_env()
-            environment["PYTHONIOENCODING"] = "utf-8"
             proc = subprocess.run(
-                argv, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
-                check=False, env=environment, creationflags=no_window_flags(),
+                argv, capture_output=True, text=True, timeout=timeout,
+                check=False, env=_child_process_env(), creationflags=no_window_flags(),
             )
         except FileNotFoundError:
             return None, f"{argv[0]} not found on PATH"

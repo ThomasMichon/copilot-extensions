@@ -11,7 +11,6 @@ import json
 from pathlib import Path
 
 import pytest
-from agent_procutil import no_window_kwargs
 
 from worktree_manager.harness_state import (
     build_projects,
@@ -152,7 +151,7 @@ def test_mis_registered_repos_accepts_real_git_checkouts(tmp_path: Path):
     import subprocess
 
     repo = tmp_path / "src" / "dotfiles"
-    subprocess.run(["git", "init", "-q", str(repo)], check=True, **no_window_kwargs())
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
     assert mis_registered_repos(home) == []
 
 
@@ -173,7 +172,7 @@ def test_mis_registered_repos_accepts_bare_checkout(tmp_path: Path):
     import subprocess
 
     shutil.rmtree(repo)
-    subprocess.run(["git", "init", "-q", "--bare", str(repo)], check=True, **no_window_kwargs())
+    subprocess.run(["git", "init", "-q", "--bare", str(repo)], check=True)
     assert mis_registered_repos(home) == []
 
 
@@ -196,7 +195,7 @@ def test_mis_registered_repos_expands_home_relative_path(tmp_path: Path, monkeyp
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     repo = tmp_path / "src" / "dotfiles"
-    subprocess.run(["git", "init", "-q", str(repo)], check=True, **no_window_kwargs())
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
 
     awt = tmp_path / ".agent-worktrees"
     awt.mkdir()

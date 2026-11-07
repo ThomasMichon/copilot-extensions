@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import subprocess
-import os
-import shlex
-import sys
 from pathlib import Path
 
 import pytest
@@ -67,88 +64,6 @@ def test_unrelated_reserved_ref_is_not_adopted(tmp_path):
     with pytest.raises(ValueError, match="unrelated"):
         Transport(root, str(remote)).append(source, lambda state: None)
     assert git(root, "ls-remote", str(remote), TRANSPORT_REF).split()[0] == source
-
-
-def test_managed_transport_passes_legacy_pr_guard_without_disabling_local_hooks(tmp_path, monkeypatch):
-    anchor = repository(tmp_path / "source")
-    config = anchor / ".agent-worktrees/config.yaml"
-    config.parent.mkdir()
-    config.write_text("pr:\n  enabled: true\n  required: true\n", encoding="utf-8")
-    git(anchor, "add", ".agent-worktrees/config.yaml")
-    git(anchor, "commit", "-m", "Require reviewed source publication")
-    root = tmp_path / "worktree"
-    git(anchor, "worktree", "add", "-b", "candidate", str(root))
-    remote = tmp_path / "remote.git"
-    git(root, "init", "--bare", str(remote))
-    source = git(root, "rev-parse", "HEAD")
-    git(root, "config", "push.followTags", "true")
-    git(root, "tag", "-a", "unrelated-tag", "-m", "Must remain local")
-    hook = anchor / ".git/hooks/pre-push"
-    marker = tmp_path / "local-hook-ran"
-    source_root = Path(__file__).resolve().parents[1]
-    paths = [str(path) for path in sorted((source_root / "libs").glob("*/src"))]
-    code = (
-        f"import sys; sys.path[:0] = {paths + sys.path!r}; "
-        "from agent_worktrees.hooks import run_hook; "
-        "sys.exit(run_hook('pre-push', []))"
-    )
-    hook.write_text(
-        "#!/bin/sh\n"
-        f"{shlex.quote(sys.executable.replace(os.sep, '/'))} -c {shlex.quote(code)} || exit $?\n"
-        f"printf 'chained\\n' >> {shlex.quote(marker.as_posix())}\n",
-        encoding="utf-8", newline="\n",
-    )
-    hook.chmod(0o755)
-    monkeypatch.delenv("AGENT_WORKTREES_PR_PUSH", raising=False)
-    denied = Transport(root, str(remote)).git(
-        "push", "--porcelain", str(remote), source + ":refs/heads/unmediated", check=False,
-    )
-    assert denied.returncode and "BLOCKED" in denied.stderr, denied.stderr
-    states = []
-    envelope = Transport(root, str(remote)).append(source, states.append)
-    assert git(root, "ls-remote", "--refs", str(remote)).split() == [envelope, TRANSPORT_REF]
-    assert marker.read_text("utf-8") == "chained\n"
-    assert "AGENT_WORKTREES_PR_PUSH" not in os.environ
-    assert states[-1]["phase"] == "transport-confirmed"
-
-
-@pytest.mark.parametrize("refspec", [
-    "a" * 40 + ":refs/heads/main",
-    "+" + "a" * 40 + ":" + TRANSPORT_REF,
-    ":" + TRANSPORT_REF,
-])
-def test_mediated_transport_rejects_branch_force_and_delete_before_git(tmp_path, refspec):
-    with pytest.raises(ValueError):
-        command(
-            ["git", "push", "--porcelain", "--no-follow-tags", str(tmp_path), refspec],
-            cwd=tmp_path, transport_push=True,
-        )
-
-
-def test_rejected_push_retains_original_diagnostic_and_does_not_retry(tmp_path):
-    root = repository(tmp_path / "source")
-    remote = tmp_path / "remote.git"
-    git(root, "init", "--bare", str(remote))
-    source = git(root, "rev-parse", "HEAD")
-    pushes = []
-
-    def rejected(argv, **kwargs):
-        if "push" in argv:
-            pushes.append(argv)
-            return subprocess.CompletedProcess(
-                argv, 1, "! [remote rejected] fixture policy rejected\n", "failed to push some refs",
-            )
-        return command(argv, **kwargs)
-    states = []
-    with pytest.raises(RuntimeError, match="fixture policy rejected"):
-        Transport(root, str(remote), run=rejected).append(source, states.append)
-    assert len(pushes) == 1
-    assert states[-1]["phase"] == "transport-unknown"
-    assert states[-2]["transport_failure"] == {
-        "returncode": 1, "stdout": "! [remote rejected] fixture policy rejected\n",
-        "stderr": "failed to push some refs",
-    }
-    assert git(root, "ls-remote", "--refs", str(remote)) == ""
 
 
 def test_competing_append_rebuilds_fast_forward_without_force(tmp_path):

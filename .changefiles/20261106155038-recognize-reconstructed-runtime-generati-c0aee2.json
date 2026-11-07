@@ -1,9 +1,0 @@
-{
-  "comment": "Recognize reconstructed runtime generation identity",
-  "changes": [
-    {
-      "plugin": "agent-dispatch",
-      "type": "patch"
-    }
-  ]
-}

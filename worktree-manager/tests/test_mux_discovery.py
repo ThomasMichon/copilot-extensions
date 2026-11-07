@@ -180,14 +180,6 @@ def test_enumeration_failure_preserves_prior_attached_count(monkeypatch, tmp_pat
     assert registry.snapshot() == before
 
 
-def test_success_with_diagnostics_does_not_retire_an_omitted_session(monkeypatch, tmp_path):
-    registry, compute, status, observations = _admitted_status_fixture(monkeypatch, tmp_path)
-    before = registry.snapshot()
-    _probe(monkeypatch, "", stderr="one server could not be queried")
-    assert compute(mux_daemon.KIND, status)["reason"] == "session-unconfirmed"
-    assert registry.snapshot() == before and observations == []
-
-
 def test_discovery_rechecks_incumbent_after_native_probe(monkeypatch, tmp_path):
     registry = MuxMappingRegistry(tmp_path / "mapping.json")
 
@@ -244,11 +236,11 @@ def test_same_incarnation_tombstone_is_not_resurrected(monkeypatch, tmp_path):
 def test_launcher_binary_alias_can_recover_a_fresh_native_incarnation(monkeypatch, tmp_path, live):
     import shutil
 
-    binary = tmp_path / "tmux.exe"
+    binary = tmp_path / "psmux.exe"
     binary.touch()
-    monkeypatch.setattr(shutil, "which", lambda name: str(binary) if name == "tmux" else None)
+    monkeypatch.setattr(shutil, "which", lambda name: str(binary) if name == "psmux" else None)
     registry = MuxMappingRegistry(tmp_path / "mapping.json")
-    registry.register(dict(_payload(mux_bin="tmux"), mapping_revision=9, live=live))
+    registry.register(dict(_payload(mux_bin="psmux"), mapping_revision=9, live=live))
     _probe(monkeypatch, "wt-one\t1\t$2:200\tworkspace\n")
     admitted = mux_discovery.discover_mapping(
         registry, _payload(mux_bin=str(binary), session_incarnation="$2:200"),
@@ -262,12 +254,12 @@ def test_launcher_binary_alias_can_recover_a_fresh_native_incarnation(monkeypatc
 def test_matching_executable_basename_is_not_identity(monkeypatch, tmp_path, resolved):
     import shutil
 
-    binary = tmp_path / "tmux.exe"
-    other = tmp_path / "other-install" / "tmux.exe"
+    binary = tmp_path / "psmux.exe"
+    other = tmp_path / "other-install" / "psmux.exe"
     monkeypatch.setattr(shutil, "which",
-                        lambda name: str(other) if resolved and name == "tmux" else None)
+                        lambda name: str(other) if resolved and name == "psmux" else None)
     registry = MuxMappingRegistry(tmp_path / "mapping.json")
-    registry.register(dict(_payload(mux_bin="tmux"), mapping_revision=9, live=False))
+    registry.register(dict(_payload(mux_bin="psmux"), mapping_revision=9, live=False))
     before = registry.snapshot()
     _probe(monkeypatch, "wt-one\t1\t$2:200\tworkspace\n")
     refused = mux_discovery.discover_mapping(
@@ -383,7 +375,7 @@ def test_confirmed_native_presence_does_not_use_unknown_legacy_liveness(monkeypa
     assert registry.get("project", "one")["live"]
 
 
-@pytest.mark.parametrize("mux_bin", ["tmux", "fixture-mux"])
+@pytest.mark.parametrize("mux_bin", ["tmux", "psmux"])
 def test_discovered_manager_status_initializes_session_formats_through_existing_writer(
     monkeypatch, tmp_path, mux_bin,
 ):
@@ -414,7 +406,7 @@ def test_discovered_manager_status_initializes_session_formats_through_existing_
     assert not any(argv[1] == "set-option" and argv[4].startswith("status") for argv in calls)
 
 
-@pytest.mark.parametrize("mux_bin", ["tmux", "fixture-mux"])
+@pytest.mark.parametrize("mux_bin", ["tmux", "psmux"])
 def test_failed_manager_format_initialization_remains_retryable(monkeypatch, tmp_path, mux_bin):
     registry, compute, status, _ = _admitted_status_fixture(monkeypatch, tmp_path, mux_bin=mux_bin)
     writes = []

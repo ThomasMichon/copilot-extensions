@@ -15,7 +15,6 @@ import stat
 import subprocess
 import sys
 from typing import Callable, Literal, cast
-from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -621,7 +620,7 @@ def check_project(
         raise TypecheckError(f"{project.name}: run python tools/typecheck.py {project.name} --prepare")
     lease = acquire_environment(0, path)
     views = _SourceViews(
-        root, path.parent / ("source-views-" + path.name) / (project.name + uuid4().hex),
+        root, path.parent / ("source-views-" + path.name) / project.name,
     )
     import_inputs: _ImportInputs | None = None
     try:
@@ -698,11 +697,9 @@ def check_project(
         if (project.import_roots or guard) and any(os.pathsep in entry for entry in ordered_imports):
             raise TypecheckError("Import search paths contain the native path-list separator")
         env["MYPYPATH"] = os.pathsep.join(ordered_imports)
-        views._parents(views.stage, create=True)
-        views._membership()
-        targets = views.stage / "typecheck-targets.txt"
+        targets = path / "typecheck-targets.txt"
         views.write(targets, ("\n".join(files) + "\n").encode("utf-8"))
-        config = views.stage / "typecheck-mypy.ini"
+        config = path / "typecheck-mypy.ini"
         views.write(config, b"[mypy]\n")
         failure = 0
         versions = (project.python_version, *project.additional_python_versions)
@@ -747,8 +744,6 @@ def check_project(
                 views.verify()
             finally:
                 views.cleanup()
-                if views.stage in views.directories:
-                    views.stage.rmdir()
         finally:
             try:
                 if import_inputs is not None:
