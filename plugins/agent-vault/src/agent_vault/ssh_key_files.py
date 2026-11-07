@@ -87,6 +87,18 @@ class WindowsSecurity:
         flags = "OICI" if directory else ""
         return f"O:{self.sid}D:P(A;{flags};FA;;;{self.sid})(A;{flags};FA;;;SY)"
 
+    def _descriptor_text(self, descriptor) -> str:
+        from ctypes import wintypes as w
+
+        text = w.LPWSTR()
+        self.checked(self.security.ConvertSecurityDescriptorToStringSecurityDescriptorW(
+            descriptor, 1, 5, ctypes.byref(text), None,
+        ))
+        try:
+            return text.value
+        finally:
+            self.kernel.LocalFree(text)
+
     def create(self, path: Path, *, directory: bool):
         from ctypes import wintypes as w
 
@@ -130,15 +142,15 @@ class WindowsSecurity:
         self.checked(self.security.GetFileSecurityW(
             str(path), 5, descriptor, size, ctypes.byref(size),
         ))
-        text = w.LPWSTR()
-        self.checked(self.security.ConvertSecurityDescriptorToStringSecurityDescriptorW(
-            descriptor, 1, 5, ctypes.byref(text), None,
+        expected = w.LPVOID()
+        self.checked(self.security.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            self.descriptor(directory), 1, ctypes.byref(expected), None,
         ))
         try:
-            if text.value != self.descriptor(directory):
+            if self._descriptor_text(descriptor) != self._descriptor_text(expected):
                 raise PermissionError("SSH key location is not owner-private")
         finally:
-            self.kernel.LocalFree(text)
+            self.kernel.LocalFree(expected)
 
     def publish(self, source: Path, target: Path):
         # WRITE_THROUGH, deliberately without REPLACE_EXISTING.

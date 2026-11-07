@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -136,6 +137,93 @@ def test_moving_revision_is_not_published_or_joined(inputs, monkeypatch):
     assert not list((driver / "bootstrap-inputs").glob("*/worktree-manager"))
 
 
+@pytest.mark.parametrize("winerror", [5, 32, 33])
+def test_retention_retries_transient_windows_publication_locks(inputs, monkeypatch, winerror):
+    helper, payload, driver = inputs
+    rename, attempts, delays = Path.rename, [], []
+
+    def locked(path, destination):
+        if path.name == "inputs" and path.parent.name.startswith(".prepare-"):
+            attempts.append(path)
+            if len(attempts) < 3:
+                error = PermissionError("transient publication lock")
+                error.winerror = winerror
+                raise error
+        return rename(path, destination)
+
+    monkeypatch.setattr(Path, "rename", locked)
+    monkeypatch.setattr(time, "sleep", delays.append)
+    retained, _share = helper.retain(payload, driver)
+    assert len(attempts) == 3 and len(delays) == 2
+    assert (retained / "src" / "module.py").read_text() == "VALUE = 1\n"
+
+
+@pytest.mark.parametrize("winerror,expected", [(5, 4), (87, 1)])
+def test_retention_publication_retry_is_bounded(inputs, monkeypatch, winerror, expected):
+    helper, payload, driver = inputs
+    rename, attempts = Path.rename, []
+
+    def denied(path, destination):
+        if path.name == "inputs" and path.parent.name.startswith(".prepare-"):
+            attempts.append(path)
+            error = PermissionError("publication denied")
+            error.winerror = winerror
+            raise error
+        return rename(path, destination)
+
+    monkeypatch.setattr(Path, "rename", denied)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    with pytest.raises(PermissionError, match="publication denied"):
+        helper.retain(payload, driver)
+    assert len(attempts) == expected
+    assert not list((driver / "bootstrap-inputs").glob("*/worktree-manager"))
+
+
+@pytest.mark.parametrize("changed", ["source", "candidate"])
+def test_retention_rechecks_source_and_candidate_after_a_lock(inputs, monkeypatch, changed):
+    helper, payload, driver = inputs
+    rename, attempts = Path.rename, []
+
+    def mutate(path, destination):
+        if path.name == "inputs" and path.parent.name.startswith(".prepare-"):
+            attempts.append(path)
+            target = payload if changed == "source" else path / "worktree-manager"
+            (target / "src" / "module.py").write_text("CHANGED = True\n", encoding="utf-8")
+            error = PermissionError("transient publication lock")
+            error.winerror = 32
+            raise error
+        return rename(path, destination)
+
+    monkeypatch.setattr(Path, "rename", mutate)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    with pytest.raises(RuntimeError, match="changed|differ"):
+        helper.retain(payload, driver)
+    assert len(attempts) == 1
+    assert not list((driver / "bootstrap-inputs").glob("*/worktree-manager"))
+
+
+def test_retention_does_not_replace_a_conflicting_snapshot_after_a_lock(inputs, monkeypatch):
+    helper, payload, driver = inputs
+    rename, winners = Path.rename, []
+
+    def competing(path, destination):
+        if path.name == "inputs" and path.parent.name.startswith(".prepare-"):
+            destination.mkdir()
+            (destination / "foreign").write_text("preserve", encoding="utf-8")
+            winners.append(destination)
+            error = PermissionError("transient publication lock")
+            error.winerror = 32
+            raise error
+        return rename(path, destination)
+
+    monkeypatch.setattr(Path, "rename", competing)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    with pytest.raises(FileExistsError):
+        helper.retain(payload, driver)
+    assert len(winners) == 1
+    assert (winners[0] / "foreign").read_text() == "preserve"
+
+
 @pytest.fixture
 def preparation_assets(inputs):
     helper, payload, driver = inputs
@@ -155,14 +243,15 @@ def test_preparation_assets_are_retained_addressed_and_rechecked(preparation_ass
     helper, payload, driver, tool = preparation_assets
     first, _share = helper.retain(payload, driver)
     target = Path("scripts/runtime-source-tools") / tool.name
-    assert (first / target).read_bytes() == tool.read_bytes()
+    first_target = Path(helper.engine._native_retained_path(first / target))
+    assert first_target.read_bytes() == tool.read_bytes()
     assert not (payload / target).exists()
     assert helper.retain(payload, driver)[0] == first
     tool.write_text("VALUE = 2\n", encoding="utf-8")
     second, _share = helper.retain(payload, driver)
     assert second != first
-    assert (first / target).read_text() == "VALUE = 1\n"
-    (second / target).write_text("damaged\n", encoding="utf-8")
+    assert first_target.read_text() == "VALUE = 1\n"
+    Path(helper.engine._native_retained_path(second / target)).write_text("damaged\n", encoding="utf-8")
     with pytest.raises(RuntimeError, match="preparation assets differ"):
         helper.retain(payload, driver)
 
@@ -184,7 +273,8 @@ def test_grouped_preparation_assets_retain_each_declared_root(preparation_assets
     retained, _share = helper.retain(payload, driver)
     for group in groups:
         for name in group["files"]:
-            assert (retained / group["payloadDir"] / name).read_bytes() == (
+            target = Path(helper.engine._native_retained_path(retained / group["payloadDir"] / name))
+            assert target.read_bytes() == (
                 payload.parent / group["canonicalDir"] / name
             ).read_bytes()
     assert helper.retain(payload, driver)[0] == retained
@@ -228,6 +318,76 @@ def test_preparation_asset_change_during_freezing_is_not_published(preparation_a
     with pytest.raises(RuntimeError, match="preparation assets changed"):
         helper.retain(payload, driver)
     assert not list((driver / "bootstrap-inputs").glob("*/worktree-manager"))
+
+
+@pytest.mark.parametrize("changed", ["source", "candidate"])
+def test_retention_rechecks_preparation_assets_after_a_lock(preparation_assets, monkeypatch, changed):
+    helper, payload, driver, tool = preparation_assets
+    rename, attempts = Path.rename, []
+
+    def mutate(path, destination):
+        if path.name == "inputs" and path.parent.name.startswith(".prepare-"):
+            attempts.append(path)
+            target = tool if changed == "source" else (
+                path / "worktree-manager" / "scripts" / "runtime-source-tools" / tool.name
+            )
+            target.write_text("changed after freezing\n", encoding="utf-8")
+            error = PermissionError("transient publication lock")
+            error.winerror = 32
+            raise error
+        return rename(path, destination)
+
+    monkeypatch.setattr(Path, "rename", mutate)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    with pytest.raises(RuntimeError, match="changed|differ"):
+        helper.retain(payload, driver)
+    assert len(attempts) == 1
+    assert not list((driver / "bootstrap-inputs").glob("*/worktree-manager"))
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended path handling")
+def test_retention_revalidates_long_windows_asset_path(preparation_assets):
+    helper, payload, driver, tool = preparation_assets
+    expected = (
+        driver / "bootstrap-inputs" / ("a" * 64) / "worktree-manager" / "scripts"
+        / "runtime-source-tools" / tool.name
+    )
+    padding = max(0, 270 - len(str(expected)) - 1)
+    if padding:
+        driver = driver / ("x" * padding)
+    retained, _share = helper.retain(payload, driver)
+    selected = retained / "scripts" / "runtime-source-tools" / tool.name
+    assert len(str(selected)) >= 260
+    assert Path(helper.engine._native_retained_path(selected)).read_bytes() == tool.read_bytes()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended path handling")
+@pytest.mark.parametrize("fail_copy", [False, True])
+def test_retention_freezes_and_cleans_deep_windows_inputs(inputs, monkeypatch, fail_copy):
+    helper, payload, driver = inputs
+    expected = driver / "bootstrap-inputs" / ("a" * 64) / "worktree-manager" / "src"
+    padding = max(1, 320 - len(str(expected / "module.py")) - 1)
+    relative = Path("x" * padding) / "module.py"
+    original = payload / "src" / relative
+    Path(helper.engine._native_retained_path(original.parent)).mkdir(parents=True)
+    Path(helper.engine._native_retained_path(original)).write_text("DEEP = True\n", encoding="utf-8")
+    if fail_copy:
+        copymode = helper.engine.shutil.copymode
+
+        def interrupted(source, target, **kwargs):
+            if str(target).endswith(str(relative)):
+                raise RuntimeError("interrupted deep copy")
+            return copymode(source, target, **kwargs)
+
+        monkeypatch.setattr(helper.engine.shutil, "copymode", interrupted)
+        with pytest.raises(RuntimeError, match="interrupted deep copy"):
+            helper.retain(payload, driver)
+        assert not list((driver / "bootstrap-inputs").glob(".prepare-*"))
+    else:
+        retained, _share = helper.retain(payload, driver)
+        selected = retained / "src" / relative
+        assert len(str(selected)) >= 260
+        assert Path(helper.engine._native_retained_path(selected)).read_text() == "DEEP = True\n"
 
 
 def test_retention_rejects_source_different_from_the_admitted_payload(preparation_assets):

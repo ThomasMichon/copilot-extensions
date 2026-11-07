@@ -218,18 +218,19 @@ def _source_files(
         raise error
 
     for root in roots:
-        for directory, children, names in os.walk(root, onerror=scan_error, followlinks=False):
-            parent = Path(directory)
+        native_root = Path(_native_retained_path(root))
+        for directory, children, names in os.walk(native_root, onerror=scan_error, followlinks=False):
+            parent = root / Path(directory).relative_to(native_root)
             for name in list(children):
                 path = parent / name
-                mode = path.lstat().st_mode
+                mode = Path(_native_retained_path(path)).lstat().st_mode
                 if not stat.S_ISDIR(mode):
                     raise ValueError(f"Runtime input directory is not ordinary: {path}")
                 if name in _GENERATED_DIRECTORIES or name.endswith((".egg-info", ".dist-info")):
                     children.remove(name)
             for name in names:
                 path = parent / name
-                if not stat.S_ISREG(path.lstat().st_mode):
+                if not stat.S_ISREG(Path(_native_retained_path(path)).lstat().st_mode):
                     raise ValueError(f"Runtime input file is not ordinary: {path}")
                 if not name.endswith((".pyc", ".pyo")):
                     files.add(path)
@@ -266,10 +267,12 @@ def freeze_inputs(
             raise ValueError(f"Frozen input destination is inside runtime source: {destination}")
     progress = {"on_progress": on_progress} if on_progress is not None else {}
     files = _source_files(roots, **progress)
-    destination.mkdir(parents=True, exist_ok=False)
+    Path(_native_retained_path(destination)).mkdir(parents=True, exist_ok=False)
     try:
         buffer_limit = 32 * 1024 * 1024
-        with tempfile.SpooledTemporaryFile(max_size=buffer_limit, dir=destination) as buffer:
+        with tempfile.SpooledTemporaryFile(
+            max_size=buffer_limit, dir=_native_retained_path(destination),
+        ) as buffer:
             offsets: dict[Path, tuple[int, int]] = {}
 
             def retain_source(source: Path, data: bytes) -> None:
@@ -292,7 +295,7 @@ def freeze_inputs(
                 if len(data) != length:
                     raise OSError("Frozen source buffer read was incomplete")
                 target = destination / source.relative_to(common)
-                target.parent.mkdir(parents=True, exist_ok=True)
+                Path(_native_retained_path(target.parent)).mkdir(parents=True, exist_ok=True)
                 Path(_native_retained_path(target)).write_bytes(data)
                 shutil.copymode(
                     _native_retained_path(source), _native_retained_path(target),
@@ -316,14 +319,15 @@ def freeze_inputs(
             detail = ", ".join(str(path.relative_to(common)) for path in changed[:10])
             raise RuntimeError(f"Runtime input file set changed while freezing inputs: {detail}")
         after = runtime.fingerprint_source(files, **progress)
-        frozen_hash = runtime.fingerprint_source(_source_files(frozen_roots, **progress), **progress)
+        native_roots = tuple(Path(_native_retained_path(root)) for root in frozen_roots)
+        frozen_hash = runtime.fingerprint_source(_source_files(native_roots, **progress), **progress)
         if before != after or before != frozen_hash:
             raise RuntimeError("Runtime input content changed while freezing inputs")
         if deadline is not None:
             _check_deadline(deadline)
         return FrozenInputs(frozen_plugin, frozen_roots, frozen_hash)
     except BaseException:
-        shutil.rmtree(destination)
+        shutil.rmtree(_native_retained_path(destination))
         raise
 
 

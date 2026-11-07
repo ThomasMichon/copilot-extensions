@@ -2460,6 +2460,31 @@ current-runtime native admission. Its private project registry is empty and
 resident startup remains suppressed by the real pytest-owned test override.
 This first-touch check is distinct from full Manager/Copilot launch qualification.
 
+The adjacent `tests/native/test_manager_application_launch.py` builds and
+installs the real Manager wheel application through the canonical standalone
+source/profile owners, removes disposable source inputs, and exercises the
+actual Worktrees launcher-discovery consumer. Manager's special installer
+starts its resident: the fixture supplies a private home, mux-data root and
+renewable native daemon-test lifecycle, and verifies settled cleanup receipts
+even when the body fails. A successful body must have started an owned
+resident. The 300-second case deadline is shared with cleanup, not extended.
+The installed Manager supplies its packaged launcher through the existing
+retention bootstrap and actual CLI version check; no synthetic health response,
+runtime marker or legacy payload directory qualifies this flow.
+`test_manager_canonical_runtime.py` preserves legacy paths and refuses missing
+or foreign application resources without recovery-generation fallback.
+Manager's focused `test_self_install.py -k app_only_self_install` and
+`test_update_bootstrap_activation.py` controls retain foreign-root/package,
+qualification, activation and startup-outcome refusals while accepting native
+path aliases. These are distinct from full native Copilot launch, desktop or
+all-caller-cleanup-Job qualification.
+
+Manager's `tests/test_shutdown_exit.py` also runs the application probe in
+bounded children with the CPython 3.13 shutdown-workaround branch armed.
+The real callable CLI version handler must finish and the resource JSON must
+be emitted before the final hard exit; a failed version result emits no
+resource report. This covers exit ordering, not native CPython 3.13 installation.
+
 The optional native runtime-removal portfolio includes
 `tools/test_installer_engine_uninstall.py`,
 `tools/test_installer_engine_commands.py`,

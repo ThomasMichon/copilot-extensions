@@ -503,6 +503,7 @@ def publish_active(
     generation: int | None = None,
     demote_existing: bool = False,
     process_start_time: str | None = None,
+    lock_deadline: float | None = None,
 ) -> Endpoint:
     """Publish ``host:port`` as the active endpoint, atomically.
 
@@ -514,8 +515,9 @@ def publish_active(
     not reconstructed by a later reader. A caller holding a spawn-time
     baseline can supply ``process_start_time``; changed or unverifiable
     identity then refuses publication without modifying the existing route.
+    ``lock_deadline`` bounds acquisition without changing the publication.
     """
-    with _routing_lock(config_dir):
+    with _routing_lock(config_dir, deadline=lock_deadline):
         active, _previous = _publish_active_unlocked(
             config_dir,
             bind=bind,
@@ -758,9 +760,10 @@ def reap_stale_active(
     service: str | None = None,
     listening: Callable[[str, int], bool] | None = None,
     pid_alive: Callable[[int | None], bool] | None = None,
+    lock_deadline: float | None = None,
 ) -> dict:
-    """Reap a stale active endpoint under the routing-table mutation lock."""
-    with _routing_lock(config_dir):
+    """Reap a stale active endpoint under the optionally bounded mutation lock."""
+    with _routing_lock(config_dir, deadline=lock_deadline):
         return _reap_stale_active_unlocked(
             config_dir,
             service=service,

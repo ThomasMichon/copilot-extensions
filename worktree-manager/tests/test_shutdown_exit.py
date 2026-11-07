@@ -13,12 +13,20 @@ mapped to ``console_entry`` in
 ``console_entry()`` directly would never catch) -- all without actually
 terminating the test process (``os._exit`` and ``atexit._run_exitfuncs`` are
 patched out).
+
+The application-resource probe also runs in a bounded child with the affected
+shutdown branch armed, so real hard exit cannot terminate the test runner.
 """
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+import subprocess
+import sys
 from unittest import mock
+from agent_procutil import no_window_kwargs
+import pytest
 
 try:  # Python 3.11+
     import tomllib
@@ -26,6 +34,45 @@ except ModuleNotFoundError:  # pragma: no cover - exercised on 3.10 only
     import tomli as tomllib  # type: ignore[no-redef]
 
 from worktree_manager import _shutdown_exit
+
+
+@pytest.mark.parametrize("version_code", [0, 23])
+def test_application_probe_finishes_before_affected_runtime_exit(tmp_path, version_code):
+    root = Path(__file__).resolve().parents[2]
+    probe = root / "plugins" / "agent-worktrees" / "src" / "agent_worktrees" / "manager_application_probe.py"
+    slot = tmp_path / "versions" / "1.2.3"
+    launcher = slot / ".venv" / "package" / "_runtime_assets" / "bin" / "launch-session.ps1"
+    launcher.parent.mkdir(parents=True)
+    launcher.touch()
+    program = """
+import runpy,sys
+from pathlib import Path
+from worktree_manager import _shutdown_exit,relocated_launch,runtime_identity
+from worktree_manager import __main__ as cli
+probe,slot,launcher=map(Path,sys.argv[1:4])
+code=int(sys.argv[4])
+_shutdown_exit._AFFECTED_RUNTIME=True
+runtime_identity.running_application_slot=lambda:slot
+relocated_launch._relocated_launch_script=lambda:launcher
+if code:
+    def failed_version(arguments):
+        assert arguments==['--version']
+        return code
+    cli.main=failed_version
+runpy.run_path(str(probe),run_name='__main__')
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-X", "utf8", "-c", program,
+         str(probe), str(slot), str(launcher), str(version_code)],
+        cwd=tmp_path, capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+    assert result.returncode == version_code, result.stdout + result.stderr
+    if version_code:
+        assert not result.stdout
+    else:
+        lines = result.stdout.splitlines()
+        assert lines[0].startswith("worktree-manager ")
+        assert json.loads(lines[-1]) == {"launcher_directory": str(launcher.parent.relative_to(slot))}
 
 
 def test_windows_hard_exit_flushes_and_runs_atexit_then_exits() -> None:

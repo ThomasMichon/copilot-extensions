@@ -341,6 +341,7 @@ def test_health(api):
     r = api.get("/health")
     assert r.status_code == 200
     assert r.json()["status"] == "ok"
+    assert r.json()["data_auth_required"] is False
 
 
 def test_worktree_status_relay_route_reads_local_store(api):
@@ -2417,6 +2418,7 @@ def test_bearer_auth_enforced(tmp_path):
     assert api.get("/health").status_code == 401
     ok = api.get("/health", headers={"Authorization": "Bearer secret"})
     assert ok.status_code == 200
+    assert ok.json()["data_auth_required"] is True
     assert api.get("/health", headers={"Authorization": "Bearer wrong"}).status_code == 401
 
 
