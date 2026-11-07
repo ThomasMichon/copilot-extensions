@@ -20,9 +20,17 @@ function Assert-LoggerScheduledTaskOwned {
     param($Task)
     $actions = @($Task.Actions)
     $launcher = [IO.Path]::ChangeExtension($TaskLauncher, '.py')
+    $guiInterpreter = $false
+    if ($actions.Count -eq 1 -and [IO.Path]::IsPathRooted("$($actions[0].Execute)")) {
+        $executable = [string]$actions[0].Execute
+        $guiInterpreter = [IO.Path]::GetFileName($executable) -ieq 'pythonw.exe'
+        if (-not $guiInterpreter -and (Test-Path -LiteralPath $executable -PathType Leaf)) {
+            $originalName = [Diagnostics.FileVersionInfo]::GetVersionInfo($executable).OriginalFilename
+            $guiInterpreter = [IO.Path]::GetFileName($originalName) -ieq 'pythonw.exe'
+        }
+    }
     if ($actions.Count -ne 1 -or
-        -not [IO.Path]::IsPathRooted("$($actions[0].Execute)") -or
-        $actions[0].Execute -notmatch '(?i)(^|[\\/])pythonw\.exe$' -or
+        -not $guiInterpreter -or
         "$($actions[0].Arguments)" -notmatch ('^-I "' + [regex]::Escape($launcher) + '" "[^"]+[\\/](?:pwsh|powershell)\.exe" "' + [regex]::Escape($TaskLauncher) + '"$')) {
         throw 'Logger scheduled task action is foreign or unsupported; left unchanged'
     }
