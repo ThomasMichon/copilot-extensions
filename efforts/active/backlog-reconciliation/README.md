@@ -237,7 +237,8 @@ The [branch-observation and streaming follow-through](<journal/2026/11.06 branch
 verifies #11219's newly merged finite source repair without adding a rollout
 gate, while preserving #11210's whole streaming acceptance and #11245's
 OPEN implementation provider. Protected sources remain withheld. The
-813-whole checkpoint stays 84 above fixed 729; Phase 2 and custody stay Active.
+813-whole checkpoint includes new #11255 inflow offsetting the preceding
+tracking retirement, and stays 84 above fixed 729; Phase 2 and custody stay Active.
 
 After reviewed #11252 and complete actual #6394 receiving/readback, #11181
 is separately retired NOT_PLANNED without technical completion or custody
