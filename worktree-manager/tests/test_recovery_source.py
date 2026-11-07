@@ -582,7 +582,10 @@ def test_unsupported_namespace_refuses_before_manager_publication(tmp_path, monk
 
 @pytest.mark.parametrize("existing", [False, True])
 @pytest.mark.parametrize("corruption", ["missing", "partial"])
-def test_unattributable_engine_uses_native_fresh_installation(tmp_path, monkeypatch, existing, corruption):
+@pytest.mark.parametrize("declared", [False, True], ids=["legacy", "custom-entry"])
+def test_unattributable_engine_uses_native_fresh_installation(
+    tmp_path, monkeypatch, existing, corruption, declared,
+):
     from agent_worktrees import reconcile, update_runtime_plan
     from worktree_manager import runtime_source_repair, update_bootstrap
 
@@ -592,10 +595,18 @@ def test_unattributable_engine_uses_native_fresh_installation(tmp_path, monkeypa
     artifact = tmp_path / "artifact"
     (artifact / "scripts").mkdir(parents=True)
     for extension in ("ps1", "sh"):
-        (artifact / "scripts" / f"install.{extension}").write_text(
+        (artifact / "scripts" / f"{'construct' if declared else 'install'}.{extension}").write_text(
             "# AGENT_WORKTREES_TARGETED_UPDATE repair\n", encoding="utf-8",
         )
-    prepared = SimpleNamespace(payload=artifact, install_source=None)
+    if declared:
+        (artifact / "source-install.json").write_text(json.dumps({
+            "schema": "copilot-extensions.native-source-install", "version": 1,
+            "windows": {"script": "scripts/construct.ps1", "argument": "-FromBundle"},
+            "posix": {"script": "scripts/construct.sh", "argument": "--from-bundle"},
+        }), encoding="utf-8")
+    prepared = SimpleNamespace(
+        payload=artifact, install_source=tmp_path / "inputs" if declared else None,
+    )
     primitive = SimpleNamespace(_current_environment=lambda **kw: ({}, str(tmp_path)))
     monkeypatch.setattr(update_bootstrap, "_policy_sdk", lambda *args: (
         None, None, {"_ordinary": lambda path: None}, {}, primitive,
