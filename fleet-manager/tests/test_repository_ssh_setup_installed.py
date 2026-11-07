@@ -10,7 +10,6 @@ import shutil
 import sqlite3
 import sys
 import time
-import zipfile
 
 from aiohttp import web
 import pytest
@@ -19,9 +18,8 @@ from fleet_manager import gateway_host as host
 from fleet_manager.planning import canonical
 from fleet_manager.private_state import create_private_file
 from gateway_service_transport_fixtures import Rig
-from test_client_distribution import PROJECT, build, run
+from test_client_distribution import PROJECT, run
 from test_gateway_enrollment import EnrollmentHarness, GRANT
-from test_gateway_host_distribution import prepared_application
 from test_runtime_identity import AUDIENCE
 from test_ssh_machine import configured, update
 
@@ -33,72 +31,35 @@ pytestmark = [
     ),
 ]
 
-ENGINE = r"""
-import json, site, sys
-from pathlib import Path
-context = json.loads(sys.argv.pop(1))
-sys.path.insert(0, context["engine"])
-for path in context["support"]:
-    site.addsitedir(path)
-from agent_worktrees import repository_ssh_setup, repos, repository_bootstrap
-assert Path(repository_ssh_setup.__file__).resolve().is_relative_to(Path(context["engine"]))
-installer = repository_ssh_setup._installer()
-assert Path(installer.__file__).resolve().is_relative_to(Path(context["engine"]))
-repos._repos_yaml_path = lambda: Path(context["registry"])
-assert sys.argv[1:3] == ["repos", "setup"]
-raise SystemExit(repository_bootstrap.command(sys.argv[3:]))
-"""
-
-MANAGER = r"""
-import json, site, sys
-context = json.loads(sys.argv.pop(1))
-for path in context["support"]:
-    site.addsitedir(path)
-sys.path.insert(0, context["manager"])
-from worktree_manager import engine_client, repository_bootstrap
-engine_client.set_engine_command([
-    sys.executable, "-I", "-B", "-c", context["driver"], json.dumps(context),
-])
-raise SystemExit(repository_bootstrap.run(repository_bootstrap.parse(sys.argv[1:])))
-"""
-
-
-def engine_wheel(tmp_path):
-    source = tmp_path / "engine-source"
-    project = source / "plugins" / "agent-worktrees"
-    original = PROJECT.parent / "plugins" / "agent-worktrees"
-    project.mkdir(parents=True)
-    for name in ("pyproject.toml", "README.md", "setup.py"):
-        shutil.copyfile(original / name, project / name)
-    for name in ("src", "scripts"):
-        shutil.copytree(
-            original / name, project / name,
-            ignore=shutil.ignore_patterns("__pycache__", "build", "dist", "*.egg-info"),
-        )
-    shutil.copytree(
-        PROJECT.parent / "libs" / "versioned-runtime", source / "libs" / "versioned-runtime",
-        ignore=shutil.ignore_patterns("__pycache__", "build", "dist", "*.egg-info"),
-    )
-    output = tmp_path / "engine-wheel"
-    result = build(project, output)
-    assert result.returncode == 0, result.stdout + result.stderr
-    installed = tmp_path / "engine"
-    with zipfile.ZipFile(next(output.glob("*.whl"))) as archive:
-        archive.extractall(installed)
-    for name in ("repository_continuity.py", "repository_setup.py", "repository_ssh_setup.py"):
-        assert (installed / "agent_worktrees" / name).read_bytes() == (
-            original / "src" / "agent_worktrees" / name
-        ).read_bytes()
-    return installed
-
-
 def private_json(path, value):
     with os.fdopen(create_private_file(path), "wb") as stream:
         stream.write(canonical(value))
 
 
+def prepared_cohort(tmp_path, monkeypatch, progress):
+    from repository_ssh_cohort_fixture import prepare_cohort
+
+    monkeypatch.syspath_prepend(str(PROJECT.parent / "tools"))
+    from test_installer_wheel_acquisition import feeds
+
+    servers = feeds.__wrapped__()
+    try:
+        return prepare_cohort(tmp_path, monkeypatch, next(servers), progress)
+    finally:
+        next(servers, None)
+
+
+def test_normal_source_cohort_preparation(tmp_path_factory, monkeypatch, capfd):
+    def progress(message):
+        with capfd.disabled():
+            print(message, flush=True)
+
+    cohort = prepared_cohort(tmp_path_factory.mktemp("cohort"), monkeypatch, progress)
+    assert set(cohort) == {"worktree-manager", "agent-worktrees", "fleet-manager", "updated"}
+
+
 def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
-    tmp_path_factory, wheel, monkeypatch, capfd,
+    tmp_path_factory, monkeypatch, capfd,
 ):
     assert os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1", (
         "normal SSH application lifetime requires the explicit ephemeral native owner"
@@ -117,22 +78,17 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
             "bus_address_selected": bool(os.environ.get("DBUS_SESSION_BUS_ADDRESS")),
         }, sort_keys=True))
     tmp_path = tmp_path_factory.mktemp("n")
-    prepared = os.environ.get("COPILOT_EXTENSIONS_TEST_VENV_ROOT")
-    assert prepared, "normal SSH lane requires the runner's explicit environment locator"
-    engine_python = Path(prepared) / "agent-worktrees" / (
-        "Scripts/python.exe" if os.name == "nt" else "bin/python"
-    )
-    assert engine_python.is_file(), "prepare the engine dependency environment before this lane"
-    support = run(
-        [str(engine_python), "-I", "-c", "import json,sysconfig;print(json.dumps(sorted({"
-         "sysconfig.get_path('purelib'),sysconfig.get_path('platlib')})))"],
-        timeout=15,
-    )
-    assert support.returncode == 0, support.stderr
-    engine = engine_wheel(tmp_path)
-    snapshot, application, updated = prepared_application(
-        tmp_path, wheel, monkeypatch, progress, extras="gateway-host,ssh-client",
-    )
+    cohort = prepared_cohort(tmp_path / "cohort", monkeypatch, progress)
+    import local_install_profile as profiles
+
+    def application_path(component):
+        snapshot = cohort[component]
+        selected = profiles.source_inputs.select_project(
+            snapshot, "fleet-manager" if component == "updated" else component,
+        )
+        return snapshot / selected.project["application"]
+
+    application, updated = application_path("fleet-manager"), application_path("updated")
     root, home, inputs, harness = (tmp_path / name for name in ("i", "home", "inputs", "harness"))
     for directory in (home, inputs, harness):
         directory.mkdir(mode=0o700)
@@ -148,23 +104,52 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
     state = home / (".fleet-continuity-" + hashlib.sha256(
         json.dumps([url, "harness-a"], separators=(",", ":")).encode(),
     ).hexdigest())
-    context = {
-        "engine": str(engine), "support": json.loads(support.stdout),
-        "manager": str(PROJECT.parent / "worktree-manager" / "src"),
-        "registry": str(home / "repos.yaml"), "driver": ENGINE,
-    }
     clean = {
         name: item for name, item in os.environ.items()
         if not name.startswith("UV_")
         and name not in {"VIRTUAL_ENV", "PYTHONPATH", "PYTHONHOME", "FLEET_MANAGER_HOST_NONCE"}
     }
     clean.update(
-        HOME=str(home), USERPROFILE=str(home), UV_OFFLINE="1", UV_PYTHON=sys.executable,
+        HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home),
+        LOCALAPPDATA=str(home / "local"), APPDATA=str(home / "roaming"),
+        UV_OFFLINE="1", UV_PYTHON=sys.executable,
         UV_PYTHON_DOWNLOADS="never", UV_CACHE_DIR=str(tmp_path / "uv-cache"),
-        FLEET_MANAGER_HOME=str(root),
+        FLEET_MANAGER_HOME=str(root), AGENT_WORKTREES_STATUS_MONITOR="0",
     )
     if os.name == "nt":
         clean.update(HOMEDRIVE=home.drive, HOMEPATH=str(home)[len(home.drive):])
+    engine_application = application_path("agent-worktrees")
+    engine_source = profiles.source_inputs.select_project(cohort["agent-worktrees"], "agent-worktrees")
+    construction = json.loads((engine_application / "application.json").read_text())["construction"]
+    with monkeypatch.context() as installation:
+        for name in set(os.environ) - clean.keys():
+            installation.delenv(name)
+        for name, value in clean.items():
+            installation.setenv(name, value)
+        profiles.source_inputs.install_application(
+            cohort["agent-worktrees"], "agent-worktrees", engine_source.payload,
+            home / ".agent-worktrees", uv=Path(shutil.which("uv")),
+            base_python=Path(sys.executable), health_module="agent_worktrees",
+            expected_version=construction["runtime_version"],
+            expected_hash=construction["payload_hash"],
+        )
+    manager_snapshot = cohort["worktree-manager"]
+    manager_source = profiles.source_inputs.select_project(manager_snapshot, "worktree-manager")
+    installed = run(
+        [sys.executable, "-I", "-B", str(manager_source.payload / "scripts" / "runtime_install.py"),
+         "--root", str(home / ".worktree-manager"), "--install-source", str(manager_snapshot),
+         "--", "--help"],
+        cwd=home, env=clean, timeout=60,
+    )
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    launcher = home / ".local" / "bin" / (
+        "worktree-manager.ps1" if os.name == "nt" else "worktree-manager"
+    )
+    assert launcher.is_file()
+    front_door = (
+        [shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(launcher)]
+        if os.name == "nt" else [str(launcher)]
+    )
 
     def git(*arguments):
         result = run(["git", "-C", str(harness), *arguments], env=clean)
@@ -219,8 +204,8 @@ def test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop(
     async def manager():
         started = time.monotonic()
         result = await asyncio.to_thread(
-            run, [sys.executable, "-I", "-B", "-c", MANAGER, json.dumps(context),
-                  "--apply", "--repository", url, "--repository-target", str(harness),
+            run, [*front_door, "setup", "--apply", "--repository", url,
+                  "--repository-target", str(harness),
                   "--trust-repository-setup", "--context", "harness-a"],
             cwd=home, env=clean, timeout=90,
         )
