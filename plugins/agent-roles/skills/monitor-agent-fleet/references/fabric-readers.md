@@ -34,7 +34,9 @@ process is currently working. Resolve canonical efforts and their declared
 agenda locators without parsing private owner databases.
 
 For cross-machine reads, first resolve the configured machine alias and shell
-through the topology reader. Use the SSH capability's bounded, headless
+through the topology reader. For a re-resolved roster, read the manifest and
+the SSH capability's read-only reachability check fresh each cycle; do not
+reuse an earlier cycle's readiness. Use the SSH capability's bounded, headless
 read-only execution procedure. Never install a tunnel, connect a stopped venue,
 write a remote collector, or send a new agent prompt to ask for its status.
 Remote stdout may be captured in the audit owner's private scratch.
