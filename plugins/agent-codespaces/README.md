@@ -637,9 +637,38 @@ Machine type and location default by convention (`largePremiumLinux` / `EastUs`)
 and can be overridden per-repo in `.copilot-extensions/agent-codespaces/config.yaml`. After the
 CodeSpace is Available, any `on_create` provisioning hooks from that config run
 automatically. Without `--force-create`, `create` first consults the pool
-planner: it returns this workstream's valid retained venue instead of creating
-a new one, or refuses when local capacity is unknown or under pressure. It does
-not borrow an unrelated idle venue.
+planner: it returns this workstream's valid retained venue, or reserves a
+compatible explicitly returned stopped venue, instead of creating a new one.
+It refuses when local capacity is unknown or under pressure. A running idle
+appearance, expired lease or missing local process is not a return.
+
+Sequential reuse is currently limited to stopped venues on the selected
+account and matching repository, with the requested branch (when specified)
+and at least the configured machine's core capacity. Known wake headroom is
+required independently of owned slots. It requires an explicit shared release
+tombstone, no local holder (including an expired record), known absence of local users,
+and the selected lease receiver's `lease-acquire-released-only-v1` capability.
+Missing support leaves the legacy workstream/create path intact; it does not
+silently allow stale takeover. `allocate` remains advice, not a reservation.
+Ordinary `create` records the native obligation and exclusive shared/local
+claim before reporting a reserved name, rechecking stopped state and headroom.
+It neither wakes nor provisions that retained venue, changes its branch, nor
+discards files or configuration. Read-only and no-build review tasks can use
+the same exclusive sequential reservation; concurrent sharing is not enabled.
+An uncertain reservation retains native responsibility and reports pressure
+instead of blindly retrying acquisition or creating a duplicate. Inspect
+`claims show` and `leases` before reconciliation. Normal Bridge connection is
+re-entrant for the reserving worktree; return through the existing
+`release-claim`/owning Worktrees lifecycle, not advisory `release` or force.
+An outbound obligation alone proves responsibility, not acquisition. Unconfirmed
+workstream ownership refuses even with spare slots. Confirmed local ownership
+retains legacy own-venue reuse; an explicitly returned venue must be reserved
+again. The selected account is retained before an uncertain attempt, and strict
+binding writes preserve additive fields, other records and corrupt-state bytes.
+Explicit creation-only display-name/devcontainer options and a repository's
+declared devcontainer profile do not silently become cross-effort reuse:
+their compatibility is not established by this pool inventory. Existing own
+venue reuse remains unchanged; `--force-create` retains its explicit meaning.
 
 Allocation and ordinary creation also enforce `defaults.max_owned_codespaces`
 (conservative policy default 30) under the target repository's selected account.

@@ -96,6 +96,16 @@ raised or lowered through the normal preference layers without changing the
 provider's actual quota. Running-core headroom is independent; unknown machine
 costs refuse additional compute, including a stopped venue's wake.
 
+The same native preferences govern sequential reuse: configured machine cores
+are a minimum for a newly borrowed venue, while its actual wake cost must fit
+known headroom. There is no new reuse YAML switch. Compatible explicitly
+returned stopped venues are considered before creating another owned slot;
+existing workstream reuse retains its prior behavior. The
+[creation/reuse contract](../README.md#create-options) describes
+selected-runtime capability discovery, ownership and retained-state limits.
+An explicit repository devcontainer profile is not qualified by the current
+pool metadata, so it does not silently select a cross-effort venue.
+
 Exclude secrets, SSH masters/sockets, lease/adoption/activation receipts,
 credential cache, logs and installed generations from portable YAML. Credential
 source *configuration* is not a secret and is documented here; it does not grant

@@ -3962,25 +3962,22 @@ def _cmd_create(args: argparse.Namespace) -> int:
 
     from .allocation import allocation_context, plan_creation
 
+    sequential = not (getattr(args, "devcontainer_path", None) or getattr(args, "display_name", None))
     if not getattr(args, "force_create", False):
         try:
             account, environment = allocation_context(args.repo)
-            decision = plan_creation(args.repo, config, account, environment)
+            decision = plan_creation(
+                args.repo, config, account, environment, branch=args.branch, allow_sequential=sequential,
+            )
         except ContextRefused:
             raise
         except RuntimeError as exc:
             print(f"[pressure] {exc}", file=sys.stderr)
             return _ALLOC_PRESSURE_EXIT
         if decision is not None and decision.action == pool_mod.ALLOC_REUSE:
-            print(f"[reuse] {decision.reason}")
-            print(
-                f"This workstream already has a CodeSpace -- reuse "
-                f"'{decision.codespace}' (ssh/borrow) instead of creating a new "
-                f"box, or pass --force-create to create anyway.",
-                file=sys.stderr,
-            )
-            print(decision.codespace)   # machine-readable: the box to reuse
-            return 0
+            from .reuse import reuse_for_create
+
+            return reuse_for_create(decision, args, config, account, environment)
         if decision is not None and decision.action in (pool_mod.ALLOC_PRESSURE, pool_mod.ALLOC_RECYCLE):
             print(f"[pressure] {decision.reason}", file=sys.stderr)
             print(
@@ -4023,7 +4020,9 @@ def _cmd_create(args: argparse.Namespace) -> int:
         print(f"[..] Codespace quota hit; {note}.")
         if not getattr(args, "force_create", False):
             try:
-                decision = plan_creation(args.repo, config, account, environment)
+                decision = plan_creation(
+                    args.repo, config, account, environment, branch=args.branch, allow_sequential=sequential,
+                )
             except ContextRefused:
                 raise
             except RuntimeError as error:
@@ -4267,18 +4266,12 @@ def _cmd_allocate(args: argparse.Namespace) -> int:
         else pool_mod.DEFAULT_STALE_AFTER
     )
     try:
-        from .allocation import allocation_context
-        from .driving_worktrees import resolve_current_workstream_box
+        from .allocation import allocation_context, plan_creation
 
         account, environment = allocation_context(args.repo)
-        members, budget = pool_mod.build_pool(
-            budget_cores=budget_cores, stale_after=stale_after,
-            account=account, environment=environment,
-            max_owned_codespaces=getattr(config, "max_owned_codespaces", 30),
-        )
-        decision = pool_mod.plan_allocation(
-            members, budget, repo=args.repo, new_cores=new_cores,
-            workstream_box=resolve_current_workstream_box(members, args.repo),
+        decision = plan_creation(
+            args.repo, config, account, environment,
+            budget_cores=budget_cores, stale_after=stale_after, new_cores=new_cores,
         )
     except ContextRefused:
         raise

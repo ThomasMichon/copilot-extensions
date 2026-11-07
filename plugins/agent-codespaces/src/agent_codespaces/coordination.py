@@ -42,6 +42,7 @@ _EXIT_OK = 0
 _EXIT_CONFLICT = 3  # LeaseConflict / LeaseLost
 _EXIT_COORDINATION_REJECTED = 5
 _PREFLIGHT_VERSION = 1
+RELEASED_ONLY_CAPABILITY = "lease-acquire-released-only-v1"
 _PREFLIGHT_REJECTION_CODES = frozenset({
     "knowledge_binding_required",
     "state_root_resolution_failed",
@@ -112,6 +113,7 @@ class PreflightResult:
     status: str
     code: str = ""
     detail: str = ""
+    capabilities: frozenset[str] = frozenset()
 
     @property
     def ready(self) -> bool:
@@ -142,6 +144,7 @@ class L2Lease:
     live: bool
     expires_at: str = ""
     token: str = ""
+    state: str = ""
 
 
 def _aw() -> str | None:
@@ -245,7 +248,11 @@ def preflight(holder_ref: str) -> PreflightResult:
                 "rejected", code="context-refused", detail="Same-cell readiness probe failed",
             )
         return PreflightResult("absent", detail="preflight output is not JSON")
-    if not isinstance(payload, dict) or payload.get("version") != _PREFLIGHT_VERSION:
+    if (
+        not isinstance(payload, dict)
+        or type(payload.get("version")) is not int
+        or payload.get("version") != _PREFLIGHT_VERSION
+    ):
         if explicit_context() and proc.returncode != _EXIT_OK:
             return PreflightResult(
                 "rejected", code="context-refused", detail="Same-cell readiness probe failed",
@@ -257,7 +264,14 @@ def preflight(holder_ref: str) -> PreflightResult:
     code = payload.get("code")
     error = payload.get("error")
     if ready is True and code == "ready" and proc.returncode == _EXIT_OK:
-        return PreflightResult("ready", code="ready")
+        capabilities = payload.get("capabilities")
+        supported = (
+            frozenset(capabilities)
+            if isinstance(capabilities, list)
+            and all(isinstance(value, str) for value in capabilities)
+            else frozenset()
+        )
+        return PreflightResult("ready", code="ready", capabilities=supported)
     if (
         ready is False
         and code in _PREFLIGHT_REJECTION_CODES
@@ -432,7 +446,7 @@ def inspect(key: str, *, origin: str | None = None) -> dict | None:
 
 
 def list_leases(
-    *, kind: str = KIND, origin: str | None = None
+    *, kind: str = KIND, origin: str | None = None, strict: bool = False,
 ) -> dict[str, L2Lease] | None:
     """Read every cross-machine L2 lease of a kind, keyed by resource key.
 
@@ -456,9 +470,23 @@ def list_leases(
     result: dict[str, L2Lease] = {}
     for rec in data:
         if not isinstance(rec, dict):
+            if strict:
+                return None
             continue
         res = rec.get("resource")
         key = str(res.get("key", "")) if isinstance(res, dict) else ""
+        if strict and (
+            not isinstance(res, dict)
+            or not isinstance(res.get("key"), str) or not key or key in result
+            or res.get("kind") != kind
+            or not isinstance(rec.get("state"), str)
+            or rec.get("state") not in {"leased", "released"}
+            or type(rec.get("live")) is not bool
+            or not isinstance(rec.get("holder"), str) or not rec["holder"]
+            or not isinstance(rec.get("token"), str) or not rec["token"]
+            or (rec["state"] == "released" and rec["live"])
+        ):
+            return None
         if not key:
             continue
         result[key] = L2Lease(
@@ -467,6 +495,7 @@ def list_leases(
             live=bool(rec.get("live", False)),
             expires_at=str(rec.get("expires_at", "")),
             token=str(rec.get("token", "")),
+            state=str(rec.get("state", "")),
         )
     return result
 
@@ -477,13 +506,24 @@ def acquire(
     *,
     ttl: int | None = DEFAULT_L2_TTL,
     origin: str | None = None,
+    released_only: bool = False,
+    preflight_result: PreflightResult | None = None,
 ) -> L2Result:
     """Attempt an atomic cross-machine acquire of the CodeSpace lease.
 
     Returns ``ok``, ``conflict``, ``rejected`` (binding unavailable), or
     ``unavailable`` (optional peer not wired/reachable).
     """
+    if released_only:
+        readiness = preflight_result or preflight(holder)
+        if not readiness.ready or RELEASED_ONLY_CAPABILITY not in readiness.capabilities:
+            return L2Result(
+                "rejected",
+                detail=readiness.detail or "Selected lease receiver does not support released-only acquisition",
+            )
     args = ["lease", "acquire", KIND, key, "--holder", holder]
+    if released_only:
+        args.append("--released-only")
     if ttl is not None:
         args += ["--ttl", str(ttl)]
     if origin:
@@ -492,7 +532,12 @@ def acquire(
     if proc is None:
         return L2Result("unavailable", detail="agent-worktrees lease not available")
     if proc.returncode == _EXIT_OK:
-        return L2Result("ok", token=_parse_token(proc))
+        token = _parse_token(proc)
+        if released_only and (
+            len(token) not in (40, 64) or any(character not in "0123456789abcdef" for character in token)
+        ):
+            return L2Result("unavailable", detail="Receiver did not confirm a valid fencing token")
+        return L2Result("ok", token=token)
     if proc.returncode == _EXIT_CONFLICT:
         rec = inspect(key, origin=origin)
         holder_of = str(rec.get("holder", "")) if rec else ""
