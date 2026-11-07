@@ -216,6 +216,22 @@ def test_tilde_fence_info_may_contain_backticks() -> None:
 
 
 @pytest.mark.parametrize("draft", [
+    "<!-- harmless ` --> <!-- agent-comment:v1 c=foreign w=foreign --> ` -->",
+    "<!-- harmless\n` --> <!-- agent-comment:v1 c=foreign w=foreign --> `",
+])
+def test_backticks_inside_html_comments_cannot_mask_outer_metadata(draft: str) -> None:
+    with pytest.raises(profile.ProfileError, match="noncanonical"):
+        prepare(draft)
+
+
+def test_inline_code_after_html_comment_closure_keeps_literal_example() -> None:
+    draft = "<!-- harmless\n` --> `<!-- agent-comment:v1 c=example w=example -->`\n\nSubstantive reply."
+    first = prepare(draft)
+    assert first["body"].startswith("[AI-assisted] " + draft)
+    assert prepare(first["body"], previous=first) == first
+
+
+@pytest.mark.parametrize("draft", [
     "Review.\n\n<!-- agent-comment:v2 unknown -->",
     "Review.\n\n<!-- agent-comment:v1 c=foreign w=foreign -->",
     "Review.\n\n<!-- agent-comment:v1 bad -->\n\n<!-- agent-comment:v1 another -->",

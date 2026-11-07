@@ -99,7 +99,9 @@ unowned, foreign, malformed or duplicate outer marker refuses. Indented, inline
 or multiline forms of the owned HTML namespace outside protected literal
 examples are noncanonical and refuse, not untracked text beside a new tag.
 Closed fenced, explicit blockquoted and same-line inline-code examples remain
-authored text. A known private worktree stamp from the previous preparation
+authored text. HTML-comment and inline-code boundaries are processed in source
+order: a backtick inside an HTML comment cannot open an inline code span.
+A known private worktree stamp from the previous preparation
 cannot be copied into a public edit, even as an example; the caller must
 redact that draft before approval rather than the helper silently deleting it.
 Repeated preparation with the same

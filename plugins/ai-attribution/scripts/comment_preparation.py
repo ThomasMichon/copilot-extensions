@@ -96,18 +96,25 @@ def _marker(identity: Identity) -> str:
     return marker
 
 
-def _mask_inline_code(line: str) -> str:
-    runs = list(re.finditer(r"`+", line))
+def _mask_inline_code(line: str, *, in_comment: bool = False) -> str:
+    runs = list(re.finditer(r"<!--|-->|`+", line))
     result = list(line)
     index = 0
     while index < len(runs):
         opening = runs[index]
+        if opening[0] in ("<!--", "-->"):
+            in_comment = opening[0] == "<!--"
+            index += 1
+            continue
+        if in_comment:
+            index += 1
+            continue
         before = line[:opening.start()]
         if (len(before) - len(before.rstrip("\\"))) % 2:
             index += 1
             continue
         closing = next(
-            (i for i in range(index + 1, len(runs)) if len(runs[i][0]) == len(opening[0])),
+            (i for i in range(index + 1, len(runs)) if runs[i][0] == opening[0]),
             None,
         )
         if closing is None:
@@ -138,9 +145,7 @@ def _outer_markers(draft: str) -> list[str]:
                     raise ProfileError("invalid backtick fence info string")
                 fence = opening[1][0], len(opening[1])
                 continue
-            literal = _mask_inline_code(line)
-        else:
-            literal = line
+        literal = _mask_inline_code(line, in_comment=html_comment is not None)
         position = 0
         for token in re.finditer(r"<!--|-->", literal):
             if html_comment is not None:
