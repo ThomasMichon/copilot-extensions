@@ -217,8 +217,10 @@ without requiring its old generation to remain cached or composing again.
 The explicit caller-ID prepared path remains unchanged. This API adds no
 storage format, public request syntax, capability advertisement, callback
 loader, policy owner, publisher rollout or installed adoption. The current
-workspace receiver still advertises `owned_edits: false` and refuses automatic
-edits; a compatible consumer is a separate qualification.
+workspace receiver retains `owned_edits: false` as its baseline. Its separately
+selected [edit extension](workspace-integration.md#optional-selected-edits)
+can supply the actual protected source after additive capability negotiation;
+ordinary/default receivers still refuse automatic edits.
 
 A retained selection is not execution-admitted. Existing execution inspection,
 attempt, receipt/projection and feedback-capture paths refuse it. Only

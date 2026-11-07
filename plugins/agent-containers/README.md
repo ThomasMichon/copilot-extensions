@@ -1323,6 +1323,15 @@ The plugin owns its runtime and binstub:
 Docker is required for fleet operations (`fleet`, `up`, `borrow`, `exec`, etc.),
 not for stamping the binstub.
 
+Provider command discovery honors a nonempty `AGENT_CONTAINERS_PAYLOAD_ROOT`
+exported by the existing front door before generic plugin or package-source
+discovery. An unavailable declared payload or missing declared command refuses
+rather than selecting another runtime. Without that declaration, the existing
+generic/module/direct-URL/deployment-manifest fallback order remains available.
+This keeps a temporary build-source location from overriding a declared
+provider payload; it does not make an explicitly transient payload permanent,
+migrate retained command records or authorize runtime cleanup.
+
 ## Runtime state
 
 Runtime-home and broker-endpoint paths are normalized lexically against the

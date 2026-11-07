@@ -118,6 +118,10 @@ def widget(app: mux_companion.MuxCompanionApp) -> str:
     return content.plain if isinstance(content, Text) else content.label.plain
 
 
+def agenda_tab_hidden(app) -> bool:
+    return app.query_one("#views", TabbedContent).get_tab("agenda-tab").has_class("-hidden")
+
+
 async def eventually(pilot, predicate, *, detail: str) -> None:
     for _ in range(120):
         if predicate():
@@ -319,9 +323,7 @@ def test_actual_commits_publish_to_resident_and_textual_without_replay(chain):
             data, worker = app._data, app._agenda_worker
             assert data.agenda["availability"] == "not-published"
             assert data.agenda["observation"] is None
-            app.query_one("#views", TabbedContent).active = "agenda-tab"
-            await pilot.pause()
-            assert app.query_one("#agenda", Static).region.height > 0
+            assert agenda_tab_hidden(app), "unpublished head still offered an Agenda tab"
 
             accepted, newly_accepted = store.mutate(home, initial, **identity)
             original = deepcopy(accepted)
@@ -335,6 +337,10 @@ def test_actual_commits_publish_to_resident_and_textual_without_replay(chain):
             )
             await receive(pilot, app, 1)
             assert "Parked: 0" in widget(app)
+            assert not agenda_tab_hidden(app)
+            app.query_one("#views", TabbedContent).active = "agenda-tab"
+            await pilot.pause()
+            assert app.query_one("#agenda", Static).region.height > 0
 
             parked = request(
                 {"operation": "park", "ref": "fixture-follow-up", "reason": "nonblocking"},

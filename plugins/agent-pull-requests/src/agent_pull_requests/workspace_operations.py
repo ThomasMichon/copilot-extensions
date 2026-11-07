@@ -22,7 +22,10 @@ from .owner_read import OwnerReadBudgetExceeded, OwnerReadHandler, REQUEST_SCHEM
 from .review_executor import execute_review
 from .review_feedback import FeedbackInputs
 from .review_intent import identifier
-from .workspace_selection import allocate_selection, selection_contract, supports_selection
+from .workspace_selection import (
+    allocate_selection, needs_owned_edits, owned_edit_contract, selection_contract,
+    supports_owned_edits, supports_selection,
+)
 from .review_workspace import MAX_GENERATION_BYTES, _generation, _scope, compare_generations
 
 PROTOCOL = "agent-pull-requests.workspace/v1"
@@ -77,7 +80,8 @@ class WorkspaceOperations:
                  attention_owner: Callable[[dict], AttentionInputs] | None = None,
                  feedback_owner: Callable[[dict], FeedbackInputs] | None = None,
                  prepared_reviews: bool = False,
-                 selection_preparer: Callable[..., Callable[..., dict]] | None = None) -> None:
+                 selection_preparer: Callable[..., Callable[..., dict]] | None = None,
+                 selection_owned_edits: bool = False) -> None:
         if (
             not isinstance(cache, GenerationCache)
             or not isinstance(read_owner, (OwnerReadHandler, NativeReadHandler))
@@ -87,6 +91,8 @@ class WorkspaceOperations:
             or not math.isfinite(max_work_seconds) or max_work_seconds <= 0
             or type(conversations) is not bool
             or type(prepared_reviews) is not bool
+            or type(selection_owned_edits) is not bool
+            or selection_owned_edits and selection_preparer is None
             or selection_preparer is not None and (
                 not callable(selection_preparer) or iscoroutinefunction(selection_preparer)
                 or not prepared_reviews or write_context is None
@@ -116,6 +122,7 @@ class WorkspaceOperations:
         self.feedback_owner = feedback_owner
         self.prepared_reviews = prepared_reviews
         self.selection_preparer = selection_preparer
+        self.selection_owned_edits = selection_owned_edits
         self._materializations = OrderedDict()
         self._generation_positions: OrderedDict[str, dict | None] = OrderedDict()
         self._materialization_lock = threading.Lock()
@@ -196,6 +203,8 @@ class WorkspaceOperations:
                    if isinstance(self.read_owner, NativeReadHandler) else {}),
                 **({"prepared_review_contract": prepared_review_contract()} if prepared else {}),
                 **({"selection_contract": selection_contract()} if selection else {}),
+                **({"owned_edit_selection_contract": owned_edit_contract()}
+                   if selection and self.selection_owned_edits is True else {}),
                 "provision_or_adopt": False,
             }
         number = payload["number"]
@@ -411,6 +420,7 @@ class NativeWorkspaceClient:
         self.operations, self.checkpoint, self.expires_at = operations, checkpoint, expires_at
         self._prepared_contract: object = None
         self._selection_contract: object = None
+        self._owned_edit_contract: object = None
         self._prepared_lock = threading.Lock()
         self._discovery_epoch = 0
 
@@ -431,12 +441,18 @@ class NativeWorkspaceClient:
                 epoch = self._discovery_epoch
                 self._prepared_contract = None
                 self._selection_contract = None
+                self._owned_edit_contract = None
         if operation == "allocate":
             current()
             with self._prepared_lock:
                 supported = supports_selection(self._selection_contract)
             if not supported:
                 raise WorkspaceUnavailable("pre-approval selection capability required")
+            if needs_owned_edits(operation, payload):
+                with self._prepared_lock:
+                    supported = supports_owned_edits(self._owned_edit_contract)
+                if not supported:
+                    raise WorkspaceUnavailable("owned-edit selection capability required")
         if needs_prepared_review(operation, payload):
             current()
             with self._prepared_lock:
@@ -453,6 +469,7 @@ class NativeWorkspaceClient:
                     raise WorkspaceUnavailable("workspace discovery superseded")
                 self._prepared_contract = copy.deepcopy(result.get("prepared_review_contract"))
                 self._selection_contract = copy.deepcopy(result.get("selection_contract"))
+                self._owned_edit_contract = copy.deepcopy(result.get("owned_edit_selection_contract"))
         return result
 
     def materialize(self, number, generation_id, *, checkpoint=None):

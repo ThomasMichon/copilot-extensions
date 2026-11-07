@@ -353,23 +353,26 @@ _Operator-required outcome; agent-recommended slices and validation._
 - [x] Deliver finite pre-approval owner retention (#11251) and fresh
   comment/reply allocation (#11253), committing exact final bytes before
   preview and separating pending selection from execution admission.
-  Automatic owned/legacy edit binding and complete all-forge/installed
-  adoption remain open.
+  Complete producer/all-forge/installed adoption beyond the finite leaves
+  below remains open.
 - [x] Deliver the finite optional receiver-owned pre-approval source path
   (#11299): negotiate actual receiver/storage support, commit final fresh
   comment/reply previews before returning them, recover the original key
   and preserve exact explicit admission/native receipts.
-  Normal host enrollment, automatic edits, other publishers, acquisition/DB
-  mapping, provider and installed/shadow acceptance remain open.
+  Normal host enrollment, other publishers, acquisition/DB mapping, provider
+  and installed/shadow acceptance remain open; selected edits have a separate
+  finite qualification below.
 - [x] Deliver the finite optional selected-edit allocation library (#11374),
   binding actual protected generation/source and native-author evidence to
   same-owner original receipts. Stable logical identity, fresh write identity,
   selected legacy edits and original-key recovery are source-qualified;
-  receiver activation and all-publisher/installed acceptance remain open.
-- [ ] Qualify the separately selected
+  normal receiver enrollment and all-publisher/installed acceptance remain open.
+- [x] Qualify the separately selected
   [owned-edit receiver extension](comment-intent-binding.md#optional-owned-edit-receiver-extension)
   through the existing CLI/native/Fleet/Gateway consumers, preserving baseline
-  fresh allocation, explicit-ID/v1/v2 and receiver rollback semantics.
+  fresh allocation, explicit-ID/v1/v2 and receiver rollback semantics (#11381;
+  250 coupled source cases). Normal host enrollment, other publishers and
+  provider/installed adoption remain separate.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -918,6 +921,15 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
+- [x] Qualify optional selected-edit CLI/native/Fleet/Gateway source consumers:
+  actual shared preparation and native receipts, prepared and genuine legacy
+  edits, lost previews, cache-independent original-key recovery, confirmed
+  retry, missing/malformed/refreshed-away support, current receiver rechecks
+  and withdrawal/restoration without state downgrade (#11381; 250 coupled
+  cases, including 17 focused consumer cases). Preserve prior fresh clients,
+  explicit-ID/v1/v2/default behavior and separately open installed/provider
+  and all-publisher acceptance.
+
 - [x] Qualify selected owned/legacy edit library allocation, repeated protected
   native edit chains, original receipts, exact scope/source/native baseline,
   conflicting/unknown history refusal, duplicate targets and lost-result/
@@ -1051,6 +1063,48 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-07 - Qualify optional selected-edit consumers without host activation
+
+- #11381 actually merged as `362d7b691d64434136a522eff1a948283374f156`
+  after exact-head Copilot approval with no open issues and latest CI
+  `42416679608`, including required PR gate `128537341926`, passed.
+  Managed completion retained the source backup and reconciled only the
+  actually merged commit.
+- The default-off trusted-host opt-in adds one separate edit capability while
+  preserving the exact fresh-selection declaration. Native/Fleet clients
+  refuse missing/malformed support before dispatch; the actual receiver
+  independently rechecks current opt-in and protected source. Retained
+  original-key previews, explicit exact submission and native receipts
+  remain separate from permission to write.
+- The bounded seven-file packet passes 250 cases with cleanup verified.
+  Seventeen new consumer cases cover actual native/Gateway CLI preparation,
+  original receipts, genuine legacy and prepared edits, lost committed
+  previews, unavailable cache, confirmed retries, old fresh capabilities and
+  support withdrawal/restoration without rewriting retained state.
+  Fatal lint, module, documentation and installation contracts pass.
+  Pending plugin typing under #9807 is not a strict-project pass.
+- Re-read the complete current parent and credit only the optional source
+  consumer leaf. Next, resolve actual normal-host producer enrollment through
+  its reviewed source/authority owners; do not activate the read-only host
+  from a callback or capability label. Other publishers, acquisition/DB
+  mapping, full attention/CLI/Dispatch/provider, installed/shadow and retained
+  parent outcomes remain open. No deployment, live feedback, migration or
+  resource release occurred.
+
+### 2026-11-07 - Review compatible selected-edit consumers
+
+- #11375 actually merged as `a34b256ad1479c705071a1829b34c0b0d6b67f6a`
+  after exact-head Copilot approval with no open issues and latest CI
+  `42415921281`, including its required PR gate, passed. Managed completion
+  retained the source backup and reconciled only the merged proposal.
+- The reviewed default-off receiver extension retains the exact fresh
+  allocation capability and adds a separately selected edit declaration
+  through the existing operation. Current receiver/source/receipt authority,
+  original-key recovery and explicit approval/submission remain separate.
+- Continue finite CLI/native/Fleet/Gateway source qualification. This proposal
+  does not enroll normal hosts or close full publication, provider/installed,
+  attention, CLI/Dispatch, shadow or parent acceptance. No rollout occurred.
 
 ### 2026-11-07 - Bind selected edits through original native custody
 
