@@ -96,20 +96,24 @@ def run(setup: protocol.Setup, name: str, *, apply: bool) -> protocol.Outcome:
     if needed and not apply:
         return protocol.Outcome("needed", "Selected context needs machine enrollment.")
     if context.ssh_key is not None and (needed or result == {"status": "ready", "stage": "connected"}):
+        key_arguments = [
+            *[item for item in ssh_arguments if item != "--key-references-only"],
+            "--expected-request-digest", description["request_digest"],
+            "--expected-key-fingerprint", context.ssh_key.fingerprint,
+        ]
         with ssh_setup.selected_inputs(description) as (module, _selected):
             setup.verify()
             if not needed and ssh_setup.status(description, module):
+                if not ssh_setup.same_description(_invoke(key_arguments), description):
+                    raise protocol.SetupError("SSH inputs changed during pinned readiness inspection.")
+                setup.verify()
                 return protocol.Outcome("ready", "Selected SSH application has converged its authenticated directory.")
         if not apply:
             return protocol.Outcome("needed", "Selected SSH application requires its normal installation and owning Vault key.")
         waiting = ssh_setup.prepare_key(setup, context, description)
         if waiting is not None:
             return waiting
-        current = _invoke([
-            *[item for item in ssh_arguments if item != "--key-references-only"],
-            "--expected-request-digest", description["request_digest"],
-            "--expected-key-fingerprint", context.ssh_key.fingerprint,
-        ])
+        current = _invoke(key_arguments)
         if not ssh_setup.same_description(current, description):
             raise protocol.SetupError("SSH inputs changed after pinned key installation; preserve the original selection.")
         setup.verify()

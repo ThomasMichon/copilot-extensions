@@ -78,6 +78,7 @@ def key_binding(context, description: dict) -> None:
 def _vault_call(selection, arguments: list[str], *, timeout: int) -> tuple[int, dict]:
     environment = protocol._environment(attended=False)
     environment["AGENT_VAULT_NO_SELFPROVISION"] = "1"
+    environment.pop("AGENT_VAULT_PINNED_CONTEXT", None)
     # A routing-only guard must not clear the caller's explicit provisioning inhibition.
     environment.pop("_AGENT_WORKTREES_VAULT_RUNTIME_GUARD", None)
     try:

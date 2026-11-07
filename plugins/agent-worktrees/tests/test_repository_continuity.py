@@ -101,6 +101,7 @@ def test_old_fleet_refuses_selected_ssh_before_bootstrap_or_private_request(sour
     None, "profile", "changed-request", "installer", "pin-capability", "already-ready",
     "vault-order", "vault-locked", "vault-sync", "vault-pin", "vault-healthy",
     "vault-capability", "vault-install-unknown", "vault-location",
+    "vault-healthy-request", "vault-healthy-pin",
 ])
 def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
     source, tmp_path, monkeypatch, failure,
@@ -190,7 +191,9 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
     monkeypatch.setattr(ssh_setup, "_installer", lambda: owner)
     monkeypatch.setattr(
         ssh_setup, "status",
-        lambda *_args, **_kwargs: failure in ("already-ready", "vault-healthy") or "install" in events,
+        lambda *_args, **_kwargs: failure == "already-ready" or (
+            isinstance(failure, str) and failure.startswith("vault-healthy")
+        ) or "install" in events,
     )
     monkeypatch.setattr(ssh_setup.shutil, "which", lambda *_args: sys.executable)
 
@@ -237,9 +240,13 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
             ]}
         if arguments[0] == "ssh-setup":
             if vault:
-                assert ("--key-references-only" in arguments) == ("vault-install" not in events)
+                healthy = failure.startswith("vault-healthy") and "inspect" in events
+                assert ("--key-references-only" in arguments) == ("vault-install" not in events and not healthy)
                 if "--key-references-only" not in arguments:
                     assert arguments[arguments.index("--expected-key-fingerprint") + 1] == fingerprint
+                    assert arguments[arguments.index("--expected-request-digest") + 1] == description["request_digest"]
+                    if failure == "vault-healthy-pin":
+                        raise setup.SetupError("selected public fingerprint mismatch")
             if "--apply" in arguments:
                 assert arguments[arguments.index("--expected-request-digest") + 1] == description["request_digest"]
             events.append("prepare" if "--apply" in arguments else "inspect")
@@ -247,11 +254,12 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
                 name: value for name, value in description.items() if name != "key_files"
             } | {"version": 1})
             return response | ({"request_digest": "changed"} if (
-                failure == "changed-request" and "--apply" in arguments
+                (failure == "changed-request" and "--apply" in arguments)
+                or (failure == "vault-healthy-request" and "--key-references-only" not in arguments)
             ) else {})
         assert arguments[0] == "bootstrap"
         events.append("bootstrap")
-        if vault and failure != "vault-healthy" and "--apply" not in arguments:
+        if vault and not failure.startswith("vault-healthy") and "--apply" not in arguments:
             return {"status": "needed", "stage": "enrollment"}
         if vault and "--apply" in arguments:
             assert events.index("vault-prepare") < events.index("vault-install")
@@ -265,6 +273,8 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
         assert events.index("source-admission") < events.index("bootstrap")
         assert "prepare" not in events and "install" not in events
         assert "vault-contract" not in events
+        if vault:
+            assert events.count("inspect") == 2
     elif failure in ("vault-locked", "vault-sync", "vault-capability", "vault-install-unknown"):
         result = continuity.run(selected_setup, "harness-a", apply=True)
         assert result.status == ("refused" if failure == "vault-capability" else "waiting")
@@ -342,6 +352,7 @@ def test_scoped_vault_adapter_uses_real_bounded_process_and_no_provisioning(tmp_
         "arguments=sys.argv[2:]\n"
         "assert os.environ['AGENT_VAULT_NO_SELFPROVISION']=='1'\n"
         "assert '_AGENT_WORKTREES_VAULT_RUNTIME_GUARD' not in os.environ\n"
+        "assert 'AGENT_VAULT_PINNED_CONTEXT' not in os.environ\n"
         f"assert arguments[:2]==['--configuration-root',{str(tmp_path)!r}]\n"
         "arguments=arguments[2:]\n"
         "with Path(sys.argv[1]).open('a') as stream: stream.write(json.dumps(arguments)+'\\n')\n"
@@ -371,6 +382,13 @@ def test_scoped_vault_adapter_uses_real_bounded_process_and_no_provisioning(tmp_
     selected = SimpleNamespace(verify=lambda: original.append("same-source"))
     monkeypatch.setenv("AGENT_VAULT_NO_SELFPROVISION", "1")
     monkeypatch.setenv("_AGENT_WORKTREES_VAULT_RUNTIME_GUARD", "1")
+    foreign_pin = json.dumps({
+        "version": 1, "kpdb": str(tmp_path / "other-database.kdbx"),
+        "group": "Other", "vault_name": "other-vault", "port": 12456,
+    })
+    monkeypatch.setenv("AGENT_VAULT_PINNED_CONTEXT", foreign_pin)
+    monkeypatch.setenv("AGENT_VAULT_CACHE", "1")
+    monkeypatch.setenv("AGENT_VAULT_CACHE_DIR", str(tmp_path / "other-identity-cache"))
     if failure == "invalid-json":
         with pytest.raises(setup.SetupError, match="unconfirmed") as refused:
             ssh_setup.prepare_key(selected, context, {"key_files": references})
@@ -392,6 +410,7 @@ def test_scoped_vault_adapter_uses_real_bounded_process_and_no_provisioning(tmp_
     assert len(original) >= (1 if failure == "unsupported" else 2)
     assert not directory.exists()
     assert __import__("os").environ["_AGENT_WORKTREES_VAULT_RUNTIME_GUARD"] == "1"
+    assert __import__("os").environ["AGENT_VAULT_PINNED_CONTEXT"] == foreign_pin
 
 
 @pytest.mark.parametrize("missing", ["continuity-ssh-key-reference-v1", "continuity-ssh-key-pin-v1"])

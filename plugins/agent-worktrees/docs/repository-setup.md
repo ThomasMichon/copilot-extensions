@@ -284,9 +284,15 @@ refuse; unknown/partial effects retain the original entry, directory and
 enrollment operation for reconciliation. Receiver stdout/stderr diagnostics are
 never forwarded. Key installation is reuse-only, including partial-pair recovery,
 not permission to rotate an identity or invent another operation.
+An inherited identity-cache `AGENT_VAULT_PINNED_CONTEXT` is removed only in this
+SSH child so it cannot override the explicit configuration root. Native Vault
+configuration selectors and the caller's environment remain unchanged.
 
 A currently authenticated, converged selected SSH application is returned ready
 without credential calls or reinstallation, even if Vault is now locked.
+It still requires actual read-only Fleet key inspection with both the selected
+public fingerprint and original request digest, followed by source
+requalification; a changed key or request is not healthy selected readiness.
 Check-only calls perform no key installation. Default, outbound-only and
 nonnull-SSH/null-key contexts retain their existing behavior.
 Source tests and a captured synthetic Vault process qualify this adapter seam;
