@@ -183,3 +183,22 @@ runtime remediation, elevated operation or destructive cleanup is authorized.
   stale echoes remain insufficient.
 - This changes source semantics. Repeat affected validation and canonical
   source qualification before the next whole-surface audit and review round.
+
+### 2026-11-07 - Corrected source qualified
+
+- The corrected completion matcher passed 45 focused cases, including real
+  private native option/freeform completion and authenticated HTTP controls
+  retaining `unverified` outcomes for mismatched completion. Nine actor-free
+  parser/input/echo cases, affected lint, install and documentation guards passed.
+- Whole-surface audit covered all source wiring, exact local binding, parser,
+  mutation admission, client negotiation, native preference, audit and CLI
+  refusals. The completion fix does not weaken permission or replay boundaries.
+- Initial recapture refused stale semantic source registration before tests;
+  refreshed declarations through their existing preparation owner and expanded
+  the probe declaration to all 312 cases. No failure or timeout was waived.
+- Source-pinned run 42424290416 passed capture, independent no-write
+  verification, historical guards and canonical export. The publication owner
+  imported all 155 current outputs; the independent contract guard passed
+  two contracts and 1,066 retained fixtures. Historical generations are unchanged.
+- Return #11390 to review. Source merge, Main promotion, both authorized
+  adopter updates and installed same-conversation proofs remain unfinished.

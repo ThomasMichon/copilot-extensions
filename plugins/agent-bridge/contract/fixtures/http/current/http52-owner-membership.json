@@ -2938,8 +2938,8 @@
       "sha256": "8949466159dbc4d24c51d87764f1351abbcdb0b8d16bcc4f5d0bcd20e0c1cea3"
     },
     "plugins/agent-bridge/src/agent_bridge/mux_question_forms.py": {
-      "blob": "29fa2f4f8aecff7089babd1fe01886a931896efb",
-      "sha256": "44d1a6a9076701a258d94ef206cea228057378e40357a25b8533ad12e1e5a4d8"
+      "blob": "80a34506c5d4b76ae9970602562835d4ba8c8688",
+      "sha256": "6a0972f69234f84d9cea1c4c07f616c4f67a49d7743dbaf92f60c934c66bc1d2"
     },
     "plugins/agent-bridge/src/agent_bridge/mux_questions.py": {
       "blob": "a9ef7d6e8dfccee70909f9ec20425fdd1f22b525",
@@ -3966,8 +3966,8 @@
       "sha256": "57cd93974ba856ffc624a1471613cae0d99d5b5f630089dcf4eb84c1631db3b3"
     },
     "plugins/agent-bridge/tests/test_mux_questions.py": {
-      "blob": "e2d5262b7a892434638210856f32cca80f8cda29",
-      "sha256": "2a8de898020fc9d07ea208d12ff14c750fa56bfa28c4f0878856b6b5057119dd"
+      "blob": "72e4cc20304c482ba4e39c73e5b4f38272ec1244",
+      "sha256": "6b1693727679774d7f8d2f83f6a3c3c4250ce1af7c009026d99877b074c1e239"
     },
     "plugins/agent-bridge/tests/test_native_bound_prompt.py": {
       "blob": "7bce023c933a14ef5b20b68705461d94705945df",
@@ -7254,8 +7254,8 @@
       "sha256": "553691f6ec04ee428538246a11df891b64d705c790bfa8134f4ce793a1138058"
     },
     "tools/bridge_http52_evidence.py": {
-      "blob": "19fb11d4e26b7cb9132ef4b3079ce9c33dec342d",
-      "sha256": "a16dd0e7d92ae7b4964733e3fc561626003a54f65f43da0d2f1090cf695d2c90"
+      "blob": "51dde7ae092ba5b7edd94b85634967111887c432",
+      "sha256": "8e37f3493872a7618a58728a4015672ef1bb683202dbd8a2240982febd487f36"
     },
     "tools/bridge_http_retained_evidence.py": {
       "blob": "cf680ef56f8bdd67173826d7cf209453561742f6",
@@ -9026,7 +9026,7 @@
       "sha256": "a9925c3f74fe1e6a3adf3450d58af86260ccfa52eb63ccd88b98316c02409bf9"
     }
   },
-  "execution_closure_sha256": "2fd8b67e3090aba5f25fbe7d5c42d32b7aa2c7bd805ece1ba2476d1a3b511f63",
+  "execution_closure_sha256": "9b1372c30ae587eb4a1ea39aab5993ba4e82343cbdc7e1ad336615fec92c93a9",
   "runtime_binding_policy": "every-owned-interpreter-source-and-entrypoint-v1",
   "runtime_roles": [
     "observer"
@@ -9079,7 +9079,7 @@
     "test_http_choice_and_freeform_are_verified_audited_and_single_use": 2,
     "test_terminal_first_and_changed_inputs_never_send_keys": 5,
     "test_restart_expiry_and_other_session_tokens_have_no_input_authority": 1,
-    "test_key_failure_is_unknown_and_blocks_reinspection_after_restart": 1,
+    "test_key_failure_is_unknown_and_blocks_reinspection_after_restart": 3,
     "test_pane_replacement_after_navigation_stops_before_enter": 1,
     "test_preissued_inspection_cannot_bypass_an_uncertain_sibling_attempt": 1,
     "test_same_screen_has_one_admission_even_with_two_inspection_tokens": 1,
@@ -9171,7 +9171,7 @@
   },
   "scope": "model-free native-send and known-session observation ASGI/journal evidence; not SDK/native qualification; membership transcripts use a virtual reader clock; separate deadline-expiry and actual SQLite VM-cutoff probes; not wall-clock read qualification; portable launch joins actual archive/policy readers, ASGI/SQLite and driver HTTP with controlled SDK, native mux, provider process, SSH, Owner, claims, forwards and POSIX-to-private-scratch namespace fixtures; not native Copilot, mux, remote authentication or installed qualification",
   "captured_from": {
-    "commit": "d5b4da29fbd54467a5fc1d4d95608a8cc7c38512",
+    "commit": "8974d1b91b9a5880c93aa28cec5c5bb9d641b5d0",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 52,
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
