@@ -38,13 +38,14 @@ class GitError(RuntimeError):
 
 
 class LeaseConflict(RuntimeError):
-    """A resource has a live lease held by another client."""
+    """A resource's existing lease does not permit this acquisition."""
 
-    def __init__(self, snapshot: LeaseSnapshot) -> None:
+    def __init__(self, snapshot: LeaseSnapshot, *, released_only: bool = False) -> None:
         self.snapshot = snapshot
         super().__init__(
             f"{snapshot.record.resource['identity']} is leased by "
             f"{snapshot.record.holder!r} until {snapshot.record.expires_at}"
+            + ("; --released-only requires an explicit release, not expiry" if released_only else "")
         )
 
 
@@ -118,8 +119,9 @@ class GitLeaseStore:
         ttl_seconds: int | None = None,
         context: object = None,
         retries: int | None = None,
+        released_only: bool = False,
     ) -> LeaseSnapshot:
-        """Acquire an absent, released, or stale resource lease."""
+        """Acquire an absent/released lease, or a stale one unless prohibited."""
         item = resource(kind, key)
         holder = validate_holder(holder)
         ttl = self.settings.ttl(ttl_seconds)
@@ -131,8 +133,10 @@ class GitLeaseStore:
         for attempt in range(retry_count + 1):
             current = self.inspect(kind, key)
             now = self._utc_now()
-            if current is not None and current.live:
-                raise LeaseConflict(current)
+            if current is not None and (
+                current.live or (released_only and current.record.state != "released")
+            ):
+                raise LeaseConflict(current, released_only=released_only)
             event = (
                 "takeover"
                 if current is not None and current.record.state == "leased"

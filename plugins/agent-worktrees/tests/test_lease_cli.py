@@ -149,6 +149,44 @@ def test_acquire_defaults_have_no_disposition(remote: Path, capsys):
     assert ob.from_context(seen["context"]) == ob.AT_REST
 
 
+def test_released_only_cli_refuses_expiry_but_accepts_release(remote, capsys, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    monkeypatch.setattr(lease_cli.GitLeaseStore, "_utc_now", lambda self: now)
+    acquired = _run(
+        capsys, "acquire", "codespace", "sequential",
+        "--holder", "first/project/work", "--origin", str(remote),
+        "--ttl", "60", "--released-only",
+    )
+    now += timedelta(hours=1)
+    assert run_lease([
+        "borrow", "codespace", "sequential", "--holder", "next/project/work",
+        "--origin", str(remote), "--released-only",
+    ]) == 3
+    capsys.readouterr()
+    unchanged = _run(capsys, "inspect", "codespace", "sequential", "--origin", str(remote))
+    assert unchanged["token"] == acquired["token"]
+    assert unchanged["live"] is False
+    assert unchanged["state"] == "leased"
+    # The existing default retains its explicit stale-takeover semantics.
+    taken = _run(
+        capsys, "acquire", "codespace", "sequential",
+        "--holder", "first/project/work", "--origin", str(remote),
+    )
+    assert taken["event"] == "takeover"
+    _run(
+        capsys, "release", "codespace", "sequential",
+        "--token", taken["token"], "--origin", str(remote),
+    )
+    reused = _run(
+        capsys, "borrow", "codespace", "sequential",
+        "--holder", "next/project/work", "--origin", str(remote), "--released-only",
+    )
+    assert reused["event"] == "acquire"
+    assert reused["holder"] == "next/project/work"
+
+
 def test_renew_advances_disposition_to_at_rest(remote: Path, capsys):
     acq = _run(
         capsys, "acquire", "codespace", "cs-3",
