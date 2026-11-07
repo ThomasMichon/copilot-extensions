@@ -1,5 +1,6 @@
 """On-demand actual Dispatch launchers must admit cold publication before writes."""
 from __future__ import annotations
+from typing import Any, cast
 
 import json
 import os
@@ -11,11 +12,12 @@ from pathlib import Path
 import pytest
 
 from test_adopter_publication import _adopter, _command
-from test_command_binding import POWERSHELL, _snapshot, _write, binding_fixture as binding_fixture
+from test_command_binding import POWERSHELL, _snapshot, _write, binding_fixture as _binding_fixture
 from test_bridge_first_use_publication import _initialize_shell_profiles
 from test_installer_publication import _policy
 from test_native_publication import _completed_slot, _run
 from test_simple_first_use_publication import _release_payload
+binding_fixture = _binding_fixture
 
 pytestmark = [
     pytest.mark.portfolio_tier("T3"),
@@ -27,7 +29,7 @@ def dispatch_release(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return _release_payload(tmp_path_factory.mktemp("dispatch-release"), "agent-dispatch")
 
 
-def _selected_cell(fixture: dict, environment: dict[str, str]) -> tuple[Path, dict]:
+def _selected_cell(fixture: dict[str, Any], environment: dict[str, str]) -> tuple[Path, dict[str, Any]]:
     primitive = fixture["primitive"]
     cell = primitive.stamp_context(
         payload_version="1.0.0", payload_origin="installed",
@@ -83,7 +85,7 @@ def _selected_cell(fixture: dict, environment: dict[str, str]) -> tuple[Path, di
     for entry in ("global", "payload", "board")
 ])
 def test_dispatch_actual_first_use_publication(
-    binding_fixture: dict, dispatch_release: Path, tmp_path: Path, state: str, entry: str,
+    binding_fixture: dict[str, Any], dispatch_release: Path, tmp_path: Path, state: str, entry: str,
 ) -> None:
     if os.name == "nt" and POWERSHELL is None:
         pytest.skip("Native PowerShell is required")
@@ -93,7 +95,7 @@ def test_dispatch_actual_first_use_publication(
         environment["LOCALAPPDATA"] = str(binding_fixture["home"] / "AppData/Local")
         environment["APPDATA"] = str(binding_fixture["home"] / "AppData/Roaming")
     shell_profiles = _initialize_shell_profiles(binding_fixture, environment)
-    def snapshot_home() -> dict:
+    def snapshot_home() -> dict[str, Any]:
         return {name: value for name, value in _snapshot(binding_fixture["home"]).items()
                 if name not in shell_profiles}
     payload = binding_fixture["payload"]
@@ -191,7 +193,7 @@ def test_dispatch_actual_first_use_publication(
         "installation-context.ps1" if os.name == "nt" else "installation-context.sh"
     )
     admission_command = (
-        [POWERSHELL, "-NoProfile", "-File", str(helper), "-Action", "probe-plugin-publication",
+        [cast(str, POWERSHELL), "-NoProfile", "-File", str(helper), "-Action", "probe-plugin-publication",
          "-PayloadRoot", str(payload), "-PluginId", "agent-dispatch", "-LegacyRoot", str(legacy)]
         if os.name == "nt" else
         ["bash", str(helper), "probe-plugin-publication", "--payload-root", str(payload),

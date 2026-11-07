@@ -27,6 +27,9 @@ from tools.typecheck_source_views import (  # noqa: E402
     _write_view, guard_alias_view, installation_view,
     HARNESS_PREFIX, HarnessProgramView, harness_emitted_inputs, harness_emitted_views,
 )
+from tools.typecheck_catalog_views import (  # noqa: E402
+    MEMBERS as CATALOG_MEMBERS, catalog_inputs, catalog_views,
+)
 from installer_dependency_policy import DependencyPolicyError, run_uv_install  # noqa: E402
 from single_instance_lease import AlreadyRunningError  # noqa: E402
 
@@ -341,6 +344,24 @@ class _SourceViews:
         self.verify()
         return emitted
 
+    def add_catalog(self, paths: tuple[str, ...]) -> tuple[SourceView, ...]:
+        self._parents(self.stage, create=True)
+        self._membership()
+        inputs, _flight, _template, _members = catalog_inputs(self.root, paths)
+        for relative, content in inputs:
+            source = self.root / relative
+            self._parents(source.parent)
+            identity = _import_identity(source)
+            if source.read_bytes() != content or _import_identity(source) != identity:
+                raise SourceViewError("Catalog input changed during capture")
+            self.sources[source] = identity, content
+        emitted = catalog_views(self.root, paths, self.stage)
+        self.views.extend(emitted)
+        for view in emitted:
+            self.outputs[view.output] = view.identity, view.content
+        self.verify()
+        return emitted
+
     def _guard_providers(self) -> None:
         allowed = {
             view.output for view in self.views
@@ -629,13 +650,19 @@ def check_project(
                 )
             views.guard_search = tuple(ordered_imports)
         supplemental = 0
+        if project.name == "lib-payload-invocation":
+            if set(files) != set(CATALOG_MEMBERS) or len(files) != len(CATALOG_MEMBERS):
+                raise TypecheckError("Catalog witnesses require the complete canonical project")
+            emitted_catalogs = views.add_catalog(all_paths)
+            supplemental += len(emitted_catalogs)
+            files = (*files, *(str(view.output) for view in emitted_catalogs))
         if guard and HARNESS_PREFIX.rstrip("/") in project.include:
             if "libs/agent-procutil/src" not in project.import_roots:
                 raise TypecheckError("Harness emitted imports require the declared ordinary procutil root")
             _harness_procutil_provider(root, ordered_imports)
             views.procutil_search = tuple(ordered_imports)
             emitted = views.add_harness(all_paths)
-            supplemental = len(emitted)
+            supplemental += len(emitted)
             files = (*files, *(str(view.output) for view in emitted))
             views.verify()
         env = {

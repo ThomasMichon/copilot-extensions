@@ -60,11 +60,10 @@ Any overlapping shared runner/tests/guide hunk coordinates through #6909's
 accepted single writer. MR1 still aborts timeout/containment/resource failures;
 readiness classification does not turn them into ordinary assertion exit 1.
 
-## Proposed contained-Windows exit-state lane
+## Contained-Windows exit-state lane
 
-Add #4835 as a sixth independent managed-runner acceptance lane under existing
-OPEN #6917, after reviewed planning and actual whole-parent delivery/readback.
-This is an agent-recommended tracking proposal, not an accepted implementation
+#6917 directly retains #4835 as a sixth independent managed-runner acceptance
+lane. This is administrative tracking acceptance, not an implementation
 assignment or a claim that the fixture or shared liveness primitive is repaired.
 
 - [ ] MR6 (#4835) - Make the named stale launch-lock pruning regression
@@ -88,8 +87,8 @@ work. #6909's accepted integrator remains the single writer only for overlapping
 shared runner/tests/guide changes; this intake does not appoint that owner to
 another maintainer's primitive or fixture. MR6 progresses independently of
 MR1-MR5. No process action, test, native run, environment change, implementation,
-claim or source/resource transfer follows. Only separate #4835 tracking may
-retire NOT_PLANNED after complete direct receiving and current eligible readback;
+claim or source/resource transfer follows. Separate #4835 tracking retired
+NOT_PLANNED only after complete direct receiving and current eligible readback;
 all technical acceptance remains unchecked and #6917 stays OPEN.
 
 ## Deterministic clean-room evidence
@@ -174,3 +173,16 @@ body, title, assignment and prior discussion unchanged. This settles separate
 tracking, not timeout readiness, native acceptance or source/resource custody.
 
 See the [campaign](README.md) for the continuing Plan and Validation Plan.
+
+## Contained-runner tracking disposition
+
+#11171 merged as `f4e3c8ae328540818e2cd6cdea20b2f00cdc3766` after exact-head
+approval, nine complete successful contexts and zero threads. All four
+reviewed, merged and current document blobs matched. The actual expanded
+OPEN #6917 body, 21,075 characters, then received MR6/MRV7, the whole
+original #4835 description and its existing correction. Its whole body and
+unchanged eligible discussion were read back before the separate judgment.
+#4835 retired NOT_PLANNED, audit 252, with its original title, body,
+discussion and assignment preserved. Six direct Plan and seven global
+Validation rows remain unchecked. This settles a subordinate tracker, not
+the fixture, shared primitive, native acceptance or source/resource custody.

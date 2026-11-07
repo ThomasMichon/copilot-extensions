@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
+from types import SimpleNamespace
+from typing import Any
 
 import httpx
 import pytest
@@ -14,10 +17,93 @@ from agent_dispatch.pool_startup_contract import POOL_STARTUP_PATH, pool_startup
 from agent_dispatch.queue import SpawnState, Status, TaskQueue
 from tests.test_pool_placement import pool, publish, record_native, task
 from tests import test_pool_placement_client as caller_controls
+from tests import test_ordinary_pool_startup as ordinary_controls
+from tests._hosting_owner import admission_owner as admission_owner
 
 q = caller_controls.q
 api = caller_controls.api
 connected = caller_controls.connected
+ordinary = ordinary_controls.ordinary
+
+
+@pytest.mark.parametrize("ordinary", [True, False], indirect=True)
+def test_preparation_uses_only_governed_startup_read_budget(ordinary: SimpleNamespace) -> None:
+    from agent_dispatch import ordinary_bridge
+    from agent_dispatch.ordinary_invocation import startup_seed
+
+    o = ordinary
+    result = ordinary_bridge.start(
+        o.task, client=o.client, agent="local", project="example",
+        prompt=startup_seed(o.task, o.client), timeout=42,
+    )
+    assert result["native_session_id"] == "native-a"
+    preparations = [
+        request for request in o.requests
+        if request.method == "POST" and request.url.path.endswith("/worktree")
+    ]
+    assert len(preparations) == 1
+    assert preparations[0].extensions["timeout"] == {
+        "connect": 10.0, "read": 42.0 if o.relationship_owner else 10.0,
+        "write": 10.0, "pool": 10.0,
+    }
+    assert "timeout" not in json.loads(preparations[0].content)
+    assert o.client._http.timeout.read == 10.0
+
+
+@pytest.mark.parametrize("configured", [10.0, 120.0, None])
+def test_workspace_observation_preserves_other_and_longer_timeouts(configured: float | None) -> None:
+    observed = []
+
+    def reply(request: httpx.Request) -> httpx.Response:
+        observed.append((request.url.path, request.extensions["timeout"]))
+        return httpx.Response(200, json={})
+
+    with DispatchClient("http://test", timeout=configured, transport=httpx.MockTransport(reply)) as client:
+        client.record_spawn_worktree("key", "worktree", timeout=42)
+        client.health()
+        assert client._http.timeout.read == configured
+    expected = None if configured is None else max(configured, 42.0)
+    assert observed == [
+        ("/spawn-reservations/key/worktree", {
+            "connect": configured, "read": expected, "write": configured, "pool": configured,
+        }),
+        ("/health", {
+            "connect": configured, "read": configured, "write": configured, "pool": configured,
+        }),
+    ]
+
+
+@pytest.mark.parametrize("ordinary", [True], indirect=True)
+def test_actual_preparation_waits_for_original_relationship_past_baseline_timeout(
+    ordinary: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import time
+
+    from agent_dispatch.coordinator import create_app
+    from tests.test_mcp_http import _boot
+
+    o = ordinary
+    owner = o.q._relationship_writer
+
+    def delayed(workspace: Any, operation: str, payload: dict) -> dict:
+        if operation == "reserve":
+            time.sleep(11)
+        return owner(workspace, operation, payload)
+
+    monkeypatch.setattr(o.q, "_relationship_writer", delayed)
+    url, stop = _boot(create_app(
+        o.q, control_token="control", enable_mcp=False, verification_interval=0,
+    ))
+    try:
+        with DispatchClient(url, control_token="control") as client:
+            monkeypatch.setattr(o, "client", client)
+            assert ordinary_controls.launch(o)["native_session_id"] == "native-a"
+            assert client._http.timeout.read == 10.0
+        assert o.q.task_relationship(o.task["id"])["state"] == "bound"
+        assert len(o.allocations) == 1
+        assert [operation for operation, _ in owner.calls] == ["reserve", "bind"]
+    finally:
+        stop()
 
 
 def claim(q: TaskQueue, api: TestClient, requests: list[httpx.Request]) -> tuple:

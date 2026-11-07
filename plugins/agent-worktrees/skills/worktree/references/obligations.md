@@ -101,4 +101,48 @@ claim blocks finalize exactly like a worktree claim, so this keeps you honest
 about unfinished cross-repo work. But the reclaim **sweep spares `pr`-kind
 claims** (it can't prove an arbitrary PR safe), so a `pr` claim is **manual to
 settle** — there is no auto-reclaim. Kinds: `worktree|codespace|container|ssh|
-workdir|pr`.
+workdir|pr|derived` (see *Derived output directories* below).
+
+## Derived output directories -- `derived` claims
+
+A producer that creates a regenerable directory inside this worktree's checkout
+(a test venv, a build or type-check cache) records it as an open **`derived`**
+claim instead of leaving untracked bulk behind. The claim blocks `finalize`
+like any other obligation; **nothing deletes a derived directory implicitly** --
+finalize never removes it and `claims sweep` always skips the kind. The owner
+settles each path explicitly, one at a time:
+
+```
+aw='<agent-worktrees catalog argv[0]>'
+"$aw" claims add derived <path> --creator <tool>   # creates <path> + marker, opens the claim
+"$aw" claims settle <path> --reclaim --dry-run     # report the checks, change nothing
+"$aw" claims settle <path> --reclaim               # delete exactly <path>, then settle the claim
+"$aw" claims release <path>                        # keep <path>, drop the claim
+```
+
+`claims add derived` creates the directory and writes a `.derived-claim.json`
+marker into it (worktree id, a random nonce also stored in the claim's note,
+creator tool, creation time). A path that **already exists** without a marker
+matching this worktree's ledger entry is **refused**: a producer never adopts a
+directory it did not create. Re-adding a path this worktree already claimed
+re-proves the marker and keeps its nonce. Python producers inside the plugin can
+call `agent_worktrees.derived_claims.claim_directory(path, creator=...)`, which
+runs the same transaction in-process and raises `DerivedClaimError` on refusal;
+everything else uses the CLI command above.
+
+`settle --reclaim` deletes only that one ledger entry's directory, and only
+when every check passes: the marker names this worktree and the ledger entry's
+nonce; the path is strictly inside this worktree's checkout (lexically and
+after resolving links, never inside `.git`); nothing at or below it is a
+symlink, junction or other reparse point (never followed); no link sits
+between the checkout and it; Git tracks no file beneath it; the ledger would
+accept the settle (no handoff reservation, owner not finalizing); and no live
+process uses it. "No live process" fails closed: on POSIX every live process
+owned by this user must be fully inspectable, and on Windows the directory is
+first moved aside, which Windows refuses while any process works in it or
+holds a file inside it open. Any failure refuses, leaves the claim
+open and lists every reason. It never acts on another worktree's claims, and
+there is no bulk form. Overwriting the claim's note (`claims annotate`) drops
+the nonce, after which reclaim safely refuses -- release the claim instead.
+`finalize --abandon --handoff-to ...` releases derived claims like any other
+kind and keeps their directories.

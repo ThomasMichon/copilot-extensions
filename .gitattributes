@@ -5,6 +5,7 @@
 *.py text eol=lf
 *.md text eol=lf
 *.json text eol=lf
+libs/payload-invocation/templates/*.tmpl text eol=lf
 *.yaml text eol=lf
 *.yml text eol=lf
 .devcontainer/trusted-harness-base/** text eol=lf

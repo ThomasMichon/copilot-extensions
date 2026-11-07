@@ -12,19 +12,25 @@ import sys
 import time
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, TypedDict, cast
 
 if __package__:
     from agent_procutil import no_window_kwargs
 else:
-    def no_window_kwargs() -> dict[str, int]:
+    def no_window_kwargs() -> dict[Any, Any]:
         return {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}  # headless-guard: allow stdlib-only payload helper; the runtime branch uses agent_procutil
 
 TICKET_ENV = "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE"
-_CURRENT: contextvars.ContextVar[Any] = contextvars.ContextVar("command_lifecycle", default=None)
+_CURRENT: contextvars.ContextVar[LifecycleLease | None] = contextvars.ContextVar("command_lifecycle", default=None)
 
 
-def _purpose(binding: Any, owner: Any) -> dict[str, Any]:
+class DeploymentPurpose(TypedDict):
+    version: int
+    origin: str
+    operation: str
+
+
+def _purpose(binding: Any, owner: Any) -> DeploymentPurpose:
     purpose = owner.get("runtimeDeployment", {
         "version": 1, "origin": "plugin", "operation": "publish",
     })
@@ -40,11 +46,11 @@ def _purpose(binding: Any, owner: Any) -> dict[str, Any]:
         or (purpose["origin"] == "management" and purpose["operation"] == "teardown")
     ):
         raise binding.CommandOwnershipConflict("Invalid runtime deployment lease purpose.")
-    return dict(purpose)
+    return cast(DeploymentPurpose, dict(purpose))
 
 
 def _publication(
-    binding: Any, primitive: Any, arguments: dict[str, Any], purpose: dict[str, Any],
+    binding: Any, primitive: Any, arguments: dict[str, Any], purpose: DeploymentPurpose,
 ) -> None:
     if purpose["operation"] == "teardown":
         return
@@ -169,7 +175,7 @@ def incumbent_manifest(
         manifest = {}
     if manifest.get("service") not in (None, arguments["plugin_id"]):
         raise binding.CommandOwnershipConflict("The legacy deploy manifest is not owned by this plugin.")
-    return manifest
+    return cast(dict[str, Any], manifest)
 
 
 def _reservation(
@@ -315,7 +321,7 @@ def legacy_lifecycle(
     root = Path(arguments["legacy_root"])
     if not root.is_absolute():
         raise ValueError("Runtime lifecycle requires an absolute runtime root.")
-    purpose = {
+    purpose: DeploymentPurpose = {
         "version": 1, "origin": "management" if managed_deployment else "plugin",
         "operation": "teardown" if teardown else "publish",
     }
@@ -470,13 +476,13 @@ def run_lifecycle(
             except subprocess.TimeoutExpired:
                 diagnostic("Runtime lifecycle deadline exceeded; stopping the admitted installer tree.")
                 try:
-                    job.terminate_and_wait(2)
+                    cast(Any, job).terminate_and_wait(2)
                 except (OSError, RuntimeError, subprocess.SubprocessError) as error:
                     diagnostic(f"Runtime lifecycle cancellation failed: {error}")
                     # Without an empty-Job witness, preserve the durable
                     # reservation even if this parent can no longer wait.
                     lease.lock.acquired = False
-                    job.close()
+                    cast(Any, job).close()
                     child.wait()
                     raise
                 child.wait()
@@ -501,4 +507,4 @@ def run_lifecycle(
                 operation.complete(
                     "done" if result == 0 else "failed", f"exit {result}", elapsed=elapsed,
                 )
-            return result
+            return cast(int, result)
