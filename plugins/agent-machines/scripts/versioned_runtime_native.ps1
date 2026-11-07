@@ -1,18 +1,13 @@
-function Enter-NativeInstallerDriver {
+function Resolve-NativeBootstrapPython {
     param(
-        [Parameter(Mandatory)][string]$Payload,
-        [Parameter(Mandatory)][string]$Root,
-        [Parameter(Mandatory)][string]$Plugin,
-        [Parameter(Mandatory)][string]$Action,
-        [string[]]$Options = @(),
-        [string]$RetainedRuntime,
-        [string]$RetainedRuntimeSha256,
-        [string]$InstallSource
+        [ValidateSet(10, 11)][int]$MinimumMinor = 11,
+        [string]$Action = 'inspect',
+        [string]$Root = ''
     )
     $probe = @'
 import json,sys
 from pathlib import Path
-assert sys.version_info >= (3,11)
+assert sys.version_info >= (3,MINIMUM_MINOR)
 python = Path(sys._base_executable).resolve(strict=True)
 if sys.argv[1].lower() in {'uninstall', 'broker-remove'}:
     root = Path(sys.argv[2]).absolute()
@@ -20,6 +15,7 @@ if sys.argv[1].lower() in {'uninstall', 'broker-remove'}:
     assert all(not python.is_relative_to(boundary) for boundary in (root, root.resolve()))
 print(json.dumps(str(python)))
 '@
+    $probe = $probe.Replace('MINIMUM_MINOR', [string]$MinimumMinor)
     $python = $null
     $candidates = @()
     foreach ($name in @('python3', 'python')) {
@@ -39,7 +35,9 @@ print(json.dumps(str(python)))
             if ($launcherMatches.Count) {
                 foreach ($match in $launcherMatches) { $candidates += $match.Groups[1].Value }
             } else {
-                foreach ($version in '3.13', '3.12', '3.11', '3') {
+                $selectors = @('3.13', '3.12', '3.11')
+                if ($MinimumMinor -eq 10) { $selectors += '3.10' }
+                foreach ($version in ($selectors + '3')) {
                     $exe = Invoke-Hidden -FilePath $launcher.Source -ArgList @(
                         "-$version", '-I', '-S', '-B', '-c', 'import json,sys; print(json.dumps(sys.executable))'
                     ) -ErrorOutput ([ref]$nativeError)
@@ -71,6 +69,21 @@ print(json.dumps(str(python)))
             }
         } catch { $python = $null }
     }
+    return $python
+}
+
+function Enter-NativeInstallerDriver {
+    param(
+        [Parameter(Mandatory)][string]$Payload,
+        [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)][string]$Plugin,
+        [Parameter(Mandatory)][string]$Action,
+        [string[]]$Options = @(),
+        [string]$RetainedRuntime,
+        [string]$RetainedRuntimeSha256,
+        [string]$InstallSource
+    )
+    $python = Resolve-NativeBootstrapPython -Action $Action -Root $Root
     if (-not $python) { throw 'Native install and uninstall require an existing Python 3.11+ bootstrap interpreter; removal requires it outside the runtime' }
     $arguments = @('-I', '-S', '-B', '-X', 'utf8',
         (Join-Path $Payload 'scripts\installer_driver.py'),

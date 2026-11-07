@@ -125,8 +125,17 @@ database custody, activation precedence or strict owner/configuration refusals.
 The source is not an activation snapshot: a newly launched resident rechecks
 current opt-in before service admission, including revocation after its caller's
 check. Read-only ping and explicit stop/export controls retain their own gates.
-Activation accepts the selected completed runtime's interpreter and uses
-ambient Python discovery only for a cold payload. This does not bypass the
+Activation accepts the selected completed runtime's interpreter and discovers
+an existing Python 3.10+ reader only for a cold payload. Windows uses the
+canonical native helper's read-only discovery, including later PATH candidates,
+non-Store launcher entries/selectors and standard installation roots. Its
+ordinary installer caller still requires 3.11; activation does not raise the
+Vault reader floor or execute an installer to select Python. POSIX qualifies
+the existing `python3`/`python` PATH candidates. Unsupported-only or absent
+Python is an explicit prerequisite refusal, never inactive readiness.
+Windows reader execution uses the same headless captured-process helper;
+discovery and reads neither install Python nor mutate PATH. Explicit runtime
+Python remains authoritative without rediscovery. This does not bypass the
 canonical installation-context owner's independent bootstrap prerequisites;
 its current Windows front door still requires Python on PATH before resolving
 an installation. The POSIX payload control qualifies the full no-global-Python
