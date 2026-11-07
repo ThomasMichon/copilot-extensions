@@ -217,9 +217,11 @@ whether data authentication is required; when a token is configured, an
 unauthenticated health request must also be rejected, including by older
 coordinators that lack the advertisement. Legacy discovery or an unverified
 endpoint is not treated as inactive. Local control uses loopback without
-environment proxies and does not pass update-driver custody to the daemon. `--apply`
-reuses the existing guarded coordinator cutover without starting an absent
-service or running broad reaping. It does not update the supervisor or claim
+environment proxies and does not pass update-driver custody to the daemon.
+`--apply` reuses the existing guarded coordinator cutover without starting an
+absent service or running broad reaping. It rechecks incumbent liveness before
+spawn and bounds each native routing-lock wait by the requested timeout. It
+does not update the supervisor or claim
 suite-wide readiness. Older runtimes without this module remain unchanged:
 callers must establish support before invoking the new form and must not replay
 an effectful request through another command after an uncertain result.

@@ -2,15 +2,41 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import logging
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from . import lifecycle
 from .routing import Endpoint
 
 if TYPE_CHECKING:
     from .conditional import PreparedCutover
-    from .cutover import CutoverOrchestrator, CutoverResult
+    from .cutover import CutoverOrchestrator, CutoverResult, _Client
+
+log = logging.getLogger("zdd")
+
+
+def adopt_relay(
+    self: CutoverOrchestrator, new_port: int, result: CutoverResult, *,
+    make_client: Callable[[str], _Client] | None = None,
+    adopt_relay: Callable[[], dict] | None = None,
+) -> None:
+    from .cutover import CutoverError
+
+    try:
+        if adopt_relay is not None:
+            adopt = adopt_relay()
+        else:
+            new_client = (make_client or self.make_client)(self._base_url(new_port))
+            adopt = new_client.adopt_relay()
+        adopted = adopt.get("adopted")
+        if adopted is not None and type(adopted) is not bool:
+            raise CutoverError("relay adoption response has an invalid boolean")
+        result.steps.append(f"relay adopt: {adopted}")
+    except Exception as exc:
+        failure = type(exc).__name__
+        result.steps.append(f"relay adopt failed (non-fatal): {failure}")
+        log.warning("Relay adoption failed after cutover (%s)", failure)
 
 
 def _drain_old(

@@ -294,6 +294,141 @@ def test_reconcile_rechecks_selected_generation_before_reusing_coordinator(tmp_p
         )
 
 
+def test_reconcile_refuses_exited_incumbent_before_spawn(tmp_path, monkeypatch):
+    from agent_procutil import _daemon_instance_identity
+    from agent_dispatch import client, source_start
+    from agent_dispatch.config import Config
+    from zdd import breadcrumb, diagnostics, routing
+
+    cfg = Config(host="127.0.0.1", db_path=str(tmp_path / "tasks.db"))
+    pid, version = os.getpid(), "0.0.1"
+    birth = diagnostics.process_start_time(pid)
+    assert birth
+    routing.publish_active(
+        tmp_path, bind="127.0.0.1", port=43123, pid=pid,
+        version=version, process_start_time=birth,
+    )
+    monkeypatch.setattr(routing, "_listening", lambda *_args, **_kwargs: True)
+    exited = False
+    original_birth = _daemon_instance_identity.birth_identity
+    original_write = breadcrumb.write_breadcrumb
+    spawned = []
+
+    def live_birth(owner):
+        if exited:
+            raise ProcessLookupError(owner)
+        return original_birth(owner)
+
+    def write(*args, **kwargs):
+        nonlocal exited
+        record = original_write(*args, **kwargs)
+        if kwargs.get("state") == "started":
+            exited = True
+        return record
+
+    class Client:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def health(self):
+            return {
+                "status": "ok", "version": version,
+                "runtime_config_identity": source_start.config_identity(cfg),
+                "slot": {"pid": pid, "process_start_time": birth, "role": "active"},
+            }
+
+    def spawn(port):
+        spawned.append(port)
+        raise RuntimeError("unexpected spawn")
+
+    monkeypatch.setattr(client, "DispatchClient", Client)
+    monkeypatch.setattr(_daemon_instance_identity, "birth_identity", live_birth)
+    monkeypatch.setattr(breadcrumb, "write_breadcrumb", write)
+    with pytest.raises(RuntimeError, match="predecessor.*ownership"):
+        source_start.run_coordinator(
+            cfg, tmp_path, token=None, spawn_passive=spawn, pick_free_port=lambda: 43124,
+            timeout=1.0, verify_selected=lambda: None, start_if_missing=False,
+            confirm_inactive=lambda _table: True,
+        )
+    assert spawned == []
+
+
+def test_reconcile_bounds_real_routing_witness_contention(tmp_path, monkeypatch):
+    import subprocess
+    import sys
+    import time
+    from agent_dispatch import client, source_start
+    from agent_dispatch.config import Config
+    from zdd import diagnostics, routing
+
+    cfg = Config(host="127.0.0.1", db_path=str(tmp_path / "tasks.db"))
+    pid, version = os.getpid(), "0.0.1"
+    birth = diagnostics.process_start_time(pid)
+    assert birth
+    routing.publish_active(
+        tmp_path, bind="127.0.0.1", port=43123, pid=pid,
+        version=version, process_start_time=birth,
+    )
+
+    class Client:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def health(self):
+            return {
+                "status": "ok", "version": version,
+                "runtime_config_identity": source_start.config_identity(cfg),
+                "slot": {"pid": pid, "process_start_time": birth, "role": "active"},
+            }
+
+    monkeypatch.setattr(client, "DispatchClient", Client)
+    script = """
+import sys, time
+from pathlib import Path
+from zdd import routing
+root = Path(sys.argv[1])
+with routing.routing_lock(root, deadline=time.monotonic() + 5):
+    (root / "held").touch()
+    deadline = time.monotonic() + 10
+    while not (root / "release").exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+"""
+    holder = subprocess.Popen(
+        [sys.executable, "-B", "-c", script, str(tmp_path)],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    try:
+        limit = time.monotonic() + 5
+        while not (tmp_path / "held").exists():
+            assert holder.poll() is None and time.monotonic() < limit
+            time.sleep(0.01)
+        started = time.monotonic()
+        result = source_start.run_coordinator(
+            cfg, tmp_path, token=None, spawn_passive=lambda _port: pytest.fail("unexpected spawn"),
+            pick_free_port=lambda: 43124, timeout=0.15, verify_selected=lambda: None,
+            start_if_missing=False, confirm_inactive=lambda _table: True,
+        )
+        elapsed = time.monotonic() - started
+    finally:
+        (tmp_path / "release").touch()
+        assert holder.wait(timeout=15) == 0
+    assert result["ok"] is False
+    assert elapsed < 2
+
+
 def test_reconcile_bounds_native_cutover_lock_wait(tmp_path, monkeypatch):
     from agent_dispatch import client, source_start
     from agent_dispatch.config import Config
@@ -797,7 +932,9 @@ def test_coordinator_reconcile_reports_unselected_owner_before_effects(tmp_path,
     assert "private detail" not in repr(result)
 
 
-def test_coordinator_reconcile_lock_wait_respects_requested_timeout(tmp_path, monkeypatch):
+def test_coordinator_reconcile_lock_wait_respects_requested_timeout(
+    tmp_path, monkeypatch, isolated_service_environment,
+):
     from agent_dispatch import action_controls, config, coordinator_cli, install_paths, single_instance, source_start
 
     clock = SimpleNamespace(value=0.0)
@@ -832,7 +969,9 @@ def test_coordinator_reconcile_rejects_inherited_driver_witness(tmp_path, monkey
         )
 
 
-def test_coordinator_reconcile_reuses_native_owner_without_broad_reaping(tmp_path, monkeypatch):
+def test_coordinator_reconcile_reuses_native_owner_without_broad_reaping(
+    tmp_path, monkeypatch, isolated_service_environment,
+):
     from agent_dispatch import action_controls, config, coordinator_cli, coordinator_observation
     from agent_dispatch import install_paths, single_instance, source_start
     from zdd import breadcrumb

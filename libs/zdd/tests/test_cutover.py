@@ -733,6 +733,150 @@ def test_run_refuses_once_the_wait_budget_is_exhausted(tmp_path: Path):
     assert routing.read_active_endpoint(tmp_path) is None
 
 
+@pytest.mark.parametrize("stage", ["reap", "witness", "breadcrumb", "publication", "unguarded-publication"])
+def test_run_bounds_routing_authority_waits(tmp_path, monkeypatch, stage):
+    import threading
+    import time
+
+    held, release = threading.Event(), threading.Event()
+    holder = None
+
+    def hold():
+        with routing.routing_lock(tmp_path, deadline=time.monotonic() + 2):
+            held.set()
+            release.wait(10)
+
+    def contend():
+        nonlocal holder
+        if holder is None:
+            holder = threading.Thread(target=hold)
+            holder.start()
+            assert held.wait(2)
+
+    if stage == "reap":
+        original = routing.reap_stale_active
+
+        def reap(*args, **kwargs):
+            contend()
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(routing, "reap_stale_active", reap)
+    elif stage == "witness":
+        original = routing.publication_witness
+
+        def witness(*args, **kwargs):
+            contend()
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(routing, "publication_witness", witness)
+    elif stage == "breadcrumb":
+        original = breadcrumb.write_breadcrumb
+
+        def write(*args, **kwargs):
+            contend()
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(breadcrumb, "write_breadcrumb", write)
+    elif stage == "publication":
+        original = routing.publish_active_with_previous_guarded
+
+        def publish(*args, **kwargs):
+            contend()
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(routing, "publish_active_with_previous_guarded", publish)
+    else:
+        original = routing.publish_active
+
+        def publish(*args, **kwargs):
+            contend()
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(routing, "publish_active", publish)
+
+    options = {} if stage in ("reap", "unguarded-publication") else {"refuse_old": lambda _raw: None}
+    orch, handle = _make(
+        tmp_path, healthy_ports={9290}, registry={}, routing_lock_timeout=0.15, **options,
+    )
+    handle.poll = lambda: 0 if handle.terminated else None
+    started = time.monotonic()
+    try:
+        result = orch.run(health_timeout=1, drain_timeout=1, lock_timeout=1)
+        elapsed = time.monotonic() - started
+    finally:
+        release.set()
+        if holder is not None:
+            holder.join(timeout=2)
+    assert holder is not None and not holder.is_alive()
+    assert result.ok is False
+    assert elapsed < 2
+
+
+@pytest.mark.parametrize("timeout", [-1, float("nan"), True])
+def test_run_rejects_invalid_routing_wait_budget(tmp_path, timeout):
+    with pytest.raises(ValueError, match="routing.*timeout"):
+        _make(tmp_path, healthy_ports={9290}, registry={}, routing_lock_timeout=timeout)
+
+
+def test_run_bounds_routing_wait_during_guarded_rollback(tmp_path, monkeypatch):
+    import os
+    import threading
+    import time
+    from zdd import diagnostics
+
+    monkeypatch.setattr(routing, "_listening", lambda *_args, **_kwargs: True)
+    birth = diagnostics.process_start_time(os.getpid())
+    old = routing.publish_active(
+        tmp_path, bind="127.0.0.1", port=9281, pid=os.getpid(),
+        version="0.9", process_start_time=birth,
+    )
+    held, release = threading.Event(), threading.Event()
+    holder = None
+    original = routing.publish_active_with_previous_guarded
+    calls = 0
+
+    def hold():
+        with routing.routing_lock(tmp_path, deadline=time.monotonic() + 2):
+            held.set()
+            release.wait(10)
+
+    def publish(*args, **kwargs):
+        nonlocal calls, holder
+        calls += 1
+        if calls == 2:
+            holder = threading.Thread(target=hold)
+            holder.start()
+            assert held.wait(2)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(routing, "publish_active_with_previous_guarded", publish)
+    orch, handle = _make(
+        tmp_path, healthy_ports={9281, 9290}, registry={},
+        expected_old=old, refuse_old=lambda _raw: None, routing_lock_timeout=0.15,
+        drain_result={"drained": False, "clean": False, "forced": False, "busy_sessions": []},
+    )
+    handle.pid = os.getpid()
+    handle.poll = lambda: 0 if handle.terminated else None
+    started = time.monotonic()
+    try:
+        result = orch.run(health_timeout=1, drain_timeout=1, lock_timeout=1)
+        elapsed = time.monotonic() - started
+    finally:
+        release.set()
+        if holder is not None:
+            holder.join(timeout=2)
+    assert holder is not None and not holder.is_alive()
+    assert not result.ok and not result.rolled_back
+    assert elapsed < 2
+
+
+def test_conditional_cutover_keeps_its_own_routing_budget(tmp_path):
+    orch, _handle = _make(tmp_path, healthy_ports={9290}, registry={}, routing_lock_timeout=0.1)
+    result = orch.run(conditional=object())
+    assert not result.ok
+    assert "conditional cutover owns its routing timeout" in result.error
+
+
 def test_run_waits_for_a_contended_lock_then_succeeds(tmp_path: Path, monkeypatch):
     """A legitimate back-to-back trigger (a fast second update superseding a
     first still in flight) must succeed once the first releases the lock --

@@ -246,6 +246,13 @@ def run_coordinator(
         with selected_client(url, probe_timeout) as client:
             return client.health()
 
+    def old_is_live():
+        if old is None or not old.process_start_time:
+            return False
+        if not start_if_missing:
+            return _route_owner_state(old) == "matching"
+        return process_start_time(old.pid) == old.process_start_time
+
     def probe(host, port, *, active=False):
         payload = read_health(host, port)
         handle = handles.get(port)
@@ -253,8 +260,7 @@ def run_coordinator(
             if old is None or not old.process_start_time:
                 return False
             handle = SimpleNamespace(
-                pid=old.pid,
-                poll=lambda: None if process_start_time(old.pid) == old.process_start_time else 0,
+                pid=old.pid, poll=lambda: None if old_is_live() else 0,
             )
         return accept_readiness(
             payload, handle=handle, version=__version__, config_identity=identity, active=active,
@@ -266,15 +272,14 @@ def run_coordinator(
         verify_selected()
         if (
             (routing.read_table(routing_root, strict=True) or {}).get("active") != raw
-            or process_start_time(old.pid) != old.process_start_time
+            or not old_is_live()
         ):
             raise RuntimeError("selected coordinator owner changed during readiness")
         return {"ok": True, "status": "reused", "pid": old.pid, "new_port": old.port}
     if old is not None:
         payload = read_health(old.client_host, old.port)
         handle = SimpleNamespace(
-            pid=old.pid,
-            poll=lambda: None if process_start_time(old.pid) == old.process_start_time else 0,
+            pid=old.pid, poll=lambda: None if old_is_live() else 0,
         )
         if not accept_readiness(
             payload, handle=handle, version=old.version, config_identity=identity, active=True,
@@ -287,15 +292,17 @@ def run_coordinator(
         verify_selected()
         if current != raw:
             return "Source startup predecessor changed"
-        if old is not None and (
-            not old.process_start_time
-            or process_start_time(old.pid) != old.process_start_time
-        ):
+        if old is not None and not old_is_live():
             return "Source startup predecessor native ownership is unconfirmed"
         return None
 
     def spawn(port):
         verify_selected()
+        if not start_if_missing and (
+            not old_is_live()
+            or (routing.read_table(routing_root, strict=True) or {}).get("active") != raw
+        ):
+            raise RuntimeError("coordinator predecessor native ownership changed before spawn")
         handle = spawn_passive(port)
         handles[port] = handle
         return handle
@@ -313,6 +320,7 @@ def run_coordinator(
         self_retirement=True, activate_successor=activate,
         serving_health_check=lambda host, port: probe(host, port, active=True),
         service="agent-dispatch",
+        **({"routing_lock_timeout": min(5.0, timeout)} if not start_if_missing else {}),
     )
     return orchestrator.run(
         health_timeout=timeout, drain_timeout=timeout,

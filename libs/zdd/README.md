@@ -319,6 +319,10 @@ retirement before `shutdown()` returns, raising if native exit is unconfirmed.
 Post-commit failures retain full predecessor identity and a writer-reconciliation
 breadcrumb; keeping a healthy successor serving does not make retirement
 successful. Callers without `expected_old` retain the existing behavior.
+Nonconditional adopters may set `routing_lock_timeout` on the orchestrator to
+bound each routing and breadcrumb lock acquisition, including rollback. It is
+not a whole-attempt deadline; conditional cutovers use their own request budget
+and refuse this additional setting.
 The candidate handle may represent a brokered worker: after the health gate the
 orchestrator refreshes its worker PID and captured `process_start_time` (when
 provided) before guarded publication. The adopter must retain and validate the
@@ -423,7 +427,8 @@ and undrains it through captured credentials. Changed ownership or inability to
 restore under the bounded lock leaves both processes alive and retains the
 nonterminal breadcrumb for owner-led recovery. It never overwrites a later
 winner, forces retirement, or converts failed repair into success. Ordinary
-unconditional callers retain their existing unbounded routing-lock behavior.
+unconditional callers retain their existing unbounded routing-lock behavior
+unless they opt into the orchestrator's routing-lock timeout.
 Restoration must attest ready after undrain. A previously promoted successor
 may have admitted work, so rollback retains it with unresolved recovery state
 rather than terminating it. Only never-promoted candidates can be disposed.

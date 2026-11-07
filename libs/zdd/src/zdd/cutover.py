@@ -39,6 +39,9 @@ from zdd import breadcrumb, routing
 from zdd.routing import Endpoint
 from . import routing_persistence
 from .cutover_result import CutoverResult as CutoverResult
+from .cutover_selection import (
+    candidate_port, routing_deadline, routing_lock_kwargs, validate_routing_lock_timeout,
+)
 
 if TYPE_CHECKING:
     from zdd.cutover_lock import CutoverLock
@@ -114,6 +117,7 @@ class CutoverOrchestrator:
         retire_failed_predecessor: Callable[[Endpoint], dict[str, Any]] | None = None,
         drain_predecessor: bool = True,
         refuse_restoration: Callable[[dict[str, Any] | None], str | None] | None = None,
+        routing_lock_timeout: float | None = None,
     ) -> None:
         if expected_old is not None and refuse_old is None:
             raise ValueError("an expected predecessor also requires a publication refusal guard")
@@ -133,6 +137,7 @@ class CutoverOrchestrator:
         self.pick_free_port = pick_free_port
         self.refuse_old = refuse_old
         self.refuse_restoration = refuse_restoration if refuse_restoration is not None else refuse_old
+        self.routing_lock_timeout = validate_routing_lock_timeout(routing_lock_timeout)
         self.sleep = sleep
         self.clock = clock
         self.routing = routing_mod
@@ -265,11 +270,15 @@ class CutoverOrchestrator:
         ``held_lock`` lets a caller serialize selection and recovery in the
         same transaction. It must be held for this exact routing directory;
         the caller remains responsible for releasing it after reconciliation.
+        A configured routing-lock timeout bounds each native routing wait;
+        conditional cutover uses its own request-specific budget instead.
         """
         from zdd.cutover_lock import CutoverBorrowError, CutoverLock, CutoverLockedError, lock_path
 
         if self.self_retirement and conditional is not None:
             return CutoverResult(ok=False, error="conditional cutover cannot defer retirement", conditional=True)
+        if conditional is not None and self.routing_lock_timeout is not None:
+            return CutoverResult(ok=False, error="conditional cutover owns its routing timeout", conditional=True)
         if self.drain_before_publish and conditional is not None:
             reason = "conditional cutover cannot use pre-publication drain"
             log.error(reason)
@@ -377,9 +386,12 @@ class CutoverOrchestrator:
             if self.self_retirement:
                 kwargs["self_retirement"] = True
             try:
-                return breadcrumb.write_breadcrumb(self.config_dir, _routing_deadline=conditional.routing_deadline() if conditional else None, **kwargs)
+                return breadcrumb.write_breadcrumb(
+                    self.config_dir, _routing_deadline=routing_deadline(conditional, self.routing_lock_timeout),
+                    **kwargs,
+                )
             except routing.RoutingLockTimeout:
-                if not conditional or not result.error or result.ok:
+                if (not conditional and self.routing_lock_timeout is None) or not result.error or result.ok:
                     raise
                 result.error += "; recovery witness retained: routing authority unavailable"
                 log.error(result.error)
@@ -394,7 +406,9 @@ class CutoverOrchestrator:
         # even when the observed native predecessor exited before selection.
         if conditional is None and not self.drain_before_publish and self.expected_old is None:
             try:
-                self.routing.reap_stale_active(self.config_dir, service=self.service)
+                self.routing.reap_stale_active(
+                    self.config_dir, service=self.service, **routing_lock_kwargs(self.routing_lock_timeout),
+                )
             except Exception:  # noqa: BLE001 -- watchdog is best-effort, never fatal
                 pass
         if self._refuse_current_old(result):
@@ -402,7 +416,8 @@ class CutoverOrchestrator:
         if self.routing is routing and conditional is None:
             try:
                 publication_witness = routing.publication_witness(
-                    self.config_dir, deadline=time.monotonic() + 5.0,
+                    self.config_dir, deadline=routing_deadline(None, self.routing_lock_timeout)
+                    or time.monotonic() + 5.0,
                 )
             except (routing.ActivePublicationRefused, OSError, ValueError) as exc:
                 result.error = f"native publication custody unavailable ({type(exc).__name__})"
@@ -451,8 +466,6 @@ class CutoverOrchestrator:
                 result.error = "predecessor route changed during selection; refusing before drain"
                 result.steps.append(f"refused: {result.error}")
                 return result
-
-        from .cutover_selection import candidate_port
 
         new_port = candidate_port(self, old, conditional, result)
         if new_port is None:
@@ -576,6 +589,7 @@ class CutoverOrchestrator:
                         pid=getattr(handle, "pid", None), version=self.version,
                         demote_existing=True,
                         **({"process_start_time": new_process_start_time} if self.self_retirement else {}),
+                        **routing_lock_kwargs(self.routing_lock_timeout),
                     )
                 else:
                     import inspect
@@ -588,7 +602,9 @@ class CutoverOrchestrator:
                             "a route that must be re-checked first"
                         )
                     refused = self.routing.ActivePublicationRefused
-                    conditional_kwargs = {}
+                    conditional_kwargs = routing_lock_kwargs(
+                        None if conditional else self.routing_lock_timeout,
+                    )
                     if conditional:
                         candidate = conditional.new
                         if candidate is None or not candidate.process_start_time:
@@ -598,7 +614,7 @@ class CutoverOrchestrator:
                             "process_start_time": candidate.process_start_time,
                         }
                     elif self.expected_old is not None or self.self_retirement:
-                        conditional_kwargs = {"process_start_time": new_process_start_time}
+                        conditional_kwargs["process_start_time"] = new_process_start_time
                     publication = self.routing.publish_active_with_previous_guarded(
                         self.config_dir, bind=self.bind, port=new_port,
                         pid=new_pid if self.expected_old is not None else getattr(handle, "pid", None),
@@ -960,20 +976,9 @@ class CutoverOrchestrator:
         adopt_relay: Callable[[], dict] | None = None,
     ) -> None:
         """Best-effort: bind the credential relay on the new daemon (non-fatal)."""
-        try:
-            if adopt_relay is not None:
-                adopt = adopt_relay()
-            else:
-                new_client = (make_client or self.make_client)(self._base_url(new_port))
-                adopt = new_client.adopt_relay()
-            adopted = adopt.get("adopted")
-            if adopted is not None and type(adopted) is not bool:
-                raise CutoverError("relay adoption response has an invalid boolean")
-            result.steps.append(f"relay adopt: {adopted}")
-        except Exception as exc:  # noqa: BLE001 -- relay is non-fatal
-            failure = type(exc).__name__
-            result.steps.append(f"relay adopt failed (non-fatal): {failure}")
-            log.warning("Relay adoption failed after cutover (%s)", failure)
+        from .cutover_drain import adopt_relay as apply
+
+        apply(self, new_port, result, make_client=make_client, adopt_relay=adopt_relay)
 
     def _undrain(self, old: Endpoint, result: CutoverResult) -> bool:
         from .cutover_rollback import _undrain
