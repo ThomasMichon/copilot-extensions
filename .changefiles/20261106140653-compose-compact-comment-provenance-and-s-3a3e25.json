@@ -1,0 +1,9 @@
+{
+  "comment": "Compose compact comment provenance and supplied stable identities through the existing AI signature profile",
+  "changes": [
+    {
+      "plugin": "ai-attribution",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify compact source-origin output through the independent AI comment-body preparation owner",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}
