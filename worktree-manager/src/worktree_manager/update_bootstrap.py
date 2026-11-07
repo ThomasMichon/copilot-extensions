@@ -380,13 +380,21 @@ def _invoke(installation: _Installation, action: str, environment: dict[str, str
     from update_driver import participant_environment
 
     artifact = installation.artifact or installation.payload
+    script = artifact / "scripts" / ("install.ps1" if os.name == "nt" else "install.sh")
+    source_argument = None
+    if installation.source_snapshot is not None:
+        from .runtime_source_repair import engine_installer
+
+        script, source_argument = engine_installer(
+            artifact, "windows" if os.name == "nt" else "posix", prepared=True,
+        )
     if os.name == "nt":
         host = shutil.which("pwsh") or shutil.which("powershell.exe")
         if host is None:
             raise RuntimeError("PowerShell is required for engine repair")
         native = [
             host, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-            str(artifact / "scripts/install.ps1"), action,
+            str(script), action,
             "-InstallDir", str(installation.root),
         ]
         if installation.context_arguments is not None:
@@ -398,7 +406,7 @@ def _invoke(installation: _Installation, action: str, environment: dict[str, str
         if host is None:
             raise RuntimeError("Bash is required for engine repair")
         native = [
-            host, str(artifact / "scripts/install.sh"), action,
+            host, str(script), action,
             "--install-dir", str(installation.root),
         ]
         if installation.context_arguments is not None:
@@ -413,10 +421,9 @@ def _invoke(installation: _Installation, action: str, environment: dict[str, str
             "-ProvisionMissingRuntime" if os.name == "nt" else "--provision-missing-runtime"
         )
     if installation.source_snapshot is not None:
-        native += [
-            "-InstallSource" if os.name == "nt" else "--install-source",
-            str(installation.source_snapshot),
-        ]
+        if source_argument is None:
+            raise RuntimeError("Prepared engine installer argument is unavailable")
+        native += [source_argument, str(installation.source_snapshot)]
     base = str(Path(getattr(sys, "_base_executable", sys.executable)).resolve())
     command = [
         base, "-I", "-S", "-B", "-X", "utf8",

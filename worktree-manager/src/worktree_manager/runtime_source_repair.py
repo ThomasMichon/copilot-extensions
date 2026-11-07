@@ -24,7 +24,19 @@ def prepare_engine(resolved: ResolvedSource) -> tuple[Path, str]:
     return payload, json.dumps(record["identity"], sort_keys=True)
 
 
-def qualify_engine(payload: Path) -> None:
+def engine_installer(payload: Path, platform: str, *, prepared: bool = False) -> tuple[Path, str | None]:
+    """Select the declared prepared entry or preserve the native legacy entry."""
+    if prepared:
+        from agent_worktrees.update_runtime_source import source_install_entry
+
+        entry = source_install_entry(payload, platform)
+        if entry is None:
+            raise ValueError("Prepared engine has no native installation-source capability")
+        return payload / entry["script"], entry["argument"]
+    return payload / "scripts" / ("install.ps1" if platform == "windows" else "install.sh"), None
+
+
+def qualify_engine(payload: Path, *, prepared: bool = False) -> None:
     """Negotiate native isolated repair before any other runtime is published."""
     declaration = ast.parse(
         (payload / "scripts/versioned_runtime_source.py").read_text(encoding="utf-8"),
@@ -37,7 +49,9 @@ def qualify_engine(payload: Path) -> None:
         for node in declaration.body
     ):
         raise ValueError("Prepared engine installer does not support transaction source pinning")
-    installer = payload / "scripts" / ("install.ps1" if os.name == "nt" else "install.sh")
+    installer, _argument = engine_installer(
+        payload, "windows" if os.name == "nt" else "posix", prepared=prepared,
+    )
     if "AGENT_WORKTREES_TARGETED_UPDATE" not in installer.read_text(encoding="utf-8"):
         raise ValueError("Prepared engine installer does not support runtime-only repair")
 
@@ -78,7 +92,10 @@ def fresh_engine_plan(source: Path, prepared):
         )
     action = "repair" if root.exists() else "install"
     if action == "repair":
-        entry = prepared.payload / "scripts" / ("install.ps1" if os.name == "nt" else "install.sh")
+        entry, _argument = engine_installer(
+            prepared.payload, "windows" if os.name == "nt" else "posix",
+            prepared=prepared.install_source is not None,
+        )
         if "repair" not in entry.read_text(encoding="utf-8"):
             raise ValueError("Selected native engine lacks independent repair support")
     step = update_runtime_plan.plan_engine(

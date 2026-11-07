@@ -359,7 +359,10 @@ def apply(request: dict, resolved, workspace: Path, source: Path, rows: dict, re
         if name not in new:
             records[name] = prepare_legacy(resolved, workspace, name)
     engine_record = records["agent-worktrees"]
-    qualify_engine(Path(engine_record["payload"]))
+    qualify_engine(
+        Path(engine_record["payload"]),
+        **({"prepared": True} if "install_source" in engine_record else {}),
+    )
     engine = PreparedRuntimeSource(
         Path(engine_record["payload"]), json.dumps(engine_record["identity"]),
         Path(engine_record["install_source"]) if "install_source" in engine_record else None,
