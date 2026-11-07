@@ -69,7 +69,7 @@ def _small_stage(tmp_path: Path, plugin: str):
     }
     names.update(path.name for path in original.glob("versioned_runtime*.*"))
     if plugin == "agent-logger":
-        names.update(("command_binding.py", "command_lifecycle.py"))
+        names.update(("command_binding.py", "command_lifecycle.py", "windows-scheduled-task.ps1"))
         shutil.copytree(original / "installation-context", scripts / "installation-context")
         shutil.copytree(original / "_lifecycle_human", scripts / "_lifecycle_human")
     for name in names:
