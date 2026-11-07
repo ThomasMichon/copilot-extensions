@@ -76,8 +76,9 @@ receiver/storage discovery and a trusted policy/profile/source resolver.
 The source attachment and full native baseline must match; complete Fleet
 preview/submission frames fit before retention. Lost responses and restart
 recover the same original bytes, while exact submission and original receipts
-remain separate. Bodyless votes stay bodyless; automatic owned/legacy edits
-refuse pending their scoped/native identity binding. This is optional source
+remain separate. Bodyless votes stay bodyless; baseline receivers refuse
+automatic owned/legacy edits. The separate optional extension below consumes
+their scoped/native identity binding. This is optional source
 integration, not normal host enrollment, another publisher's adoption or
 installed/provider qualification.
 
@@ -87,8 +88,17 @@ identity through the same owner's confirmed scoped native receipts and exact
 baseline, or allocates a first identity for an explicitly selected genuinely
 legacy target. Unknown/conflicting histories and unbound outer markers refuse.
 The [owner-store reference](../../../plugins/agent-pull-requests/docs/review-owner-store.md#optional-pre-approval-selection-retention)
-owns this API. It does not activate edits in the current receiver, change its
-strict capability declaration, enroll hosts or adopt other publishers.
+owns this API. The optional
+[selected-edit receiver extension](../../../plugins/agent-pull-requests/docs/workspace-integration.md#optional-selected-edits)
+binds that library through the existing CLI/native/Fleet/Gateway path with
+default-off trusted-host selection and a separate additive capability.
+It preserves the exact strict baseline declaration and prior fresh clients;
+it does not enroll normal hosts or adopt other publishers.
+The finite consumer source merged in #11381. Its coupled seven-file packet
+passes 250 cases, including 17 actual native/Gateway CLI edit-consumer cases;
+the earlier #11374 library packet passes 150, including 20 focused edit cases.
+These overlap and do not qualify live providers, installed hosting or other
+publication surfaces.
 
 ## Remaining qualification
 

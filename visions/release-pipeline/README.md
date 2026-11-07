@@ -3,7 +3,7 @@
 - **Subject:** continuous publication of development snapshots and their artifacts
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-10-30
+- **Last revised:** 2026-11-07
 - **Reality docs:** [`docs/pipelines.md`](../../docs/pipelines.md) ·
   [`docs/patterns/dev-main-promotion-pipeline.md`](../../docs/patterns/dev-main-promotion-pipeline.md)
 
@@ -233,6 +233,14 @@ security policy intact, then launch the installed entry points from the
 constructed environments. A declaration-age audit, a first-party wheel build,
 an import from the source checkout or an already-populated environment cannot
 substitute for that proof.
+
+For the Manager's interactive front door, installed-entry qualification includes
+actual installation with a representative adopted harness repository, invocation
+through its generated project binstub, and a real terminal that renders the TUI
+and responds to input. Construction, a version query or a live process alone is
+not readiness. Failed, timed-out, skipped, missing or stale installed-launch
+evidence prevents promotion of that candidate. The fixture remains isolated
+from operator state and retires its own processes through their existing owners.
 
 Qualification covers the complete inventory, including standalone and selected
 optional runtime environments. Unknown owners, missing platform/profile results,

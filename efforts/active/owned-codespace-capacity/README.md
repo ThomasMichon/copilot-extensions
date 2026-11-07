@@ -49,9 +49,10 @@ The proposal extends the vision's independent-capacity and sequential-reuse
 intent. It follows the existing configuration layering and optional owner
 composition contracts, not the unwired full-publication inventory foundation.
 The reviewed proposal, admission source, released-only lease receiver and first
-stopped-venue sequential-reuse consumer are merged. Release and selected
-installed/live consumer qualification remain open, as does generation-qualified
-recovery after an unpersisted shared-return acknowledgement.
+stopped-venue sequential-reuse consumer are merged and released. Selected
+installed/live consumer qualification remains open. Generation-qualified recovery
+after an unpersisted shared-return acknowledgement is also merged and released;
+its selected-consumer acceptance remains open.
 
 ## Request
 
@@ -98,7 +99,7 @@ and existing resource custody.
 - [x] Update the owning README, configuration reference and lifecycle/borrow skills, then publish and steward the complete reuse flow through merge. (#11319; installed/live acceptance remains Phase 4)
 
 ### Phase 4 - Qualify release and selected consumers
-- [ ] Verify promoted source inclusion without treating dev ancestry as release proof.
+- [x] Verify promoted source inclusion without treating dev ancestry as release proof. (Main `084f535ffff0d6f84bbb410bd68402caa706b983`, successful promotion `42410743100`; exact Worktrees source tree and Codespaces feature bytes, only generated fallback-version difference)
 - [ ] Qualify or explicitly transfer generation-qualified recovery after an unpersisted shared-return ACK (#11343); native ledger retirement alone never closes this gate.
 - [ ] Exercise the installed read-only admission consumer and a separately authorized existing-venue sequential-use flow; retain current owners, unknown effects and cleanup obligations.
 - [ ] Resolve or transfer every validation gate to a named tracked objective before marking this effort Done.
@@ -106,8 +107,8 @@ and existing resource custody.
 ### Phase 4a - Review then prove generation-qualified return recovery
 - [x] Review the receiver-first recovery proposal below before implementation. (#11355; #11343 remains the recovery objective)
 - [x] Expand only the existing native lease receiver, advertise selected-runtime support, and preserve the legacy baseline; merge its focused parser/store/compaction proof before migrating callers. (#11359; source-only, selected installed/live gates remain)
-- [ ] Capture the original generation before return and conditionally consume receiver-owned evidence through the existing return operation; unknown or unsupported evidence retains custody.
-- [ ] Prove interrupted return, successor preservation, bounded evidence eviction, compaction/GC and mixed-version refusal through the real native CLI and Codespaces consumer.
+- [x] Capture the original generation before return and conditionally consume receiver-owned evidence through the existing return operation; unknown or unsupported evidence retains custody. (#11364; source-only)
+- [x] Prove interrupted return, successor preservation, bounded evidence eviction, compaction/GC and mixed-version refusal through the real native CLI and Codespaces consumer. (#11359 native receiver/store and #11364 separate-runtime CLI with synthetic peer; Windows source evidence, not installed/cross-host/live qualification)
 
 ## Validation Plan
 

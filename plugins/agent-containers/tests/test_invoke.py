@@ -9,11 +9,97 @@ updating, so preferring it made the daemon spawn the wrapper from stale code.
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import subprocess
 import sys
 from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 
+import pytest
+
 from agent_containers import _invoke
+
+
+@pytest.fixture(autouse=True)
+def clear_declared_payload_root(monkeypatch):
+    monkeypatch.delenv("AGENT_CONTAINERS_PAYLOAD_ROOT", raising=False)
+
+
+@pytest.fixture
+def payload_roots(tmp_path, monkeypatch):
+    roots = [tmp_path / name for name in ("declared payload", "build-stage", "generic payload")]
+    shim_name = "agent-containers.cmd" if sys.platform == "win32" else "agent-containers"
+    for root in roots:
+        (root / "bin").mkdir(parents=True)
+        (root / "plugin.json").write_text("{}", encoding="utf-8")
+        shim = root / "bin" / shim_name
+        if sys.platform == "win32":
+            shim.write_bytes(b"@echo off\r\n@echo selected-payload\r\n")
+        else:
+            shim.write_bytes(b'#!/bin/sh\nprintf "selected-payload\\n"\n')
+            shim.chmod(0o700)
+    declared, staged, generic = roots
+    installed = tmp_path / "site-packages" / "agent_containers" / "__init__.py"
+    installed.parent.mkdir(parents=True)
+    installed.write_text("", encoding="utf-8")
+    monkeypatch.setattr(_invoke, "__file__", str(installed))
+    monkeypatch.setenv("AGENT_CONTAINERS_PAYLOAD_ROOT", str(declared))
+    monkeypatch.delenv("COPILOT_PLUGIN_ROOT", raising=False)
+
+    class Distribution:
+        def read_text(self, name):
+            assert name == "direct_url.json"
+            return json.dumps({"url": staged.as_uri()})
+
+    monkeypatch.setattr(_invoke, "distribution", lambda name: Distribution())
+    return declared, staged, generic, shim_name
+
+
+@pytest.mark.parametrize("generic_present", [False, True])
+def test_declared_payload_root_precedes_generic_and_build_source(payload_roots, monkeypatch, generic_present):
+    declared, _staged, generic, shim_name = payload_roots
+    if generic_present:
+        monkeypatch.setenv("COPILOT_PLUGIN_ROOT", str(generic))
+    assert _invoke.payload_root() == declared.resolve()
+    assert _invoke.payload_command_argv() == [str(declared / "bin" / shim_name)]
+
+
+@pytest.mark.parametrize("invalid", ["missing", "not-a-directory", "no-manifest"])
+def test_invalid_declared_payload_cannot_fall_back_to_build_source(payload_roots, monkeypatch, invalid):
+    declared, _staged, _generic, _shim_name = payload_roots
+    target = declared.parent / invalid
+    if invalid == "not-a-directory":
+        target.write_text("not a payload", encoding="utf-8")
+    elif invalid == "no-manifest":
+        target.mkdir()
+    monkeypatch.setenv("AGENT_CONTAINERS_PAYLOAD_ROOT", str(target))
+    with pytest.raises(RuntimeError, match="payload"):
+        _invoke.payload_command_argv()
+
+
+def test_missing_declared_command_cannot_select_another_runtime(payload_roots, monkeypatch):
+    declared, _staged, _generic, shim_name = payload_roots
+    (declared / "bin" / shim_name).unlink()
+    monkeypatch.setattr(_invoke, "module_argv", lambda: pytest.fail("another runtime selected"))
+    with pytest.raises(RuntimeError, match="command|launcher"):
+        _invoke.payload_command_argv()
+
+
+def test_recorded_provider_command_survives_build_source_cleanup(payload_roots):
+    from agent_procutil import no_window_kwargs
+
+    declared, staged, _generic, shim_name = payload_roots
+    command = _invoke.payload_command_argv()
+    shutil.rmtree(staged)
+    assert command == [str(declared / "bin" / shim_name)]
+    if sys.platform == "win32":
+        command = [os.environ["COMSPEC"], "/d", "/c", "call", *command]
+    result = subprocess.run(
+        command, capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "selected-payload"
 
 
 def _make_runtime(root, version, *, win):
@@ -50,8 +136,10 @@ def test_payload_command_argv_prefers_payload_local_shim(tmp_path, monkeypatch):
 
 def test_payload_binstub_returns_none_when_missing(tmp_path, monkeypatch):
     monkeypatch.setattr(_invoke, "payload_root", lambda: tmp_path / "payload")
+    monkeypatch.setattr(_invoke, "module_argv", lambda: ["py", "-m", "agent_containers"])
 
     assert _invoke.payload_binstub() is None
+    assert _invoke.payload_command_argv() == ["py", "-m", "agent_containers"]
 
 
 def test_payload_root_prefers_env_payload_root(monkeypatch, tmp_path):
