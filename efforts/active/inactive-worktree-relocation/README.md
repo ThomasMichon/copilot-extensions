@@ -673,3 +673,21 @@ adopter pilot feedback gates subsequent widening.
   A local test-collection indentation error was corrected without deleting
   assertions before these passing runs. Current source review/CI/merge remain
   mandatory; this does not widen inactive scope or authorize operator effects.
+
+### 2026-11-07 — Qualified first platform and historical receiver root
+- The next completed diagnostics identified unbounded inline POSIX copying and
+  historical no-intent receiver selection. Kept the first complete source slice
+  narrow rather than adding new copy infrastructure: v1 relocation advertises
+  qualified native Windows and explicitly refuses other native platforms before
+  receiving-record/custody operations. The native owned Windows copier retains
+  its deadline and output budgets; bounded POSIX copying/native parity remain
+  open source acceptance gates, not silently enabled support.
+- Existing parent ledgers without a new intent retain their original
+  anchor-derived companion allocation even when the caller supplied no explicit
+  retained path. A real reserved new intent still selects its independently
+  configured original root. No immutable receipt is rewritten.
+- Platform refusal, historical/new intent distinction, existing companion
+  consumers and the actual Windows CLI/roundtrip packet passed **31 controls**.
+  The design and public scope now name this staged platform boundary explicitly.
+  The generic umbrella/effort stay Active; review/CI/merge and subsequent adopter
+  qualification remain separate, with no rollout or broader inactive work.
