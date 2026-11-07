@@ -24,6 +24,9 @@ instruction projection. Refusal preserves the allocated worktree and existing
 recovery protocol rather than allocating another New identity. Each observation
 has its own bounded selection/read/cleanup budget; allocation and preparation
 are not claimed to fit inside either observation's deadline.
+Unconfirmed native cleanup is not an ordinary recoverable preparation refusal:
+the original `OwnedCleanupError` escapes with its process/Job custody and retry
+operation intact, annotated with the already-allocated worktree identity.
 
 `application_admission` selects the existing Machines owner through validated
 same-cell peer launch with retained build identity or the legacy owner's exact

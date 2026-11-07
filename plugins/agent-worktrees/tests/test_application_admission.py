@@ -124,6 +124,50 @@ def test_source_only_or_recovery_has_no_received_application_read(tmp_path, monk
     admission.require_received_applications(_required(_config(tmp_path)), str(tmp_path), preflight)
 
 
+@pytest.mark.parametrize("json_output", [False, True])
+def test_received_cleanup_failure_preserves_custody_and_allocated_identity(tmp_path, monkeypatch, json_output):
+    import time
+    from agent_procutil.owned_process import OwnedCleanupError
+    from agent_worktrees import __main__ as main, resolve_launch_cli, tracking
+    from test_worktree_creation_seed import _create_config, _stub_create_worktree_core_internals
+
+    config = _required(_create_config(tmp_path))
+    _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
+    records = tmp_path / "tracking"
+    monkeypatch.setattr(main.cfg, "tracking_dir", lambda: records)
+    monkeypatch.setattr(admission, "_selected_runtime", lambda **kw: (["owner"], {}))
+    process, job, resource = object(), object(), object()
+    retried = []
+    failure = OwnedCleanupError(
+        process, job, cleanup_resources=(resource,), cleanup_retry=retried.append)
+
+    def observe(argv, *, cwd, **kwargs):
+        if cwd == config.default_repo.anchor:
+            return subprocess.CompletedProcess(argv, 0, json.dumps(_observation(cwd)), "")
+        raise failure
+
+    monkeypatch.setattr(admission, "run_caller_owned", observe)
+    monkeypatch.setattr(main, "_build_launch_cmd", lambda *a, **kw: pytest.fail("unconfirmed cleanup launch"))
+    with pytest.raises(OwnedCleanupError) as caught:
+        args = main.build_parser().parse_args(["resolve", "--new", *(["--json"] if json_output else [])])
+        if json_output:
+            main.cmd_resolve(args)
+        else:
+            resolve_launch_cli._resolve_new_context(resolve_launch_cli.ResolveLaunchContext(config=config, args=args))
+    assert caught.value is failure
+    assert (failure.process, failure.job, failure.cleanup_resources) == (process, job, (resource,))
+    allocated = tracking.list_records(records)
+    assert len(allocated) == 1
+    record = allocated[0]
+    assert failure.worktree == {
+        "id": record.worktree_id, "path": record.worktree_path,
+        "branch": record.branch, "repo": record.repo,
+    }
+    deadline = time.monotonic() + 1
+    failure.retry_cleanup(deadline=deadline)
+    assert retried == [deadline]
+
+
 def test_profile_observation_uses_the_same_budget_and_cannot_start_a_late_owner(tmp_path, monkeypatch):
     from agent_worktrees import copilot_plugin_profile as tool
 

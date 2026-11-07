@@ -33,6 +33,7 @@ from datetime import datetime
 from pathlib import Path
 
 from lazy_cli_dispatch import self_override as _self_override
+from agent_procutil.owned_process import OwnedCleanupError
 
 from . import (
     activity,
@@ -959,6 +960,16 @@ def _create_worktree_core(
         if selection.assignment is not None:
             result["launch"]["profile_assignment"] = profile_assignment.metadata(selection.assignment)
         return result
+    except OwnedCleanupError as exc:
+        exc.worktree = {
+            "id": record.worktree_id, "path": record.worktree_path,
+            "branch": record.branch, "repo": record.repo,
+        }
+        exc.seed_id = seed_id
+        if add_note := getattr(exc, "add_note", None):
+            add_note(f"Worktree {record.worktree_id} was allocated at {record.worktree_path}; "
+                     "cleanup remains unconfirmed. Retain cleanup custody; do not retry New.")
+        raise
     except LaunchSeedStagingFailure:
         raise
     except Exception as exc:
