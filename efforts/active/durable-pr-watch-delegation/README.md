@@ -1009,6 +1009,32 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-11-06 - Retain pre-approval data without execution admission
+
+- The reviewed #11246 refinement now has a finite storage prerequisite:
+  `ReviewSelectionStore` composes over the existing ReplayStore transaction,
+  file and review capacity. Explicit lifecycle adoption fences old strict
+  readers. A bounded original-input digest and stage accompany the single
+  final v2 intent; no second body archive or allocation ledger is introduced.
+- Exact original-key recovery retains the first committed prepared bytes
+  across restart, lost results and changed profile/origin candidates. Existing
+  nonblocking lock contention refuses; callers reconcile that original key
+  after contention clears. Changed source/action/target/draft selection refuses.
+  Preparation cannot inspect an execution operation, start an attempt, retain
+  a native receipt/projection or bind feedback capture. Exact final admission
+  changes only the stage before existing execution/receipt semantics apply.
+- The bounded four-file owner/selection/capture/executor source packet passes
+  180 tests with cleanup verified. Two test assumptions were corrected:
+  alternate source metadata must use the actual shared preparer's matching
+  body, and the existing operation lock refuses contention rather than queues
+  both concurrent callers. Neither required changing the existing lock.
+- This is data-only source support, not automatic GUID allocation, producer
+  capability advertisement, actual approval evidence or installed behavior.
+  Next, compose allocation and retained selection through the existing owner
+  before preview, preserving exact approval/native receipt boundaries.
+  Other publishers, mapping, provider/installed/shadow and full parent
+  Plan/Validation acceptance remain open. No operational effects are granted.
+
 ### 2026-11-06 - Review durable selection before automatic identity allocation
 
 - The finite prepared-source completion journal #11244 actually merged after

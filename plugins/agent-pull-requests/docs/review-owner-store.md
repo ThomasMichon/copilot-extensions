@@ -154,6 +154,43 @@ can expose the adopted contract; data adoption alone advertises no capability
 or installed/provider qualification. Rollback cannot remove
 the extension or downgrade a file with unresolved v2 records.
 
+## Optional pre-approval selection retention
+
+`ReviewSelectionStore(existing_store)` uses the same file, operation lock,
+transaction and review capacity. Its explicit `adopt(lifecycle_checkpoint=...,
+expires_at=..., checkpoint=...)` requires prepared-review adoption and adds
+`review_selection_version: 1`. Old strict envelope and operation readers
+refuse this extension; the existing lifecycle owner must exclude them before
+adoption. No request adopts or downgrades it.
+
+The trusted source owner may call `retain(original, prepared, expires_at=...,
+checkpoint=...)` with a v1 original selection and the actual composed v2
+intent. Non-body selection, source/revision, action order and native targets
+must agree. The owner retains only the original selection's digest and a
+`prepared` stage alongside the single final intent/body and funded eventual
+receipt reservation. It stores no original draft or profile archive.
+`recover(original, ...)` reads that exact retained operation without composing
+again. Changed input refuses; a same-key race or repeated retain returns the
+first committed final bytes, not a later origin/profile's candidate. Existing
+nonblocking lock contention refuses; reconcile the same key after it clears.
+An uncertain commit must be reconciled by that same original key.
+
+This is a **data-only prerequisite**, not automatic GUID allocation, a public
+producer capability or preparation provenance. The caller still supplies the
+already-prepared intent; actual policy/profile/source resolution and preparation
+remain outside the file lock. Allocation and producer integration are separate
+remaining work under the
+[reviewed pre-approval contract](../../../efforts/active/durable-pr-watch-delegation/comment-intent-binding.md#durable-pre-approval-selection-and-allocation).
+
+A retained selection is not execution-admitted. Existing execution inspection,
+attempt, receipt/projection and feedback-capture paths refuse it. Only
+`admit_review()` with that exact final intent changes its stage to `admitted`;
+the operation, GUIDs, body, creation time and reservation remain unchanged.
+That transition is still owner-only data admission, not evidence of approval
+or permission to send. Pending records cannot contain attempts or receipts.
+Legacy operations and unknown fences remain unchanged, and preparation itself
+does not ACK, emit Dispatch, advance feedback or perform native IO.
+
 ## Explicit remaining boundary
 
 This is **not a backend executor**. It does not perform actual write-credential/
