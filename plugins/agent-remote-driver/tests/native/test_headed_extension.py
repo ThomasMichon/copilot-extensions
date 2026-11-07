@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -92,6 +93,68 @@ def _logs(directory):
     )
 
 
+@pytest.mark.parametrize("configured", [False, True])
+def test_native_private_mux_executes_the_requested_pane(tmp_path, monkeypatch, configured):
+    if os.name != "nt" or os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1":
+        pytest.skip("Explicitly select the isolated Windows PSMux lane")
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
+    from headed_mux_fixture import FixtureMux
+    binary = os.environ.get("PSMUX_TEST_BIN") or shutil.which("psmux.exe")
+    assert binary
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".psmux.conf").write_text("set -g warm off\n", encoding="utf-8")
+    marker, release = tmp_path / "started.txt", tmp_path / "release.txt"
+    pane = tmp_path / "pane.py"
+    pane.write_text(
+        "import os,time\nfrom pathlib import Path\n"
+        "Path(os.environ['DRIVER_FIXTURE_MARKER']).write_text(str(os.getpid()),encoding='utf-8')\n"
+        "while not Path(os.environ['DRIVER_FIXTURE_RELEASE']).exists(): time.sleep(0.05)\n",
+        encoding="utf-8",
+    )
+    fixture = FixtureMux(binary, home, {
+        **os.environ, "HOME": str(home), "USERPROFILE": str(home), "PSMUX_NO_WARM": "1",
+        "DRIVER_FIXTURE_MARKER": str(marker), "DRIVER_FIXTURE_RELEASE": str(release),
+    })
+    if configured:
+        fixture.environment.update(
+            PSMUX_CONFIG_FILE=os.devnull, PSMUX_DATA_DIR=str(tmp_path / "psmux-data"),
+        )
+    identity = None
+    try:
+        assert fixture.query("has-session", "-t", fixture.target).returncode == 1
+        launched = fixture.query(
+            "new-session", "-d", "-s", fixture.target, "-c", str(tmp_path), "--",
+            sys.executable, "-I", "-B", str(pane),
+        )
+        assert launched.returncode == 0, launched.stderr
+        observed = fixture.query(
+            "display-message", "-p", "-t", fixture.target, "#{session_id}:#{session_created}|#{pane_id}",
+        )
+        assert observed.returncode == 0 and "|" in observed.stdout
+        identity = observed.stdout.strip()
+        deadline = time.monotonic() + 10
+        while not marker.is_file() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert marker.is_file(), fixture.query("capture-pane", "-p", "-t", fixture.target).stdout
+        pid = int(marker.read_text(encoding="utf-8"))
+        assert pid_alive(pid)
+        release.write_text("release", encoding="utf-8")
+        while pid_alive(pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not pid_alive(pid)
+    finally:
+        if fixture.query("has-session", "-t", fixture.target).returncode == 0:
+            observed = fixture.query(
+                "display-message", "-p", "-t", fixture.target, "#{session_id}:#{session_created}|#{pane_id}",
+            )
+            if observed.returncode == 1:
+                assert fixture.query("has-session", "-t", fixture.target).returncode == 1
+            else:
+                assert identity is not None and observed.returncode == 0 and observed.stdout.strip() == identity
+                assert fixture.query("kill-session", "-t", fixture.target).returncode == 0
+
+
 def test_native_launch_scoped_observer_needs_no_privileged_permission(tmp_path, offline_cli):
     plugin = tmp_path / "plugin"
     (plugin / "extensions" / "driver-fixture").mkdir(parents=True)
@@ -148,9 +211,8 @@ async def test_native_headed_sdk_uses_common_ws_tcp_broker_and_preserves_identit
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
     from headed_mux_fixture import FixtureMux
     binary = os.environ.get("PSMUX_TEST_BIN") or shutil.which("psmux.exe")
-    shell = shutil.which("pwsh.exe") or shutil.which("pwsh")
-    if os.name != "nt" or not binary or not shell:
-        pytest.skip("This native headed fixture selects an existing Windows PSMux and PowerShell")
+    if os.name != "nt" or not binary:
+        pytest.skip("This native headed fixture selects an existing Windows PSMux")
     (offline_cli.home / "config.json").write_text(
         json.dumps({"trustedFolders": [str(offline_cli.workspace)]}), encoding="utf-8",
     )
@@ -202,41 +264,20 @@ async def test_native_headed_sdk_uses_common_ws_tcp_broker_and_preserves_identit
         "PSMUX_NO_WARM": "1", "WORKTREE_PANE_MIN_RUNTIME": "0",
         "COPILOT_DRIVER_HEADED_BINDING": json.dumps(backend.declaration()),
     }
-    root = Path(__file__).resolve().parents[4]
-    wrapper = root / "worktree-manager" / "bin" / "pane-wrapper.ps1"
-    native_argv = tmp_path / "native-argv.json"
-    native_argv.write_text(json.dumps([
+    native_argv = [
         offline_cli.executable, "-i", prompts[0], "--session-id", native, "--experimental",
         "--screen-reader", "--plugin-dir", str(plugin), "--no-auto-update", "--disable-builtin-mcps",
         "--no-custom-instructions", "--no-color", "--no-ask-user", "--log-dir", str(offline_cli.logs),
-    ]), encoding="utf-8")
-    pane = tmp_path / "fixture-pane.ps1"
-    pane.write_text(
-        "$ErrorActionPreference='Stop'\n"
-        "try {\n"
-        "  $nativeArgs = @(Get-Content -Raw -LiteralPath $env:DRIVER_FIXTURE_ARGV | ConvertFrom-Json)\n"
-        "  & $env:DRIVER_FIXTURE_WRAPPER @nativeArgs\n"
-        "  [IO.File]::WriteAllText($env:DRIVER_FIXTURE_LOG, \"pane exit: $LASTEXITCODE\")\n"
-        "  exit $LASTEXITCODE\n"
-        "} catch {\n"
-        "  [IO.File]::WriteAllText($env:DRIVER_FIXTURE_LOG, $_.ToString())\n"
-        "  exit 3\n"
-        "}\n", encoding="utf-8",
-    )
-    pane_log = tmp_path / "pane-result.txt"
-    assert wrapper.is_file(), "The real pane wrapper must exist before native creation"
-    environment.update(DRIVER_FIXTURE_ARGV=str(native_argv), DRIVER_FIXTURE_WRAPPER=str(wrapper),
-                       DRIVER_FIXTURE_LOG=str(pane_log))
+    ]
     fixture = FixtureMux(binary, offline_cli.home, environment)
     target, query = fixture.target, fixture.query
 
     async def launch():
         absent = await asyncio.to_thread(query, "has-session", "-t", target)
         assert absent.returncode == 1, "The fixture target must be absent before creation"
-        # PSMux joins pane argv; match the caller's existing single-quoted file boundary.
         result = await asyncio.to_thread(
             query, "new-session", "-d", "-s", target, "-c", str(offline_cli.workspace),
-            Path(shell).name, "-NoProfile", "-File", "'" + str(pane).replace("'", "''") + "'",
+            "--", *native_argv,
         )
         assert result.returncode == 0, result.stdout + result.stderr
         observed = await asyncio.to_thread(
@@ -255,7 +296,6 @@ async def test_native_headed_sdk_uses_common_ws_tcp_broker_and_preserves_identit
                 await asyncio.sleep(0.05)
             assert backend.bound.is_set(), (
                 _logs(offline_cli.logs)
-                + (pane_log.read_text(encoding="utf-8") if pane_log.is_file() else "Pane did not report an exit")
                 + (await asyncio.to_thread(query, "capture-pane", "-p", "-t", target)).stdout
             )
             assert backend.native_pid and pid_alive(backend.native_pid)
@@ -352,9 +392,8 @@ async def test_native_headed_coordinator_owns_the_common_broker_in_the_original_
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
     from headed_mux_fixture import FixtureMux
     binary = os.environ.get("PSMUX_TEST_BIN") or shutil.which("psmux.exe")
-    shell = shutil.which("pwsh.exe") or shutil.which("pwsh")
-    if os.name != "nt" or not binary or not shell:
-        pytest.skip("The native coordinator fixture requires existing Windows PSMux and PowerShell")
+    if os.name != "nt" or not binary:
+        pytest.skip("The native coordinator fixture requires existing Windows PSMux")
     if delivery == "bridge-client" and not shutil.which("node"):
         pytest.skip("Node is required for the retained Bridge client")
     (offline_cli.home / "config.json").write_text(
@@ -365,7 +404,6 @@ async def test_native_headed_coordinator_owns_the_common_broker_in_the_original_
     prompts = ['coordinator original\n"quotes" & $literal', "coordinator second"]
     receipt_nonce = uuid4().hex + uuid4().hex
     state_file = tmp_path / "host.json"
-    arguments = tmp_path / "coordinator-argv.json"
     coordinator_argv = [
         sys.executable,
         "-m", "agent_remote_driver.session_host", "--mode", "headed",
@@ -411,19 +449,10 @@ async def test_native_headed_coordinator_owns_the_common_broker_in_the_original_
             "sys.exit(code if code or certain else 3)",
             str(manifest),
         ]
-    arguments.write_text(json.dumps(coordinator_argv[1:]), encoding="utf-8")
-    pane = tmp_path / "coordinator-pane.ps1"
-    pane.write_text(
-        "$ErrorActionPreference='Stop'\n"
-        "$childArgs = @(Get-Content -Raw -LiteralPath $env:DRIVER_FIXTURE_ARGV | ConvertFrom-Json)\n"
-        "& $env:DRIVER_FIXTURE_PYTHON @childArgs\n"
-        "exit $LASTEXITCODE\n", encoding="utf-8",
-    )
     fixture = FixtureMux(binary, offline_cli.home, {
         **offline_cli.env, "HOME": str(offline_cli.home), "USERPROFILE": str(offline_cli.home),
         "PSMUX_DATA_DIR": str(tmp_path / "psmux-data"), "PSMUX_CONFIG_FILE": os.devnull,
-        "PSMUX_NO_WARM": "1", "DRIVER_FIXTURE_ARGV": str(arguments),
-        "DRIVER_FIXTURE_PYTHON": coordinator_argv[0],
+        "PSMUX_NO_WARM": "1",
         "AGENT_BRIDGE_SESSION_HOST_NONCE": receipt_nonce,
     })
     target, query = fixture.target, fixture.query
@@ -433,7 +462,7 @@ async def test_native_headed_coordinator_owns_the_common_broker_in_the_original_
         assert absent.returncode == 1
         launched = await asyncio.to_thread(
             query, "new-session", "-d", "-s", target, "-c", str(offline_cli.workspace),
-            Path(shell).name, "-NoProfile", "-File", "'" + str(pane).replace("'", "''") + "'",
+            "--", *coordinator_argv,
         )
         assert launched.returncode == 0, launched.stderr
         observed = await asyncio.to_thread(

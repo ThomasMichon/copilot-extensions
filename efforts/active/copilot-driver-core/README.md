@@ -1582,3 +1582,56 @@ only transient Windows open contention; complete malformed records still fail.
 Each recovery leg owns a distinct private mux target while retaining the
 same native conversation. Immediate reuse of a retiring mux name is not
 silently treated as qualified.
+
+### 2026-11-07 - Native Python-owner checkpoint merged; parent continues
+
+#11260 merged at 06:05:03 UTC as
+`7ce12dc8d83f7fb746bbb65fe50441a106b86a59`, after Copilot review `5810434897`
+approved exact head `9744d817f999cecbc8754afb47e7874ddcee6b1f`, both review
+threads were resolved and required
+[CI 42344711712](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42344711712)
+passed. The managed merge used the normal Maintainer review exception, not
+a CI bypass. Re-read the parent Plan and Validation Plan; the partial native
+checkpoint does not close their full caller/lifetime/receiving items.
+
+Native pull-forward first auto-aborted the individual replay over the merged
+squash. A tree-identical local fixup of the two owned commits then allowed
+normal synchronization. Continue the real native input/auth-wait observation
+and original-owner same-session controlled-recovery leaf, preserving its
+unsupported/unknown states and the remaining caller matrix. No deployment
+or receiving-acceptance transfer is inferred from this merge.
+
+### 2026-11-07 - Native input fencing and fixture execution checkpoint
+
+The focused Worktrees Python-owner packet passes both controls in 58.24
+seconds (128.02 seconds including managed preparation and cleanup), within
+the unchanged 180-second item, 300-second group and 600-second aggregate
+limits. Literal native terminal input stays in the original conversation,
+fences the old broker with error `-32001`, and never delivers the refused
+prompt. An explicit stop through the original owner yields a certain terminal
+receipt; native resume restores the same conversation under a new broker.
+Exact user/provider counts, live PID/birth agreement, correlated exit codes
+and identity-pinned fixture cleanup pass in both controls.
+
+Fixture diagnosis found two pre-native failures: settings scrubbing removed
+the runner's registry/lifecycle context, and a Windows venv redirector could
+hang before script entry. The fixture now preserves `COPILOT_EXTENSIONS_*`
+context and uses the physical base interpreter with the same managed test
+packages. Private stderr capture identifies original-owner failures without
+printing broker nonces. No production launch, credential or admission policy
+was changed.
+
+The unchanged Driver packet passes 20 controls, with the unrelated standalone
+observer deselected, in 45.12 seconds (65.11 seconds including preparation
+and cleanup). Thirteen unit isolation controls and seven native pane,
+SDK/broker and coordinator controls exercise canonical private mux routing,
+raw child argv and exact retirement. The native SDK/coordinator fixtures now
+launch their actual target directly rather than through a Manager wrapper;
+this evidence does not qualify that wrapper.
+
+This test-only refinement is below architectural altitude. Unit and real
+consumer/native lanes were exercised; first-install clean-room and external
+venue qualification are not applicable to these local Windows fixture
+changes. Installer, copied setup, full Manager/embody, auth-wait, physical
+keyboard, caller-Job lifetime and receiving/skew acceptance remain separate
+open gates. The parent Plan and Validation Plan remain unchanged and Active.

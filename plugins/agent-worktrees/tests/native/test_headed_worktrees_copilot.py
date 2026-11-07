@@ -10,6 +10,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import sysconfig
 import threading
 import time
 from uuid import uuid4
@@ -17,6 +18,7 @@ from uuid import uuid4
 import pytest
 
 from agent_procutil import no_window_kwargs
+from agent_procutil._interpreter import physical_executable
 from agent_procutil.owned_process import run_caller_owned
 from agent_remote_driver.session_host.client import SessionHostClient
 from agent_remote_driver.session_host.osutil import pid_alive, process_start_time
@@ -33,13 +35,18 @@ pytestmark = [
 def _until(check, label, timeout=30, diagnostic=None):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if result := check():
+        try:
+            result = check()
+        except AssertionError as error:
+            raise AssertionError(str(error) + ("\n" + diagnostic() if diagnostic else "")) from error
+        if result:
             return result
         time.sleep(0.05)
     raise AssertionError(label + ("\n" + diagnostic() if diagnostic else ""))
 
 
-def test_worktrees_native_fresh_and_resume_keep_one_history_and_real_receipts(tmp_path):
+@pytest.mark.parametrize("control", ["broker", "native-input"])
+def test_worktrees_native_fresh_and_resume_keep_one_history_and_real_receipts(tmp_path, control):
     from plugin_test_command_safety import private_mux_args
 
     executable = os.environ.get("COPILOT_NATIVE_TEST_EXECUTABLE")
@@ -47,6 +54,9 @@ def test_worktrees_native_fresh_and_resume_keep_one_history_and_real_receipts(tm
     shell = shutil.which("pwsh")
     assert executable and Path(executable).is_absolute() and Path(executable).is_file()
     assert binary and shell, "Select existing native Copilot, PSMux and PowerShell"
+    owner_python = physical_executable(getattr(sys, "_base_executable", sys.executable))
+    assert owner_python
+    site_packages = sysconfig.get_paths()["purelib"]
     prefix = [sys.executable, "-I", "-B", "-X", "utf8"]
     home, checkout = tmp_path / "copilot-home", tmp_path / "checkout"
     home.mkdir()
@@ -78,7 +88,7 @@ def test_worktrees_native_fresh_and_resume_keep_one_history_and_real_receipts(tm
     provider.daemon_threads = True
     environment = {
         key: value for key, value in os.environ.items()
-        if not key.startswith(("COPILOT_", "OTEL_"))
+        if (key.startswith("COPILOT_EXTENSIONS_") or not key.startswith(("COPILOT_", "OTEL_")))
         and key not in {
             "GH_TOKEN", "GITHUB_TOKEN", "GITHUB_API_TOKEN", "TMUX", "TMUX_PANE",
             "PSMUX_PANE", "PSMUX_SESSION", "PSMUX_TARGET_SESSION", "PSMUX_SESSION_NAME",
@@ -97,6 +107,7 @@ def test_worktrees_native_fresh_and_resume_keep_one_history_and_real_receipts(tm
     mux_directory = tmp_path / "discovery"
     mux_directory.mkdir()
     namespace = private_mux_args(tmp_path)
+    environment["DRIVER_FIXTURE_MUX_NAMESPACE"] = namespace[1]
     compiler = next((path for framework in ("Framework64", "Framework") if (
         path := Path(os.environ.get("WINDIR", "")) / "Microsoft.NET" /
         framework / "v4.0.30319" / "csc.exe"
@@ -121,7 +132,9 @@ class Mux {
             return 2;
         using (var child = Process.Start(new ProcessStartInfo {
             FileName = BINARY,
-            Arguments = String.Join(" ", new[] { "-L", NAMESPACE }.Concat(args).Select(Quote)),
+            Arguments = String.Join(" ", new[] {
+                "-L", Environment.GetEnvironmentVariable("DRIVER_FIXTURE_MUX_NAMESPACE")
+            }.Concat(args).Select(Quote)),
             UseShellExecute = false, CreateNoWindow = true
         })) {
             if (!child.WaitForExit(5000)) { child.Kill(); child.WaitForExit(); return 2; }
@@ -129,8 +142,7 @@ class Mux {
         }
     }
 }
-'''.replace("BINARY", '@"' + str(binary).replace('"', '""') + '"')
-        .replace("NAMESPACE", '@"' + namespace[1] + '"'),
+'''.replace("BINARY", '@"' + str(binary).replace('"', '""') + '"'),
         encoding="utf-8",
     )
     compiled = run_caller_owned(
@@ -141,14 +153,22 @@ class Mux {
     environment["PATH"] = os.pathsep.join((str(mux_directory), environment.get("PATH", "")))
     native = str(uuid4())
     prompts = ['Worktrees original\nsingle \' double " & $literal', "fresh broker", "resumed broker"]
+    if control == "native-input":
+        prompts.insert(2, "ISOLATED native keyboard input")
     target = "headed-fixture-" + uuid4().hex
 
     def query(action, *arguments):
-        assert action in {"new-session", "has-session", "display-message", "kill-session", "capture-pane"}
+        assert action in {
+            "new-session", "has-session", "display-message", "kill-session", "capture-pane", "send-keys",
+        }
         assert not any(value in {"-L", "-S", ";", "kill-server", "server"} for value in arguments)
         selector = "-s" if action == "new-session" else "-t"
         assert list(arguments).count(selector) == 1
         assert arguments[arguments.index(selector) + 1] == target
+        if action == "send-keys":
+            assert arguments in (
+                ("-t", target, "-l", "--", prompts[2]), ("-t", target, "Enter"),
+            )
         return subprocess.run(
             [binary, *namespace, action, *arguments], env=environment, cwd=home,
             capture_output=True, text=True, encoding="utf-8", timeout=5, **no_window_kwargs(),
@@ -162,7 +182,21 @@ class Mux {
         assert result.returncode == 0, result.stdout + result.stderr
         return json.loads(result.stdout)
 
-    async def broker(state, *, prompt=None, stop=False):
+    def pane_process():
+        observed = query("display-message", "-p", "-t", target, "#{pane_pid}")
+        if not observed.stdout.strip().isdigit():
+            return observed.stderr
+        pid = int(observed.stdout.strip())
+        detail = run_caller_owned(
+            [shell, "-NoProfile", "-Command",
+             f"Get-CimInstance Win32_Process -Filter 'ProcessId={pid}' | "
+             "Select-Object ProcessId,ParentProcessId,CommandLine | ConvertTo-Json -Compress"],
+            env=environment, cwd=home, timeout=10,
+            max_stdout_bytes=8192, max_stderr_bytes=4096,
+        )
+        return detail.stdout + detail.stderr
+
+    async def broker(state, *, prompt=None, stop=False, refused=False):
         client = await SessionHostClient.connect(port=state["port"])
         try:
             hello = await client.attach(nonce=state["nonce"].encode())
@@ -184,7 +218,10 @@ class Mux {
                     reply = json.loads(frame)
                     await client.ack(cursor)
                     if reply.get("id") == request_id:
-                        assert "result" in reply, reply
+                        if request_id == 2 and refused:
+                            assert reply.get("error", {}).get("code") == -32001, reply
+                        else:
+                            assert "result" in reply, reply
                         break
             await client.detach(reapable=True)
         finally:
@@ -207,6 +244,8 @@ class Mux {
         )
         record = Path(initialized)
         for leg in ("fresh", "resume"):
+            namespace = private_mux_args(tmp_path)
+            environment["DRIVER_FIXTURE_MUX_NAMESPACE"] = namespace[1]
             target = "headed-fixture-" + uuid4().hex
             plan = runtime(
                 "import json,sys;from pathlib import Path;from uuid import uuid4;"
@@ -229,11 +268,16 @@ class Mux {
             result_file = tmp_path / (leg + "-result.txt")
             owner_log = tmp_path / (leg + "-owner.log")
             driver.write_text(
-                "import contextlib,sys,traceback\nfrom pathlib import Path\n"
+                "import contextlib,ctypes,msvcrt,os,site,sys,traceback\nfrom pathlib import Path\n"
                 f"with Path({str(owner_log)!r}).open('w',encoding='utf-8') as log,"
                 "contextlib.redirect_stderr(log):\n"
                 "  try:\n"
+                "    os.dup2(log.fileno(),2)\n"
+                "    set_stderr=ctypes.windll.kernel32.SetStdHandle\n"
+                "    set_stderr.argtypes=[ctypes.c_ulong,ctypes.c_void_p]\n"
+                "    assert set_stderr(-12,msvcrt.get_osfhandle(2))\n"
                 "    log.write('original owner started\\n');log.flush()\n"
+                f"    site.addsitedir({site_packages!r})\n"
                 "    from agent_worktrees import launch_seed_exec,launch_execution\n"
                 f"    code=launch_seed_exec.launch(Path({str(record)!r}),{[executable, *native_args]!r},"
                 f"invoke=True,seed_id={plan['seed']!r},"
@@ -244,23 +288,10 @@ class Mux {
                 "sys.exit(code)\n",
                 encoding="utf-8",
             )
-            pane = tmp_path / (leg + ".ps1")
-            pane_log = tmp_path / (leg + "-pane.log")
-            quote = lambda value: "'" + str(value).replace("'", "''") + "'"
-            pane.write_text(
-                "$ErrorActionPreference='Stop'\ntry {\n"
-                f"  [IO.File]::WriteAllText({quote(pane_log)},'pane started')\n"
-                f"  & {quote(sys.executable)} -I -B {quote(driver)}\n"
-                "  exit $LASTEXITCODE\n"
-                "} catch {\n"
-                f"  [IO.File]::AppendAllText({quote(pane_log)},$_.ToString())\n"
-                "  exit 3\n}\n",
-                encoding="utf-8",
-            )
             assert query("has-session", "-t", target).returncode == 1
             launched = query(
                 "new-session", "-d", "-s", target, "-c", str(checkout),
-                Path(shell).name, "-NoProfile", "-File", quote(pane),
+                "--", owner_python, "-I", "-B", str(driver),
             )
             assert launched.returncode == 0, launched.stderr
             observed = query(
@@ -285,11 +316,20 @@ class Mux {
                 bound, f"{leg}: Worktrees launch did not bind the common broker",
                 diagnostic=lambda: (
                     query("capture-pane", "-p", "-t", target).stdout[-8192:]
+                    + "\n" + pane_process()
+                    + "\n" + json.dumps([
+                        {key: value for key, value in json.loads(
+                            path.read_text(encoding="utf-8")
+                        ).items() if key in {
+                            "state", "pid", "child_pid", "child_exit_code", "control_error",
+                            "host_process_start_time", "child_process_start_time",
+                        }}
+                        for path in attempt.glob("*/headed.json")
+                    ])
                     + "\n" + query(
                         "display-message", "-p", "-t", target,
                         "#{pane_pid}|#{pane_current_command}|#{pane_start_command}|#{pane_dead}",
                     ).stdout[-4096:]
-                    + "\n" + (pane_log.read_text(encoding="utf-8") if pane_log.exists() else "pane not started")
                     + "\n" + (owner_log.read_text(encoding="utf-8") if owner_log.exists() else "owner not started")
                     + "\n" + "\n".join(
                         path.read_text(encoding="utf-8", errors="replace")[-4096:]
@@ -310,13 +350,24 @@ class Mux {
                     if line.endswith("\n")
                 ]
 
-            expected_before = 1 if leg == "fresh" else 2
+            expected_before = 1 if leg == "fresh" else len(prompts) - 1
             _until(
                 lambda: sum(event["type"] == "assistant.turn_end" for event in messages()) >= expected_before,
                 f"{leg}: native history did not restore or finish its original seed",
             )
-            asyncio.run(broker(state, prompt=prompts[1 if leg == "fresh" else 2]))
+            asyncio.run(broker(state, prompt=prompts[1] if leg == "fresh" else prompts[-1]))
             expected = prompts[:2] if leg == "fresh" else prompts
+            if control == "native-input" and leg == "fresh":
+                assert query("send-keys", "-t", target, "-l", "--", prompts[2]).returncode == 0
+                assert query("send-keys", "-t", target, "Enter").returncode == 0
+                _until(
+                    lambda: sum(event["type"] == "assistant.turn_end" for event in messages()) >= 3,
+                    "Native keyboard input did not complete in the original conversation",
+                    diagnostic=lambda: query("capture-pane", "-p", "-t", target).stdout[-8192:],
+                )
+                asyncio.run(broker(state, prompt="MUST NOT ACCEPT AFTER NATIVE INPUT", refused=True))
+                assert pid_alive(state["child_pid"]) and pid_alive(state["pid"])
+                expected = prompts[:3]
             assert [event["data"]["content"] for event in messages() if event["type"] == "user.message"] == expected
             execution_files = list(attempt.glob("*.execution.json"))
             executions = [
@@ -360,7 +411,7 @@ class Mux {
         assert (
             histories[0]["child_pid"], histories[0]["child_process_start_time"],
         ) != (histories[1]["child_pid"], histories[1]["child_process_start_time"])
-        assert len(requests) == 3
+        assert len(requests) == len(prompts)
         assert list((home / "session-state").glob("*/events.jsonl")) == [
             home / "session-state" / native / "events.jsonl",
         ]
