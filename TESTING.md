@@ -174,6 +174,20 @@ must not substitute for bounded tests and timely CI feedback.
 
 ## Focused packet catalog
 
+`python-selection-native.yml` supplies real Python 3.9 and supported Python
+side by side on a disposable hosted Windows runner. Its `TEST_PYTHON39` input
+names the existing 3.9 executable explicitly and is version-checked before
+selection; an invalid supplied prerequisite fails instead of skipping.
+The existing Worktrees first-touch admission test reaches its isolated binding
+receipt through PS5.1 and pwsh. The Procutil `real_python39` cases use the
+unchanged daemon helper with actual PATH discovery, covering old-first/
+supported-later selection and unsupported-only refusal, native Job adoption
+and original helper cleanup. Both groups must produce all six passing JUnit
+cases without skips. The synthetic version controls remain separate.
+This is source-consumer qualification, not an installed runtime, public PATH
+repair, a Python-free OS, production daemon launch or full setup acceptance.
+The ordinary focused hosted controller does not provision this old interpreter.
+
 Dispatch's `--test-file tests/test_pool_startup_client.py --test-file
 tests/test_ordinary_pool_startup.py --test-file tests/test_workspace_continuity.py
 --test-file tests/test_pool_placement_client.py --allow-explicit-tiers` packet
