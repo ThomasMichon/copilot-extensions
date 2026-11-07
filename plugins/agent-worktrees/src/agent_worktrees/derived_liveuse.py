@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import os
 import secrets
+import sys
 from pathlib import Path
 
 
@@ -28,6 +29,9 @@ def blocker(target: str | os.PathLike[str], *, proc_root: Path = Path("/proc")) 
     from . import procs
 
     root = os.path.realpath(target)
+    own_image = os.path.realpath(sys.executable) if sys.executable else ""
+    if own_image and procs._is_under(own_image, root):
+        return f"this process runs an executable from it: {own_image}"
     if found := procs.checkout_retirement_blocker(root):
         return found
     if os.name != "nt":
@@ -51,7 +55,7 @@ def _zombie(entry: Path) -> bool:
 def _posix_census(root: str, proc_root: Path) -> str | None:
     from . import procs
 
-    uid, me = os.getuid(), os.getpid()
+    uid = os.getuid()
     try:
         entries = [entry for entry in proc_root.iterdir() if entry.name.isdigit()]
     except OSError as exc:
@@ -59,8 +63,6 @@ def _posix_census(root: str, proc_root: Path) -> str | None:
     users: list[str] = []
     opaque: list[str] = []
     for entry in entries:
-        if int(entry.name) == me:
-            continue
         try:
             if entry.stat().st_uid != uid or _zombie(entry):
                 continue

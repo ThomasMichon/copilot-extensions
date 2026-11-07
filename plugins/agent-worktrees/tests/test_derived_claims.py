@@ -265,6 +265,16 @@ def test_posix_census_refuses_uninspectable_own_process(monkeypatch, tmp_path):
     assert "cannot inspect" in derived_liveuse.blocker(target, proc_root=proc_root)
 
 
+def test_live_use_includes_this_process_executable(monkeypatch, tmp_path):
+    from agent_worktrees import derived_liveuse, procs
+
+    monkeypatch.setattr(procs, "checkout_retirement_blocker", lambda root: None)
+    target = tmp_path / "cache"
+    (target / "bin").mkdir(parents=True)
+    monkeypatch.setattr(derived_liveuse.sys, "executable", str(target / "bin" / "python"))
+    assert "this process runs an executable" in derived_liveuse.blocker(target)
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows in-use enforcement")
 def test_windows_reclaim_keeps_dir_held_open(tmp_path):
     target = tmp_path / "cache"
