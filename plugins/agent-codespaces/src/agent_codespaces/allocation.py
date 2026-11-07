@@ -145,18 +145,54 @@ def intended_cores(config, repo: str) -> int:
         return 0
 
 
-def plan_creation(repo: str, config, account: str, environment: dict) -> AllocationDecision:
+def plan_creation(
+    repo: str, config, account: str, environment: dict, *,
+    branch: str | None = None, new_cores: int | None = None,
+    budget_cores: int | None = None, stale_after: float | None = None,
+    allow_sequential: bool = True,
+) -> AllocationDecision:
     """Use one pinned admission path for initial creation and quota retries."""
     from . import pool
     from .driving_worktrees import resolve_current_workstream_box
+    from . import coordination, reuse
+    from .worktrees import ContextRefused
+
+    try:
+        local = reuse.local_snapshot()
+    except ContextRefused:
+        raise
+    except RuntimeError:
+        local = None
+    shared = coordination.list_leases(strict=True)
 
     members, budget = pool.build_pool(
         account=account, environment=environment,
         max_owned_codespaces=getattr(config, "max_owned_codespaces", DEFAULT_MAX_OWNED_CODESPACES),
+        leases=list(local.values()) if local is not None else [],
+        l2_leases=shared or {},
+        budget_cores=pool.DEFAULT_BUDGET_CORES if budget_cores is None else budget_cores,
+        stale_after=pool.DEFAULT_STALE_AFTER if stale_after is None else stale_after,
     )
+    requested_cores = intended_cores(config, repo) if new_cores is None else new_cores
+    declared_profile = getattr(config, "repos", {}).get(repo)
+    allow_sequential = allow_sequential and not getattr(declared_profile, "devcontainer_path", None)
+    workstream = resolve_current_workstream_box(members, repo)
+    if workstream:
+        mode = reuse.workstream_mode(workstream, local, shared)
+        if mode == "unknown":
+            return AllocationDecision(
+                action=ALLOC_PRESSURE, codespace=None,
+                reason=f"ownership of workstream venue '{workstream}' is unconfirmed; reconcile its retained obligation",
+            )
+        if mode == "released":
+            workstream = None
     return pool.plan_allocation(
-        members, budget, repo=repo, new_cores=intended_cores(config, repo),
-        workstream_box=resolve_current_workstream_box(members, repo),
+        members, budget, repo=repo,
+        new_cores=requested_cores,
+        workstream_box=workstream,
+        reusable_stopped=reuse.candidates(
+            members, budget, repo, local, shared, branch=branch, new_cores=requested_cores,
+        ) if allow_sequential else (),
     )
 
 
@@ -283,6 +319,7 @@ class AllocationDecision:
     then_codespace: str | None = None
     headroom_cores: int = 0
     needed_cores: int = 0
+    requires_reservation: bool = False
 
     def to_dict(self) -> dict:
         d: dict = {
@@ -305,11 +342,13 @@ def plan_allocation(
     repo: str,
     new_cores: int = 0,
     workstream_box: str | None = None,
+    reusable_stopped: tuple[str, ...] = (),
 ) -> AllocationDecision:
     """Plan within selected-account owned-slot and running-core capacity.
 
     A caller-resolved workstream venue is reused first; waking it needs known
-    available cores but no new owned slot. New creation requires complete
+    available cores but no new owned slot. Qualified returned stopped candidates
+    follow, subject to exclusive reservation by the executor. New creation requires complete
     inventory, a free owned slot and known compute costs. Only core pressure
     can suggest recycling a stale running member; it never treats stopping
     as freeing an owned slot. All acquisition, rescue and reclaim safety gates
@@ -342,6 +381,18 @@ def plan_allocation(
                 ),
                 headroom_cores=headroom if budget.owned_inventory_complete else 0, needed_cores=cost,
             )
+    reusable = next((
+        member for name in reusable_stopped for member in members
+        if member.name == name and member.state == "Shutdown"
+        and budget.owned_inventory_complete and not budget.unknown_cores_count
+        and new_cores > 0 and new_cores <= member.cores <= headroom
+    ), None)
+    if reusable is not None:
+        return AllocationDecision(
+            action=ALLOC_REUSE, codespace=reusable.name,
+            reason=f"released stopped CodeSpace '{reusable.name}' is a reuse candidate; exclusive reservation is required",
+            headroom_cores=headroom, needed_cores=reusable.cores, requires_reservation=True,
+        )
     if not budget.owned_inventory_complete:
         return AllocationDecision(
             action=ALLOC_PRESSURE, codespace=None,

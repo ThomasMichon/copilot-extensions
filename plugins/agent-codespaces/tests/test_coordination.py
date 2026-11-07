@@ -59,6 +59,86 @@ def test_acquire_config_error_degrades_to_unavailable(monkeypatch):
     assert coord.acquire("cs-one", "m/p/w").unavailable
 
 
+@pytest.mark.parametrize("capabilities", [None, [], "lease-acquire-released-only-v1", [1]])
+def test_released_only_missing_or_malformed_support_never_acquires(monkeypatch, capabilities):
+    seen = []
+
+    def run(args, **kwargs):
+        seen.append(args)
+        return _proc(0, json.dumps({
+            "version": 1, "ready": True, "code": "ready", "capabilities": capabilities,
+        }))
+
+    monkeypatch.setattr(coord, "_run", run)
+    result = coord.acquire("cs-one", "m/p/w", released_only=True)
+    assert result.rejected
+    assert "does not support" in result.detail
+    assert seen == [["--project", "p", "coordination-readiness"]]
+
+
+@pytest.mark.parametrize("exit_code", [0, 2, 4])
+def test_released_only_uses_selected_receiver_and_never_replays_baseline(monkeypatch, exit_code):
+    seen = []
+
+    def run(args, **kwargs):
+        seen.append(args)
+        if args[:2] == ["--project", "p"]:
+            return _proc(0, json.dumps({
+                "version": 1, "ready": True, "code": "ready",
+                "capabilities": [coord.RELEASED_ONLY_CAPABILITY],
+            }))
+        return _proc(exit_code, json.dumps({"token": "b" * 40}), "fixture failure")
+
+    monkeypatch.setattr(coord, "_run", run)
+    result = coord.acquire("cs-one", "m/p/w", released_only=True)
+    assert result.ok is (exit_code == 0)
+    assert len(seen) == 2
+    assert seen[1] == [
+        "lease", "acquire", "codespace", "cs-one", "--holder", "m/p/w",
+        "--released-only", "--ttl", str(coord.DEFAULT_L2_TTL),
+    ]
+
+
+@pytest.mark.parametrize("token", [None, 42, "", "not-an-oid"])
+def test_released_only_does_not_report_success_without_valid_token(monkeypatch, token):
+    readiness = coord.PreflightResult(
+        "ready", capabilities=frozenset({coord.RELEASED_ONLY_CAPABILITY}),
+    )
+    seen = []
+
+    def run(args, **kwargs):
+        seen.append(args)
+        return _proc(0, json.dumps({"token": token}))
+
+    monkeypatch.setattr(coord, "_run", run)
+    result = coord.acquire(
+        "cs-one", "m/p/w", released_only=True, preflight_result=readiness,
+    )
+    assert result.unavailable and "fencing token" in result.detail
+    assert len(seen) == 1 and "--released-only" in seen[0]
+
+
+@pytest.mark.parametrize("invalid", [
+    None, {"resource": {"key": "cs-one"}}, {"state": []},
+])
+def test_strict_lease_inventory_refuses_unknown_rows(monkeypatch, invalid):
+    monkeypatch.setattr(coord, "_run", lambda *args, **kwargs: _proc(0, json.dumps([invalid])))
+    assert coord.list_leases(strict=True) is None
+
+
+def test_strict_lease_inventory_distinguishes_expiry_from_release(monkeypatch):
+    records = [{
+        "resource": {"kind": "codespace", "key": name}, "holder": "m/p/old",
+        "token": token * 40, "live": False, "state": state,
+    } for name, state, token in (
+        ("expired", "leased", "a"), ("returned", "released", "b"),
+    )]
+    monkeypatch.setattr(coord, "_run", lambda *args, **kwargs: _proc(0, json.dumps(records)))
+    leases = coord.list_leases(strict=True)
+    assert leases["expired"].state == "leased"
+    assert leases["returned"].state == "released"
+
+
 def test_acquire_missing_binstub_is_unavailable(monkeypatch):
     monkeypatch.setattr(coord, "_run", lambda *a, **k: None)
     assert coord.acquire("cs-one", "m/p/w").unavailable
@@ -107,6 +187,7 @@ def test_preflight_preserves_compatible_rejection(monkeypatch, code):
         _proc(0, "not json"),
         _proc(0, json.dumps({"ready": True, "code": "ready"})),
         _proc(0, json.dumps({"version": 2, "ready": True, "code": "ready"})),
+        _proc(0, json.dumps({"version": True, "ready": True, "code": "ready"})),
         _proc(3, json.dumps({
             "version": 1,
             "ready": False,
