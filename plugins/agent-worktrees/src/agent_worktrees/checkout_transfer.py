@@ -60,6 +60,7 @@ def _windows_access(path: Path, access: int) -> None:
 def require_source_access(source: Path, destination_parent: Path) -> None:
     if os.name == "nt":
         _windows_access(destination_parent, 0x46)
+        _windows_access(source.parent, 0x46)
     elif (
         source.parent.stat().st_uid != os.getuid()
         or stat.S_IMODE(source.parent.stat().st_mode) & 0o300 != 0o300

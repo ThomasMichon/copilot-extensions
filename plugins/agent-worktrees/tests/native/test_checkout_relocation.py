@@ -250,7 +250,7 @@ def test_readonly_source_directories_refuse_before_custody(checkout, location):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows effective mutation-access proof")
-@pytest.mark.parametrize("location", ["source-file", "destination-directory"])
+@pytest.mark.parametrize("location", ["source-file", "destination-directory", "source-parent"])
 def test_required_mutation_access_refuses_before_custody(checkout, location):
     import ctypes
     from ctypes import wintypes
@@ -265,8 +265,11 @@ def test_required_mutation_access_refuses_before_custody(checkout, location):
     api.SetFileSecurityW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, ctypes.c_void_p]
     api.SetFileSecurityW.restype = wintypes.BOOL
     descriptor = ctypes.c_void_p()
-    path = checkout.source / "tracked.txt" if location == "source-file" else checkout.destination.parent
-    denied = "0x10002" if location == "source-file" else "0x2"
+    path = (
+        checkout.source / "tracked.txt" if location == "source-file"
+        else checkout.source.parent if location == "source-parent" else checkout.destination.parent
+    )
+    denied = "0x10002" if location == "source-file" else "0x4" if location == "source-parent" else "0x2"
     assert api.ConvertStringSecurityDescriptorToSecurityDescriptorW(
         f"D:P(D;;{denied};;;{user})(A;;FA;;;{user})", 1, ctypes.byref(descriptor), None,
     )
@@ -658,8 +661,8 @@ def test_effect_interruption_retries_without_losing_source_or_identity(checkout,
         elif phase == "retirement":
             original = relocation.shutil.rmtree
             def failing(path, *args, **kwargs):
-                if Path(path) == fixture.source:
-                    (fixture.source / "ignored.bin").unlink()
+                if Path(path).name.startswith(fixture.source.name + ".retiring-"):
+                    (Path(path) / "ignored.bin").unlink()
                     raise OSError("injected partial source retirement")
                 return original(path, *args, **kwargs)
             injection.setattr(relocation.shutil, "rmtree", failing)
@@ -673,11 +676,18 @@ def test_effect_interruption_retries_without_losing_source_or_identity(checkout,
             injection.setattr(relocation.durability, "files", failing)
         with pytest.raises(OSError, match="injected"):
             _move(fixture)
-    assert fixture.source.exists()
+    retirement = fixture.source.with_name(
+        fixture.source.name + ".retiring-" + Path(move_state.read(fixture.record.yaml_path)["stage"]).name.rsplit("-", 1)[1],
+    )
+    if phase == "retirement":
+        assert not fixture.source.exists() and retirement.exists()
+    else:
+        assert fixture.source.exists()
     assert fixture.destination.exists()
     assert (fixture.destination / "ignored.bin").read_bytes() == bytes(range(256))
     assert _move(fixture)["phase"] == "complete"
     assert not fixture.source.exists()
+    assert not retirement.exists()
     assert tracking.load_record(fixture.record.yaml_path).creation_nonce == fixture.record.creation_nonce
 
 
