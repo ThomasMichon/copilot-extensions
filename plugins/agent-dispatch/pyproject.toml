@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-dispatch"
-version = "0.18.294-dev1"
+version = "0.18.295-dev1"
 description = "Portable agent task-queue + per-host coordinator: a single-writer SQLite work queue so agents coordinate without push latency or an account per agent."
 readme = "README.md"
 license = "MIT"
@@ -23,6 +23,7 @@ dependencies = [
     "fastapi>=0.141.1",
     "uvicorn>=0.52.4",
     "httpx>=0.27",
+    "packaging>=25.0",
     "pyyaml>=6.0.3",
     "agent-zdd",
     "agent-procutil",

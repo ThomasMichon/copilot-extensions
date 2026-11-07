@@ -1496,8 +1496,9 @@ function Test-ActiveIsForward {
         $active = $aj.active
         $p = [int]($active.port)
         if ($p -le 0) { return $false }
-        if ($active.forwarded -eq $true) { return $true }
+        # Strict mode: read optional keys only after checking they exist.
         $names = @($active.PSObject.Properties.Name)
+        if (($names -contains 'forwarded') -and ($active.forwarded -eq $true)) { return $true }
         return (($names -notcontains 'pid') -and ($names -notcontains 'generation') -and ($names -notcontains 'bind'))
     } catch {
         return $false
@@ -1518,7 +1519,8 @@ function Get-ActiveSignature {
             ($names -notcontains 'generation') -and
             ($names -notcontains 'bind')
         )
-        if (($active.forwarded -eq $true) -or $legacyForward) { return '' }
+        $forwarded = ($names -contains 'forwarded') -and ($active.forwarded -eq $true)
+        if ($forwarded -or $legacyForward) { return '' }
         $pidValue = if ($names -contains 'pid') { [string]$active.pid } else { '' }
         $generationValue = if ($names -contains 'generation') { [string]$active.generation } else { '' }
         $bindValue = if ($names -contains 'bind') { [string]$active.bind } else { '' }
@@ -1555,7 +1557,7 @@ function Get-SignatureBaseUrl {
     param([string]$Signature)
     $bind = '127.0.0.1'
     $p = $Port
-    $parts = if ($Signature) { $Signature.Split('|') } else { @() }
+    $parts = @(if ($Signature) { $Signature.Split('|') })
     $parsed = 0
     if ($parts.Count -ge 2 -and [int]::TryParse($parts[1], [ref]$parsed) -and $parsed -gt 0) {
         $p = $parsed

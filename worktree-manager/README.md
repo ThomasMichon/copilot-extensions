@@ -879,6 +879,14 @@ Mux routes and target readiness use the constructed slot's immutable generation,
 including repair/source qualifiers. Health preserves the semantic package
 `version` and separately reports `runtime_generation` from its own interpreter
 prefix, never from the mutable selected marker.
+`python -m worktree_manager.mux_serving_observation --root <manager-root>`
+emits the version-1 `worktree-manager.mux-serving-observation` result. It
+reads the existing authenticated route and native process identity without
+starting a daemon or creating a control credential. It reports `ready` with
+the actual serving generation, `inactive` only when no route or ownership
+markers exist, and otherwise `unknown`. This observation alone does not
+authorize selection or cutover; callers coordinating changes must hold the
+appropriate native ownership and recheck the result.
 Normal mux-daemon startup uses the
 [external Python bytecode cache](../libs/agent-procutil/README.md#managed-python-bytecode-cache)
 under Manager's durable root. Explicitly read-only retention/bootstrap controls

@@ -206,6 +206,19 @@ for its bounded scope and remaining takeover/foundation limitations.
 `--supervised-debug` uses the same exclusive authority under foreground
 supervision, never a second installation writer.
 
+`update --inventory --json` advertises
+`project_controller_delegation` version 1 only when the running engine and
+its driver belong to the selected installed slot and support a full project
+controller's custody-bound engine fallback.
+Its isolated runtime phase excludes Manager recovery and local integration.
+`targeted_payload_install` is true only when the selected engine also carries
+the durable activation-preservation owner. A delegated `--phase payloads
+--plugin <name>` can then acquire that one selected payload, including a
+missing installation, without permanently changing the user's activation.
+The caller still owns source admission, child settlement and verification.
+This is not evidence that other installed or running update writers are
+capable or quiescent, and it does not select an authority.
+
 Runtime installers may execute from a delivered or prepared payload directory.
 The collected plan preserves the resolved invoking repository separately in
 `COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT` for native and prepared-source

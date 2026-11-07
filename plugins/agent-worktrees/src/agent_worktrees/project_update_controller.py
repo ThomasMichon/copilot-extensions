@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from copy import copy
 from pathlib import Path
 
 from agent_procutil import no_window_kwargs
@@ -13,12 +14,114 @@ from . import config as cfg
 from . import output, update_options
 
 PROBE_TIMEOUT = 30
+DELEGATION_SCHEMA = "copilot-extensions.project-update-delegation"
+DELEGATION_VERSION = 1
+
+
+def _targeted_payload_install_capability(prefix: Path) -> bool:
+    try:
+        import plugin_activation
+        from . import update_acquisition, update_cli, update_driver_cli, update_options, update_runtime
+
+        if any(
+            not Path(module.__file__).resolve().is_relative_to(prefix)
+            for module in (
+                plugin_activation, update_acquisition, update_cli, update_driver_cli,
+                update_options, update_runtime,
+            )
+        ):
+            return False
+        return (
+            callable(getattr(update_acquisition, "acquire", None))
+            and callable(getattr(update_acquisition, "_run_install", None))
+            and callable(getattr(update_cli, "_update_in_plugin_steps", None))
+            and callable(getattr(update_driver_cli, "cmd_update_request", None))
+            and callable(getattr(update_options, "select_plugin_targets", None))
+            and callable(getattr(update_runtime, "_update_registered_plugins", None))
+            and callable(getattr(plugin_activation, "activation_custody", None))
+            and callable(getattr(plugin_activation.ActivationCustody, "preserve", None))
+            and all(callable(getattr(plugin_activation.ActivationPreservation, name, None)) for name in (
+                "confirm_quiescent", "confirm_posix_quiescent", "confirm_not_launched",
+            ))
+        )
+    except (AttributeError, ImportError, OSError, TypeError, ValueError):
+        return False
+
+
+def delegation_capability():
+    """Advertise only the selected runtime's usable driver-backed seam."""
+    try:
+        import update_driver
+        from agent_procutil._daemon_instance_identity import runtime_slot_paths
+
+        prefix = Path(sys.prefix).resolve()
+        slot = runtime_slot_paths(prefix)
+        if (
+            slot is None or Path(slot[2]).resolve() != cfg.install_dir().resolve()
+            or not Path(__file__).resolve().is_relative_to(prefix)
+            or not Path(update_driver.__file__).resolve().is_relative_to(prefix)
+        ):
+            return None
+    except (AttributeError, ImportError, OSError, TypeError, ValueError):
+        return None
+    if (
+        getattr(update_driver, "UPDATE_AUTHORITY_CAPABILITY", None) != "suite-update-authority/v1"
+        or any(not callable(getattr(update_driver, name, None)) for name in (
+            "current_authority", "borrowed_custody", "participant_environment", "status", "runtime_command",
+        ))
+    ):
+        return None
+    return {
+        "schema": DELEGATION_SCHEMA, "version": DELEGATION_VERSION,
+        "engine_fallback": True, "isolated_runtime_phase": True,
+        "targeted_payload_install": _targeted_payload_install_capability(prefix),
+    }
 
 
 def dispatch_update(args, auth, manager, standalone) -> int:
     if getattr(args, "auth_report", False):
         return auth(args)
-    controlled = run_project_update(args)
+    request = getattr(args, "_controller_request", None)
+    selected = getattr(args, "_controller_authority", None)
+    requested = getattr(request, "authority", "standalone")
+    if selected is not None and selected.configured and selected.mode == "standalone":
+        if requested != "standalone":
+            output.err("Project update authority changed before execution.")
+            return 1
+        args = copy(args)
+        args.no_project_controller = True
+        controlled = None
+    elif requested == "project":
+        if (
+            selected is None or not selected.configured or selected.mode != "project"
+            or selected.project != request.project or cfg.active_project() != request.project
+        ):
+            output.err("The selected project update authority is unavailable.")
+            return 1
+        if (
+            getattr(args, "phase", None) or getattr(args, "target", None) is not None
+            or getattr(args, "no_project_controller", False)
+        ):
+            if any(
+                flag in {"--phase", "--target", "--no-project-controller"}
+                or flag.startswith(("--phase=", "--target="))
+                for flag in request.argv
+            ):
+                output.err("A partial request cannot own the project update.")
+                return 1
+            if getattr(args, "phase", None) or getattr(args, "target", None) is not None:
+                return standalone()
+            controlled = None
+        else:
+            controlled = run_project_update(args)
+            if controlled is None:
+                output.err("The selected project update controller is unavailable; no update ran.")
+                return 1
+    elif selected is not None and selected.configured and selected.mode == "project":
+        output.err("Standalone update is disabled by the selected project authority.")
+        return 1
+    else:
+        controlled = run_project_update(args)
     if controlled is not None:
         return controlled
     handed_off = manager(args)
@@ -31,14 +134,14 @@ def configured_script(repo) -> str:
     return controllers.get(platform) or (controllers.get("linux", "") if platform == "wsl" else "")
 
 
-def _selected_project(args):
+def _selected_project(args, *, project=None):
     if (
         getattr(args, "no_project_controller", False)
         or getattr(args, "phase", None)
         or getattr(args, "target", None) is not None
     ):
         return None
-    return cfg.active_project()
+    return cfg.active_project() if project is None else project
 
 
 def configured_for_update(args):
@@ -56,8 +159,10 @@ def _probe_command(project: str) -> list[str]:
     ]
 
 
-def probe_for_submission(args, *, cwd: Path, timeout: float = PROBE_TIMEOUT) -> bool | None:
-    project = _selected_project(args)
+def probe_for_submission(
+    args, *, cwd: Path, timeout: float = PROBE_TIMEOUT, project: str | None = None,
+) -> bool | None:
+    project = _selected_project(args, project=project)
     if not project:
         return None
     from agent_procutil.owned_process import OutputLimitExceeded, run_caller_owned

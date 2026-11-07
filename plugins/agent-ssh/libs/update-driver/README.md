@@ -168,6 +168,40 @@ creation, not an implicit permission migration or a read-only status side effect
   and cleanup before returning. Returning an exit code certifies that cleanup
   boundary; custom-executor exceptions remain conservatively interrupted.
 
+### Suite execution authority
+
+The adapter-only `current_authority` and `change_authority` APIs select either
+the standalone suite updater or a named project controller. With no explicit
+selection, the existing project-controller and standalone routing is unchanged.
+An explicit selection is per marketplace cell; receipt paths for different
+plugins in the same cell share it. The legacy installation has a separate
+per-user selection. The installation owner still validates its own receipts.
+
+The switch waits for installation custody and pending work, refuses unsettled
+execution, and records the selection atomically in queue schema 5. This schema
+is introduced only on an explicit switch and makes older queue clients refuse
+rather than ignore the selection. Capable adapters tag requests with the chosen
+authority; a legacy submission that raced the switch cannot execute under it.
+Unrelated request backends remain independent in a capable driver.
+
+`change_authority` requires a trusted `verify_capabilities(deadline)` callback.
+It must check the actual selected Worktrees, Manager and worker providers and
+prove that every direct writer, retained old Picker and automatic scheduler
+which can bypass the queue is either capable or settled. A version, downloaded
+payload, or unconditional success is not that proof. The callback owns bounded
+probe cleanup and must honor the monotonic deadline; a late result cannot
+publish a mode. Schema 5 alone cannot fence a process that bypasses the queue.
+No public mode-switch command is supplied by this primitive.
+
+An interrupted first switch leaves a guard that makes capable clients refuse
+until the switch is retried under the same checks. If an already-prevalidated
+legacy writer committed a never-started suite request after that guard, a
+capability-verified retry terminally refuses that request instead of letting it
+strand the queue. Unrelated pending work remains pending and must settle before
+the initial schema upgrade. A missing guard or database, malformed selection,
+or uncertain execution refuses rather than restoring legacy mode. Neither
+inspection nor switching starts an update or a service.
+
 ### Automatic-update KillSwitch and explicit/manual admission
 
 Before each pending request becomes running, the existing owner re-reads the
