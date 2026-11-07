@@ -588,10 +588,52 @@ def test_coordinator_legacy_listener_uses_native_bind_evidence(monkeypatch, occu
     assert coordinator_observation._legacy_listener(Config(host="127.0.0.1", port=43123)) is occupied
 
 
+def test_coordinator_localhost_uses_the_service_bind_address_family(monkeypatch):
+    import socket
+    from agent_dispatch import coordinator_observation
+
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *_args, **_kwargs: [
+        (socket.AF_INET6, socket.SOCK_STREAM, 0, "", ("::1", 0, 0, 0)),
+        (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("127.0.0.1", 0)),
+    ])
+    assert coordinator_observation._loopback("localhost") == "::1"
+
+
+def test_coordinator_localhost_rejects_nonloopback_resolution(monkeypatch):
+    import socket
+    from agent_dispatch import coordinator_observation
+
+    monkeypatch.setattr(socket, "getaddrinfo", lambda *_args, **_kwargs: [
+        (socket.AF_INET, socket.SOCK_STREAM, 0, "", ("192.0.2.1", 0)),
+    ])
+    with pytest.raises(coordinator_observation.ServingObservationError):
+        coordinator_observation._loopback("localhost")
+
+
+@pytest.mark.skipif(not __import__("socket").has_ipv6, reason="IPv6 unavailable")
+def test_coordinator_legacy_localhost_detects_an_ipv6_only_listener():
+    import socket
+    from agent_dispatch import coordinator_observation
+    from agent_dispatch.config import Config
+
+    with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as listener:
+        try:
+            listener.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+            listener.bind(("::1", 0))
+            listener.listen()
+            port = listener.getsockname()[1]
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as ipv4:
+                ipv4.bind(("127.0.0.1", port))
+        except OSError:
+            pytest.skip("isolated IPv6 loopback is unavailable")
+        assert coordinator_observation._legacy_listener(Config(host="localhost", port=port))
+
+
 @pytest.mark.parametrize(
     "changed", [
         "none", "version", "birth", "config", "route", "remote", "auth", "auth-type",
         "data-mismatch", "data-missing", "data-type", "behavior",
+        "breadcrumb", "breadcrumb-during-health",
     ],
 )
 def test_coordinator_observation_requires_authenticated_generation_and_birth(
@@ -600,7 +642,7 @@ def test_coordinator_observation_requires_authenticated_generation_and_birth(
     import httpx
     from agent_dispatch import client, coordinator_observation, source_start
     from agent_dispatch.config import Config
-    from zdd import diagnostics, routing
+    from zdd import breadcrumb, diagnostics, routing
 
     cfg = Config(host="127.0.0.1", db_path=str(tmp_path / "tasks.db"))
     version = "1.2.3+repair." + "a" * 32
@@ -639,6 +681,8 @@ def test_coordinator_observation_requires_authenticated_generation_and_birth(
         health["data_token_match_v1"] = "yes"
     elif changed == "behavior":
         health["runtime_behavior_identity_v1"] = "different"
+    elif changed == "breadcrumb":
+        breadcrumb.breadcrumb_path(tmp_path).write_text("{}", encoding="utf-8")
 
     calls = []
     local_transport = object()
@@ -664,6 +708,8 @@ def test_coordinator_observation_requires_authenticated_generation_and_birth(
                 from agent_dispatch.client_errors import DispatchError
 
                 raise DispatchError(401, "missing credential")
+            if changed == "breadcrumb-during-health":
+                breadcrumb.breadcrumb_path(tmp_path).write_text("{}", encoding="utf-8")
             return health
 
     monkeypatch.setattr(client, "DispatchClient", Client)
@@ -1240,10 +1286,59 @@ def test_coordinator_reconcile_probe_is_read_only_and_cli_is_strict(tmp_path, mo
     assert json.loads(capsys.readouterr().out) == {
         "schema": coordinator_observation.SCHEMA, "version": 1, "ok": True,
         "state": "inactive", "generation": None,
+        "lock_path": str(tmp_path / "serve-start.lock"),
     }
     with pytest.raises(SystemExit) as exc:
         coordinator_observation.main(["--apply", "--force"])
     assert exc.value.code == 2
+
+
+def test_coordinator_probe_reports_the_lock_from_the_captured_service_environment(
+    tmp_path, monkeypatch, capsys,
+):
+    import json
+    from agent_dispatch import config, coordinator_observation, install_paths
+
+    routing = tmp_path / "custom-routing"
+    routing.mkdir()
+    monkeypatch.setattr(install_paths, "install_dir", lambda: tmp_path)
+    monkeypatch.setattr(install_paths, "capture_service_environment", lambda _root: {
+        **os.environ, "AGENT_DISPATCH_ROUTING_DIR": str(routing), "FIXTURE_SECRET": "not-output",
+    })
+    monkeypatch.setattr(config, "load_config", lambda: object())
+    monkeypatch.setattr(config, "run_dir", lambda: tmp_path)
+    monkeypatch.setattr(config, "client_token", lambda: None)
+    monkeypatch.setattr(coordinator_observation, "observe", lambda _cfg, root, **_kwargs: (
+        {"state": "inactive", "generation": None} if root == routing else pytest.fail("wrong route")
+    ))
+    assert coordinator_observation.main(["--probe"]) == 0
+    output = capsys.readouterr().out
+    assert json.loads(output)["lock_path"] == str(config.coordinator_start_lock_path(routing))
+    assert "not-output" not in output
+
+
+def test_coordinator_probe_refuses_a_changed_routing_lock(tmp_path, monkeypatch, capsys):
+    import json
+    from agent_dispatch import config, coordinator_observation, install_paths
+
+    routing, other = tmp_path / "routing", tmp_path / "other"
+    routing.mkdir()
+    other.mkdir()
+    monkeypatch.setattr(install_paths, "install_dir", lambda: tmp_path)
+    monkeypatch.setattr(install_paths, "capture_service_environment", lambda _root: {
+        **os.environ, "AGENT_DISPATCH_ROUTING_DIR": str(routing),
+    })
+    monkeypatch.setattr(config, "load_config", lambda: object())
+    monkeypatch.setattr(config, "run_dir", lambda: tmp_path)
+    monkeypatch.setattr(config, "client_token", lambda: None)
+
+    def observe(*_args, **_kwargs):
+        os.environ["AGENT_DISPATCH_ROUTING_DIR"] = str(other)
+        return {"state": "inactive", "generation": None}
+
+    monkeypatch.setattr(coordinator_observation, "observe", observe)
+    assert coordinator_observation.main(["--probe"]) == 1
+    assert json.loads(capsys.readouterr().out)["state"] == "unknown"
 
 
 def test_coordinator_reconcile_uses_selected_owner_without_starting_absent_service(

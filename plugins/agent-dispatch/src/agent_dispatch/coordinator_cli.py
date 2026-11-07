@@ -483,6 +483,10 @@ def _cmd_cutover(
     host = cfg.host if cfg.host not in (wildcard_v4, "", "::", "[::]") else "127.0.0.1"
     if cfg.host in ("::", "[::]"):
         host = "::1"
+    if reconcile_existing:
+        from .coordinator_observation import _loopback
+
+        host = _loopback(host)
     routing_bind = "::" if cfg.host == "[::]" else cfg.host
     spawned = {}
 

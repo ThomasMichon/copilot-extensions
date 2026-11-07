@@ -27,11 +27,23 @@ class ServingObservationError(RuntimeError):
     """The local coordinator's actual serving state is unconfirmed."""
 
 
-def _loopback(host: str) -> str:
+def _loopback(host: str, port: int = 0) -> str:
     if not host:
         return "127.0.0.1"
-    if host == "localhost":
-        return "127.0.0.1"
+    if host.lower() == "localhost":
+        try:
+            family, _type, _proto, _canonical, address = socket.getaddrinfo(
+                host, port, type=socket.SOCK_STREAM,
+            )[0]
+            resolved = ipaddress.ip_address(address[0])
+            if resolved.is_loopback and (
+                (resolved.version == 4 and family == socket.AF_INET)
+                or (resolved.version == 6 and family == socket.AF_INET6)
+            ):
+                return str(resolved)
+        except (IndexError, OSError, TypeError, ValueError):
+            pass
+        raise ServingObservationError("coordinator localhost bind is unconfirmed")
     try:
         address = ipaddress.ip_address(host.strip("[]"))
         if address.is_unspecified:
@@ -44,23 +56,28 @@ def _loopback(host: str) -> str:
 
 
 def _legacy_listener(cfg) -> bool:
-    host = _loopback(cfg.host)
     if type(cfg.port) is not int or not 0 < cfg.port < 65536:
         raise ServingObservationError("legacy coordinator port is unavailable")
-    try:
-        family = socket.AF_INET6 if ":" in host else socket.AF_INET
-        with socket.socket(family, socket.SOCK_STREAM) as probe:
-            if os.name == "nt":
-                probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
-            probe.bind((host, cfg.port))
-            return False
-    except OSError as error:
-        if (
-            error.errno in (errno.EADDRINUSE, errno.EACCES)
-            or getattr(error, "winerror", None) in (10013, 10048)
-        ):
-            return True
-        raise ServingObservationError("legacy coordinator listener is unconfirmed") from None
+    hosts = ("127.0.0.1", "::1") if cfg.host.lower() == "localhost" else (_loopback(cfg.host),)
+    for host in hosts:
+        try:
+            family = socket.AF_INET6 if ":" in host else socket.AF_INET
+            with socket.socket(family, socket.SOCK_STREAM) as probe:
+                if os.name == "nt":
+                    probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+                probe.bind((host, cfg.port))
+        except OSError as error:
+            if (
+                error.errno in (errno.EADDRINUSE, errno.EACCES)
+                or getattr(error, "winerror", None) in (10013, 10048)
+            ):
+                return True
+            if host == "::1" and (
+                error.errno == errno.EAFNOSUPPORT or getattr(error, "winerror", None) == 10047
+            ):
+                continue
+            raise ServingObservationError("legacy coordinator listener is unconfirmed") from None
+    return False
 
 
 def _unrouted_evidence(root: Path, run: Path, environment: dict) -> bool:
@@ -122,6 +139,8 @@ def observe(
             or type(require_behavior) is not bool
         ):
             raise ServingObservationError("coordinator observation inputs are invalid")
+        if os.path.lexists(breadcrumb.breadcrumb_path(root)):
+            raise ServingObservationError("coordinator cutover remains unsettled")
         table = routing.read_table(root, strict=True)
         if table is None:
             if (
@@ -144,7 +163,7 @@ def observe(
             or _route_owner_state(endpoint) != "matching"
         ):
             raise ServingObservationError("routed coordinator ownership is unconfirmed")
-        host = _loopback(endpoint.client_host)
+        host = _loopback(endpoint.client_host, endpoint.port)
         url = f"http://{routing.format_authority(host, endpoint.port)}"
         health = _local_health(url, token=token, timeout=min(timeout, 2.0))
         slot = health.get("slot") if isinstance(health, dict) else None
@@ -163,6 +182,7 @@ def observe(
             )
             or routing.read_table(root, strict=True) != table
             or _route_owner_state(endpoint) != "matching"
+            or os.path.lexists(breadcrumb.breadcrumb_path(root))
         ):
             raise ServingObservationError("routed coordinator readiness is unconfirmed")
         return {"state": "ready", "generation": endpoint.version}
@@ -206,6 +226,8 @@ def main(argv: list[str] | None = None) -> int:
             os.environ.update(captured)
             cfg = config.load_config()
             token = config.client_token()
+            routing_root = config.routing_dir()
+            lock_path = config.coordinator_start_lock_path(routing_root)
             if args.apply:
                 from . import coordinator_cli
 
@@ -226,9 +248,11 @@ def main(argv: list[str] | None = None) -> int:
                     raise ServingObservationError("selected coordinator installation changed")
             stage = "observation"
             observed = observe(
-                cfg, config.routing_dir(), run_dir=config.run_dir(), token=token,
+                cfg, routing_root, run_dir=config.run_dir(), token=token,
                 environment=captured, timeout=args.timeout,
             )
+            if config.coordinator_start_lock_path(config.routing_dir()) != lock_path:
+                raise ServingObservationError("coordinator routing lock changed")
             if args.apply:
                 stage = "selection"
                 if not source_start.require_selected_generation().samefile(root):
@@ -246,6 +270,8 @@ def main(argv: list[str] | None = None) -> int:
             os.environ.clear()
             os.environ.update(previous)
         result = {"schema": SCHEMA, "version": VERSION, "ok": True, **observed}
+        if args.probe:
+            result["lock_path"] = str(lock_path)
     except Exception as error:
         if callable(getattr(error, "retry_cleanup", None)):
             raise

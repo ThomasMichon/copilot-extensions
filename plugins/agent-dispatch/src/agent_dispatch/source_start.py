@@ -196,7 +196,7 @@ def run_coordinator(
     if old is not None and not start_if_missing:
         from .coordinator_observation import _loopback
 
-        _loopback(old.client_host)
+        _loopback(old.client_host, old.port)
     identity = config_identity(cfg, base_dir=install_dir())
     behavior = behavior_identity(cfg) if not start_if_missing else None
     handles = {}
@@ -244,7 +244,7 @@ def run_coordinator(
         if not start_if_missing:
             from .coordinator_observation import _loopback
 
-            host = _loopback(host)
+            host = _loopback(host, port)
         return f"http://{routing.format_authority(host, port)}"
 
     def selected_client(url, request_timeout):

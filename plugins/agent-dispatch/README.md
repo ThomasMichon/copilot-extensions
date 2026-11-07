@@ -228,6 +228,11 @@ ready or reused. A data token equal to the control token is invalid; replacement
 fails without disturbing the incumbent. Legacy discovery or an unverified
 endpoint is not treated as inactive. Local control uses loopback without
 environment proxies and does not pass update-driver custody to the daemon.
+For `localhost`, observation uses the same resolved address family as the
+service bind; inactive checks also refuse an IPv4 or IPv6 legacy listener.
+Probes refuse a pending cutover breadcrumb and report the start-lock path
+resolved from the captured service environment. That path is coordination
+information, not evidence that a caller holds the lock or may alter selection.
 `--apply` reuses the existing guarded coordinator cutover without starting an
 absent service or running broad reaping. It rechecks incumbent liveness before
 spawn and bounds each native routing-lock wait by the requested timeout. It
