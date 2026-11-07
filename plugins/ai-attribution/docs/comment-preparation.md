@@ -125,6 +125,32 @@ No fallback to a PR-source marker or unsupported peer is performed.
 
 ## Ownership and remaining adoption
 
+The optional in-process `scripts/comment_producer.py` supplies
+`CommentProducer(source_root, source_config, scope, context)`. A trusted
+embedding passes its actual Worktrees `Config`, an absolute exact managed
+producer root, the selected native scope and owner-resolved destination policy.
+It is a resolver for the existing synchronous `selection_preparer` seam, not
+an arbitrary factory loader or a new CLI/HTTP request shape. Import it from
+the selected attribution payload through the embedding's existing composition;
+no host JSON field loads Python code.
+
+On each new selection it calls the actual Worktrees
+`resolve_comment_origin` owner and loads the effective attribution profile.
+Missing/prior source owners, wrong roots/scopes and rejected profiles refuse.
+The resolver must run on the existing synchronous worker before the replay
+transaction; its returned composer snapshots source/profile/policy and performs
+only pure shared preparation. It checks each action's exact scope and permits
+comment, reply and selected owned-edit preparation. Later profile/source changes
+cannot mutate that snapshot. Original-selection recovery still belongs to the
+replay owner and must precede new resolution.
+
+The embedding remains responsible for current authorization/policy withdrawal
+and for supplying real policy facts; the resolver does not derive them from
+an untrusted request. This finite source/profile prerequisite does not bind a
+normal host, provide a protected write transport, enable submission or add a
+runtime dependency to otherwise independent consumers. Those gates remain in
+the [producer-enrollment contract](../../../efforts/active/durable-pr-watch-delegation/comment-producer-enrollment.md).
+
 Prepare before final preview/approval and immutable intent admission. Retain
 the exact prepared bytes, public GUIDs and original source snapshot through
 the existing intent/receipt owner; do not make a parallel body archive.

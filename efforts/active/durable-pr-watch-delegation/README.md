@@ -373,9 +373,10 @@ _Operator-required outcome; agent-recommended slices and validation._
   fresh allocation, explicit-ID/v1/v2 and receiver rollback semantics (#11381;
   250 coupled source cases). Normal host enrollment, other publishers and
   provider/installed adoption remain separate.
-- [ ] Review the [trusted producer-enrollment contract](comment-producer-enrollment.md)
-  before changing normal-host behavior. Deliver its actual source/profile
-  resolver and protected write-owner prerequisites through their existing
+- [x] Review the [trusted producer-enrollment contract](comment-producer-enrollment.md)
+  before changing normal-host behavior (#11393).
+- [ ] Deliver its actual source/profile resolver and protected write-owner
+  prerequisites through their existing
   owners, then bind one explicitly selected authenticated host route.
   Injected factories and observation credentials do not satisfy these exits;
   default watch-only and native read-only hosting stay unchanged.
@@ -1076,6 +1077,23 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-07 - Review actual producer dependencies without enabling a writer
+
+- #11393 actually merged as `fd66cc49d339442664eea11bd1ffc6af17f26351`
+  after exact-head Copilot approval with no open issues or threads and latest
+  CI `42421735633`, including required gate `128551570834`, passed.
+  Managed completion retained its backup and reconciled only the merged commit.
+- The source trace distinguishes injected preparation/write factories from
+  normal hosting: the standalone configuration supplies only an observe-bound
+  reader, while protected native review consumes an existing private transport.
+  The reviewed contract preserves that read-only default and requires actual
+  producer source/profile and protected writer prerequisites before enrollment.
+- Re-read the complete current parent. Credit only contract review; continue
+  the finite actual source/profile resolver, then the protected native owner
+  and explicit host binding. All-publisher, mapping, provider/installed,
+  attention, CLI/Dispatch, retention and shadow acceptance remain open.
+  No host, credential, service or resource was activated or released.
 
 ### 2026-11-07 - Qualify optional selected-edit consumers without host activation
 
