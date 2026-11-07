@@ -154,6 +154,13 @@ not its independently running mux daemon. Unknown, missing, payload-only and
 machine-policy outcomes remain explicit in details. Unavailable catalog or
 engine metadata is a finding, not an empty healthy installation.
 
+The optional Machines-owned **Application Readiness** section complements this
+version inventory with declared required-module observations and explicitly
+confirmed repair. Its [native owner](../../plugins/agent-machines/README.md#application-readiness-in-configuration)
+retains selection, installers, plan validation, post-readiness and restart
+obligations. Manager does not infer authentication or first-task admission from
+these rows, and visiting the section does not install a missing Machines runtime.
+
 Updating submits a durable request through the existing installation driver.
 Acceptance is not completion: return to the list and refresh to see queued,
 running, succeeded, failed, blocked or interrupted owner state, attributable

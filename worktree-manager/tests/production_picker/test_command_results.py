@@ -259,8 +259,19 @@ def test_completed_text_action_invalidates_an_older_inflight_list(
     tmp_path, monkeypatch, form,
 ):
     monkeypatch.setenv("AGENT_WORKTREES_STEER_DRAFTS", str(tmp_path))
+    command_started = tmp_path / "command-started"
+    command_release = tmp_path / "command-release"
     action = {
-        "label": "Change", "run": [sys.executable, "-c", "print('accepted')"],
+        "label": "Change", "run": [
+            sys.executable, "-c",
+            "import time\nfrom pathlib import Path\n"
+            f"Path({str(command_started)!r}).touch()\n"
+            "deadline=time.monotonic()+10\n"
+            f"while not Path({str(command_release)!r}).exists():\n"
+            " if time.monotonic()>deadline: raise SystemExit(90)\n"
+            " time.sleep(.01)\n"
+            "print('accepted')\n",
+        ],
         "result_view": "text",
     }
     if form:
@@ -290,19 +301,24 @@ def test_completed_text_action_invalidates_an_older_inflight_list(
             await _wait_for_initial_setup(pilot, screen)
             monkeypatch.setattr(screen, "_pivot_runtime", lambda selected: runtime)
             monkeypatch.setattr(screen, "_pivot_scope_key", lambda: "original-scope")
-            runtime.ensure("original-scope")
-            await _wait(pilot, entered.is_set)
             runtime._cache["original-scope"] = ("ready", [{"id": "sample-task"}], "")
             generation = runtime._scope_generations.get("original-scope", 0)
             if form:
                 screen._run_pivot_form_submit(
-                    reg, reg.actions[0], {"task_id": "sample-task", "machine": "original-scope"}, "Sample", {},
+                    reg, reg.actions[0], {
+                        "task_id": "sample-task", "machine": "original-scope",
+                        "_manager_scope": "original-scope",
+                    }, "Sample", {},
                 )
             else:
                 screen._run_task_action(reg, reg.actions[0], {
                     "id": "sample-task", "_manager_scope": "original-scope",
                 })
+            await _wait(pilot, command_started.exists)
+            runtime.repoll("original-scope")
+            await _wait(pilot, entered.is_set)
             monkeypatch.setattr(screen, "_pivot_scope_key", lambda: "other-scope")
+            command_release.touch()
             await _wait(pilot, lambda: isinstance(app.screen, CommandResultScreen) and not app.screen.pending)
             assert runtime._scope_generations["original-scope"] > generation
             assert runtime._gen == 0 and "other-scope" not in runtime._scope_generations
@@ -314,5 +330,6 @@ def test_completed_text_action_invalidates_an_older_inflight_list(
     try:
         asyncio.run(run())
     finally:
+        command_release.touch()
         release.set()
         runtime.close()

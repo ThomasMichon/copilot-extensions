@@ -56,7 +56,12 @@ Missing/older driver support refuses without an inline installer.
 The POSIX hook retains its existing metadata-Python prerequisite and no-Python
 no-op. Activation reads use the payload's bundled configuration SDK and the
 selected completed runtime interpreter when available, retaining ambient
-Python discovery for cold payloads. The canonical installation-context
+Python discovery for cold payloads. Cold activation qualifies an existing
+Python 3.10+ reader rather than accepting the first unsupported PATH winner;
+Windows reuses read-only canonical native discovery and headless capture.
+This neither raises Vault's floor to the installer's 3.11 tooling floor nor
+installs Python, changes PATH or invokes an installer to select the reader.
+The canonical installation-context
 bootstrap keeps its independent platform prerequisites (currently Python
 on PATH on Windows). No Vault runtime or backend is installed for this read. Cold
 bootstrap requires the qualified Windows or Linux native driver, not stock

@@ -39,6 +39,26 @@ def request_scopes(engine, pivot):
     return tuple(scopes)
 
 
+def actions_ready(runtime, scopes):
+    """Keep legacy snapshots compatible while the current runtime checks atomically."""
+    checker = getattr(runtime, "actions_ready", None)
+    if checker is not None:
+        return checker(scopes)
+    pending = getattr(runtime, "read_pending", None)
+    return bool(scopes) and all(
+        runtime.get(scope)[0] == "ready" and not (pending is not None and pending(scope))
+        for scope in scopes
+    )
+
+
+def action_scopes(context):
+    """Return captured read custody, without inventing it for independent commands."""
+    scopes = context.get("_manager_refresh_scopes")
+    if scopes is None and "_manager_scope" in context:
+        scopes = (context["_manager_scope"],)
+    return scopes
+
+
 def _read_state(states):
     states = tuple(states)
     if not states:

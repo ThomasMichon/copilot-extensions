@@ -25,13 +25,25 @@ class PivotRequestsMixin:
     def read_pending(self, machine):
         """Distinguish a replacement read from an already-published held channel."""
         with self._lock:
-            return (
-                (not self.pivot.subscribe and machine in self._inflight)
-                or machine in self._starting_scopes
-                or machine in self._refresh_pending
-                or machine in self._scope_retirements
-                or machine in self._resetting_scopes
-                or any(scope == machine for scope, _generation in self._pending_requests)
+            return self._read_pending(machine)
+
+    def _read_pending(self, machine):
+        return (
+            (not self.pivot.subscribe and machine in self._inflight)
+            or machine in self._starting_scopes
+            or machine in self._refresh_pending
+            or machine in self._scope_retirements
+            or machine in self._resetting_scopes
+            or any(scope == machine for scope, _generation in self._pending_requests)
+        )
+
+    def actions_ready(self, scopes):
+        """Check terminal read state and replacement admission in one snapshot."""
+        with self._lock:
+            return bool(scopes) and not self._closed.is_set() and all(
+                self._cache.get(scope, ("idle", [], ""))[0] == "ready"
+                and not self._read_pending(scope)
+                for scope in scopes
             )
 
     def _cancel_pending_lists(self):

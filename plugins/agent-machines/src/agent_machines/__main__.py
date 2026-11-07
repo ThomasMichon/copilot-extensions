@@ -376,6 +376,12 @@ def _cmd_installation_repair(args: argparse.Namespace) -> int:
     return 0 if result["status"] in {"discovered", "observed", "ready", "restart-confirmed"} else 2
 
 
+def _cmd_installation_configuration(args: argparse.Namespace) -> int:
+    from .installation_configuration import command
+
+    return command(args)
+
+
 def _fmt_val(v: object) -> str:
     s = json.dumps(v) if not isinstance(v, str) else v
     return s if len(s) <= 80 else s[:77] + "..."
@@ -854,6 +860,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     installation_repair.add_argument("--readiness-timeout", type=float, default=15)
     installation_repair.add_argument("--installer-timeout", type=float, default=300)
+    installation_configuration = add("installation-configuration", _cmd_installation_configuration)
+    installation_configuration.add_argument("--project", required=True)
+    installation_configuration.add_argument("--stream", action="store_true")
+    installation_configuration.add_argument("--progress", action="store_true")
+    installation_configuration.add_argument("--apply", action="store_true")
+    installation_configuration.add_argument("--expected-plan-digest")
     restore = add("restore", _cmd_restore)
     add_reconcile_scope(restore)
     restore.add_argument(
