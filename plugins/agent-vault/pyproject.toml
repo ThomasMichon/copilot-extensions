@@ -17,11 +17,10 @@ authors = [
 ]
 dependencies = [
     "agent-configuration-layers",
-    "agent-procutil[retirement-custody]",
+    "agent-procutil",
     "agent-zdd",
     "agent-single-instance-lease",
     "agent-update-driver",
-    "psutil>=7.0",
 ]
 
 [tool.uv.sources]

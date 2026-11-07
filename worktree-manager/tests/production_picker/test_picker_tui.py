@@ -5682,7 +5682,11 @@ def test_update_indicator_focus_glyph_and_refresh():
 
 
 def test_orphan_chip_appears_in_status_text_when_orphans_present():
-    """Orphan details remain available without a technical counter in chrome."""
+    """worktree-claims-transitive-finalization Phase 4 item 2: a re-homed
+    obligation awaiting ``claims cleanup`` has no worktree row of its own,
+    so it surfaces as a status-line chip instead -- labeled "(local, 'o')"
+    so it is never mistaken for a fleet-wide/cross-machine count (the
+    orphanage registry is per-machine local state)."""
     s = PickerScreen(_fixture_source(), live=False)
     s.setup_sync_for_tests()
     s.htab = 0
@@ -5691,12 +5695,13 @@ def test_orphan_chip_appears_in_status_text_when_orphans_present():
 
     s._orphans = [{"kind": "codespace", "ref": "cs-1"}]
     text = s.status_text(False).plain
-    assert "obligation" not in text and "details" not in text
+    assert "1 local re-homed obligation(s) · o details" in text
     assert "\u26a0" in text   # ⚠
+    # The compact form (used when the full status doesn't fit) still
+    # preserves the local scope and the 'o' shortcut -- never a bare
+    # "⚠N" that a narrow terminal could mistake for a fleet-wide count.
     compact = s.status_text(True).plain
-    assert compact.endswith("\u26a0")
-    assert "obligation" not in compact
-    assert "o: Doctor" in s.footer(48).plain
+    assert "\u26a01 local obligation(s) · o" in compact
 
 
 def test_poll_orphan_state_fetches_from_source_orphans(monkeypatch):

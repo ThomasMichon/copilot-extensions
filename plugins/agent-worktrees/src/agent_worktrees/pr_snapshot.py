@@ -53,8 +53,6 @@ class PRSnapshot:
     observation: Observation | None = None
     base_sha: str = ""
     """Provider-returned target tip, not the merge base or synthetic merge commit."""
-    endpoint: str = ""
-    """Effective authority captured by the provider read; absent means unknown."""
 
     @property
     def max_review_id(self) -> int:

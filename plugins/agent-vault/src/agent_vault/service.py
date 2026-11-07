@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agent_procutil.daemon_instances import admit_daemon_instance, daemon_entrypoint
+from agent_procutil.daemon_instances import daemon_entrypoint
 
 import asyncio
 import contextlib
@@ -51,7 +51,6 @@ from .service_connections import VaultConnections, settle_owned
 from .service_generation import PROCESS_GENERATION, PROTOCOL, ServiceGeneration
 from .service_handoff import supported_versions
 from .winpipe import pipe_send
-from .winpipe import pipe_absent as pipe_absent
 from .winpipe import start_pipe_server as start_pipe_server
 
 # Service inactivity timeout (0 = never, set via --persistent)
@@ -564,14 +563,6 @@ class VaultService:
                 self._generation.handoff_result
                 if getattr(self, "_generation", None) is not None else "not-requested"
             ),
-            "predecessor_retirement": (
-                self._generation.predecessor_retirement
-                if getattr(self, "_generation", None) is not None else "not-requested"
-            ),
-            "writer_predecessor_retirement": (
-                self._generation.writer_predecessor_retirement
-                if getattr(self, "_generation", None) is not None else "not-requested"
-            ),
         }
 
     def _handle_admitted_request(self, request: dict, peer: str = "?",
@@ -1014,9 +1005,6 @@ async def handle_client(
 
 @daemon_entrypoint("agent-vault", source=__file__, purpose="production")
 async def run_server(service: VaultService, tcp_port: int | None = None) -> None:
-    # The outer entrypoint retains this same admission through shutdown.
-    with admit_daemon_instance("agent-vault") as custody:
-        service._instance_registry_root = custody.receipt.registry_root
     servers = []
     pipe_servers: list = []
     connections = VaultConnections(service, handle_client)
@@ -1031,7 +1019,6 @@ async def run_server(service: VaultService, tcp_port: int | None = None) -> None
         generation = getattr(service, "_generation", None)
         try:
             if generation is not None:
-                await settle_owned(generation.settle_retirements())
                 await generation.close_handoff()
         finally:
             await settle_owned(connections.close(

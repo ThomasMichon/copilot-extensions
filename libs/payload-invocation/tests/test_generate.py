@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import importlib.util
-from importlib.machinery import ModuleSpec
 from collections.abc import Callable
 import json
 import os
@@ -13,7 +12,6 @@ import subprocess
 import sys
 import venv
 from types import ModuleType
-from typing import Any, cast
 from pathlib import Path
 
 import pytest
@@ -21,7 +19,7 @@ import pytest
 SCRIPT = Path(__file__).resolve().parents[1] / "generate.py"
 REPO = SCRIPT.parents[2]
 _spec = importlib.util.spec_from_file_location("payload_invocation_generate", SCRIPT)
-generator = importlib.util.module_from_spec(cast(ModuleSpec, _spec))
+generator = importlib.util.module_from_spec(_spec)
 assert _spec and _spec.loader
 _spec.loader.exec_module(generator)
 # Fixture setup uses the receipt owner API; invocation still exercises the real PowerShell dispatcher.
@@ -67,7 +65,7 @@ def _manifest(tmp_path: Path) -> Path:
 @pytest.mark.parametrize("kind", ["sh", "ps1", "cmd", "dispatcher", "dispatcher-installed"] if os.name == "nt"
                          else ["sh", "ps1", "dispatcher", "dispatcher-installed",
                                "dispatcher-sh", "dispatcher-sh-installed"])
-def test_generated_shim_external_cache_cold_and_warm(tmp_path: Path, kind: str) -> None:
+def test_generated_shim_external_cache_cold_and_warm(tmp_path, kind):
     dispatcher = kind.startswith("dispatcher")
     installed = kind.endswith("-installed")
     manifest = _manifest(tmp_path)
@@ -154,9 +152,9 @@ def test_generated_shim_external_cache_cold_and_warm(tmp_path: Path, kind: str) 
     else:
         if os.name == "nt":
             git = shutil.which("git")
-            bash_host = Path(git).parent.parent / "bin/bash.exe" if git else None
-            assert bash_host and bash_host.is_file(), "native Git Bash is required"
-            argv = [str(bash_host), str(shim)]
+            host = Path(git).parent.parent / "bin/bash.exe" if git else None
+            assert host and host.is_file(), "native Git Bash is required"
+            argv = [str(host), str(shim)]
         else:
             argv = ["sh", str(shim)]
     environment = dict(os.environ)
@@ -164,7 +162,7 @@ def test_generated_shim_external_cache_cold_and_warm(tmp_path: Path, kind: str) 
     child_env.pop("PYTHONDONTWRITEBYTECODE", None)
     child_env.pop("PYTHONPYCACHEPREFIX", None)
 
-    def snapshot() -> dict[str, tuple[bytes | None, int, int, int]]:
+    def snapshot():
         return {
             str(path.relative_to(slot)): (
                 path.read_bytes() if path.is_file() else None,
@@ -180,7 +178,7 @@ def test_generated_shim_external_cache_cold_and_warm(tmp_path: Path, kind: str) 
         result = subprocess.run(
             [*argv, "argument with spaces"], cwd=tmp_path, env=child_env,
             capture_output=True, text=True, timeout=30,
-            **({"creationflags": cast(Any, subprocess).CREATE_NO_WINDOW} if os.name == "nt" else {}),
+            **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
         )
         assert result.returncode == 0, result.stderr
         output = json.loads(result.stdout)
@@ -192,8 +190,8 @@ def test_generated_shim_external_cache_cold_and_warm(tmp_path: Path, kind: str) 
         assert cached.is_relative_to(Path(prefix))
         current = (cached.read_bytes(), cached.stat().st_mtime_ns, cached.stat().st_ino)
         if cached_before is not None:
-            assert (cast(Path, previous_cache).read_bytes(), cast(Path, previous_cache).stat().st_mtime_ns,
-                    cast(Path, previous_cache).stat().st_ino) == cached_before
+            assert (previous_cache.read_bytes(), previous_cache.stat().st_mtime_ns,
+                    previous_cache.stat().st_ino) == cached_before
             assert (cached == previous_cache) is installed
         cached_before = current
         previous_cache = cached
@@ -209,14 +207,14 @@ def test_generated_shim_external_cache_cold_and_warm(tmp_path: Path, kind: str) 
     result = subprocess.run(
         [*argv, "argument with spaces"], cwd=tmp_path, env=child_env,
         capture_output=True, text=True, timeout=30,
-        **({"creationflags": cast(Any, subprocess).CREATE_NO_WINDOW} if os.name == "nt" else {}),
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
     )
     assert result.returncode == 0, result.stderr
     output = json.loads(result.stdout)
     assert output[0] == 84 and output[2:] == [False, ["argument with spaces"]]
     assert Path(output[1]) != previous_cache
-    assert (cast(Path, previous_cache).read_bytes(), cast(Path, previous_cache).stat().st_mtime_ns,
-            cast(Path, previous_cache).stat().st_ino) == cached_before
+    assert (previous_cache.read_bytes(), previous_cache.stat().st_mtime_ns,
+            previous_cache.stat().st_ino) == cached_before
     assert dict(os.environ) == environment
 
 
@@ -286,7 +284,7 @@ def _required_context_multi_manifest(tmp_path: Path) -> Path:
     return path
 
 
-def test_binding_human_assets_do_not_require_worktrees_source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_binding_human_assets_do_not_require_worktrees_source(tmp_path, monkeypatch):
     manifest = _required_context_manifest(tmp_path)
     data = json.loads(manifest.read_text(encoding="utf-8"))
     data["catalogBinding"] = True
@@ -397,7 +395,7 @@ def test_object_pipeline_forwarding_is_explicit_and_default_false(tmp_path: Path
 
 
 @pytest.mark.parametrize("value", ["true", 1, None])
-def test_object_pipeline_forwarding_requires_boolean(tmp_path: Path, value: object) -> None:
+def test_object_pipeline_forwarding_requires_boolean(tmp_path: Path, value) -> None:
     manifest = _required_context_manifest(tmp_path)
     data = json.loads(manifest.read_text(encoding="utf-8"))
     data["powershellPipelineInput"] = value
@@ -415,7 +413,7 @@ def test_object_pipeline_forwarding_requires_dispatcher(tmp_path: Path) -> None:
         generator.load_manifest(manifest)
 
 
-def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+def _read_jsonl(path: Path) -> list[dict[str, object]]:
     return [
         json.loads(line)
         for line in path.read_text(encoding="utf-8").splitlines()
@@ -790,7 +788,7 @@ def _dependency_materializer() -> ModuleType:
     assert spec and spec.loader
     materializer = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(materializer)
-    setattr(materializer, "find_uv_editable_refs", materializer.uer.find_uv_editable_refs)
+    materializer.find_uv_editable_refs = materializer.uer.find_uv_editable_refs
     return materializer
 
 
@@ -923,7 +921,7 @@ def _copied_agent_worktrees_payload(tmp_path: Path, *, dispatch_only: bool = Fal
     source = REPO / "plugins" / "agent-worktrees"
     ignore_runtime = _payload_copy_ignore(source)
 
-    def ignore(directory: str, names: list[str]) -> set[str]:
+    def ignore(directory, names):
         excluded = ignore_runtime(directory, names)
         if Path(directory) == source:
             # These runtime/dispatch fixtures do not consume the authoring corpus.
@@ -1066,7 +1064,7 @@ def test_required_context_inner_command_external_cache(tmp_path: Path, host: str
     for key in ("PYTHONDONTWRITEBYTECODE", "PYTHONPYCACHEPREFIX", "PYTHONPATH"):
         child_env.pop(key, None)
 
-    def snapshot(directory: Path) -> dict[str, tuple[bytes | None, int, int, int]]:
+    def snapshot(directory):
         return {
             str(path.relative_to(directory)): (
                 path.read_bytes() if path.is_file() else None,
@@ -1082,7 +1080,7 @@ def test_required_context_inner_command_external_cache(tmp_path: Path, host: str
             [host, "-NoProfile", "-File",
              str(payload / "bin" / "payload" / "agent-worktrees.ps1"), "argument with spaces"],
             env=child_env, cwd=tmp_path, capture_output=True, text=True, timeout=30,
-            creationflags=cast(Any, subprocess).CREATE_NO_WINDOW,
+            creationflags=subprocess.CREATE_NO_WINDOW,
         )
         assert result.returncode == 0, result.stderr
         output = json.loads(result.stdout)
@@ -1119,13 +1117,13 @@ def test_worktrees_composed_status_preserves_independent_validation(tmp_path: Pa
     ]
     expectations = ["-ExpectedPluginId", "agent-worktrees", "-ExpectedPayloadRoot", str(payload)]
 
-    def invoke(arguments: list[str]) -> dict[str, Any]:
+    def invoke(arguments: list[str]) -> dict[str, object]:
         result = subprocess.run(
             [*prefix, *arguments], env=environment, capture_output=True, text=True,
-            timeout=20, creationflags=cast(Any, subprocess).CREATE_NO_WINDOW,
+            timeout=20, creationflags=subprocess.CREATE_NO_WINDOW,
         )
         assert result.returncode == 0, result.stderr
-        return cast(dict[str, Any], json.loads(result.stdout))
+        return json.loads(result.stdout)
 
     ordinary = invoke(status)
     assert ordinary["status"] == "ready"
@@ -1178,7 +1176,7 @@ def test_worktrees_composed_status_revalidates_changed_receipt(tmp_path: Path, h
          "-WithContextValidation", "-ExpectedPluginId", "agent-worktrees",
          "-ExpectedPayloadRoot", str(payload)],
         env=environment, capture_output=True, text=True, timeout=20,
-        creationflags=cast(Any, subprocess).CREATE_NO_WINDOW,
+        creationflags=subprocess.CREATE_NO_WINDOW,
     )
     assert result.returncode == 1
     assert not result.stdout.strip()
@@ -1241,7 +1239,7 @@ def test_worktrees_releases_provision_lock_before_runtime_dispatch(
         [host, "-NoProfile", "-File", str(payload / "bin" / "payload" / "agent-worktrees.ps1"),
          "--version"],
         env=environment, capture_output=True, text=True, timeout=25,
-        creationflags=cast(Any, subprocess).CREATE_NO_WINDOW,
+        creationflags=subprocess.CREATE_NO_WINDOW,
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "lock-released"
@@ -1293,7 +1291,7 @@ def test_worktrees_in_process_checks_refuse_changed_policy(
         [host, "-NoProfile", "-File", str(payload / "bin" / "payload" / "agent-worktrees.ps1"),
          "--version"],
         env=environment, capture_output=True, text=True, timeout=25,
-        creationflags=cast(Any, subprocess).CREATE_NO_WINDOW,
+        creationflags=subprocess.CREATE_NO_WINDOW,
     )
     assert result.returncode == 126, result.stderr
     assert not result.stdout.strip()
@@ -3316,10 +3314,10 @@ def test_powershell_cwd_boundary_rejects_registry_provider(
     )
     for project, expected in ((str(home), home), ("HKCU:\\Software", home)):
         result = subprocess.run(
-            [cast(str, shutil.which("pwsh")), "-NoProfile", "-File", str(script)],
+            [shutil.which("pwsh"), "-NoProfile", "-File", str(script)],
             cwd=payload, env={**os.environ, "HOME": str(home), "USERPROFILE": str(home), "COPILOT_PROJECT_DIR": project},
             capture_output=True, text=True, timeout=15,
-            creationflags=cast(Any, subprocess).CREATE_NO_WINDOW,
+            creationflags=subprocess.CREATE_NO_WINDOW,
         )
         assert result.returncode == 0, (result.stdout, result.stderr)
         assert Path(result.stdout.strip()).resolve() == expected.resolve()
@@ -3647,7 +3645,7 @@ def test_powershell_shim_boot_trace_lines_survive_concurrent_invocations(
 
     records = _read_jsonl(runtime_root / "logs" / "boot-trace.jsonl")
     assert len(records) >= 9
-    by_pid: dict[int, list[dict[str, Any]]] = {}
+    by_pid: dict[int, list[dict[str, object]]] = {}
     for rec in records:
         by_pid.setdefault(int(rec["pid"]), []).append(rec)
     assert len(by_pid) == 3
@@ -3671,7 +3669,7 @@ def test_powershell_shim_boot_trace_lines_survive_concurrent_invocations(
 
 
 @pytest.mark.parametrize("value", [None, 0, 1, "", []])
-def test_in_process_catalog_rejects_non_boolean_opt_in(tmp_path: Path, value: object) -> None:
+def test_in_process_catalog_rejects_non_boolean_opt_in(tmp_path, value):
     manifest = _manifest(tmp_path)
     data = json.loads(manifest.read_text())
     data["inProcessCatalog"] = value
@@ -3681,7 +3679,7 @@ def test_in_process_catalog_rejects_non_boolean_opt_in(tmp_path: Path, value: ob
 
 
 @pytest.mark.parametrize("other", ["catalogGate", "catalogBinding"])
-def test_in_process_catalog_rejects_unimplemented_policy_composition(tmp_path: Path, other: str) -> None:
+def test_in_process_catalog_rejects_unimplemented_policy_composition(tmp_path, other):
     manifest = _manifest(tmp_path)
     data = json.loads(manifest.read_text())
     data["inProcessCatalog"] = True
@@ -3696,7 +3694,7 @@ def test_in_process_catalog_rejects_unimplemented_policy_composition(tmp_path: P
 
 
 @pytest.mark.parametrize("multi", [False, True])
-def test_in_process_catalog_is_explicit_generated_source(tmp_path: Path, multi: bool) -> None:
+def test_in_process_catalog_is_explicit_generated_source(tmp_path, multi):
     manifest = (_multi_manifest if multi else _manifest)(tmp_path)
     module = manifest.parent / "scripts/emit_command_catalog.py"
     before = generator.expected_files(manifest)
@@ -3707,7 +3705,7 @@ def test_in_process_catalog_is_explicit_generated_source(tmp_path: Path, multi: 
     after = generator.expected_files(manifest)
     assert set(after) == {*before, module}
     assert all(after[path] == content for path, content in before.items())
-    namespace: dict[str, Any] = {"__file__": str(module), "__name__": "_catalog_test"}
+    namespace = {"__file__": str(module), "__name__": "_catalog_test"}
     exec(compile(after[module], str(module), "exec"), namespace)
     context = namespace["render_context"](windows=True)
     catalog = json.loads(context.split("```json\n", 1)[1].split("\n```", 1)[0])
@@ -3727,12 +3725,12 @@ _IN_PROCESS_ADOPTERS = (
 )
 
 
-def _catalog_parts(context: str) -> tuple[str, dict[str, Any]]:
+def _catalog_parts(context):
     prose, encoded = context.split("```json\n", 1)
     return prose, json.loads(encoded.split("\n```", 1)[0])
 
 
-def _flight_snapshot(home: Path) -> dict[Path, bytes]:
+def _flight_snapshot(home):
     # Native PowerShell owns its AppData startup cache, independently of the hook.
     return {
         path.relative_to(home): path.read_bytes()
@@ -3741,7 +3739,7 @@ def _flight_snapshot(home: Path) -> dict[Path, bytes]:
     }
 
 
-def _flight_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: str, *, multi: bool = False) -> tuple[Path, Path, dict[Path, bytes]]:
+def _flight_fixture(tmp_path, monkeypatch, state, *, multi=False):
     manifest = (_multi_manifest if multi else _manifest)(tmp_path)
     data = json.loads(manifest.read_text())
     data["inProcessCatalog"] = True
@@ -3789,7 +3787,7 @@ def _flight_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: str,
     ("installed", "already installed"), ("lkg", "already installed"),
     ("unverified-context", "could not be verified for this installation context"),
 ])
-def test_in_process_catalog_flight_check_is_passive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, multi: bool, state: str, expected: str) -> None:
+def test_in_process_catalog_flight_check_is_passive(tmp_path, monkeypatch, multi, state, expected):
     manifest, home, before = _flight_fixture(tmp_path, monkeypatch, state, multi=multi)
     module_path = manifest.parent / "scripts/emit_command_catalog.py"
     spec = importlib.util.spec_from_file_location("_flight_catalog_test", module_path)
@@ -3797,7 +3795,7 @@ def test_in_process_catalog_flight_check_is_passive(tmp_path: Path, monkeypatch:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
-    def forbidden(*args: object, **kwargs: object) -> None:
+    def forbidden(*args, **kwargs):
         raise AssertionError("A passive catalog must not spawn tools or services")
 
     monkeypatch.setattr(subprocess, "Popen", forbidden)
@@ -3820,7 +3818,7 @@ def test_in_process_catalog_flight_check_is_passive(tmp_path: Path, monkeypatch:
     ("installed", "already installed"), ("lkg", "already installed"),
     ("unverified-context", "could not be verified for this installation context"),
 ])
-def test_native_catalog_flight_check_is_passive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shell: str, state: str, expected: str) -> None:
+def test_native_catalog_flight_check_is_passive(tmp_path, monkeypatch, shell, state, expected):
     executable = shutil.which(shell)
     if not executable:
         pytest.skip("native catalog shell unavailable")
@@ -3841,7 +3839,7 @@ def test_native_catalog_flight_check_is_passive(tmp_path: Path, monkeypatch: pyt
     assert not list(manifest.parent.rglob("__pycache__"))
 
 
-def test_flight_check_selected_root_does_not_substitute_legacy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_flight_check_selected_root_does_not_substitute_legacy(tmp_path, monkeypatch):
     manifest, home, before = _flight_fixture(tmp_path, monkeypatch, "installed")
     spec = importlib.util.spec_from_file_location(
         "_selected_flight", manifest.parent / "scripts/command_binding.py",
@@ -3858,7 +3856,7 @@ def test_flight_check_selected_root_does_not_substitute_legacy(tmp_path: Path, m
 
 
 @pytest.mark.parametrize("plugin", _IN_PROCESS_ADOPTERS)
-def test_in_process_catalog_registered_writer_native_entry(tmp_path: Path, plugin: str) -> None:
+def test_in_process_catalog_registered_writer_native_entry(tmp_path, plugin):
     if os.name == "nt":
         shell = shutil.which("pwsh") or shutil.which("powershell.exe")
     else:
@@ -3883,7 +3881,7 @@ def test_in_process_catalog_registered_writer_native_entry(tmp_path: Path, plugi
     instrumentation = (
         "\nimport sys as _audit_sys, json as _audit_json\n"
         f"_audit_path = {str(audit)!r}\n"
-        "def _audit_record(event: str, args: tuple[object, ...]) -> None:\n"
+        "def _audit_record(event, args):\n"
         "    if event in ('subprocess.Popen', 'os.system', 'os.posix_spawn', 'os.spawn'):\n"
         "        with open(_audit_path, 'a', encoding='utf-8') as stream:\n"
         "            stream.write(_audit_json.dumps({'spawn': event}) + '\\n')\n"
@@ -3934,7 +3932,7 @@ def test_in_process_catalog_registered_writer_native_entry(tmp_path: Path, plugi
     target = home / ".copilot/session-state/session-1/instructions" / plugin / "session-guidance.instructions.md"
     calls = 0
 
-    def invoke(payload_input: str = '{"sessionId":"session-1"}') -> str:
+    def invoke(payload_input='{"sessionId":"session-1"}'):
         nonlocal calls
         calls += 1
         result = subprocess.run(command, input=payload_input, env=env, text=True,
@@ -3944,7 +3942,7 @@ def test_in_process_catalog_registered_writer_native_entry(tmp_path: Path, plugi
         assert not sentinel.exists()
         return target.read_text(encoding="utf-8") if target.exists() else ""
 
-    def reference() -> tuple[str, dict[str, Any]]:
+    def reference():
         argv = (
             [shell, "-NoProfile", "-File", str(scripts / "emit-command-catalog.ps1")]
             if os.name == "nt" else [shell, str(scripts / "emit-command-catalog.sh")]
@@ -4004,14 +4002,14 @@ def test_in_process_catalog_registered_writer_native_entry(tmp_path: Path, plugi
 
 
 @pytest.mark.parametrize("multi", [False, True])
-def test_in_process_catalog_retains_platform_availability_predicates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, multi: bool) -> None:
+def test_in_process_catalog_retains_platform_availability_predicates(tmp_path, monkeypatch, multi):
     manifest = (_multi_manifest if multi else _manifest)(tmp_path)
     data = json.loads(manifest.read_text())
     data["inProcessCatalog"] = True
     data["windowsCatalogShim"] = "cmd"
     manifest.write_text(json.dumps(data))
     module = manifest.parent / "scripts/emit_command_catalog.py"
-    namespace: dict[str, Any] = {"__file__": str(module), "__name__": "_catalog_predicates"}
+    namespace = {"__file__": str(module), "__name__": "_catalog_predicates"}
     exec(compile(generator.expected_files(manifest)[module], str(module), "exec"), namespace)
     commands = ["agent-example", "example-helper"] if multi else ["agent-example"]
     output = manifest.parent / "bin"

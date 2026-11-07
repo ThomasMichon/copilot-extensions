@@ -2,7 +2,6 @@
 import hashlib
 import json
 import os
-import shutil
 import subprocess
 import sys
 import time
@@ -14,7 +13,7 @@ import pytest
 import runtime_profile_delivery as delivery
 from installer_wheel_inputs import WheelError
 from runtime_profile import validate_profile
-from test_runtime_profile_bundle import build, inputs, isolated_manager  # noqa: F401
+from test_runtime_profile_bundle import build, inputs  # noqa: F401
 
 
 def digest(path):
@@ -66,134 +65,6 @@ def test_deterministic_complete_readback_without_originals(tmp_path, selected):
         assert retained.materials["source.tar.gz"].read() == b"independently qualified source archive"
         paths = list(retained.wheels.paths.values())
     assert not any(path.exists() for path in paths)
-
-
-def test_isolated_delivery_holds_both_verified_environment_closures(tmp_path, isolated_manager):  # noqa: F811
-    record, paths = isolated_manager
-    transport = tmp_path / "wheels.zip"
-    built = build(record, paths, transport, max_wheels=3, layout="manager-isolated")
-    selected = (record, transport, built["sha256"], {}, {})
-    output = tmp_path / "delivery.zip"
-    result = produce(selected, output, layout="manager-isolated")
-    with zipfile.ZipFile(output) as archive:
-        manifest = json.loads(archive.read("delivery.json"))
-    assert (manifest["version"], manifest["layout"]) == (2, "manager-isolated")
-    with retain(selected, output, result["sha256"]) as retained:
-        assert retained.layout == "manager-isolated"
-        assert set(retained.environments) == {"shared", "manager"}
-        assert set(retained.wheels.paths) == set(paths)
-        assert {
-            row["filename"]
-            for profile in retained.environments.values()
-            for row in profile.record()["wheels"]
-        } == set(paths)
-
-
-def test_isolated_delivery_cannot_be_downgraded_to_single_environment(tmp_path, isolated_manager):  # noqa: F811
-    record, paths = isolated_manager
-    transport = tmp_path / "wheels.zip"
-    built = build(record, paths, transport, max_wheels=3, layout="manager-isolated")
-    selected = (record, transport, built["sha256"], {}, {})
-    output = tmp_path / "delivery.zip"
-    produce(selected, output, layout="manager-isolated")
-    with zipfile.ZipFile(output) as archive:
-        contents = {item.filename: archive.read(item) for item in archive.infolist()}
-    manifest = json.loads(contents["delivery.json"])
-    manifest["version"] = 1
-    del manifest["layout"]
-    contents["delivery.json"] = json.dumps(manifest).encode()
-    downgraded = tmp_path / "downgraded.zip"
-    with zipfile.ZipFile(downgraded, "w") as archive:
-        for name, data in contents.items():
-            archive.writestr(name, data)
-    with pytest.raises(ValueError), retain(selected, downgraded, digest(downgraded)):
-        pytest.fail("colliding single environment admitted")
-
-
-def test_isolated_delivery_commands_match_the_apis(tmp_path, isolated_manager):  # noqa: F811
-    record, paths = isolated_manager
-    profile, materials = tmp_path / "profile.json", tmp_path / "materials.json"
-    profile.write_text(json.dumps(record), encoding="utf-8")
-    materials.write_text("{}", encoding="utf-8")
-    transport = tmp_path / "wheels.zip"
-    api_transport = build(record, paths, transport, max_wheels=3, layout="manager-isolated")
-    options = {
-        "capture_output": True, "text": True, "timeout": 30, "check": False,
-        "creationflags": subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-    }
-    cli_transport = tmp_path / "command-wheels.zip"
-    result = subprocess.run(
-        [sys.executable, str(Path(delivery.__file__).with_name("runtime_profile_bundle.py")),
-         "--profile", str(profile), "--wheel-dir", str(tmp_path), "--output", str(cli_transport),
-         "--layout", "manager-isolated"],
-        **options,
-    )
-    assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == api_transport
-    assert cli_transport.read_bytes() == transport.read_bytes()
-    selected = (record, transport, api_transport["sha256"], {}, {})
-    api_delivery = produce(selected, tmp_path / "api.zip", layout="manager-isolated")
-    command_delivery = tmp_path / "command.zip"
-    result = subprocess.run(
-        [sys.executable, str(Path(delivery.__file__)), "--profile", str(profile),
-         "--transport", str(transport), "--transport-sha256", api_transport["sha256"],
-         "--materials", str(materials), "--material-dir", str(tmp_path),
-         "--output", str(command_delivery), "--layout", "manager-isolated"],
-        **options,
-    )
-    assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == api_delivery
-    assert command_delivery.read_bytes() == (tmp_path / "api.zip").read_bytes()
-
-
-@pytest.mark.skipif(os.name != "nt", reason="native Windows isolated environments")
-def test_native_isolated_delivery_installs_only_its_verified_environment(tmp_path, isolated_manager):  # noqa: F811
-    import installer_dependency_policy as policy
-    from runtime_profile_wheels import profile_wheel_inputs
-
-    record, paths = isolated_manager
-    transport = tmp_path / "wheels.zip"
-    built = build(record, paths, transport, max_wheels=3, layout="manager-isolated")
-    selected = (record, transport, built["sha256"], {}, {})
-    output = tmp_path / "delivery.zip"
-    result = produce(selected, output, layout="manager-isolated", deadline=time.monotonic() + 120)
-    uv = shutil.which("uv")
-    assert uv
-    with retain(selected, output, result["sha256"], deadline=time.monotonic() + 120) as retained:
-        for name, value in (("shared", 1), ("manager", 2)):
-            profile = retained.environments[name]
-            filenames = tuple(row["filename"] for row in profile.record()["wheels"])
-            snapshot = retained.wheels.subset(filenames)
-            verified = profile_wheel_inputs(
-                profile, snapshot, max_archive_bytes=1_000_000, max_unpacked_bytes=1_000_000,
-                max_metadata_bytes=100_000, deadline=time.monotonic() + 60,
-            )
-            slot = tmp_path / name
-            python = slot / "Scripts" / "python.exe"
-            subprocess.run(
-                [sys.executable, "-I", "-m", "venv", "--without-pip", "--copies", str(slot)],
-                check=True, capture_output=True, timeout=30, creationflags=policy._HEADLESS,
-            )
-            with policy.retain_closed_wheel_install(uv, snapshot, python=python) as transaction:
-                subprocess.run(
-                    transaction.argv, cwd=transaction.cwd, env=transaction.environment,
-                    check=True, capture_output=True, timeout=30, creationflags=policy._HEADLESS,
-                )
-                verified.verify()
-            proof = subprocess.run(
-                [str(python), "-I", "-c",
-                 "import helper,importlib.metadata as m,json; "
-                 "print(json.dumps({'value':helper.VALUE,'origin':helper.__file__,"
-                 "'distributions':sorted(d.metadata['Name'] for d in m.distributions())}))"],
-                check=True, capture_output=True, text=True, timeout=30, creationflags=policy._HEADLESS,
-            )
-            evidence = json.loads(proof.stdout)
-            assert evidence["value"] == value
-            assert Path(evidence["origin"]).resolve().is_relative_to(slot.resolve())
-            assert set(evidence["distributions"]) == (
-                {"demo-pkg", "helper"} if name == "shared"
-                else {"copilot-extensions-worktree-manager"}
-            )
 
 
 @pytest.mark.parametrize("change", ["bytes", "missing", "extra", "unrelated", "kind", "path", "size"])

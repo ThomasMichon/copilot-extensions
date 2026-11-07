@@ -18,7 +18,7 @@ def test_projection_consumer_keeps_scoped_modules_without_delegation_policy(tmp_
     specs, unknown = projections._load_specs(tmp_path, [source], result)
     assert not unknown and result.blocking == 0, result.findings
     assert {spec.source_id for spec in specs} == {
-        "useful-autonomy", "question-framing", "maintenance-standby", "elevation-fallback",
+        "useful-autonomy", "maintenance-standby", "elevation-fallback",
         "multi-agent-rules-of-engagement", "process-hygiene-fallback",
         "scratch-space-fallback", "secret-masking-fallback",
     }

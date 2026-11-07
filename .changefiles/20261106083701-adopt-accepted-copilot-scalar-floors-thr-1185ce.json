@@ -1,9 +1,0 @@
-{
-  "comment": "Adopt accepted Copilot scalar floors through confirmed native settings merge",
-  "changes": [
-    {
-      "plugin": "agent-machines",
-      "type": "patch"
-    }
-  ]
-}

@@ -66,14 +66,7 @@ After useful safe work is exhausted, present the packet's recommendation and
 scope choice, not a request to reauthorize the task itself or another incremental
 lever. A real acceptance becomes the original bounded grant and is captured
 immediately through the existing record/checkpoint procedure.
-Frame the packet's options with the skill's question-framing check: the
-recommendation is the broadest option that completes the goal within the
-requested authority, a recurring question gets a standing option, and
-narrower options never replace the broad one.
 
-Avoid repeated unchanged questions. Before asking about an operation class
-again, run the skill's pre-ask self-check; a repeated ask for one class should
-request class-level pre-clearance with a bounded rerun policy. A saved "check
-again in four hours" is a condition revisit, not a daemon, approval renewal or
-exact-turn guarantee. Preserve unresolved responsibility through the existing
-agenda/handoff owner.
+Avoid repeated unchanged questions. A saved "check again in four hours" is a
+condition revisit, not a daemon, approval renewal or exact-turn guarantee.
+Preserve unresolved responsibility through the existing agenda/handoff owner.

@@ -326,7 +326,7 @@ class GitHubProvider:
         GitHub Enterprise host; otherwise ambient ``GH_HOST``/``github.com``
         is resolved once and passed explicitly to every read.
         """
-        host = snapshot_endpoint = self.authority_endpoint(
+        host = self.authority_endpoint(
             (api_base or "https://github.com") if credential_source is not None else api_base,
         )
         if credential_source is not None and token is not None:
@@ -404,7 +404,7 @@ class GitHubProvider:
         # REST ``state`` is only open|closed; ``merged`` is a separate bool (a
         # merged PR is closed+merged).
         return PRSnapshot(
-            pr_state="closed" if str(pr.get("state", "")).lower() == "closed" else "open", endpoint=snapshot_endpoint,
+            pr_state="closed" if str(pr.get("state", "")).lower() == "closed" else "open",
             merged=bool(pr.get("merged", False)),
             head_sha=head_sha,
             base_ref=str((pr.get("base") or {}).get("ref", "")), base_sha=str((pr.get("base") or {}).get("sha") or ""),

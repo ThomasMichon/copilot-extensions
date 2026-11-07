@@ -31,15 +31,6 @@ FLEET_TEST_CONSUMERS = frozenset({
 })
 
 
-def has_dev_extra(project: Path) -> bool:
-    """Read the development extra without executing package metadata."""
-    try:
-        data = tomllib.loads((project / "pyproject.toml").read_text(encoding="utf-8"))
-    except (OSError, tomllib.TOMLDecodeError):
-        return False
-    return "dev" in data.get("project", {}).get("optional-dependencies", {})
-
-
 def _dependency_entries(name: str, plugin: Path, repo: Path) -> list[tuple[Path, tuple[str, ...]]]:
     entries: list[tuple[Path, tuple[str, ...]]] = []
     manifest = plugin / "pyproject.toml"

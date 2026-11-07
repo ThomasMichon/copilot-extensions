@@ -40,32 +40,6 @@ def test_target_capabilities_are_actual_cli_contract(author, out):
     assert result["repo"] == "project/repo"
     assert result["operations"]["metadata-update"] is True
     assert result["operations"]["remote-evidence"] is False
-    assert result["operations"]["worker-policy-config"] is True
-    assert result["operations"]["worker-policy-export"] is True
-
-
-@pytest.mark.parametrize("contents", [None, "{}", "[]"])
-def test_invalid_explicit_author_config_refuses_before_mutation(
-    author, out, monkeypatch, tmp_path, contents,
-):
-    path = tmp_path / "worker.json"
-    if contents is not None:
-        path.write_text(contents, "utf-8")
-    monkeypatch.setattr(pr_metadata, "update_metadata", lambda *a, **k: pytest.fail("write"))
-    assert cli.main([
-        "pr-update", "--repo", "project/repo", "--number", "7",
-        "--config", str(path), "--title", "new", "--json",
-    ]) == 1
-    assert "explicit PR configuration" in json.loads(out.getvalue())["error"]
-
-
-def test_empty_explicit_author_config_is_not_ambient(author, out, monkeypatch):
-    monkeypatch.setattr(pr_metadata, "update_metadata", lambda *a, **k: pytest.fail("write"))
-    assert cli.main([
-        "pr-update", "--repo", "project/repo", "--number", "7",
-        "--config=", "--title", "new", "--json",
-    ]) == 1
-    assert "explicit PR configuration file is unavailable" in json.loads(out.getvalue())["error"]
 
 
 def test_metadata_command_keeps_exact_body_and_partial_pr_identity(author, monkeypatch, tmp_path, out):

@@ -937,12 +937,6 @@ explicit-cell namespace/payload ownership, so reuse notices repairs and
 revocation. The stdlib-only registry reader ignores optional metadata, including
 inline and block-style tag lists. It follows mapping indentation and preserves
 quoted ownership paths, including trailing comments and literal hash characters.
-The existing Windows entry also reuses a complete
-[original-owner prepared cell observation](docs/worktree-observations.md#prepared-installation-cell-membership),
-checking current context/payload, all original input witnesses and bounded
-validated receipt/manifest content without launching the admission interpreter.
-Cold, incomplete and incompatible observations retain the original resolver;
-this is not a complete shell-only cell-hook transition.
 Platform selection shares the runtime's
 kernel/container-aware classifier rather than inherited WSL environment labels.
 Persistent reuse is also scoped to that execution platform. Explicit per-project
@@ -1275,6 +1269,7 @@ installation-local frozen-origin check; malformed or conflicting evidence
 requires explicit repair. Long interpreter paths are launched with an explicit
 application path, not inferred from the command-line token.
 
+
 ### Emergency pre-tool relief
 
 The default installation supports `agent-machines pretool-killswitch on
@@ -1306,33 +1301,3 @@ ACP and other hosts without a qualified extension registration/lifecycle keep
 selects a qualified session launch, not a feature-detection or failover mechanism.
 ACP command-hook compatibility and measured whole-path gains remain transition
 gates, not inferred benefits of moving code into an extension.
-
-## Read-only state-root request API
-
-`agent_worktrees.state_root_request.resolve()` returns the existing `StateRoot`
-result using normal cwd/project discovery, layered configuration and state-root
-semantics. It is intended for a bounded read in an already selected owning
-runtime; it neither provisions a runtime nor changes installation admission.
-Project discovery starts fresh for each call and restores its caller's
-in-process project selection afterward, including on failure.
-
-Inside that one synchronous request, coupled-registry and project-state reads
-reuse one canonically validated installation binding. The owner freshly
-revalidates the binding before returning the result. Routing changes or changed
-source, namespace, receipt or generation evidence reject the request. The value
-is discarded on success or failure; ordinary registry readers outside this API
-retain their existing fresh-validation behavior. There is no persistent or
-process-wide authority cache.
-Authority failures raise `StateRootRequestRefused`; configuration-read failures
-retain their normal error behavior. The snapshot adapter maps an authority
-refusal separately from an unavailable older API.
-
-The SSH snapshot consumer uses this API instead of independently composing the
-same reads and repeatedly validating an identical binding. Its existing
-dispatch validation, descendant ownership and five-second aggregate optional
-read deadline are unchanged. An older optional runtime without this API is
-unavailable, never silently replaced by another runtime or installation cell.
-
-Focused controls live in `tests/test_state_root_request.py`; the actual
-namespaced native consumer is exercised by agent-ssh's
-`tests/test_snapshot_runtime.py`.

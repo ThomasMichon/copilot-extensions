@@ -172,20 +172,6 @@ class _PickerButtons(_FocusRegion):
         _machine, buttons = scr._chrome_split(chrome)
         return scr._join_lines([vr.text for vr in buttons], W)
 
-class _PickerNotices(Widget):
-    """Fixed-height notices never become OptionList entries or reflow siblings."""
-
-    can_focus = False
-
-    def __init__(self, screen, **kw):
-        super().__init__(**kw)
-        self._screen = screen
-
-    def render(self):
-        scr = self._screen
-        lines = scr.worktrees_view.notice_lines() if scr._kind() == "worktrees" else []
-        return scr._join_lines(lines, self.size.width or 100)
-
 class _PickerStickyHeader(Widget):
     """NF5-5 (#88) + Phase 9 item 1 (worktrees-pivot-ux-overhaul #3307): the
     pinned column-header + current-group-band region above the native
@@ -323,8 +309,7 @@ class _PickerNativeData(OptionList):
                 scr.size.width, getattr(scr, "cmd_mode", False),
                 getattr(scr.list_view, "query", ""),
                 getattr(scr.list_view, "sort_index", 0), fp, worker_fp,
-                tuple(notice for notice in worktree_read_feedback(scr) if not notice.cached)
-                if kind == "worktrees" else ())
+                tuple(worktree_read_feedback(scr)) if kind == "worktrees" else ())
 
     def _rebuild(self):
         scr = self._screen

@@ -165,11 +165,6 @@ canonical admission/execution owners.
 Fresh legacy deploy-manifest publication uses the canonical command-binding
 writer on both native paths, preserving the active lifecycle reservation
 without an intermediate unbound manifest.
-Reusing a completed package-version slot still health-checks and selects that
-target, then reconciles its payload snapshot, command/task launchers and deploy
-manifest. This also applies without source-qualified identity: a retry after
-publication failure must refresh the receipt without rebuilding the immutable
-slot. Publication refusals remain failures, not successful no-ops.
 
 Healthy managed and installation-cell runtimes remain callable without
 installer work, preserving the command's module arguments and exit status.

@@ -117,6 +117,4 @@ def test_real_bare_cli_reads_an_isolated_install_snapshot(tmp_path):
     assert "Registered projects reported: 0" in result.stdout
     assert "Build-out roadmap" not in result.stdout
     assert "you are here" not in result.stdout
-    assert not list(tmp_path.iterdir()), [
-        str(path.relative_to(tmp_path)) for path in tmp_path.rglob("*")
-    ][:20]
+    assert not list(tmp_path.iterdir())

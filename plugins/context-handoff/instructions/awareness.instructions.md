@@ -59,7 +59,7 @@ CH_ROOT="${COPILOT_PLUGIN_ROOT:-$HOME/.copilot/installed-plugins/copilot-extensi
 CH="$CH_ROOT/extensions/context-handoff/handoff-cli.mjs"
 node "$CH" save --title "<t>" --prompt-file "<f.md>" --session-id "$COPILOT_AGENT_SESSION_ID" --cwd "$PWD"
 ```
-Other verbs share that shape; add `--json` for machine output.
+Other verbs share that shape; add `--json` for machine output (table above).
 PowerShell: same default
 (`$HOME\.copilot\installed-plugins\copilot-extensions\context-handoff`), run
 `node $CH <verb> ...`.

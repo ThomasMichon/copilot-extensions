@@ -145,7 +145,7 @@
     },
     {
       "name": "agent-conduct-guidance",
-      "description": "Independent ambient conduct modules and scoped task-time procedures: useful autonomy and operator pre-clearance, decision-scoped operator questions, maintenance standby, consented elevation, multi-agent authority and custody, headless process hygiene, scratch-space hygiene and secret-pattern masking avoidance. Optional assignment prompt/contract authoring and inert model configuration impose no delegation strategy.",
+      "description": "Independent ambient conduct modules and scoped task-time procedures: useful autonomy and operator pre-clearance, maintenance standby, consented elevation, multi-agent authority and custody, headless process hygiene, scratch-space hygiene and secret-pattern masking avoidance. Optional assignment prompt/contract authoring and inert model configuration impose no delegation strategy.",
       "version": "0.1.0-dev1",
       "source": "plugins/agent-conduct-guidance"
     },

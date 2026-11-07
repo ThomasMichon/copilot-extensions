@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from pathlib import Path
 
-from . import claims_cli, config as cfg, output, resource_producer as producer
+from . import config as cfg, output, resource_producer as producer
 from . import resource_relationship as relationship, tracking, tracking_write
 from .resource_producer_cli import read_input
 
@@ -94,6 +94,8 @@ def cmd_resource_relationship(args) -> int:
                 "max_ref_bytes": producer.MAX_REF_BYTES, "max_input_bytes": producer.MAX_INPUT_BYTES,
             })
             return 0
+        from . import claims_cli
+
         payload = read_input("relationship")
         parsed = tracking.parse_claim_ref(args.owner_ref)
         if parsed is None or not parsed.is_qualified:

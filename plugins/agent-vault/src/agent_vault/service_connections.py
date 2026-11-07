@@ -29,8 +29,6 @@ async def settle_owned(awaitable):
 
 
 class VaultConnections:
-    SERVER_CLOSE_GRACE = 2.0
-
     def __init__(self, service, handler):
         self.service = service
         self.handler = handler
@@ -111,25 +109,14 @@ class VaultConnections:
 
         pending = list(servers)
         while pending:
-            waits = {asyncio.ensure_future(server.wait_closed()): server for server in pending}
-            done, stalled = await asyncio.wait(waits, timeout=self.SERVER_CLOSE_GRACE)
-            for future in stalled:
-                future.cancel()
-            if stalled:
-                # Every tracked client and worker has settled, so a server still
-                # waiting here is holding only asyncio's untracked connection
-                # count (e.g. after a peer reset). It must not block cleanup.
-                with contextlib.suppress(BaseException):
-                    log.warning(
-                        "Vault server close did not settle within %ss; continuing cleanup",
-                        self.SERVER_CLOSE_GRACE,
-                    )
+            results = await asyncio.gather(
+                *(server.wait_closed() for server in pending), return_exceptions=True
+            )
             failed = []
-            for future in done:
-                error = None if future.cancelled() else future.exception()
-                if future.cancelled() or error is not None:
-                    remember(error or asyncio.CancelledError())
-                    failed.append(waits[future])
+            for server, result in zip(pending, results):
+                if isinstance(result, BaseException):
+                    remember(result)
+                    failed.append(server)
             pending = failed
             if pending:
                 await asyncio.sleep(0.05)

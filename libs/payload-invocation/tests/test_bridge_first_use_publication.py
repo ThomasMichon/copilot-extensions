@@ -1,7 +1,5 @@
 """Actual Bridge commands must admit cold publication before touching a runtime."""
 from __future__ import annotations
-from collections.abc import Callable
-from typing import Any, cast
 
 import json
 import os
@@ -12,23 +10,20 @@ import sys
 from pathlib import Path
 
 import pytest
-from test_command_binding import PowerShellFactory, _PowerShellHost
 
 from test_adopter_publication import SHELLS, _adopter
 from test_command_binding import (
     POWERSHELL, _snapshot, _write,
-    binding_fixture as _binding_fixture,
-    powershell_host as _powershell_host,
+    binding_fixture as binding_fixture,
+    powershell_host as powershell_host,
 )
 from test_installer_publication import _policy
 from test_native_publication import _completed_slot
 from test_simple_first_use_publication import _release_payload
-binding_fixture = _binding_fixture
-powershell_host = _powershell_host
 
 
 @pytest.fixture(scope="module")
-def bridge_release(tmp_path_factory: pytest.TempPathFactory) -> Path:
+def bridge_release(tmp_path_factory) -> Path:
     payload = _release_payload(tmp_path_factory.mktemp("bridge-release"), "agent-bridge")
     # Wire-contract golden cases are test data, not runtime or native support.
     # Real queued construction separately retains the complete release payload.
@@ -36,7 +31,7 @@ def bridge_release(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return payload
 
 
-def _selected_cell(fixture: dict[str, Any], environment: dict[str, str]) -> tuple[Path, dict[str, Any]]:
+def _selected_cell(fixture: dict, environment: dict) -> tuple[Path, dict]:
     primitive = fixture["primitive"]
     cell = primitive.stamp_context(
         payload_version="1.0.0", payload_origin="installed",
@@ -68,7 +63,7 @@ def _selected_cell(fixture: dict[str, Any], environment: dict[str, str]) -> tupl
     }
 
 
-def _record_installer(fixture: dict[str, Any], shell: str) -> None:
+def _record_installer(fixture: dict, shell: str) -> None:
     scripts = fixture["payload"] / "scripts"
     if shell == "powershell":
         (scripts / "install.ps1").write_text(
@@ -90,7 +85,7 @@ def _record_installer(fixture: dict[str, Any], shell: str) -> None:
         )
 
 
-def _record_driver(fixture: dict[str, Any], shell: str) -> None:
+def _record_driver(fixture: dict, shell: str) -> None:
     """Publication-boundary probe only; real native construction is separate."""
     scripts = fixture["payload"] / "libs/update-driver/scripts"
     scripts.mkdir(parents=True, exist_ok=True)
@@ -114,7 +109,7 @@ def _record_driver(fixture: dict[str, Any], shell: str) -> None:
         )
 
 
-def _command(fixture: dict[str, Any], shell: str, script: Path, *arguments: str) -> list[str]:
+def _command(fixture: dict, shell: str, script: Path, *arguments: str) -> list[str]:
     if shell == "powershell":
         assert POWERSHELL is not None
         return [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(script), *arguments]
@@ -123,7 +118,7 @@ def _command(fixture: dict[str, Any], shell: str, script: Path, *arguments: str)
     return [interpreter, str(script), *arguments]
 
 
-def _run(fixture: dict[str, Any], environment: dict[str, str], command: list[str], host: _PowerShellHost | None) -> subprocess.CompletedProcess[str]:
+def _run(fixture: dict, environment: dict, command: list[str], host):
     if host:
         return host.run(command)
     return subprocess.run(
@@ -133,14 +128,14 @@ def _run(fixture: dict[str, Any], environment: dict[str, str], command: list[str
 
 
 def _initialize_shell_profiles(
-    fixture: dict[str, Any], environment: dict[str, str], *, engines: tuple[str | None, ...] | None = None,
+    fixture: dict, environment: dict, *, engines: tuple[str | None, ...] | None = None,
 ) -> set[str]:
     if os.name != "nt":
         return set()
     environment["PATH"] = os.pathsep.join((
         str(Path(sys.executable).parent),
         str(Path(os.environ["SystemRoot"]) / "System32"),
-        str(Path(cast(str, POWERSHELL)).parent),
+        str(Path(POWERSHELL).parent),
         str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0"),
     ))
     profiles = {
@@ -161,7 +156,7 @@ def _initialize_shell_profiles(
             [engine, "-NoLogo", "-NoProfile", "-Command",
              "[System.Runtime.ProfileOptimization]::StartProfile($null)"],
             cwd=fixture["home"], env=environment, capture_output=True, text=True,
-            timeout=60, creationflags=cast(Any, subprocess).CREATE_NO_WINDOW,
+            timeout=60, creationflags=subprocess.CREATE_NO_WINDOW,
         )
         assert control.returncode == 0, control.stdout + control.stderr
     after = _snapshot(fixture["home"])
@@ -183,7 +178,7 @@ def _initialize_shell_profiles(
     "deactivated-publisher-and-pointer",
 ])
 def test_bridge_cell_stamp_preserves_global_ownership(
-    binding_fixture: dict[str, Any], bridge_release: Path, shell: str, existing_global: bool, loss: str,
+    binding_fixture: dict, bridge_release: Path, shell: str, existing_global: bool, loss: str,
     front: str,
 ) -> None:
     fixture = binding_fixture
@@ -200,7 +195,7 @@ def test_bridge_cell_stamp_preserves_global_ownership(
         environment["APPDATA"] = str(fixture["home"] / "AppData/Roaming")
     shell_profiles = _initialize_shell_profiles(fixture, environment)
 
-    def stamp(root: Path) -> subprocess.CompletedProcess[str]:
+    def stamp(root: Path):
         suffix = "ps1" if shell == "powershell" else "sh"
         command = _command(fixture, shell, fixture["payload"] / f"scripts/install.{suffix}")
         command += (
@@ -366,8 +361,8 @@ def test_bridge_cell_stamp_preserves_global_ownership(
     )) for entry in ("payload", "stamped-global")],
 ])
 def test_bridge_actual_first_use_publication(
-    binding_fixture: dict[str, Any], bridge_release: Path, shell: str, scope: str, state: str, entry: str,
-    powershell_host: PowerShellFactory,
+    binding_fixture: dict, bridge_release: Path, shell: str, scope: str, state: str, entry: str,
+    powershell_host,
 ) -> None:
     fixture = binding_fixture
     environment = _adopter(fixture, "agent-bridge", bridge_release)
@@ -389,7 +384,7 @@ def test_bridge_actual_first_use_publication(
         environment["APPDATA"] = str(fixture["home"] / "AppData/Roaming")
     shell_profiles = _initialize_shell_profiles(fixture, environment)
 
-    def snapshot_home() -> dict[str, Any]:
+    def snapshot_home() -> dict:
         # Shell-only controls prove these exact CLR profiles precede plugin
         # execution. Retain every other home byte and directory mtime.
         return {name: value for name, value in _snapshot(fixture["home"]).items()
@@ -406,7 +401,7 @@ def test_bridge_actual_first_use_publication(
     retained = None
     if entry.startswith("stamped-"):
         if shell == "powershell":
-            quote: Callable[[object], str] = lambda path: "'" + str(path).replace("'", "''") + "'"
+            quote = lambda path: "'" + str(path).replace("'", "''") + "'"
             stamp = fixture["home"] / "bridge-stamp.ps1"
             stamp.write_text(
                 f"& {quote(fixture['payload'] / 'scripts/install.ps1')} -Action stamp "
@@ -469,7 +464,7 @@ def test_bridge_actual_first_use_publication(
         python = _completed_slot(slot_fixture)
         site = python.parent.parent / (
             "Lib/site-packages" if os.name == "nt" else
-            f"lib/python{cast(Any, os).sys.version_info.major}.{cast(Any, os).sys.version_info.minor}/site-packages"
+            f"lib/python{os.sys.version_info.major}.{os.sys.version_info.minor}/site-packages"
         )
         (site / "agent_bridge.py").write_text(
             "import json, os, sys\n"
@@ -488,7 +483,7 @@ def test_bridge_actual_first_use_publication(
             legacy_python = _completed_slot(fixture)
             legacy_site = legacy_python.parent.parent / (
                 "Lib/site-packages" if os.name == "nt" else
-                f"lib/python{cast(Any, os).sys.version_info.major}.{cast(Any, os).sys.version_info.minor}/site-packages"
+                f"lib/python{os.sys.version_info.major}.{os.sys.version_info.minor}/site-packages"
             )
             (legacy_site / "agent_bridge.py").write_text("raise SystemExit(99)\n", encoding="utf-8")
     suffix = "ps1" if shell == "powershell" else "sh"

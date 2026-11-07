@@ -24,7 +24,6 @@ resilient safety boundary through the exact-session dynamic-guidance pattern.
 | `ai-attribution` skill | Preparing or auditing code, issues, pull requests, comments, releases, docs, or other published artifacts | Walks through audience and ownership classification, disclosure placement, public writing, sanitization, and live post-publication verification. |
 | `ai-attribution-setup` skill | Adopting or repairing the plugin in a repository | Idempotently reconciles the marked always-on fallback, configures host-qualified operator policy, and validates hook-less launch paths. |
 | optional signature profile / pure helper | Configuring header/footer wording for a surface, visibility and activity | Renders fresh layered JSON defaults/overrides in session guidance; optionally resolves/decorates a draft before approval, without publishing it. |
-| optional compact comment preparer | An admitted publisher supplies source data and retained comment/write GUIDs | Composes the current signature profile and one compact hidden marker before approval; no allocation, persistence or publication. See [comment preparation](docs/comment-preparation.md). |
 
 The ambient policy requires agents to:
 
@@ -119,9 +118,6 @@ optional pure decorator, see [docs/signature-profiles.md](docs/signature-profile
   jq, YAML module, network access, or authenticated account.
 - The exact-session writer and optional JSON profile helper use Python 3.9+
   (standard library only); the native policy emitters remain dependency-free.
-- The optional comment preparer is also Python standard library only. Its
-  source projection is supplied by the caller; importing or running it does
-  not install or contact Worktrees.
 - The hook receives a JSON `sessionStart` payload on stdin and uses its `cwd`;
   process working directory is deliberately not authoritative.
 

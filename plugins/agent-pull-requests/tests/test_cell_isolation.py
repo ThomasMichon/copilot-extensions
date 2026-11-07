@@ -13,17 +13,14 @@ from work_coalescing_singleton.client import request
 from zdd import process_exit, routing
 
 from agent_pull_requests.watch_storage import read_subscriptions_state
-from test_cell_payload_upgrade import _cutover_failure_details, _release, _run, _scenario_remaining
+from test_cell_payload_upgrade import _release, _run, _scenario_remaining
 from test_cell_payload_upgrade import native_profile as native_profile  # noqa: F401 -- pytest fixture
 from test_cell_upgrade import _pending
 
 
-def _json(command, arguments, environment, caller, *, run_root=None):
+def _json(command, arguments, environment, caller):
     result = _run(command, arguments, environment, caller, timeout=60)
-    assert result.returncode == 0, {
-        "stderr": result.stderr,
-        "cutover": _cutover_failure_details(run_root) if run_root is not None else {},
-    }
+    assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
 
 
@@ -108,10 +105,7 @@ def test_two_normal_shipped_cells_isolate_state_endpoints_and_lifecycle(tmp_path
                 timeout=_scenario_remaining(scenario_deadline),
             )
             assert result.returncode == 0, result.stderr
-            health = _json(
-                command, ["watch", "health", "--json"], environment, caller,
-                run_root=plugin / "run",
-            )
+            health = _json(command, ["watch", "health", "--json"], environment, caller)
             owner = health["instance"]
             reference = process_exit.open_process(owner["pid"], owner["startTime"])
             cell["reference"] = reference

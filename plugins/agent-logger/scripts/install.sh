@@ -1298,17 +1298,19 @@ install_package() {
 
     _versioned_slot_clean || return 1
     if [[ "$_RUNTIME_CONSTRUCTION_REUSE" == 1 ]]; then
-        if [[ ! -f "$INSTALL_DIR/current-version" || "$(cat "$INSTALL_DIR/current-version")" != "$SRC_VERSION" ]]; then
-            _versioned_activate || return 1
-        else
-            _test_runtime_healthy || return 1
-            deploy_runtime_helpers || return 1
-            _assert_source_runtime || return 1
-        fi
-        publish_payload_snapshot || return 1
-        if [[ "$PUBLISH_GLOBAL_BINSTUBS" == 1 ]]; then
-            deploy_auxiliary_compatibility_binstubs || return 1
-            deploy_binstub || return 1
+        if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+            if [[ ! -f "$INSTALL_DIR/current-version" || "$(cat "$INSTALL_DIR/current-version")" != "$SRC_VERSION" ]]; then
+                _versioned_activate || return 1
+            else
+                _test_runtime_healthy || return 1
+                deploy_runtime_helpers || return 1
+                _assert_source_runtime || return 1
+            fi
+            publish_payload_snapshot || return 1
+            if [[ "$PUBLISH_GLOBAL_BINSTUBS" == 1 ]]; then
+                deploy_auxiliary_compatibility_binstubs || return 1
+                deploy_binstub || return 1
+            fi
         fi
         return 0
     fi

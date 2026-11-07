@@ -63,25 +63,16 @@ _ABBREVIATED_OBSERVER_ARGS = [
     pytest.param(["observe-owner"], id="membership-direct"),
     pytest.param(["--proj=demo", "--j", "observe-owner"], id="membership-project-json"),
     pytest.param(["-p", "observe-owner", "create", "fixture"], id="membership-value-not-verb"),
-    pytest.param(["telemetry", "capabilities"], id="telemetry-capabilities"),
-    pytest.param(
-        ["telemetry", "retained", "--directory", "unused", "--apply", "--confirm", "unused"],
-        id="telemetry-apply",
-    ),
 ] + _ABBREVIATED_OBSERVER_ARGS)
 def test_passive_observer_attributed_payload_never_provisions(tmp_path, shell, mode, argv):
     """Run the shipped dispatcher with inert context/publication/installer spies."""
-    if shell == "bash" and os.name == "nt":
-        pytest.skip("native POSIX Bash required; Windows bash.exe is a WSL launcher")
     from agent_bridge.__main__ import build_parser
 
     argv = list(argv)
-    verb = "telemetry" if argv[0] == "telemetry" else (
-        "observe-owner" if argv[-1] == "observe-owner" else argv[-2]
-    )
+    verb = "observe-owner" if argv[-1] == "observe-owner" else argv[-2]
     if verb == "observe-owner":
         argv += ["--owner-ref", "fixture-host/demo/parent-worktree", "--contract-version", "1", "--json"]
-    elif verb not in {"create", "telemetry"}:
+    elif verb != "create":
         argv += ["--worktree-id", "fixture-worktree", "--contract-version", "1", "--json"]
     parser_argv = argv[1:] if argv[0] == "agent-bridge" else argv
     parsed = build_parser().parse_args(parser_argv)
@@ -184,15 +175,8 @@ def test_passive_observer_attributed_payload_never_provisions(tmp_path, shell, m
         PROBE_CALLS=str(calls), PROBE_STATUS=str(status_file), PROBE_VALIDATED=str(validated),
         PROBE_INSTALLER=str(installer_marker),
     )
-    # PowerShell's host-owned startup caches are not plugin runtime state.
-    host_cache = home / "AppData" / "Local" / "Microsoft" / "PowerShell"
-
-    def snapshot_home():
-        return {path.relative_to(home): path.read_bytes()
-                for path in home.rglob("*")
-                if path.is_file() and not path.is_relative_to(host_cache)}
-
-    before = snapshot_home()
+    before = {path.relative_to(home): path.read_bytes()
+              for path in home.rglob("*") if path.is_file()}
     result = subprocess.run(
         command, cwd=tmp_path, env=env, capture_output=True, text=True,
         encoding="utf-8", timeout=15, **no_window_kwargs(),
@@ -201,8 +185,7 @@ def test_passive_observer_attributed_payload_never_provisions(tmp_path, shell, m
     recorded = calls.read_text(encoding="utf-8").splitlines()
     if passive:
         assert result.returncode == 1, result.stdout + result.stderr
-        label = "configuration-only" if verb == "telemetry" else "passive observation"
-        assert label + "; no self-provision" in result.stderr
+        assert "passive observation; no self-provision" in result.stderr
         assert recorded == [
             "status", *(["validate"] if mode == "namespaced" else []),
             "resolver:read-only:unset",
@@ -214,7 +197,8 @@ def test_passive_observer_attributed_payload_never_provisions(tmp_path, shell, m
         assert "probe-plugin-publication" in recorded
     assert not installer_marker.exists()
     assert not runtime.exists()
-    assert snapshot_home() == before
+    assert {path.relative_to(home): path.read_bytes()
+            for path in home.rglob("*") if path.is_file()} == before
 
 
 @pytest.fixture(scope="module")

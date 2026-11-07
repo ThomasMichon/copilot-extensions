@@ -65,8 +65,6 @@ rather than being silently removed.
 | `--reasoning-effort` | Override the persisted `effortLevel` |
 | `--context` | Override the persisted `contextTier` |
 | `--timeout-seconds` | 300; finite positive overall client/request deadline |
-| `--load-session-guidance` | Opt in to the bounded three-request conversation described below |
-| `--round-timeout-seconds` | 60; finite positive deadline per request in multi-round mode, capped by the overall deadline |
 | `--agent-worktrees-command` | Optional exact catalog command for registry-backed marketplace inventory; never a bare global command lookup |
 
 Model precedence is explicit `--model`, then inherited `COPILOT_MODEL`, then
@@ -107,49 +105,6 @@ completion. There is no bind override, endpoint attachment, forwarding,
 shared-service mode or daemon mode. A different local client does not know the
 fresh per-run credential. Equally privileged local software is not an
 adversarial security boundary.
-
-### Session-guidance snapshot (opt in)
-
-Add `--load-session-guidance` when startup-generated cues are not in the first
-request. The default one-shot behavior remains unchanged. This mode returns
-native tool-call replies rather than asking a model to improvise a plan:
-
-1. Capture the initial request and ask the advertised `glob` tool to list Markdown
-   files under this freshly owned session's `instructions` directory.
-2. Capture the correlated listing result and ask the advertised `view` tool to
-   read each listed file in full.
-3. Capture the read results and return the terminal acknowledgement.
-
-The child receives only `--allow-tool glob` and `--allow-tool view`; no shell,
-blanket permission, additional-directory grant or fallback tool is used.
-The response schemas must advertise compatible arguments. Paths must also
-match the local inventory inside the owned session directory; arbitrary paths,
-links, denied results and unsupported listing formats fail closed.
-At most 64 Markdown files, 256 KiB per file, 2 MiB of source guidance and
-4 MiB of decoded tool results are admitted. Inventories stop after 512 entries.
-Full nonempty source bodies must be observed in correlated read results;
-missing, duplicate, denied, empty, changed or truncated bodies leave an explicit
-incomplete result, not a successful snapshot.
-
-For `request.json`, all three raw output names are reserved before launch:
-`request.json`, `request.round-2.json`, and `request.round-3.json`. Each preserves
-that request's exact wire bytes. The single `request.analysis.json` analyzes
-the last captured request, including an incomplete conversation, and adds
-`multi_round`: per-round UTC timestamps, generated-file inventory (path, size,
-modification time), request byte deltas, correlated tool-result byte counts and
-full-body evidence. Total `captured_bytes` sums the captured rounds.
-Wire deltas include conversation wrappers and any other client changes; they
-are not exclusively guidance bytes. Unused reserved files are removed, while
-complete partial captures remain private for diagnosis.
-
-This proves only that the selected source bodies reached the later request.
-It does not prove that the model obeyed them, that every producer finished, or
-that all sessionStart hooks completed. `session_start_completion` is explicitly
-`not_observable`; no startup hook is rerun and no hydration helper is invoked.
-An absent/empty directory, unsupported tools, permission failure or timeout
-ends the bounded attempt with `status=failed` and an incomplete reason.
-This mode reads all listed Markdown under `instructions`, not other session
-files or directories referenced by a cue.
 
 The selected harness can execute its usual startup hooks and MCP servers.
 They retain their ordinary filesystem/network capabilities and may create

@@ -16,7 +16,7 @@ import zipfile
 import pytest
 
 from runtime_profile import ProfileError, SCHEMA, select_profile, validate_profile
-from runtime_profile_wheels import verify_profile_layout, verify_profile_wheels
+from runtime_profile_wheels import verify_profile_wheels
 from installer_wheel_inputs import WheelLimits, inspect_archive
 
 
@@ -124,68 +124,6 @@ def _verify(profile, wheels, **limits):
         "max_archive_bytes": 1 << 20, "max_unpacked_bytes": 1 << 20,
         "max_metadata_bytes": 1 << 16, **limits,
     })
-
-
-def _isolated_inputs(*, manager_requires_counter=False):
-    record = _record()
-    manager = {
-        "name": "copilot-extensions-worktree-manager", "version": "1.0",
-        "filename": "copilot_extensions_worktree_manager-1.0-py3-none-any.whl",
-        "sha256": "sha256:" + "1" * 64, "requires_python": "",
-        "provides_extras": [], "selected_extras": [],
-        "requires_dist": ["counter==1.0"] if manager_requires_counter else [],
-    }
-    record["roots"].append("copilot-extensions-worktree-manager==1.0")
-    record["wheels"].append(manager)
-    archives = {}
-    for row in record["wheels"]:
-        data = _encoded(
-            row, extra={"counter/__init__.py": b"embedded\n"} if row is manager else None,
-        )
-        row["sha256"] = "sha256:" + hashlib.sha256(data).hexdigest()
-        archives[row["filename"]] = io.BytesIO(data)
-    return validate_profile(record), archives
-
-
-def test_isolated_manager_layout_checks_complete_separate_closures():
-    profile, archives = _isolated_inputs()
-    with pytest.raises(ProfileError, match="ownership collision"):
-        _verify(profile, archives)
-    selected = verify_profile_layout(
-        profile, archives, layout="manager-isolated",
-        max_archive_bytes=1 << 20, max_unpacked_bytes=1 << 20, max_metadata_bytes=1 << 16,
-    )
-    assert set(selected) == {"shared", "manager"}
-    assert {
-        row["filename"] for group in selected.values() for row in group.record()["wheels"]
-    } == set(archives)
-    assert {row["name"] for row in selected["manager"].record()["wheels"]} == {
-        "copilot-extensions-worktree-manager",
-    }
-
-
-def test_isolated_manager_layout_refuses_a_collision_inside_manager():
-    profile, archives = _isolated_inputs(manager_requires_counter=True)
-    with pytest.raises(ProfileError, match="ownership collision"):
-        verify_profile_layout(
-            profile, archives, layout="manager-isolated",
-            max_archive_bytes=1 << 20, max_unpacked_bytes=1 << 20, max_metadata_bytes=1 << 16,
-        )
-
-
-def test_isolated_manager_layout_shares_one_expanded_budget():
-    profile, archives = _isolated_inputs()
-    sizes = {}
-    for name, stream in archives.items():
-        with zipfile.ZipFile(stream) as archive:
-            sizes[name] = sum(member.file_size for member in archive.infolist())
-    manager = next(name for name in sizes if name.startswith("copilot_extensions_worktree_manager"))
-    limit = max(sizes[manager], sum(size for name, size in sizes.items() if name != manager))
-    with pytest.raises(ProfileError):
-        verify_profile_layout(
-            profile, archives, layout="manager-isolated",
-            max_archive_bytes=1 << 20, max_unpacked_bytes=limit, max_metadata_bytes=1 << 16,
-        )
 
 
 def _select_for_target(records, target, **options):

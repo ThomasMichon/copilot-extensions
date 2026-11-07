@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit prepared-intent data admission in the existing replay owner without enabling new publication or serving behavior.",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

@@ -88,14 +88,6 @@ intent/in-flight/partial receipts use the same ReplayStore; there is no upload
 staging store or second operation ledger. A lost transport result is unknown,
 not a failed effect. Retain the original operation ID, inspect/reconcile through
 the same owner, and never invent a new identity or infer success from equal values.
-The existing opaque action body can contain a
-[compact prepared comment](../../ai-attribution/docs/comment-preparation.md).
-An explicit caller prepares it before final preview/approval and intent
-admission; submission preserves those exact bytes rather than invoking a
-decorator or minting IDs. Focused source fixtures qualify create/reply/owned-edit
-serialization, retained intent after owner restart and confirmed retry without
-another send. Automatic preparation, GUID allocation and native correlation
-remain unimplemented; this is not all-publisher or installed/provider adoption.
 The existing SDK's explicit pre-dispatch credential/challenge failures retain
 their known-no-send classification. Only its `outcome-unknown` transport error
 marks a possibly dispatched submit; ordinary post-dispatch HTTP/response failures

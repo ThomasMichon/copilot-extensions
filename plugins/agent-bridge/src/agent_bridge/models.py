@@ -6,9 +6,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
-
-from .acquisition_contract import WorktreeWriterRequirement
+from pydantic import BaseModel, Field
 
 from .cli_mode_models import (  # noqa: F401 -- re-exported public models
     CliModeReservationInfo,
@@ -211,9 +209,7 @@ TurnInfo.model_rebuild()
 class ResumeSessionRequest(BaseModel):
     """Request to resume a stopped session."""
 
-    model_config = ConfigDict(extra="forbid")
-
-    worktree_writer: WorktreeWriterRequirement | None = None
+    pass
 
 
 class AnswerAskUserRequest(BaseModel):

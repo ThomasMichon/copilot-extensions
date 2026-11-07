@@ -7,8 +7,6 @@
 - **Status:** Active
 - **Umbrella issue:** #6681
 - **Sub-issues:** #5861, #8888; allocation prerequisite #5839; prerequisite owners #6030, #6240, #6424, #5789, #6443, #6804
-- **Audit follow-up:** supported Python #6888; user-logon SSH #11123;
-  setup integration #6030; all-peer/new-member convergence #63
 
 ## Guiding Intent
 
@@ -532,23 +530,6 @@ setup/apply, enrollment, live rollout, lifecycle takeover or implementation
 completion is asserted.
 
 ## Journal
-
-### 2026-11-06 - Setup audit follow-up tracked
-
-- [#6888](https://github.com/ThomasMichon/copilot-extensions/issues/6888#issuecomment-6695873463)
-  records supported-interpreter selection through core dependencies or
-  minimum-aware binstubs; portable Python remains an investigation, not a
-  selected implementation.
-- #11123 tracks why user-logon SSH requires elevation and the user-mode
-  alternatives. A privileged service is not the default onboarding answer.
-- [#6030](https://github.com/ThomasMichon/copilot-extensions/issues/6030#issuecomment-6695876093)
-  retains generic configuration-selected Gateway/SSH setup integration.
-  [#63](https://github.com/ThomasMichon/copilot-extensions/issues/63#issuecomment-6696099463)
-  retains all-permitted-peer profiles and bidirectional new-member catch-up.
-  Rendered aliases alone do not prove authenticated connectivity.
-- This is tracking only: existing implementation owners and all open Plan and
-  Validation Plan gates remain unchanged. No setup, enrollment or rollout
-  was performed.
 
 ### 2026-10-27 - Native Linux aarch64 SDK boundary qualified
 

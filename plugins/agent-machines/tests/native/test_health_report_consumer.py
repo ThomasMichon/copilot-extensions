@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import subprocess
 import sys
 import time
@@ -85,85 +84,6 @@ def test_input_discovery_never_creates_files_or_counts_the_same_file_twice(tmp_p
     assert report["coverage"]["duplicate_inputs"] == 1
     assert report["coverage"]["accepted_records"] == 1
     assert not missing.exists()
-
-
-def test_normal_cli_hourly_slot_roundtrip_uses_explicit_local_inputs(tmp_path):
-    from agent_machines import health_slots
-
-    store = tmp_path / "store"
-    store.mkdir()
-    (store / "policy.json").write_text(json.dumps({
-        "schema": health_slots.POLICY_SCHEMA, "version": 1,
-        "publisher": "example-worker", "continuity": "example-generation",
-    }), encoding="utf-8")
-    source = tmp_path / "observation.json"
-    now = datetime.now(timezone.utc)
-    stamp = int(now.timestamp() * 1000)
-    source.write_text(json.dumps({
-        "schema": health_slots.SCHEMA, "version": 1,
-        "publisher": "example-worker", "continuity": "example-generation",
-        "hour": stamp // health_slots.HOUR_MS, "observed_at_ms": stamp,
-        "revision": 1, "parent": None, "domains": {},
-    }), encoding="utf-8")
-    command = [sys.executable, "-m", "agent_machines", "health"]
-
-    def call(arguments):
-        child = subprocess.run(
-            [*command, *arguments], capture_output=True, text=True, timeout=20, **no_window_kwargs(),
-        )
-        assert child.returncode == 0, child.stderr
-        return json.loads(child.stdout)
-
-    arguments = [
-        "record", "--input", str(source), "--store-dir", str(store), "--now", now.isoformat(),
-    ]
-    preview = call(arguments)
-    assert set(path.name for path in store.iterdir()) == {"policy.json"}
-    recorded = call([*arguments, "--apply", "--expect", preview["preview_token"]])
-    assert recorded["applied"] and recorded["changed"]
-    view = call(["inspect", "--store-dir", str(store), "--now", now.isoformat()])
-    assert view["observed_hours"] == 1 and len(view["hours"]) == 168
-    domains = view["hours"][-1]["sample"]["domains"]
-    assert all(item["state"] == "unknown" for item in domains.values())
-    assert domains["logical_agents"]["count"] is None
-    assert domains["ssh_authenticated"]["direction"] is None
-    assert all(item["observed_at_ms"] is None and item["evidence"] == "not-observed" for item in domains.values())
-    assert view["carrier_receipt"] == "not-observed" and view["probe_execution"] == "not-performed"
-
-
-def test_closed_stdout_after_confirmed_record_keeps_unknown_acknowledgement(tmp_path):
-    from agent_machines import health_slots
-
-    store = tmp_path / "store"
-    store.mkdir()
-    (store / "policy.json").write_text(json.dumps({
-        "schema": health_slots.POLICY_SCHEMA, "version": 1,
-        "publisher": "example-worker", "continuity": "example-generation",
-    }), encoding="utf-8")
-    source = tmp_path / "observation.json"
-    now = datetime.now(timezone.utc)
-    stamp = int(now.timestamp() * 1000)
-    source.write_text(json.dumps({
-        "schema": health_slots.SCHEMA, "version": 1,
-        "publisher": "example-worker", "continuity": "example-generation",
-        "hour": stamp // health_slots.HOUR_MS, "observed_at_ms": stamp,
-        "revision": 1, "parent": None, "domains": {},
-    }), encoding="utf-8")
-    preview = health_slots.record(store, source, now_ms=stamp)
-    reader, writer = os.pipe()
-    os.close(reader)
-    try:
-        child = subprocess.run([
-            sys.executable, "-I", "-m", "agent_machines", "health", "record",
-            "--input", str(source), "--store-dir", str(store), "--now", now.isoformat(),
-            "--apply", "--expect", preview["preview_token"],
-        ], stdout=writer, stderr=subprocess.PIPE, text=True, timeout=20, **no_window_kwargs())
-    finally:
-        os.close(writer)
-    assert child.returncode == 2, child.stderr
-    result = json.loads(child.stderr)
-    assert result["error"] == "response-output-unavailable" and result["applied"] is None
-    assert health_slots.inspect(store, now_ms=stamp)["observed_hours"] == 1
 
 
 def test_replaced_input_is_unavailable_without_reading_the_new_identity(

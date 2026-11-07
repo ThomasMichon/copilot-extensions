@@ -45,12 +45,6 @@ needs you" and "a source couldn't be read" are never confused.
 - **Host (owns PRs):** the implementer.
 - **Delegates:** none.
 - **Handoff:** n/a.
-- **Finite tracking intake:** #5978's delivered dismissal feature keeps its
-  #6018 credit; D1/DV1 below retain the complete original and accepted refinement,
-  including the remaining explicit CLI spelling. Administrative consolidation
-  requires reviewed planning delivery and complete current-parent readback.
-  It does not complete D1/DV1, appoint an execution lead, release custody or
-  complete this effort's other Plan/Validation obligations.
 
 ## Context
 
@@ -102,15 +96,6 @@ an empty queue.
   worktree's handoff ledger lists it, and offers `resume`/`abandon`; any item
   can be dismissed until it changes, snoozed or ignored, reported under
   `dismissed` (ThomasMichon/copilot-extensions#5978).
-- [ ] D1 (#5978) - Reconcile the explicitly requested
-  `attention dismiss <item-id> --until-changed` spelling, by implementation
-  or an explicit accepted disposition of that spelling. Preserve the delivered
-  default changed mode, ISO-time snooze, forever, undismiss, dismissed listing,
-  visible hidden-item JSON, install-local stable-ID storage and malformed-store
-  `config_errors`. Credit #6018's reviewed normalized-reason and ignored
-  read-time `updated_at` semantics; do not revive the original raw-timestamp
-  expectation or require future clients, runtime rollout or a universal native
-  portfolio for this finite CLI residual. Existing owners and claims remain.
 
 ### Phase 4 — Clients
 
@@ -128,14 +113,6 @@ Each tier's required cases are in [validation.md](validation.md).
 - [x] Unit: command sources and external identity.
 - [x] Unit: the bridge adapter.
 - [x] Unit: the pr adapter.
-- [ ] DV1 (#5978 / D1) - Prove the explicit spelling is accepted with unchanged
-  default changed-mode and mutually exclusive mode behavior, or record its
-  explicit accepted disposition. Retain the original deterministic change,
-  snooze-expiry, forever/undismiss, hidden-state visibility, stable local storage
-  and malformed-store report contracts, including the accepted condition
-  refinement. Existing #6018 delivery remains credit, not a fresh test run.
-  Qualify the finite parser/CLI/report boundary without adding future UI,
-  installed or all-native gates; keep broader validation below independent.
 - [ ] Simple e2e.
 - [ ] Live.
 

@@ -1,6 +1,5 @@
 """Roster-wide bootstrap and session-command-glossary coverage."""
 from __future__ import annotations
-from typing import Any, cast
 
 import importlib.util
 import json
@@ -24,13 +23,13 @@ if _spec is None or _spec.loader is None:
     raise RuntimeError("cannot load payload-invocation generator")
 generator = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(generator)
-def _runtime_agent_plugins() -> list[tuple[str, Path, dict[str, Any]]]:
+def _runtime_agent_plugins() -> list[tuple[str, Path, dict]]:
     marketplace = json.loads(
         (REPO / ".github" / "plugin" / "marketplace.json").read_text(
             encoding="utf-8"
         )
     )
-    plugins: list[tuple[str, Path, dict[str, Any]]] = []
+    plugins: list[tuple[str, Path, dict]] = []
     for entry in marketplace["plugins"]:
         name = entry["name"]
         plugin = REPO / entry["source"]
@@ -210,12 +209,12 @@ def test_runtime_agent_roster_declares_output_free_session_start() -> None:
 def test_default_legacy_stamp_publishes_every_payload_command(
     name: str,
     plugin: Path,
-    manifest: dict[str, Any],
+    manifest: dict,
     tmp_path: Path,
 ) -> None:
     """Absent namespaced policy preserves the complete legacy PATH fallback."""
     if os.name != "nt":
-        profile_home = Path(cast(Any, pwd).getpwuid(cast(Any, os).getuid()).pw_dir)
+        profile_home = Path(pwd.getpwuid(os.getuid()).pw_dir)
         if (profile_home / ".copilot-extensions" / "installation-mode.json").exists():
             pytest.skip("OS-profile installation-mode policy is present")
     installer = str(manifest["installer"])

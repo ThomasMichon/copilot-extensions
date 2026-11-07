@@ -7,7 +7,6 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any
 
 _PLUGIN = @@CATALOG_PLUGIN_PYTHON@@
 _SPECS = @@CATALOG_SPECS_PYTHON@@
@@ -22,7 +21,7 @@ def render_context(*, windows: bool | None = None) -> str:
     root = Path(__file__).resolve().parents[1]
     installer = root / "scripts" / (_INSTALLER + (".ps1" if windows else ".sh"))
     installer_ready = installer.exists() if windows else installer.is_file()
-    commands: list[dict[str, Any]] = []
+    commands = []
     for spec in _SPECS:
         command = root.joinpath(*spec["relativePath"].split("/"))
         if windows:
@@ -36,7 +35,7 @@ def render_context(*, windows: bool | None = None) -> str:
             "purpose": spec["purpose"],
             "availability": "ready" if installer_ready and ready else "unavailable",
         })
-    catalog: dict[str, Any] = {
+    catalog = {
         "schema": "copilot-extensions.session-command-catalog", "version": 1,
         "plugin": _PLUGIN, "payload": {"provenance": "payload-local"},
         "commands": commands,

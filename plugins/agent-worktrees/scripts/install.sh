@@ -20,7 +20,6 @@
 #
 # Options:
 #   --project-name N Project name (auto-detected if omitted)
-#   --runtime-only   Install/update without project inference or adoption
 #   --force          Overwrite config without drift confirmation
 #   --remove-config  On uninstall: also delete config and session metadata
 #   --machine NAME   Machine name (auto-detected if omitted)
@@ -54,7 +53,6 @@ __aw_provision_missing_runtime=false
 __aw_remove_config=false
 __aw_project_name=""
 __aw_project_name_index=-1
-__aw_runtime_only=false
 __aw_args=("$@")
 _aw_resolve_installer_project_name() {
     local name="${1:-}" cwd_name
@@ -73,9 +71,7 @@ __aw_uninstall_native_path() {
     esac
 }
 for ((__aw_i = 1; __aw_i < ${#__aw_args[@]}; __aw_i++)); do
-    if [[ "${__aw_args[$__aw_i]}" == "--runtime-only" ]]; then
-        __aw_runtime_only=true
-    elif [[ "${__aw_args[$__aw_i]}" == "--provision-missing-runtime" ]]; then
+    if [[ "${__aw_args[$__aw_i]}" == "--provision-missing-runtime" ]]; then
         __aw_provision_missing_runtime=true
     elif [[ "${__aw_args[$__aw_i]}" == "--install-dir" ]]; then
         ((__aw_i + 1 < ${#__aw_args[@]})) || {
@@ -118,13 +114,6 @@ for ((__aw_i = 1; __aw_i < ${#__aw_args[@]}; __aw_i++)); do
         esac
     fi
 done
-if $__aw_runtime_only && [[
-    ( "$__aw_action" != install && "$__aw_action" != update ) ||
-    "$__aw_project_name_index" -ge 0
-]]; then
-    printf '%s\n' 'ERROR: --runtime-only requires install/update without --project-name' >&2
-    exit 1
-fi
 if [[ "$__aw_action" == uninstall && -z "${COPILOT_EXTENSIONS_CONTEXT:-}" &&
       -z "$__aw_project_name" ]]; then
     __aw_project_name="$(_aw_resolve_installer_project_name "$__aw_project_name")"
@@ -842,7 +831,6 @@ while [[ $# -gt 0 ]]; do
         --remove-config) REMOVE_CONFIG=true; shift ;;
         --machine)       MACHINE="$2"; shift 2 ;;
         --project-name)  PROJECT_NAME_ARG="$2"; shift 2 ;;
-        --runtime-only)  shift ;;
         --install-dir)   INSTALL_DIR_ARG="$2"; shift 2 ;;
         --install-source) INSTALL_SOURCE_ARG="$2"; shift 2 ;;
         --owner)         OWNER_ARG="$2"; shift 2 ;;
@@ -866,10 +854,7 @@ fi
 # Priority: --project-name arg > existing config
 # CWD is NOT auto-adopted -- pass --project-name to adopt explicitly.
 
-PROJECT_NAME=""
-if ! $__aw_runtime_only; then
-    PROJECT_NAME="$(_aw_resolve_installer_project_name "$PROJECT_NAME_ARG")"
-fi
+PROJECT_NAME="$(_aw_resolve_installer_project_name "$PROJECT_NAME_ARG")"
 # Reserved-name guard: `agent-worktrees` is the runtime's own global command
 # (the project-agnostic shim from bin/agent-worktrees, deployed by
 # deploy_tool_binstub), never a per-project launcher. Auto-inference above

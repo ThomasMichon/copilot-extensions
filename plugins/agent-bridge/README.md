@@ -29,11 +29,6 @@ listener under this daemon's existing lifecycle. See the
 forward the legacy relay as an account-scoped endpoint or infer credential
 permission from ordinary Bridge/Gateway membership.
 
-The finite [source-account file adapters](docs/source-account-file-auth.md)
-can acquire a declared HTTP source lease and renew an existing approved POSIX
-native plaintext account slot. They remain unactivated source APIs, not a
-renewal daemon, new login flow or native execution auth-wait implementation.
-
 Persistent inter-agent communication service for Copilot CLI. One instance per
 machine, providing session management, SSE event streaming, live-session
 messaging, and agent subprocess spawning across local, SSH, CodeSpace, and
@@ -64,6 +59,10 @@ The interactive extension's [retained SDK consumer](docs/retained-sdk-consumer.m
 is explicitly opt-in. Legacy defaults are unchanged; selected retained delivery
 requires HTTP 50 recovery and never silently downgrades or resends an ambiguous
 original. Native qualification and installed adoption remain separate.
+An original headed-core launch can also select it with its private client
+declaration: delivery then uses the retained common Session Host rather than
+a competing direct SDK sender. Ordinary launches without that declaration
+keep their existing selection.
 
 Remote credential-relay admission and persisted-session reconnect use
 `timeouts.session_host_ready` (90 seconds by default) as a bounded readiness

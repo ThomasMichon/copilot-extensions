@@ -88,11 +88,6 @@ def check_bind_safety(cfg: Config) -> None:
 def build_app(cfg: Config | None = None, *, replay_consumer_factory=None):
     """Construct the coordinator; only a trusted embedding selects replay."""
     cfg = cfg or replace(load_config(), control_token=resolve_control_token())
-    from .assignment_admission import configured_writer
-
-    relationship_writer = configured_writer(
-        cfg.relationship_admission, cfg.relationship_authority,
-    )
     # Install a telemetry sink if one is configured (generic open hook; a no-op
     # unless a consumer wired a sink). Prefer a convention-located config file
     # (env-free); fall back to the environment so env-wired deploys don't
@@ -102,8 +97,6 @@ def build_app(cfg: Config | None = None, *, replay_consumer_factory=None):
     Path(cfg.db_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
     queue = TaskQueue(
         Path(cfg.db_path).expanduser(), worker_admission=require_worker_admission,
-        relationship_writer=relationship_writer,
-        relationship_authority=cfg.relationship_authority,
     )
     app = create_app(
         queue, token=cfg.token, control_token=cfg.control_token,
@@ -399,7 +392,6 @@ def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = Fal
                 "Docker bridge subnets only)",
                 cfg.host,
             )
-        app = build_app(cfg)
         # Stage C: pre-bind the listening socket ourselves so we can capture the
         # OS-assigned port and advertise the *actual* endpoint before serving. Passing
         # the already-bound socket to uvicorn avoids a fixed-port reservation entirely.
@@ -423,6 +415,7 @@ def serve(cfg: Config | None = None, *, passive: bool = False, force: bool = Fal
 
         if not passive:
             write_running_version()
+        app = build_app(cfg)
         fed_runner = _maybe_start_federation(drain_gate=app.state.drain_gate)
         app.state.federation_runner = fed_runner
         server = uvicorn.Server(uvicorn.Config(app, log_level="info"))

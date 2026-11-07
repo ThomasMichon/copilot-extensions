@@ -1,9 +1,0 @@
-{
-  "comment": "Add explicit fixed-HTTPS source lease and native POSIX account-file renewal adapters without execution or background activation",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

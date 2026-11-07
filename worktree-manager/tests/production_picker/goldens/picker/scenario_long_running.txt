@@ -6,8 +6,6 @@
 
    + New worktree…     ✕ Clean     ⟳ Sync     creates on anomalous-potato Win  (this host)
 
-
-
   ID     STATE      AGE    USED   LIVE       LENGTH    CLAIMS
   ── Active ──────────────────────────────────────────────────────────────────────────────────────────────────────────
     (none)
@@ -18,6 +16,8 @@
       Created yesterday, untouched
   ── Completed ───────────────────────────────────────────────────────────────────────────────────────────────────────
     (none)
+
+
 
 
 

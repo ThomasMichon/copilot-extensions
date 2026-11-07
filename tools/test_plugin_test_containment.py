@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import json
 import shutil
 import subprocess
 import sys
@@ -15,145 +14,6 @@ import pytest
 
 from tools import plugin_test_containment
 from tools.plugin_test_containment import Limits, isolated_environment
-
-
-def test_poisoned_parent_state_is_detached_before_preparation(tmp_path, monkeypatch):
-    import importlib.util
-
-    root = Path(__file__).parents[1]
-    monkeypatch.syspath_prepend(str(root / "tools"))
-    spec = importlib.util.spec_from_file_location("isolated_runner_probe", root / "tools/run-plugin-tests.py")
-    runner = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, spec.name, runner)
-    spec.loader.exec_module(runner)
-    import plugin_test_environment as preparation
-    monkeypatch.setattr(preparation, "capture_preparation_auth",
-                        lambda *args, **kwargs: {"UV_CREDENTIALS_DIR": str(tmp_path / "fixture-auth")})
-    cache = tmp_path / "test-cache"
-    monkeypatch.setattr(runner, "VENV_ROOT", None)
-    monkeypatch.setattr(runner, "venv_root", lambda repo: cache)
-    poison = tmp_path / "host-state"
-    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(poison / "manager"))
-    monkeypatch.setenv("AGENT_MCP_INSTALL_DIR", str(poison / "mcp"))
-    monkeypatch.setenv("AGENT_FUTURE_STATE_ROOT", str(poison / "future"))
-    monkeypatch.setenv("AGENT_FUTURE_SOCKET", "")
-    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "foreign-installation-context")
-    monkeypatch.setenv("UPDATE_DRIVER_WITNESS", "foreign-participant-witness")
-    monkeypatch.setenv("AGENT_TEST_SUPERVISOR_ROOT", "unchanged-custody")
-    observed = {}
-
-    def prepare(name, uv, *, reinstall, environment):
-        observed.update(environment)
-        private = Path(environment["COPILOT_EXTENSIONS_TEST_SANDBOX"])
-        for key in ("HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
-                    "WORKTREE_MANAGER_ROOT", "AGENT_MCP_INSTALL_DIR", "AGENT_FUTURE_STATE_ROOT"):
-            assert Path(environment[key]).is_relative_to(private)
-        assert not {"COPILOT_EXTENSIONS_CONTEXT", "UPDATE_DRIVER_WITNESS"} & environment.keys()
-        assert environment["AGENT_TEST_SUPERVISOR_ROOT"] == "unchanged-custody"
-        assert "AGENT_FUTURE_SOCKET" not in environment
-        assert Path(environment["UV_CACHE_DIR"]) == cache / ".uv-cache"
-        assert Path(environment["UV_PYTHON_INSTALL_DIR"]) == cache / ".python"
-        return private / "prepared-python"
-
-    monkeypatch.setattr(runner, "_prepare_venv", prepare)
-    runner._ensure_venv("fixture", "fixture-uv", reinstall=False)
-    assert observed and not poison.exists()
-
-
-def test_user_only_uv_configuration_survives_private_preparation(tmp_path, monkeypatch):
-    import importlib.util
-
-    root = Path(__file__).parents[1]
-    monkeypatch.syspath_prepend(str(root / "tools"))
-    spec = importlib.util.spec_from_file_location("resolver_runner_probe", root / "tools/run-plugin-tests.py")
-    runner = importlib.util.module_from_spec(spec)
-    monkeypatch.setitem(sys.modules, spec.name, runner)
-    spec.loader.exec_module(runner)
-    import installer_dependency_policy as policy
-    import plugin_test_environment as preparation
-    monkeypatch.setattr(preparation, "capture_preparation_auth",
-                        lambda *args, **kwargs: {"UV_CREDENTIALS_DIR": str(tmp_path / "fixture-auth")})
-    host = tmp_path / "user"
-    config = host / "uv" / "uv.toml"
-    config.parent.mkdir(parents=True)
-    config.write_text(
-        '[[index]]\nname="fixture"\nurl="https://packages.example.invalid/simple"\n'
-        'default=true\n', encoding="utf-8",
-    )
-    monkeypatch.delenv("UV_CONFIG_FILE", raising=False)
-    monkeypatch.delenv("UV_NO_CONFIG", raising=False)
-    monkeypatch.setenv("APPDATA", str(host))
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(host))
-    monkeypatch.setenv("UV_INDEX_FIXTURE_USERNAME", "fixture-user")
-    monkeypatch.setenv("UV_INDEX_FIXTURE_PASSWORD", "fixture-value")
-    plugin = tmp_path / "plugin"
-    plugin.mkdir()
-    monkeypatch.setattr(runner, "_plugin_dir", lambda name: plugin)
-    monkeypatch.setattr(runner, "VENV_ROOT", tmp_path / "venvs")
-    observed = []
-
-    def prepare(name, uv, *, reinstall, environment):
-        private = Path(environment["COPILOT_EXTENSIONS_TEST_SANDBOX"])
-        assert Path(environment["HOME"]).is_relative_to(private)
-        assert Path(environment["APPDATA"]).is_relative_to(private)
-        assert Path(environment["XDG_CONFIG_HOME"]).is_relative_to(private)
-        inputs = policy._config_inputs([], environment, plugin)
-        data = [policy._toml(path) for path, _ in inputs]
-        assert any(item.get("index", [{}])[0].get("name") == "fixture" for item in data)
-        assert environment["UV_INDEX_FIXTURE_USERNAME"] == "fixture-user"
-        assert environment["UV_INDEX_FIXTURE_PASSWORD"] == "fixture-value"
-        observed.append(Path(environment["UV_CONFIG_FILE"]))
-        assert observed[-1].is_relative_to(private)
-        return private / "python"
-
-    monkeypatch.setattr(runner, "_prepare_venv", prepare)
-    runner._ensure_venv("fixture", "fixture-uv", reinstall=False)
-    assert len(observed) == 1 and not observed[0].exists()
-
-
-@pytest.mark.skipif(os.name != "nt", reason="native Windows profile and path resolution")
-@pytest.mark.parametrize("host_name", ["pwsh", "powershell.exe"])
-def test_poisoned_roots_reach_only_explicit_private_native_resolvers(tmp_path, host_name):
-    from agent_procutil import no_window_kwargs
-
-    host = shutil.which(host_name)
-    if not host:
-        pytest.skip(f"{host_name} unavailable")
-    poison = tmp_path / "poisoned-parent"
-    sandbox = tmp_path / "private-child"
-    base = dict(os.environ, WORKTREE_MANAGER_ROOT=str(poison / "manager"),
-                AGENT_MCP_INSTALL_DIR=str(poison / "mcp"),
-                AGENT_MCP_SERVE_SOCKET=str(poison / "serve.sock"),
-                AGENT_FUTURE_HOME=str(poison / "future"),
-                COPILOT_EXTENSIONS_CONTEXT="foreign-context", UPDATE_DRIVER_WITNESS="foreign-witness")
-    environment = isolated_environment(base, sandbox)
-    program = r"""
-param([string]$InstallDir,[string]$DataDir,[string]$ManagerRoot,[string]$Boundary)
-$ErrorActionPreference='Stop'
-foreach($value in @($InstallDir,$DataDir,$ManagerRoot,$env:AGENT_MCP_SERVE_SOCKET,$env:AGENT_FUTURE_HOME)){
-    $resolved=[IO.Path]::GetFullPath($value)
-    if(-not $resolved.StartsWith([IO.Path]::GetFullPath($Boundary)+[IO.Path]::DirectorySeparatorChar,
-        [StringComparison]::OrdinalIgnoreCase)){throw 'non-private native state root'}
-}
-if($env:COPILOT_EXTENSIONS_CONTEXT -or $env:UPDATE_DRIVER_WITNESS){throw 'foreign participant context'}
-@{install=[IO.Path]::GetFullPath($InstallDir);data=[IO.Path]::GetFullPath($DataDir);
-  manager=[IO.Path]::GetFullPath($ManagerRoot);
-  nativeProfile=[Environment]::GetFolderPath('UserProfile')} | ConvertTo-Json -Compress
-"""
-    script = tmp_path / "native-resolve.ps1"
-    script.write_text(program, encoding="utf-8")
-    result = subprocess.run(
-        [host, "-NoProfile", "-NonInteractive", "-File", str(script),
-         "-InstallDir", environment["AGENT_MCP_INSTALL_DIR"],
-         "-DataDir", environment["AGENT_MCP_HOME"],
-         "-ManagerRoot", environment["WORKTREE_MANAGER_ROOT"], "-Boundary", str(sandbox)],
-        env=environment, capture_output=True, text=True, timeout=10, **no_window_kwargs(),
-    )
-    assert result.returncode == 0, result.stderr
-    resolved = json.loads(result.stdout)
-    assert Path(resolved["manager"]) == sandbox / "worktree-manager"
-    assert Path(resolved["install"]) == sandbox / "agent-mcp-runtime"
-    assert not poison.exists()
 
 
 @pytest.mark.parametrize("supports_repeated", [False, True])
@@ -242,134 +102,6 @@ def test_interactive_daemons_require_an_explicit_runner_policy(tmp_path, monkeyp
             ["unused"], cwd=tmp_path, env={}, sandbox=tmp_path,
             limits=Limits(), daemon_purpose="interactive-test",
         )
-
-
-@pytest.mark.parametrize("refusal", ["host", "self-hosted", "outside", "contained"])
-def test_native_application_refuses_without_disposable_owner(tmp_path, monkeypatch, refusal):
-    monkeypatch.setenv("GITHUB_ACTIONS", "false" if refusal == "host" else "true")
-    monkeypatch.setenv(
-        "RUNNER_ENVIRONMENT", "self-hosted" if refusal == "self-hosted" else "github-hosted",
-    )
-    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
-    monkeypatch.setenv(plugin_test_containment.CONTAINED_ENV, "1" if refusal == "contained" else "0")
-    monkeypatch.setattr(
-        plugin_test_containment, "daemon_test_lifecycle",
-        lambda **kwargs: pytest.fail("native refusal must precede lifecycle or process effects"),
-    )
-    with pytest.raises(plugin_test_containment.ContainmentError, match="disposable"):
-        plugin_test_containment.run_contained(
-            ["unused"], cwd=tmp_path, env={}, limits=Limits(), native_application=True,
-            sandbox=tmp_path.parent if refusal == "outside" else tmp_path,
-        )
-
-
-@pytest.mark.parametrize("cleanup", ["settled", "held", "error"])
-@pytest.mark.parametrize("controller_failure", [False, True])
-def test_native_application_retains_runner_lease_limits_and_cleanup(
-    tmp_path, monkeypatch, cleanup, controller_failure,
-):
-    from contextlib import contextmanager
-    from types import SimpleNamespace
-    from tools import plugin_test_lifecycle
-
-    monkeypatch.setenv("GITHUB_ACTIONS", "true")
-    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
-    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
-    monkeypatch.delenv(plugin_test_containment.CONTAINED_ENV, raising=False)
-    monkeypatch.setattr(plugin_test_lifecycle, "_native_scope_environment", lambda env: env)
-    events = []
-    limits = Limits(wall_seconds=180)
-    environment = {plugin_test_containment.CONTAINED_ENV: "1", "KEEP": "yes"}
-    original = plugin_test_containment.ContainmentError("controller failed")
-    teardown_error = OSError("cleanup could not inspect the daemon registry")
-
-    @contextmanager
-    def lifecycle(**kwargs):
-        events.append("lease")
-        try:
-            yield {"LEASE": "owned"}
-        finally:
-            events.append("cleanup")
-            if cleanup == "error":
-                raise teardown_error
-            kwargs["cleanup_results"].append(SimpleNamespace(status=cleanup))
-
-    def run(command, **kwargs):
-        assert kwargs["limits"] is limits and kwargs["native_application"] is True
-        assert kwargs["env"] == {"KEEP": "yes", "LEASE": "owned"}
-        events.append("run")
-        if controller_failure:
-            raise original
-        return 0
-
-    monkeypatch.setattr(plugin_test_containment, "daemon_test_lifecycle", lifecycle)
-    monkeypatch.setattr(plugin_test_containment, "_run_contained_process", run)
-    monkeypatch.setattr(plugin_test_containment, "_read_registry_environment", lambda: None)
-    monkeypatch.setattr(plugin_test_containment, "_registry_environment_drift", lambda _: [])
-    if cleanup != "settled":
-        with pytest.raises(plugin_test_containment.UnreapedProcessError, match="unsettled") as refused:
-            plugin_test_containment.run_contained(
-                ["unused"], cwd=tmp_path, env=environment, sandbox=tmp_path,
-                limits=limits, native_application=True,
-            )
-        assert refused.value.__cause__ is (
-            teardown_error if cleanup == "error" else original if controller_failure else None
-        )
-        if cleanup == "error" and controller_failure:
-            assert teardown_error.__context__ is original
-    elif controller_failure:
-        with pytest.raises(plugin_test_containment.ContainmentError) as refused:
-            plugin_test_containment.run_contained(
-                ["unused"], cwd=tmp_path, env=environment, sandbox=tmp_path,
-                limits=limits, native_application=True,
-            )
-        assert refused.value is original
-    else:
-        assert plugin_test_containment.run_contained(
-            ["unused"], cwd=tmp_path, env=environment, sandbox=tmp_path,
-            limits=limits, native_application=True,
-        ) == 0
-    assert events == ["lease", "run", "cleanup"]
-    assert environment[plugin_test_containment.CONTAINED_ENV] == "1"
-
-
-@pytest.mark.parametrize("failure", [None, "missing", "foreign", "ordinary"])
-def test_native_application_selects_only_the_existing_owned_user_bus(monkeypatch, failure):
-    import stat
-    from types import SimpleNamespace
-    from agent_procutil import linux_daemon_scope
-    from tools import plugin_test_lifecycle as lifecycle
-
-    class Bus:
-        def __init__(self, value):
-            assert value == "/run/user/1001/bus"
-            self.value = value
-
-        def __str__(self):
-            return self.value
-
-        def lstat(self):
-            if failure == "missing":
-                raise FileNotFoundError
-            return SimpleNamespace(
-                st_mode=stat.S_IFREG if failure == "ordinary" else stat.S_IFSOCK,
-                st_uid=1002 if failure == "foreign" else 1001,
-            )
-
-    monkeypatch.setattr(lifecycle, "sys", SimpleNamespace(platform="linux"))
-    monkeypatch.setattr(lifecycle, "os", SimpleNamespace(getuid=lambda: 1001))
-    monkeypatch.setattr(lifecycle, "Path", Bus)
-    monkeypatch.setattr(linux_daemon_scope, "caller_unit", lambda: "fixture.service")
-    environment = {"XDG_RUNTIME_DIR": "sandbox-run", "DBUS_SESSION_BUS_ADDRESS": "unselected"}
-    if failure:
-        with pytest.raises(ValueError, match="user-manager bus"):
-            lifecycle._native_scope_environment(environment)
-    else:
-        assert lifecycle._native_scope_environment(environment) == {
-            "XDG_RUNTIME_DIR": "sandbox-run",
-            "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1001/bus",
-        }
-    assert environment == {"XDG_RUNTIME_DIR": "sandbox-run", "DBUS_SESSION_BUS_ADDRESS": "unselected"}
 
 
 def test_runner_passes_pause_tolerant_policy_and_keeps_renewal_custody(tmp_path, monkeypatch):
@@ -824,145 +556,51 @@ def test_windows_job_waits_for_every_member_before_closing_handle(monkeypatch):
     events = []
     job = object.__new__(plugin_test_containment._WindowsJob)
     job._handle = 7
-    monkeypatch.setattr(plugin_test_containment, "JobHandle", lambda handle: SimpleNamespace(handle=handle))
+    counts = iter((2, 1, 0))
 
-    def retire(owner, timeout):
-        assert 0 < timeout <= 5
-        events.append(("pin-native-members", owner.handle))
-        events.append(("accounting-zero", owner.handle))
-        events.append(("native-member-exit", owner.handle))
-        owner.handle = None
+    def active():
+        count = next(counts)
+        events.append(("active", count))
+        return count
 
+    job.active_processes = active
     job._kernel32 = SimpleNamespace(
-        CloseHandle=lambda handle: pytest.fail("the canonical owner closes its own handles"),
+        TerminateJobObject=lambda handle, code: events.append(("terminate", handle)) or 1,
+        CloseHandle=lambda handle: events.append(("close", handle)),
     )
-    monkeypatch.setattr(plugin_test_containment, "_retire_windows_job", retire)
+    monkeypatch.setattr(plugin_test_containment.time, "sleep", lambda seconds: None)
     job.close()
     assert events == [
-        ("pin-native-members", 7), ("accounting-zero", 7), ("native-member-exit", 7),
+        ("active", 2), ("terminate", 7), ("active", 1), ("active", 0), ("close", 7),
     ]
     assert job._handle is None
-    job.close()
-    assert len(events) == 3
 
 
-@pytest.mark.parametrize("fault", [
-    "timeout", "terminate", "query", "cancel", "native-exit", "unclosed", "pending-witnesses",
-])
+@pytest.mark.parametrize("fault", ["timeout", "terminate", "query", "cancel"])
 def test_windows_job_reports_unproven_termination_instead_of_claiming_reaped(monkeypatch, fault):
     job = object.__new__(plugin_test_containment._WindowsJob)
     job._handle = 7
-    monkeypatch.setattr(plugin_test_containment, "JobHandle", lambda handle: SimpleNamespace(handle=handle))
 
-    def retire(owner, timeout):
-        owner._native_retirement = object()
-        if fault == "unclosed":
-            return
-        if fault == "pending-witnesses":
-            owner.handle = None
-            return
+    def active():
+        if fault == "query":
+            raise plugin_test_containment.ContainmentError("query failed")
         if fault == "cancel":
             raise KeyboardInterrupt
-        if fault in {"timeout", "native-exit"}:
-            raise TimeoutError("native member exit is not confirmed")
-        raise OSError(fault + " failed")
+        return 1
 
-    monkeypatch.setattr(plugin_test_containment, "_retire_windows_job", retire)
-    qualification = SimpleNamespace(
-        boundary=SimpleNamespace(whole_deadline=100, require=lambda clock: None),
-        forced_termination=False, job_zero_observed=False, job_handle_closed=False,
-    )
-    job.active_processes = lambda: 0
-    monkeypatch.setattr(plugin_test_containment.time, "monotonic", lambda: 0)
-    with pytest.raises(plugin_test_containment.UnreapedProcessError) as error:
-        job.close(qualification=qualification)
-    assert error.value.job is job._retirement_owner
-    assert error.value.job.handle == job._handle == (None if fault == "pending-witnesses" else 7)
-    assert error.value.job._native_retirement is not None
-    assert not qualification.job_zero_observed and not qualification.job_handle_closed
-
-
-@pytest.mark.parametrize("retained", [False, True])
-def test_expired_windows_job_requests_termination_without_verification_extension(monkeypatch, retained):
-    job = object.__new__(plugin_test_containment._WindowsJob)
-    native_owner = SimpleNamespace(handle=None if retained else 7)
-    if retained:
-        native_owner._native_retirement = SimpleNamespace(duplicate=9)
-    job._retirement_owner = native_owner
-    job._handle = native_owner.handle
-    job.active_processes = lambda: 1
-    requests = []
+    job.active_processes = active
+    closed = []
     job._kernel32 = SimpleNamespace(
-        TerminateJobObject=lambda handle, code: requests.append((handle, code)) or 1,
+        TerminateJobObject=lambda handle, code: int(fault != "terminate"),
+        CloseHandle=lambda handle: closed.append(handle),
     )
-    qualification = SimpleNamespace(
-        boundary=SimpleNamespace(
-            whole_deadline=19,
-            require=lambda clock: pytest.fail("expired verification cannot become positive"),
-        ),
-        forced_termination=False, job_zero_observed=False, job_handle_closed=False,
-    )
-    monkeypatch.setattr(
-        plugin_test_containment, "time",
-        SimpleNamespace(monotonic=lambda: 20, sleep=lambda seconds: pytest.fail("no extension")),
-    )
-    monkeypatch.setattr(
-        plugin_test_containment, "_retire_windows_job",
-        lambda *args: pytest.fail("expired close cannot begin native verification"),
-    )
-    with pytest.raises(plugin_test_containment.UnreapedProcessError) as error:
-        job.close(qualification=qualification)
-    assert requests == [(9 if retained else 7, 124)]
-    assert error.value.job is native_owner
-    assert job._handle == native_owner.handle
-    assert qualification.forced_termination
-    assert not qualification.job_zero_observed and not qualification.job_handle_closed
-
-
-@pytest.mark.parametrize("expired,confirmed", [(False, False), (False, True), (True, False)])
-def test_preliminary_accounting_failure_still_retires_owned_job(monkeypatch, expired, confirmed):
-    job = object.__new__(plugin_test_containment._WindowsJob)
-    native_owner = SimpleNamespace(handle=7)
-    job._retirement_owner = native_owner
-    job._handle = 7
-    events = []
-
-    def unavailable():
-        raise plugin_test_containment.ContainmentError("preliminary accounting unavailable")
-
-    job.active_processes = unavailable
-    job._kernel32 = SimpleNamespace(
-        TerminateJobObject=lambda handle, code: events.append(("terminate", handle, code)) or 1,
-    )
-    qualification = SimpleNamespace(
-        boundary=SimpleNamespace(
-            whole_deadline=19 if expired else 100,
-            require=lambda clock: pytest.fail("unavailable accounting cannot qualify"),
-        ),
-        forced_termination=False, job_zero_observed=False, job_handle_closed=False,
-    )
-    monkeypatch.setattr(
-        plugin_test_containment, "time",
-        SimpleNamespace(monotonic=lambda: 20, sleep=lambda seconds: pytest.fail("no extension")),
-    )
-
-    def retire(owner, remaining):
-        assert owner is native_owner and remaining == 5
-        owner._native_retirement = object()
-        events.append(("native-retirement", owner.handle, remaining))
-        if confirmed:
-            owner.handle = None
-            del owner._native_retirement
-            return
-        raise OSError("native exit unconfirmed")
-
-    monkeypatch.setattr(plugin_test_containment, "_retire_windows_job", retire)
-    with pytest.raises(plugin_test_containment.UnreapedProcessError) as error:
-        job.close(qualification=qualification)
-    assert events == ([("terminate", 7, 124)] if expired else [("native-retirement", 7, 5)])
-    assert error.value.job is native_owner and job._handle == (None if confirmed else 7)
-    assert qualification.forced_termination
-    assert not qualification.job_zero_observed and not qualification.job_handle_closed
+    clock = iter((0.0, 6.0))
+    monkeypatch.setattr(plugin_test_containment.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(plugin_test_containment, "_windows_last_error", lambda: 5)
+    with pytest.raises(plugin_test_containment.UnreapedProcessError):
+        job.close()
+    assert closed == [7]
+    assert job._handle is None
 
 
 def test_posix_group_waits_until_no_live_members_remain(monkeypatch):
@@ -1508,8 +1146,7 @@ def test_native_cancellation_reaps_file_holding_descendant(tmp_path, monkeypatch
 def test_environment_audit_failure_cannot_mask_unreaped_retention(
     tmp_path, monkeypatch, unreaped, audit_error,
 ):
-    owned_job = object()
-    original = plugin_test_containment.UnreapedProcessError("tree remains owned", job=owned_job)
+    original = plugin_test_containment.UnreapedProcessError("tree remains owned")
     sandbox = plugin_test_containment.TestSandbox(dir=tmp_path)
 
     def command(*args, **kwargs):
@@ -1535,7 +1172,6 @@ def test_environment_audit_failure_cannot_mask_unreaped_retention(
         if unreaped:
             assert (Path(sandbox.name) / "still-owned").read_text() == "preserve"
             assert raised.value.__cause__ is original
-            assert raised.value.job is owned_job
             assert "environment audit also failed" in str(raised.value)
             assert type(audit_error).__name__ in str(raised.value)
         else:

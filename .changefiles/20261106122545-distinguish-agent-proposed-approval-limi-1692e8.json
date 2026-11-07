@@ -1,9 +1,0 @@
-{
-  "comment": "Distinguish agent-proposed approval limits from operator pins, read grants by operation class, treat a rerun after a reviewed fix as a bounded retry, and ask for class-level pre-clearance instead of per-invocation re-asks",
-  "changes": [
-    {
-      "plugin": "agent-conduct-guidance",
-      "type": "patch"
-    }
-  ]
-}

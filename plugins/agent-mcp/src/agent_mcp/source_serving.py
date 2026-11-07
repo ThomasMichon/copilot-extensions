@@ -43,18 +43,6 @@ def generation_selected(server) -> bool:
     return selected == server._version
 
 
-def control_ping_reply(server) -> dict:
-    return {
-        "ok": True, "pong": True, "draining": server._draining,
-        "attached": server._attached, "sessions": server.pool.size,
-        "pid": os.getpid(), "version": server._version,
-        "runtime_root": str(server._runtime_root) if server._runtime_root else None,
-        "data_socket": str(server.socket_path),
-        "ready": server._server is not None and server._server.is_serving()
-        and not server._closing and not server._draining,
-    }
-
-
 @contextlib.contextmanager
 def startup_transaction(server):
     """Serialize fixed-handle startup with the existing application cutover owner."""
@@ -114,15 +102,16 @@ def data_handle_matches(fixed: Path, data_socket: Path) -> bool:
         return False
 
 
-def _owner_reply(fixed: Path, endpoint) -> dict | None:
-    """Read installation identity only from the authenticated live native owner."""
+def ready_owner(fixed: Path, endpoint, version: str, *, deadline: float) -> dict | None:
+    """Qualify the exact active native generation and its authenticated data handle."""
+    from zdd import routing
     from zdd.diagnostics import process_start_time
 
     from . import serve
-    from .cutover import control_request
+    from .cutover import control_request, source_data_owner
 
     if (
-        endpoint is None or not endpoint.pid
+        endpoint is None or endpoint.version != version or not endpoint.pid
         or not endpoint.process_start_time or endpoint.client_host not in {"127.0.0.1", "::1"}
         or process_start_time(endpoint.pid) != endpoint.process_start_time
     ):
@@ -136,49 +125,10 @@ def _owner_reply(fixed: Path, endpoint) -> dict | None:
         )
         if not (
             reply.get("ok") is True and reply.get("pong") is True
-            and reply.get("pid") == endpoint.pid and reply.get("version") == endpoint.version
+            and reply.get("ready") is True and not reply.get("draining")
+            and reply.get("pid") == endpoint.pid and reply.get("version") == version
         ):
             return None
-        return reply
-    except (OSError, ValueError, KeyError, TypeError):
-        return None
-
-
-def installation_matches(reply, root: Path) -> bool:
-    identity = reply.get("runtime_root") if isinstance(reply, dict) else None
-    try:
-        return isinstance(identity, str) and Path(identity).is_absolute() and Path(identity).resolve() == root.resolve()
-    except (OSError, ValueError):
-        return False
-
-
-def require_installation_owner(fixed: Path, endpoint, root: Path) -> dict:
-    from .cutover import ControlError
-
-    reply = _owner_reply(fixed, endpoint)
-    if not installation_matches(reply, root):
-        raise ControlError("MCP serving installation identity is unavailable or foreign")
-    return reply
-
-
-def ready_owner(
-    fixed: Path, endpoint, version: str, *, runtime_root: Path, deadline: float,
-) -> dict | None:
-    """Qualify the exact installation, native generation and authenticated handle."""
-    from zdd import routing
-    from zdd.diagnostics import process_start_time
-
-    from .cutover import source_data_owner
-
-    if endpoint is None or process_start_time(endpoint.pid) != endpoint.process_start_time:
-        return None
-    reply = require_installation_owner(fixed, endpoint, runtime_root)
-    if (
-        endpoint.version != version
-        or reply.get("ready") is not True or reply.get("draining")
-    ):
-        return None
-    try:
         data_socket = Path(reply["data_socket"])
 
         def refuse_current(_raw):
@@ -195,7 +145,7 @@ def ready_owner(
         )
         return {
             "ok": True, "pid": endpoint.pid, "version": version,
-            "data_socket": str(data_socket), "runtime_root": str(runtime_root),
+            "data_socket": str(data_socket),
         }
     except (OSError, ValueError, KeyError, TypeError, routing.ActivePublicationRefused):
         return None
@@ -215,9 +165,7 @@ def recover_publication(
     current = routing.Endpoint.from_dict(current_table.get("active", {}))
     if data_handle_matches(fixed, data_socket):
         if current == incoming:
-            result = ready_owner(
-                fixed, incoming, incoming.version, runtime_root=Path(layout[2]), deadline=deadline,
-            )
+            result = ready_owner(fixed, incoming, incoming.version, deadline=deadline)
             _require_selected(layout)
             if result is not None and Path(result["data_socket"]) == data_socket:
                 return result
@@ -291,7 +239,6 @@ def ready_replacement(server) -> bool:
             and reply.get("ready") is True
             and not reply.get("draining") and reply.get("pid") == endpoint.pid
             and reply.get("version") == selected
-            and installation_matches(reply, server._runtime_root)
         ):
             return False
         data_socket = Path(reply["data_socket"])

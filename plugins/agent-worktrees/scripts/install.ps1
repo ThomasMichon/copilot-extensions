@@ -22,10 +22,6 @@
     Project name (e.g. 'my-project'). Defaults to an existing config matching
     the basename of the current directory.
 
-.PARAMETER RuntimeOnly
-    On install/update: skip project inference and adoption. Cannot be combined
-    with ProjectName. Shared runtime preparation and integration are unchanged.
-
 .PARAMETER InstallDir
     Exact runtime installation root. Structured context callers must supply the
     root selected by the installation-context resolver.
@@ -55,7 +51,6 @@ param(
     [string]$Action = 'status',
 
     [string]$ProjectName,
-    [switch]$RuntimeOnly,
 
     [string]$InstallDir,
     [string]$InstallSource,
@@ -80,12 +75,6 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
         throw 'Required installer human-output initializer is unavailable.'
     }
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
-}
-
-if ($RuntimeOnly -and (
-    $Action -notin @('install', 'update') -or $PSBoundParameters.ContainsKey('ProjectName')
-)) {
-    throw '-RuntimeOnly requires install/update without -ProjectName.'
 }
 
 # Keep native staging and the updater on the same declared installation budget.
@@ -388,7 +377,6 @@ print(json.dumps(sys.executable, ensure_ascii=True))
             '--shell', (Get-Process -Id $PID).Path, '--action', $Action.ToLowerInvariant()
         )
         if ($ProjectName) { $driverArguments += @('--project-name', $ProjectName) }
-        if ($RuntimeOnly) { $driverArguments += '--runtime-only' }
         if ($BootstrapPython) { $driverArguments += @('--bootstrap-python', $BootstrapPython) }
         if ($InstallSource) { $driverArguments += @('--install-source', $InstallSource) }
         if ($PSBoundParameters.ContainsKey('InputTimeout')) {
@@ -1114,7 +1102,7 @@ $LegacyBinstubs = @(
 $RepoDir = $null
 
 # Infer project name: explicit parameter > existing config matching CWD.
-$ProjectName = if ($RuntimeOnly) { $null } else { Resolve-InstallerProjectName -Name $ProjectName }
+$ProjectName = Resolve-InstallerProjectName -Name $ProjectName
 # Don't auto-adopt the CWD repo -- project association is explicit.
 # Runtime installs fine without a project name.
 # Reserved-name guard: `agent-worktrees` is the runtime's own global command

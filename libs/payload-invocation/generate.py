@@ -9,7 +9,6 @@ import os
 import re
 import stat
 from pathlib import Path
-from typing import Any
 
 REPO = Path(__file__).resolve().parents[2]
 TEMPLATES = Path(__file__).resolve().parent / "templates"
@@ -82,8 +81,8 @@ def _load_command(path: Path, value: object, *, label: str) -> dict[str, str]:
     return command
 
 
-def load_manifest(path: Path) -> dict[str, Any]:
-    data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+def load_manifest(path: Path) -> dict[str, object]:
+    data = json.loads(path.read_text(encoding="utf-8"))
     manifest_version = data.get("version")
     if (
         data.get("schema") != SCHEMA
@@ -107,7 +106,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
             raise ValueError(
                 f"{path}: version 1 cannot declare installation-context fields"
             )
-        installation_context: Any = "legacy"
+        installation_context = "legacy"
     else:
         if "runtimeRoot" in data:
             raise ValueError(f"{path}: version 2 uses legacyRuntimeRoot")
@@ -320,7 +319,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
 
 def render(
     template: str,
-    data: dict[str, Any],
+    data: dict[str, object],
     *,
     command: dict[str, str] | None = None,
 ) -> str:
@@ -818,7 +817,7 @@ def expected_files(manifest: Path) -> dict[Path, str | bytes]:
         if data["posixCatalogMode"] == "shell"
         else f"{catalog_prefix}-posix.tmpl"
     )
-    catalog_outputs: tuple[tuple[Path, str], ...] = (
+    catalog_outputs = (
         (
             manifest.parent / "scripts" / "emit-command-catalog.sh",
             posix_catalog_template,

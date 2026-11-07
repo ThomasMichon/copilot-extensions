@@ -45,8 +45,6 @@ class Prereq:
     source: str | None = None
     #: Baseline only: how Phase 2 provisions it ("system" | "script").
     provision: str | None = None
-    #: Empty means every platform; otherwise normalized OS tokens.
-    platforms: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -106,11 +104,6 @@ class Catalog:
 
 
 def _prereq(d: dict) -> Prereq:
-    platforms = d.get("platforms", [])
-    if not isinstance(platforms, list) or any(
-        p not in ("windows", "macos", "linux") for p in platforms
-    ):
-        raise ValueError("Prerequisite platforms must list supported OS tokens")
     return Prereq(
         name=d["name"],
         min=d.get("min"),
@@ -118,7 +111,6 @@ def _prereq(d: dict) -> Prereq:
         optional=bool(d.get("optional", False)),
         source=d.get("source"),
         provision=d.get("provision"),
-        platforms=tuple(platforms),
     )
 
 

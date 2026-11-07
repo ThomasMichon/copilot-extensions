@@ -74,7 +74,7 @@ Use the same owner-private `gateway-host.json`, with configuration version 2:
 ```
 
 The referenced [SSH configuration](ssh-machine.md) keeps its existing v1
-token/proof, v2 external PEM or v3 continuity-reference meaning. Preflight
+token/proof or v2 machine-key meaning and provider-owned references. Preflight
 validates the existing local writer scopes and credentials without network,
 lease creation or profile writes. The SSH lease and entire installation root
 must be separate. No enrollment, credential acquisition or materialization occurs.
@@ -106,10 +106,6 @@ concurrency. Each
 group retains the 180-second runner bound, and neither stateful installation
 sequence is split. Their union preserves the full selected case set; this is
 not a claim that the combined portfolio finishes within one 180-second process.
-The normal Manager/engine setup packet has a further dependent six-minute
-platform job, with its own180-second runner and explicit engine-dependency
-preparation. It exercises a different consumer contract, not a replacement for
-the existing manually selected installed cases, and adds no peak concurrency.
 
 `fleet-manager gateway-host status|start|stop` addresses the selected physical,
 completed application. No resident code, working directory or lifecycle binding

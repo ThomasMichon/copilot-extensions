@@ -132,20 +132,9 @@ def _cmd_resume(args: argparse.Namespace) -> None:
 
     try:
         target, worktree_only = resume_target(args)
-        writer_path = getattr(args, "worktree_writer_file", None)
-        if writer_path is not None and (
-            worktree_only or getattr(args, "force", False) or getattr(args, "cli", False)
-            or not getattr(args, "strict", False)
-        ):
-            raise argparse.ArgumentTypeError(
-                "--worktree-writer-file requires --strict resume of an exact ACP session ID",
-            )
     except argparse.ArgumentTypeError as error:
         print(f"[FAIL] {error}", file=sys.stderr)
         raise SystemExit(2) from error
-    from .workspace_creation_cli import read_writer_requirement
-
-    writer = read_writer_requirement(writer_path) if writer_path is not None else None
     core = _core()
     client = core._get_client()
     configure_client(client, args)
@@ -153,7 +142,6 @@ def _cmd_resume(args: argparse.Namespace) -> None:
         client=client,
         target=target,
         worktree_only=worktree_only,
-        worktree_writer=writer,
         reclaim=bool(getattr(args, "force", False)),
         strict=bool(getattr(args, "strict", False)),
         cli=bool(getattr(args, "cli", False)),
@@ -577,7 +565,6 @@ def register_session_lifecycle_commands(sub: argparse._SubParsersAction) -> None
     resume_target.add_argument("--worktree-id", type=exact_worktree_id, help="Resume only this exact worktree; never select a session alias or singleton alternative")
     resume_p.add_argument("--force", "--reclaim", dest="force", action="store_true", help="Break-glass take-over: adopt the worktree even if a live interactive CLI holds it (stop that CLI first)")
     resume_p.add_argument("--strict", action="store_true", help="Identity-preserving contract: refuse (409) rather than silently start a fresh replacement conversation when the worktree has no existing session or its resume fails")
-    resume_p.add_argument("--worktree-writer-file", metavar="PATH", help="Original keyed writer JSON for strict exact-session ACP resume; - reads stdin")
     resume_p.add_argument("--cli", action="store_true", help="Resume the exact native head in a headed/muxed CLI instead of headless ACP")
     resume_p.set_defaults(func=_cmd_resume)
 

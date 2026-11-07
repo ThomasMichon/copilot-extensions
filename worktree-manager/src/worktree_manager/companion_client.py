@@ -12,13 +12,13 @@ from .engine_environment import _engine_environment
 
 
 def worktree_status_bundle(
-    project: str | None, worktree_id: str, *, runner=None, engine_command: list[str] | None = None,
+    project: str | None, worktree_id: str, *, runner=None,
 ) -> dict:
     """Read the owning engine's independently marked status facts."""
     obj = ec.run_json(
         project,
         ["worktree-status-bundle", "--worktree", worktree_id, "--json"],
-        runner=runner, engine_command=engine_command,
+        runner=runner,
     )
     if (
         not isinstance(obj, dict)

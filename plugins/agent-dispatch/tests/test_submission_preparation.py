@@ -263,12 +263,12 @@ def test_preparation_and_legacy_completion_serialize_at_the_queue_boundary(submi
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         outcomes = list(executor.map(run, [True, False]))
-    assert not outcomes[1]
-    assert queue.get(task.id) == task and queue.submission_preparation(task.id) is not None
+    assert sum(outcomes) == 1
     if outcomes[0]:
-        assert queue.submission_preparation(task.id)["request"]["request_id"] == arguments["request_id"]
+        assert queue.get(task.id) == task and queue.submission_preparation(task.id) is not None
     else:
-        assert queue.submission_preparation(task.id)["request"]["request_id"].startswith("complete:")
+        assert queue.get(task.id).status == Status.SUBMITTED
+        assert queue.submission_preparation(task.id) is None
 
 
 @pytest.mark.parametrize("require_verification", [True, False])

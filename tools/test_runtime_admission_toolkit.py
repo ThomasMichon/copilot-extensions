@@ -23,8 +23,6 @@ from test_installer_wheel_acquisition import CERTIFICATE
 from test_installer_packaging_seed import engine as engine  # noqa: F401
 from test_installer_packaging_seed import seed, selected_seed
 from test_runtime_profile_bundle import inputs as inputs  # noqa: F401
-from test_runtime_profile_bundle import build as build_profile_bundle
-from test_runtime_profile_bundle import isolated_manager as isolated_manager  # noqa: F401
 from test_runtime_profile_delivery import produce
 from test_runtime_profile_delivery import selected as selected  # noqa: F401
 from promotion_unit_tests.test_runtime_profile_wheels import _record
@@ -190,46 +188,6 @@ print("copied-delivery-intake-ok")
     )
     assert observed.returncode == 0, observed.stdout + observed.stderr
     assert observed.stdout.strip() == "copied-delivery-intake-ok"
-
-
-def test_copied_toolkit_retains_both_isolated_environments(tmp_path, isolated_manager):  # noqa: F811
-    toolkit = _toolkit(tmp_path)
-    record, paths = isolated_manager
-    transport = tmp_path / "wheels.zip"
-    built = build_profile_bundle(
-        record, paths, transport, max_wheels=3, layout="manager-isolated",
-    )
-    bundle = tmp_path / "delivery.zip"
-    result = produce((record, transport, built["sha256"], {}, {}), bundle, layout="manager-isolated")
-    profile = tmp_path / "selected-profile.json"
-    profile.write_text(json.dumps(record), encoding="utf-8")
-    script = """
-import json, pathlib, sys, time
-root = pathlib.Path(sys.argv[1]).resolve()
-sys.path.insert(0, str(root.parent))
-import _runtime_admission
-_runtime_admission.activate()
-import runtime_profile_delivery as delivery
-assert pathlib.Path(delivery.__file__).resolve().is_relative_to(root)
-record = json.loads(pathlib.Path(sys.argv[2]).read_text())
-with delivery.retain_profile_delivery(
-    record, pathlib.Path(sys.argv[3]), delivery_sha256=sys.argv[4],
-    max_bytes=1_000_000, max_files=10, max_snapshot_bytes=10_000_000,
-    deadline=time.monotonic() + 30,
-) as retained:
-    assert retained.layout == "manager-isolated"
-    assert set(retained.environments) == {"shared", "manager"}
-    assert len(retained.wheels.archives) == 3
-    retained.wheels.verify()
-print("copied-isolated-delivery-ok")
-"""
-    observed = subprocess.run(
-        [sys.executable, "-I", "-B", "-c", script, str(toolkit), str(profile), str(bundle), result["sha256"]],
-        cwd=tmp_path, capture_output=True, text=True, timeout=60,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-    )
-    assert observed.returncode == 0, observed.stdout + observed.stderr
-    assert observed.stdout.strip() == "copied-isolated-delivery-ok"
 
 
 def test_admitted_seed_runs_payload_local_semantic_validation(

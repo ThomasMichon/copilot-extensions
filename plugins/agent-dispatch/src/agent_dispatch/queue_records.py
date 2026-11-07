@@ -253,7 +253,6 @@ class SpawnReservation:
     execution_machine: str | None = None
     driver: str | None = None
     agent_info: dict | None = None
-    worktree_writer_requirement: dict | None = None
     allocation_project: str | None = None
     worktree_path: str | None = None
     creation_nonce: str | None = None
@@ -297,8 +296,6 @@ class SpawnReservation:
             execution_machine=row["execution_machine"] if "execution_machine" in row.keys() else None,
             driver=row["driver"],
             agent_info=json.loads(row["agent_info"]) if "agent_info" in row.keys() and row["agent_info"] else None,
-            worktree_writer_requirement=json.loads(row["worktree_writer_requirement"])
-            if "worktree_writer_requirement" in row.keys() and row["worktree_writer_requirement"] else None,
             allocation_project=row["allocation_project"] if "allocation_project" in row.keys() else None,
             worktree_path=row["worktree_path"] if "worktree_path" in row.keys() else None,
             creation_nonce=row["creation_nonce"] if "creation_nonce" in row.keys() else None,

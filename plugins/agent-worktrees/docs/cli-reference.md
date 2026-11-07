@@ -40,85 +40,6 @@ Overlapping request and background refreshes use per-worktree publication
 generations: an older computation may finish its own response, but cannot
 replace a newer generation's cached or durable facts or renew their age.
 
-## On-demand PR associations
-
-Ordinary `worktree-status-bundle` responses add the optional
-`companion_pr_observations` declaration: contract
-`companion-pr-observations-v1`, version 1, option `--pr-associations`, and
-passive snapshot schema `agent-worktrees.pr-snapshot`, version 1.
-This is the executing CLI's support, not the resident's generation or fresh
-provider evidence. Ordinary reads keep their existing six facts and omit
-related-PR binding discovery.
-
-After finding that declaration, a consumer may request
-`worktree-status-bundle --worktree <id> --pr-associations --json`.
-It retains the original cached/core bundle and adds the independently timed
-`facts.pr_associations` fact. The version-1 `agent-worktrees.pr-associations`
-value identifies the exact project, worktree and stored `creation_nonce`,
-with `available`, `complete`, `associations` and `omitted`.
-Each association retains its stored `pr_id`, `pr_revision`, `provider`,
-target `repo`, `number`, `url` and `recorded_state`. Its separate `binding`
-reports `available` and either the registered provider/repository,
-configured `api_base` and effective `endpoint`, or a bounded reason.
-Binding availability means that target can be selected for the existing read;
-it is not authorization, provider reachability or observation freshness.
-
-Discovery projects at most 24 associations, with explicit omissions, within
-the existing 1 MiB body budget, measured using the actual versioned, indented
-stdout envelope and newline. One invocation shares one fresh configuration
-acquisition scope and one strict registry snapshot across association targets.
-Concrete failed configuration acquisitions, including malformed related files,
-suppressed related-overlay failures and failed/malformed/lossy committed inputs,
-cannot qualify fallback bindings. Related-file diagnostics join the active
-configuration acquisition without changing the loader's fallback values or
-legacy exception behavior.
-Classification fails closed: any indeterminate acquisition outcome, including a
-malformed or unreadable installation context and any unrecognized failure
-reason, makes the binding unavailable. Only recognized owner-provenance gaps,
-where a value was acquired but its complete provenance cannot be proven, are
-not configuration value failures.
-It performs no credential/forge read, Git remote discovery,
-Git fetch, service startup or canonical write of its own; the status command's
-existing Git/liveness/bootstrap behavior is unchanged.
-Duplicate YAML keys in record evidence and malformed or duplicate-key registry
-sources remain unavailable; they cannot overwrite earlier evidence into an
-empty success or silently select a related fallback. Hosting inputs use the
-same surrounding-whitespace normalization as the existing snapshot fetch.
-Deployment prefixes remain case-sensitive; repository URL components are
-decoded separately without allowing encoded separators to change their
-boundaries. Both encoded and legacy unescaped ADO repository names are supported.
-Concrete initial/foreign configuration acquisition failures keep bindings
-unavailable even if the loader returns usable defaults. A failed foreign
-target cannot regain availability through the same invocation's cache.
-Malformed `config.d` entries and indeterminate drop-in scans likewise keep
-bindings unavailable, including scans that retain last-known configuration.
-The owning configuration loader's ordinary valid-peer isolation is unchanged.
-Genuinely absent optional registries remain compatible.
-Incomplete owner-provenance diagnostics alone are not a malformed value.
-The record is reread and checked against the selected worktree incarnation and
-again after binding resolution. Changed, malformed, oversized or legacy
-incarnation evidence remains unavailable, not an empty success.
-An exact known empty list needs no binding discovery. Missing/legacy identity,
-duplicate association IDs, incomplete targets and conflicting/unregistered
-bindings cannot qualify a provider read. Configuration failure retains the
-known associations with unavailable bindings.
-If even the unavailable fact cannot fit beside the existing core within the
-body budget, the optional response reports `availability.status: unavailable`
-with reason `association-byte-budget`, without replaying the oversized core.
-The original cache is unchanged; consumers retain independently obtained views
-rather than treating this bounded failure as an empty core.
-Oversized or malformed subject metadata instead yields the bounded
-`association-metadata-overflow` availability reason without reproducing or
-truncating the identity into another subject.
-
-Claims and recorded `open`, `merged`, `closed` or other lifecycle state do not
-establish current provider state, acceptance or claim release. This operation
-does not acquire a snapshot or watch. Consumers using older/rolled-back CLIs
-without the declaration retain their claim-only baseline and unknown PR state;
-they must not guess the new option or fall back to a raw forge client.
-Older readers can ignore the additive declaration/fact. Unknown arguments
-remain rejected, and no existing form is retired.
-
 ## Repository PR census
 
 `pr-sweep <owner/repository> [--fleet] [--include MACHINE/ENV]
@@ -549,7 +470,7 @@ continue to work unchanged.
 | `push-changes` | Push worktree changes to remote default branch (squash, rebase, push). Aborts if the pre-squash fails (`--allow-unsquashed` to opt into individual commits) |
 | `finalize` | Validate the branch's content is on upstream; for a merged PR with a missing cached head SHA, use a fresh provider-observed head only after the provider confirms the merge, and keep refusing when its boundary remains unverifiable; prune the worktree/branch only when idle (deferred while a session is live). The creating agent owns child cleanup; `--abandon` is refused without an operator-directed `--handoff-to <recipient-or-flow>`, recorded on each re-homed obligation |
 | `mark-complete` | Manual recovery -- set tracking status flag only (hidden from help) |
-| `claims` | The worktree's **resource-obligation ledger** (accountability for what it allocated; effort `resource-obligation-settlement`). `claims [id]` shows the ledger; `claims owner <kind> <ref> [--json] [--all-states]` searches every registered project on this machine for the worktree(s) holding that outbound claim (held claims only by default); `claims add <kind> <ref> [--owner-ref <m/p/w>]` journals an outbound claim; `claims annotate <ref> --note <text>` attaches/updates a note on an already-existing claim (e.g. one an underlying tool auto-created) without release + re-add; `claims settle <ref> [--released]` marks it at-rest/released; `claims add derived <path> --creator <tool>` creates a derived output directory with a `.derived-claim.json` marker (worktree id + nonce) and opens a `derived` claim on it, refusing any path that already exists without a matching marker; `claims settle <path> --reclaim [--dry-run]` deletes exactly that one derived directory -- only when its marker/nonce match the ledger, it is inside this worktree's checkout, holds no Git-tracked files, contains no symlink/junction/reparse point and no live process uses it -- and then settles the claim (any failed check refuses and leaves the claim open; finalize and `claims sweep` never delete derived directories); `claims release <ref> [--remove]` retires one (for a derived claim the directory is kept); `claims handoff offer ...` offers exact held claims to another worktree, and `claims handoff accept <bundle-id>` atomically transfers them -- same-machine in-process, cross-machine by SSHing to the source machine's own project binstub for the source-side settle while the accepting machine commits the consumer-side ledger locally, fenced by the shared claim-handoff lease; `claims sweep [--apply]` runs the never-wedge reclaim (flip a provably-gone+safe `active` claim → `abandoned`; dry-run default); `claims reconcile-at-rest [<worktree-id> ...] [--apply]` is the dedicated legacy/GC close-out reconciliation command (`worktree-finality-and-obligations` design.md): releases lingering **at-rest-only** claims on existing records that predate/bypassed finalize's own automatic release-under-freeze, never an `active` one; no selector means every tracked record; dry-run by default; `claims orphans` lists the durable orphanage (obligations re-homed by a `finalize --abandon`); `claims cleanup [<ref-or-source-worktree> ...] [--apply]` is the acting consumer that reclaims matching orphaned resources (delete the CodeSpace, finalize the cross-repo worktree, release a PR only when its reference matches the configured provider and authority and the live provider confirms it merged) and drops settled entries. No selector means the entire orphanage. Same-machine, best-effort, dry-run by default; `claims transitive [worktree_id]` lists every unsettled obligation anywhere in a worktree's whole subtree (itself + every worktree it created, transitively) -- a diagnostic convenience, never a substitute for the per-hop finalize gate; `claims history <ref>` prints the durable, ordered claim/release/settle/reassigned event history recorded for a claimed resource -- **today `pr`-kind only**, fed from the explicit claim-lifecycle write paths, `worktree run`'s own PR-claim persistence (both its live pending-ref settle site and its tested helper), an explicit claim-handoff bundle accept's transfer, plus a context-handoff cutover's implicit agent-bridge-style session reassignment (not yet an agent-dispatch task redrive -- an empty result is NOT proof nothing happened), locally plus, with `--remote`, merged with any mirrored remote events (`refs/agent-worktrees/claim-history/v1`, same shared store as the lease refs) -- an unreadable remote store warns on stderr rather than silently showing local-only history as complete |
+| `claims` | The worktree's **resource-obligation ledger** (accountability for what it allocated; effort `resource-obligation-settlement`). `claims [id]` shows the ledger; `claims owner <kind> <ref> [--json] [--all-states]` searches every registered project on this machine for the worktree(s) holding that outbound claim (held claims only by default); `claims add <kind> <ref> [--owner-ref <m/p/w>]` journals an outbound claim; `claims annotate <ref> --note <text>` attaches/updates a note on an already-existing claim (e.g. one an underlying tool auto-created) without release + re-add; `claims settle <ref> [--released]` marks it at-rest/released; `claims release <ref> [--remove]` retires one; `claims handoff offer ...` offers exact held claims to another worktree, and `claims handoff accept <bundle-id>` atomically transfers them -- same-machine in-process, cross-machine by SSHing to the source machine's own project binstub for the source-side settle while the accepting machine commits the consumer-side ledger locally, fenced by the shared claim-handoff lease; `claims sweep [--apply]` runs the never-wedge reclaim (flip a provably-gone+safe `active` claim → `abandoned`; dry-run default); `claims reconcile-at-rest [<worktree-id> ...] [--apply]` is the dedicated legacy/GC close-out reconciliation command (`worktree-finality-and-obligations` design.md): releases lingering **at-rest-only** claims on existing records that predate/bypassed finalize's own automatic release-under-freeze, never an `active` one; no selector means every tracked record; dry-run by default; `claims orphans` lists the durable orphanage (obligations re-homed by a `finalize --abandon`); `claims cleanup [<ref-or-source-worktree> ...] [--apply]` is the acting consumer that reclaims matching orphaned resources (delete the CodeSpace, finalize the cross-repo worktree, release a PR only when its reference matches the configured provider and authority and the live provider confirms it merged) and drops settled entries. No selector means the entire orphanage. Same-machine, best-effort, dry-run by default; `claims transitive [worktree_id]` lists every unsettled obligation anywhere in a worktree's whole subtree (itself + every worktree it created, transitively) -- a diagnostic convenience, never a substitute for the per-hop finalize gate; `claims history <ref>` prints the durable, ordered claim/release/settle/reassigned event history recorded for a claimed resource -- **today `pr`-kind only**, fed from the explicit claim-lifecycle write paths, `worktree run`'s own PR-claim persistence (both its live pending-ref settle site and its tested helper), an explicit claim-handoff bundle accept's transfer, plus a context-handoff cutover's implicit agent-bridge-style session reassignment (not yet an agent-dispatch task redrive -- an empty result is NOT proof nothing happened), locally plus, with `--remote`, merged with any mirrored remote events (`refs/agent-worktrees/claim-history/v1`, same shared store as the lease refs) -- an unreadable remote store warns on stderr rather than silently showing local-only history as complete |
 | `follow-ups` | The worktree's **itemized follow-up ledger** (worktree-finality-and-obligations effort; replaces the boolean-only `follow_up` flag). `follow-ups [id]` lists items + the effective open count; `follow-ups add <summary> [--ref <kind>:<value>]...` journals a new open item (`--ref` is repeatable; kinds: `resource-claim`\|`dispatch-task`\|`issue`\|`pull-request`\|`file`\|`effort`\|`other`) and reopens a `finalized` owner; `follow-ups resolve <id> [--result-ref <ref>]` marks one done; `follow-ups dismiss <id> --reason <text>` marks one explicitly not requiring action. An open (or `pending-transfer`) item counts as an open obligation the same way `status --follow-up` did, and blocks `cleanup`/`gc` the same way a held claim does. Transfer (`offer`/`accept`/`decline`) is not yet implemented |
 | `cleanup` | List and remove orphaned or finalized worktrees. Open/unconfirmed PRs and held outbound obligations block removal and archival, including `--force` and missing checkouts; see [cleanup safety details](../skills/worktree/references/cleanup-details.md). |
 | `gc` | Garbage-collect this project's worktrees on this machine: **claim-history mirror sync** (opt-in, `--mirror-claim-history` -- pushes not-yet-mirrored `claim_history` events to the shared store; runs FIRST, before any step below can delete the tracking records a legacy event's eligibility depends on) + tracked reap (cleanup verdict) + **managed system/bridge leak sweep** (`--no-managed` to skip) + orphan-directory sweep + **orphaned launcher-shell reap** (`--no-reap-shells` to skip) + `git worktree prune` + optional **lease-ref squash** (`--lease-gc`). `--dry-run` lists without removing; `--json` reports the managed + orphan + shell + lease + claim-history-mirror sweeps. Also runs automatically on the no-daemon cadence (picker launch + session end) |
@@ -1001,7 +922,7 @@ Repos without `pr.roles` and non-GitHub providers keep their prior behavior.
 | `pr bar` | Check a PR against its merge bar, clause by clause, on one head: `ci_green`, `review_on_head` (the reviewer's latest review is on the head; `--reviewer`, default Copilot's), `review_findings_zero` (that review reports no open or previously missed findings, and agrees with the threads), `threads_unresolved_zero` (outdated threads are closed), `human_reviews_answered` (people only; an app reviewer is not one), `mergeable`, `merge_policy` (the repo's own policy through the shared classifier: no hold label, not a draft or WIP title, no outstanding change request (any reviewer's latest verdict, an app's too, or the provider's own review decision; a provider-required review is pending unless the provider affirms this actor may bypass it), and an approval on the head where the policy requires one -- resolved for the acting identity's role; an actor demoted by live authority needs a person's approval on the head). Every list is read to its last page; an unreadable page or an empty check list is `unknown`, never met, and a head that moves mid-read makes every clause `unknown` (mergeability the provider is still computing is not a change: the latest answer stands). The read is the repo provider's `PRProvider.get_bar_snapshot` (GitHub reads it today; a provider without one reads every clause `unknown`). `pr bar [<owner/name> <n> \| <n> \| <worktree-id>] [--reviewer <login>] [--json]`; exit 0 met (or merged), 10 pending, 11 failed, 12 unknown |
 | `pr rounds` | Is a PR's review/fix loop converging? One round per head the reviewer reviewed (its latest review in effect there), measured by the open plus previously missed findings it reported; a review stating no count is unmeasured, never zero. `done` when the latest round measured zero on the current head (a clean review of an older head is `continue`); `plateau` when none of the last `--plateau-passes` rounds (default 3) improved on the best before them; `round_cap` after `--max-rounds` (default 6); else `continue` ("round N of M"). Reads through the same `PRProvider.get_bar_snapshot` as `pr bar`, and fails closed the same way: no head, a head that moves or a PR that changes mid-read is `unknown`, never a stop or a go. `pr rounds [<owner/name> <n> \| <n> \| <worktree-id>] [--reviewer <login>] [--max-rounds N] [--plateau-passes N] [--json]`; exit 0 continue or done, 20 plateau, 21 round cap, 12 unknown |
 | `pr-watch` | `snapshot/status <repo> <pr> --json` reads configured native gate evidence once; `threads` reads discussion bodies and reply fingerprints on demand. `wait <repo> <pr> [--until …]` blocks for transitions with an opaque cursor; `cursor <repo> <pr>` captures the baseline. `subscribe/stop/ownerstatus` use the existing shared subscription owner. See [repository-configured observation](pr-observation.md) for native requirements and ownership. |
-| `pr-watch checks` | Built-in `lenses`, `record-self-review`, `verify-self-review` and `scope-report` for an explicit repository/workspace. `export-config` writes read/check policy; optional `--include-author` also preserves author policy without self-merge/bypass grants. Workers use the delivered file through `--config`. Configured checks also gate publication mandatorily. See [publication checks](pr-publication-checks.md). |
+| `pr-watch checks` | Built-in `lenses`, `record-self-review`, `verify-self-review` and `scope-report` for an explicit repository/workspace. `export-config` writes the resolved read/check policy for a worker; worker checks use the delivered file through `--config`. Configured checks also gate publication mandatorily. See [publication checks](pr-publication-checks.md). |
 | `pr-watch reply/requeue` | Explicit, bounded ADO discussion replies or recovery of an existing build-policy evaluation; no new pipeline, approval or attestation. See [remediation](pr-remediation.md) for freshness, evidence, deduplication and reconciliation requirements. |
 | `pr-merge` | Signal **merge consent** on an approved PR (applies the bound `automerge_label`); the review gate merges when satisfied. `--all` / `--loop` for sweeps |
 | `pr-complete` | Reconcile the worktree after its PR merged — fast-forward past the squash-merge (or rebase), dropping the local commits the squash already absorbed |
@@ -1009,7 +930,7 @@ Repos without `pr.roles` and non-GitHub providers keep their prior behavior.
 | `pr-comment` | Post a general (non-verdict) comment on the active tracked PR: `pr-comment <body>` |
 | `pr-review` | Publish a review verdict on the active tracked PR: `--approve` / `--request-changes` / `--comment`, with an optional `--body` |
 | `attribution-audit` | Config-only check: flags this repo's `pr.head_pattern` for the branch-name leak class (embeds `{machine}` while `pr.source_attribution` isn't `true`; `{worktree_id}` is never flagged -- it isn't part of `pr_head_name`'s rendering contract, so it can't actually leak). Plain mode prints findings and exits 1 if any are found (0 if none); `--json` exits 0 whenever it can report findings (empty or not). A configuration-load failure exits 1 in both modes |
-| `attribution-prepare` | Emit a source marker, or prepare a UTF-8 `--body-file`, for an external PR tool without provider access. Optional `--tag` supplies an adopter-owned label; `--omit-source` honors anonymous publication. Ordinary `--json` retains `version`, `marker`, `body`, `attributed`. The separate `--comment-origin` mode emits compact `agent-worktrees.comment-origin/v1` data, with `--visibility public` (default) or `internal`; it does not compose or publish a comment. Runs from a managed source worktree; leaves files and remote objects unchanged. See the worktree skill's `pr-attribution.md` reference. |
+| `attribution-prepare` | Emit a source marker, or prepare a UTF-8 `--body-file`, for an external GitHub/Azure DevOps PR tool without provider access. Optional `--tag` supplies an adopter-owned public label; `--omit-source` honors anonymous publication. `--json` returns `version`, `marker`, `body`, `attributed`. Runs from a managed source worktree; leaves files and remote PRs unchanged. See the worktree skill's `pr-attribution.md` reference. |
 | `identity-vault status/setup/verify` | Local optional shared-key setup for an already configured agent-vault database and independently running service; no project is required. `--vault-argv` supplies exact vault catalog argv as JSON; optional `--vault-context` supplies its owning validated receipt, not worktrees' context. Setup requires a running service and persists non-secret installation-scoped source selection after population and a fresh cache-loader/encryption probe. Status is read-only; verify exercises the persisted normal reader. `--prompt` is explicit; first-owner creation requires both `--initialize-owner --confirm-first-owner`. See [identity-vault](identity-vault.md). |
 | `pr` | Namespace grouping the `pr-*` verbs |
 
@@ -1459,7 +1380,7 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
 | `unregister` | Deregister project adoption and retire project-owned tool plugin overlay values in its verified checkout family -- never the shared runtime or another project; see below |
 | `uninstall` | Remove worktree manager (`--remove-config` ALSO deletes the SHARED `~/.agent-worktrees` registry root -- shared by every adopted project, not just `--project`'s; requires `--yes`) |
 | `update` | Re-deploy runtime from repo source + refresh every active registered plugin payload/runtime, purge inactive installed identities absent from an authoritatively refreshed marketplace catalog, and opportunistically refresh the remaining installed-but-inactive payload inventory; then update sibling modules, fast-forward the managed repo anchor(s), and auto-prune legitimately stale Picker pivot manifests. Active or activation-unknown identities are never purged. An inactive inventory refresh/uninstall failure is advisory; an active plugin refresh failure fails the update. Version-gated: skips a runtime whose deployed version already matches its payload (`--force` re-deploys all active runtimes; `--force-runtime NAME`, repeatable, re-deploys only the named runtime(s); `--no-anchor-sync` skips the anchor sync; `--no-prune-pivots` skips the pivot prune -- see `doctor`'s `--prune-pivots` for the same safe subset run on demand). Exit codes and the run's status file: see below |
-| `install-status` | Show installation and deployment status; Windows reports the registered session-launch control-plane provider (registration only, not runtime health), not the retired `launch-session.cmd` wrapper |
+| `install-status` | Show installation and deployment status |
 | `deploy-instructions` | Retire migrated managed instruction files (machine identity now via the `session-machine` sessionStart hook) |
 | `machine-context` | sessionStart producer for the exact-session guidance writer (cwd-gated) |
 | `get` | Query config values (e.g., `agent-worktrees get repo-dir`) |
@@ -1698,86 +1619,6 @@ The default `repos list` remains the tolerant interactive listing. Its legacy
 JSON has no authority marker and must not be interpreted as a completeness
 attestation. An older runtime that does not return the strict marker cannot
 establish inventory completeness even if it accepts or ignores the new flag.
-
-### Read-only project registration inspection (`repos registration inspect`)
-
-Setup callers can inspect an explicit absolute anchor and proposed fresh
-default without selecting or changing a project:
-
-```text
-agent-worktrees repos registration inspect --anchor "<absolute-anchor>" --default-name "<default-project>" --contract-version 1
-```
-
-The command always returns JSON. The selected executing runtime declares
-`contract: "copilot-extensions.project-registration-inspection"`,
-`contract_version: 1` and `supported_contract_versions: [1]` in both successful
-and failed replies. Success has exit 0 and `status: "ready"` with `project`,
-canonical native `anchor`, `registered`, `agent`, `exposure_source` and
-`repository_class`. A registered alias wins over the proposed default even
-when another checkout legitimately owns that default name. A genuinely
-unregistered anchor receives the default only when that command name is
-unclaimed.
-
-The existing strict repository reader owns canonical location/class/exposure;
-the existing strict project parser supplies unmigrated legacy adoption facts.
-Canonical `agent` takes precedence over a stale adoption mirror. Supported
-documents are repository schema 1 (including its unversioned legacy form) and
-project schemas 1/2; native home/path expansion and validated installation-cell
-selection remain with their current owners. Inspection neither migrates these
-documents nor infers permission from an exposed agent or editing class.
-Existing directory aliases compare by native file identity, including Windows
-extended-path spellings; a second name for the same anchor remains ambiguous.
-The project owner's known empty-document/null-project defaults stay empty;
-invalid scalar/list documents do not become absence. Legacy base-repository
-mode remains singleton rather than being promoted to worktree editing.
-
-Failures have exit 2, `status: "failed"`, `code` and `message`. Ambiguous aliases,
-inconsistent roots, occupied defaults, unknown adopted roots, command-name
-collisions, malformed/unreadable/unsupported documents and invalid paths or
-policies are not fresh absence. Unknown arguments and unsupported requested
-contract versions fail before registry acquisition. No registry, binding,
-launcher, service, worktree or command is created, changed or reserved.
-The result is a point-in-time read, not a write permit or transaction token;
-the actual writer still owns its mutation-time checks.
-
-This is provider-first expansion only. Existing commands/routing retain their
-syntax and behavior. Callers must establish support from this exact executing
-runtime's versioned response, not a package version or newer payload. A legacy
-runtime may reject the new read-only request; do not strip required semantics
-and retry a registration writer. Later latest-flow adoption must use an
-independently runnable incoming reader through the existing construction owner
-when the installed provider cannot answer, rather than make old capability
-support a replacement veto. No caller migration or installed recovery is
-implied by publication of this read contract.
-
-#### Incoming source inspection before installation
-
-The source-owned `scripts/inspect_registration.py` entry runs the same version-1
-reader without using the selected runtime:
-
-```text
-<base-python> -I -B <incoming-payload>/scripts/inspect_registration.py --anchor "<absolute-anchor>" --default-name "<default-project>" --contract-version 1 --uv "<absolute-uv>"
-```
-
-It composes the existing frozen-input constructor in a private temporary control
-environment and retains the reader child until it exits. This is preparation,
-not installation: no globals, selectors, registrations, bindings or services
-are published, and the temporary environment is removed before returning.
-The existing dependency/feed, source health, process and cleanup owners remain
-in force. The entry requires an existing base Python and selected UV executable;
-it does not repair prerequisites or a selected historical runtime.
-
-An optional absolute `--install-source` consumes the matching complete prepared
-Source/profile through `install_source.project_inputs` and the same numbered
-constructor, including its generated application when present. Without it,
-the existing ordinary source-construction path owns dependency acquisition and
-builds. Neither form is an alternative registry parser or installation owner.
-
-Only the existing reader's JSON is written to stdout. Reader success and refusal
-retain exit 0/2 and their original response. Failed preparation has exit 1 and
-an explicit stderr diagnostic; it must not be interpreted as an absent project
-or retried as an effectful registration. This entry supplies incoming inspection,
-not completed caller adoption, installed readiness or whole-flow recovery.
 
 ### Bare-anchor sync (`repos sync`)
 

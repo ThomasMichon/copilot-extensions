@@ -30,28 +30,6 @@ class WorktreeRelationshipWriter:
     its callback cannot be bypassed through the legacy unbound call.
     """
 
-    @classmethod
-    def selected(
-        cls,
-        *,
-        admit_workspace: Callable[[AssignmentWorkspace, dict], None],
-        admit_request: Callable[[AssignmentWorkspace, dict, dict], None],
-        timeout: float = 30,
-    ) -> WorktreeRelationshipWriter:
-        """Observe actual CLI/resident participants, not the remaining cohort."""
-        from .worktree_owner_launch import retained_selection
-
-        try:
-            prefix = retained_selection()
-        except (OSError, ValueError, ImportError) as exc:
-            raise TaskError("selected Worktrees build cannot be retained") from exc
-        if not callable(admit_request):
-            raise ValueError("selected relationship writer requires original request admission")
-        return cls(
-            prefix, admit_workspace=admit_workspace, admit_request=admit_request,
-            timeout=timeout, require_resident=True,
-        )
-
     def __init__(
         self,
         prefix: Sequence[str],
@@ -59,7 +37,6 @@ class WorktreeRelationshipWriter:
         admit_workspace: Callable[[AssignmentWorkspace, dict], None],
         admit_request: Callable[[AssignmentWorkspace, dict, dict], None] | None = None,
         timeout: float = 30,
-        require_resident: bool = False,
     ) -> None:
         if not prefix or not callable(admit_workspace):
             raise ValueError(
@@ -71,7 +48,6 @@ class WorktreeRelationshipWriter:
             raise ValueError("relationship request admission must be callable")
         self._admit_request = admit_request
         self.timeout = timeout
-        self._require_resident = require_resident
         support = self._run(["resource-relationship", "capabilities", "--json"])
         identity = support.get("writer_identity")
         if not (
@@ -91,42 +67,11 @@ class WorktreeRelationshipWriter:
             and bool(identity["installation_root"].strip())
             and isinstance(identity["runtime_generation"], str)
             and re.fullmatch(r"[0-9a-f]{32}", identity["runtime_generation"]) is not None
-            and (not require_resident or (
-                type(support.get("resident_inspect")) is int and support["resident_inspect"] == 1
-            ))
         ):
             raise TaskError(
                 "selected Worktrees writer cannot protect incarnation-bound task relationships"
             )
         self._writer_identity = dict(identity)
-
-    def _inspect_resident(self, workspace: AssignmentWorkspace, request_id: str) -> None:
-        result = self._run(
-            ["--project", workspace.project, "resource-relationship", "inspect",
-             "--resident-only", "--owner-ref", workspace.owner_ref, "--json"],
-            {"request_id": request_id, "allow_missing": True,
-             "expected_creation_nonce": workspace.creation_nonce},
-        )
-        identity = result.get("writer_identity")
-        resident = result.get("resident")
-        if not (
-            result.get("schema") == "copilot-extensions.resource-relationship"
-            and type(result.get("version")) is int and result["version"] == 1
-            and result.get("ok") is True
-            and result.get("owner") == workspace.owner_ref
-            and result.get("request_id") == request_id
-            and result.get("creation_nonce") == workspace.creation_nonce
-            and valid_record_writer(result.get("writer_contract"))
-            and isinstance(identity, dict)
-            and set(identity) == {"installation_root", "runtime_generation"}
-            and identity["installation_root"] == self._writer_identity["installation_root"]
-            and isinstance(identity["runtime_generation"], str)
-            and re.fullmatch(r"[0-9a-f]{32}", identity["runtime_generation"]) is not None
-            and isinstance(resident, dict)
-            and set(resident) == {"generation", "runtime_generation"}
-            and all(isinstance(value, str) and value.strip() for value in resident.values())
-        ):
-            raise TaskError("actual Worktrees resident is unconfirmed; original assignment retained")
 
     def bind_request(self, request: dict) -> RelationshipWriter:
         """Bind one audited request without sharing mutable callback state."""
@@ -278,8 +223,6 @@ class WorktreeRelationshipWriter:
             key in payload and payload[key] != value for key, value in expected.items()
         ):
             raise TaskError("task relationship input conflicts with its admitted writer or workspace")
-        if self._require_resident:
-            self._inspect_resident(workspace, payload.get("request_id", "dispatch-writer-inspection"))
         # Exact identity was captured by the assigning owner. This read only
         # checks it; it cannot adopt a path or reconstruct a missing nonce.
         record = self._run(

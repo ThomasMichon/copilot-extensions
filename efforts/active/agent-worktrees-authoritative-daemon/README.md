@@ -1002,10 +1002,6 @@ within the already-requested Phase 6d.3 real-consumer acceptance.
       before replacement implementation; preserve all incumbent phases/scopes.
 - [ ] Implement and qualify original-owner fact publications and actual eligible
       shell consumers, without blocking Python, current-packet replay or a new daemon.
-- [ ] Deliver the [prepared Windows cell-membership prerequisite](ordinary-hook-endpoint-recovery.md#prepared-windows-installation-cell-prerequisite)
-      through the original validated producer and bounded reader; preserve
-      complete receipt/content witnesses, old-reader/producer/SDK fallback and
-      unchanged legacy admission. This does not close full cell-hook or cold recovery.
 - [ ] Record exact source/release evidence separately from installed, live
       ordinary-session/model/ACP and composed-throughput acceptance.
 
@@ -1378,10 +1374,6 @@ _(Agent-recommended direct selection/list case; all rows unchecked.)_
 
 ### Proposed ordinary-hook recovery source slice
 
-- [ ] Qualify native selected-cell membership with original stamped linked
-      worktrees, interpreter traps, receipt/manifest ABA, missing input/content
-      witnesses, wrong scope/payload and legacy compatibility; retain source
-      unit, native consumer, installed and full-throughput evidence separately.
 - [ ] Complete the [paired shell/file consumer, compatibility, identity, deadline,
       concurrency and cleanup checks](ordinary-hook-endpoint-recovery.md#paired-validation)
       through the real isolated consumer path, not helper counts alone.
@@ -1487,62 +1479,6 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
-
-### 2026-11-06 - Prepared native cell-membership source qualification
-
-Receipt-only payload-alias retarget first reproduces two native prepared
-false positives while original admission rejects it. The correction captures
-all three original SDK receipt path reads (`payload.root`, `pluginRoot` and
-`namespaceReceipt`) during one resolution, restores the getter in `finally`,
-and requires singleton directly canonical values. The ten-field native view
-requires all three declarations; missing/aliased capture retains original
-admission. Both shells pass each receipt-alias refusal and missing-declaration
-control, and final uninstrumented canonical reuse passes both shells in
-17.98seconds,210.34seconds including preparation/cleanup. Local positive
-original fallback intermittently exceeds its unchanged two-second child wait:
-temporary diagnostics show the child still running with neither stream complete,
-not an SDK admission rejection. Temporary diagnostics are removed; the local
-full packet is not accepted. Complete hosted native/fallback, actual exact-head
-unit/coverage and fresh review remain required before source completion.
-
-Review corrections additionally require all seven receipt-declared
-lexical/resolved root pairs and explicit original validated source-kind
-eligibility. Each declared-root junction and lexical alias has native coverage.
-Directory-source and ancestor-retarget regressions first reproduce four native
-false positives, then pass after retaining original admission for directory
-and unknown namespace kinds. The affected current-source packet passes11
-native/producer controls with UTF-8 mode disabled in74.79seconds,
-197.38seconds including preparation/cleanup; ten portable controls pass.
-Two separate valid-directory cases pass through the actual original native
-fallback in15.32seconds,135.31seconds including preparation/cleanup.
-The complete hosted cell matrix and required exact-head CI/review remain
-publication gates. Earlier packet counts below are historical, overlapping
-evidence, not a sum or current full-transition acceptance.
-
-The existing admission producer adds only the minimum selected-cell path and
-validated-content observation to its existing association. The registry adapter
-borrows the original SDK's validated receipt bytes and the original manifest
-read; no second resolution, registry traversal or new authority is introduced.
-The native reader requires complete current context, source/layout/input and
-bounded content checks. Timestamp restoration cannot conceal changed receipt
-or manifest bytes. Missing/opaque SDK observations keep the original admission.
-
-The initial two native current-cell controls failed with interpreter lookup
-trapped. Corrected source passes the complete 52-control prepared native packet
-in111.97seconds,200.27seconds including preparation/cleanup. The separate real
-producer-isolation control passes. The additional two original-fallback
-controls initially failed because the disposable fixture omitted the actual
-CLI's caller-watch helper; after closing that fixture dependency they pass
-in11.20seconds. These packets overlap and are not summed into a fictional run.
-The 30-second item/10-second child/300-second prepared-group bounds are unchanged.
-
-Seven actor-free producer/adapter controls cover fresh publication, one-time
-upgrade, unchanged-view no-op, one original resolution and unsupported capture.
-Required CI and current-head review/source merge still gate delivery. The
-selected hosted native lane verifies Windows consumers and Linux producer
-isolation separately. This is only prepared membership, not complete cell
-post-tool dispatch, shell-only cold recovery, POSIX hooks, installed selection
-or actual throughput. The full parent and all other source/lifecycle owners remain.
 
 ### 2026-11-05 - Shell-facts and asynchronous ordinary-hook amendment
 

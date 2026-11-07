@@ -577,27 +577,48 @@ def test_posix_bash_env_selection_uses_the_effective_launch_environment(
         assert launch_seed_exec.native_setup_index(prepared) == 3
 
 
-@pytest.mark.skipif(os.name != "posix", reason="Native POSIX setup plan")
 @pytest.mark.parametrize("native_resume", [None, "native-original"])
-def test_posix_admission_retains_the_existing_owner_fence(launch, monkeypatch, native_resume):
+@pytest.mark.parametrize("supported", [False, True])
+def test_posix_admission_requires_negotiated_live_owner_before_copying(
+    launch, monkeypatch, native_resume, supported,
+):
+    from types import SimpleNamespace
     from agent_worktrees import launch_seed_contract
 
     record, runtime, _assets = launch
     scripts = runtime / "scripts"
     shutil.copytree(Path(__file__).resolve().parents[1] / "scripts", scripts)
     monkeypatch.setattr(launch_seed_exec.installer, "install_dir", lambda: runtime)
-    monkeypatch.setattr(
-        launch_seed_contract, "supports_posix_setup",
-        lambda *_: pytest.fail("Admission-only must retain the existing owner"),
-    )
+    monkeypatch.setattr(manager_launch_cli, "_worktree_manager_root", lambda: runtime.with_name("manager"))
+    monkeypatch.setattr(launch_seed_exec, "os", SimpleNamespace(**{**vars(os), "name": "posix"}))
+    monkeypatch.delenv("BASH_ENV", raising=False)
+    queries = []
+
+    def support(root, *, admission_only):
+        assert admission_only is True
+        assert not (record.parent / "launch-attempts").exists()
+        queries.append(root)
+        return supported
+
+    monkeypatch.setattr(launch_seed_contract, "supports_posix_setup", support)
     command = ["/bin/bash", str(scripts / "default-setup.sh"), "--stdio"]
     prepared = launch_seed_exec.deferred_command(
         command, record, admission_only=True, native_resume_session=native_resume,
     )
-    assert prepared[1:3] == ["-m", "agent_worktrees.launch_seed_exec"]
-    assert "--admission-only" in prepared
-    assert prepared[-len(command):] == command
-    assert not (record.parent / "launch-attempts").exists()
+    assert queries == [runtime]
+    if not supported:
+        assert prepared[1:3] == ["-m", "agent_worktrees.launch_seed_exec"]
+        assert "--admission-only" in prepared
+        assert prepared[-len(command):] == command
+        assert not (record.parent / "launch-attempts").exists()
+    else:
+        index = launch_seed_exec.native_setup_index(prepared)
+        assert index == 1
+        assert prepared[index + 1:index + 3] == ["--launch-seed-preparation", "admission"]
+        assert "--launch-seed-id" not in prepared
+        assert prepared[-1] == "--stdio"
+        if native_resume:
+            assert prepared[prepared.index("--launch-native-resume-session") + 1] == native_resume
 
 
 @pytest.mark.skipif(os.name != "posix", reason="Native POSIX setup plan")

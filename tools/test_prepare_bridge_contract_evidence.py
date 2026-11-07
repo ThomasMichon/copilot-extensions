@@ -67,7 +67,6 @@ def test_retained_merkle_metadata_needs_no_remote_checkpoint(tmp_path, monkeypat
     import bridge_capture_metadata as retained
     from test_bridge_capture_metadata import _capture
 
-    monkeypatch.setattr(preparation, "PACKETS", preparation.PACKETS[:-1])
     source = tmp_path / "source"
     commit, _ = _capture(source, 2)
     canonical = tmp_path / "canonical"
@@ -91,24 +90,6 @@ def test_retained_merkle_metadata_needs_no_remote_checkpoint(tmp_path, monkeypat
 
     assert not (canonical / ".git").exists()
     assert calls == [(("cat-file", "-e", f"{commit}^{{commit}}"), 10)]
-
-
-def test_dynamic_runtime_inventory_retains_tree_despite_available_registry_metadata(
-    tmp_path, monkeypatch,
-):
-    import bridge_capture_metadata as retained
-
-    _packet(tmp_path)
-    monkeypatch.setattr(retained, "load", lambda *_: object())
-    calls = _runner(monkeypatch, iter([1, 0, 0]))
-    assert preparation.prepare(tmp_path, REMOTE) == COMMIT
-    assert calls == [
-        (("cat-file", "-e", f"{COMMIT}^{{commit}}"), 10),
-        (("fetch", "--no-tags", "--depth=1", "--no-recurse-submodules",
-          "--no-auto-maintenance", "--no-write-fetch-head", REMOTE, COMMIT), 60),
-        (("cat-file", "-e", f"{COMMIT}^{{commit}}"), 10),
-        (("cat-file", "blob", f"{COMMIT}:{codec.REGISTRY}"), 10),
-    ]
 
 
 def test_missing_capture_fetches_only_exact_object_from_selected_remote(tmp_path, monkeypatch):

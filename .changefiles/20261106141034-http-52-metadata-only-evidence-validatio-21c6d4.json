@@ -1,9 +1,0 @@
-{
-  "comment": "HTTP-52 metadata-only evidence validation no longer requires owner proofs for agent-worktrees/agent-codespaces modules added after capture.",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

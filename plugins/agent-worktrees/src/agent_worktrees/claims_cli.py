@@ -15,7 +15,6 @@ from . import (
     claims_history_cli,
     claims_owner,
     claims_transitive_cli,
-    derived_claims_cli,
     obligations,
     output,
     producer_views_cli,
@@ -157,7 +156,7 @@ def add_parsers(sub) -> None:
         help="with history: also merge mirrored remote claim-history events (network)",
     )
     p.add_argument("--sweep-observation", action="store_true", help=argparse.SUPPRESS)
-    producer_views_cli.add_arguments(p); derived_claims_cli.add_arguments(p)
+    producer_views_cli.add_arguments(p)
     p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
 
 
@@ -231,7 +230,7 @@ def cmd_claims(args: argparse.Namespace) -> int:
                 return output._json_error("claims add: usage 'add <kind> <ref>'", 2)
             output.err(
                 "claims add: usage 'add <kind> <ref>' "
-                "(kind: worktree|codespace|container|ssh|workdir|pr|derived)"
+                "(kind: worktree|codespace|container|ssh|workdir|pr)"
             )
             return 2
         return _claims_add(args, target[1], target[2])
@@ -241,7 +240,7 @@ def cmd_claims(args: argparse.Namespace) -> int:
                 return output._json_error("claims release: missing <ref>", 2)
             output.err("claims release: missing <ref>. Usage: claims release <ref> [--remove]")
             return 2
-        return _claims_release(args, derived_claims_cli.stored_ref(args, target[1]))
+        return _claims_release(args, target[1])
     if target and target[0] == "annotate":
         if len(target) < 2:
             if args.json:
@@ -257,8 +256,7 @@ def cmd_claims(args: argparse.Namespace) -> int:
                 return output._json_error("claims settle: missing <ref>", 2)
             output.err("claims settle: missing <ref>. Usage: claims settle <ref> [--released]")
             return 2
-        if getattr(args, "reclaim", False): return derived_claims_cli.claims_settle_reclaim(args, target[1])
-        return _claims_settle(args, derived_claims_cli.stored_ref(args, target[1]))
+        return _claims_settle(args, target[1])
     if target and target[0] == "sweep":
         return _claims_sweep(args)
     if target and target[0] == "reconcile-at-rest":
@@ -397,7 +395,7 @@ def _resolve_owner_ref_record_path(
 
 def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
     """Journal a new outbound resource claim on a worktree."""
-    valid_kinds = {"worktree", "codespace", "container", "ssh", "workdir", "pr", "task", "derived"}
+    valid_kinds = {"worktree", "codespace", "container", "ssh", "workdir", "pr", "task"}
     if kind not in valid_kinds:
         msg = (
             f"claims add: unknown kind {kind!r} (expected one of {', '.join(sorted(valid_kinds))})"
@@ -406,7 +404,6 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
             return output._json_error(msg, 2)
         output.err(msg)
         return 2
-    if kind == "derived": return derived_claims_cli.claims_add_derived(args, ref)
     config = cfg.load_config()
     owner_ref = getattr(args, "claim_owner_ref", None)
     if owner_ref:

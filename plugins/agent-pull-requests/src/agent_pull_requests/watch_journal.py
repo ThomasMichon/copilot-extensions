@@ -22,7 +22,7 @@ from .watch_installation import PLUGIN_ID, WatchInstallation
 from .watch_custody import endpoint_tuple, endpoint_value, read_launch, require_absent
 from .watch_exit import observe_cleanup_exit, observe_exit, record_exit
 from .watch_private import confirm_private, require_private, write_private
-from .watch_runtime import WatchInstance, WatchRuntime, native_start_time
+from .watch_runtime import WatchInstance, WatchRuntime
 from .watch_rollback import require_rollback_selection, restore_route, validate_restoration
 
 _FILE = "watch-owner-transaction.json"
@@ -178,7 +178,7 @@ def _target_selection(installation: WatchInstallation, document: dict) -> None:
 
 def _controller() -> dict[str, object]:
     pid = os.getpid()
-    token = native_start_time(pid)
+    token = diagnostics.process_start_time(pid)
     if token is None:
         raise NotImplementedError("watch controller requires native process birth evidence")
     return {"pid": pid, "startTime": token}

@@ -1,7 +1,5 @@
 """Ownership admission precedes native runtime writes and activation."""
 from __future__ import annotations
-from types import ModuleType
-from typing import Any, NoReturn, cast
 
 import importlib
 import json
@@ -16,19 +14,16 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from test_command_binding import PowerShellFactory
 
 from test_command_binding import (
     PLUGIN_ID, POWERSHELL, ROOT, _catalog_environment, _load, _prepare_catalog,
-    _resolve, _snapshot, _write, binding_fixture as _binding_fixture,
+    _resolve, _snapshot, _write, binding_fixture as binding_fixture,
     _publish, _lifecycle_lock_path,
-    powershell_host as _powershell_host,
+    powershell_host as powershell_host,
 )
-binding_fixture = _binding_fixture
-powershell_host = _powershell_host
 
 
-def _lifecycle(fixture: dict[str, Any]) -> ModuleType:
+def _lifecycle(fixture: dict):
     return _load(ROOT / "libs/payload-invocation/command_lifecycle.py", "lifecycle_reference")
 
 
@@ -38,7 +33,7 @@ def test_lifecycle_loads_retained_procutil_package(tmp_path: Path) -> None:
     lifecycle = _load(ROOT / "libs/payload-invocation/command_lifecycle.py", "lifecycle_reference")
     procutil = lifecycle._procutil(tmp_path)
     accounting = importlib.import_module(f"{procutil.__name__}._windows_job_types")
-    assert Path(cast(str, accounting.__file__)).parent == helper
+    assert Path(accounting.__file__).parent == helper
     with pytest.raises(procutil.SyncProcessLaunchError) as raised:
         procutil.spawn_sync_in_kill_on_close_job([str(tmp_path / "missing-executable")])
     assert isinstance(raised.value, FileNotFoundError)
@@ -46,16 +41,16 @@ def test_lifecycle_loads_retained_procutil_package(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("budget", [None, 10])
 def test_legacy_lifecycle_forwards_remaining_lock_budget(
-    binding_fixture: dict[str, Any], monkeypatch: pytest.MonkeyPatch, budget: float | None,
+    binding_fixture: dict, monkeypatch: pytest.MonkeyPatch, budget: float | None,
 ) -> None:
     binding, primitive = binding_fixture["binding"], binding_fixture["primitive"]
     lifecycle = binding._load_lifecycle()
     moments = iter((100, 102))
     monkeypatch.setattr(lifecycle, "time", SimpleNamespace(monotonic=lambda: next(moments)))
     original = primitive._DirectoryLock
-    observed: list[float | None] = []
+    observed = []
 
-    def lock(path: Path, **arguments: Any) -> Any:
+    def lock(path, **arguments):
         observed.append(arguments.get("timeout_seconds"))
         return original(path, **arguments)
 
@@ -65,12 +60,12 @@ def test_legacy_lifecycle_forwards_remaining_lock_budget(
         **binding_fixture["arguments"],
     ) as lease:
         lease.assert_owned()
-    assert observed == (cast(list[float | None], [None]) if budget is None else [8])
+    assert observed == ([None] if budget is None else [8])
     assert not _lifecycle_lock_path(binding_fixture["legacy"]).exists()
 
 
 @pytest.mark.parametrize("budget", [-1, float("nan"), float("inf")])
-def test_legacy_lifecycle_refuses_invalid_lock_budget(binding_fixture: dict[str, Any], budget: float) -> None:
+def test_legacy_lifecycle_refuses_invalid_lock_budget(binding_fixture: dict, budget: float) -> None:
     binding = binding_fixture["binding"]
     with pytest.raises(ValueError, match="finite and nonnegative"):
         with binding._load_lifecycle().legacy_lifecycle(
@@ -84,7 +79,7 @@ def test_legacy_lifecycle_refuses_invalid_lock_budget(binding_fixture: dict[str,
 @pytest.mark.skipif(os.name != "nt", reason="Windows strict containment")
 @pytest.mark.parametrize("parent_exits", [False, True])
 def test_command_binding_deadline_stops_tree_before_releasing_admission(
-    binding_fixture: dict[str, Any], parent_exits: bool,
+    binding_fixture: dict, parent_exits: bool,
 ) -> None:
     helper = binding_fixture["payload"] / "libs/agent-procutil/src/agent_procutil"
     shutil.copytree(ROOT / "libs/agent-procutil/src/agent_procutil", helper)
@@ -123,7 +118,7 @@ def test_command_binding_deadline_stops_tree_before_releasing_admission(
 
 @pytest.mark.parametrize("timeout", [0, -1, float("inf"), float("nan")])
 def test_command_binding_invalid_deadline_never_acquires_admission(
-    binding_fixture: dict[str, Any], timeout: float,
+    binding_fixture: dict, timeout: float,
 ) -> None:
     lifecycle = binding_fixture["binding"]._load_lifecycle()
     with pytest.raises(ValueError, match="finite and positive"):
@@ -136,13 +131,13 @@ def test_command_binding_invalid_deadline_never_acquires_admission(
 
 
 def test_command_binding_posix_deadline_refuses_before_admission_or_spawn(
-    binding_fixture: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+    binding_fixture: dict, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     lifecycle = binding_fixture["binding"]._load_lifecycle()
     before = _snapshot(binding_fixture["home"])
     monkeypatch.setattr(lifecycle, "os", SimpleNamespace(name="posix"))
 
-    def not_spawned(*args: object, **kwargs: object) -> NoReturn:
+    def not_spawned(*args, **kwargs):
         pytest.fail("Unsupported bounded lifecycle spawned a child")
 
     monkeypatch.setattr(lifecycle.subprocess, "Popen", not_spawned)
@@ -159,17 +154,17 @@ def test_command_binding_posix_deadline_refuses_before_admission_or_spawn(
 @pytest.mark.skipif(os.name != "nt", reason="Windows strict containment")
 @pytest.mark.parametrize("expired", [False, True])
 def test_command_binding_unverified_job_cleanup_preserves_durable_lock(
-    binding_fixture: dict[str, Any], monkeypatch: pytest.MonkeyPatch, expired: bool,
+    binding_fixture: dict, monkeypatch: pytest.MonkeyPatch, expired: bool,
 ) -> None:
     lifecycle = binding_fixture["binding"]._load_lifecycle()
-    calls: list[tuple[str, float] | tuple[str]] = []
+    calls = []
 
-    def wait(timeout: float | None = None) -> int:
+    def wait(timeout=None):
         if timeout is not None and expired:
             raise subprocess.TimeoutExpired("fixture", timeout)
         return 0
 
-    def terminate(timeout: float) -> NoReturn:
+    def terminate(timeout):
         calls.append(("terminate", timeout))
         raise RuntimeError("Job emptiness could not be verified")
 
@@ -178,7 +173,7 @@ def test_command_binding_unverified_job_cleanup_preserves_durable_lock(
         terminate_and_wait=terminate, close=lambda: calls.append(("close",)),
     )
 
-    def spawn(command: list[str], **kwargs: Any) -> tuple[SimpleNamespace, SimpleNamespace]:
+    def spawn(command, **kwargs):
         assert kwargs["require_job"] is True
         assert kwargs["allow_breakaway"] is False
         return child, job
@@ -197,7 +192,7 @@ def test_command_binding_unverified_job_cleanup_preserves_durable_lock(
     assert calls == [("terminate", 2), ("close",)]
 
 
-def test_command_binding_pending_failure_keeps_owner_and_never_selects(binding_fixture: dict[str, Any]) -> None:
+def test_command_binding_pending_failure_keeps_owner_and_never_selects(binding_fixture: dict) -> None:
     binding = binding_fixture["binding"]
     lifecycle = _lifecycle(binding_fixture)
     with pytest.raises(RuntimeError, match="fixture failure"):
@@ -221,7 +216,7 @@ def test_command_binding_pending_failure_keeps_owner_and_never_selects(binding_f
     assert all(after[path] == value for path, value in before.items() if path != ".")
 
 
-def test_command_binding_same_owner_retries_pending_and_completes(binding_fixture: dict[str, Any]) -> None:
+def test_command_binding_same_owner_retries_pending_and_completes(binding_fixture: dict) -> None:
     binding = binding_fixture["binding"]
     # Use the binding's loader so publication and admission share their context.
     lifecycle = binding._load_lifecycle()
@@ -238,7 +233,7 @@ def test_command_binding_same_owner_retries_pending_and_completes(binding_fixtur
 @pytest.mark.parametrize("old", [None, b"{", b'{"value":"\xff"}', b"[]",
                                b'{"schema_version":99}', b'{"schema_version":3}'])
 def test_unrecognized_manifest_stays_unrecognized_until_publication(
-    binding_fixture: dict[str, Any], old: bytes | None,
+    binding_fixture: dict, old: bytes | None,
 ) -> None:
     fixture = binding_fixture
     binding, primitive = fixture["binding"], fixture["primitive"]
@@ -259,7 +254,7 @@ def test_unrecognized_manifest_stays_unrecognized_until_publication(
     assert json.loads((fixture["legacy"] / "retained-state.json").read_text()) == {"retained": True}
 
 
-def test_recovered_manifest_keeps_foreign_retry_out_after_failure(binding_fixture: dict[str, Any]) -> None:
+def test_recovered_manifest_keeps_foreign_retry_out_after_failure(binding_fixture: dict) -> None:
     fixture = binding_fixture
     binding, primitive = fixture["binding"], fixture["primitive"]
     path = fixture["legacy"] / "deploy-manifest.json"
@@ -282,14 +277,14 @@ def test_recovered_manifest_keeps_foreign_retry_out_after_failure(binding_fixtur
 
 @pytest.mark.parametrize("fault", ["storage", "foreign-service"])
 def test_unrecognized_manifest_does_not_hide_unrecoverable_evidence(
-    binding_fixture: dict[str, Any], monkeypatch: pytest.MonkeyPatch, fault: str,
+    binding_fixture: dict, monkeypatch: pytest.MonkeyPatch, fault: str,
 ) -> None:
     fixture = binding_fixture
     binding, primitive = fixture["binding"], fixture["primitive"]
     path = fixture["legacy"] / "deploy-manifest.json"
     path.write_text('{"service":"another-plugin"}' if fault == "foreign-service" else "{")
     if fault == "storage":
-        def unreadable(*args: object, **kwargs: object) -> NoReturn:
+        def unreadable(*args, **kwargs):
             raise primitive.InstallationContextError("fixture storage failure")
         monkeypatch.setattr(primitive, "read_deployment_manifest", unreadable)
     before = _snapshot(fixture["home"])
@@ -305,7 +300,7 @@ def test_unrecognized_manifest_does_not_hide_unrecoverable_evidence(
 @pytest.mark.parametrize("plugin", ["agent-worktrees", "agent-index"])
 @pytest.mark.parametrize("mutation", ["none", "edited", "foreign-root"])
 def test_manifest_recovery_admits_only_exact_existing_global_commands(
-    binding_fixture: dict[str, Any], old: bytes | None, plugin: str, mutation: str,
+    binding_fixture: dict, old: bytes | None, plugin: str, mutation: str,
 ) -> None:
     fixture = binding_fixture
     binding, primitive = fixture["binding"], fixture["primitive"]
@@ -377,7 +372,7 @@ def test_manifest_recovery_admits_only_exact_existing_global_commands(
 @pytest.mark.parametrize("plugin", ["agent-bridge", "agent-dispatch", "agent-containers"])
 @pytest.mark.parametrize("mutation", ["none", "edited", "foreign-publisher"])
 def test_manifest_recovery_retains_relocated_publisher_as_template_data(
-    binding_fixture: dict[str, Any], plugin: str, mutation: str,
+    binding_fixture: dict, plugin: str, mutation: str,
 ) -> None:
     fixture = binding_fixture
     binding, primitive = fixture["binding"], fixture["primitive"]
@@ -432,7 +427,7 @@ def test_manifest_recovery_retains_relocated_publisher_as_template_data(
     assert not publisher.exists()
 
 
-def test_recovery_inventory_is_not_imported_before_source_admission(binding_fixture: dict[str, Any]) -> None:
+def test_recovery_inventory_is_not_imported_before_source_admission(binding_fixture: dict) -> None:
     fixture = binding_fixture
     binding, primitive = fixture["binding"], fixture["primitive"]
     _write(fixture["home"] / ".copilot/settings.json", {"extraKnownMarketplaces": {}})
@@ -451,7 +446,7 @@ def test_recovery_inventory_is_not_imported_before_source_admission(binding_fixt
     assert _snapshot(fixture["home"]) == before
 
 
-def test_command_binding_teardown_lock_survives_runtime_removal(binding_fixture: dict[str, Any]) -> None:
+def test_command_binding_teardown_lock_survives_runtime_removal(binding_fixture: dict) -> None:
     binding = binding_fixture["binding"]
     primitive = binding_fixture["primitive"]
     lifecycle = binding._load_lifecycle()
@@ -470,7 +465,7 @@ def test_command_binding_teardown_lock_survives_runtime_removal(binding_fixture:
     assert not binding_fixture["legacy"].exists()
 
 
-def test_command_binding_teardown_foreign_owner_refuses_without_writes(binding_fixture: dict[str, Any]) -> None:
+def test_command_binding_teardown_foreign_owner_refuses_without_writes(binding_fixture: dict) -> None:
     _publish(binding_fixture)
     _write(binding_fixture["home"] / ".copilot/settings.json", {
         "extraKnownMarketplaces": {
@@ -488,7 +483,7 @@ def test_command_binding_teardown_foreign_owner_refuses_without_writes(binding_f
     assert _snapshot(binding_fixture["home"]) == before
 
 
-def test_teardown_cannot_retag_manifest_publication(binding_fixture: dict[str, Any]) -> None:
+def test_teardown_cannot_retag_manifest_publication(binding_fixture: dict) -> None:
     fixture = binding_fixture
     binding, primitive = fixture["binding"], fixture["primitive"]
     _publish(fixture)
@@ -506,7 +501,7 @@ def test_teardown_cannot_retag_manifest_publication(binding_fixture: dict[str, A
 
 @pytest.mark.parametrize("attributed", (False, True))
 def test_teardown_preserves_foreign_commands_without_publication(
-    binding_fixture: dict[str, Any], attributed: bool,
+    binding_fixture: dict, attributed: bool,
 ) -> None:
     fixture = binding_fixture
     binding, primitive = fixture["binding"], fixture["primitive"]
@@ -555,7 +550,7 @@ def test_teardown_preserves_foreign_commands_without_publication(
 
 @pytest.mark.parametrize("interpreter", ["parent", "child"])
 def test_command_binding_teardown_refuses_interpreters_in_erased_runtime(
-    binding_fixture: dict[str, Any], monkeypatch: pytest.MonkeyPatch, interpreter: str,
+    binding_fixture: dict, monkeypatch: pytest.MonkeyPatch, interpreter: str,
 ) -> None:
     _publish(binding_fixture)
     binding = binding_fixture["binding"]
@@ -578,7 +573,7 @@ def test_command_binding_teardown_refuses_interpreters_in_erased_runtime(
 @pytest.mark.skipif(POWERSHELL is None, reason="PowerShell unavailable")
 @pytest.mark.parametrize("inside_runtime", [False, True])
 def test_command_binding_teardown_bootstrap_excludes_entire_runtime(
-    binding_fixture: dict[str, Any], inside_runtime: bool,
+    binding_fixture: dict, inside_runtime: bool,
 ) -> None:
     root = binding_fixture["legacy"]
     candidate = root / "active/Scripts/python.exe" if inside_runtime else Path(sys.executable)
@@ -614,21 +609,21 @@ if ($ProbeCount -ne 1) { throw 'Bootstrap launcher was not probed exactly once' 
 if ($selected) { Write-Output $selected }
 """
     completed = subprocess.run(
-        [cast(str, POWERSHELL), "-NoLogo", "-NoProfile", "-Command", program],
+        [POWERSHELL, "-NoLogo", "-NoProfile", "-Command", program],
         env={
             **_catalog_environment(binding_fixture),
             "TEST_INSTALLER": str(ROOT / "plugins/agent-worktrees/scripts/install.ps1"),
             "TEST_RUNTIME": str(root), "TEST_CANDIDATE": str(candidate),
         },
         capture_output=True, text=True, timeout=30,
-        creationflags=cast(Any, subprocess).CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert completed.stdout.strip() == ("" if inside_runtime else str(candidate))
 
 
 def test_command_binding_ticket_presence_is_not_admission(
-    binding_fixture: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+    binding_fixture: dict, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     binding = binding_fixture["binding"]
     monkeypatch.setenv("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", "{}")
@@ -639,7 +634,7 @@ def test_command_binding_ticket_presence_is_not_admission(
 
 
 def test_command_binding_unattributed_default_preserves_legacy_without_selection(
-    binding_fixture: dict[str, Any], capsys: pytest.CaptureFixture[str],
+    binding_fixture: dict, capsys: pytest.CaptureFixture,
 ) -> None:
     binding = binding_fixture["binding"]
     primitive = binding_fixture["primitive"]
@@ -659,7 +654,7 @@ def test_command_binding_unattributed_default_preserves_legacy_without_selection
 
 
 def test_command_binding_completed_unattributed_install_can_be_qualified_by_update(
-    binding_fixture: dict[str, Any],
+    binding_fixture: dict,
 ) -> None:
     binding = binding_fixture["binding"]
     primitive = binding_fixture["primitive"]
@@ -687,7 +682,7 @@ def test_command_binding_completed_unattributed_install_can_be_qualified_by_upda
     assert _resolve(binding_fixture)["status"] == "selected"
 
 
-def test_command_binding_failed_unattributed_install_keeps_its_reservation(binding_fixture: dict[str, Any]) -> None:
+def test_command_binding_failed_unattributed_install_keeps_its_reservation(binding_fixture: dict) -> None:
     binding = binding_fixture["binding"]
     primitive = binding_fixture["primitive"]
     lifecycle = binding._load_lifecycle()
@@ -707,7 +702,7 @@ def test_command_binding_failed_unattributed_install_keeps_its_reservation(bindi
     assert manifest.read_bytes() == before
 
 
-def test_command_binding_unattributed_explicit_policy_never_admits_mutation(binding_fixture: dict[str, Any]) -> None:
+def test_command_binding_unattributed_explicit_policy_never_admits_mutation(binding_fixture: dict) -> None:
     binding = binding_fixture["binding"]
     _write(binding_fixture["home"] / ".copilot/settings.json", {})
     _write(binding_fixture["home"] / ".copilot-extensions/installation-mode.json", {
@@ -727,7 +722,7 @@ def test_command_binding_unattributed_explicit_policy_never_admits_mutation(bind
     ("root", "/another-runtime"), ("owner", {}), ("version", 1),
 ])
 def test_command_binding_inherited_ticket_is_bound_to_its_owner(
-    binding_fixture: dict[str, Any], monkeypatch: pytest.MonkeyPatch, field: str, value: object,
+    binding_fixture: dict, monkeypatch: pytest.MonkeyPatch, field: str, value: object,
 ) -> None:
     binding = binding_fixture["binding"]
     lifecycle = binding._load_lifecycle()
@@ -743,7 +738,7 @@ def test_command_binding_inherited_ticket_is_bound_to_its_owner(
 
 
 def test_command_binding_inherited_ticket_requires_live_parent(
-    binding_fixture: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+    binding_fixture: dict, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     binding = binding_fixture["binding"]
     primitive = binding_fixture["primitive"]
@@ -760,7 +755,7 @@ def test_command_binding_inherited_ticket_requires_live_parent(
             lifecycle._CURRENT.reset(token)
 
 
-def _materialize_native_payload(fixture: dict[str, Any]) -> None:
+def _materialize_native_payload(fixture: dict) -> None:
     payload = fixture["payload"]
     source = ROOT / "plugins/agent-worktrees"
     for name in ("scripts", "src"):
@@ -776,7 +771,7 @@ def _materialize_native_payload(fixture: dict[str, Any]) -> None:
     assert not any(line.startswith("SKIP ") for line in log), log
 
 
-def _native_fixture(fixture: dict[str, Any], shell: str, action: str = "provision") -> list[str]:
+def _native_fixture(fixture: dict, shell: str, action: str = "provision") -> list[str]:
     payload = fixture["payload"]
     _prepare_catalog(fixture)
     if shell == "powershell":
@@ -794,7 +789,7 @@ def _native_fixture(fixture: dict[str, Any], shell: str, action: str = "provisio
         with observer.open("a", encoding="utf-8") as stream:
             stream.write(
                 "\n# This transaction fixture has no consumers; never inspect host processes.\n"
-                "def refuse_consumers(*args: object, **kwargs: object) -> None:\n    return None\n"
+                "def refuse_consumers(*args, **kwargs):\n    return None\n"
             )
     if shell == "bash":
         source = (ROOT / "plugins/agent-worktrees/scripts/install.sh").read_text()
@@ -914,10 +909,10 @@ def _native_fixture(fixture: dict[str, Any], shell: str, action: str = "provisio
         )
     script = payload / "scripts/install.ps1"
     script.write_text(program, encoding="utf-8")
-    return [cast(str, POWERSHELL), "-NoLogo", "-NoProfile", "-File", str(script), "-Action", action]
+    return [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(script), "-Action", action]
 
 
-def _refused_installer_snapshot(fixture: dict[str, Any], installer: Path) -> dict[str, Any]:
+def _refused_installer_snapshot(fixture: dict, installer: Path) -> dict:
     from update_driver import core
 
     home = fixture["home"]
@@ -953,7 +948,7 @@ def _refused_installer_snapshot(fixture: dict[str, Any], installer: Path) -> dic
             directory, _mtime, data = snapshot[key]
             assert directory
             snapshot[key] = (directory, 0, data)
-    for request in cast(tuple[core.Request, ...], core.status(root=home / audit)):
+    for request in core.status(root=home / audit):
         assert request.state == "completed" and request.exit_code not in (None, 0)
         assert request.finished_at is not None and not request.unresolved
     return snapshot
@@ -961,7 +956,7 @@ def _refused_installer_snapshot(fixture: dict[str, Any], installer: Path) -> dic
 
 @pytest.mark.parametrize("mutation", ("source", "runtime", "command"))
 def test_refusal_snapshot_excludes_bytecode_but_retains_product_bytes(
-    binding_fixture: dict[str, Any], mutation: str,
+    binding_fixture: dict, mutation: str,
 ) -> None:
     import py_compile
 
@@ -986,7 +981,7 @@ def test_refusal_snapshot_excludes_bytecode_but_retains_product_bytes(
     assert _refused_installer_snapshot(fixture, installer) != before
 
 
-def _real_installer(fixture: dict[str, Any], shell: str, location: str) -> tuple[Path, dict[str, str]]:
+def _real_installer(fixture: dict, shell: str, location: str) -> tuple[Path, dict[str, str]]:
     _prepare_catalog(fixture)
     payload = fixture["payload"]
     suffix = "sh" if shell == "bash" else "ps1"
@@ -1012,7 +1007,7 @@ def _real_installer(fixture: dict[str, Any], shell: str, location: str) -> tuple
 ])
 @pytest.mark.parametrize("location", ["installed", "local-copy"])
 def test_command_binding_real_installer_refuses_before_self_staging(
-    binding_fixture: dict[str, Any], shell: str, location: str, powershell_host: PowerShellFactory,
+    binding_fixture: dict, shell: str, location: str, powershell_host,
 ) -> None:
     installer, environment = _real_installer(binding_fixture, shell, location)
     _publish(binding_fixture)
@@ -1030,7 +1025,7 @@ def test_command_binding_real_installer_refuses_before_self_staging(
     for action in ("install", "update", "provision", "stamp", "uninstall"):
         command = (
             ["bash", str(installer), action] if shell == "bash" else
-            [cast(str, POWERSHELL), "-NoLogo", "-NoProfile", "-File", str(installer), action]
+            [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(installer), action]
         )
         refused = host.run(command) if host else subprocess.run(
             command, env=environment, cwd=binding_fixture["home"],
@@ -1056,14 +1051,14 @@ def test_command_binding_real_installer_refuses_before_self_staging(
 ])
 @pytest.mark.parametrize("location", ["installed", "local-copy"])
 def test_command_binding_real_installer_reenters_under_admitted_lease(
-    binding_fixture: dict[str, Any], shell: str, location: str,
+    binding_fixture: dict, shell: str, location: str,
 ) -> None:
     installer, environment = _real_installer(binding_fixture, shell, location)
     payload = binding_fixture["payload"]
     _publish(binding_fixture)
     command = (
         ["bash", str(installer), "stamp"] if shell == "bash" else
-        [cast(str, POWERSHELL), "-NoLogo", "-NoProfile", "-File", str(installer), "stamp"]
+        [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(installer), "stamp"]
     )
     if location == "local-copy":
         binding = binding_fixture["binding"]
@@ -1073,14 +1068,14 @@ def test_command_binding_real_installer_reenters_under_admitted_lease(
         ) as lease:
             command = (
                 ["bash", str(installer), "stamp"] if shell == "bash" else
-                [cast(str, POWERSHELL), "-NoLogo", "-NoProfile", "-File", str(installer), "stamp"]
+                [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(installer), "stamp"]
             )
             admitted = subprocess.run(
                 command, env={
                     **environment, "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE": json.dumps(lease.ticket),
                 },
                 cwd=binding_fixture["home"], capture_output=True, text=True, timeout=30,
-                creationflags=cast(Any, subprocess).CREATE_NO_WINDOW if os.name == "nt" else 0,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
             )
             assert admitted.returncode == 0, admitted.stdout + admitted.stderr
             smoke = json.loads((binding_fixture["legacy"] / "smoke.json").read_text())
@@ -1092,7 +1087,7 @@ def test_command_binding_real_installer_reenters_under_admitted_lease(
     # The unchanged self-stage block still runs under the admitted parent lease.
     completed = subprocess.run(
         command, env=environment, cwd=binding_fixture["home"], capture_output=True,
-        text=True, timeout=30, creationflags=cast(Any, subprocess).CREATE_NO_WINDOW if os.name == "nt" else 0,
+        text=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
     smoke = json.loads((binding_fixture["legacy"] / "smoke.json").read_text())
@@ -1118,7 +1113,7 @@ def test_command_binding_real_installer_reenters_under_admitted_lease(
     ),
 )])
 def test_command_binding_native_selfstage_preserves_human_optin(
-    binding_fixture: dict[str, Any], shell: str, action: str, windows_powershell: bool,
+    binding_fixture: dict, shell: str, action: str, windows_powershell: bool,
 ) -> None:
     _prepare_catalog(binding_fixture)
     _materialize_native_payload(binding_fixture)
@@ -1130,14 +1125,14 @@ def test_command_binding_native_selfstage_preserves_human_optin(
         **_catalog_environment(binding_fixture),
         "COPILOT_PLUGIN_INSTALL_SMOKE": "1", "COPILOT_PLUGIN_INSTALL_SMOKE_SLEEP": "0",
     }
-    host = cast(str, shutil.which("powershell.exe") if windows_powershell else POWERSHELL)
+    host = shutil.which("powershell.exe") if windows_powershell else POWERSHELL
     command = (
         ["bash", str(installer), action] if shell == "bash" else
         [host, "-NoLogo", "-NoProfile", "-File", str(installer), action]
     )
     completed = subprocess.run(
         command, env=environment, cwd=binding_fixture["home"], capture_output=True,
-        text=True, timeout=30, creationflags=cast(Any, subprocess).CREATE_NO_WINDOW if os.name == "nt" else 0,
+        text=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert completed.stdout == ""
@@ -1168,7 +1163,7 @@ def test_command_binding_native_selfstage_preserves_human_optin(
 ])
 @pytest.mark.parametrize("remove_config", [False, True])
 def test_command_binding_native_teardown_refuses_foreign_then_removes_owned_runtime(
-    binding_fixture: dict[str, Any], shell: str, remove_config: bool,
+    binding_fixture: dict, shell: str, remove_config: bool,
 ) -> None:
     if shell == "powershell" and os.name != "nt":
         pytest.skip("Full PowerShell installer removal requires Windows")
@@ -1195,7 +1190,7 @@ def test_command_binding_native_teardown_refuses_foreign_then_removes_owned_runt
     before = _snapshot(runtime)
     refused = subprocess.run(
         command, env=environment, cwd=binding_fixture["home"], capture_output=True,
-        text=True, timeout=45, creationflags=cast(Any, subprocess).CREATE_NO_WINDOW if os.name == "nt" else 0,
+        text=True, timeout=45, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert refused.returncode != 0, refused.stdout + refused.stderr
     assert "Command ownership" in refused.stdout + refused.stderr
@@ -1203,7 +1198,7 @@ def test_command_binding_native_teardown_refuses_foreign_then_removes_owned_runt
     settings.write_bytes(original)
     completed = subprocess.run(
         command, env=environment, cwd=binding_fixture["home"], capture_output=True,
-        text=True, timeout=45, creationflags=cast(Any, subprocess).CREATE_NO_WINDOW if os.name == "nt" else 0,
+        text=True, timeout=45, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert runtime.exists() is not remove_config
@@ -1221,7 +1216,7 @@ def test_command_binding_native_teardown_refuses_foreign_then_removes_owned_runt
     pytest.param("powershell", marks=pytest.mark.skipif(POWERSHELL is None, reason="PowerShell unavailable")),
 ])
 def test_command_binding_native_stamp_defers_without_stuck_reservation(
-    binding_fixture: dict[str, Any], shell: str,
+    binding_fixture: dict, shell: str,
 ) -> None:
     command = _native_fixture(binding_fixture, shell, "stamp")
     environment = {
@@ -1234,7 +1229,7 @@ def test_command_binding_native_stamp_defers_without_stuck_reservation(
     stamped = subprocess.run(
         command, env=environment, cwd=binding_fixture["home"],
         capture_output=True, text=True, timeout=45,
-        creationflags=cast(Any, subprocess).CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert stamped.returncode == 0, stamped.stdout + stamped.stderr
     runtime = binding_fixture["legacy"]
@@ -1252,7 +1247,7 @@ def test_command_binding_native_stamp_defers_without_stuck_reservation(
     installed = subprocess.run(
         provision, env=environment, cwd=binding_fixture["home"],
         capture_output=True, text=True, timeout=45,
-        creationflags=cast(Any, subprocess).CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert installed.returncode == 0, installed.stdout + installed.stderr
     assert (runtime / "current-version").read_text() == "example"
@@ -1266,7 +1261,7 @@ def test_command_binding_native_stamp_defers_without_stuck_reservation(
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows first-touch interpreter forwarding")
 def test_command_binding_bootstrap_preserves_off_path_spaced_interpreter_through_stage(
-    binding_fixture: dict[str, Any],
+    binding_fixture: dict,
 ) -> None:
     _prepare_catalog(binding_fixture)
     payload = binding_fixture["payload"]
@@ -1288,17 +1283,17 @@ def test_command_binding_bootstrap_preserves_off_path_spaced_interpreter_through
          "import json,sys; print(json.dumps([sys.executable,sys.prefix]))"],
         env=environment, cwd=binding_fixture["home"], capture_output=True,
         text=True, encoding="utf-8", timeout=10,
-        creationflags=cast(Any, subprocess).CREATE_NO_WINDOW,
+        creationflags=subprocess.CREATE_NO_WINDOW,
     )
     assert probe.returncode == 0, probe.stdout + probe.stderr
     executable, prefix = json.loads(probe.stdout)
     assert Path(executable) == python and Path(prefix) == python_root
     completed = subprocess.run(
-        [cast(str, POWERSHELL), "-NoProfile", "-File", str(scripts / "bootstrap-check.ps1"),
+        [POWERSHELL, "-NoProfile", "-File", str(scripts / "bootstrap-check.ps1"),
          "-BootstrapPython", str(python)],
         env=environment, cwd=binding_fixture["home"], capture_output=True,
         text=True, encoding="utf-8", timeout=30,
-        creationflags=cast(Any, subprocess).CREATE_NO_WINDOW,
+        creationflags=subprocess.CREATE_NO_WINDOW,
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert json.loads(completed.stdout) == {}
@@ -1315,7 +1310,7 @@ def test_command_binding_bootstrap_preserves_off_path_spaced_interpreter_through
     pytest.param("powershell", marks=pytest.mark.skipif(POWERSHELL is None, reason="PowerShell unavailable")),
 ])
 def test_command_binding_native_lifecycle_admits_one_runtime_owner(
-    binding_fixture: dict[str, Any], shell: str,
+    binding_fixture: dict, shell: str,
 ) -> None:
     other = binding_fixture["home"] / ".copilot/installed-plugins/other" / PLUGIN_ID
     other.mkdir(parents=True)
@@ -1339,7 +1334,7 @@ def test_command_binding_native_lifecycle_admits_one_runtime_owner(
                 "COPILOT_PLUGIN_ROOT": str((binding_fixture["payload"], other)[index]),
             },
             cwd=binding_fixture["home"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, creationflags=cast(Any, subprocess).CREATE_NO_WINDOW if os.name == "nt" else 0,
+            text=True, creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         ))
     outputs = [process.communicate(timeout=45) for process in processes]
     assert sum(process.returncode == 0 for process in processes) == 1, outputs
@@ -1357,7 +1352,7 @@ def test_command_binding_native_lifecycle_admits_one_runtime_owner(
              str(binding_fixture["home"] / "test-bin/python3"),
              "COPILOT_PLUGIN_ROOT": str((binding_fixture["payload"], other)[1 - winner])},
         cwd=binding_fixture["home"], capture_output=True, text=True, timeout=30,
-        creationflags=cast(Any, subprocess).CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert refused.returncode != 0
     after = _snapshot(runtime)

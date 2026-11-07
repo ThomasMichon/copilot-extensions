@@ -9,6 +9,8 @@ import json
 import os
 from pathlib import Path
 import sys
+import tempfile
+import threading
 from types import CodeType, FunctionType, ModuleType
 from importlib.machinery import ModuleSpec, PathFinder
 
@@ -44,27 +46,34 @@ def load_request() -> tuple[Path, dict]:
     return path, request
 
 
-def _source_locator(proof: dict) -> Callable[[str], str | None]:
-    sources: dict[str, str] = {}
+def _source_lookup(proof: dict) -> Callable[[str], str | None]:
+    sources: dict[str, list[tuple[int, str, str]]] = {}
     for path in proof:
         if not path.endswith(".py"):
             continue
         suffix = path.split("/src/", 1)[-1] if "/src/" in path else path
-        sources[suffix] = max(sources.get(suffix, ""), path)
+        sources.setdefault(suffix.rsplit("/", 1)[-1], []).append((len(suffix), suffix, path))
 
-    def locate(filename: str) -> str | None:
-        remaining = filename.replace("\\", "/")
-        while "/" in remaining:
-            remaining = remaining.split("/", 1)[1]
-            if remaining in sources:
-                return sources[remaining]
-        return None
+    def lookup(filename: str) -> str | None:
+        normalized = filename.replace("\\", "/")
+        candidates = [
+            (length, path)
+            for length, suffix, path in sources.get(normalized.rsplit("/", 1)[-1], ())
+            if normalized.endswith("/" + suffix)
+        ]
+        return max(candidates)[1] if candidates else None
 
-    return locate
+    return lookup
 
 
 def relative_source(filename: str, proof: dict) -> str | None:
-    return _source_locator(proof)(filename)
+    return _source_lookup(proof)(filename)
+
+
+def _interpreter_log(directory: Path) -> Path:
+    fd, name = tempfile.mkstemp(prefix=f"{os.getpid()}-", suffix=".jsonl", dir=directory)
+    os.close(fd)
+    return Path(name)
 
 
 def entry_role(filename: str) -> str | None:
@@ -85,7 +94,25 @@ def installation_source(filename: str) -> str | None:
     return None
 
 
-def launch_role(argv: list) -> str | None:
+def launch_role(argv: list | str) -> str | None:
+    if isinstance(argv, str):
+        import ctypes
+        from ctypes import wintypes
+
+        shell = ctypes.WinDLL("shell32", use_last_error=True)
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        shell.CommandLineToArgvW.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(ctypes.c_int)]
+        shell.CommandLineToArgvW.restype = ctypes.POINTER(wintypes.LPWSTR)
+        kernel.LocalFree.argtypes = [wintypes.HLOCAL]
+        kernel.LocalFree.restype = wintypes.HLOCAL
+        count = ctypes.c_int()
+        parsed = shell.CommandLineToArgvW(argv, ctypes.byref(count))
+        if not parsed:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            argv = [parsed[index] for index in range(count.value)]
+        finally:
+            kernel.LocalFree(parsed)
     values = [os.fsdecode(value) for value in argv]
     if "-m" in values and values[values.index("-m") + 1] == "agent_bridge.session_host":
         return "host"
@@ -132,6 +159,7 @@ def install(*, observer: bool = False) -> None:
     path, request = load_request()
     proof = request["source_proof"]
     root = Path(request["root"])
+    lookup_source = _source_lookup(proof)
     bind_installation = request.get("capture_generation") in (48, 49, 50, 51, 52)
     own = "tools/bridge_http47_runtime.py"
     if sha(Path(__file__).read_bytes()) != proof[own]["sha256"]:
@@ -185,12 +213,13 @@ def install(*, observer: bool = False) -> None:
     sys.meta_path.insert(0, Origins)
     directory = path.parent / "interpreters"
     directory.mkdir(exist_ok=True)
-    log = directory / f"{os.getpid()}.jsonl"
-    if log.exists():
-        raise ValueError("HTTP-47 interpreter identity was reused")
+    log = _interpreter_log(directory)
+    # The audit hook owns this stream for the interpreter's lifetime.
+    stream = log.open("a", encoding="utf-8")
+    record_lock = threading.Lock()
 
     def record(event: dict) -> None:
-        with log.open("a", encoding="utf-8") as stream:
+        with record_lock:
             stream.write(json.dumps(event, sort_keys=True) + "\n")
             stream.flush()
             os.fsync(stream.fileno())
@@ -199,7 +228,6 @@ def install(*, observer: bool = False) -> None:
     for name in early:
         verify_preloaded(sys.modules[name], proof[modules[name]])
         record({"kind": "exec", "source": modules[name], "role": None, "preloaded": True})
-    locate_source = _source_locator(proof)
     checking = False
 
     def audit(event: str, args: tuple) -> None:
@@ -216,7 +244,7 @@ def install(*, observer: bool = False) -> None:
         if event != "exec" or not isinstance(args[0], CodeType):
             return
         code = args[0]
-        source = locate_source(code.co_filename)
+        source = lookup_source(code.co_filename)
         role = entry_role(code.co_filename)
         helper = installation_source(code.co_filename) if bind_installation else None
         if source is None and helper is not None:
@@ -275,6 +303,7 @@ def verify_interpreters(
     directory: Path, proof: dict, *,
     expected_roles: frozenset[str] = frozenset({"worker", "host", "peer"}),
     required_sources: frozenset[str] = frozenset(),
+    expected_observers: int = 1,
 ) -> dict:
     """Require a bound entrypoint for every actual contributing child launch."""
     logs = []
@@ -288,7 +317,11 @@ def verify_interpreters(
             raise ValueError("HTTP-47 interpreter rejected unproven source")
         logs.append(events)
     observers = [events for events in logs if events[0]["observer"]]
-    if len(observers) != 1 or not any(e["kind"] == "observer-entry" for e in observers[0]):
+    if (
+        type(expected_observers) is not int or expected_observers < 1
+        or len(observers) != expected_observers
+        or any(not any(e["kind"] == "observer-entry" for e in events) for events in observers)
+    ):
         raise ValueError("HTTP-47 observer entrypoint is unproven")
     launched = Counter()
     started = Counter()

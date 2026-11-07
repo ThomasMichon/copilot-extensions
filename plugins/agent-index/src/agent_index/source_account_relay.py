@@ -3,43 +3,12 @@
 from __future__ import annotations
 
 import json
-import math
 import socket
 import time
 import ipaddress
 import stat
 import struct
-from dataclasses import dataclass, field
 from pathlib import Path
-
-SOURCE_LEASE_CONTRACT = "credential-relay.account-source-lease/v1"
-SOURCE_LEASE_EXCHANGE = "connection-bound/v1"
-
-
-@dataclass
-class SourceLease:
-    """Source authorization, not token expiry or permission to resume execution."""
-
-    token: str = field(repr=False)
-    lease_id: str
-    lease_issued_at: float
-    lease_expires_at: float
-    _last_wall: float = field(repr=False)
-    _received_monotonic: float = field(repr=False)
-    _budget: float = field(repr=False)
-    _expired: bool = field(default=False, init=False, repr=False)
-    _last_elapsed: float = field(default=0.0, init=False, repr=False)
-
-    def remaining_seconds(self) -> float:
-        now = time.time()
-        elapsed = time.monotonic() - self._received_monotonic
-        remaining = min(self.lease_expires_at - now, self._budget - elapsed)
-        if now < self._last_wall or elapsed < self._last_elapsed or remaining <= 0:
-            self._expired = True
-        self._last_wall = now
-        self._last_elapsed = elapsed
-        return 0.0 if self._expired else remaining
-
 
 def _reference(path, limit=65536):
     path = Path(path)
@@ -144,92 +113,9 @@ def exchange(transport: dict, fields: dict, capability: str, *, timeout: float =
     exact source/account/recipient capability checked by the source custodian.
     No arbitrary operation, URL, redirect or credential cache is supported.
     """
-    wire = _account_wire("get-account-token", fields, capability)
-    response = _roundtrip(transport, wire, timeout=timeout)
-    return _response_token(response, fields)
-
-
-def acquire_source_lease(
-    path: Path, *, source: str, account: str, host: str | None = None, timeout: float = 20,
-) -> SourceLease:
-    """Read the selected capability only after the serving peer declares support."""
-    transport, binding = _selection(path, source=source, account=account, host=host)
-    fields = {key: value for key, value in binding.items() if key != "capability_file"}
-
-    def capability():
-        return _reference(binding["capability_file"], 4096).decode("ascii").strip()
-
-    return _source_lease(transport, fields, capability, timeout=timeout)
-
-
-def exchange_source_lease_for(
-    path: Path, fields: dict, capability: str, *, host: str, timeout: float = 20,
-) -> SourceLease:
-    """Embedding seam using only the admitted caller's capability, never a stored one."""
-    transport, binding = _selection(
-        path, source=fields.get("source"), account=fields.get("account"), host=host,
-    )
-    expected = {key: value for key, value in binding.items() if key != "capability_file"}
-    if fields != expected:
-        raise RuntimeError("source-account-relay-unavailable")
-    return exchange_source_lease(transport, fields, capability, timeout=timeout)
-
-
-def exchange_source_lease(
-    transport: dict, fields: dict, capability: str, *, timeout: float = 20,
-) -> SourceLease:
-    """Negotiate and acquire once; unsupported peers never receive a capability."""
-    return _source_lease(transport, fields, lambda: capability, timeout=timeout)
-
-
-def _source_lease(transport, fields, capability, *, timeout):
     try:
         if type(timeout) not in (int, float) or not 0 < timeout <= 30:
             raise ValueError
-        started = time.monotonic()
-        started_at = time.time()
-
-        def acquire(support):
-            if support != {
-                "contract": SOURCE_LEASE_CONTRACT, "operation": "get-account-source-lease",
-                "exchange": SOURCE_LEASE_EXCHANGE,
-            }:
-                raise RuntimeError("source-account-relay-lease-unsupported")
-            return _account_wire("get-account-source-lease", fields, capability())
-
-        response = _roundtrip(
-            transport, f"describe-account-relay\nexchange={SOURCE_LEASE_EXCHANGE}\n\n",
-            timeout=timeout, followup=acquire,
-        )
-        token = _response_token(response, fields, source_lease=True)
-        if (
-            response["lease_contract"] != SOURCE_LEASE_CONTRACT
-            or len(response["lease_id"]) != 32
-            or any(char not in "0123456789abcdef" for char in response["lease_id"])
-        ):
-            raise ValueError
-        issued = float(response["lease_issued_at"])
-        expires = float(response["lease_expires_at"])
-        received_at = time.time()
-        received = time.monotonic()
-        if (
-            not math.isfinite(issued) or not math.isfinite(expires)
-            or not 0 < issued < expires < 1e12 or expires - issued > 3600
-            or received_at < started_at or issued > received_at or received < started
-        ):
-            raise ValueError
-        budget = min(expires - received_at, expires - issued - (received - started))
-        if budget <= 0:
-            raise ValueError
-        return SourceLease(
-            token, response["lease_id"], issued, expires, received_at, received, budget,
-        )
-    except (OSError, ValueError, TypeError, KeyError, UnicodeError):
-        raise RuntimeError("source-account-relay-unavailable") from None
-
-
-def _account_wire(operation, fields, capability):
-    try:
         if set(fields) != {"source", "account", "recipient", "host", "action"}:
             raise ValueError
         for value in fields.values():
@@ -237,34 +123,6 @@ def _account_wire(operation, fields, capability):
         if fields["action"] != "get-github-token" or not 32 <= len(capability) <= 4096:
             raise ValueError
         _text(capability)
-        request = dict(fields, auth=capability)
-        return operation + "\n" + "\n".join(f"{k}={v}" for k, v in request.items()) + "\n\n"
-    except (ValueError, TypeError, KeyError):
-        raise RuntimeError("source-account-relay-unavailable") from None
-
-
-def _response_token(response, fields, *, source_lease=False):
-    try:
-        keys = {"protocol", "host", "username", "token"}
-        if source_lease:
-            keys |= {"lease_contract", "lease_id", "lease_issued_at", "lease_expires_at"}
-        if (
-            set(response) != keys
-            or response["protocol"] != "https" or response["host"] != fields["host"]
-            or response["username"] != fields["account"]
-            or not response["token"] or len(response["token"]) > 16384
-            or any(ord(char) < 33 or ord(char) == 127 for char in response["token"])
-        ):
-            raise ValueError
-        return response["token"]
-    except (ValueError, TypeError, KeyError):
-        raise RuntimeError("source-account-relay-unavailable") from None
-
-
-def _roundtrip(transport: dict, wire: str, *, timeout: float, followup=None) -> dict:
-    try:
-        if type(timeout) not in (int, float) or not 0 < timeout <= 30:
-            raise ValueError
         if not isinstance(transport, dict):
             raise ValueError
         peer_uid = None
@@ -333,6 +191,8 @@ def _roundtrip(transport: dict, wire: str, *, timeout: float, followup=None) -> 
             connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         else:
             raise ValueError
+        request = dict(fields, auth=capability)
+        wire = "get-account-token\n" + "\n".join(f"{k}={v}" for k, v in request.items()) + "\n\n"
         deadline = time.monotonic() + timeout
         with connection:
             connection.settimeout(timeout)
@@ -345,34 +205,36 @@ def _roundtrip(transport: dict, wire: str, *, timeout: float, followup=None) -> 
                 observed = endpoint.stat()
                 if actual_uid != peer_uid or (observed.st_dev, observed.st_ino) != (device, inode):
                     raise ValueError
-            def request(value):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ValueError
+            connection.settimeout(remaining)
+            connection.sendall(wire.encode("utf-8"))
+            data = bytearray()
+            while b"\n\n" not in data:
                 remaining = deadline - time.monotonic()
-                if remaining <= 0:
+                if remaining <= 0 or len(data) >= 32768:
                     raise ValueError
                 connection.settimeout(remaining)
-                connection.sendall(value.encode("utf-8"))
-                data = bytearray()
-                while b"\n\n" not in data:
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0 or len(data) >= 32768:
-                        raise ValueError
-                    connection.settimeout(remaining)
-                    part = connection.recv(min(4096, 32768 - len(data)))
-                    if not part:
-                        if not data:
-                            return {}
-                        raise ValueError
-                    data.extend(part)
-                response = {}
-                for line in data.decode("utf-8").strip().splitlines():
-                    key, separator, value = line.partition("=")
-                    if not separator or key in response:
-                        raise ValueError
-                    response[key] = value
-                return response
-
-            response = request(wire)
-            return request(followup(response)) if followup is not None else response
+                part = connection.recv(min(4096, 32768 - len(data)))
+                if not part:
+                    raise ValueError
+                data.extend(part)
+        response = {}
+        for line in data.decode("utf-8").strip().splitlines():
+            key, separator, value = line.partition("=")
+            if not separator or key in response:
+                raise ValueError
+            response[key] = value
+        if (
+            set(response) != {"protocol", "host", "username", "token"}
+            or response["protocol"] != "https" or response["host"] != fields["host"]
+            or response["username"] != fields["account"]
+            or not response["token"] or len(response["token"]) > 16384
+            or any(ord(char) < 33 or ord(char) == 127 for char in response["token"])
+        ):
+            raise ValueError
+        return response["token"]
     except (OSError, ValueError, TypeError, KeyError, UnicodeError):
         raise RuntimeError("source-account-relay-unavailable") from None
 

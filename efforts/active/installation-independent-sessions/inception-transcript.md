@@ -5,20 +5,6 @@ Back to the [canonical effort](README.md).
 The operator's literal proposal is retained below, including original typos.
 The effort README labels subsequent agent-recommended controls separately.
 
-## Operator - Scheduler-independent clean hosts
-
-> We shouldn't have Task Scheduler registrations on these dev boxes
-
-> All machines except [private custom host] right now. We want to ensure the Harness doesn't require them by-default, and [clean host group] machines should represent "clean" Harness configurations. [Private custom host] has a lot of custom stuff since I can actually control the admin account on that machine. I can't configure local account access on [managed development hosts]
-
-Only private deployment identifiers and the managed-provider reference are
-redacted; the full literal capture is retained privately without a public
-link. The agent's owner-specific implementation and validation steps are
-recommendations, not additional operator grants. Keep the underlying
-capabilities and protected running processes; this is not an instruction to
-remove unrelated OS tasks or silently substitute another privileged startup
-mechanism.
-
 ## Operator - Reconstruction findings and cooperative task standby
 
 > Don't re-enable the task triggers

@@ -20,7 +20,7 @@ import json
 import os
 
 installer_ready = os.path.isfile(os.environ["INSTALLER_PATH"])
-commands = []  # type: list[dict[str, object]]
+commands = []
 for spec in json.loads(os.environ["COMMAND_SPECS"]):
     command_path = os.path.join(
         os.environ["SELF_ROOT"], *spec["relativePath"].split("/")
@@ -47,7 +47,7 @@ catalog = {
     "plugin": "@@PLUGIN@@",
     "payload": {"provenance": "payload-local"},
     "commands": commands,
-}  # type: dict[str, object]
+}
 @@CATALOG_BINDING_PYTHON@@@@CATALOG_FLIGHT_PYTHON@@context = (
     "## @@PLUGIN@@ session command catalog\n\n"
     "Select the command by `id` and invoke its exact `argv`. "

@@ -174,9 +174,9 @@ def _listener(selection: dict):
     return listener
 
 
-def prepare(root: Path, selection: dict, *, configuration=None) -> tuple[object, object]:
+def prepare(root: Path, selection: dict) -> tuple[object, object]:
     if selection["role"] == "ssh-client":
-        config = configuration if configuration is not None else ssh_configuration(selection)
+        config = ssh_configuration(selection)
         from .ssh_machine import prepare as prepare_ssh
 
         state = Path(config.to_dict()["state_dir"]).resolve()

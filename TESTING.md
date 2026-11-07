@@ -10,7 +10,6 @@ prerequisites for one contribution.
 |----------|------------|
 | What does required PR/promotion testing cover? | [Unit packet](#unit-only-promotion-packet), [portfolio invariants](#test-portfolio-invariants), and the bounded Windows Resume promotion exception below |
 | How do I run a focused local selection? | [Turn-key runner](#the-turn-key-runner); select the affected files/contracts rather than the whole portfolio |
-| Can I obtain Windows evidence without running tests on my machine? | [Owner-only hosted Windows escape hatch](#owner-only-hosted-windows-escape-hatch); focused, explicit and independent of required CI |
 | What should I do after a run times out? | [Per-test diagnosis and residual runs](#per-test-diagnosis-and-residual-runs); inspect retained progress before repeating or enlarging a run |
 | How do I isolate portable integration? | [Devcontainer isolation](#optional-devcontainer-based-isolation-linux) and the declared periodic inventory in `tools/periodic-integration-inventory.json` |
 | What proves a native or external consumer? | Its explicitly selected packet below, with the actual platform, launch mode and prerequisites; a portable or synthetic pass is not equivalent |
@@ -34,96 +33,6 @@ useful evidence without passing the original full acceptance gate. Preserve
 that remaining gate, real assertions, cleanup and resource bounds. Required
 CI and review remain unchanged; a shared native quiet window still needs its
 affected owners' agreement.
-
-## Owner-only hosted Windows escape hatch
-
-`windows-qualification.yml` is an explicit manual lane on a disposable
-GitHub-hosted Windows image. Only the individual repository owner may submit
-or rerun it, and its controller must run from the protected GitHub default
-branch. Organization-owned repositories are not admitted. It is not a
-Maintainer-role ACL supplied by GitHub, required PR CI, release authority,
-self-hosted execution, or proof of a productive desktop/native application.
-
-Use the source-owned client with the exact `agent-worktrees` command path
-from the current session catalog. The candidate must be a commit in a checkout
-whose `origin` names the same public GitHub repository. Uncommitted changes
-are not test input. For example (substitute the actual command path and repo):
-
-```text
-python tools/windows-qualification.py --worktrees <catalog-argv0> --repo <owner/repo> submit --plugin agent-bridge --test-file tests/test_venue_path_length.py
-python tools/windows-qualification.py --worktrees <catalog-argv0> --repo <owner/repo> submit --tools --test-file tools/test_windows_qualification.py
-python tools/windows-qualification.py --worktrees <catalog-argv0> --repo <owner/repo> wait --request-id <id> --seconds 600
-python tools/windows-qualification.py --worktrees <catalog-argv0> --repo <owner/repo> result --request-id <id>
-```
-
-Add `-k <expression>` to focused plugin/library or tool files. A named plugin
-uses the turn-key runner's existing target resolver, including its library
-aliases. `--allow-explicit-tiers` retains existing eligibility/prerequisites;
-it never opts into host credentials or changes a packet's deadlines.
-Omitting files is an error unless `--full-suite` explicitly selects the named
-plugin/library suite or tool suite. Broad runs are an escape hatch, not the
-default after a timeout.
-
-`submit --packet bridge-http52 --source <full-commit>` invokes the candidate's
-canonical capture with `--write`, a separate same-source no-write capture,
-the independent contract verifier and the canonical artifact exporter.
-Each capture retains its own existing aggregate clock, including managed test
-environment preparation; the workflow timeout does not enlarge it.
-Returned files are data: the client never applies the generated outputs.
-
-Before any staging or dispatch, the client reads the selected protected
-controller's `tools/windows-qualification-support.json`. Missing/unsupported
-request, result or selection support refuses without publishing source.
-Caller package versions do not establish receiver support. New controllers
-reach the default branch through normal Dev review, CI and promotion.
-
-Already-readable candidate commits need no staging. Local-only commits are
-retained through one reserved append-only ref, `refs/qualification/windows-inputs`,
-not per-request branches. An envelope retains the prior transport tip and
-the exact candidate; its tree equals the candidate tree. Normal fast-forward
-updates and bounded contention retry never force shared history, alter the
-caller's branch/index/tree, or merge staging into source/default branches.
-An unrelated existing ref is refused. This history intentionally retains
-submitted public source; there is no automatic ref cleanup. Provider rejection
-of this namespace is an explicit unsupported transport, not permission to
-create a different ref silently.
-
-The fixed-ref envelope push uses the native mediated-push marker in that
-child's environment only, so older worktree PR hooks admit the transport
-without disabling local hooks. Its command boundary rejects branch, force
-and deletion refspecs and suppresses automatic tag following. No installed
-hook, shared Git configuration or ordinary source-push policy is changed.
-Rejected pushes retain their bounded diagnostic with the original request;
-an absent or uncertain effect is not permission for automatic replay.
-
-The client emits a request ID before effects and stores its state under the
-current worktree's Git metadata (`windows-qualification/<id>`). `status` and
-`wait` resolve that same run, not the latest successful workflow.
-`resume --request-id <id>` may finish a confirmed original transport and its
-not-yet-attempted dispatch. It never repeats a possibly accepted dispatch.
-An original transport that remains unobserved, or an unknown dispatch with no
-run yet, stays unresolved; do not submit a replacement ID to hide uncertainty.
-Local state operations use a crash-releasing lock for that request only;
-another live operation reports busy instead of duplicating a resume. Wait
-releases it between polls. Independent requests still use shared-ref CAS.
-Preserve needed records before normal worktree retirement.
-
-`result` downloads the uniquely named run/attempt artifact, validates request,
-source, trusted control, selection, Windows platform and phase identity, and
-returns the manifest. Actual test identities, failure/skip reasons, phase
-progress/timing, available JUnit, bounded logs and named-packet outputs are
-retained in Actions artifacts for seven days. Empty, skipped, failed, timed-out,
-unsupported or partial selections never become unconditional qualification.
-The result command exits zero only for qualification, one for a returned
-failed/incomplete result, and two for an unavailable or invalid result.
-Artifacts are immutable run evidence, not patches to execute or apply.
-
-Tool execution imports the selected candidate's canonical containment and
-environment helpers before pytest, keeping its sandbox roots aligned with
-that source's test policy even when the protected controller is older.
-A tool pytest exit 5 with an actual empty JUnit report returns `incomplete`
-with `incomplete_reason: empty-selection`. Missing JUnit and other failing
-commands remain `failed`; neither outcome returns qualification success.
 
 ## Per-test diagnosis and residual runs
 
@@ -174,33 +83,6 @@ must not substitute for bounded tests and timely CI feedback.
 
 ## Focused packet catalog
 
-Dispatch's `--test-file tests/test_pool_startup_client.py --test-file
-tests/test_ordinary_pool_startup.py --test-file tests/test_workspace_continuity.py
---test-file tests/test_pool_placement_client.py --allow-explicit-tiers` packet
-checks the ordinary startup observation budget through governed preparation.
-Its actual HTTP regression delays the original relationship owner beyond the
-baseline ten-second read timeout and requires one allocation and bound request
-before native creation. Other controls preserve longer/disabled reads, legacy
-preparation and unrelated request budgets. Owner/native responses are fixtures;
-this is not installed-cohort or full running-lifecycle acceptance.
-
-Dispatch's `--test-file tests/test_submission_consumer.py --test-file
-tests/test_submission_preparation.py --test-file tests/test_submission_readiness.py
---test-file tests/test_submission_advancement.py --test-file
-tests/test_submission_resubmission.py --allow-explicit-tiers` packet exercises
-ordinary protected completion, exact proposal custody, nonfinalizing readiness,
-rollback refusal and rejection/resubmission. It covers the actual task HTTP route
-and registered HTTP MCP completion operation, concurrent calls, status-change
-fences and retained manual-assignment incompatibility. Its real HTTP client
-control delays the owner observation beyond the baseline ten-second read budget,
-while separate controls preserve longer selected and unrelated request timeouts.
-Worktrees observations
-remain synthetic owner boundaries; this packet does not qualify an installed
-writer cohort, stopped-native recovery or permanent finalization.
-The ten controls in `tools/promotion_unit_tests/test_submission_consumer.py`
-separately admit actor-free retry/order/failure logic with production coverage;
-database, thread and transport controls remain outside required unit-only CI.
-
 Worktrees' opt-in `--test-file tests/test_post_tool_shell.py --test-file
 tests/test_hook_ipc.py --test-file tests/test_status_monitor.py
 --allow-explicit-tiers -k "native_mutation or
@@ -216,65 +98,6 @@ Original IPC controls cover exact generation/schema/deadline/wire bounds and
 the running monitor's real invalidation wake and unadmitted refusal. These are
 isolated source consumers, not installed, complete shell-command or throughput
 acceptance; required exact-source unit CI remains separate.
-
-The same packet's `shell_mutation` selection covers original argument and
-shell/Git parsing, while `registered_native_mutation_is_send_only` includes
-`shell-` cases for single-shell notifications. Real PowerShell 5.1/7 entries
-exercise JSON/raw/fallback arguments, read versus mutation, fast-forward pulls,
-unknown command shapes, missing/old/wrong-generation/closed discovery, wire
-overflow and a non-replying peer. Running-monitor controls prove shell read
-demand does not trigger a mutation sweep and unadmitted events have no effect.
-The portable unit packet additionally exercises the original send-only handler
-and mutation-only parser with synthetic inputs; it is not native evidence.
-
-The separately path-gated `prepared-membership-native.yml` lane also selects
-`tests/test_post_tool_shell.py -k registered_prepared_cell` on Windows.
-Actual stamped cells, original membership/binding/current-row publishers and
-the registered PowerShell 5.1/7 entry compose read/native/batch/single-shell
-notifications. It checks installation-scoped discovery, changed-byte refusal,
-old membership routing, missing rows, live reminder opt-out, late guidance
-and non-replying peers. Warm interpreter/client and synchronous requests are
-trapped; incompatible membership explicitly retains its original admission
-lookup. Original 30-second item, 10-second child, 300-second group and 50-ms
-production-send limits remain unchanged. These are isolated source consumers,
-not installed, cold/directory/POSIX/recovery, composed or throughput acceptance.
-
-The path-gated, manually dispatchable legacy-monitor native lane also runs
-`test_anchor_write_guard.py -k braced_parameter_boundaries_match_native_bash`
-on Linux and Windows. Nine native Bash controls compare actual expansion and
-command boundaries with pre-tool anchor denial and post-tool invalidation;
-the Git function only prints a marker, so no real commit is attempted.
-Quoted/escaped braces, nested command/arithmetic/parameter forms, backticks,
-ANSI quotes and a read-only control are included. The explicit lane requires
-native Bash rather than WSL or skipped prerequisites. The original 30-second
-item, 180-second group and five-second Bash-child bounds remain finite.
-This is source consumer/guard parity, not installed or throughput acceptance.
-
-Worktrees' opt-in `--test-file tests/test_companion_pr_associations.py
---test-file tests/test_worktree_status_bundle_cli.py --test-file
-tests/test_pr_read_context.py --test-file tests/test_pr_candidate_snapshot.py
---test-file tests/test_pr_observation_events.py --test-file
-tests/test_pr_config_foreign_repo.py --test-file tests/test_pr_related_binding.py
---test-file tests/test_worktree_status_compute.py --test-file
-tests/test_lazy_dispatch.py --allow-explicit-tiers` packet exercises the
-declared optional association fact through actual private tracking files and
-current/frozen-prior parser processes. It covers canonical empty versus
-unknown/omitted evidence, scope/incarnation/reassignment, typed record state,
-shared fresh configuration acquisition, independent cached core facts,
-three-provider bindings and unchanged strict parsing. The existing passive
-snapshot supplies a separate effective endpoint; no test acquires real credentials,
-contacts a real forge or starts a real resident. Cleanup remains caller-owned and
-verified. This is isolated source/process qualification, not installed/native
-performance, UI point-read or full live topology acceptance. Required unit-only
-CI is unchanged.
-The focused endpoint regression extension also selects
-`tests/test_pr_observation_credentials.py`, `tests/test_pr_observation.py` and
-`tests/test_providers.py` for actual provider construction over synthetic native
-responses. Duplicate-key private YAML/registry, whitespace-normalized bindings,
-fetch-captured host selection and actual emitted stdout budgets are covered.
-The four publication-fixture gaps tracked in #10408 remain separately scoped;
-their explicit exclusion does not establish an unfiltered provider-suite pass
-or weaken required CI.
 
 Manager's opt-in `--test-file tests/test_companion_head_observation.py
 --test-file tests/test_mux_companion.py --test-file tests/test_engine_client.py
@@ -302,14 +125,9 @@ The required unit-only packet is unchanged.
 
 The Windows Resume consumer packet is
 `python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_resume_pane_startup.py --allow-explicit-tiers`.
-It requires PowerShell 7, real PSMux and the Windows .NET Framework compiler,
-without fallback or prerequisite skips on Windows. A private executable adapter
-adds the runner-owned `-L` namespace to the launcher's PSMux calls; fixture
-control and cleanup calls use that same namespace. The adapter restores the
-backend's original PATH. Two small native controls cover direct and adapted
-private mux startup. Four concurrent admitted
-Resume plans traverse the unchanged production launcher, copied pane assets,
-argument receipt and startup reader,
+It requires PowerShell 7 and real PSMux, without fallback or prerequisite skips
+on Windows. Four concurrent admitted Resume plans traverse the unchanged
+production launcher, copied pane assets, argument receipt and startup reader,
 real ConPTY attachment, detach and owned child retirement. Cold Resume starts
 with PSMux prewarming enabled and disabled carry a realistic JSON environment and literal
 33-argument commands. Private engine resolution and finite Copilot setup
@@ -710,44 +528,6 @@ source-independent repeat, failed candidate
 preflight, a distinct generation update and confirmed native stop. The fixture
 does not qualify release-feed acquisition, provider authentication, reboot
 startup or fleet adoption. Required unit-only CI is unchanged.
-The Gateway jobs keep each complete installed Gateway and SSH lifecycle case
-in its own sequential 180-second runner, separate from the independent consumer
-controls. No lifecycle sequence is split; the six-minute job limit and peak job
-concurrency are unchanged.
-
-Its further dependent normal-setup jobs prepare the engine's declared test
-dependencies and run the repository continuity module's `normal_ssh_setup or
-setup_status` controls, including real Git source qualification and required
-request-pin capability. They then run `test_ssh_setup.py` and the whole
-`test_repository_ssh_setup_installed.py` sequence under the same 180-second
-runner/six-minute job limits. The latter builds the engine wheel with its
-packaged Source API and drives the actual Manager/engine handoff into synthetic
-TLS enrollment and the complete Source application installer, repeat,
-wrong-scope preservation, selected update and exact native stop. The Manager
-and engine dependency support remain fixtures; this is not complete installed
-product-cohort, provider, fresh-adopter or rollout proof. These jobs are
-sequenced after the retained explicit continuity cases, not parallel replacement
-coverage. Local helper/ordering controls and a packaged-API refusal probe do
-not substitute for their actual native outcomes.
-
-Only those normal-setup jobs select `--ephemeral-native-ssh-setup`. Admission
-requires an explicitly selected Fleet lane on a GitHub-hosted disposable runner,
-with its owned sandbox beneath `RUNNER_TEMP`; ordinary hosts, self-hosted
-runners and nested contained callers refuse before preparation. The native
-envelope retains the original bounded-worker limits and runner-renewed daemon
-lease, but permits explicit application-daemon escape from caller cleanup
-Jobs/process groups. Bounded descendants remain caller-owned; held daemon
-cleanup fails and retains the sandbox. Ordinary tests still suppress daemon
-escape. Held cleanup retains the sandbox even when the controller raises,
-preserving the original failure as the exception cause. A teardown exception
-also retains the sandbox when no cleanup results were recorded; a controller
-failure followed by confirmed cleanup keeps its original error.
-This distinction matters because the real Source constructor closes
-an inner cleanup scope before the engine checks the selected host's readiness.
-On Linux, a caller cleanup unit also requires the current user's already-running,
-owned user-manager bus. The native envelope selects that fixed local bus endpoint
-without moving `XDG_RUNTIME_DIR` or application state out of the sandbox; it
-does not start a manager, install a service or use an inherited bus address.
 
 Efforts' optional `--test-file tests/test_agenda_export_contributors.py
 --test-file tests/test_agenda_export.py --test-file tests/test_agenda_export_cli.py
@@ -1947,57 +1727,6 @@ Ordinary callers retain their existing relative-limit API.
 pure registry-value comparison. The containment module re-exports its public
 environment API in both package and standalone import modes; the registry
 reader, refusal errors and native Job lifecycle remain in the original owner.
-Preparation resolves UV configuration before redirecting user directories,
-using the dependency owner's configuration reader, precedence merge and private
-snapshot writer. Existing UV credential inputs remain available without
-restoring host service roots or changing feed admission policy.
-Preparation additionally requires the **selected UV executable** to support
-`uv auth dir`. The preparation owner uses the dependency owner's executable
-and environment qualification to capture one UTF-8 absolute
-authentication-directory path before home isolation; an explicit
-`UV_CREDENTIALS_DIR` must be absolute and agree with that metadata.
-The read-only metadata operation receives only authentication-location and
-native execution inputs, not host service/installation participants or ambient
-GitHub tokens. It has a 20-second owned bound including a five-second cleanup
-reserve, with 32 KiB stdout and 16 KiB stderr ceilings. Unconfirmed cleanup
-retains its native custody and preparation sandbox. Unsupported, missing,
-malformed or failed metadata refuses **before installation**, with an actionable
-selected-tool requirement; it never guesses UV defaults or retries authlessly.
-Select compatible UV in the invocation's existing tooling context or correct
-the explicit directory input. No OS/user tool upgrade is automatic, and this
-is a test-preparation capability contract, not a global installer version floor.
-
-Only UV preparation receives the captured location through `UV_CREDENTIALS_DIR`;
-capture never reads or copies credential contents. Actor environments reset
-that variable to their own private directory, including host-state opt-ins.
-An independently qualified private fixture may supply its own synthetic
-authentication input after isolation. Configured resolver/keyring settings
-remain within the existing dependency owner, but external keyring state is
-**unqualified**: this does not claim to restore file-backed or native keyring
-contexts. The opt-in
-`COPILOT_EXTENSIONS_UV_AUTH_QUALIFICATION=1` control in
-`tools/test_preparation_auth_context.py` uses only an offline synthetic store;
-its selected-UV result is independent native qualification, not promotion-unit
-actor admission.
-The same preparation boundary retains the qualified **netrc location**, not its
-contents. UV's [documented rule](https://docs.astral.sh/uv/concepts/authentication/http/#netrc-files)
-is explicit `NETRC`, otherwise `~/.netrc`; the existing native-feed owner uses
-original `HOME` on POSIX and `USERPROFILE` on Windows for that home. Preparation
-requires an absolute explicit `NETRC` or absolute original home, and refuses
-unqualified locations rather than guessing an OS fallback. A missing file is
-not manufactured or populated. Actors always receive a private `NETRC` file
-location, including Windows case aliases and host-state opt-ins. The opt-in
-netrc fixture uses only an owned loopback index, synthetic credentials and
-selected UV resolution without installation or external network access; it
-checks default/explicit preparation success and actor refusal.
-Windows Job teardown reuses procutil's pinned-member native-exit barrier.
-Zero active-process accounting alone does not prove that native exit or pending
-I/O has completed. Unconfirmed retirement retains the same Job witnesses on
-`UnreapedProcessError.job`; it cannot publish successful settlement flags.
-An expired whole bound still requests termination of that exact owned Job,
-without starting another verification interval or claiming settlement.
-Unavailable preliminary accounting remains unclean, but cannot skip the exact
-owned cleanup attempt within the same original bound.
 
 The qualified stage publishes source/scope/origin-bound work-completion evidence
 only after actual candidate and worker exits within the original work cutoff.
@@ -2109,27 +1838,6 @@ stream, calibration witnesses and original coverage ceilings remain required.
 Its portable policy controls are in
 `tools/promotion_unit_tests/test_sdk_desktop_observer.py`; actual desktop proof
 is a different lane and must never appear in required unit-only CI.
-The distinct scoped-root foundation is documented in
-`libs/agent-procutil/README.md` under pre-resume observation admission.
-`libs/agent-procutil/tests/test_windows_observation_spawn.py` checks the existing
-owner's opt-in barrier and original cleanup with synthetic native calls.
-`libs/agent-procutil/tests/test_sdk_scoped_observer.py` uses synthetic USER32
-filters and portable pump threads to check scoped acquisition, source/epoch
-binding, visibility/focus violations and unqualified coverage/cleanup failures.
-These threaded controls are outside the admitted actor-free promotion packet.
-They acquire no native desktop and do not qualify opaque CMD descendants,
-terminal attribution or calibration. The independent SDK case is
-`libs/agent-procutil/tests/test_caller_owned_native.py::test_scoped_observer_managed_root`.
-It uses the original SDK finite owner and requires its exact source-admitted
-enrollment; no application-specific selector or compatibility alias is accepted.
-Its native driver integration and actual execution are independent SDK gates,
-not MCP prerequisites. Actor-free collection and its default skip are not native
-qualification; the whole-desktop self-profile cannot enroll it.
-Integrated synthetic launch controls also cover successful observer admission
-followed by native resume failure, independent original Job cleanup failure,
-same-exception propagation and retained hook/pin custody. Context exit and
-explicit close do not replay uncertain native closes or qualify an unfinished
-observation.
 The source manifest must include the runner helpers and the explicit SDK
 closure declared in `sdk_visibility_sources.py`, all beneath the selected
 SDK root. It must match that exact closure, not mix in separately located
@@ -3002,26 +2710,6 @@ Shared immutable-input preparation has its own bounded qualification control;
 each publication case still creates a fresh consumer fixture.
 It retains the ordinary runner's containment and test deadlines. This is
 source/publication evidence, not SDK, native Windows or installed qualification.
-Historical seed preparation indexes each immutable packet's source identity
-once, instead of rereading every packet for every source. Named progress and
-slow-case timings identify unfinished work; JUnit outcomes are retained on
-failure without changing the 30/300/900-second item/group/plugin limits or test
-selection. The controlled HTTP-52 capture uses the same guard step.
-Historical guards precede canonical validation and export, so stale current
-metadata does not suppress their diagnostic execution and no qualified
-current artifact is exported before their success.
-The runner partitions the HTTP-48/49/50/51 publication module into sequential,
-disjoint generation cohorts, with untagged and future controls in the catch-all
-cohort. Other selected modules remain present. Every cohort retains the
-300-second group bound and shares the original 900-second plugin deadline;
-no parallel workers, larger resource limits or omitted cases are introduced.
-`tools/plugin_test_selection.py` owns that cohort policy; the runner retains
-containment, execution, cleanup and aggregate deadline enforcement.
-Each admitted capture interpreter binds its source-name suffix index once;
-lookup specificity and refusal boundaries remain exact. Per-execution source
-hash/code/origin checks, role/launch verification and durable receipts are not
-cached or relaxed. Three pure locator controls supplement the original
-historical packet without widening its or the current capture's deadlines.
 Use a fresh canonical-history-only clone to check proof retention across a
 squash; a long-lived clone may hide missing objects. Windows archive identity
 controls are independent of the heavier Git-backed publication packet.
@@ -5451,10 +5139,6 @@ test bytes, the expected parameter nodes, production coverage targets and a
 whole-packet budget. Any missing, duplicate, unexpected, failed or skipped node
 or phase rejects the result. One pytest directory collector visits only admitted
 files, once each in manifest order, without repeated sibling-directory scans.
-The catalog correspondence controls also bind the canonical catalog declaration
-and eleven templates as exact, hashed data inputs. These registered data paths
-cannot be selected as test nodes or Python coverage targets; an unregistered
-template or changed input still rejects admission.
 An exact node whitelist deselects other cases before execution and restores manifest
 order. Missing or duplicate admitted nodes reject collection before execution.
 Nine execution-acquisition controls in `test_related_acquisition.py` exercise
@@ -6150,48 +5834,6 @@ outcomes/skips, elapsed times and cleanup result; retain failed standard-budget
 runs separately. Default CI, production deadlines, unrelated test suites and
 actual performance assertions are unchanged.
 
-### SSH snapshot split gates under load
-
-The same opt-in profile also accepts only `agent-ssh`'s complete
-`tests/test_snapshot_runtime.py` and `tests/test_snapshot_windows_visibility.py`
-files, separately or together:
-
-```bash
-python tools/run-plugin-tests.py agent-ssh --test-profile busy-host-functional \
-  --test-file tests/test_snapshot_runtime.py \
-  --test-file tests/test_snapshot_windows_visibility.py --junit-dir <reports>
-```
-
-Set `AGENT_SSH_WINDOWS_VISIBILITY=1` on native Windows to execute the real
-windowless-parent observer. It requires the active accessible input desktop,
-not a focused window. Without that opt-in/platform, its skips are not native
-visibility evidence.
-
-The functional positives use test-only 30-second optional-peer and 60-second
-contributor envelopes, a 60-second fixture-compilation guard, a 180-second GUI
-observer and 300-second native item guards. The disposable driver invokes the actual payload bootstrap, completed
-SSH/Worktrees runtimes, admission/refusal checks and process-owner primitives;
-it changes only the test's positive-call deadlines, not deployed source.
-The profile keeps the complete selected inventory and the same runner resource
-caps and aggregate bounds described above. No load probe or quiet host is required.
-
-Qualification has separate gates: native functional assertions (including
-zero surfaced windows/focus transitions and refreshed external-state reads),
-strict production-deadline degradation/cleanup controls, and latency evidence.
-The strict controls still require actual `TimeoutExpired` at the original
-5-second optional-peer and 10-second contributor limits; optional-peer resolution
-and execution descendants must both be reaped. An unrelated error or a missing
-PID is not timeout/cleanup evidence. Those controls are never widened by the
-functional driver.
-
-A functional PASS plus strict-control PASS may qualify the bounded functional
-change when explicitly selected as its acceptance contract; neither establishes
-original-budget availability, cold/tail latency or the composed two-second
-target. Keep those unresolved under the existing latency objective
-[#7935](https://github.com/ThomasMichon/copilot-extensions/issues/7935), retain
-failed standard-budget results, and report each gate separately. Production
-5/10-second deadlines, ordinary runs, required CI and fresh review are unchanged.
-
 `tools/promotion_unit_tests/test_client_guardian_resources.py` exercises the real
 client-to-guardian caller boundary with process/native-import value doubles and the actual
 stdin bootstrap. It replaces each admitted executable member after snapshot,
@@ -6220,30 +5862,6 @@ JUnit output retains individual cold/warm samples and visibility counts, not a
 tail-latency or installed-runtime qualification. This does not enroll the
 subprocess packet in required unit-only CI or change runner budgets.
 
-The `prepared_cell_membership` selection in that packet stamps real selected
-cells through the original resolver, publishes the original linked-worktree
-association, then traps interpreter lookup in PowerShell 5.1 and 7. It covers
-current reuse, changed install/payload bytes including restored-size/mtime
-controls, missing namespace/content witnesses, conflicting payload selection,
-wrong registry scope and incomplete older associations under the unchanged
-30-second item and 10-second child bounds. Legacy prepared controls remain
-separate compatibility evidence. These are isolated native membership checks,
-not installed or complete cell-hook qualification.
-The seven actor-free producer/adapter controls in
-`tools/promotion_unit_tests/test_prepared_cell_membership.py` cover fresh
-publication, one-time upgrade without input/Git replay and unchanged-view
-no-op, reuse of the original validated bytes with exactly one resolution,
-older-SDK, opaque-witness and oversized-source fallback using injected owner/filesystem
-boundaries; they belong in unit CI,
-not the native subprocess inventory.
-
-The path-gated `prepared-membership-native.yml` workflow separately requires
-both Windows shells for the selected-cell controls and exercises real stamped
-producer isolation on Linux. The incomplete-association control reaches the
-actual original admission CLI and its caller-watch helper, then verifies the
-one-time prepared-view upgrade. It remains under the same item/child bounds;
-missing native prerequisites are failures in the selected hosted lane.
-
 The `plugin-activation` target runs the shared activation transaction suite.
 Its `tests/test_preservation_processes.py` packet interrupts real transaction
 holders before/after witness publication and during restoration. Worktrees'
@@ -6252,105 +5870,6 @@ integration; `python tools/run-plugin-tests.py agent-procutil --test-file tests/
 --allow-explicit-tiers` covers POSIX FD progress, absolute deadlines, cancellation
 and unverified cleanup. These explicit native packets do not expand required
 unit-only CI, and skips are not native platform qualification.
-
-### Shared-host command safety
-
-The host may contain live work from other sessions or users. A temporary home,
-`USERPROFILE`, `PSMUX_DATA_DIR`, redirected config, Windows Job or POSIX process
-group does **not** prove that an external command targets a private service.
-Jobs/groups contain child lifetime, not IPC to an already-running mux, Docker
-engine, service manager or WSL distribution.
-
-`run-plugin-tests.py` checks test/helper source before dependency preparation
-or collection for literal destructive cleanup, including helpers later started
-with Python `-I`/`-S`. The injected pytest portfolio guard and repository-tool
-conftest also install a Python audit guard before tests execute. It rejects
-server-wide mux shutdown, name/pattern/image-based process termination, global
-signals, shared service/WSL shutdown, container/image pruning and known bulk
-container cleanup. It also rejects real mux commands without a runner-owned
-transport. Neither `--allow-host-state` nor `--allow-explicit-tiers` disables
-command safety.
-
-Supported local launchers retain scope validation through their effective
-environment and working directory, including `env` assignment/unset/reset,
-split-string and directory options. Privilege launchers cannot use inherited
-`TMUX` as scope proof, and local scope does not authorize remote mux commands.
-Shell inspection covers combined command flags such as `bash -lc`, literal
-shell argv bodies and encoded PowerShell bodies in both runtime and source checks.
-Source checks also recognize literal exec/spawn signatures and PowerShell
-termination aliases. Executable lookups (`command -v`/`-V`) remain harmless
-inspection, not commands to execute.
-Recognized shell state changes invalidate inherited environment or relative-directory
-scope evidence; an explicit absolute private transport can still be verified.
-Shell substitutions are inspected as nested command positions. Unresolved
-variable, home or glob expansion in a mux namespace is not private-scope proof;
-literal argument vectors do not undergo shell expansion.
-Quoted data is not a command group; unquoted parentheses and braces are
-inspected as nested command positions. SSH options and destinations are
-separated from the remote command, and explicit local/proxy command options
-are inspected independently.
-The supported `env -S` subset excludes GNU-specific expansions and escape
-sequences that a shell tokenizer cannot safely interpret. Prefer an explicit
-argument vector instead of relying on those additional parsing rules.
-
-For real mux fixtures, use
-`plugin_test_command_safety.private_mux_args(tmp_path)` and pass its exact
-arguments to **every** client and owner-pool operation. On Windows it creates
-a fresh `-L` namespace bound to this runner sandbox; on POSIX it selects a
-private `-S` socket. Only POSIX tmux's documented, sandbox-contained `TMUX`
-socket is accepted as an inherited transport. A different home/data directory
-alone never qualifies Windows routing. An isolated Python fixture owner must
-explicitly install the same command guard and validate the received namespace
-before starting native work.
-
-Cleanup must retire only the fixture's sessions or identity-pinned process
-handles. Do not call `kill-server`, `pkill`, `killall`, `taskkill /IM`,
-`Stop-Process -Name`, `wsl --shutdown`, `systemctl stop/restart`, or container
-pruning from a test. Exact-PID commands are not ownership proof: establish
-birth/handle identity first, refuse changed targets and preserve pre-existing
-processes. Never broaden cleanup after a timeout or failed assertion. Preserve
-evidence and report an unreaped fixture rather than terminating unrelated work.
-Do not install/update the operator's runtimes or rewrite Terminal settings as
-test setup.
-
-These are accident-prevention guards, **not an OS security sandbox**. Source
-checks recognize literal call shapes, not arbitrary generated code; audit
-hooks do not automatically propagate through `-I`/`-S`, native shells or
-third-party processes. A trusted fixture must carry its explicit scope through
-those boundaries. If routing/ownership or child isolation cannot be proved,
-mock the operation or run in a disposable VM/container without live host
-sockets, credentials or work mounted. Do not add an annotation or opt-out to
-execute a global cleanup on a shared host.
-
-Validate refusal with pure command classification, source-only controls and
-harmless executable stand-ins. Never execute the dangerous command as a
-negative control, even when expecting rejection. Native qualification belongs
-on a disposable worker: keep a fixture-owned sentinel in a separate namespace,
-prove it and all pre-existing mux identities survive, and clean up only
-identity-verified fixture resources. A passing pytest result without those
-checks is not proof of host isolation.
-
-The existing optional `installation-context-acceptance.yml` dispatch with
-`interactive_completion=true` qualifies the real mux lifetime fixture on
-disposable Linux and Windows workers, plus the private POSIX pane fixture.
-Windows uses portable PSMux 3.4.0 in runner temp, pinned by archive SHA-256;
-it does not install or register a host service. This lane remains manual and
-outside required unit CI. Do not substitute a shared developer desktop for it.
-The older 3.3.5 fixture can lose a cursor-response wakeup when control requests
-overlap pane creation, blocking even direct Python before its first instruction.
-The fixture pin does not change installed muxes or production compatibility.
-Windows startup controls overlap private mux requests with four detached
-launches, using direct Python and the PowerShell wrapper.
-The original worker-startup deadline, real TTY, owner-death and sentinel
-assertions remain unchanged. A cursor-position response is sent only after a
-startup failure, to diagnose a blocked shell; it never converts that failure
-into a passing qualification.
-
-Manager's source-bound test environment installs its ordinary wheel, preserving
-the declared metadata of its embedded first-party libraries. Other plugin
-test environments remain editable; Manager's separate Bridge test dependency
-also remains editable. The cache distinguishes this preparation mode from
-an older editable Manager environment, without changing runtime installations.
 
 The actor-free `tests/test_resident_configuration.py` selection executes the
 native configuration consumer and qualified owner-report reader with a synthetic
@@ -9817,60 +9336,6 @@ Follow the same contract so it stays safe-by-default and reproducible:
   environment; only *timeouts* may carry internal constants.
 - Assert observable end-state, not exact model output (turns vary).
 - Document the module and its variables in this file.
-
-## Optional native registration inspection
-
-The additive native installer runtime-only seam has focused controls in
-`tests/test_runtime_install_driver.py` and `tests/test_installer_config.py`.
-Select both through `tools/run-plugin-tests.py agent-worktrees` with
-`--allow-explicit-tiers -k runtime_only`. Driver controls preserve the exact
-admitted flag through participant re-entry and reject contradictory arguments
-before bootstrap. Real shell controls retain ordinary existing-config inference,
-skip it on repeated runtime-only selections, and exercise the actual front-door
-parser's pre-admission refusal. These checks do not construct a runtime or
-qualify a fresh native installation; keep that separate disposable-host evidence
-and higher-level caller migration explicit.
-The manual `worktrees-runtime-only` portfolio runs this selection plus the
-existing native driver re-entry and default scaffold controls on Linux and
-Windows. Supply the branch and exact `source_sha`; mandatory native cases
-cannot be missing or skipped. The copied cold-driver payload excludes unrelated
-library test trees and retains the original item and child deadlines. A bounded
-diagnostic snapshot reports its real request state and log without changing
-custody, readiness or settlement.
-
-The `registration-inspection` portfolio in `installation-context-full.yml`
-runs only the focused native registration reader/CLI and incoming bootstrap controls on Linux and
-Windows. Supply the published branch and its exact `source_sha`; both jobs
-verify that commit before testing. The existing bounded runner's process,
-storage and 30/300/900-second item/group/plugin limits are unchanged, and the
-portfolio adds no scheduled or required-unit work.
-
-The same local selection is:
-
-```text
-python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_registration_inspection.py
-python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_incoming_registration_inspection.py --test-file tests/native/test_incoming_registration_inspection_native.py --allow-explicit-tiers
-```
-
-It exercises unique canonical/legacy aliases, preserved exposure/editing mode,
-fresh default and conflict/unknown-source refusals, native installation-cell
-selection and the actual CLI from a neutral directory. Existing repository
-inventory remains a separate old-caller control. Configuration bytes stay
-unchanged; no actual registration, installer, service or authentication provider
-is started. Hosted jobs require both native consumer cases and refuse skipped
-or failed evidence. A separate incoming step requires real cold construction
-and the existing reader with an unusable selected predecessor. Both exposure
-choices, a fresh default, ambiguity and an actually unusable incoming UV tool
-run twice, preserving registry, selector, malformed owner and binding bytes.
-This uses the ordinary
-constructor and owned-child cleanup, not installation or service startup.
-The native test retains its 180-second child and 300-second item limits;
-the original reader packet remains separate. These checks do not qualify
-caller migration or installed-host recovery.
-Two focused controls also supply a deliberately lossy normalizer while retaining
-real distinct directories and native file-identity checks. They reject foreign
-selection and inconsistent roots without provisioning a case-sensitive Windows
-directory or claiming that separate filesystem-mode acceptance.
 
 ## Optional paired-worktree finalization
 

@@ -11,57 +11,14 @@ from pathlib import Path
 from . import codename, config as cfg, git_ops, output, root_chain, tracking
 from .providers import attribution
 
-COMMENT_ORIGIN_PROTOCOL = "agent-worktrees.comment-origin/v1"
-
 
 def add_parsers(sub) -> None:
-    parser = sub.add_parser(
-        "attribution-prepare", allow_abbrev=False,
-        help="Prepare source metadata without provider access",
-    )
+    parser = sub.add_parser("attribution-prepare", help="Prepare a source marker or PR body without provider access")
     parser.add_argument("--body-file", type=Path, help="UTF-8 PR body; omit to emit only the marker")
     parser.add_argument("--tag", help="Optional public adopter tag; no tag is supplied by default")
     parser.add_argument("--omit-source", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--config")
-    parser.add_argument("--comment-origin", action="store_true", help="Emit compact comment-origin JSON, not a PR marker")
-    parser.add_argument("--visibility", choices=("public", "internal"), help="Comment destination visibility (default: public)")
-
-
-def prepare_comment_origin(
-    record: tracking.WorktreeRecord, config: cfg.Config, *, visibility: str = "public",
-) -> dict[str, object]:
-    """Source-owner projection only; not a comment, native receipt or permission."""
-    if visibility not in ("public", "internal"):
-        raise ValueError("unsupported comment destination visibility")
-    settings = config.default_repo.pr
-    mode = settings.source_attribution
-    result: dict[str, object] = {
-        "protocol": COMMENT_ORIGIN_PROTOCOL, "privacy": "anonymous",
-        "origin": None, "effects": "none",
-    }
-    if mode is False:
-        return result
-    if mode is not True and mode != "codename":
-        raise ValueError("source attribution mode is not supported")
-    private = visibility == "internal" and mode is True
-    if (
-        not record.codename or not codename.is_valid_handle(record.codename)
-        or not attribution.may_publish_codename(
-            codename_source=record.codename_source,
-            source_attribution_configured=(
-                settings.source_attribution_configured and (private or mode == "codename")
-            ),
-        )
-    ):
-        raise ValueError("comment source codename provenance is not authorized for publication")
-    origin = {"codename": record.codename}
-    if private:
-        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,255}", record.worktree_id):
-            raise ValueError("comment source worktree stamp is not supported")
-        origin["worktree"] = record.worktree_id
-    result.update(privacy="internal" if private else "public", origin=origin)
-    return result
 
 
 def prepare(body: str, record, config, *, head: str, omit: bool = False, tag: str | None = None) -> dict:
@@ -104,12 +61,6 @@ def prepare(body: str, record, config, *, head: str, omit: bool = False, tag: st
 
 def cmd_attribution_prepare(args: argparse.Namespace) -> int:
     try:
-        comment_origin = getattr(args, "comment_origin", False)
-        visibility = getattr(args, "visibility", None)
-        if comment_origin and (args.body_file or args.tag or args.omit_source):
-            raise ValueError("comment origin cannot compose a PR body, tag or omission override")
-        if not comment_origin and visibility is not None:
-            raise ValueError("visibility requires comment-origin mode")
         config = cfg.load_config(Path(args.config) if args.config else None)
         cwd = Path.cwd()
         worktree_id = tracking.find_worktree_id_by_cwd(str(cwd), project=config.repo_name)
@@ -118,10 +69,6 @@ def cmd_attribution_prepare(args: argparse.Namespace) -> int:
             raise ValueError("run attribution-prepare inside a managed source worktree")
         if not record.worktree_path:
             raise ValueError("managed source worktree has no recorded root")
-        if comment_origin:
-            result = prepare_comment_origin(record, config, visibility=visibility or "public")
-            print(json.dumps(result))
-            return 0
         root = Path(record.worktree_path).resolve()
         body = args.body_file.read_text(encoding="utf-8") if args.body_file else ""
         head = git_ops.git(

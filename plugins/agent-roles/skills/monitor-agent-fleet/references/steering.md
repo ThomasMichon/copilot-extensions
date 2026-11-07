@@ -55,8 +55,6 @@ evidence and decision to its owner/operator rather than alternating commands.
 
 - Answer the target's permission prompts, approve its scope change or merge.
 - Start, stop, restart or replace the target's session or venue.
-- Edit the target's effort, agenda, claims, branch or checkpoint. Correcting
-  an inactive owner's records is the separate
-  [dormant correction](dormant-correction.md) mode with its own grant.
+- Edit the target's effort, agenda, claims, branch or checkpoint.
 - Steer a reviewer's verdict or an author's consent.
 - Treat a steer, acknowledgement or successful send as completion evidence.

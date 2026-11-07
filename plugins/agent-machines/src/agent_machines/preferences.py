@@ -77,8 +77,7 @@ def decode(raw: bytes) -> dict:
     return value
 
 
-def read_snapshot(path: Path, *, optional=False, local=False, validator=None) -> tuple[dict | None, str | None]:
-    """Bind validated values to the exact bytes read, not a second file read."""
+def read(path: Path, *, optional=False, local=False, validator=None) -> dict | None:
     descriptor = None
     try:
         before = path.lstat()
@@ -105,20 +104,16 @@ def read_snapshot(path: Path, *, optional=False, local=False, validator=None) ->
         if (opened.st_size, opened.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
             raise PreferenceError("input-changed")
         check = validator or (validate_local if local else validate)
-        return check(decode(raw)), hashlib.sha256(raw).hexdigest()
+        return check(decode(raw))
     except FileNotFoundError as error:
         if optional:
-            return None, None
+            return None
         raise PreferenceError("input-unavailable") from error
     except OSError as error:
         raise PreferenceError("input-unavailable") from error
     finally:
         if descriptor is not None:
             os.close(descriptor)
-
-
-def read(path: Path, *, optional=False, local=False, validator=None) -> dict | None:
-    return read_snapshot(path, optional=optional, local=local, validator=validator)[0]
 
 
 def _domains(value, *, local=False) -> int:

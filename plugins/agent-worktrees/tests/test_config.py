@@ -2708,7 +2708,7 @@ class TestDetectMachine:
 
 def test_adoption_defaults_resolved_from_registries(monkeypatch):
     """default_branch from repos.yaml, base_repo from projects.yaml."""
-    from agent_worktrees import projects_registry
+    from agent_worktrees import installer
     from agent_worktrees import repos as repos_mod
 
     entry = repos_mod.RepoEntry(
@@ -2720,8 +2720,8 @@ def test_adoption_defaults_resolved_from_registries(monkeypatch):
         lambda: repos_mod.ReposRegistry(repos={"proj": entry}),
     )
     monkeypatch.setattr(
-        projects_registry, "read_projects_registry",
-        lambda *_: {"projects": {"proj": {"base_repo": True}}},
+        installer, "read_projects_registry",
+        lambda: {"projects": {"proj": {"base_repo": True}}},
     )
     out = cfg._resolve_adoption_defaults_from_registry("proj", "linux")
     assert out == {"default_branch": "main", "base_repo": True}
@@ -2770,7 +2770,7 @@ def test_load_config_fills_branch_and_base_repo_from_registry(
 ):
     """A minimal overlay (no anchor/branch/base_repo) still resolves them from
     the registries -- so restating them in the overlay is redundant."""
-    from agent_worktrees import projects_registry
+    from agent_worktrees import installer
     from agent_worktrees import repos as repos_mod
 
     anchor = tmp_path / "proj"
@@ -2784,8 +2784,8 @@ def test_load_config_fills_branch_and_base_repo_from_registry(
         lambda: repos_mod.ReposRegistry(repos={"proj": entry}),
     )
     monkeypatch.setattr(
-        projects_registry, "read_projects_registry",
-        lambda *_: {"projects": {"proj": {"base_repo": True}}},
+        installer, "read_projects_registry",
+        lambda: {"projects": {"proj": {"base_repo": True}}},
     )
     monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
 
@@ -2805,7 +2805,7 @@ def test_overlay_branch_overrides_registry_fallback(
     tmp_path: Path, monkeypatch
 ):
     """An explicit overlay default_branch still wins over the registry."""
-    from agent_worktrees import projects_registry
+    from agent_worktrees import installer
     from agent_worktrees import repos as repos_mod
 
     anchor = tmp_path / "proj"
@@ -2819,7 +2819,7 @@ def test_overlay_branch_overrides_registry_fallback(
         lambda: repos_mod.ReposRegistry(repos={"proj": entry}),
     )
     monkeypatch.setattr(
-        projects_registry, "read_projects_registry", lambda *_: {"projects": {}},
+        installer, "read_projects_registry", lambda: {"projects": {}},
     )
     monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
 
@@ -3209,7 +3209,7 @@ def test_config_report_copied_context_does_not_share_collectors_between_threads(
 @pytest.mark.parametrize("mode", ["owner", "failure", "replacement", "projects-failure"])
 def test_registered_config_helpers_preserve_owner_calls_and_independent_defaults(tmp_path, monkeypatch, mode):
     from agent_worktrees import config_acquisition as acquisition
-    from agent_worktrees import projects_registry, repos_registry_reader
+    from agent_worktrees import installer, repos_registry_reader
     from agent_worktrees import repos as repos_mod
 
     path = tmp_path / "repos.yaml"
@@ -3226,14 +3226,14 @@ def test_registered_config_helpers_preserve_owner_calls_and_independent_defaults
             )})
         return repos_registry_reader.read_registry(path)
 
-    def projects(_path):
+    def projects():
         calls.append("projects")
         if mode == "projects-failure":
             raise ValueError("synthetic private projects failure")
         return {"projects": {"sample": {"default_branch": "fallback", "base_repo": True}}}
 
     monkeypatch.setattr(repos_mod, "read_registry", registered)
-    monkeypatch.setattr(projects_registry, "read_projects_registry", projects)
+    monkeypatch.setattr(installer, "read_projects_registry", projects)
     with acquisition.capture_config_observations() as observations:
         anchor = cfg._resolve_anchor_from_registry("sample", "linux")
         defaults = cfg._resolve_adoption_defaults_from_registry("sample", "linux")
@@ -3278,7 +3278,6 @@ def projects_acquisition_sources(tmp_path, monkeypatch):
 
     monkeypatch.setattr(repos_mod, "read_registry", registered)
     monkeypatch.setattr(installer, "projects_yaml_path", lambda: projects)
-    monkeypatch.setattr(cfg, "install_dir", lambda: tmp_path)
     monkeypatch.setattr(cfg, "_load_inrepo_config", lambda *a, **k: {
         "default_branch": "inrepo", "base_repo": True,
     })
@@ -3395,7 +3394,7 @@ def test_projects_acquisition_replacements_keep_value_identity_but_not_coverage(
     machine, projects, calls, options = projects_acquisition_sources
     value = {"projects": {"sample": {"default_branch": "fallback", "base_repo": True}}}
     projects.write_text("schema_version: 2\nprojects: {}\n", encoding="utf-8")
-    original = projects_registry.parse_projects_registry if replacement.startswith("parser") else projects_registry.read_projects_registry
+    original = projects_registry.parse_projects_registry if replacement.startswith("parser") else installer.read_projects_registry
 
     def provider(*args, **kwargs):
         calls.append("projects-replacement")
@@ -3406,7 +3405,7 @@ def test_projects_acquisition_replacements_keep_value_identity_but_not_coverage(
     if replacement.startswith("parser"):
         monkeypatch.setattr(projects_registry, "parse_projects_registry", provider)
     else:
-        monkeypatch.setattr(projects_registry, "read_projects_registry", provider)
+        monkeypatch.setattr(installer, "read_projects_registry", provider)
     assert installer.read_projects_registry() is value
     calls.clear()
     defaults = cfg._resolve_adoption_defaults_from_registry("sample", "windows")

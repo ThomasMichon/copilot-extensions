@@ -219,7 +219,7 @@ Supported built-in command groups:
 
 | Area | Commands |
 |------|----------|
-| Entries | `get`, `batch-get`, `has`, `search`, `list`/`ls`, `show`, `add`, `set-password`, `set-username`, `remove`/`rm`, `move`/`mv` |
+| Entries | `get`, `has`, `search`, `list`/`ls`, `show`, `add`, `set-password`, `set-username`, `remove`/`rm`, `move`/`mv` |
 | SSH keys | `import-key`, `export-key`, `ssh-key prepare --entry SSH/node-a`, `ssh-key install --entry SSH/node-a --directory <absolute-path>` |
 | Service | `ping`, `start`, `stop`, `lock`, `unlock` (`--terminal`/`--here`) |
 | Config | `which`, `vault list`, `vault add`, `vault set-default`, `vault remove` |
@@ -227,56 +227,6 @@ Supported built-in command groups:
 | Persistent cache | `cache-populate`, `cache-status`, `cache-clear`, `cache-verify` |
 | Envelope KEK | `seal`, `unseal`, `kek-list` |
 | Shared owner key | `identity-key context --json`, `identity-key setup --entry Identity/PR-attribution` |
-
-## Batch reads
-
-`agent-vault batch-get` reads an array of entry/field objects from JSON stdin
-in one CLI process:
-
-```bash
-printf '%s\n' '[{"entry":"Example/service","field":"username"},{"entry":"Example/service"}]' |
-  agent-vault batch-get
-```
-
-`entry` must be a nonempty string; omitted `field` means `password`. Unknown
-properties, duplicate JSON object keys, non-finite numbers and malformed
-requests fail before any credential read. The output is `{"results":[...]}`,
-with one record per request in the original order, including duplicates.
-Successful records have exactly `entry`, `field`, `value`, `ok: true` and
-`source`. Values remain strings, including empty or multiline values; JSON
-escaping does not change them. `source` is `cache` or `service`. Failed records
-have `ok: false`, `value: null`, an error string and the attempted source
-(`cache`, `service` or `none`).
-Protected-cache failures are sanitized per item without service fallback,
-cache replacement or key regeneration. Later requests are still represented;
-the legacy single `get` protection behavior is unchanged.
-
-Exit status is `0` when every request succeeds (also for an empty array), `2`
-for a mixture of successes and failures, and `1` when every request fails.
-Invalid input also returns `1`, with stderr diagnostics and no results output.
-Callers must decide whether to accept any values from a partial result.
-Credential values are written only to the requested results stream, not to
-diagnostic output.
-
-Reads reuse ordinary `get` context selection, cache and service transports.
-`--refresh` bypasses cached values and retains authoritative cache
-reconciliation; a reconciliation failure is not a successful result. Batch
-reads never enable interactive prompts. Use the existing explicit unlock
-command if required. One credential CLI process handles the batch without
-per-entry credential CLI children or a new daemon protocol. Existing context
-qualification and transport discovery may still invoke their ordinary peer
-helpers; this is not a daemon-native batch or a claim of one total OS process.
-Callers may impose one deadline on the whole invocation and its descendants.
-
-The selected runtime advertises `batch-get-v1` through the existing
-`agent-vault invocation-contract --json` contract. Check that runtime's
-capability before migrating a caller; a newer payload or package version
-does not prove support. A cold unprepared runtime reports no capabilities,
-and older receivers may not support the metadata query itself. Missing
-support blocks only the new operation: existing `get` syntax remains usable.
-Provider rollout precedes consumer migration; rollback must restore a
-supported baseline or report the unsupported batch requirement without
-guessing, silently issuing separate reads or retrying effectful calls.
 
 ## SSH key preparation and protected installation
 
@@ -467,7 +417,7 @@ diagnostics or plaintext artifacts.
 - Credential reads fail fast by default when locked: they return an actionable error instead of hanging on a hidden prompt. Use `agent-vault unlock`, `agent-vault unlock --terminal`, or `agent-vault get --prompt ...` when you want an interactive prompt.
 - Unlock-source extensions run before prompts, so a configured provider can satisfy locked reads without UI.
 - The CLI cold-starts the daemon when needed. The installer also deploys platform supervision: a Windows Scheduled Task named `AgentVault`, or a Linux/WSL systemd user unit named `agent-vault.service` when systemd is available.
-- Windows updates start the incoming generation independently; the old build preferably settles work and retires itself. A bounded, ownership-checked central retirement handles stuck predecessors, but live credential children retain writer exclusion. Compatible private auth handoff preserves unexpired unlocked state without resetting its lifetime. See [runtime replacement](docs/runtime-replacement.md) for the contract, readiness distinction and remaining POSIX/systemd migration.
+- Windows updates start the incoming generation independently; the old build settles its work and retires itself. Compatible private auth handoff preserves unexpired unlocked state without resetting its lifetime. See [runtime replacement](docs/runtime-replacement.md) for the contract, readiness distinction and remaining POSIX/systemd migration.
 - There is **no** `agent-vault doctor` subcommand today. Use `agent-vault ping`, `agent-vault which`, `agent-vault cache-status`, and the installer `status` action for troubleshooting.
 
 ## Persistent cache and sealed values

@@ -144,21 +144,33 @@ async def test_retained_command_is_used_for_qualification_and_later_lineage(
 @pytest.mark.parametrize("changed", ["creation_nonce", "identity", "worktree_path", "project"])
 @pytest.mark.parametrize("command", ["register-session", "bind-session", "link-succession"])
 def test_retained_session_receiver_refuses_changed_scope_without_resident_fallback(
-    tmp_path, changed, command,
+    tmp_path, monkeypatch, changed, command,
 ):
+    from agent_procutil import direct_python
+
     root = Path(__file__).resolve().parents[3]
+    monkeypatch.syspath_prepend(str(root / "plugins/agent-worktrees/src"))
+    for library in ("lazy-cli-dispatch", "work-coalescing-singleton", "update-telemetry"):
+        monkeypatch.syspath_prepend(str(root / "libs" / library / "src"))
+    from agent_worktrees import tracking
+
     state = tmp_path / "authority"
     state.mkdir()
     identity = {"installation_root": str(state / "owner"), "runtime_generation": "a" * 32}
     (state / "writer-identity.json").write_text(json.dumps(identity), encoding="utf-8")
+    interpreter, interpreter_env = direct_python(sys.executable)
+    for key, value in interpreter_env.items():
+        monkeypatch.setenv(key, value)
     prefix = [
-        sys.executable, str(root / "plugins/agent-worktrees/tests/fixtures/worktree_record_owner.py"),
+        interpreter, str(root / "plugins/agent-worktrees/tests/fixtures/worktree_record_owner.py"),
         str(root), str(state), "example", "host",
     ]
     snapshot(prefix, "protect")
-    before = snapshot(prefix)
+    record_path = state / "project" / "worktrees" / "host.yaml"
+    before = record_path.read_bytes()
     scope = {
-        "version": 1, "identity": identity, "creation_nonce": before["creation_nonce"],
+        "version": 1, "identity": identity,
+        "creation_nonce": tracking.load_record(record_path).creation_nonce,
         "worktree_id": "host", "project": "example",
         "worktree_path": str(state / "trees" / "host"),
     }
@@ -175,5 +187,5 @@ def test_retained_session_receiver_refuses_changed_scope_without_resident_fallba
         capture_output=True, text=True, timeout=15, **no_window_kwargs(),
     )
     assert result.returncode == 1, result.stdout + result.stderr
-    assert snapshot(prefix) == before
+    assert record_path.read_bytes() == before
     assert not (state / "resident-calls").exists()

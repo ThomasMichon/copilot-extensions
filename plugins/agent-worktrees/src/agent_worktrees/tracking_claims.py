@@ -111,7 +111,7 @@ def parse_claim_ref(ref: str) -> ClaimRef | None:
 #: ``expected_kinds`` restriction.
 CLAIM_KINDS: frozenset[str] = frozenset({
     "worktree", "session", "codespace", "container", "task", "bridge",
-    "ssh", "effort", "workdir", "pr", "bug", "issue", "derived",
+    "ssh", "effort", "workdir", "pr", "bug", "issue",
 })
 
 #: The PR-like subset of :data:`CLAIM_KINDS` (mirrors
@@ -715,11 +715,6 @@ def sweep_abandoned_obligations(
     reclaimed: list[ResourceClaim] = []
     for claim in record.resources:
         if claim.has_producer:
-            continue
-        # A derived claim is settled only by its owner, one path at a time
-        # (`claims settle <path> --reclaim` or `claims release <path>`); a
-        # sweep must never reclaim one, even with a gone+safe verdict.
-        if claim.kind == "derived":
             continue
         if not claim.is_unsettled or claim_handoff_reservation(record, claim):
             continue

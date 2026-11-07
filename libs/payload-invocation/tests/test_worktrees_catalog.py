@@ -1,6 +1,5 @@
 """Contract tests for the agent-worktrees payload command catalog."""
 from __future__ import annotations
-from typing import Any, cast
 
 import json
 import os
@@ -17,10 +16,10 @@ REPO = Path(__file__).resolve().parents[3]
 PLUGIN = REPO / "plugins" / "agent-worktrees"
 
 
-def _catalog(context: str) -> dict[str, Any]:
+def _catalog(context: str) -> dict:
     match = re.search(r"```json\n(.*)\n```", context)
     assert match
-    return cast(dict[str, Any], json.loads(match.group(1)))
+    return json.loads(match.group(1))
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX catalog test")

@@ -202,17 +202,22 @@ another authorized avenue progresses. Explicit all-work holds remain binding.
 
 - Fill **Context** (background + sourced issues/plans), **Plan** (phased,
   checklisted), and **Validation Plan**.
-- **Keep the README a lean map (budget ~40 KB);** agents re-enter it after every
-  new context window, resumption and merge. One-line Plan items (state, summary,
-  link); journal PR-by-PR history instead of growing a checkbox. Extract a large
-  phase body to a sibling `<effort-folder>/<phase>.md` read only when working
-  that phase. Link out *and* back; no orphan sub-docs.
-- **Journal in dated files early.** Once the inline Journal passes ~100 lines,
-  move entries to `<effort-folder>/journal/<YYYY>/MM.DD <title>.md` (one per day
-  or notable entry) and keep the README Journal section a **thin chronological
-  index** linking them newest-first. Link out *and* back; no orphan entries.
-- **Never prescribe whole-tree re-reads** in a plan step ("read the entire parent
-  effort"); name the sections or sub-docs the step needs.
+- **Decompose large phases/slices into linked sub-docs.** The README is loaded
+  whole every time an agent resumes the effort, so keep it a navigable map. When a
+  phase or slice grows a big self-contained body — a detailed sub-plan, deep design
+  notes, its own validation matrix — extract it to a sibling sub-doc
+  (`<effort-folder>/<phase>.md`) and leave the Plan a checklist item with a
+  one-line summary and a link. The agent reads the sub-doc **only when working that
+  phase**, cutting upfront context (the trade is an extra read on demand). Link out
+  *and* back; no orphan sub-docs. This is the same *decompose-liberally* bias docs
+  and visions follow.
+- **Split a large journal by date.** The Journal is append-only — the one section
+  that grows without bound. When it (inline or an extracted `journal.md`) nears the
+  ~800-line soft cap, break it into dated files
+  `<effort-folder>/journal/<YYYY>/MM.DD <title>.md` (one per day / notable
+  entry, mirroring the archive's date scheme) and keep `journal.md` (or the README
+  Journal section) as a **thin chronological index** linking them newest-first. Link
+  out *and* back; no orphan entries.
 - **Be validation-driven:** every effort carries an implementation plan *and* a
   validation/test plan. An effort may *start* as a pure reproduction — a
   failing validation captured first, fix to follow.
@@ -407,16 +412,13 @@ change that realizes it.
 
 ## Resume an effort
 
-1. Pull latest, then run [`scripts/effort_digest.py`](scripts/effort_digest.py)
-   `<effort-folder> [--since <last-read rev>]` (outline with line ranges, open
-   Plan/Validation items, latest journal entries, changed sections) and read only
-   the ranges you need. The prose stays authoritative; the digest says where to
-   look. A small README may be read whole.
+1. Pull latest so the Journal is current, then **read the README** — Status,
+   Plan checklists, Blockers, and the latest Journal entries.
 2. When agent-worktrees is available, inspect
    `<agent-worktrees catalog argv[0]> effort-focus show --json` and bind this
    effort/slice if it is not already the worktree's active focus.
-3. Pick up from the last incomplete checklist item / Journal entry. The effort
-   is self-contained by design — a fresh agent session resumes from its files.
+3. Pick up from the last incomplete checklist item / Journal entry. The README
+   is self-contained by design — a fresh agent session resumes from the file.
    Read applicable Scope Approvals and later holds/changes before effects;
    preserve their original evidence and bounds in the current-owner checkpoint.
 4. For multi-participant work, dispatch via the bound executor (the addendum

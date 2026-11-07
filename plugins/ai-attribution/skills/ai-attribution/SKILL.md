@@ -69,13 +69,6 @@ schema and optional pre-approval draft helper are documented in
 `../../docs/signature-profiles.md`. Never decorate after approval or infer human
 review from a template: `{review_status}` requires the actual exact-draft fact.
 
-For an adopter using compact comment identity, the optional
-[comment preparer](../../docs/comment-preparation.md) composes that same
-profile with supplied source data and retained public comment/write GUIDs.
-Use it before approval, not as a second decorator on an approved/tagged body.
-It does not allocate IDs, prove native attribution or adopt a publisher;
-missing required identity/support stays an explicit pre-effect gap.
-
 - Disclosure turns on **who this specific contribution addresses, not on who
   owns the repository.** Two narrow cases may omit disclosure by default:
   a self-authored PR/issue (no other party's content exists there yet), and

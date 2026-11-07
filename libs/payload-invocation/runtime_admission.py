@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import ast
-from collections.abc import Iterator
 import json
 from pathlib import Path
 import stat
@@ -39,7 +38,7 @@ def _ordinary(path: Path, root: Path) -> None:
         raise ValueError(f"toolkit source is not a file: {path}")
 
 
-def _sources(directory: Path) -> Iterator[Path]:
+def _sources(directory: Path):
     for path in sorted(directory.rglob("*")):
         if (
             any(part in _IGNORED for part in path.relative_to(directory).parts)
@@ -50,7 +49,7 @@ def _sources(directory: Path) -> Iterator[Path]:
             yield path
 
 
-def _imports(name: str, path: Path, content: str) -> Iterator[str]:
+def _imports(name: str, path: Path, content: str):
     for node in ast.walk(ast.parse(content, filename=str(path))):
         if isinstance(node, ast.Import):
             yield from (alias.name for alias in node.names)
@@ -79,7 +78,7 @@ def expected_files(repo: Path) -> dict[Path, str | bytes]:
         library / "src" if (library / "src").is_dir() else library
         for library in sorted((repo / "libs").iterdir()) if library.is_dir()
     )
-    modules: dict[str, tuple[Path, Path]] = {}
+    modules = {}
     contents: dict[Path, str | bytes] = {}
     for root in roots:
         for path in _sources(root):
@@ -89,10 +88,9 @@ def expected_files(repo: Path) -> dict[Path, str | bytes]:
             if name.endswith(".__init__"):
                 name = name.removesuffix(".__init__")
             modules.setdefault(name, (path, root))
-    selected: dict[str, Path] = {}
-    selected_roots: set[Path] = set()
+    selected, selected_roots = {}, set()
     pending = list(ENTRY_MODULES)
-    expanded_libraries: set[Path] = set()
+    expanded_libraries = set()
     known_names = {name.split(".")[0] for name in modules}
     while pending:
         name = pending.pop()
@@ -151,7 +149,7 @@ import json
 import sys
 
 
-def activate() -> None:
+def activate():
     """Make only this self-contained toolkit's first-party owners importable.
 
     Call in the installation authority's admitted tooling interpreter, never in

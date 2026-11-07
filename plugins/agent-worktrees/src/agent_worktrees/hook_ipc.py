@@ -19,7 +19,6 @@ _RECENT_HOOK_DEMAND_S = 120.0
 READ_DEMAND_CAPABILITY = "read-hook-demand-v1"
 NATIVE_MUTATION_CAPABILITY = "native-hook-mutation-v1"
 NATIVE_BATCH_MUTATION_CAPABILITY = "native-hook-batch-mutation-v1"
-SHELL_MUTATION_CAPABILITY = "shell-hook-mutation-v1"
 _CAPABILITIES = [
     "session-lifecycle-v1", "session-start-source-v1", "session-end-source-v1",
 ]
@@ -95,7 +94,7 @@ class _Handler(socketserver.StreamRequestHandler):
                 if owner is not None and len(raw) <= 2048 and raw.endswith(b"\n"):
                     owner._on_read_demand(request)
                 return
-            if kind in {"nativeToolMutation", "nativeToolBatchMutation", "shellToolMutation"}:
+            if kind in {"nativeToolMutation", "nativeToolBatchMutation"}:
                 owner = self.server.owner
                 if owner is not None and len(raw) <= 65536 and raw.endswith(b"\n"):
                     owner._on_native_mutation(request)
@@ -192,7 +191,7 @@ class HookIpcServer:
             *_CAPABILITIES,
             *([READ_DEMAND_CAPABILITY] if self._read_demand_admitted is not None else []),
             *(
-                [NATIVE_MUTATION_CAPABILITY, NATIVE_BATCH_MUTATION_CAPABILITY, SHELL_MUTATION_CAPABILITY]
+                [NATIVE_MUTATION_CAPABILITY, NATIVE_BATCH_MUTATION_CAPABILITY]
                 if self._native_mutation_decide is not None else []
             ),
         ]

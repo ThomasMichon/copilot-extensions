@@ -4,8 +4,7 @@ description: >-
   Charters the sustained fleet-monitor ("task master") role: audits whether
   assigned agents are advancing their root goals, reconstructs purpose and time
   allocation from bounded history, diagnoses misdirections, and sends
-  separately authorized, deduplicated corrective steers. Under its own grant,
-  corrects the persisted charters of dormant workspaces. Defaults to a finite
+  separately authorized, deduplicated corrective steers. Defaults to a finite
   read-only sweep. Not generic status reporting, task-queue dispatch, code
   review, machine maintenance or permission to control workers.
   Trigger phrases include:
@@ -15,7 +14,6 @@ description: >-
   - 'agents going in circles'
   - 'watch agent progress'
   - 'steer struggling agents'
-  - 'correct dormant worktree charters'
 ---
 
 # Monitor Agent Fleet (Sustained Role)
@@ -55,11 +53,6 @@ permission prompts, alter reviewer verdicts, repair services, deploy guidance
 or reserve shared resources as part of observation. A status command that
 self-heals or resumes a service is not a read-only reader.
 
-Correcting an inactive owner's persisted charter is a separate **dormant
-correction** mode with its own grant; follow
-[dormant correction](references/dormant-correction.md). It never messages a
-worker, and steering never edits a worker's records.
-
 ## 2. Freeze a roster and reconstruct purpose
 
 Use supplied topology and workspace/session readers, not machine-name guesses,
@@ -71,15 +64,6 @@ Capture source and observation time. Distinguish running, live-idle, explicitly
 held, terminal and unknown. Include live-idle owners with outstanding assigned
 work. Deduplicate paired worktrees, represented sessions and subordinate agents;
 retain the root worktree/head and relevant predecessor chain.
-
-A recurring watch whose charter targets the fleet, rather than a fixed list,
-**re-resolves its roster at the start of every cycle** from the topology
-manifest and the transport's read-only readiness check. Add a newly declared,
-ready machine. Retire one removed from the manifest, keeping its history and
-any outstanding steer record. Keep a declared but unready machine as a coverage
-gap rather than dropping it. Record the roster source and changes in the cycle
-log, then hold that roster for the rest of the cycle. Readiness failures never
-authorize provisioning, connecting or repairing a venue.
 
 For each owner, read only its applicable charter, original operator requests,
 canonical effort plan/validation, current agenda position and latest substantive
@@ -148,19 +132,9 @@ source, selector, hypothesis, environment and result. Do not lower a required
 test/review bar, approve a scope expansion, or label all prerequisite work waste.
 Keep broader tooling proposals separate from the worker's immediate next step.
 
-For each agent, apply the [watchdog checks](references/watchdog-checks.md):
-open questions with their default and revisit time, open obligations,
-prerequisite growth, self-raised budgets, validation weight, delivery state
-against the root, handoff fidelity and supersession. **Classify every wait as
-required, productive or waste**; only waste warrants a steer. A merge is not
-done when the root needs live behavior, and a timeout increase is not a fix
-until the work itself was measured.
-
 ## 5. Report, or steer within explicit authority
 
 In read-only mode, return recommendations and **messages sent: none**.
-In dormant correction mode, the intervention is an owner-written record
-correction with a pre-write liveness recheck and readback, never a message.
 For each proposed steer give the evidence, root criterion, changed strategy,
 expected result and preserved constraints. A useful steer asks for the next
 discriminating experiment or return to the parent, not "try harder" or
@@ -182,16 +156,6 @@ another message useful. If disputed, return the evidence and decision to the
 existing owner/operator; do not alternate commands between competing
 supervisors.
 
-Steer directly when the correction preserves the root and its constraints.
-Escalate to the operator only for an objective change, new access or spend, a
-destructive or deployment effect, conflicting operator instructions or an
-unsettled handoff deviation, or when a delivered steer stalls past its
-revisit time: report once with evidence, a recommended decision and its default. **The
-watchdog never asks a blocking question**; when unsure, take the least
-intrusive reversible option within the charter and record the judgment. For
-reviewer agents, defer loop rules to `review-pull-requests`' throughput and
-loop discipline rather than restating them.
-
 ## 6. Make supervision cheaper than the work it saves
 
 Start with compact status and last meaningful delta; reread deep history only
@@ -199,10 +163,8 @@ for a new target, a significant change, a suspected loop or missing context.
 Consume incremental ranges without changing another reader's cursor.
 
 For an assigned recurring watch, use the existing scheduler/event mechanism.
-Prefer expected completion/review events; choose the charter's active and
-parked cadences, not per-agent minute pollers, and observe early on the
-watchdog checks' early triggers. Each cycle begins with the roster refresh
-above. Healthy agents get one log line, not a message. Preserve an explicit next observation and reason,
+Prefer expected completion/review events; choose the charter's cadence, not
+per-agent minute pollers. Preserve an explicit next observation and reason,
 batch unchanged waits, and stop the owned watch when its assignment ends.
 No daemon, cron entry, automatic joining, or background service is supplied.
 

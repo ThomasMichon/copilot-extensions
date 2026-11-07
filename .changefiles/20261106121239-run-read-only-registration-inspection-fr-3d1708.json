@@ -1,9 +1,0 @@
-{
-  "comment": "Run read-only registration inspection from canonically constructed incoming code without changing the selected runtime.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

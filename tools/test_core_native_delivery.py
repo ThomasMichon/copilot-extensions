@@ -205,52 +205,6 @@ def test_core_delivery_composes_existing_profile_and_transport_owners(delivery):
     assert result["profile_sha256"].startswith("sha256:")
 
 
-def test_source_bound_delivery_keeps_manager_in_a_separate_environment(tmp_path, monkeypatch, request):
-    import test_core_python_artifacts as fixtures
-    from runtime_profile_delivery import retain_profile_delivery
-
-    original_fixture, original_wheel = fixtures._fixture, fixtures._wheel_bytes
-
-    def fixture(root):
-        source = original_fixture(root)
-        project = root / "plugins" / "manager-fixture"
-        package = project / "src" / "copilot_extensions_worktree_manager"
-        package.mkdir(parents=True)
-        (package / "__init__.py").write_bytes(b"VALUE = 1\n")
-        embedded = project / "src" / "shared_core"
-        embedded.mkdir()
-        (embedded / "__init__.py").write_bytes(b"VALUE = 1\n")
-        (project / "pyproject.toml").write_text(
-            '[build-system]\nrequires = ["setuptools>=68"]\nbuild-backend = "setuptools.build_meta"\n'
-            '[project]\nname = "copilot-extensions-worktree-manager"\nversion = "1.0"\n'
-            '[tool.setuptools.packages.find]\nwhere = ["src"]\n',
-        )
-        return source
-
-    def wheel(name, version, **options):
-        if name == "copilot_extensions_worktree_manager":
-            options["members"]["shared_core/__init__.py"] = b"VALUE = 1\n"
-        return original_wheel(name, version, **options)
-
-    monkeypatch.setattr(fixtures, "_fixture", fixture)
-    monkeypatch.setattr(fixtures, "_wheel_bytes", wheel)
-    producer, arguments, _calls = delivery.__wrapped__(tmp_path, monkeypatch, request)
-    with pytest.raises(ProfileError, match="ownership collision"):
-        producer._build_from_snapshot(**arguments)
-    assert not arguments["destination"].exists()
-    result = producer._build_from_snapshot(**(arguments | {"layout": "manager-isolated"}))
-    with zipfile.ZipFile(arguments["destination"]) as archive:
-        profile = json.loads(archive.read("profile.json"))
-    with retain_profile_delivery(
-        profile, arguments["destination"], delivery_sha256=result["sha256"],
-        max_bytes=4 << 20, max_files=1000, max_snapshot_bytes=32 << 20,
-        deadline=time.monotonic() + 60,
-    ) as retained:
-        assert retained.layout == "manager-isolated"
-        assert set(retained.environments) == {"shared", "manager"}
-        assert len(retained.wheels.paths) == len(json.loads(arguments["manifest_data"])["wheels"])
-
-
 @pytest.mark.parametrize("delivery", ["many-members"], indirect=True)
 def test_core_delivery_accepts_wheels_with_more_members_than_material_limit(delivery):
     producer, arguments, _calls = delivery

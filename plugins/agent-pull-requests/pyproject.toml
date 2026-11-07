@@ -44,7 +44,6 @@ fleet = ["fleet-manager[service-gateway]>=0.1.0.dev1"]
 dev = [
     "pytest>=9.1.1",
     "agent-pull-requests[fleet]",
-    "pyyaml>=6.0.3",
 ]
 
 [project.scripts]

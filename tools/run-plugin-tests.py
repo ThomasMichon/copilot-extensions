@@ -54,6 +54,7 @@ import subprocess
 import sys
 import tempfile as tempfile  # Preserve the cleanup adapter used by runner contracts.
 import time
+import tomllib
 from collections.abc import Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
@@ -63,8 +64,7 @@ from codespaces_test_profile import validate_profile
 from seasoned_uv import run_uv_install
 from standalone_consumers import standalone_build_resources
 from plugin_test_cache import (
-    clear_cache_contents, dependency_fingerprint, has_dev_extra,
-    ordinary_cache_root, source_resolution_arguments,
+    clear_cache_contents, dependency_fingerprint, ordinary_cache_root, source_resolution_arguments,
 )
 from plugin_test_resources import record_owner, run_prefix, runs_root, venv_root
 # Preserve the runner's existing public map as an explicit re-export.
@@ -72,10 +72,6 @@ from plugin_test_selection import EXTERNAL_TEST_ROOTS as EXTERNAL_TEST_ROOTS
 from plugin_test_selection import SOURCE_ONLY_TEST_TARGETS
 from plugin_test_selection import (
     TestSelection, load_selection, resolve_plugin_root, validate_test_file,
-    _CODESPACES_NATIVE_FILE as _CODESPACES_NATIVE_FILE,
-    _CODESPACES_WINDOWS_PARTITIONS as _CODESPACES_WINDOWS_PARTITIONS,
-    _BRIDGE_HISTORICAL_FILE as _BRIDGE_HISTORICAL_FILE,
-    plan_test_groups as _plan_test_groups,
 )
 from plugin_test_containment import (
     ContainmentError,
@@ -86,7 +82,6 @@ from plugin_test_containment import (
     partition,
     run_contained,
 )
-from plugin_test_command_safety import UnsafeTestCommand, check_test_sources
 
 REPO = Path(__file__).resolve().parents[1]
 PLUGINS = REPO / "plugins"
@@ -214,7 +209,15 @@ def _has_pyproject(name: str) -> bool:
 
 
 def _has_dev_extra(name: str) -> bool:
-    return has_dev_extra(_plugin_dir(name))
+    pyproject = _plugin_dir(name) / "pyproject.toml"
+    if not pyproject.is_file():
+        return False
+    try:
+        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return False
+    extras = data.get("project", {}).get("optional-dependencies", {})
+    return "dev" in extras
 
 
 def all_plugins_with_suites() -> list[str]:
@@ -295,23 +298,6 @@ def _dep_fingerprint(name: str) -> str:
 
 
 def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
-    """Detach build children before preparation, not only before pytest."""
-    retained = _venv_root()
-    with _TestSandbox(prefix="ce-prep-", dir=runs_root(REPO)) as private:
-        record_owner(Path(private), REPO, retention="disposable after verified preparation cleanup")
-        from plugin_test_environment import preparation_environment
-
-        environment = preparation_environment(os.environ, Path(private), _plugin_dir(name), uv=uv)
-        cache = retained / ".uv-cache"
-        cache.mkdir(parents=True, exist_ok=True)
-        environment["UV_CACHE_DIR"] = str(cache.resolve())
-        interpreters = retained / ".python"
-        interpreters.mkdir(parents=True, exist_ok=True)
-        environment["UV_PYTHON_INSTALL_DIR"] = str(interpreters.resolve())
-        return _prepare_venv(name, uv, reinstall=reinstall, environment=environment)
-
-
-def _prepare_venv(name: str, uv: str, *, reinstall: bool, environment: dict[str, str]) -> Path:
     """Prepare the cached venv and return its Python interpreter.
 
     The caller must establish the environment directory and hold its
@@ -342,7 +328,7 @@ def _prepare_venv(name: str, uv: str, *, reinstall: bool, environment: dict[str,
         before = venv.stat()
         subprocess.run(
             [uv, "venv", "--allow-existing", str(venv)], check=True,
-            env={key: value for key, value in environment.items() if key != "UV_VENV_CLEAR"},
+            env={key: value for key, value in os.environ.items() if key != "UV_VENV_CLEAR"},
         )
         after = venv.stat()
         if (after.st_dev, after.st_ino) != (before.st_dev, before.st_ino):
@@ -375,7 +361,7 @@ def _prepare_venv(name: str, uv: str, *, reinstall: bool, environment: dict[str,
                 # dependencies after the container loses network access.
                 cmd.extend(["--cache-dir", str(venv / ".bootstrap-uv-cache")])
             run_uv_install(
-                uv, cmd[3:], env=environment, cwd=_plugin_dir(name), trusted_source_roots=(REPO,), check=True,
+                uv, cmd[3:], cwd=_plugin_dir(name), trusted_source_roots=(REPO,), check=True,
                 **({"non_editable": True} if name == "worktree-manager" else {}),
                 retained_resource_roots=(
                     standalone_build_resources("fleet-manager", source_root=REPO)
@@ -390,7 +376,7 @@ def _prepare_venv(name: str, uv: str, *, reinstall: bool, environment: dict[str,
                 if reinstall or drifted:
                     arguments.append("--reinstall")
                 run_uv_install(
-                    uv, arguments, env=environment, cwd=bridge, trusted_source_roots=(REPO,), check=True,
+                    uv, arguments, cwd=bridge, trusted_source_roots=(REPO,), check=True,
                 )
         else:
             # Source-only targets and pyproject-less plugins import their
@@ -398,7 +384,7 @@ def _prepare_venv(name: str, uv: str, *, reinstall: bool, environment: dict[str,
             run_uv_install(
                 uv, ["--python", str(py), "pytest", *RUNNER_DEPENDENCIES,
                      *EXTERNAL_TEST_DEPENDENCIES.get(name, ())],
-                env=environment, cwd=_plugin_dir(name), trusted_source_roots=(REPO,), check=True,
+                cwd=_plugin_dir(name), trusted_source_roots=(REPO,), check=True,
             )
         stamp.write_text(fingerprint, encoding="utf-8")
     return py
@@ -484,17 +470,45 @@ def _group_cleanup_worker() -> Iterator[tuple[ThreadPoolExecutor, list[Future[No
                 raise failure
 
 
+_CODESPACES_NATIVE_FILE = Path("tests") / "test_installer_engine_adoption.py"
 _CODESPACES_PROFILE_ENV = "CODESPACES_INSTALLER_TEST_PROFILE"
-_SSH_PROFILE_ENV = "AGENT_SSH_SNAPSHOT_TEST_PROFILE"
+_CODESPACES_ADMISSION = (
+    "codespaces_library_install_order_retry_and_errors or "
+    "codespaces_real_admission_replays_captured_source"
+)
+_CODESPACES_FALSE = f"({_CODESPACES_ADMISSION}) and False"
+_CODESPACES_TRUE = f"({_CODESPACES_ADMISSION}) and True"
+_CODESPACES_NEGATIVE = "codespaces_admission_spy_refuses_incorrect_or_bypassed_calls"
+_CODESPACES_LIFECYCLE = "stamp_snapshot or native_dev_generation_dependency_failure"
+_CODESPACES_WINDOWS_PARTITIONS = (
+    f"({_CODESPACES_FALSE}) and healthy",
+    f"({_CODESPACES_FALSE}) and not healthy",
+    f"not ({_CODESPACES_FALSE}) and ({_CODESPACES_TRUE}) and healthy",
+    f"not ({_CODESPACES_FALSE}) and "
+    f"((({_CODESPACES_TRUE}) and not healthy) or {_CODESPACES_NEGATIVE})",
+    f"not (({_CODESPACES_FALSE}) or ({_CODESPACES_TRUE}) or {_CODESPACES_NEGATIVE}) "
+    f"and ({_CODESPACES_LIFECYCLE})",
+    f"not (({_CODESPACES_FALSE}) or ({_CODESPACES_TRUE}) or {_CODESPACES_NEGATIVE} "
+    f"or {_CODESPACES_LIFECYCLE})",
+)
 
 
 def _test_group_plan(
     name: str, groups: list[list[Path]], *, windows: bool | None = None,
 ) -> list[tuple[list[Path], str | None]]:
-    return _plan_test_groups(
-        name, _plugin_dir(name), groups,
-        windows=sys.platform == "win32" if windows is None else windows,
-    )
+    """Partition only the Codespaces native contract; retain every other file."""
+    native = sys.platform == "win32" if windows is None else windows
+    target = _plugin_dir(name) / _CODESPACES_NATIVE_FILE
+    plan = []
+    for group in groups:
+        if name != "agent-codespaces" or not native or target not in group:
+            plan.append((group, None))
+            continue
+        other_files = [path for path in group if path != target]
+        if other_files:
+            plan.append((other_files, None))
+        plan.extend(([target], selector) for selector in _CODESPACES_WINDOWS_PARTITIONS)
+    return plan
 
 
 def run_plugin(
@@ -554,18 +568,10 @@ def run_plugin(
         _ensure_venv(name, uv, reinstall=reinstall)
         print(f"[PASS] {name} (prepared)")
         return 0
-    plugin_started = time.monotonic()
-    try:
-        check_test_sources(_plugin_dir(name) / "tests")
-    except UnsafeTestCommand as error:
-        print(f"[FAIL] {name}: {error}", file=sys.stderr)
-        return 2
-    if time.monotonic() - plugin_started >= plugin_timeout:
-        print(f"[LIMIT] {name}: source preflight exhausted the plugin budget", file=sys.stderr)
-        return 124
     label = "collect-only" if collect_only else ("guard tests" if guards else "pytest")
     state_mode = "host state (explicit opt-in)" if allow_host_state else "isolated state"
     print(f"[RUN ] {name}: preparing venv + {label} [{state_mode}] ...")
+    plugin_started = time.monotonic()
     report_directory = None
     if junit_dir is not None:
         report_directory = junit_dir.expanduser().resolve() / name
@@ -598,10 +604,8 @@ def run_plugin(
         env["COPILOT_EXTENSIONS_TEST_VENV_ROOT"] = str(_venv_root())
         # Ambient profile state must never silently relax an ordinary run.
         env.pop(_CODESPACES_PROFILE_ENV, None)
-        env.pop(_SSH_PROFILE_ENV, None)
         if test_profile != "standard":
-            profile_env = _SSH_PROFILE_ENV if name == "agent-ssh" else _CODESPACES_PROFILE_ENV
-            env[profile_env] = test_profile
+            env[_CODESPACES_PROFILE_ENV] = test_profile
             env.pop("PYTEST_ADDOPTS", None)
         if selection is not None:
             env.pop("PYTEST_ADDOPTS", None)
@@ -789,7 +793,7 @@ def main(argv: list[str] | None = None) -> int:
                          "explicit value here always wins)")
     ap.add_argument(
         "--test-profile", choices=("standard", "busy-host-functional"), default="standard",
-        help="explicit Codespaces installer or SSH snapshot functional qualification profile; "
+        help="explicit Codespaces installer functional qualification profile; "
              "busy-host-functional is not original-budget or performance evidence",
     )
     ap.add_argument("--max-files-per-sub-suite", type=int, default=None,
@@ -913,14 +917,8 @@ def main(argv: list[str] | None = None) -> int:
                 if args.test_profile == "busy-host-functional":
                     effective_subsuite_timeout = 900.0
                     effective_plugin_timeout = 2700.0
-                    native_limits = (
-                        "fixture-compile=60s optional-peer=30s contributor=60s observer=180s item=300s "
-                        "strict-timeout-controls=production "
-                        if name == "agent-ssh"
-                        else "native=135s module-item=300s "
-                    )
                     print(
-                        f"[PROFILE] busy-host-functional: {native_limits}"
+                        "[PROFILE] busy-host-functional: native=135s module-item=300s "
                         "default-item=30s group=900s plugin=2700s; "
                         "functional evidence only, not original-budget/performance PASS"
                     )

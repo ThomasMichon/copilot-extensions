@@ -1678,9 +1678,20 @@ def _main(argv: list[str] | None = None):
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=ssh_key_install_command)
 
-    from .batch_reads import add_commands as add_read_commands
-
-    add_read_commands(sub, cmd_get)
+    p = sub.add_parser("get", help="Read a credential")
+    p.add_argument("entry", help="Entry path")
+    p.add_argument("field", nargs="?", default="password",
+                   help="Field to read (default: password)")
+    p.add_argument("-p", "--prompt", action="store_true",
+                   help="Prompt for the master password if locked "
+                        "(default: fail fast and ask you to run 'agent-vault unlock')")
+    p.add_argument("--refresh", action="store_true",
+                   help="Bypass the persistent cache and fetch from the live vault")
+    p.add_argument("--max-cache-age", type=int, default=None, dest="max_cache_age",
+                   help="Use the persistent cache only when it is at most this many seconds old")
+    p.add_argument("--cache-only", action="store_true", dest="cache_only",
+                   help="Read from the persistent cache only; never contact the service")
+    p.set_defaults(func=cmd_get)
 
     p = sub.add_parser("has", help="Check if an entry exists")
     p.add_argument("entry", help="Entry path")

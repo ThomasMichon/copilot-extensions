@@ -243,73 +243,8 @@ The original `machine_caller` signature and return type remain unchanged.
 SSH configuration v3 consumes this fixed owner interface, and the installed host
 uses the owner revision without parsing private state. V1/v2 token/PEM and normal
 outbound-only repository setup remain unchanged. Missing state or reference
-support is explicit; the caller factories themselves do not implement normal
-selected-role setup.
-
-## Normal selected SSH setup
-
-The additive `continuity-ssh-setup-v1` capability supplies the fixed
-`fleet-manager ssh-setup --request <private-file> --source <private-source>
---harness <context> --state-root <original-state>` adapter. Without `--apply`
-it reads/validates public references and returns a bounded construction
-description without creating configuration, reading retained private identity,
-enrolling, installing or starting a watch. The normal
-[repository setup consumer](../../plugins/agent-worktrees/docs/repository-setup.md#explicit-selected-ssh-setup)
-passes the original context/state namespace, never a credential override from
-the request.
-
-The additive `continuity-ssh-setup-pin-v1` capability accepts
-`--expected-request-digest <digest>`. The repository consumer requires this
-capability and carries the inspected digest through subsequent checks and apply.
-Fleet compares it before preparing inputs or following the selected installation
-root, so a request changed during bootstrap cannot redirect configuration writes.
-Direct standalone callers may omit the pin as before; the repository consumer
-never downgrades to that unpinned operation.
-
-The owner-private, bounded16KiB request has exactly these fields:
-
-```json
-{
-  "schema": "fleet-manager.continuity-ssh-setup",
-  "version": 1,
-  "snapshot": "<absolute prepared Source snapshot>",
-  "root": "<absolute physical installation root>",
-  "selection": {
-    "source_commit": "<full source commit>",
-    "source_tree": "<full source tree>",
-    "runtime_version": "<exact prepared runtime version>",
-    "payload_hash": "<64 lowercase hex characters>"
-  },
-  "authority": "authority-a",
-  "installation": "installation-a",
-  "ssh": {}
-}
-```
-
-`ssh` is the complete [SSH configuration v3](ssh-machine.md) **minus**
-`credential_source`. The fixed adapter derives that reference from the selected
-continuity arguments. It compares origin, machine, principal, audience, resource
-and CA to the selected projection before retained identity access. Local public
-keys, policy, references, writer geometry and unresolved launch state are
-checked before configuration effects. The installation, Source snapshot,
-provider state and SSH lease are separate. Retained inputs cannot live in a
-checkout/session folder or the installation's write scope.
-
-After normal bootstrap, `--apply` uses the existing provider and host preflight,
-then creates/reuses `ssh-client.json` and `gateway-host.json` under the private
-installation root. It does not construct or install the application. Existing
-different/foreign contents and partial files are retained and refused; this
-is not a configuration migration command. No PEM/token export or duplicate
-enrollment is needed.
-
-The engine separately holds the exact complete Source/profile and calls its
-packaged `install_application` API. Existing constructor, selectors, host
-lifetime, input fences, readiness and exact stop retain their authorities.
-Only current selected authenticated convergence is ready; generated
-configuration, a successful bootstrap or a staged environment is not.
-Unavailable prerequisites/unknown outcomes remain explicit. This implements an
-opt-in source composition, not provider sign-in, artifact publication,
-automatic Source selection or permission for live deployment.
+support is explicit; the normal selected-role Manager/engine handoff is not
+implemented by these APIs.
 
 ## Qualification and release boundary
 
@@ -343,13 +278,3 @@ Providers expand first; callers activate
 only for the selected declaration/capability. No old profile or declaration
 generation is retired. A source merge does not install the optional SDK or
 change any running Gateway.
-
-The separate normal SSH setup fixture
-`tests/test_repository_ssh_setup_installed.py` exercises the real Manager/engine
-process handoff, packaged engine operational assets, original synthetic TLS
-enrollment, complete Source application constructor and installed SSH lifetime.
-Its explicit native lane prepares engine dependency support and builds the
-engine wheel; the Manager/dependency drivers remain fixtures, not a qualified
-complete installed Manager/engine cohort. Pending native execution is not a
-passing result. Full role/product closure, actual provider/adopter, reboot/logon
-and migration need their own evidence.

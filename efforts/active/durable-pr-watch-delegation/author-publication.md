@@ -147,10 +147,8 @@ than weakening checks to make checkout-free creation appear supported.
   authorizing raw forge calls, token workarounds or an automatic runtime update.
 
 The remaining consumer adapter, venue policy/authentication delivery and
-installed replacement acceptance remain in the
-[author-publication cohort under #6007](https://github.com/ThomasMichon/copilot-extensions/issues/6007#issuecomment-6668447425).
-Historical #10412 was subsumed there, not completed or reassigned. Generic
-source guidance and the worker-policy expansion in #11092 do not close these rows.
+installed replacement acceptance belong to #10412. Generic source guidance
+does not close those rows.
 
 ### A5 - Qualification and adoption
 
@@ -161,8 +159,8 @@ source guidance and the worker-policy expansion in #11092 do not close these row
   #7051, #7188 or their broader acceptance.
 
 Source validation is recorded below. The operator selected source-PR completion
-with live/installed adoption tracked separately; the retained A4-A5 cohort under
-#6007 carries the remaining matrix rows and consumer work with the same owners.
+with live/installed adoption tracked separately; #10412 carries the remaining
+matrix rows and consumer work under the same retained domain owners.
 
 ## Validation (agent-recommended)
 
@@ -197,8 +195,8 @@ with live/installed adoption tracked separately; the retained A4-A5 cohort under
 
 Checked rows describe source/adapter and disposable real-Git controls, not
 live ADO or installed acceptance. The unchecked continuity, consumer and tier
-rows, plus remote-only transport qualification, remain in that specific
-A4-A5 cohort after #10412's administrative consolidation; they are not waived.
+rows, plus remote-only transport qualification, are explicitly retained in
+#10412; they have not been silently waived.
 
 ## Implementation journal
 
@@ -263,36 +261,10 @@ remaining A4-A5 consumer migration, live/installed and remote-only evidence
 qualification. No rollout occurred, and no existing consumer helper was retired.
 This closes the finite source contribution, not #6007, #7051 or #7188.
 
-### 2026-11-06 - Portable worker author-policy source expanded
-
-#11092 merged to `dev` as `384350abb66786f8d2cf10c7670b4817368d39fc`
-after current-head Copilot approval and required green CI. It delivers the
-finite source-contract gap tracked by #11070: opt-in author-policy export,
-separate frontend/selected-peer capabilities and explicit native configuration.
-Caller custody and metadata locking retain the invoking project; target
-policy, required descriptions, attribution choices, labels and push deadlines
-remain separate. Origin selection uses the delivered target rather than an
-absent or conflicting caller declaration. No self-merge or bypass grant is exported.
-
-Focused source acceptance included the 107-case Worktrees contract packet,
-62 native frontend cases, 14 target-origin operation controls and 91 existing
-label/metadata/producer cases; overlapping selections are not summed. Actual
-process boundaries, fresh configuration and private Git/lease publication were
-exercised. A Windows-only synthetic path fixture was corrected without changing
-production identity checks. Three mandatory POSIX controls made the strict
-Windows packet ineligible; actual Linux unit/coverage CI passed instead.
-
-This records merged source, not a release selection, installed consumer or
-live-provider acceptance. No runtime update, credential delivery, worker
-activation, live target mutation or helper retirement occurred. Every original
-unchecked A4-A5/Validation row remains open. Next, qualify actual selected
-consumers and separately authorized policy/authentication delivery, preserving
-old/new compatibility and existing source/resource owners.
-
 ## Completion and next action
 
-The selected source contributions are merged. Continue separately authorised
-adoption through the retained A4-A5 cohort under #6007; resolve its remaining rows against
+The selected source contribution is merged. Continue separately authorised
+adoption from #10412; resolve the remaining A4-A5 and validation rows against
 actual installed/live evidence before declaring this whole amendment complete.
 The existing effort remains Active and every broader Plan/Validation row stays
 in force. This document contains no installed or rollout completion claim.

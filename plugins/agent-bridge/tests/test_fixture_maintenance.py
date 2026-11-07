@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import dataclasses
 import hashlib
 import importlib
 import json
@@ -163,17 +162,6 @@ def test_http52_inventory_uses_captured_owner_tree_not_future_checkout(batch_evi
     assert retained.captured_inventory(evidence.SPEC, set(), {
         worktrees + "__pycache__/cached.py": (),
     }) == set()
-
-
-def test_http52_metadata_only_owners_exclude_future_checkout_modules(batch_evidence):
-    evidence = importlib.import_module("bridge_http52_evidence")
-    retained = importlib.import_module("bridge_http_retained_evidence")
-    future = "plugins/agent-worktrees/src/agent_worktrees/future.py"
-    spec = dataclasses.replace(evidence.SPEC, extra_paths=(*evidence.SPEC.extra_paths, future))
-    owners = retained.historical_owners(spec)
-    assert future not in owners
-    assert set(evidence.SPEC.affected) <= owners
-    assert evidence.INPUT in owners and evidence.CAPTURE in owners
 
 
 @pytest.mark.timeout(180)

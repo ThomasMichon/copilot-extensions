@@ -17,7 +17,7 @@ from agent_procutil import no_window_kwargs
 from test_cell_installer_slice import PAYLOAD
 from test_cell_upgrade import _pending
 from test_watch_installation import _policy
-from zdd import diagnostics, lifecycle, process_exit, publication_history, routing
+from zdd import lifecycle, process_exit, publication_history, routing
 
 from agent_pull_requests import _installation_context as api
 from agent_pull_requests.watch_storage import read_subscriptions_state
@@ -121,56 +121,27 @@ def _run(script, arguments, environment, caller, *, timeout):
     else:
         target = script.with_suffix("" if script.parent.name == "bin" else ".sh")
         command = ["bash", str(target)]
-    try:
-        return subprocess.run(  # noqa: S603 -- exact test-owned released payload
-            [*command, *arguments],
-            env=environment, cwd=caller, capture_output=True, text=True,
-            timeout=timeout, check=False, **no_window_kwargs(),
-        )
-    except subprocess.TimeoutExpired as error:
-        print(
-            f"Owned payload command timed out after {timeout}s: "
-            f"stdout={error.stdout!r}; stderr={error.stderr!r}",
-            file=sys.stderr,
-        )
-        raise
-
-
-def _run_cutover(script, arguments, environment, caller, *, run_root, phase, timeout):
-    try:
-        return _run(script, arguments, environment, caller, timeout=timeout)
-    except subprocess.TimeoutExpired as error:
-        raise AssertionError(
-            f"Owned {phase} timed out: {_cutover_failure_details(run_root)}; "
-            f"stdout={error.stdout!r}; stderr={error.stderr!r}"
-        ) from error
+    return subprocess.run(  # noqa: S603 -- exact test-owned released payload
+        [*command, *arguments],
+        env=environment, cwd=caller, capture_output=True, text=True,
+        timeout=timeout, check=False, **no_window_kwargs(),
+    )
 
 
 def _cutover_failure_details(run_root):
     path = run_root / "watch-owner-transaction.json"
     journal = {"state": "absent"}
-    identity = {}
     if path.is_file():
         try:
             document = json.loads(path.read_text("utf-8"))
             journal = {key: document.get(key) for key in ("phase", "exited")}
-            owner = document.get("successor")
-            if isinstance(owner, dict):
-                pid, birth = owner.get("pid"), owner.get("startTime")
-                if type(pid) is int and isinstance(birth, str):
-                    try:
-                        actual = diagnostics.process_start_time(pid)
-                        identity["nativeBirthMatches"] = None if actual is None else actual == birth
-                        identity["originalExited"] = process_exit.observe_original_exit(pid, birth)
-                    except (OSError, ValueError, NotImplementedError) as error:
-                        identity["observationError"] = type(error).__name__
         except (OSError, ValueError) as error:
             journal = {"readError": type(error).__name__}
     events = [
         {key: event.get(key) for key in ("ts", "action", "outcome", "version")}
         for event in lifecycle.read_events(run_root, limit=24)
     ]
-    return {"journal": journal, "events": events, "identity": identity}
+    return {"journal": journal, "events": events}
 
 
 def _scenario_remaining(deadline):
@@ -188,59 +159,6 @@ def test_scenario_remaining_preserves_the_original_deadline(monkeypatch):
         _scenario_remaining(140)
 
 
-def test_payload_command_timeout_retains_both_streams(tmp_path, monkeypatch, capsys):
-    timeout_error = subprocess.TimeoutExpired(
-        ["fixture"], 5, output="partial stdout", stderr="partial stderr",
-    )
-    timeout_error.add_note = None
-
-    def timed_out(command, **kwargs):
-        raise timeout_error
-
-    monkeypatch.setattr(subprocess, "run", timed_out)
-    with pytest.raises(subprocess.TimeoutExpired) as failure:
-        _run(tmp_path / "scripts" / "init.ps1", [], {}, tmp_path, timeout=5)
-    captured = capsys.readouterr()
-    assert failure.value is timeout_error
-    assert "after 5s" in captured.err
-    assert "partial stdout" in captured.err
-    assert "partial stderr" in captured.err
-
-
-@pytest.mark.parametrize("phase", ["startup", "upgrade"])
-def test_cutover_timeout_retains_caller_evidence_and_both_streams(tmp_path, monkeypatch, phase):
-    (tmp_path / "watch-owner-transaction.json").write_text(json.dumps({
-        "phase": "committed", "exited": [],
-        "successor": {"pid": 42, "startTime": "10", "token": "fixture-private"},
-    }), encoding="utf-8")
-    lifecycle.record(tmp_path, "fixture", detail={"private": "fixture-private"})
-    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: "10")
-    monkeypatch.setattr(process_exit, "observe_original_exit", lambda pid, birth: False)
-    timeout_error = subprocess.TimeoutExpired(
-        ["fixture"], 5, output="partial stdout", stderr="partial stderr",
-    )
-    timeout_error.add_note = None
-
-    def timed_out(*_args, **_kwargs):
-        raise timeout_error
-
-    monkeypatch.setattr(subprocess, "run", timed_out)
-    with pytest.raises(AssertionError) as failure:
-        _run_cutover(
-            tmp_path / "scripts" / "init.ps1", [], {}, tmp_path,
-            run_root=tmp_path, phase=phase, timeout=5,
-        )
-    message = str(failure.value)
-    assert f"Owned {phase} timed out" in message
-    assert "'phase': 'committed'" in message
-    assert "'action': 'fixture'" in message
-    assert "'nativeBirthMatches': True" in message
-    assert "'originalExited': False" in message
-    assert "partial stdout" in message and "partial stderr" in message
-    assert "fixture-private" not in message
-    assert failure.value.__cause__ is timeout_error
-
-
 def test_cutover_failure_details_exclude_private_journal_and_event_fields(tmp_path):
     (tmp_path / "watch-owner-transaction.json").write_text(json.dumps({
         "phase": "committed", "exited": [], "authorization": "fixture-private-capability",
@@ -251,51 +169,6 @@ def test_cutover_failure_details_exclude_private_journal_and_event_fields(tmp_pa
     evidence = _cutover_failure_details(tmp_path)
     assert evidence["journal"] == {"phase": "committed", "exited": []}
     assert set(evidence["events"][0]) == {"ts", "action", "outcome", "version"}
-    assert "fixture-private" not in json.dumps(evidence)
-
-
-@pytest.mark.parametrize("actual,exited", [
-    ("10", False), ("11", True), (None, True),
-])
-def test_cutover_failure_details_separate_native_birth_and_original_exit(
-    tmp_path, monkeypatch, actual, exited,
-):
-    (tmp_path / "watch-owner-transaction.json").write_text(json.dumps({
-        "phase": "complete", "exited": [],
-        "successor": {"pid": 42, "startTime": "10", "token": "fixture-private"},
-    }), encoding="utf-8")
-    seen = []
-    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: actual)
-
-    def observe(pid, birth):
-        seen.append((pid, birth))
-        return exited
-
-    monkeypatch.setattr(process_exit, "observe_original_exit", observe)
-    evidence = _cutover_failure_details(tmp_path)
-    assert evidence["identity"] == {
-        "nativeBirthMatches": None if actual is None else actual == "10",
-        "originalExited": exited,
-    }
-    assert seen == [(42, "10")]
-    assert "fixture-private" not in json.dumps(evidence)
-
-
-def test_cutover_failure_details_preserve_unconfirmed_native_exit(tmp_path, monkeypatch):
-    (tmp_path / "watch-owner-transaction.json").write_text(json.dumps({
-        "phase": "complete", "exited": [],
-        "successor": {"pid": 42, "startTime": "10"},
-    }), encoding="utf-8")
-    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: None)
-
-    def unavailable(*_args):
-        raise PermissionError("fixture-private native failure")
-
-    monkeypatch.setattr(process_exit, "observe_original_exit", unavailable)
-    evidence = _cutover_failure_details(tmp_path)
-    assert evidence["identity"] == {
-        "nativeBirthMatches": None, "observationError": "PermissionError",
-    }
     assert "fixture-private" not in json.dumps(evidence)
 
 
@@ -393,10 +266,15 @@ def test_normal_payload_init_refreshes_receipt_and_upgrades_live_owner(tmp_path_
         # Once attempted, cleanup inspects/stops through the governed entry even
         # if a caller loses the startup response after the owner commits.
         started = True
-        result = _run_cutover(
-            command, ["restart", "--json"], environment, caller,
-            run_root=run_root, phase="startup", timeout=_scenario_remaining(scenario_deadline),
-        )
+        try:
+            result = _run(
+                command, ["restart", "--json"], environment, caller,
+                timeout=_scenario_remaining(scenario_deadline),
+            )
+        except subprocess.TimeoutExpired as error:
+            raise AssertionError(
+                f"Owned startup timed out: {_cutover_failure_details(run_root)}"
+            ) from error
         assert result.returncode == 0, result.stderr
         assert json.loads(result.stdout) == {"restarted": True, "was_running": False}
         result = _run(command, ["watch", "health", "--json"], environment, caller, timeout=60)
@@ -413,10 +291,15 @@ def test_normal_payload_init_refreshes_receipt_and_upgrades_live_owner(tmp_path_
         assert new_version != old_version
         _refresh_release(payload, new_version)
         # No direct stamp, activation CAS, manual snapshot or runtime edit.
-        result = _run_cutover(
-            init, [], environment, caller,
-            run_root=run_root, phase="upgrade", timeout=_scenario_remaining(scenario_deadline),
-        )
+        try:
+            result = _run(
+                init, [], environment, caller,
+                timeout=_scenario_remaining(scenario_deadline),
+            )
+        except subprocess.TimeoutExpired as error:
+            raise AssertionError(
+                f"Owned upgrade timed out: {_cutover_failure_details(run_root)}"
+            ) from error
         if result.returncode != 0:
             pytest.fail(
                 f"Owned upgrade refused:\n{result.stderr}\n"

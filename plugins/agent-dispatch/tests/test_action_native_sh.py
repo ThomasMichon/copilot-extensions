@@ -135,48 +135,6 @@ def test_warm_runtime_start_ignores_action_inhibition(tmp_path: Path) -> None:
     assert not (root / ".provision.lock").exists()
 
 
-@pytest.mark.parametrize("arguments", [
-    ["telemetry", "capabilities"],
-    ["telemetry", "retained", "--directory", "unused", "--apply", "--confirm", "unused"],
-    ["--url", "unused", "telemetry", "capabilities"],
-    [
-        "--task-token", "unused", "--task-token-file", "unused", "--task-scope", "unused",
-        "--task-url", "unused", "--task-worker", "unused", "telemetry", "capabilities",
-    ],
-    [
-        "--task-token=unused", "--task-token-file=unused", "--task-scope=unused",
-        "--task-url=unused", "--task-worker=unused", "telemetry", "retained",
-        "--directory", "unused", "--apply", "--confirm", "unused",
-    ],
-])
-def test_payload_telemetry_refuses_missing_runtime_without_provision(
-    tmp_path: Path, arguments: list[str],
-) -> None:
-    gate, root, started, provisioned, env = _gate_fixture(tmp_path)
-    payload = gate.parent.parent
-    binary = payload / "bin"
-    binary.mkdir()
-    entry = binary / "agent-dispatch"
-    shutil.copyfile(PLUGIN / "bin" / "agent-dispatch", entry)
-    trace = tmp_path / "resolution-mode"
-    gate.with_name("resolve-runtime.sh").write_text(
-        "# Trace contract: normal/read-only/ready-v1\n"
-        f'printf "%s" "$AGENT_RT_RESOLVE_TRACE_MODE" > {str(trace)!r}\ntrue\n',
-        encoding="utf-8",
-    )
-    before = {path.relative_to(root): path.read_bytes()
-              for path in root.rglob("*") if path.is_file()}
-    result = subprocess.run(
-        [BASH, str(entry), *arguments], env=env, capture_output=True, text=True, timeout=15,
-    )
-    assert result.returncode == 1, result.stdout + result.stderr
-    assert "configuration-only; no self-provision" in result.stderr
-    assert trace.read_text(encoding="utf-8") == "read-only"
-    assert not started.exists() and not provisioned.exists()
-    assert {path.relative_to(root): path.read_bytes()
-            for path in root.rglob("*") if path.is_file()} == before
-
-
 def _linked_selection(
     tmp_path: Path, root: Path, env: dict[str, str], spelling: str,
 ) -> dict[str, str]:

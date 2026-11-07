@@ -154,13 +154,6 @@ def _record_agent(
                     raise TaskError("ordinary startup invocation is already bound")
             elif startup_invocation is not None:
                 raise TaskError("historical ordinary invocation is unavailable")
-        from .ordinary_writer_admission import REQUIREMENT, retain_requirement
-        retain_requirement(json.loads(row["agent_info"]) if row["agent_info"] else None, agent_info)
-        expected_writer = json.loads(row[REQUIREMENT]) if row[REQUIREMENT] else None
-        if expected_writer != agent_info.get(REQUIREMENT):
-            raise TaskError("ordinary Bridge original writer requirement differs from allocation intent")
-        if row["task_relationship_required"] and REQUIREMENT not in agent_info:
-            raise TaskError("governed ordinary startup lacks its original writer requirement")
         if startup_invocation is not None:
             from .ordinary_invocation import same_facts, validate_storage
             validate_storage(startup_invocation, task, row, agent_info)
@@ -168,12 +161,6 @@ def _record_agent(
                 raise TaskError("ordinary invocation storage conflict")
         elif "startup_invocation" in agent_info:
             raise TaskError("keyed ordinary intent requires explicit storage capability")
-        if REQUIREMENT in agent_info and (
-            startup_invocation is None
-            or startup_invocation["binding"].get("creation_nonce")
-            != agent_info[REQUIREMENT]["creation_nonce"]
-        ):
-            raise TaskError("ordinary Bridge writer requirement changed its allocation nonce")
         if (
             row["allocation_project"] and row["allocation_project"] != actual.project
             or row["worktree_path"] and row["worktree_path"] != actual.path

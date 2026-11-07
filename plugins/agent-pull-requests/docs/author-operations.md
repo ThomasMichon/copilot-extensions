@@ -22,40 +22,6 @@ The frontend checks that actual response before the dependent operation.
 Missing or older peers refuse: no raw forge fallback, automatic update,
 credential workaround or silent switch to GitHub.
 
-## Explicit worker policy
-
-After separately authorizing author work, use the existing
-[worker policy export](../../agent-worktrees/docs/pr-publication-checks.md#delivering-policy-to-a-worker)
-with `--include-author`. Ordinary exports remain read/check-only.
-The selected Worktrees runtime advertises `operations.worker-policy-export`
-and `operations.worker-policy-config`; this frontend separately advertises
-`frontend.worker-policy-config` in its `author-capabilities` response.
-These additive schema-1 capabilities are independent of package versions.
-Do not infer frontend support from the Worktrees peer's declaration alone.
-
-On capable peers, `author-capabilities`, `create`, `update` and `push` accept
-`--config <delivered-worker-policy>`. The frontend checks the actual peer
-response before the dependent author operation, and forwards the same explicit
-file. Missing files, unsupported old peers and mismatched worker targets refuse
-without effects or an ambient-policy fallback. Old callers without this option
-retain their existing behavior; provider rollback requires that old supported
-route or a truthful unsupported-contract result, never replay after an uncertain
-write.
-
-The reserved exported `pr-worker` binding is target-scoped in memory. Author
-operations use its declared PR policy without inheriting a same-slug registry
-entry or checkout policy. Caller custody and metadata locking still use the
-invoking project's configuration, separately from that target policy. The
-worker binding does not become the claimant worktree: source and PR claims
-still belong to the invoking managed caller. Publication-origin selection uses
-the delivered target declaration independently of the caller's origin policy,
-and does not activate itself merely because the file contains a declaration.
-Exported policy carries
-no credentials, self-approval, self-merge role or bypass grant, and does not
-authorize dispatch, publication, auto-completion or a human-only action.
-Status/wait and subscription routing remain unchanged by this author-only
-configuration option.
-
 PATs are not required. Without an explicitly selected or already inherited
 compatibility credential, ADO operations reuse the existing Azure CLI/Entra
 authentication path. This workflow does not acquire a PAT, change credentials

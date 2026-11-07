@@ -320,9 +320,7 @@ def test_changed_live_identity_never_opens_retry_or_resets_budget(worker: Simple
 
 
 @pytest.mark.parametrize("after", ["accepted", "exhausted", "submitted", "completed"])
-def test_late_acp_retry_receipt_never_reopens_accepted_or_exhausted_startup(
-    worker: SimpleNamespace, after: str,
-) -> None:
+def test_late_acp_retry_receipt_only_settles_original_caller(worker: SimpleNamespace, after: str) -> None:
     w = worker
     w.state["lose_send"] = True
     assert cycle(w, 101) == 0
@@ -341,15 +339,10 @@ def test_late_acp_retry_receipt_never_reopens_accepted_or_exhausted_startup(
                 Status.SUBMITTED if after == "submitted" else Status.COMPLETED
             )
     before = w.o.q.get(w.o.task["id"]), w.o.q.pool_startup(w.o.task["id"])
-    calls = len(w.calls)
     from agent_dispatch.supervisor_pool_retry import reconcile_retry_completion
     assert reconcile_retry_completion(
         w.owner, asdict(w.o.q.get_reservation(w.key)), asdict(w.o.q.get(w.o.task["id"])),
-    ) is (True if after == "exhausted" else None)
-    if after != "exhausted":
-        assert before[1].retry_invocation is None
-        assert before[1].startup_attempts == 0
-        assert len(w.calls) == calls
+    ) is True
     assert w.o.q.get(w.o.task["id"]) == before[0]
     assert w.o.q.pool_startup(w.o.task["id"]).startup_attempts == before[1].startup_attempts
     assert w.o.q.get_reservation(w.key).session_handle == "local-body:bridge-a"

@@ -217,34 +217,3 @@ policy in `telemetry`, using configuration and metadata only. Live write health
 remains explicitly unknown. Custom legacy factories are not imported or exposed.
 See Bridge's diagnostic documentation for the identical validation, timestamp,
 retention and asynchronous failure semantics.
-
-### Native configuration-only preview and apply
-
-`agent-dispatch telemetry capabilities` publishes the selected executable's
-`process-telemetry.retained-configuration/v1` support, not coordinator liveness.
-These offline commands run before coordinator/client initialization:
-
-```text
-agent-dispatch telemetry retained --directory <absolute preprovisioned base>
-agent-dispatch telemetry retained --directory <same base> --apply --confirm <preview confirmation>
-```
-
-The target is the native `install_paths.install_dir()/telemetry.json`, including
-the existing installation override. Preview never writes or provisions anything.
-Apply uses the native `OperationLock` and atomic configuration writer, preserves
-custom/legacy sinks and unrelated fields, and rechecks its token-bound inputs at
-the write boundary. Output is always JSON; exit 0 means previewed/configured and
-exit 2 means refusal/error. It starts no coordinator or buffer and makes no
-health, activation or delivery claim.
-The additive `input_fence: 1` capability supports the same repeated
-`--if-input <absolute file> <sha256>` write-boundary checks as Bridge.
-Task-projected invocations retain native task-only admission; explicit
-task-worker root options do not allow a cold telemetry launch to provision.
-Apply errors distinguish `write_outcome: not-applied` from `unknown`.
-
-The [Bridge configuration contract](../../../plugins/agent-bridge/docs/diagnostic-logs.md#native-configuration-only-preview-and-apply)
-defines the identical bounds, confirmation, path, environment, exclusion and
-version-skew semantics. This additive provider-first operation changes neither
-existing loader/factory behavior nor `logs`. Unsupported old or rolled-back
-runtime discovery must block only this optional configuration adoption; callers
-must not substitute their own writer or replay a legacy effectful form.

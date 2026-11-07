@@ -13,10 +13,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-def no_window_kwargs():
-    from agent_procutil import no_window_kwargs as native
-
-    return native()
+from agent_procutil import no_window_kwargs
 
 
 def _selected_runtime_root() -> Path | None:

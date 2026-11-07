@@ -13,11 +13,10 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from collections.abc import Callable, Iterator
 from contextlib import nullcontext
 from pathlib import Path
 from types import ModuleType
-from typing import Any, cast
+from typing import Any
 
 import pytest
 
@@ -43,8 +42,8 @@ def _write(path: Path, value: Any) -> None:
     path.write_text(json.dumps(value), encoding="utf-8")
 
 
-def _snapshot(root: Path) -> dict[str, tuple[bool, int, bytes | None]]:
-    def capture(path: Path) -> tuple[str, tuple[bool, int, bytes | None]]:
+def _snapshot(root: Path) -> dict:
+    def capture(path):
         return path.relative_to(root).as_posix(), (
             path.is_dir(), path.stat().st_mtime_ns,
             path.read_bytes() if path.is_file() else None,
@@ -55,7 +54,7 @@ def _snapshot(root: Path) -> dict[str, tuple[bool, int, bytes | None]]:
         return dict(reader.map(capture, [root, *root.rglob("*")]))
 
 
-def test_snapshot_retains_every_byte_even_when_size_and_timestamp_are_unchanged(tmp_path: Path) -> None:
+def test_snapshot_retains_every_byte_even_when_size_and_timestamp_are_unchanged(tmp_path):
     directory = tmp_path / "nested"
     directory.mkdir()
     path = directory / "resource"
@@ -71,12 +70,12 @@ def test_snapshot_retains_every_byte_even_when_size_and_timestamp_are_unchanged(
     assert after != before
 
 
-def test_snapshot_surfaces_file_read_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_snapshot_surfaces_file_read_failure(tmp_path, monkeypatch):
     path = tmp_path / "resource"
     path.write_bytes(b"retained")
     original = Path.read_bytes
 
-    def fail(target: Path) -> bytes:
+    def fail(target):
         if target == path:
             raise OSError("fixture snapshot read failure")
         return original(target)
@@ -92,7 +91,7 @@ def _lifecycle_lock_path(root: Path) -> Path:
 
 
 @pytest.fixture
-def binding_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+def binding_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     home = tmp_path / "home"
     payload = home / ".copilot" / "installed-plugins" / "example" / PLUGIN_ID
     payload.mkdir(parents=True)
@@ -134,26 +133,26 @@ def binding_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str
     }
 
 
-def _publish(fixture: dict[str, Any]) -> dict[str, Any]:
+def _publish(fixture: dict) -> dict:
     receipt = fixture["binding"].publish_legacy_binding(
         fixture["primitive"], **fixture["arguments"]
     )
     _write(fixture["legacy"] / "deploy-manifest.json", {
         "schema_version": 3, "service": PLUGIN_ID, "commandBinding": receipt,
     })
-    return cast(dict[str, Any], receipt)
+    return receipt
 
 
-def _resolve(fixture: dict[str, Any]) -> dict[str, Any]:
+def _resolve(fixture: dict) -> dict:
     before = _snapshot(fixture["home"])
     result = fixture["binding"].resolve_command_binding(
         fixture["primitive"], **fixture["arguments"]
     )
     assert _snapshot(fixture["home"]) == before
-    return cast(dict[str, Any], result)
+    return result
 
 
-def test_archive_source_keeps_command_ownership_across_generations(binding_fixture: dict[str, Any]) -> None:
+def test_archive_source_keeps_command_ownership_across_generations(binding_fixture):
     fixture = binding_fixture
     descriptor = {"source": "github", "repo": "Example/Plugins"}
     initial_state = (fixture["legacy"] / "retained-state.json").read_bytes()
@@ -182,7 +181,7 @@ def test_archive_source_keeps_command_ownership_across_generations(binding_fixtu
 @pytest.mark.parametrize("borrowed", [False, True])
 @pytest.mark.parametrize("commit", [False, True])
 def test_manifest_publication_binds_before_commit_without_early_write(
-    binding_fixture: dict[str, Any], borrowed: bool, commit: bool,
+    binding_fixture: dict, borrowed: bool, commit: bool,
 ) -> None:
     fixture = binding_fixture
     binding, primitive = fixture["binding"], fixture["primitive"]
@@ -214,7 +213,7 @@ def test_manifest_publication_binds_before_commit_without_early_write(
             assert path.read_bytes() == previous
 
 
-def test_command_binding_unowned_legacy_is_explicitly_unresolved(binding_fixture: dict[str, Any]) -> None:
+def test_command_binding_unowned_legacy_is_explicitly_unresolved(binding_fixture: dict) -> None:
     result = _resolve(binding_fixture)
     assert result["status"] == "unresolved"
     assert result["reason"] == "legacy-ownership-missing"
@@ -229,7 +228,7 @@ def test_command_binding_unowned_legacy_is_explicitly_unresolved(binding_fixture
 
 @pytest.mark.parametrize("lifecycle_state", [None, "complete", "pending"])
 def test_retained_owner_does_not_require_original_publisher(
-    binding_fixture: dict[str, Any], lifecycle_state: str | None,
+    binding_fixture: dict, lifecycle_state: str | None,
 ) -> None:
     fixture = binding_fixture
     binding, primitive = fixture["binding"], fixture["primitive"]
@@ -266,7 +265,7 @@ def test_retained_owner_does_not_require_original_publisher(
     "null-lifecycle", "managed-policy",
 ])
 def test_retained_owner_rejects_invalid_incumbent_or_authority(
-    binding_fixture: dict[str, Any], field: str,
+    binding_fixture: dict, field: str,
 ) -> None:
     fixture = binding_fixture
     binding, primitive = fixture["binding"], fixture["primitive"]
@@ -308,7 +307,7 @@ def test_retained_owner_rejects_invalid_incumbent_or_authority(
     assert path.read_bytes() == before
 
 
-def test_command_binding_owned_legacy_and_retained_pointer(binding_fixture: dict[str, Any]) -> None:
+def test_command_binding_owned_legacy_and_retained_pointer(binding_fixture: dict) -> None:
     receipt = _publish(binding_fixture)
     pointer = binding_fixture["home"] / ".copilot-extensions/agent-worktrees/runtime-root"
     pointer.parent.mkdir(parents=True)
@@ -330,7 +329,7 @@ def test_command_binding_owned_legacy_and_retained_pointer(binding_fixture: dict
     ("installationId", "sha256:" + "0" * 64),
 ])
 def test_command_binding_foreign_receipt_refuses(
-    binding_fixture: dict[str, Any], field: str, value: Any,
+    binding_fixture: dict, field: str, value: Any,
 ) -> None:
     receipt = _publish(binding_fixture)
     receipt[field] = value
@@ -343,7 +342,7 @@ def test_command_binding_foreign_receipt_refuses(
     assert result["installation"] is None
 
 
-def test_command_binding_publisher_refuses_other_marketplace(binding_fixture: dict[str, Any]) -> None:
+def test_command_binding_publisher_refuses_other_marketplace(binding_fixture: dict) -> None:
     _publish(binding_fixture)
     other = binding_fixture["home"] / ".copilot/installed-plugins/other" / PLUGIN_ID
     other.mkdir(parents=True)
@@ -367,7 +366,7 @@ def test_command_binding_publisher_refuses_other_marketplace(binding_fixture: di
     assert _snapshot(binding_fixture["home"]) == before
 
 
-def test_command_binding_payload_replacement_keeps_installation_identity(binding_fixture: dict[str, Any]) -> None:
+def test_command_binding_payload_replacement_keeps_installation_identity(binding_fixture: dict) -> None:
     old = _publish(binding_fixture)
     replacement = binding_fixture["home"] / ".copilot/installed-plugins/alias" / PLUGIN_ID
     replacement.mkdir(parents=True)
@@ -394,7 +393,7 @@ def test_command_binding_payload_replacement_keeps_installation_identity(binding
 
 @pytest.mark.parametrize("blocked", ["policy", "maintenance", "source", "context"])
 def test_command_binding_blocked_governance_never_selects(
-    binding_fixture: dict[str, Any], blocked: str,
+    binding_fixture: dict, blocked: str,
 ) -> None:
     _publish(binding_fixture)
     if blocked == "policy":
@@ -418,7 +417,7 @@ def test_command_binding_blocked_governance_never_selects(
     assert result["installation"] is None
 
 
-def _activate(fixture: dict[str, Any], payload: Path, *, durable_home: Path | None = None) -> dict[str, Any]:
+def _activate(fixture: dict, payload: Path, *, durable_home: Path | None = None) -> dict:
     primitive = fixture["primitive"]
     environment = fixture["environment"]
     stamped = primitive.stamp_context(
@@ -443,7 +442,7 @@ def _activate(fixture: dict[str, Any], payload: Path, *, durable_home: Path | No
     return {**stamped, **activated}
 
 
-def test_command_binding_two_cells_are_owned_and_generation_pinned(binding_fixture: dict[str, Any]) -> None:
+def test_command_binding_two_cells_are_owned_and_generation_pinned(binding_fixture: dict) -> None:
     other = binding_fixture["home"] / ".copilot/installed-plugins/other" / PLUGIN_ID
     other.mkdir(parents=True)
     _write(binding_fixture["home"] / ".copilot/settings.json", {
@@ -473,7 +472,7 @@ def test_command_binding_two_cells_are_owned_and_generation_pinned(binding_fixtu
     assert selected[0]["runtimeRoot"] != selected[1]["runtimeRoot"]
 
 
-def _prepare_catalog(fixture: dict[str, Any]) -> None:
+def _prepare_catalog(fixture: dict) -> None:
     payload = fixture["payload"]
     scripts = payload / "scripts"
     scripts.mkdir()
@@ -499,7 +498,7 @@ def _prepare_catalog(fixture: dict[str, Any]) -> None:
     generator.process_manifest(payload / "payload-invocation.json", check=False)
 
 
-def _catalog_environment(fixture: dict[str, Any], interpreter: str | None = None) -> dict[str, str]:
+def _catalog_environment(fixture: dict, interpreter: str | None = None) -> dict[str, str]:
     interpreter = interpreter or sys.executable
     environment = {
         **os.environ, **fixture["environment"],
@@ -526,7 +525,7 @@ def _catalog_environment(fixture: dict[str, Any], interpreter: str | None = None
         "import os,pwd,runpy,sys\n"
         "sys.dont_write_bytecode=True\n"
         "original=pwd.getpwuid\n"
-        "def getpwuid(uid: int) -> pwd.struct_passwd:\n"
+        "def getpwuid(uid):\n"
         "    record=original(uid)\n"
         "    return pwd.struct_passwd((*record[:5],os.environ['HOME'],record.pw_shell))\n"
         "pwd.getpwuid=getpwuid\n"
@@ -570,14 +569,14 @@ def _catalog_environment(fixture: dict[str, Any], interpreter: str | None = None
 
 
 def test_command_binding_catalog_disables_shell_metadata_cache(
-    binding_fixture: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+    binding_fixture: dict, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("PSModuleAnalysisCachePath", str(binding_fixture["home"] / "parent-cache"))
     assert _catalog_environment(binding_fixture)["PSModuleAnalysisCachePath"] == os.devnull
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX interpreter isolation")
-def test_command_binding_catalog_preserves_stdin_arguments(binding_fixture: dict[str, Any]) -> None:
+def test_command_binding_catalog_preserves_stdin_arguments(binding_fixture: dict) -> None:
     environment = _catalog_environment(binding_fixture)
     command = [str(binding_fixture["home"] / "test-bin/python3"), "-", "first", "space two"]
     result = subprocess.run(
@@ -590,7 +589,7 @@ def test_command_binding_catalog_preserves_stdin_arguments(binding_fixture: dict
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX catalog interpreter")
 def test_command_binding_catalog_isolates_project_and_pythonpath(
-    binding_fixture: dict[str, Any],
+    binding_fixture: dict,
 ) -> None:
     _prepare_catalog(binding_fixture)
     _publish(binding_fixture)
@@ -627,16 +626,16 @@ def test_command_binding_catalog_isolates_project_and_pythonpath(
     pytest.param("powershell", marks=pytest.mark.skipif(POWERSHELL is None, reason="PowerShell unavailable")),
 ])
 def test_command_binding_catalog_disables_user_site_startup(
-    binding_fixture: dict[str, Any], shell: str, powershell_host: Callable[[dict[str, Any], dict[str, str]], _PowerShellHost],
+    binding_fixture: dict, shell: str, powershell_host,
 ) -> None:
     _prepare_catalog(binding_fixture)
     _publish(binding_fixture)
     home = binding_fixture["home"]
-    interpreter = cast(str, cast(Any, sys)._base_executable)
+    interpreter = sys._base_executable
     environment = _catalog_environment(binding_fixture, interpreter)
     if os.name == "nt":
         environment["APPDATA"] = str(home / "AppData/Roaming")
-    kwargs: dict[str, Any] = {"creationflags": cast(Any, subprocess).CREATE_NO_WINDOW if os.name == "nt" else 0}
+    kwargs = {"creationflags": subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0}
     query = subprocess.run(
         [interpreter, "-I", "-B", "-c", "import site; print(site.getusersitepackages())"],
         env=environment, cwd=home, capture_output=True, text=True, timeout=10,
@@ -680,7 +679,7 @@ def test_command_binding_catalog_disables_user_site_startup(
         )
         environment.update({"TEST_PYTHON": python, "TEST_LAUNCHER_PATH": str(launcher)})
         host = powershell_host(binding_fixture, environment)
-        command = [cast(str, POWERSHELL), "-File", str(wrapper)]
+        command = [POWERSHELL, "-File", str(wrapper)]
     else:
         host = None
         command = ["bash", str(binding_fixture["payload"] / "scripts/emit-command-catalog.sh")]
@@ -749,10 +748,10 @@ class _PowerShellHost:
             encoding="utf-8",
         )
         self.process = subprocess.Popen(
-            [cast(str, POWERSHELL), "-NoLogo", "-NoProfile", "-File", str(script)],
+            [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(script)],
             env=environment, cwd=home, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, encoding="utf-8",
-            creationflags=cast(Any, subprocess).CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         self.lines: queue.Queue[str | None] = queue.Queue()
         self.native_errors: queue.Queue[str | None] = queue.Queue()
@@ -787,7 +786,7 @@ class _PowerShellHost:
             self.close()
             raise
 
-    def _response(self) -> dict[str, Any]:
+    def _response(self) -> dict:
         deadline = time.monotonic() + 30
         native_output = []
         while True:
@@ -806,10 +805,10 @@ class _PowerShellHost:
                     native_output.append(prefix)
                 if native_output:
                     response["stdout"] = "".join(native_output) + response.get("stdout", "")
-                return cast(dict[str, Any], response)
+                return response
             native_output.append(line)
 
-    def run(self, argv: list[str]) -> subprocess.CompletedProcess[str]:
+    def run(self, argv: list[str]) -> subprocess.CompletedProcess:
         index = argv.index("-File")
         request = {"path": argv[index + 1], "arguments": argv[index + 2:]}
         assert self.process.stdin
@@ -851,14 +850,11 @@ class _PowerShellHost:
         self.process.stderr.close()
 
 
-PowerShellFactory = Callable[[dict[str, Any], dict[str, str]], _PowerShellHost]
-
-
 @pytest.fixture
-def powershell_host() -> Iterator[PowerShellFactory]:
+def powershell_host():
     hosts: list[_PowerShellHost] = []
 
-    def start(fixture: dict[str, Any], environment: dict[str, str]) -> _PowerShellHost:
+    def start(fixture: dict, environment: dict[str, str]) -> _PowerShellHost:
         host = _PowerShellHost(fixture["home"], environment)
         hosts.append(host)
         return host
@@ -873,7 +869,7 @@ def powershell_host() -> Iterator[PowerShellFactory]:
     "ignored-native-failure", "exit", "throw", "native-stderr", "native-stdout",
 ])
 def test_command_binding_initialized_host_preserves_script_outcome(
-    binding_fixture: dict[str, Any], result: str, powershell_host: Callable[[dict[str, Any], dict[str, str]], _PowerShellHost],
+    binding_fixture: dict, result: str, powershell_host,
 ) -> None:
     environment = _catalog_environment(binding_fixture)
     environment["TEST_PYTHON"] = sys.executable
@@ -895,7 +891,7 @@ def test_command_binding_initialized_host_preserves_script_outcome(
         ),
     }[result], encoding="utf-8")
     host = powershell_host(binding_fixture, environment)
-    completed = host.run([cast(str, POWERSHELL), "-File", str(script)])
+    completed = host.run([POWERSHELL, "-File", str(script)])
     assert completed.returncode == {
         "ignored-native-failure": 0, "exit": 7, "throw": 1, "native-stderr": 0,
         "native-stdout": 0,
@@ -904,10 +900,10 @@ def test_command_binding_initialized_host_preserves_script_outcome(
         assert "fixture-script-error" in completed.stderr
     elif result == "native-stderr":
         assert "native-error" in completed.stderr
-        assert host.run([cast(str, POWERSHELL), "-File", str(script)]).stderr == completed.stderr
+        assert host.run([POWERSHELL, "-File", str(script)]).stderr == completed.stderr
     elif result == "native-stdout":
         assert completed.stdout == 'raw-native\n{"ready":false}\ncomplete'
-        assert host.run([cast(str, POWERSHELL), "-File", str(script)]).stdout == completed.stdout
+        assert host.run([POWERSHELL, "-File", str(script)]).stdout == completed.stdout
     else:
         assert completed.stdout == "complete"
 
@@ -918,7 +914,7 @@ def test_command_binding_initialized_host_preserves_script_outcome(
 ])
 @pytest.mark.parametrize("owned", [False, True])
 def test_command_binding_real_catalog_read_only(
-    binding_fixture: dict[str, Any], shell: str, owned: bool, powershell_host: Callable[[dict[str, Any], dict[str, str]], _PowerShellHost],
+    binding_fixture: dict, shell: str, owned: bool, powershell_host,
 ) -> None:
     _prepare_catalog(binding_fixture)
     if owned:
@@ -928,7 +924,7 @@ def test_command_binding_real_catalog_read_only(
     argv = (
         ["bash", str(payload / "scripts/emit-command-catalog.sh")]
         if shell == "bash" else
-        [cast(str, POWERSHELL), "-NoLogo", "-NoProfile", "-File", str(payload / "scripts/emit-command-catalog.ps1")]
+        [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(payload / "scripts/emit-command-catalog.ps1")]
     )
     host = powershell_host(binding_fixture, environment) if shell == "powershell" else None
     before = _snapshot(binding_fixture["home"])
@@ -936,7 +932,7 @@ def test_command_binding_real_catalog_read_only(
         completed = host.run(argv) if host else subprocess.run(
             argv, env=environment, cwd=binding_fixture["home"],
             capture_output=True, text=True, timeout=30, check=True,
-            creationflags=cast(Any, subprocess).CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         assert completed.returncode == 0, completed.stdout + completed.stderr
         envelope = json.loads(completed.stdout)
@@ -960,7 +956,7 @@ def test_command_binding_real_catalog_read_only(
         completed = host.run(argv) if host else subprocess.run(
             argv, env=environment, cwd=binding_fixture["home"],
             capture_output=True, text=True, timeout=30, check=True,
-            creationflags=cast(Any, subprocess).CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         assert completed.returncode == 0, completed.stdout + completed.stderr
         envelope = json.loads(completed.stdout)
@@ -981,7 +977,7 @@ def test_command_binding_real_catalog_read_only(
     "py", "python", "alias-only", "py-unavailable", "py-too-old", "helper-failure", "empty-response",
 ])
 def test_command_binding_catalog_python_launcher_avoids_app_alias(
-    binding_fixture: dict[str, Any], launcher: str, powershell_host: Callable[[dict[str, Any], dict[str, str]], _PowerShellHost],
+    binding_fixture: dict, launcher: str, powershell_host,
 ) -> None:
     _prepare_catalog(binding_fixture)
     _publish(binding_fixture)
@@ -1037,7 +1033,7 @@ def test_command_binding_catalog_python_launcher_avoids_app_alias(
         encoding="utf-8",
     )
     host = powershell_host(binding_fixture, environment)
-    completed = host.run([cast(str, POWERSHELL), "-File", str(wrapper)])
+    completed = host.run([POWERSHELL, "-File", str(wrapper)])
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert "::boot-trace::" not in completed.stdout
     assert completed.stderr.count("fixture-launcher-run") == (
@@ -1068,9 +1064,7 @@ def test_command_binding_catalog_python_launcher_avoids_app_alias(
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows console encoding")
 @pytest.mark.parametrize("native_shell", ["powershell.exe", "pwsh"])
-def test_command_binding_catalog_decodes_unicode_interpreter(
-    binding_fixture: dict[str, Any], native_shell: str,
-) -> None:
+def test_command_binding_catalog_decodes_unicode_interpreter(binding_fixture, native_shell):
     shell, uv = shutil.which(native_shell), shutil.which("uv")
     if not shell or not uv:
         pytest.skip("native PowerShell and uv required")
@@ -1080,8 +1074,7 @@ def test_command_binding_catalog_decodes_unicode_interpreter(
     venv = binding_fixture["home"] / "caf\u00e9" / "environment"
     created = subprocess.run(
         [uv, "venv", "--python", sys.executable, "--no-python-downloads", str(venv)],
-        capture_output=True, text=True, timeout=30,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        capture_output=True, text=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW,
     )
     assert created.returncode == 0, created.stderr
     environment["TEST_PYTHON"] = str(venv / "Scripts/python.exe")
@@ -1100,7 +1093,7 @@ def test_command_binding_catalog_decodes_unicode_interpreter(
     completed = subprocess.run(
         [shell, "-NoLogo", "-NoProfile", "-File", str(wrapper)], env=environment,
         cwd=binding_fixture["home"], capture_output=True, text=True, encoding="utf-8",
-        timeout=30, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        timeout=30, creationflags=subprocess.CREATE_NO_WINDOW,
     )
     assert completed.returncode == 0, completed.stderr
     envelope = json.loads(completed.stdout)
@@ -1116,7 +1109,7 @@ def test_command_binding_catalog_decodes_unicode_interpreter(
 ])
 @pytest.mark.parametrize("contextual", [False, True])
 def test_command_binding_native_manifest_publication_and_foreign_refusal(
-    binding_fixture: dict[str, Any], shell: str, contextual: bool, powershell_host: Callable[[dict[str, Any], dict[str, str]], _PowerShellHost],
+    binding_fixture: dict, shell: str, contextual: bool, powershell_host,
 ) -> None:
     _prepare_catalog(binding_fixture)
     runtime = binding_fixture["legacy"]
@@ -1184,14 +1177,14 @@ def test_command_binding_native_manifest_publication_and_foreign_refusal(
         )
         program_path = binding_fixture["home"] / "publish-fixture.ps1"
         program_path.write_text(program, encoding="utf-8")
-        argv = [cast(str, POWERSHELL), "-NoLogo", "-NoProfile", "-File", str(program_path)]
+        argv = [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(program_path)]
     host = powershell_host(binding_fixture, environment) if shell == "powershell" else None
 
-    def run() -> subprocess.CompletedProcess[str]:
+    def run() -> subprocess.CompletedProcess:
         return host.run(argv) if host else subprocess.run(
             argv, env=environment, cwd=binding_fixture["home"],
             capture_output=True, text=True, timeout=30,
-            creationflags=cast(Any, subprocess).CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
 
     completed = run()
@@ -1224,7 +1217,7 @@ def test_command_binding_native_manifest_publication_and_foreign_refusal(
     assert after == before
 
 
-def test_command_binding_concurrent_lifecycle_publishers_keep_one_owner(binding_fixture: dict[str, Any]) -> None:
+def test_command_binding_concurrent_lifecycle_publishers_keep_one_owner(binding_fixture: dict) -> None:
     other = binding_fixture["home"] / ".copilot/installed-plugins/other" / PLUGIN_ID
     other.mkdir(parents=True)
     _write(binding_fixture["home"] / ".copilot/settings.json", {
@@ -1238,13 +1231,11 @@ def test_command_binding_concurrent_lifecycle_publishers_keep_one_owner(binding_
     bootstrap = """
 import importlib.util,json,os,sys,time
 from pathlib import Path
-from collections.abc import Callable
-from typing import Any
 sys.dont_write_bytecode=True
 if os.name!='nt':
     import pwd
     original=pwd.getpwuid
-    def getpwuid(uid: int) -> pwd.struct_passwd:
+    def getpwuid(uid):
         record=original(uid)
         return pwd.struct_passwd((*record[:5],os.environ['HOME'],record.pw_shell))
     pwd.getpwuid=getpwuid
@@ -1253,8 +1244,8 @@ spec=importlib.util.spec_from_file_location('concurrent_binding',payload/'script
 binding=importlib.util.module_from_spec(spec)
 spec.loader.exec_module(binding)
 primitive=binding._load_primitive(payload)
-write: Callable[..., None]=primitive._atomic_write_json
-def delayed_write(*args: Any,**kwargs: Any) -> None:
+write=primitive._atomic_write_json
+def delayed_write(*args,**kwargs):
     if Path(args[0]).name=='deploy-manifest.json':
         time.sleep(0.3)
     return write(*args,**kwargs)
@@ -1276,7 +1267,7 @@ print(json.dumps(result))
         processes.append(subprocess.Popen(
             [sys.executable, "-B", "-c", bootstrap, str(payload), str(binding_fixture["legacy"]), str(gate)],
             env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            creationflags=cast(Any, subprocess).CREATE_NO_WINDOW if os.name == "nt" else 0,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         ))
     gate.write_text("start", encoding="utf-8")
     outputs = [process.communicate(timeout=30) for process in processes]

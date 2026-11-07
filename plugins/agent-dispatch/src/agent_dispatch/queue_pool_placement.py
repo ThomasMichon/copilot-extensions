@@ -48,8 +48,6 @@ def pool_placement_contract() -> dict[str, object]:
         "protocol": POOL_PLACEMENT_PROTOCOL, "supported_versions": [POOL_PLACEMENT_VERSION],
         "supported_drivers": ["cli", "ordinary-bridge"],
         "ordinary_initial_start_versions": [1],
-        "ordinary_writer_requirement_versions": [1],
-        "prepared_writer_requirement_versions": [1],
         "cli_initial_start_versions": [1],
         "instance_bound_placement_versions": [1],
         "instance_scoped_reservation_versions": [1],
@@ -60,8 +58,6 @@ def pool_placement_contract() -> dict[str, object]:
         "worker_decline_preparation_versions": [1],
         "worker_decline_local_closeout_versions": [1],
         "worker_decline_closeout_complete": False,
-        "worker_submission_readiness_versions": [1],
-        "worker_submission_scope": "retained-workspace-assignments",
         "automatic_lane_migration": False, "startup_retry_policy_complete": False,
     }
 

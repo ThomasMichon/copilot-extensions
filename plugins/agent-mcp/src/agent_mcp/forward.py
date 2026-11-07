@@ -102,7 +102,8 @@ def _serve_handle(socket_path: str | None) -> str:
     relative ``AGENT_MCP_HOME``) resolved by the host would bind somewhere
     other than the path this forwarder polls.
     """
-    raw = socket_path or str(sockio.default_socket_path())
+    raw = (socket_path or os.environ.get("AGENT_MCP_SERVE_SOCKET")
+           or str(sockio.default_socket_path()))
     return sockio.absolute_handle(raw)
 
 
@@ -168,13 +169,6 @@ def _ensure_serve(socket_path: str | None):
     existing = sockio.serve_socket_if_available(handle)
     if existing is not None:
         return existing
-    from . import incoming
-    if incoming.launch_generation() is not None:
-        try:
-            incoming.ensure_current(handle)
-            return handle
-        except OSError:
-            return None
     try:
         _spawn_serve_host(handle)
     except (OSError, RuntimeError, ValueError):
@@ -219,11 +213,10 @@ def _attach_or_spawn(bridge: str, socket_path: str | None):
        Any failure here yields ``None`` -> direct fallback.
     """
     bref = _abs_bridge_ref(bridge)
-    from . import incoming
     handle = sockio.serve_socket_if_available(socket_path)
     if handle is not None:
         try:
-            return incoming.attach(handle, bref)
+            return sockio.attach(handle, bref)
         except sockio.HostUnreachableError:
             # The advertised host is gone but left its handle behind; reclaim it
             # so _ensure_serve spawns a fresh host below.
@@ -237,7 +230,7 @@ def _attach_or_spawn(bridge: str, socket_path: str | None):
     if handle is None:
         return None
     try:
-        return incoming.attach(handle, bref)
+        return sockio.attach(handle, bref)
     except OSError:
         return None
 
@@ -245,13 +238,6 @@ def _attach_or_spawn(bridge: str, socket_path: str | None):
 def _run_direct(bridge: str) -> int:
     """The inline fallback: run the full in-process bridge (lazy heavy import)."""
     import asyncio
-    from . import incoming
-
-    try:
-        incoming.require_selected()
-    except incoming.AdmissionRefused as exc:
-        print(f"agent-mcp: direct execution refused: {exc}", file=sys.stderr)
-        return 1
 
     from .bridge import Bridge
     from .config import ConfigError, load_config

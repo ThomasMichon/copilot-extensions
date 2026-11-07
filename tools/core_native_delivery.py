@@ -63,7 +63,6 @@ from runtime_profile_delivery import (
     build_profile_delivery,
 )
 from runtime_profile_release import _unique_object
-from runtime_profile_wheels import MANAGER_ISOLATED
 from runtime_source_lock import _wheel_pins
 from runtime_wheel_inspection import inspect_wheel as inspect_pool_wheel
 from standalone_python_artifacts import COMPONENTS
@@ -275,13 +274,11 @@ def _build_from_snapshot(
     material_paths: dict, destination: Path, deadline: float, max_bytes: int,
     native_lock: Path | None = None, offline_wheel_pool: Path | None = None,
     guarded_feed: bool = False, artifact_index: Path | None = None,
-    nonsecret_feed_url: str | None = None, layout: str | None = None,
+    nonsecret_feed_url: str | None = None,
 ) -> dict:
     """Keep selected lock, wheel and material custody until candidate publication."""
     if type(max_bytes) is not int or max_bytes <= 0:
         raise ProfileError("core delivery requires a positive byte budget")
-    if layout not in (None, MANAGER_ISOLATED):
-        raise ProfileError("unsupported core delivery environment layout")
     if type(guarded_feed) is not bool or sum(
         (native_lock is not None, offline_wheel_pool is not None, guarded_feed),
     ) != 1:
@@ -524,7 +521,7 @@ def _build_from_snapshot(
                             manifest_data=manifest_data, native_record=native_profile.record(),
                             archives=selected_paths, limits=limits, max_wheels=256,
                             max_total_bytes=max_bytes, max_snapshot_bytes=4 * max_bytes,
-                            max_unpacked_bytes=limits.max_expanded_bytes, deadline=deadline, layout=layout,
+                            max_unpacked_bytes=limits.max_expanded_bytes, deadline=deadline,
                         )
                         if index is not None:
                             candidate_index = compose_core_profile_index(index, manifest_data, profile)
@@ -534,14 +531,14 @@ def _build_from_snapshot(
                             max_wheels=256, max_total_bytes=max_bytes,
                             max_snapshot_bytes=4 * max_bytes,
                             max_unpacked_bytes=limits.max_expanded_bytes,
-                            max_bundle_bytes=max_bytes, deadline=deadline, layout=layout,
+                            max_bundle_bytes=max_bytes, deadline=deadline,
                         )
                         result = build_profile_delivery(
                             profile.record(), transport, wheel_result["sha256"],
                             materials, material_paths, candidate, max_bytes=max_bytes,
                             # The delivery reader also uses this limit for members inside each wheel.
                             max_files=limits.max_members, max_snapshot_bytes=8 * max_bytes,
-                            deadline=deadline, layout=layout,
+                            deadline=deadline,
                         )
                         retained.verify()
                     if external is not None:
@@ -606,14 +603,12 @@ def prepare_core_delivery(
     download_origins: tuple[str, ...], deadline: float, max_bytes: int,
     native_lock: Path | None = None, offline_wheel_pool: Path | None = None,
     guarded_feed: bool = False, artifact_index: Path | None = None,
-    nonsecret_feed_url: str | None = None, layout: str | None = None,
+    nonsecret_feed_url: str | None = None,
 ) -> dict:
     """Compose the selected Main source and prepare one inert native candidate."""
     _check_deadline(deadline)
     if type(max_bytes) is not int or max_bytes <= 0:
         raise ProfileError("core delivery requires a positive byte budget")
-    if layout not in (None, MANAGER_ISOLATED):
-        raise ProfileError("unsupported core delivery environment layout")
     if type(guarded_feed) is not bool or sum(
         (native_lock is not None, offline_wheel_pool is not None, guarded_feed),
     ) != 1:
@@ -642,7 +637,7 @@ def prepare_core_delivery(
             download_origins=download_origins, materials=materials, material_paths=material_paths,
             destination=destination, deadline=deadline, max_bytes=max_bytes, native_lock=native_lock,
             offline_wheel_pool=offline_wheel_pool, guarded_feed=guarded_feed, artifact_index=artifact_index,
-            nonsecret_feed_url=nonsecret_feed_url, layout=layout,
+            nonsecret_feed_url=nonsecret_feed_url,
         )
 
 
@@ -666,7 +661,6 @@ def main(argv: list[str] | None = None) -> int:
     selection.add_argument("--offline-wheel-pool", type=Path)
     selection.add_argument("--guarded-feed", action="store_true")
     parser.add_argument("--download-origin", action="append", default=[])
-    parser.add_argument("--layout", choices=(MANAGER_ISOLATED,))
     parser.add_argument(
         "--nonsecret-feed-url",
         help="opt in to reproducible identity for this explicitly nonsecret anonymous HTTPS feed",
@@ -685,7 +679,7 @@ def main(argv: list[str] | None = None) -> int:
             args.output, uv=args.uv, download_origins=tuple(args.download_origin),
             deadline=deadline, max_bytes=args.max_bytes, native_lock=args.native_lock,
             offline_wheel_pool=args.offline_wheel_pool, guarded_feed=args.guarded_feed,
-            artifact_index=args.artifact_index, nonsecret_feed_url=args.nonsecret_feed_url, layout=args.layout,
+            artifact_index=args.artifact_index, nonsecret_feed_url=args.nonsecret_feed_url,
         )
         print(json.dumps(result, sort_keys=True))
         return 0

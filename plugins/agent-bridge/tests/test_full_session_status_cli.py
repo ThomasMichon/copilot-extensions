@@ -63,65 +63,6 @@ def test_full_session_status_cli_flag_is_registered():
     assert args.session_id == "bridge-a" and args.full is True and args.json is True
 
 
-@pytest.mark.parametrize("argv", [
-    ["status", "--worktree-writer"],
-    ["status", "bridge-a", "--worktree-writer"],
-    ["status", "--full", "--worktree-writer"],
-])
-def test_writer_status_requires_full_exact_session_before_discovery(monkeypatch, capsys, argv):
-    monkeypatch.setattr(core, "_get_client", lambda **_: pytest.fail("must not discover a client"))
-    args = core.build_parser().parse_args(argv)
-    with pytest.raises(SystemExit) as error:
-        args.func(args)
-    assert error.value.code == 2 and "--full" in capsys.readouterr().err
-
-
-@pytest.mark.parametrize("changed", ["none", "unsupported", "ignored-query", "wrong-session"])
-def test_writer_status_uses_negotiated_original_observation(monkeypatch, capsys, changed):
-    client = BridgeClient("http://example.invalid", "synthetic")
-    observation = {
-        "schema": "copilot-extensions.creation-worktree-writer", "version": 1,
-        "session_id": "other" if changed == "wrong-session" else "bridge-a",
-        "writer_scope": "executing-process", "retained_session_writes": 1,
-        "worktree_writer": {
-            "version": 1, "creation_nonce": "original-nonce",
-            "identity": {"installation_root": "/example/owner", "runtime_generation": "a" * 32},
-        },
-    }
-    result = {"session_id": "bridge-a", "worktree_writer_observation": observation}
-    if changed == "ignored-query":
-        result.pop("worktree_writer_observation")
-    calls = []
-
-    def request(method, path, **kwargs):
-        calls.append((method, path, kwargs))
-        if path == "/health":
-            return {
-                "protocol_version": 52, "min_protocol_version": 1,
-                "capabilities": {} if changed == "unsupported" else {
-                    "retained_workspace_creation_writer_inspection": 1,
-                },
-            }
-        return result
-
-    monkeypatch.setattr(client, "_request", request)
-    monkeypatch.setattr(core, "_get_client", lambda **_: client)
-    args = core.build_parser().parse_args(["status", "bridge-a", "--full", "--worktree-writer"])
-    if changed == "none":
-        args.func(args)
-        assert json.loads(capsys.readouterr().out) == result
-    else:
-        with pytest.raises(SystemExit) as error:
-            args.func(args)
-        output = capsys.readouterr()
-        assert error.value.code == 1 and not output.out and output.err
-    assert all(method == "GET" for method, _path, _kwargs in calls)
-    assert [path for _method, path, _kwargs in calls] == (
-        ["/health"] if changed == "unsupported"
-        else ["/health", "/api/v1/sessions/bridge-a?worktree_writer=true"]
-    )
-
-
 @pytest.mark.parametrize("status", [404, 409, 503])
 def test_full_session_status_cli_surfaces_read_failure(monkeypatch, capsys, status):
     client = Mock()

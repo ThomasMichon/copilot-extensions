@@ -371,8 +371,6 @@ def dispatch_cli(argv: list[str]) -> int:
     parser.add_argument("--workspace", required=True)
     parser.add_argument("--config")
     parser.add_argument("--output", help="New worker config file for export-config only")
-    parser.add_argument("--include-author", action="store_true",
-                        help="Also export author policy, without self-merge or bypass grants")
     from . import pr_publication_labels_cli, pr_publication_labels
     pr_publication_labels_cli.add_options(parser)
     parser.add_argument("--base")
@@ -397,7 +395,7 @@ def dispatch_cli(argv: list[str]) -> int:
         if args.operation == "export-config":
             from dataclasses import replace
             config = pr_publication_labels.activate(config, args.publication_origin, args.publication_label)
-            origin = pr_publication_labels.selected_for_config(config)
+            origin = pr_publication_labels.selected(config.default_repo.pr)
             if origin is not None:
                 repo = replace(repo, pr=replace(repo.pr, publication_origin=origin))
             from .pr_worker_config import export_config
@@ -406,16 +404,11 @@ def dispatch_cli(argv: list[str]) -> int:
                 args.since, args.allowed_path is not None,
             )):
                 raise CheckError("export-config needs --output and no local review/scope options")
-            result = export_config(
-                args.repo, repo, args.workspace, args.base, Path(args.output),
-                include_author=args.include_author,
-            )
+            result = export_config(args.repo, repo, args.workspace, args.base, Path(args.output))
             print(json.dumps(result))
             return 0
         if args.publication_origin or args.publication_label:
             raise CheckError("Publication-origin options apply only to export-config")
-        if args.include_author:
-            raise CheckError("--include-author applies only to export-config")
         if policy is None:
             raise CheckError("this repository has no configured publication checks")
         if args.output:

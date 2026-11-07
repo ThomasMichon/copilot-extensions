@@ -278,30 +278,6 @@ class QueueTaskRelationshipsMixin:
             or _encoded(snapshot.get("relationship")) != _encoded(request)
         ):
             raise TaskError("original queue and audited relationship request are unconfirmed")
-        if request["reservation_key"] is not None:
-            with self._connect() as conn:
-                prepared = conn.execute(
-                    "SELECT task_id, worktree, allocation_project, worktree_path,"
-                    " execution_machine, creation_nonce, task_relationship_required,"
-                    " task_relationship_event_id, task_relationship_generation"
-                    " FROM spawn_reservations WHERE key=?", (request["reservation_key"],),
-                ).fetchone()
-            workspace = AssignmentWorkspace(**request["workspace"])
-            expected = {
-                "task_id": request["task_id"], "worktree": workspace.worktree,
-                "allocation_project": workspace.project, "worktree_path": workspace.path,
-                "creation_nonce": workspace.creation_nonce, "task_relationship_required": 1,
-                "task_relationship_event_id": request["event_id"],
-                "task_relationship_generation": request["generation"],
-            }
-            if (
-                prepared is None
-                or any(prepared[key] != value for key, value in expected.items())
-                or not same_assignment_worker(
-                    f"{prepared['execution_machine']}/{prepared['worktree']}", workspace.worker_id,
-                )
-            ):
-                raise TaskError("original prepared workspace and reservation are unconfirmed")
         return snapshot
 
     def reconcile_task_relationship(self, task_id: str, *, event_id: int | None = None) -> dict:

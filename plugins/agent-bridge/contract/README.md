@@ -107,13 +107,6 @@ The actual parser carries file/stdin writer requirements through the existing
 client and capability fence, while invalid forms refuse before connection.
 This adds no acquisition route, cohort admission or ordinary allocation.
 
-Seven optional full-status CLI controls bring the current portfolio to 252
-cases. They cover required exact/full targeting, current-provider negotiation,
-unsupported providers and ignored optional queries. The existing actual
-keyed-creation HTTP control also joins the real full-status parser and passive
-health JSON. The CLI declaration and status implementation are semantic inputs;
-HTTP generation, service endpoints and historical evidence are unchanged.
-
 The joined portable-mux fixture retains the production native socket-path
 bound. Its isolated physical temporary root must be short enough for that
 bound; a long caller `TMPDIR` can correctly refuse before creating the mocked

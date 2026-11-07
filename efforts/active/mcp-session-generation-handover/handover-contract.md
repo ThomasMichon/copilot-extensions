@@ -32,16 +32,6 @@ before implementing it; do not infer a general per-session-service exception.
 
 ## Internal contract
 
-The operator selected the bounded fresh-code slice with **explicit direct
-fallbacks**, tracking broader warm reuse separately under #10486. HTTP,
-dynamic-auth, routed and CLI sharing remain unsupported in that slice.
-Stdio sharing retains actual inherited cwd and credential significance;
-there is no declared `ServerSpec.cwd` override to manufacture equivalence.
-Direct fallback pays cold authentication/startup/initialization costs while
-preserving current-code admission and no-replay semantics. Broader warm
-eligibility and the full custody contract below are follow-up work, not new
-incoming gates or a claim that the whole effort is Done.
-
 Introduce an MCP-owned versioned custody/attachment contract, independent of
 package versions, through the existing attach/discovery boundary. The first
 contract must declare its identity, supported range and capabilities for

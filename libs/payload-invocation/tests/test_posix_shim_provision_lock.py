@@ -10,8 +10,6 @@ an exact point of the loop. This runs under any bash, including Git Bash.
 from __future__ import annotations
 
 import importlib.util
-from importlib.machinery import ModuleSpec
-from typing import cast
 import json
 import os
 import shutil
@@ -22,7 +20,7 @@ import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "generate.py"
 _spec = importlib.util.spec_from_file_location("payload_invocation_generate_lock", SCRIPT)
-generator = importlib.util.module_from_spec(cast(ModuleSpec, _spec))
+generator = importlib.util.module_from_spec(_spec)
 assert _spec and _spec.loader
 _spec.loader.exec_module(generator)
 
@@ -116,7 +114,7 @@ def _rendered_lock_section(tmp_path: Path, entry: str) -> str:
     rendered = {
         path.name: text for path, text in generator.expected_files(manifest).items()
     }
-    shim = cast(str, rendered["agent-example"])
+    shim = rendered["agent-example"]
     start = shim.index(LOCK_START)
     return shim[start : shim.index("\n_resolve_runtime\n", start)]
 

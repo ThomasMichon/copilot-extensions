@@ -214,47 +214,6 @@ the same sanitized warning contract as managed publication.
   decommissioned, or is currently unreachable over SSH -- not that the
   marker itself is malformed.
 
-## Compact comment-origin producer
-
-The optional comment-origin mode produces data for the separately reviewed
-[comment-identity contract](../../../../../efforts/active/durable-pr-watch-delegation/comment-identity.md),
-not a PR-ownership marker or a posted comment:
-
-```text
-<agent-worktrees catalog argv[0]> attribution-prepare --comment-origin --json
-<agent-worktrees catalog argv[0]> attribution-prepare --comment-origin --visibility internal --json
-```
-
-Default destination visibility is `public`, even when the source repository
-permits raw PR metadata. Example output:
-
-```json
-{"protocol":"agent-worktrees.comment-origin/v1","privacy":"public","origin":{"codename":"example-label"},"effects":"none"}
-```
-
-The assigned codename is the worktree's public source stamp. Only explicit
-`internal` destination selection together with the existing raw-attribution
-policy includes the additional `worktree` stamp. Internal means a confirmed
-closed-circuit destination, not merely a private repository. A private custom
-codename vocabulary does not gain public publication approval from raw-source
-opt-in; unqualified or missing codenames refuse rather than being invented.
-Anonymous policy returns `privacy: anonymous` and `origin: null`.
-
-This compact projection does not acquire a Git head, root chain, identity key,
-vault cache or provider credentials. It omits session, machine, head and
-encrypted-record payloads. It cannot combine with PR `--body-file`, `--tag` or
-`--omit-source`; `--visibility` is only meaningful with `--comment-origin`.
-Unknown/abbreviated flags refuse. Ordinary PR preparation and its version-1
-JSON fields retain their existing behavior.
-
-A consuming publisher must bind destination visibility to its actual admitted
-target, validate this exact output contract and refuse missing identity when
-its policy requires it. This data is not authentication or a send grant.
-It does not compose the AI signature/body, allocate or persist GUIDs, emit a
-hidden comment marker, update a database or claim all-publisher adoption.
-An older selected CLI may not support the mode; report that optional gap
-without probing a write or falling back to a PR-source marker.
-
 ## Accepted tradeoff -- read this before treating a codename as secret
 
 A codename is **informationless-by-decoding, not unlinkable**. The marker

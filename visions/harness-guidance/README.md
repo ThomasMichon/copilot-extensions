@@ -3,7 +3,7 @@
 - **Subject:** Ambient guidance across repositories, plugins, skills, and operator policy
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-11-06
+- **Last revised:** 2026-11-01
 - **Reality docs:** `docs/patterns/session-scoped-dynamic-guidance.md`, `docs/patterns/worktree-scoped-dynamic-guidance.md`, `docs/harness-runbook.md`
 
 ## Purpose & Intent
@@ -175,25 +175,6 @@ consumer should use the same effective configuration and avoid duplicate
 markers. Neither presentation path should invent human review, waive a required
 disclosure, authorize publication or change an already approved or published
 item.
-
-### compact-forge-comment-provenance
-
-Agent-authored issue and pull-request comments, replies, inline feedback and
-review bodies should honor configured AI attribution and carry compact,
-privacy-safe source provenance without cluttering the conversation.
-Logical comment identity should survive edits; intentional writes should
-remain distinguishable while retries preserve their original identity.
-
-Visible attribution should remain concise and avoid repetition only where
-required disclosure and reliable context permit. Machine-readable correlation
-should be self-contained rather than extra metadata-only conversation posts.
-Source privacy and anonymous choices remain effective; hidden content is not
-private merely because the normal renderer omits it.
-
-Correlation should support recovery and synchronization without becoming
-proof of authorship, permission or a completed native effect. Ordinary comment
-origin must not replace pull-request ownership or another authority's receipt,
-publication or retention duties.
 
 ### maintenance-aware-tool-unavailability
 

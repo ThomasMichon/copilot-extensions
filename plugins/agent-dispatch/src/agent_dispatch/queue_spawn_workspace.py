@@ -18,7 +18,6 @@ class SpawnWorkspaceMixin:
         allocation_project: str | None = None,
         worktree_path: str | None = None,
         creation_nonce: str | None = None,
-        worktree_writer_requirement: dict | None = None,
         now: float | None = None,
     ) -> SpawnReservation:
         """Record a reusable worktree while the reservation is still reserving.
@@ -86,11 +85,6 @@ class SpawnWorkspaceMixin:
                 raise TaskError(
                     f"worktree {worktree!r} has in-flight cleanup {cleanup_claim['key']}"
                 )
-            from .ordinary_writer_admission import prepared_requirement
-            retained_writer = prepared_requirement(
-                dict(row), worktree=worktree, project=allocation_project, path=worktree_path,
-                creation_nonce=creation_nonce, value=worktree_writer_requirement,
-            )
             conn.execute(
                 "UPDATE spawn_reservations SET "
                 "session_handle = CASE "
@@ -101,13 +95,11 @@ class SpawnWorkspaceMixin:
                 "WHEN worktree_ownership = 'reused' THEN worktree "
                 "ELSE inherited_worktree END, "
                 "worktree = ?, worktree_ownership = ?, creating_host = ?, execution_machine = ?, "
-                "driver = ?, allocation_project = ?, worktree_path = ?, "
-                "worktree_writer_requirement = ?, updated_at = ? WHERE key = ?",
+                "driver = ?, allocation_project = ?, worktree_path = ?, updated_at = ? WHERE key = ?",
                 (
                     worktree, worktree, ownership,
                     creating_host if ownership == "created" else row["creating_host"],
-                    execution_machine, driver, allocation_project, worktree_path,
-                    retained_writer, ts, key,
+                    execution_machine, driver, allocation_project, worktree_path, ts, key,
                 ),
             )
             updated = conn.execute(

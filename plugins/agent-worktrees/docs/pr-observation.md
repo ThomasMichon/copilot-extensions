@@ -29,15 +29,6 @@ pr-watch wait Project/repository 7 --since <cursor> --until any --timeout 600 --
 `agent-worktrees.pr-snapshot` version-1 envelope identifies the provider,
 endpoint, repository, PR and head, and carries the same `observation` that the
 tracked `pr-status` live block and foreground wait report.
-The additive `endpoint` is the authority captured by the actual provider
-fetch, separate from the configured `api_base`. In particular, an ordinary
-GitHub read with empty `api_base` can select an ambient host, while a selected
-credential source pins its own supported host and does not inherit that
-ambient selection. Gitea and ADO use the fetch's normalized API input.
-Formatting never reselects the host from the later environment or unnormalized
-configuration. An empty or absent `endpoint` is unknown, not evidence of the
-public host. This field needs no extra provider request and supplies no action
-authority.
 The one-shot envelope additionally carries `base_sha`: the target-tip object
 ID returned by the same native PR read, not the merge base or synthetic merge
 commit. GitHub/Gitea use `base.sha`; native and legacy ADO use

@@ -36,8 +36,6 @@ def _state(queue: TaskQueue, conn: sqlite3.Connection, task_id: str, request_id:
     request = value["request"]
     if request["request_id"] != request_id:
         raise TaskError("submission readiness preparation request changed")
-    if request.get("expected_status") is not None and task.status != request["expected_status"]:
-        raise TaskError("submission readiness expected status changed")
     from .queue_submission_resubmission import retained_lineage
     retained_lineage(conn, request)
     workspace = AssignmentWorkspace.from_dict(request["workspace"])

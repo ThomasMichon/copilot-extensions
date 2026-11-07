@@ -159,21 +159,6 @@ class QueueLifecycleMixin(QueueProgressMixin):
                 conn.execute("COMMIT")
                 raise TaskError(f"task {task_id!r} ownership incarnation changed")
 
-            from .queue_submission_consumer import complete, original_request
-            request = original_request(
-                conn, task, worker_id, allowed=allowed, expected_status=expected_status,
-            )
-            if request is not None:
-                if (
-                    expected_owner_session_id is not None
-                    and task.owner_session_id != expected_owner_session_id
-                ):
-                    raise TaskError(f"task {task_id!r} ownership incarnation changed")
-                conn.execute("COMMIT")
-                return complete(
-                    self, task_id, worker_id, request,
-                    result=result, result_ref=result_ref, now=ts,
-                )
             from .queue_submission_preparation import require_unprepared_submission
             require_unprepared_submission(conn, task_id)
             if task.status in {Status.SUBMITTED, Status.COMPLETED} and encoded_result is not None:

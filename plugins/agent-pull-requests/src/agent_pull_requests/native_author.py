@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import subprocess
 
 from .native_command import run_command
@@ -19,7 +18,6 @@ def add_parsers(subparsers, *, repo_type, handler):
         }[name], allow_abbrev=False)
         author.add_argument("--repo", required=True, type=repo_type)
         author.add_argument("--worktrees-command", required=True, type=validate_selector)
-        author.add_argument("--config", help="Explicit delivered worker policy (native only)")
         author.add_argument("--json", action="store_true")
         author.set_defaults(handler=handler)
         if name == "author-capabilities":
@@ -41,19 +39,9 @@ def add_parsers(subparsers, *, repo_type, handler):
             author.add_argument("--expected-remote-head", default=None)
 
 
-def config_options(args) -> list[str]:
-    path = getattr(args, "config", None)
-    if path is None:
-        return []
-    if not path or not Path(path).is_file():
-        raise ValueError("Explicit native author configuration file is unavailable")
-    return [f"--config={Path(path).resolve()}"]
-
-
 def capability(args, prefix: list[str], operation: str | None = None) -> dict:
-    options = config_options(args)
     response = run_command(
-        [*prefix, "pr-author-capabilities", f"--repo={args.repo}", "--json", *options], timeout=20.0,
+        [*prefix, "pr-author-capabilities", f"--repo={args.repo}", "--json"], timeout=20.0,
     )
     try:
         body = json.loads(response.stdout)
@@ -65,7 +53,6 @@ def capability(args, prefix: list[str], operation: str | None = None) -> dict:
         or type(body.get("version")) is not int or body["version"] != 1
         or body.get("repo") != args.repo or not isinstance(body.get("operations"), dict)
         or operation is not None and body["operations"].get(operation) is not True
-        or options and body["operations"].get("worker-policy-config") is not True
     ):
         raise ValueError(
             "Selected Worktrees runtime does not advertise this target-qualified author operation; "
@@ -80,20 +67,19 @@ def create_options(args, prefix: list[str]) -> list[str]:
     if bool(workspace) != bool(expected):
         raise ValueError("--source-workspace and --expected-head must be supplied together")
     if not workspace:
-        if getattr(args, "body_file", None) or config_options(args):
+        if getattr(args, "body_file", None):
             capability(args, prefix, "qualified-create")
-        return config_options(args)
+        return []
     capability(args, prefix, "qualified-create")
-    return [f"--source-workspace={workspace}", f"--expected-head={expected}", *config_options(args)]
+    return [f"--source-workspace={workspace}", f"--expected-head={expected}"]
 
 
 def run(args, prefix: list[str]) -> tuple[int, dict]:
     if args.command == "author-capabilities":
-        return 0, {**capability(args, prefix), "frontend": {"worker-policy-config": True}}
+        return 0, capability(args, prefix)
     operation = "metadata-update" if args.command == "update" else "source-push"
     capability(args, prefix, operation)
     argv = ["pr-update" if args.command == "update" else "pr-push", f"--repo={args.repo}", "--json"]
-    argv.extend(config_options(args))
     if args.command == "update":
         if args.number < 1:
             raise ValueError("--number must be positive")

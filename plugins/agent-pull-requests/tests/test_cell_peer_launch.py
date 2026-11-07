@@ -185,7 +185,6 @@ def test_normal_payload_peer_roundtrip_uses_same_cell_and_immutable_boundary(
         timeout=60, **no_window_kwargs(),
     )
     assert reverse.returncode == 1, reverse.stderr
-    assert reverse.stdout, f"Peer returned no JSON: stderr={reverse.stderr!r}"
     assert json.loads(reverse.stdout) == {"error": "no committed installation-local watch owner"}
     for damage in ("current", "manifest"):
         marker = installation.plugin_root / api.CURRENT_VERSION_FILE

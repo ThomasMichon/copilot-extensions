@@ -138,7 +138,7 @@ def test_read_demand_rejects_stale_malformed_and_unadmitted_notifications():
         server.close()
 
 
-@pytest.mark.parametrize("kind", ["nativeToolMutation", "nativeToolBatchMutation", "shellToolMutation"])
+@pytest.mark.parametrize("kind", ["nativeToolMutation", "nativeToolBatchMutation"])
 def test_native_mutation_wire_is_generation_bound_and_send_only(kind):
     calls = []
     server = HookIpcServer(
@@ -149,15 +149,12 @@ def test_native_mutation_wire_is_generation_bound_and_send_only(kind):
     try:
         assert hook_ipc.NATIVE_MUTATION_CAPABILITY in server.capabilities()
         assert hook_ipc.NATIVE_BATCH_MUTATION_CAPABILITY in server.capabilities()
-        assert hook_ipc.SHELL_MUTATION_CAPABILITY in server.capabilities()
         request = {
             "version": 1, "token": server.token, "kind": kind,
             "hook_generation": server.generation, "deadline": time.time() + 1,
             "payload": (
                 {"toolCalls": [{"name": "edit", "args": {"path": "one"}}]}
                 if kind == "nativeToolBatchMutation"
-                else {"toolName": "powershell", "toolArgs": '{"command":"git commit -m test"}'}
-                if kind == "shellToolMutation"
                 else {"toolName": "edit", "toolArgs": {"path": "one"}}
             ),
         }
@@ -188,7 +185,6 @@ def test_native_mutation_wire_is_generation_bound_and_send_only(kind):
         server._native_mutation_decide = None
         assert hook_ipc.NATIVE_MUTATION_CAPABILITY not in server.capabilities()
         assert hook_ipc.NATIVE_BATCH_MUTATION_CAPABILITY not in server.capabilities()
-        assert hook_ipc.SHELL_MUTATION_CAPABILITY not in server.capabilities()
         send()
         assert len(calls) == 1
     finally:

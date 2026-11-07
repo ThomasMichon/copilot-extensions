@@ -135,15 +135,6 @@ def assert_obligations_settled(
             "(creator ownership cannot be disabled by obligation-gate mode):"
         )
         _describe()
-        derived = [c for c in unsettled if c.kind == "derived"]
-        if derived:
-            emit_error(
-                f"{len(derived)} of these are derived output director"
-                f"{'y' if len(derived) == 1 else 'ies'}; finalize never deletes "
-                "them. Per path: `agent-worktrees claims settle <path> --reclaim "
-                "[--dry-run]` deletes it after safety checks, or `agent-worktrees "
-                "claims release <path>` keeps it and drops the claim."
-            )
         emit_error(
             "Close each resource out (a cross-repo worktree: finalize it; a "
             "CodeSpace/container: merge or move its work off-box; a bridge: drive "

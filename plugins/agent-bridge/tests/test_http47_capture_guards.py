@@ -24,6 +24,43 @@ SEED_STATES = pytest.mark.parametrize(
 )
 
 
+def test_http47_capture_source_lookup_scans_the_proof_only_at_admission():
+    from bridge_http47_runtime import _source_lookup
+
+    class Proof(dict):
+        scans = 0
+
+        def __iter__(self):
+            self.scans += 1
+            return super().__iter__()
+
+    proof = Proof({
+        "libs/core/src/pkg/source.py": {},
+        "libs/other/src/source.py": {},
+        "tools/source.py": {},
+        "tools/not-python.json": {},
+    })
+    lookup = _source_lookup(proof)
+    for _ in range(10):
+        assert lookup(r"C:\retained\pkg\source.py") == "libs/core/src/pkg/source.py"
+        assert lookup("/retained/source.py") == "libs/other/src/source.py"
+        assert lookup("/retained/tools/source.py") == "tools/source.py"
+        assert lookup("<string>") is None
+        assert lookup("/retained/source.pyc") is None
+    assert proof.scans == 1
+
+
+def test_http47_interpreter_log_retains_distinct_admissions_after_pid_reuse(tmp_path):
+    from bridge_http47_runtime import _interpreter_log
+
+    prior = tmp_path / f"{os.getpid()}.jsonl"
+    prior.write_text("retained")
+    logs = [_interpreter_log(tmp_path) for _ in range(2)]
+    assert logs[0] != logs[1] and prior not in logs
+    assert all(path.read_bytes() == b"" and path.name.startswith(f"{os.getpid()}-") for path in logs)
+    assert prior.read_text() == "retained"
+
+
 def remove_fixture(root: Path) -> None:
     """Release only this completed composed Git fixture, including readonly objects."""
     def readonly(function, path, error):
@@ -124,20 +161,18 @@ def source_seed(tmp_path_factory: pytest.TempPathFactory) -> Path:
         http["declared_range"].update(current=47, previous_generation=46)
         http["capability_versions"].pop("retained_inbox", None)
         http["capability_versions"].pop("retained_inbox_producer", None)
-        captured_sources = set()
-        for fixture in http["fixtures"]:
-            if fixture["generation"] < 48:
-                captured = json.loads((seed / fixture["path"]).read_bytes()).get(
-                    "captured_from", {},
-                )
-                captured_sources.add((
-                    captured.get("source_path"), captured.get("source_sha256"),
-                ))
         for row in http["source_paths"]:
             if row["path"] == evidence.PREFIX + "protocol.py":
                 row["sha256"] = evidence.digest(protocol.read_bytes())
             elif row["path"] not in evidence.AFFECTED and row["semantic"]:
-                covered = (row["path"], row["sha256"]) in captured_sources
+                covered = any(
+                    f["generation"] < 48
+                    and (captured := json.loads((seed / f["path"]).read_bytes()).get(
+                        "captured_from", {},
+                    )).get("source_path") == row["path"]
+                    and captured.get("source_sha256") == row["sha256"]
+                    for f in http["fixtures"]
+                )
                 if not covered:
                     row.update(semantic=False, non_semantic_reason=(
                         "Disposable HTTP-47 test cohort excludes the later adapter's semantics."
@@ -857,10 +892,19 @@ def test_http47_capture_canonical_closure_rejects_self_consistent_tamper(
 
 @pytest.mark.parametrize("fault", ["none", "host-only-module", "host-entry", "worker-entry"])
 def test_http47_capture_real_subprocess_source_and_entrypoint_binding(
-    repository, tmp_path, fault
+    tmp_path, fault
 ):
-    root, commit = repository
-    proof = evidence.source_snapshot(root, commit, evidence.baseline(root, commit))
+    from bridge_http47_runtime import sha
+
+    root = tmp_path / "runtime"
+    proof = {
+        path: {"sha256": sha((ROOT / path).read_bytes())}
+        for path in evidence.proof_paths(ROOT, read_registry(ROOT))
+    }
+    for path in ("tools/bridge_http47_runtime.py", "tools/http47_capture_bootstrap/sitecustomize.py"):
+        destination = root / path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT / path, destination)
     directory = root / ".test-venvs/http47-capture-child-test"
     directory.mkdir(parents=True)
     request = directory / "request.json"
@@ -915,10 +959,10 @@ def test_http47_capture_real_subprocess_source_and_entrypoint_binding(
         assert checked.returncode != 0, checked.stdout + checked.stderr
         assert "HTTP-47" in checked.stdout + checked.stderr
     assert not marker.exists()
-    assert evidence.source_snapshot(root, commit, evidence.baseline(root, commit)) == proof
+    assert all(sha((ROOT / path).read_bytes()) == item["sha256"] for path, item in proof.items())
 
 
-@pytest.mark.parametrize("fault", ["none", "missing-child", "duplicate-launch", "refusal"])
+@pytest.mark.parametrize("fault", ["none", "pid-reuse", "missing-child", "duplicate-launch", "refusal"])
 def test_http47_capture_every_launch_requires_its_own_entrypoint_receipt(tmp_path, fault):
     from bridge_http47_runtime import verify_interpreters
 
@@ -934,6 +978,7 @@ def test_http47_capture_every_launch_requires_its_own_entrypoint_receipt(tmp_pat
     (directory / "10.jsonl").write_text("".join(json.dumps(e) + "\n" for e in observer))
     proof = {}
     for pid, role in enumerate(("worker", "host", "peer"), start=11):
+        pid = 11 if fault == "pid-reuse" else pid
         if fault == "missing-child" and role == "host":
             continue
         source = "fixture-" + role
@@ -944,8 +989,8 @@ def test_http47_capture_every_launch_requires_its_own_entrypoint_receipt(tmp_pat
         ]
         if fault == "refusal" and role == "worker":
             events.append({"kind": "refused", "source": source})
-        (directory / f"{pid}.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
-    if fault == "none":
+        (directory / f"{pid}-{role}.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
+    if fault in ("none", "pid-reuse"):
         assert verify_interpreters(directory, proof)["roles"] == ["observer", "worker", "host", "peer"]
     else:
         with pytest.raises(ValueError, match="coverage mismatch|rejected unproven"):

@@ -1,7 +1,5 @@
 """Retained installation binding and native PowerShell lock contention."""
 from __future__ import annotations
-from typing import Any, cast
-from collections.abc import Callable
 
 import json
 import os
@@ -11,26 +9,22 @@ import time
 from pathlib import Path
 
 import pytest
-from test_command_binding import PowerShellFactory
 
 from test_adopter_publication import _adopter, _command
 from test_bridge_first_use_publication import _initialize_shell_profiles, _run, _selected_cell
 from test_command_binding import (
-    POWERSHELL, _snapshot, binding_fixture as _binding_fixture,
-    powershell_host as _powershell_host,
+    POWERSHELL, _snapshot, binding_fixture as binding_fixture,
+    powershell_host as powershell_host,
 )
-from test_containers_first_use_publication import containers_release as _containers_release
+from test_containers_first_use_publication import containers_release as containers_release
 from test_dispatch_first_use_publication import dispatch_release as dispatch_release
 from test_installer_publication import _policy
 from test_native_publication import _completed_slot
-binding_fixture = _binding_fixture
-powershell_host = _powershell_host
-containers_release = _containers_release
 
 pytestmark = [pytest.mark.portfolio_tier("T3"), pytest.mark.timeout(60)]
 
 
-def _runtime_module(fixture: dict[str, Any], root: Path, output: str) -> Path:
+def _runtime_module(fixture: dict, root: Path, output: str) -> Path:
     python = _completed_slot({**fixture, "legacy": root})
     site = python.parent.parent / (
         "Lib/site-packages" if os.name == "nt" else
@@ -48,7 +42,7 @@ EMITTERS = ["native", pytest.param(
 )]
 
 
-def _environment(fixture: dict[str, Any], release: Path) -> dict[str, str]:
+def _environment(fixture: dict, release: Path) -> dict:
     environment = _adopter(fixture, "agent-containers", release)
     environment.pop("COPILOT_PLUGIN_INSTALL_SMOKE", None)
     environment["COPILOT_EXTENSIONS_TEST_CONTAINED"] = "1"
@@ -61,13 +55,13 @@ def _environment(fixture: dict[str, Any], release: Path) -> dict[str, str]:
     return environment
 
 
-def _global_command(fixture: dict[str, Any], environment: dict[str, str], powershell_host: PowerShellFactory) -> subprocess.CompletedProcess[str]:
+def _global_command(fixture: dict, environment: dict, powershell_host):
     path = fixture["home"] / ".local/bin/agent-containers"
     if os.name == "nt":
         host = powershell_host(fixture, environment)
         try:
             return _run(fixture, environment, [
-                cast(str, POWERSHELL), "-NoLogo", "-NoProfile", "-File", str(path.with_suffix(".ps1")), "--help",
+                POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(path.with_suffix(".ps1")), "--help",
             ], host)
         finally:
             host.close()
@@ -79,8 +73,8 @@ def _global_command(fixture: dict[str, Any], environment: dict[str, str], powers
     "symlink", marks=pytest.mark.skipif(os.name == "nt", reason="unprivileged POSIX symlink"),
 )])
 def test_equivalent_root_keeps_known_legacy_global_binding(
-    binding_fixture: dict[str, Any], containers_release: Path, emitter: str, spelling: str,
-    powershell_host: PowerShellFactory,
+    binding_fixture: dict, containers_release: Path, emitter: str, spelling: str,
+    powershell_host,
 ) -> None:
     fixture = binding_fixture
     environment = _environment(fixture, containers_release)
@@ -112,8 +106,8 @@ def test_equivalent_root_keeps_known_legacy_global_binding(
 @pytest.mark.parametrize("emitter", EMITTERS)
 @pytest.mark.parametrize("scope", ["legacy", "selected-cell"])
 def test_fresh_provision_publishes_binding_without_prior_stamp(
-    binding_fixture: dict[str, Any], containers_release: Path, emitter: str, scope: str,
-    powershell_host: PowerShellFactory,
+    binding_fixture: dict, containers_release: Path, emitter: str, scope: str,
+    powershell_host,
 ) -> None:
     fixture = binding_fixture
     environment = _environment(fixture, containers_release)
@@ -132,7 +126,7 @@ def test_fresh_provision_publishes_binding_without_prior_stamp(
     profile = scripts / "runtime_profile.py"
     original = profile.with_name("recorded-runtime-profile.py")
     profile.rename(original)
-    profile_result = {
+    result = {
         "profile": "base", "runtimeVersion": "1.0.0",
         "venv": str(python.parent.parent), "python": str(python), "runtimeSource": None,
     }
@@ -141,7 +135,7 @@ def test_fresh_provision_publishes_binding_without_prior_stamp(
         "if '--root' not in sys.argv:\n"
         f" runpy.run_path({str(original)!r},run_name='__main__')\n"
         "else:\n"
-        f" result={profile_result!r}\n"
+        f" result={result!r}\n"
         " print('\\t'.join(list(result.values())[:4]) if '--tsv' in sys.argv else json.dumps(result))\n",
         encoding="utf-8",
     )
@@ -172,8 +166,8 @@ def test_fresh_provision_publishes_binding_without_prior_stamp(
 )])
 @pytest.mark.parametrize("loss", ["active", "publisher", "pointer", "deactivated"])
 def test_cell_bound_global_never_uses_legacy_resolver_fallback(
-    binding_fixture: dict[str, Any], containers_release: Path, stamp_shell: str, loss: str,
-    powershell_host: PowerShellFactory,
+    binding_fixture: dict, containers_release: Path, stamp_shell: str, loss: str,
+    powershell_host,
 ) -> None:
     fixture = binding_fixture
     environment = _adopter(fixture, "agent-containers", containers_release)
@@ -216,7 +210,7 @@ def test_cell_bound_global_never_uses_legacy_resolver_fallback(
     command = ["bash", str(path), "--help"]
     host = None
     if os.name == "nt":
-        command = [cast(str, POWERSHELL), "-NoLogo", "-NoProfile", "-File", str(path.with_suffix(".ps1")), "--help"]
+        command = [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(path.with_suffix(".ps1")), "--help"]
         host = powershell_host(fixture, environment)
     before = {key: value for key, value in _snapshot(fixture["home"]).items() if key not in profiles}
     result = _run(fixture, environment, command, host)
@@ -235,7 +229,7 @@ def test_cell_bound_global_never_uses_legacy_resolver_fallback(
 @pytest.mark.parametrize("plugin", ["agent-containers", "agent-dispatch"])
 @pytest.mark.parametrize("retry_posix", [True, False], ids=["posix-retry", "windows-only"])
 def test_powershell_posix_cold_caller_waits_for_owner_then_reuses_runtime(
-    binding_fixture: dict[str, Any], request: pytest.FixtureRequest, plugin: str, retry_posix: bool,
+    binding_fixture: dict, request: pytest.FixtureRequest, plugin: str, retry_posix: bool,
 ) -> None:
     import fcntl
 
@@ -253,7 +247,7 @@ def test_powershell_posix_cold_caller_waits_for_owner_then_reuses_runtime(
     decisions = {}
     for action in ("status", "probe-plugin-publication", "probe-legacy"):
         result = _run(fixture, environment, [
-            cast(str, POWERSHELL), "-NoLogo", "-NoProfile", "-File", str(helper), action,
+            POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(helper), action,
             "-PayloadRoot", str(fixture["payload"]), "-PluginId", plugin,
             "-LegacyRoot", str(root),
         ], None)
@@ -288,7 +282,7 @@ def test_powershell_posix_cold_caller_waits_for_owner_then_reuses_runtime(
     resolver = scripts / "resolve-runtime.ps1"
     real_resolver = scripts / "recorded-resolver.ps1"
     resolver.rename(real_resolver)
-    quote: Callable[[object], str] = lambda path: "'" + str(path).replace("'", "''") + "'"
+    quote = lambda path: "'" + str(path).replace("'", "''") + "'"
     ready = root / "contender-ready"
     proceed = root / "contender-proceed"
     phases = root / "contender-phases"
@@ -307,7 +301,7 @@ def test_powershell_posix_cold_caller_waits_for_owner_then_reuses_runtime(
     )
     with (root / ".provision.lock").open("a+b") as lock:
         process = subprocess.Popen(
-            [cast(str, POWERSHELL), "-NoLogo", "-NoProfile", "-File",
+            [POWERSHELL, "-NoLogo", "-NoProfile", "-File",
              str(fixture["payload"] / "bin" / f"{plugin}.ps1"), "--help"],
             cwd=fixture["home"], env=environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True,
@@ -322,7 +316,7 @@ def test_powershell_posix_cold_caller_waits_for_owner_then_reuses_runtime(
                 "phases": phases.read_text() if phases.exists() else "resolver not reached",
                 "output": "".join(diagnostics),
             }
-            cast(Any, fcntl).flock(lock, cast(Any, fcntl).LOCK_EX)
+            fcntl.flock(lock, fcntl.LOCK_EX)
             proceed.write_bytes(b"continue")
             try:
                 stdout, stderr = process.communicate(timeout=0.5)
@@ -335,7 +329,7 @@ def test_powershell_posix_cold_caller_waits_for_owner_then_reuses_runtime(
                     return
                 pytest.fail(f"contender did not wait for the owner: {stdout}{stderr}")
             _runtime_module(fixture, root, "shared-ready")
-            cast(Any, fcntl).flock(lock, cast(Any, fcntl).LOCK_UN)
+            fcntl.flock(lock, fcntl.LOCK_UN)
             stdout, stderr = process.communicate(timeout=30)
             assert process.returncode == 0 and stdout.strip() == "shared-ready", stdout + stderr
             assert not installer_marker.exists()
@@ -348,7 +342,7 @@ def test_powershell_posix_cold_caller_waits_for_owner_then_reuses_runtime(
 @pytest.mark.skipif(os.name == "nt" or POWERSHELL is None, reason="POSIX non-contention I/O failure")
 @pytest.mark.parametrize("plugin", ["agent-containers", "agent-dispatch"])
 def test_powershell_provision_lock_propagates_unrelated_io_failure(
-    binding_fixture: dict[str, Any], request: pytest.FixtureRequest, plugin: str,
+    binding_fixture: dict, request: pytest.FixtureRequest, plugin: str,
 ) -> None:
     fixture = binding_fixture
     release = request.getfixturevalue(plugin.removeprefix("agent-") + "_release")
@@ -363,7 +357,7 @@ def test_powershell_provision_lock_propagates_unrelated_io_failure(
     )
     installer.write_text("throw 'installer must not run'\n", encoding="utf-8")
     result = _run(fixture, environment, [
-        cast(str, POWERSHELL), "-NoLogo", "-NoProfile", "-File",
+        POWERSHELL, "-NoLogo", "-NoProfile", "-File",
         str(fixture["payload"] / "bin" / f"{plugin}.ps1"), "--help",
     ], None)
     assert result.returncode != 0, result.stdout + result.stderr

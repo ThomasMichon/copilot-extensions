@@ -1,6 +1,5 @@
 """Real construction and native helper callbacks retain outer cell management."""
 from __future__ import annotations
-from typing import Any
 
 import importlib.util
 import json
@@ -14,8 +13,7 @@ from pathlib import Path
 import pytest
 
 from test_command_binding import ROOT, _snapshot, _write, binding_fixture as binding_fixture
-from test_installer_publication import _cell, _policy, backend as _backend
-backend = _backend
+from test_installer_publication import _cell, _policy, backend as backend
 
 pytestmark = [
     pytest.mark.portfolio_tier("T3"),
@@ -34,7 +32,7 @@ pytestmark = [
     "bash",
 ])
 def test_real_managed_cell_repair_and_callbacks(
-    backend: Any, tmp_path: Path, tmp_path_factory: pytest.TempPathFactory,
+    backend, tmp_path: Path, tmp_path_factory: pytest.TempPathFactory,
     monkeypatch: pytest.MonkeyPatch, shell: str,
 ) -> None:
     uv = shutil.which("uv")
@@ -63,8 +61,7 @@ def test_real_managed_cell_repair_and_callbacks(
         with helper.open("a", encoding="utf-8") as stream:
             stream.write(
                 "\n_fixture_current_environment = _current_environment\n"
-                "from typing import Any\n"
-                "def _current_environment(**arguments: Any) -> tuple[dict[str, Any], Path]:\n"
+                "def _current_environment(**arguments):\n"
                 "    return _fixture_current_environment(**{**arguments, 'os_profile': Path(os.environ['HOME'])})\n"
             )
         native = plugin / "scripts/installation-context/installation-context.ps1"
@@ -145,9 +142,9 @@ def test_real_managed_cell_repair_and_callbacks(
         "-c", "user.name=Runtime fixture", "-c", "user.email=fixture@example.invalid",
     ]
     environment.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
-    for git_arguments in (["init", "-q"], ["add", "--all"], ["commit", "-qm", "Frozen runtime fixture"]):
+    for arguments in (["init", "-q"], ["add", "--all"], ["commit", "-qm", "Frozen runtime fixture"]):
         subprocess.run(
-            [*options, *git_arguments], check=True, capture_output=True,
+            [*options, *arguments], check=True, capture_output=True,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), env=environment, timeout=30,
         )
     root, arguments = _cell(fixture, environment)

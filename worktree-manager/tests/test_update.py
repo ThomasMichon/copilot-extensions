@@ -13,7 +13,6 @@ import io
 import json
 import os
 import subprocess
-import sys
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
@@ -301,22 +300,12 @@ def test_engine_exit_code_maps_through_table(monkeypatch, update_home, engine_rc
         assert wm._cmd_update([]) == expected
 
 
-@pytest.mark.parametrize("prepared_environment", [False, True])
-def test_run_env_reaches_engine(monkeypatch, update_home, prepared_environment):
+def test_run_env_reaches_engine(monkeypatch, update_home):
     import update_telemetry as ut
-    from worktree_manager import update_bootstrap
     from worktree_manager.self_install import SelfUpdateResult
     monkeypatch.setattr(self_install, "self_update",
                         lambda **kw: SelfUpdateResult(action="already-current", version="1"))
     monkeypatch.setattr(ec, "engine_base_command", lambda: ["/fake/agent-worktrees"])
-    if prepared_environment:
-        snapshot = dict(os.environ)
-        assert ut.ENV_RUN_ID not in snapshot
-        snapshot["UPDATE_FIXTURE_SELECTION"] = "preserved"
-        monkeypatch.setattr(update_bootstrap, "prepare_update", lambda rest, **kwargs: (
-            update_bootstrap.PreparedUpdate(rest, environment=snapshot)
-        ))
-        monkeypatch.setattr(ec, "installed_engine_command", lambda environment: ["/fake/agent-worktrees"])
     seen = {}
 
     def fake_run(cmd, **kw):
@@ -333,47 +322,6 @@ def test_run_env_reaches_engine(monkeypatch, update_home, prepared_environment):
     assert env[ut.ENV_RUN_ID] == status["run"]["id"]
     assert status["run"]["exit_code"] == 0
     assert ut.ENV_RUN_ID not in os.environ, "the owner restores its environment"
-    if prepared_environment:
-        assert env["UPDATE_FIXTURE_SELECTION"] == "preserved"
-        assert ut.ENV_RUN_ID not in snapshot, "preparation's environment remains unchanged"
-
-
-def test_prepared_environment_engine_child_joins_manager_run(monkeypatch, update_home):
-    import update_telemetry as ut
-    from worktree_manager import update_bootstrap
-    from worktree_manager.self_install import SelfUpdateResult
-
-    snapshot = dict(os.environ)
-    monkeypatch.setattr(update_bootstrap, "prepare_update", lambda rest, **kwargs: (
-        update_bootstrap.PreparedUpdate(rest, environment=snapshot)
-    ))
-    monkeypatch.setattr(self_install, "self_update", lambda **kwargs: (
-        SelfUpdateResult(action="already-current", version="1")
-    ))
-    child = (
-        "import update_telemetry as ut; "
-        "run = ut.Run.from_env_or_new('engine'); "
-        "assert run.enabled and not run.is_owner; "
-        "run.target('runtime_reconcile', 'engine-fixture', ut.VERIFIED_CURRENT); "
-        "raise SystemExit(run.finish(0))"
-    )
-    monkeypatch.setattr(ec, "installed_engine_command", lambda environment: [
-        sys.executable, "-c", child,
-    ])
-    passthrough = ec.run_engine_passthrough
-    monkeypatch.setattr(ec, "run_engine_passthrough", lambda project, args, **kwargs: (
-        passthrough(project, args, timeout=20, headless=True, **kwargs)
-    ))
-    assert wm._cmd_update([]) == 0
-    status = _telemetry_status(update_home)
-    assert len(list((update_home / "runs").iterdir())) == 1
-    events = [
-        json.loads(line) for line in
-        (update_home / "runs" / status["run"]["id"] / "events.jsonl").read_text().splitlines()
-    ]
-    assert any(event["proc"] == "engine" for event in events)
-    assert {event["run_id"] for event in events} == {status["run"]["id"]}
-    assert ut.ENV_RUN_ID not in snapshot
 
 
 # ── run_engine_passthrough ────────────────────────────────────────────────────

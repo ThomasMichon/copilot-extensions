@@ -9,9 +9,6 @@ exclude-newer = "7 days"
 agent-procutil = { path = "../libs/agent-procutil", editable = true }
 agent-zdd = { path = "../libs/zdd", editable = true }
 
-[tool.copilot-extensions.application-sources]
-agent-ssh = "agent-ssh"
-
 [project]
 name = "fleet-manager"
 version = "0.1.0-dev1"

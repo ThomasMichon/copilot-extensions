@@ -70,9 +70,6 @@ def config_identity(cfg) -> str:
         "host": cfg.host,
         "pool_publication": cfg.pool_publication_enabled,
     }
-    if cfg.relationship_admission is not None or cfg.relationship_authority is not None:
-        selected["relationship_admission"] = cfg.relationship_admission
-        selected["relationship_authority"] = cfg.relationship_authority
     return hashlib.sha256(json.dumps(selected, sort_keys=True).encode()).hexdigest()
 
 

@@ -16,10 +16,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shlex
 from collections.abc import Awaitable, Callable, Iterable
 from typing import Any
 
-from credential_relay.readiness import build_relay_ping_probe_command
 from remote_login_shell import wrap_login_shell
 from ssh_manager import (
     LocalForward,
@@ -234,6 +234,29 @@ def relay_forwards_from_endpoint(
         host_port_resolver=host_port_resolver,
         reconnect_gate=codespace_reconnect_gate(endpoint),
     )
+
+
+def build_relay_ping_probe_command(relay_port: int) -> str:
+    """Build the remote command proving ``relay_port`` is a LIVE credential
+    relay, not merely a port that accepts a TCP connection.
+
+    A bare TCP-accept probe can pass while nothing valid is actually listening
+    end-to-end -- e.g. a stale, half-closed, or misrouted listener may still
+    complete a TCP handshake without ever answering the relay's own wire
+    protocol. This performs one real round-trip of that protocol: sends the
+    relay's built-in ``ping`` action (a lightweight, side-effect-free action
+    handled directly by ``CredentialRelayServer._handle_client`` before any
+    policy/token/source routing) and requires the exact ``pong`` reply the
+    relay sends back. Only that full protocol round-trip proves credentials
+    can actually be served through this forward.
+    """
+    script = (
+        f"exec 3<>/dev/tcp/127.0.0.1/{relay_port} && "
+        'printf "ping\\n\\n" >&3 && '
+        "IFS= read -r -t 3 reply <&3 && "
+        '[ "$reply" = "pong" ]'
+    )
+    return f"timeout 3 bash -c {shlex.quote(script)} && echo OK"
 
 
 def endpoint_serving_probe_factory(

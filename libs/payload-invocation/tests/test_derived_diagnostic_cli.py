@@ -1,6 +1,5 @@
 """Execute every vendored native diagnostic CLI without installation writes."""
 from __future__ import annotations
-from typing import Any, cast
 
 import json
 import os
@@ -58,9 +57,9 @@ def _profile_environment(home: Path) -> dict[str, str]:
     for name in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT"):
         environment.pop(name, None)
     if os.name != "nt":
-        uid = cast(Any, os).getuid()
+        uid = os.getuid()
         entry = ":".join((
-            "fixture", "x", str(uid), str(cast(Any, os).getgid()), "fixture", str(home), "/bin/sh",
+            "fixture", "x", str(uid), str(os.getgid()), "fixture", str(home), "/bin/sh",
         ))
         lookup = home / "test-bin/getent"
         lookup.write_text(

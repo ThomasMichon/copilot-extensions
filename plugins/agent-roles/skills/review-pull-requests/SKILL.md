@@ -49,10 +49,9 @@ publication/readback. Do not copy the loop policy into that charter or turn a
 single reviewer into a second coordinator.
 
 Read [setup and adapters](references/setup-and-adapters.md),
-[coordination and recovery](references/coordination-and-recovery.md),
-[communication](references/communication.md) and
-[throughput and loop discipline](references/throughput-and-loops.md) when
-performing the corresponding steps below. These references specialize this procedure, not the owners'
+[coordination and recovery](references/coordination-and-recovery.md) and
+[communication](references/communication.md) when performing the corresponding
+steps below. These references specialize this procedure, not the owners'
 ambient policies.
 
 ## 1. Capture scope and original authority
@@ -83,9 +82,6 @@ under that repository's existing planning convention. Capture:
   selections, repository-specific review/merge policy and escalation route.
 - Optional author nudges and cooldown/limit, existing observation cadence and
   owner-charter refresh cadence **only if explicitly requested**.
-- Loop discipline: re-review triggers, per-PR round cap and time budget,
-  unchanged-window count and backstop watch cadence, closed hold vocabulary
-  with owner/revisit/default, and the consent follow-up route.
 
 Do not inherit another adopter's holds, timing, merge exceptions or topology.
 
@@ -134,10 +130,7 @@ Independent reviewers read exact candidate source **statically**: never execute
 untrusted candidate code, author its fixes, supply author consent or merge it.
 The coordinator owns census, assignment, integration and verified verdict
 handling; the author retains the PR, worktree, fixes and consent. Changing a
-lane or receiving an ACK transfers none of those resources. When taking over a
-scope from a predecessor coordinator or reviewer, tell it and release or retire
-its overlapping task, claims, watches and nudges through their owners after
-accepted transfer; two reviewers never serve the same scope.
+lane or receiving an ACK transfers none of those resources.
 
 ## 5. Review, post, reconcile and follow up
 
@@ -176,15 +169,6 @@ full gate for invalid lineage, uncertain coverage or escalation. Compatible
 official retained-head authority may avoid duplicate reviews only when the
 target's actual policy permits it.
 
-Start a round only on a qualifying trigger: a new head, author input, an
-overlapping base change or a relevant check/policy change. **Never republish an
-identical verdict on an unchanged head without new input**; a timer, watch
-renewal, unrelated merge or restart is not new input. Cap rounds without new
-author input per PR, then report the loop once and stop. A watch timeout is a
-normal no-change result: after the charter's unchanged-window count, back off
-to the backstop cadence instead of renewing at a fixed short cadence. Apply
-[throughput and loop discipline](references/throughput-and-loops.md).
-
 Use the communication reference for same-context missing-input follow-ups,
 author replies and explicitly enabled nudges. Prefer existing coalesced
 subscriptions/events with their **actual returned cursors**. When webhooks or
@@ -194,13 +178,6 @@ on errors. Do not invent cursors, duplicate collectors, repeatedly relaunch
 reviewers or poll native Tasks that already provide completion notifications.
 
 ## 6. Land, settle or keep attending
-
-Measure progress as **zero eligible PRs awaiting reviewer action**. A PR
-leaves the active set only on an observed terminal state or an explicit
-hand-back naming the next owner: author change, author consent, named input or
-a hold with owner, revisit time and default. After approval without required
-consent, re-check live state and send one bounded consent request per cooldown;
-do not re-review to prompt it.
 
 Select the target's automatic, agent-consent, authorized direct-self or human
 merge adapter. Approval is not author consent. A direct-self profile does not

@@ -46,19 +46,6 @@ class ProcessPin:
             self.api.check(self.api.kernel.CloseHandle(handle), "close pinned process")
 
 
-class HeldProcessPin(ProcessPin):
-    """Keep the original duplicate available when its close is unconfirmed."""
-
-    def close(self) -> None:
-        if self.handle:
-            try:
-                self.api.check(self.api.kernel.CloseHandle(self.handle), "close held process pin")
-            except BaseException as error:
-                error.process_pin = self
-                raise
-            self.handle = None
-
-
 class NativeProcessAPI:
     def __init__(self) -> None:
         if os.name != "nt":
@@ -68,13 +55,6 @@ class NativeProcessAPI:
         self._bind(self.kernel, {
             "GetCurrentProcess": ([], wt.HANDLE),
             "GetCurrentThreadId": ([], wt.DWORD),
-            "GetProcessId": ([wt.HANDLE], wt.DWORD),
-            "GetThreadId": ([wt.HANDLE], wt.DWORD),
-            "GetProcessIdOfThread": ([wt.HANDLE], wt.DWORD),
-            "DuplicateHandle": (
-                [wt.HANDLE, wt.HANDLE, wt.HANDLE, ct.POINTER(wt.HANDLE),
-                 wt.DWORD, wt.BOOL, wt.DWORD], wt.BOOL,
-            ),
             "GetTickCount64": ([], ct.c_ulonglong),
             "OpenProcess": ([wt.DWORD, wt.BOOL, wt.DWORD], wt.HANDLE),
             "CloseHandle": ([wt.HANDLE], wt.BOOL),
@@ -114,36 +94,6 @@ class NativeProcessAPI:
 
     def pin(self, pid: int, birth: int | None = None, *, owned: bool = False) -> ProcessPin:
         return ProcessPin(self, pid, birth, owned=owned)
-
-    def duplicate(self, handle: int) -> int:
-        """Retain an existing native object, never reopen a numeric identity."""
-        duplicate = wt.HANDLE()
-        current = self.kernel.GetCurrentProcess()
-        self.check(self.kernel.DuplicateHandle(
-            current, handle, current, ct.byref(duplicate), 0, False, 2,
-        ), "duplicate held native object")
-        self.check(duplicate.value, "retain duplicated native object")
-        return duplicate.value
-
-    def pin_handle(self, handle: int, pid: int) -> HeldProcessPin:
-        pin = HeldProcessPin.__new__(HeldProcessPin)
-        pin.api, pin.pid, pin.owned = self, pid, False
-        pin.birth = 0
-        pin.handle = self.duplicate(handle)
-        try:
-            if self.kernel.GetProcessId(pin.handle) != pid:
-                raise ObservationBlocked("held process object differs from launch identity")
-            pin.birth = self.birth(pin.handle)
-            if pin.gone():
-                raise ObservationBlocked("owned launch exited before observation admission")
-            return pin
-        except BaseException as error:
-            try:
-                pin.close()
-            except BaseException as cleanup:
-                cleanup.admission_error = error
-                raise
-            raise
 
     def require_parent_pipe(self, request: dict[str, Any]) -> ProcessPin:
         import msvcrt

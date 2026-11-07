@@ -12,10 +12,8 @@
       "include": [
         "tools/typecheck.py",
         "tools/typecheck_source_views.py",
-        "tools/typecheck_catalog_views.py",
         "tools/cache_directory_paths.py",
-        "tools/test_typecheck.py",
-        "tools/promotion_unit_tests/test_typecheck_catalog.py"
+        "tools/test_typecheck.py"
       ],
       "exclude": [],
       "level": "strict"
@@ -187,30 +185,14 @@
     {
       "name": "lib-payload-invocation",
       "include": [
-        "libs/payload-invocation/command_binding.py",
-        "libs/payload-invocation/command_lifecycle.py",
-        "libs/payload-invocation/generate.py",
-        "libs/payload-invocation/runtime_admission.py"
-      ],
-      "exclude": [],
-      "level": "pending",
-      "additional_python_versions": [
-        "3.11"
-      ]
-    },
-    {
-      "name": "lib-payload-invocation-tests",
-      "include": [
-        "libs/payload-invocation/tests"
+        "libs/payload-invocation"
       ],
       "exclude": [],
       "level": "pending",
       "import_roots": [
         "tools",
         "plugins/agent-worktrees/scripts"
-      ],
-      "python_version": "3.11",
-      "requirements": "tools/typecheck-yaml-requirements.txt"
+      ]
     },
     {
       "name": "lib-peer-launch",
@@ -641,10 +623,8 @@
       "exclude": [
         "tools/typecheck.py",
         "tools/typecheck_source_views.py",
-        "tools/typecheck_catalog_views.py",
         "tools/cache_directory_paths.py",
-        "tools/test_typecheck.py",
-        "tools/promotion_unit_tests/test_typecheck_catalog.py"
+        "tools/test_typecheck.py"
       ],
       "level": "pending"
     },

@@ -52,14 +52,6 @@ not a counts-only report and not a proxy for other users' traffic.
 5. Leave retention to the operator. Never attach raw captures to issues,
    PRs, logs or commits; publish only deliberately minimized synthetic evidence.
 
-For cues generated after the initial prompt, opt in with
-`--load-session-guidance`. It captures up to three requests using only the
-client's advertised `glob` and `view` tools within the freshly owned session's
-`instructions` directory, then ends the turn. Read the usage reference's
-session-guidance section first; require both `status=captured` and
-`multi_round.status=complete`. Partial/denied results are not success, and
-observing guidance bodies does not prove every sessionStart hook completed.
-
 The script owns an ephemeral `127.0.0.1` listener and one fresh CLI invocation,
 returns a terminal fake completion and closes the listener. It cannot attach
 to an existing/shared inference endpoint, forward inference, bind a public

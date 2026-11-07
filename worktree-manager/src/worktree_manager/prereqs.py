@@ -8,15 +8,11 @@ inspection — nothing here mutates the machine; provisioning lives in
 
 from __future__ import annotations
 
-import os
 import platform
 import re
 import shutil
 import subprocess
-from contextlib import nullcontext
 from dataclasses import dataclass
-from pathlib import Path
-from tempfile import TemporaryDirectory
 
 from agent_procutil import no_window_kwargs
 
@@ -59,10 +55,10 @@ class PrereqStatus:
 
     @property
     def satisfied(self) -> bool:
-        """Presence/version readiness; executable hosts must prove their floor."""
+        """Presence/version readiness; Python must prove its declared floor."""
         if not self.present:
             return self.optional
-        if self.name in {"python3", "pwsh"} and self.min_required and not self.version:
+        if self.name == "python3" and self.min_required and not self.version:
             return False
         if self.min_required and self.version:
             return _ge(self.version, self.min_required)
@@ -89,39 +85,20 @@ def _which(name: str) -> tuple[str, str | None]:
 
 
 def _probe_version(exe: str) -> str | None:
-    powershell = Path(exe).stem.lower() == "pwsh"
-    context = TemporaryDirectory(prefix="manager-pwsh-probe-") if powershell else nullcontext(None)
-    with context as profile:
-        environment = None
-        prefix = []
-        flags = ("--version", "-V", "version")
-        if profile is not None:
-            # Even --version initializes PowerShell's user configuration directory.
-            environment = {
-                **os.environ,
-                **{name: profile for name in (
-                    "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
-                    "XDG_CACHE_HOME", "XDG_CONFIG_HOME",
-                )},
-                "POWERSHELL_TELEMETRY_OPTOUT": "1",
-                "POWERSHELL_UPDATECHECK": "Off",
-            }
-            prefix = ["-NoLogo", "-NoProfile", "-NonInteractive"]
-            flags = ("--version",)
-        for flag in flags:
-            try:
-                r = subprocess.run(
-                    [exe, *prefix, flag], capture_output=True, text=True, timeout=5,
-                    env=environment, **no_window_kwargs(),
-                )
-            except (OSError, subprocess.SubprocessError):
-                continue
-            if r.returncode != 0:
-                continue
-            blob = f"{r.stdout}\n{r.stderr}"
-            m = _VERSION_RE.search(blob)
-            if m:
-                return m.group(1)
+    for flag in ("--version", "-V", "version"):
+        try:
+            r = subprocess.run(
+                [exe, flag], capture_output=True, text=True, timeout=5,
+                **no_window_kwargs(),
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if r.returncode != 0:
+            continue
+        blob = f"{r.stdout}\n{r.stderr}"
+        m = _VERSION_RE.search(blob)
+        if m:
+            return m.group(1)
     return None
 
 
@@ -140,13 +117,9 @@ def detect_prereq(pr: Prereq) -> PrereqStatus:
 
 
 def detect_baseline(catalog=None) -> list[PrereqStatus]:
-    """Detect the catalog's baseline prerequisites for this platform."""
+    """Detect every baseline prerequisite from the catalog."""
     cat = catalog or load_catalog()
-    os_ = current_os()
-    return [
-        detect_prereq(pr) for pr in cat.baseline_prereqs
-        if not pr.platforms or os_ in pr.platforms
-    ]
+    return [detect_prereq(pr) for pr in cat.baseline_prereqs]
 
 
 def missing(statuses: list[PrereqStatus]) -> list[PrereqStatus]:

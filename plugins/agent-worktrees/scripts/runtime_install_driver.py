@@ -153,7 +153,7 @@ def _native_arguments(args) -> list[str]:
         value = getattr(args, option, None)
         if value is not None:
             values.extend(["-" + "".join(word.title() for word in option.split("_")), str(value)])
-    for option in ("force", "zero_downtime", "provision_missing_runtime", "remove_config", "runtime_only"):
+    for option in ("force", "zero_downtime", "provision_missing_runtime", "remove_config"):
         if getattr(args, option, False):
             values.append("-" + "".join(word.title() for word in option.split("_")))
     if getattr(args, "source_descriptor", None) is not None:
@@ -263,7 +263,7 @@ def _foreground(args, driver) -> int:
         value = getattr(args, option, None)
         if value is not None:
             command.extend(["--" + option.replace("_", "-"), str(value)])
-    for option in ("force", "zero_downtime", "provision_missing_runtime", "remove_config", "runtime_only"):
+    for option in ("force", "zero_downtime", "provision_missing_runtime", "remove_config"):
         if getattr(args, option, False):
             command.append("--" + option.replace("_", "-"))
     if getattr(args, "source_descriptor", None) is not None:
@@ -297,7 +297,6 @@ def main(argv: list[str] | None = None) -> int:
         "install", "update", "provision", "repair", "dev", "dev-release", "uninstall",
     ))
     parser.add_argument("--project-name")
-    parser.add_argument("--runtime-only", action="store_true")
     parser.add_argument("--bootstrap-python", type=Path)
     parser.add_argument("--owner", type=Path)
     parser.add_argument("--install-source", type=Path)
@@ -313,10 +312,6 @@ def main(argv: list[str] | None = None) -> int:
     inspection.add_argument("--check-removal", action="store_true", help=argparse.SUPPRESS)
     inspection.add_argument("--remove-runtime", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
-    if args.runtime_only and (
-        args.action not in ("install", "update") or args.project_name is not None
-    ):
-        parser.error("--runtime-only requires install/update without --project-name")
     if args.input_timeout is not None and not args.install_source:
         parser.error("--input-timeout requires --install-source")
     if args.install_source and args.action not in ("install", "update", "provision", "repair"):

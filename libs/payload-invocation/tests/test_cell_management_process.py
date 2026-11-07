@@ -9,13 +9,12 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any
 
 import pytest
 
-from test_command_binding import _snapshot, binding_fixture as _binding_fixture
+from test_command_binding import _snapshot, binding_fixture as binding_fixture
 from test_installer_publication import _cell
-binding_fixture = _binding_fixture
 
 pytestmark = [
     pytest.mark.portfolio_tier("T2"),
@@ -26,8 +25,8 @@ pytestmark = [
 
 @contextmanager
 def _live_management_owner(
-    fixture: dict[str, Any],
-) -> Iterator[tuple[Path, dict[str, Any], subprocess.Popen[str]]]:
+    fixture: dict,
+) -> Iterator[tuple[Path, dict, subprocess.Popen[str]]]:
     primitive = fixture["primitive"]
     root, arguments = _cell(fixture, {})
     program = """
@@ -51,7 +50,7 @@ with helper.runtime_publication_lease(**json.loads(sys.argv[3])) as patch:
         ],
         env={**os.environ, **fixture["environment"]},
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-        creationflags=cast(Any, subprocess).CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     try:
         assert child.stdout is not None and child.stderr is not None
@@ -69,20 +68,20 @@ with helper.runtime_publication_lease(**json.loads(sys.argv[3])) as patch:
             child.stderr.close()
 
 
-def test_current_management_process_has_native_birth_identity(binding_fixture: dict[str, Any]) -> None:
+def test_current_management_process_has_native_birth_identity(binding_fixture: dict) -> None:
     identity = binding_fixture["primitive"]._runtime_publication_process_identity(os.getpid())
     assert isinstance(identity, str) and identity
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows DWORD process identifier")
-def test_windows_process_identifier_cannot_alias_another_native_pid(binding_fixture: dict[str, Any]) -> None:
+def test_windows_process_identifier_cannot_alias_another_native_pid(binding_fixture: dict) -> None:
     primitive = binding_fixture["primitive"]
     assert primitive._runtime_publication_process_identity(os.getpid() + (1 << 32)) is None
 
 
 @pytest.mark.parametrize("identity", [None, "different-native-birth"])
 def test_borrower_refuses_unknown_or_reused_management_process(
-    binding_fixture: dict[str, Any], monkeypatch: pytest.MonkeyPatch, identity: str | None,
+    binding_fixture: dict, monkeypatch: pytest.MonkeyPatch, identity: str | None,
 ) -> None:
     fixture, primitive = binding_fixture, binding_fixture["primitive"]
     _, arguments = _cell(fixture, {})
@@ -97,7 +96,7 @@ def test_borrower_refuses_unknown_or_reused_management_process(
 
 
 def test_missing_native_identity_refuses_before_management_lock_writes(
-    binding_fixture: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+    binding_fixture: dict, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fixture, primitive = binding_fixture, binding_fixture["primitive"]
     _, arguments = _cell(fixture, {})
@@ -111,7 +110,7 @@ def test_missing_native_identity_refuses_before_management_lock_writes(
 
 @pytest.mark.parametrize("state,live", [("S", True), ("Z", False), ("X", False), ("?", False)])
 def test_linux_identity_requires_nonterminal_native_state(
-    binding_fixture: dict[str, Any], monkeypatch: pytest.MonkeyPatch, state: str, live: bool,
+    binding_fixture: dict, monkeypatch: pytest.MonkeyPatch, state: str, live: bool,
 ) -> None:
     primitive = binding_fixture["primitive"]
     boot = "12345678-1234-1234-1234-123456789abc"
@@ -132,7 +131,7 @@ def test_linux_identity_requires_nonterminal_native_state(
     (True, 258, True, "windows:12345"),
 ])
 def test_windows_identity_requires_live_handle_and_native_birth(
-    binding_fixture: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+    binding_fixture: dict, monkeypatch: pytest.MonkeyPatch,
     opened: bool, wait: int, times: bool, expected: str | None,
 ) -> None:
     import ctypes
@@ -162,14 +161,14 @@ def test_windows_identity_requires_live_handle_and_native_birth(
 
 @pytest.mark.skipif(sys.platform != "linux", reason="Linux unreaped process evidence")
 @pytest.mark.timeout(20)
-def test_exited_unreaped_manager_cannot_authorize_publication(binding_fixture: dict[str, Any]) -> None:
+def test_exited_unreaped_manager_cannot_authorize_publication(binding_fixture: dict) -> None:
     fixture, primitive = binding_fixture, binding_fixture["primitive"]
     with _live_management_owner(fixture) as (_, borrowed, child):
         primitive.borrow_runtime_publication(**borrowed)
         assert child.stdin is not None
         child.stdin.write("exit\n")
         child.stdin.flush()
-        exited = cast(Any, os).waitid(cast(Any, os).P_PID, child.pid, cast(Any, os).WEXITED | cast(Any, os).WNOWAIT)
+        exited = os.waitid(os.P_PID, child.pid, os.WEXITED | os.WNOWAIT)
         assert exited.si_pid == child.pid and exited.si_status == 0
         os.kill(child.pid, 0)
         assert primitive._pid_is_live(child.pid), "the conservative existence probe is unchanged"

@@ -69,125 +69,14 @@ else:
 '''
 
 
-def _wait_for(check, label, consoles, launches=()):
+def _wait_for(check, label, consoles):
     deadline = time.monotonic() + 40
     while time.monotonic() < deadline:
         if check():
             return
         time.sleep(.05)
     output = "\n".join(console.output.decode("utf-8", "replace") for console in consoles)
-    for launch in launches:
-        for name in ("trace.jsonl", "calls.jsonl"):
-            path = launch["root"] / name
-            if path.is_file():
-                output += f"\n{launch['name']}/{name}:\n{path.read_text('utf-8')[-4096:]}"
-    if launches:
-        root = Path(launches[0]["env"]["TEMP"])
-        for path in sorted((root / "worktree-setup-logs").glob("*.log")):
-            output += f"\n{path.name}:\n{path.read_text('utf-8-sig')[-4096:]}"
     raise AssertionError(f"{label}\n{output}")
-
-
-def _private_psmux(root, binary, namespace, env):
-    """Keep the original launcher on a real executable with private mux routing."""
-    compiler = next((
-        Path(os.environ["SystemRoot"]) / "Microsoft.NET" / framework / "v4.0.30319/csc.exe"
-        for framework in ("Framework64", "Framework")
-        if (Path(os.environ["SystemRoot"]) / "Microsoft.NET" / framework
-            / "v4.0.30319/csc.exe").is_file()
-    ), None)
-    assert compiler, "The Windows .NET Framework compiler is required for the native mux fixture"
-    root.mkdir()
-    source = root / "mux.cs"
-    source.write_text(r'''
-using System;
-using System.Diagnostics;
-using System.Linq;
-using System.Runtime.InteropServices;
-using System.Text.RegularExpressions;
-
-class PrivateMux {
-    [DllImport("kernel32.dll")]
-    static extern uint GetConsoleCP();
-
-    static string Quote(string value) {
-        return "\"" + Regex.Replace(
-            Regex.Replace(value, "(\\\\*)\"", "$1$1\\\""), "(\\\\+)$", "$1$1") + "\"";
-    }
-
-    static int Main(string[] args) {
-        var start = new ProcessStartInfo {
-            FileName = BINARY,
-            Arguments = String.Join(" ", new[] { "-L", NAMESPACE }.Concat(args).Select(Quote)),
-            UseShellExecute = false,
-            // ConPTY clients must inherit their existing console; other calls stay windowless.
-            CreateNoWindow = GetConsoleCP() == 0
-        };
-        // Only the outer launcher resolves the adapter; backend descendants use real tools.
-        start.EnvironmentVariables["PATH"] = ORIGINAL_PATH;
-        using (var child = Process.Start(start)) {
-            child.WaitForExit();
-            return child.ExitCode;
-        }
-    }
-}
-'''.replace("BINARY", '@"' + str(binary).replace('"', '""') + '"')
-   .replace("ORIGINAL_PATH", '@"' + env["PATH"].replace('"', '""') + '"')
-   .replace("NAMESPACE", '@"' + namespace.replace('"', '""') + '"'), encoding="utf-8")
-    shim = root / "psmux.exe"
-    result = subprocess.run(
-        [str(compiler), "/nologo", "/target:exe", "/out:" + str(shim), str(source)],
-        env=env, capture_output=True, text=True, timeout=20, check=False,
-        creationflags=subprocess.CREATE_NO_WINDOW,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    env["PATH"] = str(root) + os.pathsep + env["PATH"]
-
-
-@pytest.mark.parametrize("adapter", [False, True])
-def test_private_mux_transport_reaches_its_child(tmp_path, adapter):
-    from _terminal_console_fixture import Console
-    from plugin_test_command_safety import private_mux_args
-
-    psmux = os.environ.get("PSMUX_TEST_BIN") or shutil.which("psmux")
-    assert PWSH and psmux, "PowerShell 7 and PSMux are required for this native packet"
-    env = _test_env(tmp_path)
-    namespace = private_mux_args(tmp_path)
-    binary = psmux
-    prefix = namespace
-    if adapter:
-        _private_psmux(tmp_path / "mux-bin", psmux, namespace[1], env)
-        binary = str(tmp_path / "mux-bin/psmux.exe")
-        prefix = []
-    child = tmp_path / "child.ps1"
-    child.write_text(
-        "[IO.File]::WriteAllText($env:TEST_CAPTURE, 'ready')\n"
-        "while(-not(Test-Path -LiteralPath $env:TEST_RELEASE)){Start-Sleep -Milliseconds 50}\n",
-        encoding="utf-8",
-    )
-    env.update(TEST_CAPTURE=str(tmp_path / "ready"), TEST_RELEASE=str(tmp_path / "release"))
-    quote = lambda value: "'" + str(value).replace("'", "''") + "'"
-    start = tmp_path / "start.ps1"
-    start.write_text(
-        "& " + " ".join(map(quote, [
-            binary, *prefix, "new-session", "-d", "-s", "fixture",
-            "pwsh.exe", "-NoProfile", "-NoLogo", "-File", quote(child),
-        ])) + "\nexit $LASTEXITCODE\n", encoding="utf-8",
-    )
-    with Console([PWSH, "-NoProfile", "-File", str(start)], env=env, cwd=tmp_path) as console:
-        try:
-            _wait_for(
-                lambda: (tmp_path / "ready").is_file(), "Private mux child did not start",
-                [console], [{"root": tmp_path, "name": "fixture", "env": env}],
-            )
-            assert console.wait() == 0, console.output.decode("utf-8", "replace")
-        finally:
-            (tmp_path / "release").touch()
-            subprocess.run(
-                [psmux, *namespace, "kill-session", "-t", "fixture"], env=env, cwd=tmp_path,
-                capture_output=True, text=True, timeout=10, check=False,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
 
 
 def _resume_fixture(root, shared_env, manager_bin, index):
@@ -318,13 +207,10 @@ assert Path(work_coalescing_singleton.__file__).resolve().is_relative_to(Path(ru
 @pytest.mark.parametrize("prewarm", [False, True])
 def test_four_simultaneous_resume_plans_acknowledge_and_reach_copied_setup(tmp_path, prewarm):
     from _terminal_console_fixture import Console
-    from plugin_test_command_safety import private_mux_args
 
     psmux = os.environ.get("PSMUX_TEST_BIN") or shutil.which("psmux")
     assert PWSH and psmux, "PowerShell 7 and PSMux are required for this native packet"
     env = _test_env(tmp_path)
-    namespace = private_mux_args(tmp_path)
-    _private_psmux(tmp_path / "mux-bin", psmux, namespace[1], env)
     env.update(UV_OFFLINE="1", UV_PYTHON_DOWNLOADS="never")
     if prewarm:
         env.pop("PSMUX_NO_WARM")
@@ -339,7 +225,7 @@ def test_four_simultaneous_resume_plans_acknowledge_and_reach_copied_setup(tmp_p
 
     def mux(*args):
         return subprocess.run(
-            [psmux, *namespace, *args], env=env, cwd=env["USERPROFILE"],
+            [psmux, *args], env=env, cwd=env["USERPROFILE"],
             capture_output=True, text=True, timeout=10, check=False,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
@@ -352,7 +238,7 @@ def test_four_simultaneous_resume_plans_acknowledge_and_reach_copied_setup(tmp_p
                 ))
             _wait_for(
                 lambda: all(b"RESUME-FIXTURE-READY" in console.output for console in consoles),
-                "Launcher did not complete its pane acknowledgment", consoles, launches,
+                "Launcher did not complete its pane acknowledgment", consoles,
             )
             owners = []
             for console, launch in zip(consoles, launches, strict=True):
@@ -376,7 +262,7 @@ def test_four_simultaneous_resume_plans_acknowledge_and_reach_copied_setup(tmp_p
                 lambda: all(mux("has-session", "-t", launch["name"]).returncode == 1
                             for launch in launches)
                 and all(console.exited(handle) for console, *handles in owners for handle in handles),
-                "Owned pane/child processes did not retire after release", consoles, launches,
+                "Owned pane/child processes did not retire after release", consoles,
             )
         finally:
             for launch in launches:

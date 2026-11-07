@@ -10,8 +10,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
-import shutil
-import subprocess
 import time
 from pathlib import Path
 
@@ -58,51 +56,6 @@ def _write(tool, path, cwd):
 
 def _shell(cmd, cwd):
     return {"toolName": "bash", "cwd": str(cwd), "toolArgs": {"command": cmd}}
-
-
-@pytest.mark.portfolio_tier("T2")
-@pytest.mark.effect("process")
-@pytest.mark.effect("filesystem")
-@pytest.mark.parametrize("command,writes", [
-    pytest.param("echo ${value:-'}'}; git commit -m test", True, id="single-quote"),
-    pytest.param('echo ${value:-"}"}; git commit -m test', True, id="double-quote"),
-    pytest.param(r"echo ${value:-\}}; git commit -m test", True, id="escaped-brace"),
-    pytest.param("echo ${value:-$(printf '}')}; git commit -m test", True, id="command"),
-    pytest.param("echo ${value:-$((1 + 2))}; git commit -m test", True, id="arithmetic"),
-    pytest.param("echo ${value:-${other:-'}'}}; git commit -m test", True, id="nested-variable"),
-    pytest.param("echo ${value:-`printf '}'`}; git commit -m test", True, id="backtick"),
-    pytest.param(r"echo ${value:-$'\'}'}; git commit -m test", True, id="ansi-quote"),
-    pytest.param("echo ${value:-'}'}", False, id="read-only"),
-])
-def test_braced_parameter_boundaries_match_native_bash(tmp_path, anchor, command, writes):
-    from agent_procutil import no_window_kwargs
-
-    executable = shutil.which("bash")
-    if os.name == "nt":
-        git = shutil.which("git")
-        candidate = Path(git).parent.parent / "bin" / "bash.exe" if git else None
-        executable = str(candidate) if candidate and candidate.is_file() else None
-    if executable is None:
-        if os.environ.get("AGENT_WORKTREES_REQUIRE_NATIVE_BASH") == "1":
-            pytest.fail("this native qualification requires Bash, not WSL or a skipped control")
-        pytest.skip("native Bash is unavailable; WSL is not a native substitute")
-    env = {
-        key: os.environ[key] for key in ("PATH", "SystemRoot", "WINDIR") if key in os.environ
-    }
-    env.update(HOME=str(tmp_path), TMP=str(tmp_path), TEMP=str(tmp_path), LC_ALL="C")
-    script = "git() { printf 'commit-reached\\n'; }; unset value other; " + command
-    result = subprocess.run(
-        [executable, "--noprofile", "--norc", "-c", script],
-        cwd=anchor[0]["path"], env=env, capture_output=True, text=True, timeout=5,
-        **no_window_kwargs(),
-    )
-    assert result.returncode == 0, result.stderr
-    assert ("commit-reached" in result.stdout.splitlines()) is writes
-    decision = guard.decide(
-        _shell(command, anchor[0]["path"]), env={}, home=tmp_path, anchors=anchor,
-    )
-    assert bool(decision and decision["permissionDecision"] == "deny") is writes
-    assert guard.shell_may_mutate(command, "bash") is writes
 
 
 # --- write-tool blocking ------------------------------------------------------

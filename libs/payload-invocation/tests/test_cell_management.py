@@ -1,7 +1,6 @@
 """Explicit cell publication borrows existing installation custody."""
 # ruff: noqa: F811 -- imported pytest fixtures are injected by name
 from __future__ import annotations
-from typing import TYPE_CHECKING, Any
 
 import json
 import os
@@ -10,7 +9,6 @@ import sys
 from pathlib import Path
 
 import pytest
-from test_command_binding import PowerShellFactory
 
 from test_command_binding import (
     _snapshot, _write, binding_fixture as binding_fixture, powershell_host as powershell_host,
@@ -28,7 +26,7 @@ pytestmark = [
 
 
 @pytest.mark.parametrize("state", ["missing", "standalone", "managed"])
-def test_management_lease_borrows_exact_existing_locks(binding_fixture: dict[str, Any], state: str) -> None:
+def test_management_lease_borrows_exact_existing_locks(binding_fixture: dict, state: str) -> None:
     primitive = binding_fixture["primitive"]
     root, arguments = _cell(binding_fixture, {})
     _policy(binding_fixture, root, arguments, state)
@@ -53,7 +51,7 @@ def test_management_lease_borrows_exact_existing_locks(binding_fixture: dict[str
 
 @pytest.mark.parametrize("state", ["missing", "standalone", "managed"])
 def test_management_retains_active_cell_when_mode_policy_is_disabled(
-    binding_fixture: dict[str, Any], state: str,
+    binding_fixture: dict, state: str,
 ) -> None:
     primitive = binding_fixture["primitive"]
     root, arguments = _cell(binding_fixture, {})
@@ -74,7 +72,7 @@ def test_management_retains_active_cell_when_mode_policy_is_disabled(
 
 @pytest.mark.parametrize("state", ["invalid", "foreign", "future"])
 def test_management_refuses_bad_policy_before_lock_writes(
-    binding_fixture: dict[str, Any], state: str,
+    binding_fixture: dict, state: str,
 ) -> None:
     primitive = binding_fixture["primitive"]
     root, arguments = _cell(binding_fixture, {})
@@ -89,7 +87,7 @@ def test_management_refuses_bad_policy_before_lock_writes(
 @pytest.mark.parametrize("managed", [False, True])
 @pytest.mark.parametrize("profiles", [{}, {"backend": "cpu"}, {"allowSourceFallback": False}])
 def test_management_profile_hold_precedes_lease_borrow_and_cli(
-    binding_fixture: dict[str, Any], monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], managed: bool, profiles: dict[str, Any],
+    binding_fixture: dict, monkeypatch: pytest.MonkeyPatch, capsys, managed: bool, profiles: dict,
 ) -> None:
     primitive = binding_fixture["primitive"]
     root, arguments = _cell(binding_fixture, {})
@@ -121,7 +119,7 @@ def test_management_profile_hold_precedes_lease_borrow_and_cli(
     "different-pid", "token", "generation", "policy",
     "profile-empty", "profile-cpu", "profile-source",
 ])
-def test_borrower_rejects_changed_custody(binding_fixture: dict[str, Any], change: str) -> None:
+def test_borrower_rejects_changed_custody(binding_fixture: dict, change: str) -> None:
     primitive = binding_fixture["primitive"]
     root, arguments = _cell(binding_fixture, {})
     _policy(binding_fixture, root, arguments, "managed")
@@ -177,7 +175,7 @@ def test_borrower_rejects_changed_custody(binding_fixture: dict[str, Any], chang
 
 
 @pytest.mark.parametrize("ticket", ["1", "true", "{}", '{"version":true,"tokens":[]}'])
-def test_environment_ticket_alone_never_authorizes(binding_fixture: dict[str, Any], ticket: str) -> None:
+def test_environment_ticket_alone_never_authorizes(binding_fixture: dict, ticket: str) -> None:
     primitive = binding_fixture["primitive"]
     _, arguments = _cell(binding_fixture, {})
     arguments["environment"] = {
@@ -190,19 +188,14 @@ def test_environment_ticket_alone_never_authorizes(binding_fixture: dict[str, An
 
 
 def test_management_rechecks_after_both_real_locks(
-    binding_fixture: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+    binding_fixture: dict, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     primitive = binding_fixture["primitive"]
     root, arguments = _cell(binding_fixture, {})
     original = primitive._DirectoryLock
     observed = []
 
-    if TYPE_CHECKING:
-        from installation_context import _DirectoryLock as LockBase
-    else:
-        LockBase = original
-
-    class ObservingLock(LockBase):
+    class ObservingLock(original):
         def acquire(self) -> None:
             super().acquire()
             observed.append(self.kind)
@@ -219,10 +212,10 @@ def test_management_rechecks_after_both_real_locks(
 
 @pytest.mark.parametrize("mode_enabled", [True, False])
 def test_backend_borrows_outer_management_without_reacquiring(
-    binding_fixture: dict[str, Any], backend: Any, monkeypatch: pytest.MonkeyPatch, mode_enabled: bool,
+    binding_fixture: dict, backend, monkeypatch: pytest.MonkeyPatch, mode_enabled: bool,
 ) -> None:
     primitive = binding_fixture["primitive"]
-    environment: dict[str, str] = {}
+    environment = {}
     root, arguments = _cell(binding_fixture, environment)
     _policy(binding_fixture, root, arguments, "managed")
     if not mode_enabled:
@@ -249,7 +242,7 @@ def test_backend_borrows_outer_management_without_reacquiring(
         })
 
 
-def _installer_command(fixture: dict[str, Any], shell: str, root: Path, python: Path) -> list[str]:
+def _installer_command(fixture: dict, shell: str, root: Path, python: Path) -> list[str]:
     if shell == "bash":
         return [
             *_command(fixture, shell, "install"), "update", "--install-dir", str(root),
@@ -267,7 +260,7 @@ def _installer_command(fixture: dict[str, Any], shell: str, root: Path, python: 
 @pytest.mark.parametrize("shell", SHELLS)
 @pytest.mark.parametrize("mode_enabled", [True, False])
 def test_native_management_borrows_custody_before_and_after_staging(
-    binding_fixture: dict[str, Any], shell: str, mode_enabled: bool, powershell_host: PowerShellFactory,
+    binding_fixture: dict, shell: str, mode_enabled: bool, powershell_host,
 ) -> None:
     fixture, primitive = binding_fixture, binding_fixture["primitive"]
     environment = _installer_environment(fixture, shell)
@@ -297,7 +290,7 @@ def test_native_management_borrows_custody_before_and_after_staging(
 @pytest.mark.parametrize("shell", SHELLS)
 @pytest.mark.parametrize("ticket", ["forged", "expired"])
 def test_native_management_refuses_without_live_custody_before_writes(
-    binding_fixture: dict[str, Any], shell: str, ticket: str, powershell_host: PowerShellFactory,
+    binding_fixture: dict, shell: str, ticket: str, powershell_host,
 ) -> None:
     fixture, primitive = binding_fixture, binding_fixture["primitive"]
     environment = _installer_environment(fixture, shell)
@@ -327,7 +320,7 @@ def test_native_management_refuses_without_live_custody_before_writes(
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows Git Bash")
 @pytest.mark.parametrize("mode_enabled", [True, False])
 def test_windows_bash_management_borrows_native_paths(
-    binding_fixture: dict[str, Any], mode_enabled: bool,
+    binding_fixture: dict, mode_enabled: bool,
 ) -> None:
     fixture, primitive = binding_fixture, binding_fixture["primitive"]
     git = shutil.which("git")

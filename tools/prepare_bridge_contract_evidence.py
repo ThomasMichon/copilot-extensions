@@ -47,7 +47,6 @@ def prepare(root: Path, remote: str) -> str:
     ):
         raise ValueError("capture preparation requires a credential-free HTTPS repository URL")
     commits = []
-    tree_commits = set()
     for relative in PACKETS:
         packet = json.loads((root / relative).read_text(encoding="utf-8"))
         captured = packet.get("captured_from") if isinstance(packet, dict) else None
@@ -56,15 +55,11 @@ def prepare(root: Path, remote: str) -> str:
             raise ValueError("capture preparation requires an exact full commit identity")
         if commit not in commits:
             commits.append(commit)
-        if relative.endswith("/http52-owner-membership.json"):
-            # Its dynamic runtime inventory needs the captured tree to prove
-            # that files added later were not missing capture-time owners.
-            tree_commits.add(commit)
     require_local_object_reads()
     for commit in commits:
         if _run(root, "cat-file", "-e", f"{commit}^{{commit}}").returncode != 0:
             from bridge_capture_metadata import load
-            if load(root, commit) is not None and commit not in tree_commits:
+            if load(root, commit) is not None:
                 continue
             result = _run(
                 root, "fetch", "--no-tags", "--depth=1", "--no-recurse-submodules",

@@ -36,95 +36,9 @@ def screen_and_loader(*, provider=False):
 
 
 def body(screen):
-    rows = screen.worktrees_view.notice_lines()
+    rows = []
     screen.worktrees_view.build_data(lambda text, **kwargs: rows.append(text), 100, ("M", 0))
     return "\n".join(row.plain for row in rows)
-
-
-@pytest.mark.parametrize("width", [48, 118])
-def test_cached_notices_and_knowledge_changes_do_not_rebuild_or_move_list(monkeypatch, width):
-    from worktree_manager.production_picker.picker_tui.engine_regions import _PickerNativeData
-    from worktree_manager.production_picker.picker_tui.worktree_details_screen import WtDetailsScreen
-
-    monkeypatch.setattr(PickerScreen, "_tick", lambda self: None)
-
-    async def run():
-        app = PickerApp(_fixture_source(), live=False)
-        async with app.run_test(size=(width, 30)) as pilot:
-            screen = app.query_one(PickerScreen)
-            assert await asyncio.to_thread(screen._ensure_setup_completion_event().wait, 3)
-            await pilot.pause()
-            screen.live = True
-            screen.machine_idx = screen.local_index()
-            _, machine, environment, _ = screen.machines[screen.machine_idx]
-            source = data_ssh.Source(machine, environment, None, local=True)
-            screen.source_tabs[screen.machine_idx]["source_id"] = source.source_id
-            screen.loader = data_ssh.LiveLoader([source])
-            rows = [{"id": "one", "title": "Kept worktree"}]
-            screen.loader._feed_commit(source, 0, rows)
-            screen.data = screen.loader.records()
-            screen._knowledge_readiness = {"ready": True, "code": "ready"}
-            screen.refresh()
-            await pilot.pause()
-            native = screen.query_one("#nf-body-data", _PickerNativeData)
-            region = native.region
-            prompts = [native.get_option_at_index(i) for i in range(native.option_count)]
-            notices = screen.query_one("#nf-notices")
-            assert notices.region.height == 2
-            monkeypatch.setattr(native, "_rebuild", lambda: pytest.fail("notice rebuilt the list"))
-            modal = WtDetailsScreen(screen.list_records()[0], engine=screen)
-            await app.push_screen(modal)
-            await pilot.pause()
-            modal_region = modal.query_one("#details-frame").region
-            for ready, failed in [(False, True), (True, False), (False, True), (True, False)]:
-                screen._knowledge_readiness = {
-                    "ready": ready, "code": "ready" if ready else "knowledge_binding_required",
-                }
-                if failed:
-                    screen.loader._feed_error(source, 0, "fixture refresh failed", kind="content")
-                else:
-                    screen.loader._feed_commit(source, 0, rows)
-                screen.refresh(cause="pulse")
-                await pilot.pause()
-                assert native.region == region
-                assert modal.query_one("#details-frame").region == modal_region
-                assert sum(
-                    strip.text.count("Kept worktree")
-                    for strip in app.screen._compositor.render_strips()
-                ) == 1
-                assert [native.get_option_at_index(i) for i in range(native.option_count)] == prompts
-                assert all(line.cell_len <= width for line in notices.render().split("\n"))
-                assert ("Updates paused" in notices.render().plain) == failed
-            app.pop_screen()
-            await pilot.pause()
-            assert native.region == region
-            rec = screen.list_records()[0]
-            rec["claims_projection"] = {"unresolved_count": 1, "complete": False}
-            rec["raw"]["claims_projection"] = rec["claims_projection"]
-            queries = []
-
-            def inspect_claims(record):
-                queries.append(record["raw"]["id"])
-                return [{"kind": "unresolved", "state": "unresolved", "reason": "missing owner"}]
-
-            monkeypatch.setattr(screen, "_load_worktree_claim_details", inspect_claims)
-            assert "Doctor" in screen._wt_submenu_verbs(rec)[0]
-            screen._wt_submenu_dispatch(rec, ("Doctor", False, False))
-            await pilot.pause()
-            doctor = app.screen
-            assert isinstance(doctor, WtDetailsScreen)
-            assert "Doctor" in doctor._body().plain
-            assert queries == ["one"]
-            await pilot.press("escape")
-            assert app.screen is not doctor
-            for orphans in ([{"kind": "worktree", "ref": "missing-row"}], []):
-                screen._orphans = orphans
-                screen.refresh(cause="pulse")
-                await pilot.pause()
-                painted = "\n".join(strip.text for strip in app.screen._compositor.render_strips())
-                assert ("o: Doctor" in painted) == bool(orphans)
-
-    asyncio.run(run())
 
 
 @pytest.mark.parametrize("connected", [False, True])
@@ -200,28 +114,6 @@ def test_failed_replacement_loader_keeps_cached_presentation(provider, kind, row
     assert "Updates paused" in body(screen) and "Press r to retry" not in body(screen)
     tab = screen._machine_group([screen.machine_idx], True).plain
     assert "~" in tab and "✗" not in tab and "✓" not in tab
-
-
-def test_all_scope_cached_failure_is_not_hidden_by_an_earlier_refreshing_source():
-    screen, _loader, source = screen_and_loader()
-    other = data_ssh.Source("other-host", "Win", None)
-    screen.machines.append(("Other source", other.machine, other.env, True))
-    screen.source_tabs.append({
-        "label": "Other source", "machine": other.machine, "env": other.env,
-        "source_kind": other.source_kind, "source_id": other.source_id,
-    })
-    screen.machine_idx = 0
-    screen.loader = data_ssh.LiveLoader([source, other])
-    for current in (source, other):
-        screen.loader._feed_commit(current, 0, [])
-    worktree_read_feedback(screen)
-    screen.loader = data_ssh.LiveLoader([source, other])
-    screen.loader._feed_error(other, 0, "fixture unavailable")
-    notices = worktree_read_feedback(screen)
-    assert notices[0].state == "loading" and notices[1].state == "failed"
-    text = screen.worktrees_view.notice_lines()[1].plain
-    assert "Other source" in text and "Updates paused" in text
-    assert "+1 sources" in text
 
 
 def test_off_scope_empty_completion_is_remembered_before_loader_replacement():

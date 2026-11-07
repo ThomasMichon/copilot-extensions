@@ -325,7 +325,7 @@ def _claims_cell(rec, w):
     notices = claim_coverage(rec)
     seg = Text()
     if notices:
-        seg.append("⚠ ", style="yellow")
+        seg.append(f"[{'; '.join(notices)}] ", style=C_WARN)
     links = rec.get("claims_links")
     if links:
         for i, entry in enumerate(links):
@@ -581,7 +581,6 @@ def target_rows(target_envs):
 
 # Clarify each worktree action in the sub-menu (test-chamber #1343).
 ACTION_DESC = {
-    "Doctor": "Inspect this worktree's warnings and full claim details (read-only).",
     "Open": "Attach the worktree's live terminal (PSMux/TMux); launch one if "
             "none. Arrow to the No Mux row below to launch without the wrapper, "
             "for troubleshooting.",

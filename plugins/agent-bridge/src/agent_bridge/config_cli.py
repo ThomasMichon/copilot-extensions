@@ -167,9 +167,6 @@ def _cmd_doctor(args: argparse.Namespace) -> None:
 
 
 def register_config_commands(sub: argparse._SubParsersAction) -> None:
-    from .telemetry_cli import register as register_telemetry
-
-    register_telemetry(sub)
     doctor_p = sub.add_parser("doctor", help="Audit provider drop-ins and report exact stale-entry cleanup")
     doctor_p.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Emit structured provider findings")
     doctor_p.set_defaults(func=_cmd_doctor)

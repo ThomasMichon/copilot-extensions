@@ -14,9 +14,6 @@ The separate [portable preference exchange](portable-preferences.md) reads
 explicit typed snapshots, including harness-to-knowledge mapping suggestions.
 Its `preview` is read-only; explicit `accept` / `publish` transactions persist
 local snapshots only. They do not add a package source or invoke native adoption.
-The separate confirmed `preferences copilot` operation can adopt only typed
-`model`/`effortLevel` floors from accepted data through the native settings owner.
-It does not add a requirement package or change ordinary source-tier selection.
 
 ## Canonical sources
 
@@ -67,11 +64,6 @@ Every native `enforce` contribution still applies afterward, and
 `validator._settings_authority_analysis` still refuses conflicting enforced
 values before restore mutates anything. Source-tier selection **never** turns
 an enforce constraint into last-wins.
-Native settings applies serialize live read, merge, any confirmation precondition,
-backup and replacement with the target's retained `settings.json.lock`.
-Read-only surface previews do not acquire or create that writer lock.
-The lock resolves only the parent directory; a linked settings filename or
-lock refuses before mutation rather than changing lock identity on replacement.
 
 Machine-wide resource/module packages are read only for this eligible default
 projection; this does not expand a repo-scoped restore's resource-application

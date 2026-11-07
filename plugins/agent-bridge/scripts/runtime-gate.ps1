@@ -7,7 +7,6 @@ $OutputEncoding = [Console]::OutputEncoding = New-Object Text.UTF8Encoding($fals
 
 $forwardArgs = @($args)
 $passiveObservation = $false
-$configurationOnly = $false
 $skipProject = $false
 $firstArgument = $true
 $projectOptions = @('--p', '--pr', '--pro', '--proj', '--proje', '--projec', '--project')
@@ -30,9 +29,6 @@ foreach ($argument in $forwardArgs) {
         continue
     } elseif ($argument -cin @('observe-session', 'session-observation-history', 'observe-owner')) {
         $passiveObservation = $true
-        break
-    } elseif ($argument -ceq 'telemetry') {
-        $configurationOnly = $true
         break
     } else {
         break
@@ -266,17 +262,13 @@ function Invoke-Runtime {
     exit $LASTEXITCODE
 }
 
-$runtimePython = if ($passiveObservation -or $configurationOnly) {
+$runtimePython = if ($passiveObservation) {
     Resolve-RuntimePython -TraceMode 'read-only'
 } else {
     Resolve-RuntimePython
 }
 if ($runtimePython) {
     Invoke-Runtime -Python $runtimePython
-}
-if ($configurationOnly) {
-    [Console]::Error.WriteLine('[agent-bridge] runtime not provisioned (configuration-only; no self-provision).')
-    exit 1
 }
 
 if ($passiveObservation) {

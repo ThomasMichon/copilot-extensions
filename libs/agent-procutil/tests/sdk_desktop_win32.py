@@ -66,27 +66,6 @@ class EventHooks:
             raise ObservationBlocked("; ".join(failures))
 
 
-class ScopedEventHooks(EventHooks):
-    """USER32 applies the process filter before callback delivery."""
-
-    def __init__(self, api, receive, on_error, pin):
-        super().__init__(api, receive, on_error)
-        self.pin = pin
-
-    def start(self) -> None:
-        self.owner_only()
-        if type(self.pin.pid) is not int or not 0 < self.pin.pid < 1 << 32 or self.pin.gone():
-            raise ObservationBlocked("scoped hook requires its retained live process object")
-        self.api.user.PeekMessageW(ct.byref(wt.MSG()), None, 0, 0, 0)
-        for first, last in ((3, 3), (0x8000, 0x8003)):
-            handle = self.api.user.SetWinEventHook(
-                first, last, None, self.callback, self.pin.pid, 0, 0,
-            )
-            self.api.check(handle, "register process-scoped out-of-context WinEvent hook")
-            self.handles.append(handle)
-        self.count = len(self.handles)
-
-
 class WinAPI(NativeProcessAPI):
     def __init__(self):
         if os.name != "nt":
@@ -112,7 +91,6 @@ class WinAPI(NativeProcessAPI):
             "IsWindowVisible": ([wt.HWND], wt.BOOL),
             "GetWindowThreadProcessId": ([wt.HWND, ct.POINTER(wt.DWORD)], wt.DWORD),
             "EnumWindows": ([WindowCallback, wt.LPARAM], wt.BOOL),
-            "EnumThreadWindows": ([wt.DWORD, WindowCallback, wt.LPARAM], wt.BOOL),
             "SetWinEventHook": (
                 [wt.DWORD, wt.DWORD, wt.HMODULE, EventCallback,
                  wt.DWORD, wt.DWORD, wt.DWORD], wt.HANDLE,
@@ -234,39 +212,6 @@ class WinAPI(NativeProcessAPI):
 
     def event_hooks(self, receive, on_error):
         return EventHooks(self, receive, on_error)
-
-    def scoped_event_hooks(self, receive, on_error, pin):
-        return ScopedEventHooks(self, receive, on_error, pin)
-
-    def thread_windows(self, thread: int, pid: int) -> list[int]:
-        """Query one launch-owned thread; never enumerate the desktop."""
-        if (
-            type(thread) is not int or not 0 < thread < 1 << 32
-            or type(pid) is not int or not 0 < pid < 1 << 32
-        ):
-            raise ObservationBlocked("thread query requires exact nonzero native identities")
-        result, errors = [], []
-
-        @WindowCallback
-        def visit(hwnd, _unused):
-            try:
-                if self.window_identity(hwnd) != (pid, thread):
-                    raise ObservationBlocked("thread window identity changed")
-                if len(result) >= 4096:
-                    raise ObservationBlocked("owned thread window query overflow")
-                result.append(int(hwnd))
-                return True
-            except Exception as error:
-                errors.append(error)
-                return False
-
-        complete = self.user.EnumThreadWindows(thread, visit, 0)
-        if errors:
-            raise errors[0]
-        # USER32 also returns FALSE for a valid thread with no windows.
-        if not complete and result:
-            raise ObservationBlocked("owned thread window enumeration stopped after callbacks")
-        return result
 
     def pump(self) -> None:
         message = wt.MSG()

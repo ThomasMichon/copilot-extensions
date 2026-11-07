@@ -69,16 +69,12 @@ def test_process_receiver_keeps_four_request_fields_and_nineteen_powershell_argu
 
 @pytest.mark.parametrize("failure", [
     "missing-owner", "changed", "traversal", "duplicate", "foreign", "late", "orphan", "bytecode",
-    "missing-observation", "changed-observation", "foreign-observation", "missing-lifecycle",
+    "missing-observation", "changed-observation", "foreign-observation",
 ])
 def test_process_preparation_refuses_unbound_source_before_launch(tree, monkeypatch, failure):
     root, manifest = tree
-    if failure in {"missing-owner", "missing-observation", "missing-lifecycle"}:
-        missing = {
-            "missing-owner": "plugin_test_containment.py",
-            "missing-observation": "plugin_test_containment_observation.py",
-            "missing-lifecycle": "plugin_test_lifecycle.py",
-        }[failure]
+    if failure in {"missing-owner", "missing-observation"}:
+        missing = "plugin_test_containment.py" if failure == "missing-owner" else "plugin_test_containment_observation.py"
         manifest["files"] = [row for row in manifest["files"] if not row["name"].endswith(missing)]
     elif failure == "traversal":
         manifest["files"][0]["name"] = "../outside.py"
@@ -116,6 +112,8 @@ def test_required_tool_closure_contains_actual_owner_startup_imports(tree):
     names = {name for name in sources.TOOLS if name.endswith(".py")}
 
     def imports(node):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            return
         if isinstance(node, ast.Import):
             yield from (alias.name.split(".")[0] for alias in node.names)
         elif isinstance(node, ast.ImportFrom):

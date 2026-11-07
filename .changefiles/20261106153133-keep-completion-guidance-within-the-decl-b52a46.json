@@ -1,9 +1,0 @@
-{
-  "comment": "Keep completion guidance within the declared projection template budget without weakening effort gates.",
-  "changes": [
-    {
-      "plugin": "efforts",
-      "type": "patch"
-    }
-  ]
-}

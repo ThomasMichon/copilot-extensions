@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from contextlib import ExitStack
-from collections.abc import Callable
-from contextvars import ContextVar
 import ctypes
 from ctypes import wintypes
 from dataclasses import dataclass, field
@@ -12,27 +10,10 @@ from functools import lru_cache
 import math
 import os
 import subprocess
+import sys
 import time
 
 from agent_procutil import JobHandle, _build_job_extended_limit_info, _configure_job_api, _kernel32
-
-
-_pre_resume_context: ContextVar[tuple | None] = ContextVar("owned-pre-resume", default=None)
-
-
-def require_pre_resume_admission(
-    process: _Process, job: JobHandle, execution_deadline: float, cleanup_deadline: float,
-) -> None:
-    """Require this owner's active creation transaction, not a caller PID/flag."""
-    bound = _pre_resume_context.get()
-    if (
-        bound is None or bound[0] is not process or bound[1] is not job
-        or bound[2:] != (
-            process._handle, process._thread_handle, job.handle,
-            execution_deadline, cleanup_deadline,
-        )
-    ):
-        raise RuntimeError("no matching native owner's active pre-resume admission")
 
 
 class _StartupInfo(ctypes.Structure):
@@ -87,7 +68,6 @@ def _api():
             [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)], wintypes.BOOL,
         ),
         "TerminateProcess": ([wintypes.HANDLE, wintypes.UINT], wintypes.BOOL),
-        "TerminateJobObject": ([wintypes.HANDLE, wintypes.UINT], wintypes.BOOL),
         "CloseHandle": ([wintypes.HANDLE], wintypes.BOOL),
     }
     for name, (arguments, result) in signatures.items():
@@ -339,8 +319,7 @@ def _environment_block(environment):
 
 def spawn(
     argv: list[str], *, budget=None, command_deadline: float | None = None, on_settled=None,
-    cleanup_deadline: float | None = None,
-    before_resume: Callable[[_Process, JobHandle, float, float], None] | None = None, **kwargs,
+    cleanup_deadline: float | None = None, **kwargs,
 ):
     """Create the target in its caller-owned Job atomically, before it can run."""
     import msvcrt
@@ -373,13 +352,6 @@ def spawn(
     if command_deadline is not None and cleanup_deadline is not None and command_deadline > cleanup_deadline:
         raise ValueError("command_deadline must not exceed the cleanup deadline")
     launch_deadline = command_deadline if command_deadline is not None else cleanup_deadline
-    if before_resume is not None and (
-        not callable(before_resume) or command_deadline is None or cleanup_deadline is None
-        or allow_breakaway
-    ):
-        raise ValueError(
-            "observer admission requires a callback, execution/cleanup deadlines and no breakaway",
-        )
     if cleanup_deadline is not None and launch_deadline is not None:
         remaining(launch_deadline)
     job = None
@@ -490,6 +462,7 @@ def spawn(
                     os.set_handle_inheritable(msvcrt.get_osfhandle(fd), True)
                 if launch_deadline is not None:
                     remaining(launch_deadline)
+                sys.audit("subprocess.Popen", application, argv, cwd, kwargs.get("env"))
                 creation_attempted = True
                 if not kernel.CreateProcessW(
                     application, command, None, None, True,
@@ -500,19 +473,6 @@ def spawn(
                     raise ctypes.WinError(ctypes.get_last_error())
                 process = _Process(argv, info, streams)
                 if launch_deadline is not None:
-                    remaining(launch_deadline)
-                if before_resume is not None:
-                    process._observation_pending = True
-                    admission = _pre_resume_context.set((
-                        process, job, process._handle, process._thread_handle, job.handle,
-                        launch_deadline, cleanup_deadline,
-                    ))
-                    try:
-                        if before_resume(process, job, launch_deadline, cleanup_deadline) is not None:
-                            raise ValueError("observer admission must acknowledge without a replacement")
-                    finally:
-                        _pre_resume_context.reset(admission)
-                        process._observation_pending = False
                     remaining(launch_deadline)
                 if kernel.ResumeThread(info.hThread) == 0xFFFFFFFF:
                     raise ctypes.WinError(ctypes.get_last_error())
@@ -539,16 +499,8 @@ def spawn(
             if cleanup_deadline is not None:
                 job_empty_confirmed = False
                 try:
-                    seconds = cleanup_deadline - time.monotonic()
-                    if seconds > 0:
-                        job.terminate_and_wait(seconds)
-                        job_empty_confirmed = True
-                    else:
-                        if not kernel.TerminateJobObject(job.handle, 1):
-                            raise ctypes.WinError(ctypes.get_last_error())
-                        raise TimeoutError(
-                            "owned Job termination requested after deadline; exit unconfirmed",
-                        )
+                    job.terminate_and_wait(remaining(cleanup_deadline))
+                    job_empty_confirmed = True
                     process.wait(max(0.0, cleanup_deadline - time.monotonic()))
                     if failed_preparation or process._thread_handle:
                         raise cleanup_error() from operation_error

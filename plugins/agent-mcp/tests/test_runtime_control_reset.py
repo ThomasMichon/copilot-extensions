@@ -331,7 +331,7 @@ async def test_real_serve_starts_after_reset_and_survives_losing_reset(tmp_path:
 
 @pytest.mark.parametrize("language", ["ps1", "sh"])
 @pytest.mark.parametrize("mode", ["fresh", "incremental"])
-def test_native_incoming_publication_is_independent_of_construction_mode(
+def test_native_cutover_runs_only_for_the_incremental_path(
     tmp_path: Path,
     language: str,
     mode: str,
@@ -348,14 +348,14 @@ def test_native_incoming_publication_is_independent_of_construction_mode(
     text = (ROOT / "plugins/agent-mcp/scripts" / f"init.{language}").read_text(
         encoding="utf-8",
     )
-    marker = tmp_path / "incoming-published"
+    marker = tmp_path / "cutover-invoked"
 
     def q(value: Path | str) -> str:
         return _quote(value, language)
 
     if language == "ps1":
         block = re.search(
-            r"(?ms)^function Publish-IncomingMcp \{.*?^\}",
+            r"(?ms)^if \(\$VersionedRuntime .*AGENT_MCP_NO_CUTOVER\) \{.*?^\}",
             text,
         )
         script = f"""
@@ -363,24 +363,19 @@ $ErrorActionPreference='Stop'
 $VersionedRuntime=$true
 $script:RuntimeConstructionSession=[pscustomobject]@{{Construction='{mode}'}}
 $VenvPython='fixture-python'
-$PSScriptRoot={q(tmp_path)}
-$InstallDir={q(tmp_path / "installation")}
 $env:AGENT_MCP_NO_CUTOVER=''
 function Write-Ok($value) {{ }}
 function Write-Skip($value) {{ }}
 function Invoke-Hidden {{
     param($FilePath,$ArgList)
-    if ($ArgList -contains '--force' -or $ArgList -contains '--reset-control') {{
-        throw 'Incoming publication must not force or reset live state'
-    }}
-    [IO.File]::WriteAllText({q(marker)},($ArgList -join ' '))
-    $global:LASTEXITCODE=0
+    [IO.File]::WriteAllText({q(marker)},'cutover')
     '{{"ok":true}}'
 }}
 """
     else:
         block = re.search(
-            r"(?ms)^_publish_incoming_mcp\(\) \{.*?^\}",
+            r'(?ms)^if \[\[ "\$VERSIONED_RUNTIME" -eq 1'
+            r"[^\n]*AGENT_MCP_NO_CUTOVER[^\n]*; then.*?^fi$",
             text,
         )
         script = f"""
@@ -389,15 +384,13 @@ VERSIONED_RUNTIME=1
 _RUNTIME_CONSTRUCTION_MODE='{mode}'
 AGENT_MCP_NO_CUTOVER=''
 VENV_PYTHON=fixture_python
-SCRIPT_DIR={q(tmp_path)}
-INSTALL_DIR={q(tmp_path / "installation")}
 _ok() {{ :; }}
 _skip() {{ :; }}
 _step() {{ :; }}
 fixture_python() {{
     for arg in "$@"; do
-        if [[ "$arg" == */publish_incoming.py ]]; then
-            printf '%s\\n' "$@" > {q(marker)}
+        if [[ "$arg" == cutover ]]; then
+            printf cutover > {q(marker)}
             printf '{{"ok":true}}'
             return 0
         fi
@@ -406,8 +399,6 @@ fixture_python() {{
 }}
 """
     assert block
-    invocation = "\nPublish-IncomingMcp" if language == "ps1" else "\n_publish_incoming_mcp"
-    result = _run(tmp_path, language, script + block.group() + invocation)
+    result = _run(tmp_path, language, script + block.group())
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "publish_incoming.py" in marker.read_text(encoding="utf-8-sig")
-    assert "--reset-control" not in marker.read_text(encoding="utf-8-sig")
+    assert marker.exists() is (mode == "incremental")

@@ -7,9 +7,6 @@ on:
     paths:
       - ".github/workflows/legacy-monitor-native-acceptance.yml"
       - "plugins/agent-worktrees/scripts/runtime_install.py"
-      - "plugins/agent-worktrees/scripts/anchor_shell_parser.py"
-      - "plugins/agent-worktrees/scripts/anchor_write_guard.py"
-      - "plugins/agent-worktrees/tests/test_anchor_write_guard.py"
       - "plugins/agent-worktrees/src/agent_worktrees/runtime_monitor_identity.py"
       - "plugins/agent-worktrees/src/agent_worktrees/runtime_monitor_grace.py"
       - "plugins/agent-worktrees/src/agent_worktrees/runtime_monitor_retirements.py"
@@ -48,15 +45,6 @@ jobs:
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
-      - name: Qualify native Bash parameter boundaries and protected-anchor routing
-        env:
-          AGENT_WORKTREES_REQUIRE_NATIVE_BASH: "1"
-        run: >-
-          python tools/run-plugin-tests.py agent-worktrees
-          --test-file tests/test_anchor_write_guard.py
-          -k braced_parameter_boundaries_match_native_bash
-          --allow-explicit-tiers
-          --test-timeout 30 --timeout 180 --plugin-timeout 600
       - name: Qualify pinned legacy retirement through the real installer
         env:
           AGENT_WORKTREES_NATIVE_RECOVERY: "1"

@@ -42,7 +42,7 @@ inert; first complete authenticated local convergence gates SSH readiness.
 Neither source delivery nor the installed synthetic fixture is a containing
 release, provider setup, real SSH route or adopter receipt.
 
-The setup gap was concrete at the #10954 merge: normal
+The remaining setup gap is concrete at the #10954 merge: normal
 `repository_continuity.run` invokes the selected Fleet SDK and stops after
 authenticated outbound access. It does not choose an SSH participant or
 construct its configuration. The enrollment owner's private `machine.json`
@@ -50,14 +50,6 @@ retains a JWK and original operation, whereas the delivered SSH configuration
 v2 consumes an externally provisioned private P-256 PEM reference. That
 private record is not an advertised credential interface. Copying its key
 into another PEM or teaching SSH to parse it would bypass its owner.
-
-Provider expansion #11009 and explicit consumer migration #11023 now expose
-the owner's caller/public revision and SSH v3 references. The
-[normal opt-in setup consumer](../../../plugins/agent-worktrees/docs/repository-setup.md#explicit-selected-ssh-setup)
-joins that reference to the complete prepared Source application contract,
-preserving old outbound-only declarations. Its actual installed-process
-qualification, complete product cohort and release/adopter outcomes remain
-separate gates; this plan is not their completion record.
 
 Reuse `install_source.project_inputs` / `install_application` and the selected
 complete application profile through their existing owner; do not extend the
@@ -86,56 +78,6 @@ Before effects, the owning flow must resolve:
 These are required semantic inputs, not new DTO/schema names or a proposed
 second authority store. Secrets remain with the credential owner and do not
 enter argv, logs, receipts, desired state or the role artifact.
-
-## Selected engine SDK profile and normal installed consumer
-
-The bounded normal setup adapter is delivered by #11041. Its installed-process
-witness exercises the selected engine wheel and packaged Source constructor,
-but supplies development/test support and an in-process Manager engine override.
-That is useful adapter qualification, not a source-independent installed product
-cohort. The following is a **contract-only continuation**, not implemented
-profile syntax or a claim that the default engine includes Fleet.
-
-The normal continuity caller executes Fleet with the selected engine's own
-isolated interpreter. That engine environment must therefore contain the
-explicitly selected Fleet SDK closure; a separate Fleet command on PATH, an
-editable installation or dependencies in the Manager process do not supply it.
-Current engine metadata has no declared Fleet SDK extra. Before implementation,
-select a canonical opt-in extra or another already-supported explicit root
-composition with the existing Source/profile owner. Record its actual declared
-dependencies and supported construction entry point; a lower-level multi-root
-helper alone does not establish a normal installation journey.
-
-Reuse complete wheel-profile preparation, integrity admission, construction,
-selection publication and update through their existing owners. #11121 retains
-the current canonical Source/wheel-application integration; this plan neither
-modifies that open change nor treats it as merged support. Do not add a second
-builder, installer, resolver, private wheel cache or publisher. The declared
-SDK profile must supply the service-Gateway and SSH-client support actually
-needed by the selected setup operation. Preserve the selected source, extras
-and complete dependency closure across normal preparation, installation and
-update. Installing an SDK does not activate a host, enroll an identity or grant
-access. Default engine, client-only and outbound-only behavior stays unchanged.
-
-Negotiate the existing executable capability contracts before optional setup
-effects. An older or incomplete engine/SDK/profile reports the missing support
-without credential fallback, ambient imports, automatic dependency installation,
-new enrollment or role selection. Do not infer executable support from a
-package version, profile name or construction receipt. Existing issuer,
-enrollment, credential, Source and host-lifecycle authorities remain unchanged.
-
-Qualify the complete noneditable Manager/engine/SDK cohort through the normal
-installed Manager front door and its actual selected-engine discovery. Use
-synthetic continuity enrollment and TLS services, but no injected Manager source,
-demo engine override, editable support or successful setup callback. Deny
-checkout/plugin-payload reads during the consumer phase and clear incidental
-Python import paths; packaged operational assets remain supported inputs.
-Prove first selected setup, repeat, restart, explicit update and exact stop
-retain the original identity/operation and preserve a healthy selection on
-candidate failure. Run unchanged default/outbound-only and missing-profile
-controls through that same front door. Source, containing release, native
-platform qualification and authorized provider/adopter outcomes remain separate
-gates; this cohort must not relabel an unavailable lane as passing.
 
 ## Next bounded seam: provider identity and selected setup
 
@@ -260,16 +202,6 @@ resources, user state or a still-required access route.
   no credential/profile ownership transfer.
 - [ ] Non-editable role-selected installed closure runs with source/payload
   reads denied; a source-import negative control fails as expected.
-- [ ] The explicitly selected engine SDK closure is declared and prepared by
-  the normal Source/profile owner, survives ordinary installation/update and
-  leaves default installation inert; no second construction path is used.
-- [ ] The noneditable installed Manager front door discovers its real selected
-  engine and completes synthetic continuity-backed SSH setup with checkout and
-  payload access denied, without demo overrides or development imports.
-- [ ] The same installed front door proves unchanged default/outbound-only
-  behavior and pre-effect refusal for missing or incompatible SDK/profile
-  support; repeat, restart, update and failed candidates preserve identity,
-  original-operation correlation and the healthy selection.
 - [ ] Fresh Windows/Linux setup, no-op repeat, explicit update, candidate
   failure, compatible state-preserving recovery and stop/uninstall exercise
   the actual owner contracts, not only mocked callbacks.

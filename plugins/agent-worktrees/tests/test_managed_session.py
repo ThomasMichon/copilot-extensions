@@ -78,10 +78,9 @@ def fixture_linked_worktree(tmp_path, anchor, *, relative=False):
     (admin / "HEAD").write_text("ref: refs/heads/work\n")
     (admin / "commondir").write_text("../..\n")
     (admin / "gitdir").write_text(
-        (os.path.relpath(worktree / ".git", admin) if relative else str(worktree / ".git")) + "\n",
-        encoding="utf-8",
+        (os.path.relpath(worktree / ".git", admin) if relative else str(worktree / ".git")) + "\n"
     )
-    (worktree / ".git").write_text("gitdir: " + str(admin) + "\n", encoding="utf-8")
+    (worktree / ".git").write_text("gitdir: " + str(admin) + "\n")
     return worktree, admin
 
 
@@ -605,14 +604,6 @@ def test_real_installation_cells_do_not_share_admission_or_fall_back(tmp_path, m
         assert result.returncode == 0, result.stderr
         assert json.loads(result.stdout)["admitted"] is (index == 0), result.stdout
         assert (registry / "cache" / "managed-sessions").exists() is (index == 0)
-        if index == 0:
-            association = json.loads(next((registry / "cache" / "managed-sessions").glob("*.json")).read_text())
-            view = association["installation"]
-            assert view["version"] == 1
-            assert view["pluginRoot"] == str(registry)
-            assert set(view["files"]) == {
-                view["namespaceReceipt"], view["installReceipt"], str(payload / "plugin.json"),
-            }
     assert not (legacy / "cache").exists()
 
 
@@ -635,8 +626,6 @@ def environment(home, anchor):
 def test_prepared_native_membership_reuses_original_association(tmp_path, monkeypatch, shell, linked):
     executable = shutil.which(shell)
     if not executable:
-        if os.environ.get("AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP") == "1":
-            pytest.fail(f"Required native membership shell {shell} is unavailable")
         pytest.skip(f"{shell} is unavailable")
     module = load("managed_session")
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
@@ -663,228 +652,6 @@ def test_prepared_native_membership_reuses_original_association(tmp_path, monkey
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout == "True", result.stdout + result.stderr
-
-
-@pytest.mark.skipif(os.name != "nt", reason="Native Windows prepared cell membership")
-@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
-@pytest.mark.parametrize("case", [
-    "current", "receipt", "payload", "source-witness", "scope", "legacy-association",
-    "receipt-aba", "payload-aba", "payload-selection", "missing-files",
-    "original-fallback", "root-versions", "root-snapshots", "root-state", "root-run",
-    "root-logs", "root-cache", "root-launchers", "root-alias", "missing-roots",
-    "directory-source", "directory-ancestor", "directory-fallback", "missing-source-kind",
-    "payload-junction", "receipt-payload-junction", "receipt-plugin-junction",
-    "receipt-namespace-junction", "missing-declared-paths",
-    "receipt-payload-fallback", "receipt-plugin-fallback", "receipt-namespace-fallback",
-])
-def test_prepared_cell_membership_reuses_only_complete_current_owner_observation(
-    tmp_path, monkeypatch, shell, case,
-):
-    from types import SimpleNamespace
-    import test_registry_paths as fixtures
-
-    executable = shutil.which(shell)
-    if not executable:
-        if os.environ.get("AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP") == "1":
-            pytest.fail(f"Required native membership shell {shell} is unavailable")
-        pytest.skip(f"{shell} is unavailable")
-    native_run = subprocess.run
-    monkeypatch.setattr(fixtures, "subprocess", SimpleNamespace(
-        run=lambda *args, **kwargs: native_run(
-            *args, **(kwargs | no_window_kwargs() | {"timeout": 10}),
-        ),
-    ))
-    anchor, legacy = fixture_project(tmp_path)
-    workspace = fixture_linked_worktree(tmp_path, anchor)[0]
-    payload_root = fixtures._payload(tmp_path, "selected")
-    shutil.copyfile(SCRIPTS / "managed-session.ps1", payload_root / "scripts" / "managed-session.ps1")
-    namespace_source = tmp_path / "source-parent" / "marketplace"
-    source = None
-    if case.startswith("directory-"):
-        namespace_source.mkdir(parents=True)
-        source = {"source": "directory", "path": str(namespace_source)}
-    context, registry = fixtures._stamp(
-        tmp_path / "durable", payload_root, marketplace="selected", repository="example/selected",
-        source=source,
-    )
-    if case == "root-alias":
-        inner = registry / "inner"
-        inner.mkdir()
-        alias = registry / "alias"
-        native_run(
-            [os.environ["COMSPEC"], "/c", "mklink", "/J", str(alias), str(inner)],
-            check=True, capture_output=True, timeout=10, **no_window_kwargs(),
-        )
-        receipt = json.loads(context.read_text())
-        receipt["roots"]["versions"] = "alias/versions"
-        context.write_text(json.dumps(receipt))
-    receipt_alias = tmp_path / "receipt-alias"
-    if case.startswith(("receipt-payload-", "receipt-plugin-", "receipt-namespace-")):
-        target = (
-            payload_root if case.startswith("receipt-payload-") else
-            registry if case.startswith("receipt-plugin-") else registry.parent.parent
-        )
-        native_run(
-            [os.environ["COMSPEC"], "/c", "mklink", "/J", str(receipt_alias), str(target)],
-            check=True, capture_output=True, timeout=10, **no_window_kwargs(),
-        )
-        receipt = json.loads(context.read_text())
-        if case.startswith("receipt-payload-"):
-            receipt["payload"]["root"] = str(receipt_alias)
-        elif case.startswith("receipt-plugin-"):
-            receipt["pluginRoot"] = str(receipt_alias)
-        else:
-            receipt["namespaceReceipt"] = str(receipt_alias / "namespace.json")
-        context.write_text(json.dumps(receipt))
-    for name in ("projects.yaml", "repos.yaml"):
-        (registry / name).write_text((legacy / name).read_text())
-    selected_payload = payload_root
-    if case == "payload-junction":
-        selected_payload = tmp_path / "payload-alias"
-        native_run(
-            [os.environ["COMSPEC"], "/c", "mklink", "/J", str(selected_payload), str(payload_root)],
-            check=True, capture_output=True, timeout=10, **no_window_kwargs(),
-        )
-    fixtures._select(monkeypatch, context, selected_payload)
-    session = tmp_path / ".copilot" / "session-state" / "prepared-cell"
-    session.mkdir(parents=True)
-    event = {"sessionId": "prepared-cell", "cwd": str(workspace)}
-    module = load("managed_session")
-    resolution_errors = []
-    original_resolve = module.resolve_registry_context
-
-    def resolve_with_diagnostics(*args, **kwargs):
-        try:
-            return original_resolve(*args, **kwargs)
-        except Exception as error:
-            resolution_errors.append(repr(error))
-            raise
-
-    monkeypatch.setattr(module, "resolve_registry_context", resolve_with_diagnostics)
-    observation = module.inspect(event, home=tmp_path)
-    assert observation["admitted"], (resolution_errors, observation)
-    marker = session / "agent-worktrees" / "managed-session.json"
-    value = json.loads(marker.read_text())
-    if case == "receipt":
-        context.write_text(context.read_text() + "\n")
-    elif case == "payload":
-        manifest = payload_root / "plugin.json"
-        manifest.write_text(manifest.read_text() + "\n")
-    elif case == "source-witness":
-        namespace = json.loads(context.read_text())["namespaceReceipt"]
-        value["sources"].pop(namespace)
-        value["inputs"].pop(namespace)
-        marker.write_text(json.dumps(value))
-    elif case == "scope":
-        value["scope"]["registry"] = str(legacy)
-        marker.write_text(json.dumps(value))
-    elif case == "legacy-association":
-        value.pop("installation", None)
-        marker.write_text(json.dumps(value))
-    elif case in {"receipt-aba", "payload-aba"}:
-        path = context if case == "receipt-aba" else payload_root / "plugin.json"
-        before = path.stat()
-        path.write_bytes(path.read_bytes().replace(b"{", b"[", 1))
-        os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
-        assert path.stat().st_size == before.st_size
-        assert path.stat().st_mtime_ns == before.st_mtime_ns
-        assert not load("managed_session").admitted(event, home=tmp_path)
-    elif case == "missing-files":
-        value["installation"].pop("files")
-        marker.write_text(json.dumps(value))
-    elif case == "missing-roots":
-        value["installation"].pop("roots")
-        marker.write_text(json.dumps(value))
-    elif case == "missing-source-kind":
-        value["installation"].pop("sourceKind")
-        marker.write_text(json.dumps(value))
-    elif case == "missing-declared-paths":
-        value["installation"].pop("declaredPaths")
-        marker.write_text(json.dumps(value))
-    elif case == "payload-junction":
-        other = fixtures._payload(tmp_path, "other")
-        selected_payload.rmdir()
-        native_run(
-            [os.environ["COMSPEC"], "/c", "mklink", "/J", str(selected_payload), str(other)],
-            check=True, capture_output=True, timeout=10, **no_window_kwargs(),
-        )
-        assert not module.admitted(event, home=tmp_path)
-    elif case in {"receipt-payload-junction", "receipt-plugin-junction", "receipt-namespace-junction"}:
-        assert "installation" not in value
-        other = fixtures._payload(tmp_path, "other") if case == "receipt-payload-junction" else (
-            tmp_path / "other"
-        )
-        other.mkdir(exist_ok=True)
-        receipt_alias.rmdir()
-        native_run(
-            [os.environ["COMSPEC"], "/c", "mklink", "/J", str(receipt_alias), str(other)],
-            check=True, capture_output=True, timeout=10, **no_window_kwargs(),
-        )
-        assert not module.admitted(event, home=tmp_path)
-    elif case in {
-        "original-fallback", "directory-fallback", "receipt-payload-fallback",
-        "receipt-plugin-fallback", "receipt-namespace-fallback",
-    }:
-        if case.startswith("receipt-"):
-            assert "installation" not in value
-        value.pop("installation", None)
-        marker.write_text(json.dumps(value))
-        for name in ("managed_session.py", "execution_platform.py", "managed_project_identity.py",
-                     "remote_identity.py", "guarded_anchor_map.py", "hook_policy_process.py"):
-            shutil.copyfile(SCRIPTS / name, payload_root / "scripts" / name)
-    elif case.startswith("directory-"):
-        path = namespace_source if case == "directory-source" else namespace_source.parent
-        shutil.rmtree(path)
-        external = tmp_path / "external"
-        (external / "marketplace").mkdir(parents=True)
-        native_run(
-            [os.environ["COMSPEC"], "/c", "mklink", "/J", str(path), str(external)],
-            check=True, capture_output=True, timeout=10, **no_window_kwargs(),
-        )
-        assert not module.admitted(event, home=tmp_path)
-    elif case.startswith("root-"):
-        path = registry / (case.removeprefix("root-") if case != "root-alias" else "alias")
-        if case == "root-alias":
-            path.rmdir()
-        elif path.exists():
-            shutil.rmtree(path)
-        external = tmp_path / "external"
-        external.mkdir()
-        native_run(
-            [os.environ["COMSPEC"], "/c", "mklink", "/J", str(path), str(external)],
-            check=True, capture_output=True, timeout=10, **no_window_kwargs(),
-        )
-        assert not module.admitted(event, home=tmp_path)
-    env = environment(tmp_path, workspace)
-    env.update(
-        COPILOT_EXTENSIONS_CONTEXT=str(context), COPILOT_PLUGIN_ROOT=str(payload_root),
-        AGENT_WORKTREES_PAYLOAD_ROOT=str(selected_payload),
-        PREPARED_MEMBERSHIP_SCRIPT=str(payload_root / "scripts" / "managed-session.ps1"),
-    )
-    if case == "payload-selection":
-        env["COPILOT_PLUGIN_ROOT"] = str(legacy)
-    command = ". $env:PREPARED_MEMBERSHIP_SCRIPT; "
-    fallback = case in {
-        "original-fallback", "directory-fallback", "receipt-payload-fallback",
-        "receipt-plugin-fallback", "receipt-namespace-fallback",
-    }
-    if fallback:
-        env["AGENT_WORKTREES_RESIDENT_PRE_TOOL_PYTHON"] = sys.executable
-    else:
-        command += "function Get-ManagedWorktreesPython { throw 'interpreter lookup is forbidden' }; "
-    command += (
-        "[Console]::Out.Write((Test-ManagedWorktreesSession -Raw ([Console]::In.ReadToEnd())).ToString())"
-    )
-    result = native_run(
-        [executable, "-NoProfile", "-NonInteractive", "-Command", command],
-        input=json.dumps(event), text=True, capture_output=True, timeout=10,
-        cwd=workspace, env=env, **no_window_kwargs(),
-    )
-    assert result.returncode == 0 and not result.stderr, result.stdout + result.stderr
-    assert result.stdout == ("True" if case == "current" or fallback else "False")
-    if case == "original-fallback":
-        assert len(json.loads(marker.read_text())["installation"]["files"]) == 3
-    assert not (legacy / "cache").exists()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows prepared membership")

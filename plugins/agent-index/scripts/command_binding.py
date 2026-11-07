@@ -11,7 +11,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Mapping, Protocol, cast
+from typing import Any, Mapping, Protocol
 
 SCHEMA = "copilot-extensions.command-installation-binding"
 VERSION = 1
@@ -582,14 +582,14 @@ def main() -> int:
                 command = arguments.command
                 if command and command[0] == "--":
                     command = command[1:]
-                return cast(int, lifecycle.run_lifecycle(
+                return lifecycle.run_lifecycle(
                     _rules(), primitive, command,
                     deferred_runtime=arguments.deferred_runtime,
                     managed_deployment=arguments.managed_deployment,
                     timeout=arguments.lifecycle_timeout,
                     teardown=arguments.teardown, **publication_arguments,
                     human_operation=arguments.human_operation,
-                ))
+                )
             elif arguments.write_manifest:
                 manifest = json.load(sys.stdin)
                 if not isinstance(manifest, dict):

@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 
 from .._exec import no_window_creationflags, resolve_argv
 from .._reaper import TreeReaper
@@ -41,9 +42,7 @@ class StdioTransport(Transport):
         self._reaper: TreeReaper | None = None
 
     async def start(self) -> None:
-        from ..execution_context import inherited_environment
-
-        env = inherited_environment(self.cfg)
+        env = dict(os.environ)
         env.update(self.cfg.server.env)
         env.update(await self.injector.child_env())
 

@@ -26,9 +26,6 @@ from every venv — hence a lib installed into each, vendored the same way as
 ## Contents
 
 - `credential_relay.server` — `CredentialRelayServer`, `RelayPolicy`, `RelayStats`.
-- `credential_relay.readiness` - the shared bounded POSIX ping/pong command
-  used by remote-listener admission. Ping queries no credential source;
-  protocol reachability does not establish credential authorization or delivery.
 - `credential_relay.token_store` - strict token-map reads shared by providers
   and Bridge. Only file absence means an empty map; malformed JSON or a
   non-object root refuses. Windows access/sharing failures receive at most

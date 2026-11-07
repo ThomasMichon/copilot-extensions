@@ -14,18 +14,6 @@ if TYPE_CHECKING:
 
 TokenProvider = Callable[[], str]
 
-SOURCE_HTTP_LEASE_EXCHANGE = "http/v1"
-
-
-def source_credentials_contract() -> dict[str, str]:
-    """Declare lease semantics implemented by this serving HTTP generation."""
-    from agent_index.source_account_relay import SOURCE_LEASE_CONTRACT
-
-    return {
-        "lease_contract": SOURCE_LEASE_CONTRACT,
-        "exchange": SOURCE_HTTP_LEASE_EXCHANGE,
-    }
-
 
 class SourceCredentialError(RuntimeError):
     """Static errors safe to expose through indexing task diagnostics."""
@@ -56,16 +44,13 @@ def _relay_destination(spec: SourceSpec) -> str:
 def http_source_credentials(value: dict) -> dict:
     """Fixed source-HTTP seam; caller capabilities never come from local files."""
     keys = {"source", "account", "recipient", "host", "action", "capability"}
-    if not isinstance(value, dict) or set(value) not in (keys, keys | {"lease_contract"}):
+    if not isinstance(value, dict) or set(value) != keys:
         raise SourceCredentialError("source-provider-policy-invalid")
-    leased = "lease_contract" in value
-    if leased and value["lease_contract"] != source_credentials_contract()["lease_contract"]:
-        raise SourceCredentialError("source-lease-unsupported")
     capability = value["capability"]
     if not isinstance(capability, str) or not 32 <= len(capability) <= 2048:
         raise SourceCredentialError("source-capability-required")
     from agent_index.indexing.engine import configured_source_specs
-    from agent_index.source_account_relay import exchange_for, exchange_source_lease_for
+    from agent_index.source_account_relay import exchange_for
 
     matches = [
         spec for spec in configured_source_specs()
@@ -74,31 +59,12 @@ def http_source_credentials(value: dict) -> dict:
     ]
     if len(matches) != 1:
         raise SourceCredentialError("source-provider-policy-invalid")
-    fields = {key: value[key] for key in keys - {"capability"}}
+    fields = {key: item for key, item in value.items() if key != "capability"}
     try:
-        if leased:
-            lease = exchange_source_lease_for(
-                Path(matches[0].auth_relay), fields, capability,
-                host=_relay_destination(matches[0]),
-            )
-            remaining = lease.remaining_seconds()
-            if remaining <= 0:
-                raise ValueError
-            return {
-                "token": lease.token, "account": value["account"], "host": value["host"],
-                "lease_contract": value["lease_contract"], "lease_id": lease.lease_id,
-                "lease_issued_at": lease.lease_issued_at,
-                "lease_expires_at": lease.lease_expires_at,
-                "lease_remaining_seconds": remaining,
-            }
         token = exchange_for(
             Path(matches[0].auth_relay), fields, capability, host=_relay_destination(matches[0]),
         )
-    except RuntimeError as exc:
-        if str(exc) == "source-account-relay-lease-unsupported":
-            raise SourceCredentialError("source-lease-unsupported") from None
-        raise SourceCredentialError("source-credential-unavailable") from None
-    except (OSError, ValueError, TypeError):
+    except (OSError, ValueError, TypeError, RuntimeError):
         raise SourceCredentialError("source-credential-unavailable") from None
     return {"token": token, "account": value["account"], "host": value["host"]}
 

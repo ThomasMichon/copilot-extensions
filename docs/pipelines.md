@@ -1278,7 +1278,6 @@ contributions do not restart an executing source-admission run.
 | `source-attribution-departures.yml` | `pull_request_target` (`closed`, `edited`) | Trusted metadata-only refresh for closed dev PRs and retargets away from dev, without a new-base filter. Synchronize refresh shares the existing trusted Dev entrypoint. Publishes no required-context skipped jobs and never executes PR content. |
 | `base-branch-reminder.yml` | `pull_request_target` → `main` | Hosts the trusted `main source gate`, the existing one-time retarget reminder, and identifier reporting for owner-authored PRs that pass admission. Gate permissions are contents-read only; any checkout is pinned trusted main, and PR commits are fetched only as Git data. No PR code executes. This replaces main-PR CI admission and post-CI scanning. |
 | `trusted-ci.yml` | `workflow_dispatch` | Routing metadata only: the old self-hosted PR integration route is retired; hardened periodic Linux integration belongs to `windows-coverage-rotation.yml`. |
-| `windows-qualification.yml` | `workflow_dispatch` | Individual-owner-only protected default-branch controller; one disposable hosted Windows worker per typed source-bound request. Focused selectors and one append-only non-branch transport ref; no required-CI, promotion or periodic-routing changes. [Usage and evidence limits](../TESTING.md#owner-only-hosted-windows-escape-hatch). |
 
 The dedicated review setup is independently guarded: only its exact filename,
 official job identity, minimal permissions and setup step may select literal

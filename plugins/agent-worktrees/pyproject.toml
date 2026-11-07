@@ -36,9 +36,11 @@ dependencies = [
     "agent-update-telemetry",
     "agent-update-driver",
     "agent-repository-policy",
+    "agent-copilot-driver-core",
 ]
 
 [tool.uv.sources]
+agent-copilot-driver-core = { path = "../../libs/copilot-driver-core", editable = true }
 agent-configuration-layers = { path = "../../libs/configuration-layers", editable = true }
 agent-repository-policy = { path = "../../libs/repository-policy", editable = true }
 agent-worktree-identity = { path = "../../libs/worktree-identity", editable = true }
@@ -122,16 +124,12 @@ agent-update-driver = { path = "../../libs/update-driver", editable = true }
 agent-worktrees = "agent_worktrees.current_roster_entry:console_entry"
 
 [project.optional-dependencies]
-fleet-ssh = ["fleet-manager[service-gateway,ssh-client]"]
 dev = [
     "pytest>=9.1.1",
     "pytest-xdist>=3.8,<4",
     # Exercise the runtime's Python 3.10 TOML fallback on newer test interpreters too.
     "tomli>=2",
 ]
-
-[tool.copilot-extensions.application-sources]
-fleet-manager = "standalone:fleet-manager"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

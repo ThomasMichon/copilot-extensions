@@ -381,50 +381,6 @@ def test_http48_actual_installation_helper_execution_is_source_bound(
         assert any(event["kind"] == "refused" and event["source"] == refused_source for event in events)
 
 
-@pytest.mark.parametrize("reverse", [False, True])
-def test_http48_source_locator_preserves_specificity_ties_and_boundaries(reverse):
-    import bridge_http47_runtime as runtime
-
-    paths = [
-        "libs/first/src/pkg/client.py",
-        "libs/last/src/pkg/client.py",
-        "tools/pkg/client.py",
-        "tools/pkg/config.json",
-    ]
-    proof = dict.fromkeys(reversed(paths) if reverse else paths, {})
-    locate = runtime._source_locator(proof)
-    for filename, expected in (
-        ("/snapshot/tools/pkg/client.py", "tools/pkg/client.py"),
-        ("/snapshot/pkg/client.py", "libs/last/src/pkg/client.py"),
-        (r"X:\snapshot\pkg\client.py", "libs/last/src/pkg/client.py"),
-        ("pkg/client.py", None),
-        ("/snapshot/notpkg/client.py", None),
-        ("/snapshot/pkg/Client.py", None),
-        ("/snapshot/tools/pkg/config.json", None),
-        ("<string>", None),
-    ):
-        assert locate(filename) == expected
-        assert runtime.relative_source(filename, proof) == expected
-
-
-def test_http48_source_locator_does_not_rescan_the_bound_inventory():
-    import bridge_http47_runtime as runtime
-
-    class Proof(dict):
-        bound = False
-
-        def __iter__(self):
-            assert not self.bound, "an admitted source lookup rescanned the full inventory"
-            return super().__iter__()
-
-    proof = Proof({f"libs/pkg/src/pkg/module{index}.py": {} for index in range(64)})
-    locate = runtime._source_locator(proof)
-    proof.bound = True
-    for index in range(64):
-        assert locate(f"/snapshot/pkg/module{index}.py") == f"libs/pkg/src/pkg/module{index}.py"
-        assert locate(f"/unowned/module{index}.py") is None
-
-
 def test_http48_observer_scope_does_not_relax_the_http47_child_portfolio(tmp_path: Path) -> None:
     from bridge_http47_runtime import verify_interpreters
 
@@ -443,6 +399,29 @@ def test_http48_observer_scope_does_not_relax_the_http47_child_portfolio(tmp_pat
         )
     with pytest.raises(ValueError, match="coverage mismatch"):
         verify_interpreters(tmp_path, {})
+
+
+@pytest.mark.parametrize("fault", [None, "missing-entry", "missing-observer", "extra-observer"])
+def test_partitioned_capture_requires_every_declared_observer_entry(tmp_path, fault):
+    from bridge_http47_runtime import verify_interpreters
+
+    count = {"missing-observer": 1, "extra-observer": 3}.get(fault, 2)
+    for pid in range(1, count + 1):
+        events = [{"kind": "start", "pid": pid, "parent": 0, "observer": True}]
+        if not (fault == "missing-entry" and pid == 2):
+            events.append({"kind": "observer-entry", "distribution": "pytest", "source": "pytest/__main__.py"})
+        (tmp_path / f"{pid}.jsonl").write_text(
+            "".join(json.dumps(event) + "\n" for event in events), encoding="utf-8",
+        )
+    if fault:
+        with pytest.raises(ValueError, match="observer entrypoint"):
+            verify_interpreters(tmp_path, {}, expected_roles=frozenset(), expected_observers=2)
+    else:
+        assert verify_interpreters(
+            tmp_path, {}, expected_roles=frozenset(), expected_observers=2,
+        )["roles"] == ["observer"]
+        with pytest.raises(ValueError, match="observer entrypoint"):
+            verify_interpreters(tmp_path, {}, expected_roles=frozenset())
 
 
 @pytest.mark.parametrize("future_generation", [48, 49, 50, 51])

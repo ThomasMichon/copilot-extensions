@@ -1,7 +1,5 @@
 """Containers' actual cold commands must admit publication before state writes."""
 from __future__ import annotations
-from typing import Any, cast
-from collections.abc import Callable
 
 import json
 import os
@@ -10,19 +8,16 @@ import sys
 from pathlib import Path
 
 import pytest
-from test_command_binding import PowerShellFactory
 
 from test_adopter_publication import _adopter, _command
 from test_bridge_first_use_publication import _initialize_shell_profiles, _run, _selected_cell
 from test_command_binding import (
-    POWERSHELL, _snapshot, binding_fixture as _binding_fixture,
-    powershell_host as _powershell_host,
+    POWERSHELL, _snapshot, binding_fixture as binding_fixture,
+    powershell_host as powershell_host,
 )
 from test_installer_publication import _policy
 from test_native_publication import _completed_slot
 from test_simple_first_use_publication import _release_payload
-binding_fixture = _binding_fixture
-powershell_host = _powershell_host
 
 pytestmark = [pytest.mark.portfolio_tier("T3"), pytest.mark.timeout(60)]
 
@@ -95,8 +90,8 @@ def containers_release(tmp_path_factory: pytest.TempPathFactory) -> Path:
     for entry in ("payload", "global")
 ])
 def test_containers_actual_first_use_publication(
-    binding_fixture: dict[str, Any], containers_release: Path, scope: str, state: str,
-    entry: str, powershell_host: PowerShellFactory,
+    binding_fixture: dict, containers_release: Path, scope: str, state: str,
+    entry: str, powershell_host,
 ) -> None:
     fixture = binding_fixture
     environment = _adopter(fixture, "agent-containers", containers_release)
@@ -120,7 +115,7 @@ def test_containers_actual_first_use_publication(
         environment["APPDATA"] = str(fixture["home"] / "AppData/Roaming")
     profiles = _initialize_shell_profiles(fixture, environment)
 
-    def snapshot_home() -> dict[str, Any]:
+    def snapshot_home() -> dict:
         return {name: value for name, value in _snapshot(fixture["home"]).items()
                 if name not in profiles}
 
@@ -162,7 +157,7 @@ def test_containers_actual_first_use_publication(
     roots = [fixture["payload"]]
     if retained is not None and retained != fixture["payload"]:
         roots.append(retained)
-    quote: Callable[[object], str] = lambda path: "'" + str(path).replace("'", "''") + "'"
+    quote = lambda path: "'" + str(path).replace("'", "''") + "'"
     for payload in roots:
         installer = payload / "scripts" / f"init.{suffix}"
         installer.write_text(
@@ -275,7 +270,7 @@ def test_containers_actual_first_use_publication(
         if healthy else ["--help"]
     )
     command = (
-        [cast(str, POWERSHELL), "-NoLogo", "-NoProfile", "-File", str(path), *forwarded]
+        [POWERSHELL, "-NoLogo", "-NoProfile", "-File", str(path), *forwarded]
         if os.name == "nt" else ["bash", str(path), *forwarded]
     )
     host = powershell_host(fixture, environment) if os.name == "nt" else None

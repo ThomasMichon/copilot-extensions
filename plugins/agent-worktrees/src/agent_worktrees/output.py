@@ -69,19 +69,14 @@ def write_real_stdout(payload: str) -> None:
         raise SystemExit(1) from exc
 
 
-def json_output_text(data: dict) -> str:
-    """Serialize the exact versioned, indented stdout envelope."""
-    envelope = {"version": _JSON_SCHEMA_VERSION, **data}
-    return json.dumps(envelope, indent=2) + "\n"
-
-
 def _json_output(data: dict) -> None:
     """Write a versioned JSON envelope to the real stdout.
 
     Always writes to ``sys.__stdout__`` so it works inside
     :func:`stdout_to_stderr` blocks.
     """
-    write_real_stdout(json_output_text(data))
+    envelope = {"version": _JSON_SCHEMA_VERSION, **data}
+    write_real_stdout(json.dumps(envelope, indent=2) + "\n")
 
 
 def _json_error(message: str, exit_code: int = 1) -> int:

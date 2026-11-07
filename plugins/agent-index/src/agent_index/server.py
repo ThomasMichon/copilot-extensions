@@ -412,8 +412,6 @@ def build_app(*, passive: bool = False) -> FastAPI:
 
     @app.get("/health")
     def health(request: Request) -> dict[str, Any]:
-        from .sources.credentials import source_credentials_contract
-
         gate: DrainGate = request.app.state.drain_gate
         return {
             "status": (
@@ -426,7 +424,6 @@ def build_app(*, passive: bool = False) -> FastAPI:
             "passive": request.app.state.passive,
             "promoted": request.app.state.promoted,
             "indexing_contract": intake_contract(),
-            "source_credentials_contract": source_credentials_contract(),
             **service_identity(request),
         }
 
@@ -471,10 +468,7 @@ def build_app(*, passive: bool = False) -> FastAPI:
                 value = json.loads(data, object_pairs_hook=_pairs)
                 result = await asyncio.to_thread(http_source_credentials, value)
             except SourceCredentialError as exc:
-                status = {
-                    "source-capability-required": 403,
-                    "source-lease-unsupported": 409,
-                }.get(str(exc), 503)
+                status = 403 if str(exc) == "source-capability-required" else 503
                 raise HTTPException(status_code=status, detail=str(exc)) from None
             except (ValueError, UnicodeError, TypeError, RecursionError):
                 raise HTTPException(status_code=400, detail="source request invalid") from None

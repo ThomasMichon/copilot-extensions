@@ -65,8 +65,7 @@ class ForeignRepoResolution:
 
 
 def resolve_repo_config_for_slug(
-    config: cfg.Config, repo_slug: str, *, allow_git: bool = True,
-    registry_entries: list | None = None,
+    config: cfg.Config, repo_slug: str
 ) -> ForeignRepoResolution:
     """Resolve the :class:`~agent_worktrees.config.RepoConfig` that OWNS
     ``repo_slug`` (``owner/name`` or ADO ``project/repo``), independent of the
@@ -90,51 +89,22 @@ def resolve_repo_config_for_slug(
     A registry entry without a local checkout does not veto an explicit
     checkout-free binding. Other config load failures remain visible and
     block fallback, so malformed or inaccessible project policy is not bypassed.
-    ``allow_git=False`` requires registered remote evidence and refuses ambiguous
-    registry matches; it never discovers an anchor's remote through Git.
-    Read-only callers may supply their own fresh strict ``registry_entries`` to
-    share that acquisition across targets; absent input retains the native read.
     """
-    explicit_target = getattr(config, "explicit_pr_target", None)
-    if explicit_target is not None:
-        if repo_slug != explicit_target.pr.repository:
-            return ForeignRepoResolution(None, error="Explicit worker policy addresses another PR target")
-        return ForeignRepoResolution(explicit_target, "pr-worker")
-
     from . import repos as repos_mod
 
-    entries = None
-    if allow_git:
-        try:
-            active_remote = _resolve_repo_remote(config, config.default_repo)
-        except Exception:
-            active_remote = ""
-    else:
-        entries = registry_entries
-        if entries is None:
-            try:
-                entries = repos_mod.list_repos(strict=True)
-            except Exception:
-                return ForeignRepoResolution(None, error="Repository registry unavailable")
-        matches = [
-            entry for entry in entries
-            if entry.remote and git_ops.slug_from_url(entry.remote) == repo_slug
-        ]
-        if len(matches) > 1:
-            return ForeignRepoResolution(None, error="Ambiguous registered PR repository")
-        active_remote = next(
-            (entry.remote for entry in matches if entry.name == config.repo_name), "",
-        )
+    try:
+        active_remote = _resolve_repo_remote(config, config.default_repo)
+    except Exception:
+        active_remote = ""
     if active_remote and git_ops.slug_from_url(active_remote) == repo_slug:
         return ForeignRepoResolution(
             config.default_repo, config.repo_name, same_as_active=True
         )
 
-    if entries is None:
-        try:
-            entries = repos_mod.list_repos()
-        except Exception:
-            entries = []
+    try:
+        entries = repos_mod.list_repos()
+    except Exception:
+        entries = []
 
     for entry in entries:
         if entry.name == config.repo_name:

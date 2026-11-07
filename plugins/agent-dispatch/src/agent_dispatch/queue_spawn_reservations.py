@@ -592,15 +592,6 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                     carried_execution_machine,
                 ),
             )
-            if driver == "ordinary-bridge" and not new_allocation:
-                conn.execute(
-                    "UPDATE spawn_reservations SET worktree_writer_requirement=("
-                    "SELECT worktree_writer_requirement FROM spawn_reservations "
-                    "WHERE key<>? AND creation_key=? AND worktree=? AND worktree_path=? "
-                    "AND worktree_writer_requirement IS NOT NULL ORDER BY reserved_at DESC LIMIT 1"
-                    ") WHERE key=?",
-                    (key, creation_key, carried_worktree, carried_path, key),
-                )
             if selected_pool is not None:
                 from .queue_task_relationships import latest_relationship
                 governed = latest_relationship(conn, task.id) is not None
@@ -847,9 +838,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
             conn.execute("COMMIT")
         return SpawnReservation._from_row(row)
 
-    def record_spawn_allocation(
-        self, key: str, project: str, *, worktree_writer_requirement: dict | None = None,
-    ) -> SpawnReservation:
+    def record_spawn_allocation(self, key: str, project: str) -> SpawnReservation:
         """Bind execution routing before the first non-transactional allocation."""
         if not isinstance(project, str) or not project.strip():
             raise TaskError("allocation project must be non-empty")
@@ -862,12 +851,9 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                 raise TaskError("allocation binding requires a reserving attempt")
             if row["allocation_project"] is not None and row["allocation_project"] != project:
                 raise TaskError("recorded allocation project cannot change")
-            from .ordinary_writer_admission import allocation_requirement
-            retained = allocation_requirement(dict(row), project, worktree_writer_requirement)
             conn.execute(
-                "UPDATE spawn_reservations SET allocation_project=?, worktree_writer_requirement=?, "
-                "updated_at=? WHERE key=?",
-                (project, retained, self._now(None), key),
+                "UPDATE spawn_reservations SET allocation_project=?, updated_at=? WHERE key=?",
+                (project, self._now(None), key),
             )
             updated = conn.execute("SELECT * FROM spawn_reservations WHERE key=?", (key,)).fetchone()
             conn.execute("COMMIT")

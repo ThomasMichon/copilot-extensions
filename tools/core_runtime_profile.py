@@ -20,7 +20,7 @@ from runtime_profile_release import (
     validate_release_bindings,
     with_release_profiles,
 )
-from runtime_profile_wheels import verify_profile_layout
+from runtime_profile_wheels import verify_profile_wheels
 from runtime_wheel_inspection import inspect_wheel
 
 # isort: split
@@ -78,7 +78,6 @@ def build_core_profile(
     max_snapshot_bytes: int,
     max_unpacked_bytes: int,
     deadline: float,
-    layout: str | None = None,
 ) -> RuntimeProfile:
     """Rebind selected native inputs to a core manifest, never resolve or approve.
 
@@ -188,7 +187,7 @@ def build_core_profile(
             "wheels": [wheels[name][0] for name in sorted(wheels)],
         }
         profile = validate_profile(record, max_tags=limits.max_tags, deadline=deadline)
-        verify_profile_layout(
+        verify_profile_wheels(
             profile,
             snapshot.archives,
             max_archive_bytes=max_total_bytes,
@@ -196,7 +195,6 @@ def build_core_profile(
             max_metadata_bytes=limits.max_metadata_bytes,
             limits=limits,
             deadline=deadline,
-            layout=layout,
         )
         from runtime_profile_release import SCHEMA
 

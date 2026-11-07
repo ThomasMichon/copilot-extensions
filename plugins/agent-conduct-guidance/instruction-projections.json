@@ -12,15 +12,6 @@
       "legacyMarkers": []
     },
     {
-      "id": "question-framing",
-      "deliveryMode": "selector",
-      "template": "instructions/question-framing.instructions.md",
-      "destination": ".github/instructions/agent-conduct-guidance/question-framing.instructions.md",
-      "customizationKind": "instructions",
-      "applyTo": "**",
-      "legacyMarkers": []
-    },
-    {
       "id": "maintenance-standby",
       "deliveryMode": "selector",
       "template": "instructions/maintenance-standby.instructions.md",

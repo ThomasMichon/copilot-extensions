@@ -1139,31 +1139,14 @@ jobs:
         run: |
           python tools/seasoned_uv.py --uv uv -- --system pytest psutil
           python -m pytest -q libs/agent-procutil/tests/test_interactive.py libs/agent-procutil/tests/test_interactive_session_native.py
-      - name: Prepare pinned PSMux only on the disposable Windows runner
-        if: ${{ runner.os == 'Windows' }}
-        shell: pwsh
-        run: |
-          $archive = Join-Path $env:RUNNER_TEMP 'psmux-3.4.0.zip'
-          $destination = Join-Path $env:RUNNER_TEMP 'psmux-fixture-3.4.0'
-          Invoke-WebRequest -Uri 'https://github.com/psmux/psmux/releases/download/v3.4.0/psmux-v3.4.0-windows-x64.zip' -OutFile $archive
-          $expected = 'a66b6be7c13c6fa0dc3660a267b9e34eaa91a4eb7f07fbd55a0468018bd0f721'
-          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) {
-            throw 'PSMux fixture archive digest mismatch'
-          }
-          Expand-Archive -LiteralPath $archive -DestinationPath $destination
-          $binaries = @(Get-ChildItem -LiteralPath $destination -Recurse -File -Filter psmux.exe)
-          if ($binaries.Count -ne 1) { throw 'Expected one fixture PSMux executable' }
-          Add-Content -LiteralPath $env:GITHUB_PATH -Value $binaries[0].Directory.FullName
       - name: Qualify warm UI lifetime in a private native mux
-        if: ${{ runner.os == 'Linux' || runner.os == 'Windows' }}
-        shell: bash
+        if: ${{ runner.os == 'Linux' }}
         run: |
-          if [ "$RUNNER_OS" = Linux ] && ! command -v tmux; then
+          if ! command -v tmux; then
             sudo apt-get update
             sudo apt-get install -y tmux
           fi
-          python tools/run-plugin-tests.py worktree-manager --allow-explicit-tiers --test-file tests/native/test_warm_picker_lifetime.py
-          python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_mux_active_pane.py
+          python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_warm_picker_lifetime.py
 
   interactive-completion-macos:
     if: ${{ inputs.interactive_completion }}
@@ -1748,12 +1731,6 @@ jobs:
             -vv --durations=20
             -k selected_gateway_application_first_touch_repeat_update_and_stop
         run: python tools/run-standalone-tests.py fleet-manager --prepare --timeout 180
-      - name: Selected SSH installed lifecycle
-        env:
-          PYTEST_ADDOPTS: >-
-            -vv --durations=20
-            -k selected_ssh_application_first_touch_repeat_update_and_stop
-        run: python tools/run-standalone-tests.py fleet-manager --timeout 180
       - name: Selected host lifecycle and SSH consumer authentication
         env:
           PYTEST_ADDOPTS: >-
@@ -1766,7 +1743,6 @@ jobs:
             or test_provider_owned_caller_reuses_enrollment_without_export_rotation_or_reenrollment
             or test_provider_caller_does_not_recreate_a_concurrently_removed_identity)
             and not selected_gateway_application_first_touch_repeat_update_and_stop
-            and not selected_ssh_application_first_touch_repeat_update_and_stop
             and not selected_continuity_ssh_application_first_touch_repeat_update_and_stop"
         run: python tools/run-standalone-tests.py fleet-manager --timeout 180
   gateway-host-application-windows:
@@ -1808,48 +1784,6 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 6
     steps: *gateway-continuity-application-steps
-
-  gateway-normal-setup-linux:
-    if: ${{ inputs.pr_artifacts }}
-    needs: gateway-continuity-application-linux
-    name: Normal selected SSH setup (Linux)
-    runs-on: ubuntu-latest
-    timeout-minutes: 6
-    env: &gateway-normal-setup-env
-      UV_PYTHON: "3.12"
-    steps: &gateway-normal-setup-steps
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v9.0.0
-        with:
-          version: "0.12.6"
-      - name: Prepare the declared engine dependency support
-        run: python tools/run-plugin-tests.py agent-worktrees --prepare-only
-      - name: Repository source admission and pinned SSH setup controls
-        env:
-          PYTEST_ADDOPTS: "-vv --durations=20"
-        run: >-
-          python tools/run-plugin-tests.py agent-worktrees
-          --test-file tests/test_repository_continuity.py
-          -k "normal_ssh_setup or setup_status"
-      - name: Normal Manager and engine SSH setup
-        env:
-          COPILOT_EXTENSIONS_SSH_SETUP_NATIVE: "1"
-          PYTEST_ADDOPTS: >-
-            -vv --durations=20
-            -k "test_ssh_setup or normal_manager_engine_ssh_first_touch_repeat_update_and_stop"
-        run: python tools/run-standalone-tests.py fleet-manager --prepare --timeout 180 --ephemeral-native-ssh-setup
-
-  gateway-normal-setup-windows:
-    if: ${{ inputs.pr_artifacts }}
-    needs: gateway-continuity-application-windows
-    name: Normal selected SSH setup (Windows)
-    runs-on: windows-latest
-    timeout-minutes: 6
-    env: *gateway-normal-setup-env
-    steps: *gateway-normal-setup-steps
 
   gateway-role-tunnels:
     if: ${{ inputs.pr_artifacts }}

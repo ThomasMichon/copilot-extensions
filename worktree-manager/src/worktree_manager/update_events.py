@@ -38,17 +38,6 @@ class UpdateRun:
                 self._human.__exit__(type(exc), exc, exc.__traceback__)
             raise
 
-    def child_environment(self, environment: dict[str, str] | None) -> dict[str, str] | None:
-        """Retain this invocation when bootstrap supplied an earlier environment snapshot."""
-        if environment is None or self._run is None or not self._run.enabled:
-            return environment
-        return {
-            **environment,
-            _ut.ENV_RUN_ID: self._run.run_id,
-            _ut.ENV_EVENTS: str(self._run.events_path),
-            _ut.ENV_OWNER: self._run.owner,
-        }
-
     @contextlib.contextmanager
     def self_update_phase(self):
         telemetry = (

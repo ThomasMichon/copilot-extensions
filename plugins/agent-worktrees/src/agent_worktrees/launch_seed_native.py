@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from dataclasses import asdict
 import json
 import os
 from pathlib import Path
+import secrets
 import sys
 from uuid import uuid4
 
@@ -60,20 +61,24 @@ def prepare(
     setup: bool = False, admission_only: bool = False, preserve_seed_id: str | None = None,
     native_resume_session: str | None = None, pid: int | None = None,
     process_start_time: str | None = None,
+    headed: bool = False,
 ) -> dict:
     """Claim once before native spawn; only argv crosses the in-memory pipe."""
     from . import launch_admission, launch_seed_exec
 
     if not command or not command[0] or not all(isinstance(arg, str) and "\0" not in arg for arg in command):
         raise ValueError("A literal backend command is required")
-    if not setup and (admission_only or preserve_seed_id or native_resume_session or pid or process_start_time):
+    if setup and headed:
+        raise ValueError("Headed preparation belongs to the backend owner")
+    if not setup and (pid or process_start_time):
         raise ValueError("Backend preparation cannot include setup admission")
     if setup:
         if process_start_time is None and type(pid) is int and pid > 0:
             process_start_time = locks.process_start_time(pid)
         _require_process(pid, process_start_time)
+    invoke = not setup and not admission_only
     if not launch_seed_exec._valid_request(
-        record_path, invoke=not setup, seed_id=seed_id, admission_only=admission_only,
+        record_path, invoke=invoke, seed_id=seed_id, admission_only=admission_only,
         preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
     ):
         raise ValueError("Backend launch policy refused preparation")
@@ -86,7 +91,7 @@ def prepare(
         # uses the existing seed authority's own guards, never a nested lease.
         with launch_admission.guard(record_path) if admission_only else nullcontext():
             prepared = launch_seed_exec._prepare(
-                record_path, command, invoke=not setup, seed_id=seed_id,
+                record_path, command, invoke=invoke, seed_id=seed_id,
                 admission_only=admission_only, preserve_seed_id=preserve_seed_id,
                 native_resume_session=native_resume_session, execution=execution,
             )
@@ -108,7 +113,7 @@ def prepare(
         except (*_ERRORS, KeyboardInterrupt):
             execution.observed("unknown")
             raise
-    return {
+    result = {
         "version": 1, "argv": prepared.argv, "environment": prepared.environment,
         "attempt_id": execution.subject["attempt_id"],
         "resolution_id": execution.subject["resolution_id"],
@@ -116,6 +121,122 @@ def prepare(
         "parent_id": execution.subject["parent_id"],
         **({"setup_seed_id": prepared.setup_seed_id} if setup else {}),
     }
+    if headed and (selected := _headed_command(prepared.argv)) is not None:
+        from agent_remote_driver.headed.launcher import prepare_headed_command
+        from agent_remote_driver.headed.receipt import NONCE_ENV
+
+        argv, session_id = selected
+        attempt = record_path.parent / "launch-attempts" / result["attempt_id"] / result["operation_id"]
+        state_file = attempt / "headed.json"
+        result["argv"] = prepare_headed_command(
+            argv, session_id=session_id, attempt_directory=attempt,
+            state_file=state_file, cwd=os.getcwd(),
+        )
+        result["environment"] = {**(prepared.environment or os.environ), NONCE_ENV: secrets.token_hex(32)}
+        result["headed"] = {
+            "version": 1, "argv": argv, "session_id": session_id,
+            "state_file": str(state_file), "cwd": os.getcwd(),
+        }
+    return result
+
+
+def _headed_command(command: list[str]) -> tuple[list[str], str] | None:
+    """Select new identity only for an unambiguous local interactive invocation."""
+    from .launch_seed_exec import _headed_session
+    from .native_arguments import VALUE_OPTIONS, _insert
+
+    if not command or Path(command[0]).name.lower() not in {"copilot", "copilot.exe"}:
+        return None
+    has_identity = False
+    index = 1
+    while index < len(command):
+        name, separator, _value = command[index].partition("=")
+        if name == "--":
+            break
+        if name in {
+            "--connect", "--ahp", "--continue", "--acp", "--stdio", "-p", "--prompt",
+            "--help", "-h", "--version", "-v", "--environment-host", "--environment-compute-id",
+        } or not name.startswith("-"):
+            return None
+        if name in {"--resume", "-r", "--session-id"}:
+            has_identity = True
+            if name == "-r":
+                return None
+            if not separator:
+                index += 1
+                if index >= len(command) or command[index].startswith("-"):
+                    return None
+        elif not separator and name in VALUE_OPTIONS | {"-C"}:
+            index += 1
+            if index >= len(command):
+                return None
+        elif not separator and name in {
+            "--allow-tool", "--deny-tool", "--available-tools", "--excluded-tools",
+            "--allow-url", "--deny-url", "--secret-env-vars",
+        }:
+            while index + 1 < len(command) and not command[index + 1].startswith("-"):
+                index += 1
+        index += 1
+    session = _headed_session(command)
+    if session:
+        return command, session
+    if has_identity:
+        return None
+    session = str(uuid4())
+    return [command[0], *_insert(command[1:], ["--session-id", session])], session
+
+
+def admit(
+    record_path: Path, correlation: launch_execution.Correlation, operation_id: str,
+    *, admission_only: bool = False, preserve_seed_id: str | None = None,
+    native_resume_session: str | None = None,
+) -> None:
+    """Recheck the original launch immediately before its retained coordinator creates native."""
+    with admission(
+        record_path, correlation, operation_id, admission_only=admission_only,
+        preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
+    ):
+        pass
+
+
+@contextmanager
+def admission(
+    record_path: Path, correlation: launch_execution.Correlation, operation_id: str,
+    *, admission_only: bool = False, preserve_seed_id: str | None = None,
+    native_resume_session: str | None = None,
+):
+    """Keep the original creation fence until the exec or retained owner releases it."""
+    from . import launch_admission, launch_seed_exec, launch_seed_state, tracking
+
+    with launch_admission.guard(record_path):
+        def check() -> None:
+            _owner, saved = _load(record_path, correlation, operation_id)
+            if any(event["phase"] == "process-spawned" for event in saved["events"]):
+                raise ValueError("Original headed launch was already observed")
+            receipt = _receipt(record_path, saved)
+            if admission_only:
+                if receipt is not None or not launch_seed_exec._valid_request(
+                    record_path, invoke=False, seed_id=None, admission_only=True,
+                    preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
+                ):
+                    raise ValueError("Admission-only creation cannot claim a prompt")
+                prepared = launch_seed_exec._prepare(
+                    record_path, ["admission-check"], invoke=False, seed_id=None, admission_only=True,
+                    preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
+                )
+                if isinstance(prepared, int):
+                    raise ValueError("Original admission-only launch intent changed before creation")
+            current = tracking.load_record(record_path)
+            if (
+                current.status in {"finalizing", "complete", "completed", "finalized", "archived"}
+                or current.pending_seed
+                or not admission_only and receipt is None and launch_seed_state.peek(record_path) is not None
+            ):
+                raise ValueError("Original headed launch intent changed before creation")
+            if error := launch_seed_exec._final_cold_error(current):
+                raise ValueError(error)
+        check()
+        yield check
 
 
 def _require_process(pid: int | None, process_start_time: str | None) -> None:
@@ -159,12 +280,24 @@ def _receipt(record_path: Path, saved: dict) -> dict | None:
 def spawned(
     record_path: Path, correlation: launch_execution.Correlation, operation_id: str,
     *, pid: int, process_start_time: str,
+    headed_state_file: Path | None = None, headed_session_id: str | None = None,
+    headed_nonce: str | None = None,
 ) -> None:
-    """The native caller retains the actual child handle across this callback."""
+    """The caller retains its direct child, or an explicitly bound headed coordinator."""
     execution, saved = _load(record_path, correlation, operation_id)
     if any(event["phase"] == "process-spawned" for event in saved["events"]):
         raise ValueError("Backend spawn was already observed; do not replay it")
     _require_process(pid, process_start_time)
+    if any(value is not None for value in (headed_state_file, headed_session_id, headed_nonce)):
+        if headed_state_file is None or headed_session_id is None or headed_nonce is None:
+            raise ValueError("Headed receipt requires the complete original caller binding")
+        from agent_remote_driver.headed.receipt import native_child
+
+        pid, process_start_time = native_child(
+            headed_state_file, coordinator_pid=pid, coordinator_birth=process_start_time,
+            session_id=headed_session_id, nonce=headed_nonce,
+        )
+        _require_process(pid, process_start_time)
     receipt = _receipt(record_path, saved)
     execution.observed(
         "process-spawned", pid=pid, process_start_time=process_start_time,
@@ -202,7 +335,7 @@ def returned(
     execution, saved = _load(record_path, correlation, operation_id)
     if (
         type(exit_code) is not int or type(receipt_uncertain) is not bool
-        or saved["events"][-1]["phase"] != "process-spawned"
+        or saved["events"][-1]["phase"] != "process-spawned" and not receipt_uncertain
     ):
         raise ValueError("Backend return requires its recorded spawn and actual exit code")
     execution.failed = receipt_uncertain
@@ -226,13 +359,18 @@ def main() -> int:
         "preparation_output_formats": ["json", "nul"], "nul_reply_schema": NUL_REPLY_SCHEMA,
         "preparation_environment_modes": ["full", "execution-hint"],
         "setup_process_start_time_sources": ["caller", "provider"],
-        "backend_execution_modes": ["posix-exec-v1", "posix-exec-env-v1"] if os.name == "posix" else [],
+        "backend_execution_modes": [
+            "posix-exec-v1", "posix-exec-env-v1", "posix-headed-env-v1",
+        ] if os.name == "posix" else [],
+        "backend_process_receipts": ["direct-v1", "headed-native-child-v1"],
+        "backend_preparation_modes": ["direct-v1", "headed-live-owner-v1"],
+        "setup_admission_modes": ["posix-live-owner-v1"] if os.name == "posix" else [],
     }))
     parser.add_argument("--contract-version", type=int, choices=[1], required=True)
     parser.add_argument("--output-format", choices=["json", "nul"], default="json")
     parser.add_argument("--environment-reply", choices=["full", "execution-hint"], default="full")
     parser.add_argument(
-        "--phase", choices=["prepare", "setup", "spawned", "spawn-failed", "returned", "interrupted", "exec"],
+        "--phase", choices=["prepare", "setup", "admit", "spawned", "spawn-failed", "returned", "interrupted", "exec"],
         required=True,
     )
     parser.add_argument("--root", type=Path, required=True)
@@ -247,14 +385,29 @@ def main() -> int:
     parser.add_argument("--operation-id")
     parser.add_argument("--pid", type=int)
     parser.add_argument("--process-start-time")
+    parser.add_argument("--headed-state-file", type=Path)
+    parser.add_argument("--headed-session-id")
     parser.add_argument("--exit-code", type=int)
     parser.add_argument("--receipt-uncertain", action="store_true")
+    parser.add_argument("--backend-mode", choices=["direct-v1", "headed-live-owner-v1"], default="direct-v1")
     parser.add_argument("--completion-file", type=Path)
     parser.add_argument("--backend-environment-fd", type=int)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     try:
+        if args.backend_mode != "direct-v1" and (
+            args.phase not in {"prepare", "exec"}
+            or args.output_format != "json" or args.environment_reply != "full"
+        ):
+            raise ValueError("Headed preparation requires a full JSON backend reply")
+        if any(value is not None for value in (
+            args.headed_state_file, args.headed_session_id,
+        )) and (
+            args.phase != "spawned" or args.headed_state_file is None
+            or args.headed_session_id is None
+        ):
+            raise ValueError("Headed identity is only available for a complete spawn callback")
         if args.completion_file is not None and args.phase != "exec":
             raise ValueError("Exec completion cannot be used by another phase")
         if args.backend_environment_fd is not None and args.phase != "exec":
@@ -282,6 +435,7 @@ def main() -> int:
                 admission_only=args.admission_only, preserve_seed_id=args.preserve_seed_id,
                 native_resume_session=args.native_resume_session, pid=args.pid,
                 process_start_time=args.process_start_time,
+                headed=args.backend_mode == "headed-live-owner-v1",
             )
             if args.environment_reply == "execution-hint":
                 result["environment"] = {
@@ -291,30 +445,51 @@ def main() -> int:
         elif args.phase == "exec":
             if (
                 not correlation or not args.operation_id or not args.completion_file
-                or args.output_format != "json" or args.seed_id or args.admission_only
-                or args.preserve_seed_id or args.native_resume_session or args.receipt_uncertain
+                or args.output_format != "json" or args.seed_id or args.receipt_uncertain
+                or not args.admission_only and (args.preserve_seed_id or args.native_resume_session)
                 or any(value is not None for value in (args.pid, args.process_start_time, args.exit_code))
             ):
                 raise ValueError("Exec requires only its prepared backend identity and completion file")
-            from .launch_seed_posix import execute
+            from .launch_seed_posix import execute, execute_headed
 
-            code = execute(
+            execute_backend = execute_headed if args.backend_mode == "headed-live-owner-v1" else execute
+            code = execute_backend(
                 args.record, correlation, args.operation_id, command, args.completion_file,
                 **({"backend_environment_fd": args.backend_environment_fd}
                    if args.backend_environment_fd is not None else {}),
+                **({
+                    "admission_only": True, "preserve_seed_id": args.preserve_seed_id,
+                    "native_resume_session": args.native_resume_session,
+                } if args.admission_only else {}),
             )
-            print("Native backend exec was not confirmed; inspect the retained handoff.", file=sys.stderr)
+            if args.backend_mode == "direct-v1":
+                print("Native backend exec was not confirmed; inspect the retained handoff.", file=sys.stderr)
             return code
         else:
             if (
                 not correlation or not args.operation_id or command or args.seed_id
-                or args.admission_only or args.preserve_seed_id or args.native_resume_session
+                or (args.admission_only or args.preserve_seed_id or args.native_resume_session)
+                and args.phase != "admit"
+                or not args.admission_only and (args.preserve_seed_id or args.native_resume_session)
             ):
                 raise ValueError("Backend callback requires only its original execution identity")
             if args.phase == "spawned" and args.exit_code is None and not args.receipt_uncertain:
+                from agent_remote_driver.headed.receipt import NONCE_ENV
+
                 spawned(
                     args.record, correlation, args.operation_id,
                     pid=args.pid, process_start_time=args.process_start_time,
+                    headed_state_file=args.headed_state_file,
+                    headed_session_id=args.headed_session_id,
+                    headed_nonce=os.environ.get(NONCE_ENV) if args.headed_state_file is not None else None,
+                )
+            elif args.phase == "admit" and not args.receipt_uncertain and all(value is None for value in (
+                args.pid, args.process_start_time, args.exit_code,
+            )):
+                admit(
+                    args.record, correlation, args.operation_id,
+                    admission_only=args.admission_only, preserve_seed_id=args.preserve_seed_id,
+                    native_resume_session=args.native_resume_session,
                 )
             elif args.phase == "spawn-failed" and not args.receipt_uncertain and all(value is None for value in (
                 args.pid, args.process_start_time, args.exit_code,

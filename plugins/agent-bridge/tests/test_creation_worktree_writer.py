@@ -138,45 +138,11 @@ async def test_keyed_creation_writer_retains_original_scope_and_strict_resume(wr
     assert replay is first and replay_receipt["native_session_id"] == receipt["native_session_id"]
     await rig.manager.stop_session(first.session_id, force=True)
     assert first.status == SessionStatus.STOPPED
-    resumed = await rig.manager.resume_session(
-        first.session_id, drain=False, allow_recreate=True,
-        worktree_writer=fixture.requirement,
-    )
+    resumed = await rig.manager.resume_session(first.session_id, drain=False, allow_recreate=True)
     assert resumed is first and resumed.acp_session_id == receipt["native_session_id"]
     assert fixture.selected.call_count == 1
     assert writers.current() is None
     assert dict(rig.db.execute_read("SELECT * FROM workspace_embodiments")[0]) == saved
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("changed", ["requirement", "pointer", "native", "alias"])
-async def test_required_creation_resume_refuses_changed_custody_before_effect(
-    writer_creation, monkeypatch, changed,
-):
-    fixture = writer_creation
-    rig = fixture.rig
-    session, _receipt = await workspace_creation.start(
-        rig.manager, rig.target, key="original-key", worktree_writer=fixture.requirement,
-    )
-    await rig.manager.stop_session(session.session_id, force=True)
-    requirement = fixture.requirement.model_dump()
-    target = session.session_id
-    if changed == "requirement":
-        requirement["creation_nonce"] = "replacement"
-    elif changed == "pointer":
-        session.target = replace(session.target, venue={})
-    elif changed == "native":
-        session.acp_session_id = "replacement"
-    else:
-        target = "alias"
-        monkeypatch.setattr(rig.manager, "_resolve_ref", lambda _target: session.session_id)
-    fixture.selected.side_effect = AssertionError("must not select a replacement writer")
-    connect = AsyncMock(side_effect=AssertionError("refused resume must not launch"))
-    monkeypatch.setattr(rig.manager, "_connect_via_session_host", connect)
-    with pytest.raises(AcquisitionRefused):
-        await rig.manager.resume_session(target, worktree_writer=requirement)
-    connect.assert_not_awaited()
-    assert session.status == SessionStatus.STOPPED
 
 
 @pytest.mark.asyncio
@@ -502,13 +468,10 @@ def test_required_creation_writer_cli_rejects_remote_before_connect(monkeypatch,
     assert failure.value.code == 2
 
 
-def test_required_creation_writer_round_trips_through_actual_http_owner(
-    writer_creation, monkeypatch, capsys,
-):
+def test_required_creation_writer_round_trips_through_actual_http_owner(writer_creation, monkeypatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
     from agent_bridge import creation_writer_inspection as inspection
-    from agent_bridge import __main__ as core
     from agent_bridge.routes import health, sessions
 
     fixture = writer_creation
@@ -547,40 +510,9 @@ def test_required_creation_writer_round_trips_through_actual_http_owner(
         )
         original = dict(rig.db.execute_read("SELECT * FROM workspace_embodiments")[0])
         fixture.selected.side_effect = AssertionError("inspection must not select a writer")
-        requirement = fixture.requirement.model_dump()
-        assert http.post(
-            f"/api/v1/sessions/{result['session_id']}/stop", params={"force": "true"},
-        ).status_code == 204
-        resumed = client.resume_session(result["session_id"], worktree_writer=requirement)
-        assert resumed["session_id"] == result["session_id"]
-        assert resumed["acp_session_id"] == result["creation"]["native_session_id"]
-        with pytest.raises(BridgeClientError) as changed:
-            client.resume_session(
-                result["session_id"],
-                worktree_writer={**requirement, "creation_nonce": "replacement"},
-            )
-        assert changed.value.status == 409
-        assert http.post(
-            f"/api/v1/sessions/{result['session_id']}/resume",
-            json={"worktree_writer": {"unknown": True}},
-        ).status_code == 422
-        assert http.post(
-            f"/api/v1/sessions/{result['session_id']}/resume", json={"unknown": True},
-        ).status_code == 422
         observed = client.get_session(result["session_id"], worktree_writer=True)
         assert observed["worktree_writer_observation"]["worktree_writer"] == fixture.requirement.model_dump()
         assert observed["worktree_writer_observation"]["bridge_instance"] == instance
-        monkeypatch.setattr(core, "_get_client", lambda **_: client)
-        cli_args = core.build_parser().parse_args([
-            "status", result["session_id"], "--full", "--worktree-writer",
-        ])
-        cli_args.func(cli_args)
-        assert json.loads(capsys.readouterr().out) == observed
-        cli_args = core.build_parser().parse_args(["--json", "status"])
-        cli_args.func(cli_args)
-        health_info = json.loads(capsys.readouterr().out)
-        assert health_info["capabilities"]["retained_workspace_creation_writer_inspection"] == 1
-        assert health_info["worktree_record_writer"] == fixture.requirement.identity.model_dump()
         assert "worktree_writer_observation" not in client.get_session(result["session_id"])
         assert dict(rig.db.execute_read("SELECT * FROM workspace_embodiments")[0]) == original
         assert not rig.db.execute_read("SELECT * FROM acquisition_attempts")
@@ -739,38 +671,78 @@ async def test_keyed_creation_registration_failure_retains_native_and_dormancy(w
 
 
 @pytest.mark.asyncio
-@pytest.mark.timeout(90)
+@pytest.mark.timeout(120)
 async def test_keyed_creation_uses_actual_retained_serializer_and_preserves_claim(
     rig, tmp_path, monkeypatch,
 ):
+    import time
+
+    started = time.monotonic()
     import os
     from pathlib import Path
     import sys
+    from agent_procutil import direct_python
     from agent_bridge import local_launch_preparation, worktree_lineage
     from agent_bridge.transport import SpawnTarget
-    from test_worktree_lineage_authority import snapshot
+    from test_worktree_lineage_authority import snapshot as owner_command
 
     root = Path(__file__).resolve().parents[3]
     state = tmp_path / "authority"
     state.mkdir()
+    monkeypatch.syspath_prepend(str(root / "plugins" / "agent-worktrees" / "src"))
+    from agent_worktrees import tracking
+
+    def snapshot():
+        record = tracking.load_record(state / "project" / "worktrees" / "worktree-a.yaml")
+        return {
+            "creation_nonce": record.creation_nonce,
+            "resources": [item.to_dict() for item in record.resources],
+            "head": record.resolved_head_session,
+            "sessions": [item.session_id for item in record.sessions],
+        }
+
     identity = {"installation_root": str(state / "owner"), "runtime_generation": "a" * 32}
     identity_file = state / "writer-identity.json"
     identity_file.write_text(json.dumps(identity), encoding="utf-8")
+    interpreter, interpreter_env = direct_python(sys.executable)
+    for key, value in interpreter_env.items():
+        monkeypatch.setenv(key, value)
     prefix = (
-        sys.executable, str(root / "plugins/agent-worktrees/tests/fixtures/worktree_record_owner.py"),
+        interpreter, str(root / "plugins/agent-worktrees/tests/fixtures/worktree_record_owner.py"),
         str(root), str(state), "test-project", "worktree-a",
     )
     environment = session_lifecycle_cli._agent_worktrees_environment()
+    environment.update(interpreter_env)
     from bridge_http47_runtime import REQUEST
 
     if REQUEST in environment:
         environment["PYTHONPATH"] = os.pathsep.join((
             str(root / "tools/http47_capture_bootstrap"), str(root / "tools"),
         ))
+        lineage_run = worktree_lineage._run
+
+        def traced_lineage(command, *args, **kwargs):
+            print(f"lineage {command[0]} start {time.monotonic() - started:.3f}s", flush=True)
+            try:
+                return lineage_run(command, *args, **kwargs)
+            finally:
+                print(f"lineage {command[0]} end {time.monotonic() - started:.3f}s", flush=True)
+
+        async def traced_owner(command, *args, **kwargs):
+            print(f"owner {command[0]} start {time.monotonic() - started:.3f}s", flush=True)
+            try:
+                return await rig.owner_command(command, *args, **kwargs)
+            finally:
+                print(f"owner {command[0]} end {time.monotonic() - started:.3f}s", flush=True)
+
+        monkeypatch.setattr(worktree_lineage, "_run", traced_lineage)
+        receiving_command = traced_owner
+    else:
+        receiving_command = rig.owner_command
     for owner in (acquisition_authority, worktree_lineage):
         monkeypatch.setattr(owner, "_agent_worktrees_environment", lambda: environment.copy())
-    protected = snapshot(list(prefix), "protect")
-    before = snapshot(list(prefix))
+    protected = owner_command(list(prefix), "protect")
+    before = snapshot()
     checkout = state / "trees" / "worktree-a"
     assert not rig.register_session(
         "worktree-a", "legacy-resident-probe", worktree_dir=str(checkout), owner_prefix=prefix,
@@ -782,8 +754,8 @@ async def test_keyed_creation_uses_actual_retained_serializer_and_preserves_clai
         session_lifecycle_cli, "_agent_worktrees_selection",
         MagicMock(side_effect=AssertionError("must not use a dynamic writer")),
     )
-    monkeypatch.setattr(acquisition_authority, "worktree_command", rig.owner_command)
-    monkeypatch.setattr(workspace_creation, "worktree_command", rig.owner_command)
+    monkeypatch.setattr(acquisition_authority, "worktree_command", receiving_command)
+    monkeypatch.setattr(workspace_creation, "worktree_command", receiving_command)
     monkeypatch.setattr(
         acquisition_authority, "_agent_worktrees_launch_prefix",
         session_lifecycle_cli._agent_worktrees_launch_prefix,
@@ -807,7 +779,7 @@ async def test_keyed_creation_uses_actual_retained_serializer_and_preserves_clai
     session, receipt = await workspace_creation.start(
         rig.manager, target, key="original-key", worktree_writer=requirement,
     )
-    after = snapshot(list(prefix))
+    after = snapshot()
     assert after["head"] == receipt["native_session_id"]
     assert after["creation_nonce"] == before["creation_nonce"]
     assert [item for item in after["resources"] if item["ref"] == protected["ref"]] == before["resources"]
@@ -829,7 +801,7 @@ async def test_keyed_creation_uses_actual_retained_serializer_and_preserves_clai
     successor = await rig.manager.handoff_session(
         session.session_id, reason="bounded test", seed=False, seed_text="Continue",
     )
-    linked = snapshot(list(prefix))
+    linked = snapshot()
     assert linked["head"] == successor.acp_session_id
     assert linked["creation_nonce"] == before["creation_nonce"]
     assert [item for item in linked["resources"] if item["ref"] == protected["ref"]] == before["resources"]
@@ -839,6 +811,6 @@ async def test_keyed_creation_uses_actual_retained_serializer_and_preserves_clai
         await rig.manager.handoff_session(
             successor.session_id, reason="changed writer", seed=False, seed_text="Continue",
         )
-    assert snapshot(list(prefix)) == linked
+    assert snapshot() == linked
     assert selected.call_count == 1
     assert not rig.db.execute_read("SELECT * FROM acquisition_attempts")

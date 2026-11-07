@@ -165,32 +165,11 @@ def test_claim_completeness_survives_normalization_and_retains_all_link_identiti
     assert row["claims_projection"] == projection
     assert row["claims_links"] == raw["claims_links"]
     cell = _claims_cell(row, 12)
-    assert cell.plain.startswith("⚠ ")
-    assert "unresolved" not in cell.plain and "omitted" not in cell.plain
+    assert cell.plain.startswith("[+13 omitted; 1 unresolved]")
     urls = [span.style for span in cell.spans if "link " in str(span.style)]
     assert len(urls) == 2
     assert all(any(link["url"] in str(style) for style in urls) for link in raw["claims_links"])
     assert cell.plain.index("dependency#42") < cell.plain.index("other#42")
-
-
-def test_doctor_is_offered_for_claim_warnings_and_opens_read_only_details():
-    from test_picker_tui import _fixture_source
-    from worktree_manager.production_picker.picker_tui.engine import PickerScreen
-    from worktree_manager.production_picker.picker_tui.worktree_details_screen import WtDetailsScreen
-
-    screen = PickerScreen(_fixture_source(), live=False)
-    screen.setup_sync_for_tests()
-    row = derive.norm(_projected(
-        claims_link_count=2, claims_links_complete=False,
-        claims_projection={"inherited_pr_count": 2, "unresolved_count": 1, "complete": False},
-    ), "host", "windows")
-    actions, _ = screen._wt_submenu_verbs(row)
-    assert "Doctor" in actions
-    text = WtDetailsScreen(row, engine=screen, doctor=True)._body().plain
-    assert "Doctor" in text and "1 unresolved" in text
-    assert "No resources are released or repaired" in text
-    clean = derive.norm(_raw(), "host", "windows")
-    assert "Doctor" not in screen._wt_submenu_verbs(clean)[0]
 
 
 @pytest.mark.parametrize("fields, expected", [
@@ -228,7 +207,7 @@ def test_legacy_child_without_links_is_unknown_not_an_empty_complete_subtree():
     row = derive.norm(_raw(resources=[
         {"kind": "worktree", "ref": "host/repo/child", "state": "active"},
     ]), "host", "windows")
-    assert _claims_cell(row, 12).plain.strip() == "⚠"
+    assert "coverage unknown" in _claims_cell(row, 12).plain
 
 
 @pytest.mark.parametrize("counts", [None, [], "unknown"])
@@ -263,7 +242,7 @@ def test_partial_claim_summary_survives_admission_and_normalization_as_unknown(c
     assert row["asset_hints"]["coverage_unknown"] is True
     assert row["asset_hints"]["details_available"] is True
     assert row["asset_hints"].get("held_count") == count
-    assert _claims_cell(row, 12).plain.startswith("⚠ ")
+    assert "coverage unknown" in _claims_cell(row, 12).plain
     screen = WtDetailsScreen(row)
     expected = "unknown" if count is None else str(count)
     assert f"held claims ({expected}): loading full details" in screen._body().plain
@@ -304,7 +283,7 @@ def test_current_rows_still_reject_historical_claim_graphs():
         _bounded({"claims_graph": [{"owner": "child"}]})
 
 
-def test_bounded_overflow_warns_compactly_without_reading_raw_ledgers_during_paint():
+def test_bounded_overflow_is_visible_without_reading_raw_ledgers_during_paint():
     from worktree_manager.production_picker.picker_tui.engine_helpers import row_text
 
     class NeverRead(list):
@@ -320,6 +299,5 @@ def test_bounded_overflow_warns_compactly_without_reading_raw_ledgers_during_pai
     row = derive.norm(raw, "host", "windows")
     raw["resources"] = NeverRead()
     cell = row_text(row, [("claims_summary", "claims", 12, "l")], 30, False)
-    assert "⚠" in cell.plain
-    assert "omitted" not in cell.plain
+    assert "+13 omitted" in cell.plain
     assert len(row["claims_links"]) == 8

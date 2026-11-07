@@ -80,7 +80,7 @@ def create_foreign_pr_from_branch(
         config = pr_publication_labels.activate(config, publication_origin, publication_labels)
     except ValueError as exc:
         return {"error": str(exc)}
-    origin = pr_publication_labels.selected_for_config(config)
+    origin = pr_publication_labels.selected(config.default_repo.pr)
     resolution = pr_config.resolve_repo_config_for_slug(config, target_repo)
     if not resolution.resolved:
         return {
