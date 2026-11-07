@@ -46,11 +46,12 @@ jobs:
           --test-file tests/test_post_tool_shell.py
           -k "registered_prepared_cell and read-pwsh-cell and not shell-read"
           --allow-explicit-tiers --test-timeout 30 --timeout 300
-      - name: Qualify mixed-batch registered entries and original receiver
+      - name: Diagnose mixed-batch sender checkpoints with original positive assertions
         if: always()
         env:
           PYTHONUTF8: "0"
-          PYTEST_ADDOPTS: "-vv --tb=short --durations=10"
+          AGENT_WORKTREES_TEST_SEND_DIAGNOSTIC: "1"
+          PYTEST_ADDOPTS: "-vv -s --tb=short --durations=10"
         run: >-
           python tools/run-plugin-tests.py agent-worktrees
           --test-file tests/test_post_tool_shell.py
