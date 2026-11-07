@@ -51,10 +51,13 @@ class Association:
     url: str
     recorded_state: str
     endpoint: str
+    source: tuple[str, str] = ("", "")
+    """The owner's (project, worktree creation nonce) this row was recorded under."""
 
     @property
     def key(self) -> tuple:
-        return (self.pr_id, self.pr_revision, self.provider, self.repo, self.number, self.endpoint)
+        return (self.pr_id, self.pr_revision, self.provider, self.repo, self.number, self.endpoint,
+                self.source)
 
     @property
     def label(self) -> str:
@@ -89,10 +92,12 @@ def supported(bundle) -> bool:
     return isinstance(bundle, dict) and bundle.get("companion_pr_observations") == DECLARATION
 
 
-def read_associations(worktree_id: str, *, runner=None, engine_command: list[str] | None = None) -> dict:
+def read_associations(worktree_id: str, *, runner=None, engine_command: list[str] | None = None,
+                      project: str | None = None) -> dict:
     """Request the declared optional association form for the selected worktree.
 
-    ``engine_command`` pins the exact runtime that declared the contract."""
+    ``engine_command`` pins the exact runtime that declared the contract; a
+    known ``project`` must match the fact's recorded source project."""
     obj = ec.run_json(
         None,
         ["worktree-status-bundle", "--worktree", worktree_id, "--pr-associations", "--json"],
@@ -110,6 +115,8 @@ def read_associations(worktree_id: str, *, runner=None, engine_command: list[str
         value.get("schema") != "agent-worktrees.pr-associations"
         or type(value.get("version")) is not int or value["version"] != 1
         or value.get("worktree_id") != worktree_id
+        or not _text(value.get("project")) or not _text(value.get("creation_nonce"))
+        or (project is not None and value["project"] != project)
         or type(value.get("available")) is not bool
         or type(value.get("complete")) is not bool
         or not isinstance(value.get("associations"), list)
@@ -120,6 +127,15 @@ def read_associations(worktree_id: str, *, runner=None, engine_command: list[str
     return fact
 
 
+def source_of(fact) -> tuple[str, str]:
+    """The (project, creation nonce) incarnation a fact describes, or empty strings."""
+    value = fact.get("value") if isinstance(fact, dict) else None
+    if not isinstance(value, dict):
+        return "", ""
+    return tuple(item if isinstance(item, str) else "" for item in
+                 (value.get("project"), value.get("creation_nonce")))
+
+
 def admitted(fact) -> tuple[list[Association], int]:
     """Associations eligible for a point read, plus the count not admitted."""
     if not isinstance(fact, dict) or not isinstance(fact.get("value"), dict):
@@ -128,6 +144,7 @@ def admitted(fact) -> tuple[list[Association], int]:
     if value.get("available") is not True or not isinstance(value.get("associations"), list):
         return [], 0
     rows = value["associations"][:MAX_ASSOCIATIONS]
+    source = source_of(fact)
     ids = [row.get("pr_id") for row in rows if isinstance(row, dict)]
     result, rejected = [], 0
     for row in rows:
@@ -149,7 +166,7 @@ def admitted(fact) -> tuple[list[Association], int]:
             continue
         result.append(Association(
             row["pr_id"], row["pr_revision"], row["provider"], row["repo"], row["number"],
-            row["url"], row["recorded_state"], binding["endpoint"],
+            row["url"], row["recorded_state"], binding["endpoint"], source,
         ))
     return result, rejected
 
@@ -213,7 +230,9 @@ def revalidated_read(association: Association, worktree_id: str, *, runner=None,
     """Re-read the owner's associations, then snapshot only a still-admitted selection.
 
     Returns the refreshed fact (``None`` when revalidation failed) and the read,
-    or ``None`` for the read when the association was removed or reassigned."""
+    or ``None`` for the read when the association was removed or reassigned.
+    ``(None, None)`` means the source project or worktree incarnation changed:
+    the selection and every previously displayed association are invalid."""
     if not engine_command:
         return None, PointRead(association, "unavailable", clock(),
                                reason="declaring engine runtime unknown; no read started")
@@ -222,6 +241,8 @@ def revalidated_read(association: Association, worktree_id: str, *, runner=None,
     except ec.EngineError as exc:
         return None, PointRead(association, "unavailable", clock(),
                                reason=("association revalidation failed: " + str(exc))[:240])
+    if source_of(fact) != association.source:
+        return None, None
     if association.key not in {item.key for item in admitted(fact)[0]}:
         return fact, None
     return fact, point_read(association, runner=runner, engine_command=engine_command, clock=clock)

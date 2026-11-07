@@ -394,6 +394,44 @@ def test_reread_of_removed_association_clears_selection(monkeypatch):
     asyncio.run(check())
 
 
+def test_reread_from_replacement_incarnation_invalidates_everything(monkeypatch):
+    from textual.widgets import Select
+
+    from test_companion_pr_state import fact, row, snapshot
+
+    current = [fact(row())]
+    _pr_app(monkeypatch, row())
+    monkeypatch.setattr(cpr, "read_associations", lambda wt, **kw: current[0])
+    reads = []
+
+    def point(association, **kw):
+        reads.append(association.pr_id)
+        return cpr.decode_snapshot(snapshot(), association, observed_at=1.0)
+
+    monkeypatch.setattr(cpr, "point_read", point)
+
+    async def check():
+        app = companion.MuxCompanionApp()
+        async with app.run_test(size=(100, 40)) as pilot:
+            await _open_graph(app, pilot)
+            select = app.query_one("#pr-association", Select)
+            select.value = "pr-1"
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            replacement = fact(row())
+            replacement["value"]["creation_nonce"] = "replacement"
+            current[0] = replacement
+            app.query_one("#pr-read-btn").press()
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert reads == ["pr-1"] and app._pr_fact is None
+            assert app._pr_selected is None and select.disabled
+            assert "worktree source changed" in graph_text(app)
+
+    asyncio.run(check())
+
+
 def test_refresh_invalidates_pr_before_blocked_retirement(monkeypatch):
     from test_companion_pr_state import row, snapshot
 

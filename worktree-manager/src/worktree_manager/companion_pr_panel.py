@@ -74,7 +74,8 @@ class CompanionPrMixin:
                 raise ec.EngineError("declaring engine runtime unknown")
             fact = await asyncio.to_thread(
                 cpr.read_associations, worktree_id, runner=self._owned_read_runner(cancelled),
-                engine_command=data.engine_command,
+                engine_command=data.engine_command, project=data.bundle.get("project")
+                if isinstance(data.bundle.get("project"), str) else None,
             )
         except ec.EngineError as exc:
             fact, error = None, str(exc)
@@ -175,9 +176,13 @@ class CompanionPrMixin:
         if generation != self._pr_generation or self._pr_selected is None \
                 or self._pr_selected.key != selected.key:
             return
-        if fact is not None:
+        if fact is None and result is None:
+            # Another project or worktree incarnation: nothing shown remains valid.
+            self._pr_fact, self._pr_error = None, "worktree source changed; refresh to reload"
+            self._pr_selected, self._pr_read, self._pr_busy = None, None, False
+        elif fact is not None:
             self._pr_fact = fact
-        if result is None:
+        if result is None and self._pr_selected is not None:
             # Removed or reassigned since load: show the refreshed associations instead.
             self._pr_selected, self._pr_read, self._pr_busy = None, None, False
         else:

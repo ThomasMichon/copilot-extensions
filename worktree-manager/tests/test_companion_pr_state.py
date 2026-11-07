@@ -211,3 +211,34 @@ def test_revalidated_read_pins_the_declaring_runtime(monkeypatch):
 
     _fact, read = cpr.revalidated_read(association, "selected", engine_command=None)
     assert read.state == "unavailable" and len(seen) == 2
+
+
+@pytest.mark.parametrize("change", [{"project": "other"}, {"creation_nonce": "replacement"}])
+def test_revalidation_rejects_changed_project_or_incarnation(monkeypatch, change):
+    association = cpr.admitted(fact(row()))[0][0]
+    assert association.source == ("p", "n")
+    replaced = fact(row())
+    replaced["value"].update(change)
+    calls = []
+
+    def run_json(project, argv, **kw):
+        calls.append(argv[0])
+        if argv[0] == "pr-watch":
+            raise AssertionError("no snapshot may start for a changed source")
+        return {"worktree_id": "selected", "companion_pr_observations": dict(cpr.DECLARATION),
+                "facts": {"pr_associations": replaced}}
+
+    monkeypatch.setattr(cpr.ec, "run_json", run_json)
+    refreshed, read = cpr.revalidated_read(association, "selected", engine_command=["e"])
+    assert calls == ["worktree-status-bundle"] and (refreshed, read) == (None, None)
+
+
+@pytest.mark.parametrize("missing", ["project", "creation_nonce"])
+def test_discovery_requires_source_project_and_incarnation(monkeypatch, missing):
+    incomplete = fact(row())
+    incomplete["value"][missing] = ""
+    monkeypatch.setattr(cpr.ec, "run_json", lambda *a, **kw: {
+        "worktree_id": "selected", "companion_pr_observations": dict(cpr.DECLARATION),
+        "facts": {"pr_associations": incomplete}})
+    with pytest.raises(ec.EngineError):
+        cpr.read_associations("selected", engine_command=["e"])
