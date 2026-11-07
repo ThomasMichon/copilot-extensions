@@ -243,6 +243,9 @@ wrong-installation or old discovery skips the optional send. A connection or
 write failure has unknown acceptance and is not retried, replayed through
 another endpoint or replaced by Python. Provider rollback therefore retains
 the shell-safe advisory baseline, not a blocking compatibility call.
+The sender allocates an explicitly IPv4 client for its IPv4-only loopback
+endpoint, avoiding the modern runtime's default dual-mode socket selection.
+Client allocation remains inside the existing send clock.
 The sender first checks the runtime's IPv4 support. That capability query can
 initialize the socket subsystem on first use; its cost is part of whole-hook
 entry, not the 50-ms client-allocation/connect/write clock. No probe connection

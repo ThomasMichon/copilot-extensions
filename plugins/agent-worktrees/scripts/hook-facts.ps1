@@ -419,7 +419,7 @@ function Send-PostToolReadDemand {
         $limit = if ($null -ne $Mutation) { 65536 } else { 2048 }
         if ($bytes.Length -gt $limit) { return }
         $clock = [Diagnostics.Stopwatch]::StartNew()
-        $client = [Net.Sockets.TcpClient]::new()
+        $client = [Net.Sockets.TcpClient]::new([Net.Sockets.AddressFamily]::InterNetwork)
         if (-not $client.ConnectAsync([Net.IPAddress]::Loopback, $port).Wait(50)) { return }
         $remaining = 50 - [int]$clock.ElapsedMilliseconds
         if ($remaining -le 0) { return }

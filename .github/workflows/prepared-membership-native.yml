@@ -34,24 +34,21 @@ jobs:
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v9.0.0
-      - name: Diagnose the first PowerShell 7 prepared-cell read without changing send bounds
+      - name: Require actual Windows PowerShell and PowerShell 7 membership and post-tool controls
         env:
           AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP: "1"
-          AGENT_WORKTREES_TEST_SEND_DIAGNOSTIC: "1"
           PYTHONUTF8: "0"
-          PYTEST_ADDOPTS: "-vv -s --tb=short --durations=10"
+          PYTEST_ADDOPTS: "-vv --tb=short --durations=10"
         run: >-
           python tools/run-plugin-tests.py agent-worktrees
           --test-file tests/test_managed_session.py
           --test-file tests/test_post_tool_shell.py
-          -k "registered_prepared_cell and read-pwsh-cell and not shell-read"
+          -k "prepared_cell_membership or registered_prepared_cell"
           --allow-explicit-tiers --test-timeout 30 --timeout 300
-      - name: Diagnose mixed-batch sender checkpoints with original positive assertions
-        if: always()
+      - name: Qualify mixed-batch registered entries and original receiver
         env:
           PYTHONUTF8: "0"
-          AGENT_WORKTREES_TEST_SEND_DIAGNOSTIC: "1"
-          PYTEST_ADDOPTS: "-vv -s --tb=short --durations=10"
+          PYTEST_ADDOPTS: "-vv --tb=short --durations=10"
         run: >-
           python tools/run-plugin-tests.py agent-worktrees
           --test-file tests/test_post_tool_shell.py
