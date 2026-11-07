@@ -21,19 +21,26 @@ _CONTROLLER_OWNS_MANAGER = object()
 
 def _project_integration_capability(prefix: Path) -> bool:
     try:
-        from . import manager_launch_cli, manager_recovery, update_cli, update_integration
+        from . import manager_launch_cli, manager_recovery, picker_profiles_cli, update_cli, update_integration
 
         return (
             all(Path(module.__file__).resolve().is_relative_to(prefix)
-                for module in (update_cli, update_integration, manager_launch_cli, manager_recovery))
+                for module in (
+                    update_cli, update_integration, manager_launch_cli, manager_recovery, picker_profiles_cli,
+                ))
             and getattr(update_cli, "PROJECT_INTEGRATION_CAPABILITY", None)
             == getattr(update_integration, "PROJECT_INTEGRATION_CAPABILITY", None)
             == "project-controller-integration/v1"
+            and getattr(picker_profiles_cli, "CONTROLLER_PROFILE_REFRESH_CAPABILITY", None)
+            == "controller-profile-refresh/v1"
             and getattr(update_cli, "run_selected", None) is getattr(update_integration, "run_selected", None)
             and callable(getattr(update_integration, "run_selected", None))
             and callable(getattr(manager_recovery, "adopted_manager", None))
             and callable(getattr(manager_recovery.Adoption, "verify", None))
+            and callable(getattr(manager_recovery, "controller_selection", None))
+            and callable(getattr(manager_recovery.ControllerSelection, "verify", None))
             and callable(getattr(manager_launch_cli, "_worktree_manager_root", None))
+            and callable(getattr(picker_profiles_cli, "_refresh_terminal_profiles", None))
         )
     except (AttributeError, ImportError, OSError, TypeError, ValueError):
         return False

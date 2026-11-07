@@ -101,10 +101,10 @@ def test_inventory_advertises_delegation_only_with_a_capable_driver(installed, m
 
 @pytest.mark.parametrize("foreign", [False, True])
 def test_project_integration_capability_requires_selected_runtime(installed, monkeypatch, tmp_path, foreign):
-    from agent_worktrees import manager_launch_cli, manager_recovery, update_integration
+    from agent_worktrees import manager_launch_cli, manager_recovery, picker_profiles_cli, update_integration
 
     prefix = installed_capability_runtime(tmp_path, monkeypatch)
-    for module in (update_cli, update_integration, manager_launch_cli, manager_recovery):
+    for module in (update_cli, update_integration, manager_launch_cli, manager_recovery, picker_profiles_cli):
         root = tmp_path / "foreign" if foreign and module is update_integration else prefix / "site"
         monkeypatch.setattr(
             module, "__file__", str(root / "agent_worktrees" / f"{module.__name__.split('.')[-1]}.py"),
@@ -119,6 +119,24 @@ def test_project_integration_capability_requires_selected_runtime(installed, mon
     monkeypatch.setitem(sys.modules, "update_driver", driver)
     capability = owner.inventory()["project_controller_delegation"]
     assert capability["project_integration"] is not foreign
+
+
+@pytest.mark.parametrize("missing", ["foreign-profile", "profile-binding", "controller-selection"])
+def test_project_integration_requires_verified_profile_owner(monkeypatch, tmp_path, missing):
+    from agent_worktrees import (
+        manager_launch_cli, manager_recovery, picker_profiles_cli,
+        project_update_controller, update_integration,
+    )
+
+    prefix = installed_capability_runtime(tmp_path, monkeypatch)
+    for module in (update_cli, update_integration, manager_launch_cli, manager_recovery, picker_profiles_cli):
+        root = tmp_path / "foreign" if missing == "foreign-profile" and module is picker_profiles_cli else prefix
+        monkeypatch.setattr(module, "__file__", str(root / "site" / f"{module.__name__.split('.')[-1]}.py"))
+    if missing == "profile-binding":
+        monkeypatch.setattr(picker_profiles_cli, "CONTROLLER_PROFILE_REFRESH_CAPABILITY", None, raising=False)
+    elif missing == "controller-selection":
+        monkeypatch.setattr(manager_recovery, "controller_selection", None)
+    assert not project_update_controller._project_integration_capability(prefix)
 
 
 @pytest.mark.parametrize("foreign", [False, True])

@@ -149,16 +149,22 @@ def test_controller_owned_integration_never_repairs_manager(monkeypatch, tmp_pat
     monkeypatch.setattr(manager_recovery, "recover", lambda: pytest.fail("Manager repair was invoked"))
     monkeypatch.setattr(manager_launch_cli, "_worktree_manager_root", lambda: root)
     monkeypatch.setattr(
-        manager_recovery, "adopted_manager",
-        lambda: SimpleNamespace(root=root, verify=lambda: calls.append("verify")) if adopted else None,
+        manager_recovery, "controller_selection",
+        lambda: SimpleNamespace(
+            adoption=SimpleNamespace(root=root) if adopted else None,
+            selected=object() if adopted else None, verify=lambda: calls.append("verify"),
+        ),
     )
     monkeypatch.setattr(integration.installer, "reconcile_binstubs", lambda: calls.append("binstubs") or {})
     monkeypatch.setattr(
         integration.picker_profiles_cli, "_refresh_terminal_profiles",
-        lambda: calls.append("profiles") or True,
+        lambda **kwargs: calls.append("profiles") or True,
     )
     assert integration.finish(tmp_path, "windows", {}, manager_owned_by_controller=True)
-    assert calls == (["verify", "binstubs", "profiles", "verify"] if adopted else ["binstubs"])
+    assert calls == (
+        ["verify", "binstubs", "verify", "profiles", "verify"] if adopted
+        else ["verify", "binstubs", "verify", "verify"]
+    )
 
 
 def test_controller_owned_integration_refuses_changed_manager_adoption(monkeypatch, tmp_path):
@@ -170,7 +176,8 @@ def test_controller_owned_integration_refuses_changed_manager_adoption(monkeypat
     root = tmp_path / "manager"
     monkeypatch.setattr(manager_launch_cli, "_worktree_manager_root", lambda: root)
     monkeypatch.setattr(
-        manager_recovery, "adopted_manager", lambda: SimpleNamespace(root=root, verify=changed),
+        manager_recovery, "controller_selection",
+        lambda: SimpleNamespace(adoption=SimpleNamespace(root=root), verify=changed),
     )
     monkeypatch.setattr(
         integration.installer, "reconcile_binstubs",
@@ -184,9 +191,9 @@ def test_controller_owned_integration_refuses_foreign_manager_root(monkeypatch, 
 
     monkeypatch.setattr(manager_launch_cli, "_worktree_manager_root", lambda: tmp_path / "selected")
     monkeypatch.setattr(
-        manager_recovery, "adopted_manager",
+        manager_recovery, "controller_selection",
         lambda: SimpleNamespace(
-            root=tmp_path / "other", verify=lambda: pytest.fail("foreign Manager was accepted"),
+            adoption=SimpleNamespace(root=tmp_path / "other"), verify=lambda: None,
         ),
     )
     monkeypatch.setattr(
@@ -208,7 +215,8 @@ def test_controller_owned_integration_detects_late_adoption_change(monkeypatch, 
 
     monkeypatch.setattr(manager_launch_cli, "_worktree_manager_root", lambda: root)
     monkeypatch.setattr(
-        manager_recovery, "adopted_manager", lambda: SimpleNamespace(root=root, verify=verify),
+        manager_recovery, "controller_selection",
+        lambda: SimpleNamespace(adoption=SimpleNamespace(root=root), verify=verify),
     )
     monkeypatch.setattr(integration.installer, "reconcile_binstubs", lambda: {})
     assert not integration.finish(tmp_path, "linux", {}, manager_owned_by_controller=True)
