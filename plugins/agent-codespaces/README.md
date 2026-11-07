@@ -637,9 +637,129 @@ Machine type and location default by convention (`largePremiumLinux` / `EastUs`)
 and can be overridden per-repo in `.copilot-extensions/agent-codespaces/config.yaml`. After the
 CodeSpace is Available, any `on_create` provisioning hooks from that config run
 automatically. Without `--force-create`, `create` first consults the pool
-planner: it returns this workstream's valid retained venue instead of creating
-a new one, or refuses when local capacity is unknown or under pressure. It does
-not borrow an unrelated idle venue.
+planner: it returns this workstream's valid retained venue, or reserves a
+compatible explicitly returned stopped venue, instead of creating a new one.
+It refuses when local capacity is unknown or under pressure. A running idle
+appearance, expired lease or missing local process is not a return.
+
+Sequential reuse is currently limited to stopped venues on the selected
+account and matching repository, with the requested branch (when specified)
+and at least the configured machine's core capacity. Known wake headroom is
+required independently of owned slots. It requires an explicit shared release
+tombstone, no local holder (including an expired record), known absence of local users,
+and the selected lease receiver's `lease-acquire-released-only-v1` capability.
+Missing support leaves the legacy workstream/create path intact; it does not
+silently allow stale takeover. `allocate` remains advice, not a reservation.
+Ordinary `create` records the native obligation and exclusive shared/local
+claim before reporting a reserved name, rechecking stopped state and headroom.
+Reservation checks existing provider holds, including retained uncertain or
+unreadable hold state, before account binding, journaling or shared acquisition,
+and retains its final admission recheck.
+It neither wakes nor provisions that retained venue, changes its branch, nor
+discards files or configuration. Read-only and no-build review tasks can use
+the same exclusive sequential reservation; concurrent sharing is not enabled.
+An uncertain reservation retains native responsibility and reports pressure
+instead of blindly retrying acquisition or creating a duplicate. Inspect
+`claims show` and `leases` before reconciliation. Normal Bridge connection is
+re-entrant for the reserving worktree; return through the existing
+`release-claim`/owning Worktrees lifecycle, not advisory `release` or force.
+An outbound obligation alone proves responsibility, not acquisition. Unconfirmed
+workstream ownership refuses even with spare slots. Confirmed local ownership
+retains legacy own-venue reuse; an explicitly returned venue must be reserved
+again. The selected account is retained before an uncertain attempt, and strict
+binding writes preserve additive fields, other records and corrupt-state bytes.
+Qualified ownership is read through the selected Worktrees runtime, not an
+installed sibling Python package or a directory-basename identity guess.
+Native anchor IDs may differ from their repository directory names.
+Cross-caller return matches the stored native worktree ID or native-recorded
+path together with its complete qualified reference; it does not resolve a
+relative owner against the returning caller's directory.
+An older noncanonical owner label can also be linked by its exact active
+fencing token and unique qualified native owner. An unmatched epoch or an
+already-released lease without an identifiable original owner remains unknown.
+Failed or malformed ledger reads refuse;
+an omitted inventory row does not hide a matching bound obligation.
+Admission classifies every matching obligation; one returned venue cannot hide
+another uncertain acquisition. Holder equality includes machine, project and
+worktree, ignoring only the session suffix. Unmapped obligations spanning
+accounts require an explicit repository-account selection.
+Caller-owned local claims and pending returns also participate independently of
+the native ledger, including after its entry is released or removed. Pending
+returns remain unresolved even with spare owned slots; unreadable local custody
+refuses admission rather than becoming an empty snapshot. The same retained
+custody preserves account selection across an active-account switch.
+Each plan resolves the caller path and qualified reference once and shares that
+pair with obligation classification and candidate selection. Known missing
+identity is retained within that plan, not probed again per venue. The next
+plan resolves fresh; reservation independently revalidates identity before effects.
+Tokened return confirms shared release and settles the original qualified
+owner's ledger before removing the unchanged local claim. Unknown return or
+deferred settlement reports failure and retains local custody, including through
+generic and bulk release. A quota retry that discovers a returned venue uses
+the same reservation flow rather than creating again.
+Tokened own-workstream reuse also requires shared evidence; only tokenless
+legacy local claims retain the optional-peer fallback. Ordinary `claim` journals
+responsibility like the connection path. A reopened owner's valid earlier
+finalization history is diagnostic data, not a failed active-claim ACK or
+restoration of those old resources. Return accepts a missing legacy ledger
+entry only after a complete qualified native read confirms absence or prior
+release, never after a failed lookup.
+Shared fencing tokens must be raw JSON strings with the supported object-ID
+shape; numeric values are never coerced into apparently valid tokens.
+Claim, advisory borrow, heartbeat, sequential reservation and return share a
+per-CodeSpace local OS-held exclusion. Return holds it through native settlement
+and local cleanup; ordinary claim journaling stays inside it too, outside the
+short lease-file transaction. Concurrent operations report busy, and a process
+exit releases the guard without deleting or age-stealing its lock identity.
+Busy, unsettled or malformed return coordination is a blocking rejection for
+SSH and attached/detached Copilot admission, not optional bookkeeping.
+Provider-hold publication briefly joins this same exclusion before its body;
+it does not retain the guard during provider work or block normal return
+inside that hold. Claim checks provider holds and known local conflicts before
+shared coordination, then rechecks before committing local ownership.
+Force, renewal and adoption do not bypass an existing hold. A rejected attempt
+returns only a shared acquisition it created, never an original lease it
+renewed or adopted. A defensive late-hold check preserves a rotated original
+token only when its local snapshot is unchanged; replacement records remain
+untouched. Unconfirmed rollback is reported explicitly, not called cleanup
+success. Provider-hold, corrupt-admission and store-lock failures block
+owner-associated connection admission rather than becoming bookkeeping warnings.
+Generic and bulk return also pin their preselected local snapshots; a delayed
+selection cannot release a replacement claim from the same owner.
+The existing `leases.json` retains pending returns in the reserved
+`__agent_codespaces_returns_v1__` entry: original local snapshot, qualified
+owner and prepared/confirmed-release phase. Ordinary lease records keep their
+legacy shape. After confirmed release, a settlement retry uses that saved
+owner without rereleasing or inspecting a later borrower's lease. Unknown
+progress or settlement retains custody; unrelated current writes preserve it.
+Progress rows must be JSON objects; arrays with matching key names are malformed
+state and receive the same blocking admission diagnostic, not a traceback.
+If publishing the released phase fails after a positive shared-release ACK,
+the same invocation may still finish through confirmed native settlement and
+durable local cleanup. Native ledger retirement is bookkeeping, not proof of
+shared release: finalization can mark it released without returning the venue.
+Prepared progress, including an older optional active-obligation fact, cannot
+use a later ledger transition as shared-return evidence.
+If the actual ACK is no longer available and no released phase was persisted,
+retain original custody when the shared generation cannot be confirmed.
+Do not settle the native ledger as a workaround, remove its entry, hand-edit
+progress, release a successor or infer success from absence/expiry.
+Generation-qualified recovery after this unpersisted-ACK window remains
+tracked in [#11343](https://github.com/ThomasMichon/copilot-extensions/issues/11343);
+current refusal is not completed reconciliation.
+Older tolerant readers still see ordinary holders; older strict admission
+readers refuse the extra entry. Older writers do not join the new exclusion
+and may discard progress: serialize mixed-version writers during rollout or
+rollback. Lost progress is unknown, not proof another borrower's return
+settled the original claim. No automatic replay or cross-version concurrency
+guarantee is implied.
+The existing per-target lifecycle lock covers final inventory/user checks,
+local reservation, binding confirmation and eligibility-marker removal, so a
+managed destructive operation cannot interleave with that commit sequence.
+Explicit creation-only display-name/devcontainer options and a repository's
+declared or custom global devcontainer/location preferences do not silently become cross-effort reuse:
+their compatibility is not established by this pool inventory. Existing own
+venue reuse remains unchanged; `--force-create` retains its explicit meaning.
 
 Allocation and ordinary creation also enforce `defaults.max_owned_codespaces`
 (conservative policy default 30) under the target repository's selected account.

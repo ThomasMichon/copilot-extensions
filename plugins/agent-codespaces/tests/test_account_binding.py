@@ -42,6 +42,34 @@ def test_bound_account_corrupt_file_is_none(monkeypatch, tmp_path):
     assert binding_mod.bound_account("cs-one") is None
 
 
+@pytest.mark.parametrize("content", ["{not json", "[]"])
+def test_strict_bind_preserves_unreadable_or_malformed_state(monkeypatch, tmp_path, content):
+    _redirect_store(monkeypatch, tmp_path)
+    binding_mod.BINDINGS_FILE.write_text(content, encoding="utf-8")
+    before = binding_mod.BINDINGS_FILE.read_bytes()
+    with pytest.raises(RuntimeError):
+        binding_mod.bind("cs-one", "acct-a", "owner/repo", strict=True)
+    assert binding_mod.BINDINGS_FILE.read_bytes() == before
+
+
+def test_strict_bind_preserves_additive_fields_and_other_bindings(monkeypatch, tmp_path):
+    import json
+
+    _redirect_store(monkeypatch, tmp_path)
+    original = {
+        name: {
+            "codespace": name, "account": "acct-a", "repo": "owner/repo",
+            "bound_at": 1.0, "future_field": {"retained": name},
+        } for name in ("cs-one", "cs-other")
+    }
+    binding_mod.BINDINGS_FILE.write_text(json.dumps(original), encoding="utf-8")
+    binding_mod.bind("cs-one", "acct-b", "owner/repo", strict=True)
+    actual = json.loads(binding_mod.BINDINGS_FILE.read_text(encoding="utf-8"))
+    assert actual["cs-other"] == original["cs-other"]
+    assert actual["cs-one"]["future_field"] == original["cs-one"]["future_field"]
+    assert actual["cs-one"]["account"] == "acct-b"
+
+
 def test_bound_account_or_raise_corrupt_file_still_degrades_to_none(monkeypatch, tmp_path):
     """A corrupt/missing FILE is this store's own documented, intentional
     degrade for the legacy bound readers. Only lock CONTENTION propagates

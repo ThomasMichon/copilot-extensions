@@ -41,6 +41,46 @@ same-named command found through `PATH`. Full readiness detail:
 
 ---
 
+## Sequential reuse through ordinary creation
+
+Use the catalog command's `allocate <repo> --json` for advice and
+`create <repo>` to reserve a compatible returned venue before creating another
+owned slot. `allocate` does not acquire anything. Creation first retains a
+valid current-workstream venue; cross-effort reuse currently requires a stopped
+same-account/repository venue, compatible branch and configured core capacity,
+known wake headroom, explicit shared release, no local holder and known absence of users.
+The selected Worktrees lease receiver must advertise
+`lease-acquire-released-only-v1`; an expired hold or missing capability is never
+permission for silent stale takeover.
+
+On cross-effort reuse, creation records native responsibility and an exclusive
+shared/local worktree claim before reporting the name. It leaves the venue
+stopped, its branch/files/configuration intact and provisioning hooks unrun.
+Read-only and no-build review work use this same exclusive reservation, not
+parallel agents sharing a checkout. The normal Bridge claim is re-entrant for
+the reserving owner. Return with `release-claim` for that owner or the owning
+Worktrees lifecycle; do not overwrite the claim with advisory `borrow --force`
+or drop only its local record with advisory `release`.
+
+If reservation is unconfirmed or later validation fails, pressure diagnostics
+name retained responsibility. Inspect the existing `claims show`, `leases` and
+shared lease state through their owners; do not blindly repeat acquisition,
+create a replacement or force-clear another holder.
+
+Qualified ownership is read through the selected Worktrees runtime; installing
+its Python package into the Codespaces environment is not a workaround.
+Unknown ledger reads or omitted bound obligations refuse admission. Final
+reservation checks and marker removal share the native lifecycle lock.
+Every matching obligation is checked, and holder scope includes machine and
+project, not only the worktree ID. Tokened return confirms shared release and
+original-owner ledger settlement before local cleanup. Deferred or unknown
+settlement retains the claim and reports failure; do not force-clear it.
+Tokened own-workstream reuse cannot fall back to local evidence alone. Return
+can reconcile an unjournaled legacy claim only when a complete qualified ledger
+read confirms the entry absent or already released; unreadable is not absent.
+Unverified custom devcontainer/location preferences remain creation choices,
+not implicit permission to select another effort's venue.
+
 ## Advisory lease (borrow / release / leases)
 
 The lease is **host-local advisory state** in

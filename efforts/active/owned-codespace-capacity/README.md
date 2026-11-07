@@ -48,8 +48,9 @@ pressure must not relax those protections.
 The proposal extends the vision's independent-capacity and sequential-reuse
 intent. It follows the existing configuration layering and optional owner
 composition contracts, not the unwired full-publication inventory foundation.
-The reviewed proposal and admission source are merged. Sequential cross-effort
-reuse, release and selected installed/live consumer qualification remain open.
+The reviewed proposal, admission source and released-only lease receiver are
+merged. Sequential cross-effort reuse callers, release and selected
+installed/live consumer qualification remain open.
 
 ## Request
 
@@ -86,7 +87,8 @@ and existing resource custody.
 - [x] Publish the first complete admission flow after focused checks, then steward it through merge. (#11228)
 
 ### Phase 3 - Prove safe sequential reuse
-- [ ] Expand the native lease receiver with capability-advertised acquisition that refuses expired-but-unreleased holders, then migrate reuse callers only when the selected receiver supports it.
+- [x] Expand the native lease receiver with capability-advertised acquisition that refuses expired-but-unreleased holders. (#11306)
+- [ ] Migrate reuse callers only when the selected receiver supports released-only acquisition; missing support or rollback must never silently enable stale takeover.
 - [ ] Extend existing suitability/admission and borrow/return paths to reuse compatible same-account, same-repository venues across efforts, including explicit read-only and no-build review use.
 - [ ] Preserve retained files, branches, configuration and claims; reject incompatible active agents and live or unknown holders rather than inferring release from local absence.
 - [ ] Account for stopped-venue wake cost separately from owned slots, and retain current workstream reuse when valid.
@@ -96,6 +98,7 @@ and existing resource custody.
 
 ### Phase 4 - Qualify release and selected consumers
 - [ ] Verify promoted source inclusion without treating dev ancestry as release proof.
+- [ ] Qualify or explicitly transfer generation-qualified recovery after an unpersisted shared-return ACK (#11343); native ledger retirement alone never closes this gate.
 - [ ] Exercise the installed read-only admission consumer and a separately authorized existing-venue sequential-use flow; retain current owners, unknown effects and cleanup obligations.
 - [ ] Resolve or transfer every validation gate to a named tracked objective before marking this effort Done.
 
