@@ -278,8 +278,12 @@ class AgendaRuntime:
             availability = "head-changed"
         elif body is not None:
             availability = "observed" if body["source"]["session"] == session else "not-published"
+        exposed = None
         if availability == "observed":
             contract.observation(body, version=request["contract_version"])
+            exposed = copy.deepcopy(body)
+            if not contract.graph_requested(request):
+                exposed.pop("graph", None)
         return {
             "ok": True,
             "contract_version": request["contract_version"],
@@ -289,7 +293,7 @@ class AgendaRuntime:
             "worktree_id": wid,
             "session_id": session,
             "availability": availability,
-            "observation": copy.deepcopy(body) if availability == "observed" else None,
+            "observation": exposed,
         }
 
     def _source_fence(self, conn, key, body, encoded) -> None:
@@ -387,6 +391,9 @@ class AgendaRuntime:
                 "worktree_id": body["source"]["worktree"],
                 "session_id": body["source"]["session"],
             }
+            if "graph" in body:
+                # Acknowledge exactly what was committed, including the optional graph.
+                request["graph"] = body["graph"]["version"]
             project, wid, session = contract.selection(request)
             expected = contract.hex_id(payload["expected_generation"], "expected generation")
             key = project, wid

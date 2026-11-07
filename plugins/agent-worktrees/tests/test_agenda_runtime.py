@@ -220,6 +220,77 @@ def test_v2_control_publication_and_held_feed_preserve_exact_committed_body(
         assert advanced["observation"] == observation_v2(2)
 
 
+def graphed(revision=1):
+    body = observation_v2(revision)
+    body["graph"] = {
+        "version": 1,
+        "revision": revision,
+        "cursor": {"frame": "child", "item": "probe", "stack": ["root", "child"]},
+        "frames": [
+            {"id": "root", "parent": None, "via": None, "state": "active",
+             "label": "task:assignment", "returns": None},
+            {"id": "child", "parent": "root", "via": "parent", "state": "active",
+             "label": "subqueue: Run parent", "returns": "Reassess parent"},
+        ],
+        "items": [
+            {"id": "parent", "frame": "root", "label": "Run parent", "state": "replanning",
+             "attempts": 1},
+            {"id": "tail", "frame": "root", "label": "Tail item", "state": "queued", "attempts": 0},
+            {"id": "probe", "frame": "child", "label": "Probe", "state": "running", "attempts": 1},
+        ],
+        "history": [
+            {"at": "2026-11-01T07:00:00.000001Z", "kind": "expansion", "frame": "root",
+             "item": "parent", "text": "expanded: Reassess parent"},
+        ],
+        "omitted": {"frames": 0, "items": 0, "history": 0},
+    }
+    return body
+
+
+def test_graph_is_negotiated_acknowledged_and_stripped_for_readers_that_did_not_opt_in(owned):
+    owner, *_rest = owned
+    assert contract.GRAPH_CAPABILITY in owner.health()["capabilities"]
+    body = graphed()
+    accepted = owner.agendas.publish(publication(owner, body, contract_version=2))
+    assert accepted["ok"] is True and accepted["observation"] == body
+    plain = owner.agendas.read(request(contract_version=2))
+    assert plain["observation"] == {k: v for k, v in body.items() if k != "graph"}
+    contract.validate_reply(plain, request(contract_version=2), plain["generation"])
+    rich = owner.agendas.read(request(contract_version=2, graph=1))
+    assert rich["observation"] == body
+    contract.validate_reply(rich, request(contract_version=2, graph=1), rich["generation"])
+    with pytest.raises(contract.AgendaError, match="not requested"):
+        contract.validate_reply(rich, request(contract_version=2), rich["generation"])
+    for wrong in (request(graph=1), request(contract_version=2, graph=2),
+                  request(contract_version=2, graph=True)):
+        assert owner.agendas.read(wrong)["ok"] is False
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        lambda g: g["cursor"].update(frame="root"),
+        lambda g: g["cursor"].update(item="missing"),
+        lambda g: g["items"][0].update(state="sideways"),
+        lambda g: g["items"][0].update(frame="elsewhere"),
+        lambda g: g["frames"].reverse(),
+        lambda g: g["frames"][1].update(returns=None),
+        lambda g: g.update(revision=2),
+        lambda g: g["history"][0].update(at="yesterday"),
+        lambda g: g["omitted"].update(items=-1),
+        lambda g: g.update(extra=True),
+    ],
+)
+def test_graph_shape_is_strict(owned, fault):
+    owner, *_rest = owned
+    body = graphed()
+    fault(body["graph"])
+    assert owner.agendas.publish(publication(owner, body, contract_version=2))["ok"] is False
+    legacy = observation()
+    legacy["graph"] = graphed()["graph"]
+    assert owner.agendas.publish(publication(owner, legacy, contract_version=2))["ok"] is False
+
+
 def test_observation_upgrade_cannot_rewrite_same_revision_or_add_snapshot_fields(owned):
     owner, *_rest = owned
     assert owner.agendas.publish(publication(owner))["ok"] is True

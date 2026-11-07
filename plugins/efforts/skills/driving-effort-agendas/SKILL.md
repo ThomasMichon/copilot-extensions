@@ -285,6 +285,13 @@ Optional trusted publisher argv receives only a bounded committed observation.
 Persisted success and pending/not-configured/delivered notification are distinct;
 delivery failure calls for `publish`, not replaying a mutation. Manager/head/
 generation fencing and actual presentation remain the adapter's responsibility.
+Each committed observation also carries an optional display `graph`. It is
+built by `scripts/agenda_v2_graph.py` and holds the frame tree, the queued items
+per frame, the cursor, its frame stack and recent history, kept within the
+observation's size limit. The bundled provider sends that graph only to a
+resident that admits `worktree-agendas-graph-v1`. Consumers render it, for
+example as Companion's git-graph view. The graph is display-only and is never
+planning authority.
 No agenda command executes work, proves external approval, starts a service or
 changes the canonical completion gate.
 

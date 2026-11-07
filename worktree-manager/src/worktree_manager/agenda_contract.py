@@ -24,6 +24,10 @@ _REPLY_FIELDS = {
 _TRANSIENT_ERRORS = {"disconnected", "unavailable", "unready", "draining", "superseded"}
 _TEMPORARY_CLOSURES = _TRANSIENT_ERRORS - {"superseded"}
 CONTRACT_VERSIONS = (1, 2)
+GRAPH_CAPABILITY = "worktree-agendas-graph-v1"
+GRAPH_VERSIONS = (1,)
+_GRAPH_FRAME_STATES = {"active", "deferred", "closed", "idle"}
+_GRAPH_ITEM_STATES = {"done", "queued", "running", "replanning", "waiting", "closed"}
 
 
 class AgendaUnavailable(ValueError):
@@ -109,8 +113,11 @@ def validate_snapshot(
     if len(json.dumps(observation, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) + 1 > MAX_BODY_BYTES:
         raise ValueError("agenda observation exceeds its body bound")
     source, snapshot = observation.get("source"), observation.get("snapshot")
+    fields = {"schema", "version", "source", "revision", "committed_at", "snapshot"}
+    if "graph" in observation and observation.get("version") == 2 and contract_version == 2:
+        fields.add("graph")
     if (
-        set(observation) != {"schema", "version", "source", "revision", "committed_at", "snapshot"}
+        set(observation) != fields
         or
         observation.get("schema") != "efforts.agenda-observation"
         or type(observation.get("version")) is not int or observation["version"] not in (1, 2)
@@ -153,6 +160,80 @@ def validate_snapshot(
     for field in ("next_action", "next_revisit_at"):
         if snapshot[field] is not None and not isinstance(snapshot[field], str):
             raise ValueError(f"agenda snapshot has invalid {field}")
+    if "graph" in observation:
+        validate_graph(observation["graph"], observation["revision"])
+
+
+def _graph_text(value, *, optional: bool = False) -> bool:
+    return (optional and value is None) or (isinstance(value, str) and bool(value))
+
+
+def validate_graph(value, revision: int) -> None:
+    """Admit the optional display graph: frame tree, item queues, stack, cursor, history."""
+    if not isinstance(value, dict) or set(value) != {
+        "version", "revision", "cursor", "frames", "items", "history", "omitted",
+    }:
+        raise ValueError("agenda graph has invalid fields")
+    if type(value["version"]) is not int or value["version"] not in GRAPH_VERSIONS:
+        raise ValueError("agenda graph has an unsupported version")
+    if type(value["revision"]) is not int or value["revision"] != revision:
+        raise ValueError("agenda graph revision disagrees with its observation")
+    frames, items, history = value["frames"], value["items"], value["history"]
+    if not all(isinstance(entry, list) for entry in (frames, items, history)):
+        raise ValueError("agenda graph has invalid collections")
+    known: set[str] = set()
+    for frame in frames:
+        if (
+            not isinstance(frame, dict)
+            or set(frame) != {"id", "parent", "via", "state", "label", "returns"}
+            or not _graph_text(frame["id"]) or frame["id"] in known
+            or not _graph_text(frame["label"]) or frame["state"] not in _GRAPH_FRAME_STATES
+            or (frame["parent"] is None) != (frame["via"] is None)
+            or (frame["parent"] is None) != (frame["returns"] is None)
+            or (frame["parent"] is not None and (
+                frame["parent"] not in known or not _graph_text(frame["via"])
+                or not _graph_text(frame["returns"])
+            ))
+        ):
+            raise ValueError("agenda graph has an invalid or out-of-order frame")
+        known.add(frame["id"])
+    seen: set[str] = set()
+    for item in items:
+        if (
+            not isinstance(item, dict)
+            or set(item) != {"id", "frame", "label", "state", "attempts"}
+            or not _graph_text(item["id"]) or item["id"] in seen or item["frame"] not in known
+            or not _graph_text(item["label"]) or item["state"] not in _GRAPH_ITEM_STATES
+            or type(item["attempts"]) is not int or not 0 <= item["attempts"] <= MAX_INTEGER
+        ):
+            raise ValueError("agenda graph has an invalid, duplicated or orphaned item")
+        seen.add(item["id"])
+    cursor = value["cursor"]
+    if not isinstance(cursor, dict) or set(cursor) != {"frame", "item", "stack"}:
+        raise ValueError("agenda graph has an invalid cursor")
+    stack = cursor["stack"]
+    if (
+        not isinstance(stack, list) or any(frame not in known for frame in stack)
+        or (cursor["frame"] is None) != (not stack)
+        or (stack and cursor["frame"] != stack[-1])
+        or (cursor["item"] is not None and cursor["item"] not in seen)
+    ):
+        raise ValueError("agenda graph cursor is not the top of a known stack")
+    for entry in history:
+        if (
+            not isinstance(entry, dict) or set(entry) != {"at", "kind", "frame", "item", "text"}
+            or not _utc(entry["at"]) or not _graph_text(entry["kind"])
+            or not _graph_text(entry["text"])
+            or not _graph_text(entry["frame"], optional=True)
+            or not _graph_text(entry["item"], optional=True)
+        ):
+            raise ValueError("agenda graph has an invalid history entry")
+    omitted = value["omitted"]
+    if (
+        not isinstance(omitted, dict) or set(omitted) != {"frames", "items", "history"}
+        or any(type(count) is not int or not 0 <= count <= MAX_INTEGER for count in omitted.values())
+    ):
+        raise ValueError("agenda graph has invalid omission counts")
 
 
 class AgendaPublicationFence:
