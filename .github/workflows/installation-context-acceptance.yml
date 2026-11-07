@@ -1842,7 +1842,64 @@ jobs:
           PYTEST_ADDOPTS: >-
             -vv --durations=20
             -k "test_ssh_setup or normal_manager_engine_ssh_first_touch_repeat_update_and_stop"
-        run: python tools/run-standalone-tests.py fleet-manager --prepare --timeout 180 --ephemeral-native-ssh-setup
+        shell: python
+        run: |
+          import os
+          import runpy
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          root = Path.cwd()
+          sys.path.insert(0, str(root / "tools"))
+          runner = runpy.run_path(str(root / "tools" / "run-standalone-tests.py"))
+          python = runner["default_python"]("fleet-manager")
+          environment_root = runner["ordinary_cache_root"](python.parent.parent)
+          environment_root.mkdir(parents=True, exist_ok=True)
+          lease = runner["acquire"](0, environment_root)
+          temporary = runner["TestSandbox"](
+              prefix=runner["run_prefix"]("ssh-cohort"), dir=Path(os.environ["RUNNER_TEMP"]),
+          )
+          sandbox = Path(temporary.name)
+          try:
+              runner["record_owner"](sandbox, root, retention="native cohort inputs until verified cleanup")
+              runner["prepare"]("fleet-manager", python)
+              environment = runner["isolated_environment"](os.environ, sandbox)
+              environment["COPILOT_EXTENSIONS_TEST_VENV_ROOT"] = str(runner["venv_root"](root))
+              try:
+                  code = runner["run_contained"](
+                      [str(python), "-I", "-B",
+                       str(root / "fleet-manager" / "tests" / "repository_ssh_cohort_fixture.py"),
+                       "--output", str(sandbox / "cohort")],
+                      cwd=root, env=environment, sandbox=sandbox,
+                      limits=runner["Limits"](wall_seconds=180),
+                  )
+              except runner["UnreapedProcessError"]:
+                  temporary.retain()
+                  raise
+              finally:
+                  lease.release()
+                  lease = None
+              if code:
+                  raise RuntimeError(f"normal Source cohort preparation failed: {code}")
+              environment = dict(os.environ)
+              environment["COPILOT_EXTENSIONS_SSH_SETUP_COHORT"] = str(sandbox / "cohort" / "cohort.json")
+              code = subprocess.run(
+                  [sys.executable, str(root / "tools" / "run-standalone-tests.py"),
+                   "fleet-manager", "--timeout", "180", "--ephemeral-native-ssh-setup"],
+                  env=environment, check=False,
+                  creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+              ).returncode
+              if code:
+                  temporary.retain()
+                  raise RuntimeError(f"normal installed cohort lifecycle failed: {code}")
+          finally:
+              try:
+                  if not temporary.retained:
+                      runner["cleanup_sandbox"](temporary)
+              finally:
+                  if lease is not None:
+                      lease.release()
 
   gateway-normal-setup-windows:
     if: ${{ inputs.pr_artifacts }}
