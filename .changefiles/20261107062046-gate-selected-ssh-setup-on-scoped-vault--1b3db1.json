@@ -6,7 +6,7 @@
       "type": "patch"
     },
     {
-      "plugin": "standalone:fleet-manager",
+      "plugin": "fleet-manager",
       "type": "patch"
     }
   ]
