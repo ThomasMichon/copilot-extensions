@@ -104,6 +104,9 @@ View-wide executable actions remain unavailable until the consumer has a success
 read with no replacement pending. Confirmation and progress-command dispatch
 recheck the captured scopes, as does row execution; a partial summary cannot authorize repair. Partial
 rows and read-only detail cards remain available for inspection.
+The internal `recover-forms` view action also remains available during pending
+or failed board reads: it opens local retained responses without querying or
+executing the provider.
 
 Version-1 compatibility also covers the existing declarative fields:
 

@@ -73,7 +73,8 @@ class PickerScreenModelMixin:
         summary = self._task_summary()
         return [
             action for action in getattr(reg, "view_actions", ())
-            if (getattr(action, "card", None) is not None or ready)
+            if (getattr(action, "card", None) is not None
+                or getattr(action, "internal", None) == "recover-forms" or ready)
             and entry_matches(action.when, summary)
         ]
     def grid_dirty(self):

@@ -414,6 +414,57 @@ def test_native_prepare_persists_before_submit_and_global_recovery_cancel_never_
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("read_state", ["loading", "error", "replacement"])
+def test_native_recovery_view_action_does_not_depend_on_board_read(
+    tmp_path, monkeypatch, read_state,
+):
+    from test_config_actions import _wait
+    from test_picker_tui import _fixture_source, _wait_for_initial_setup
+    from worktree_manager.production_picker.picker_tui.engine import PickerApp, PickerScreen
+    from worktree_manager.production_picker.picker_tui.engine_form_requests import RetainedResponsesMenu
+
+    directory = tmp_path / "drafts"
+    monkeypatch.setenv("AGENT_WORKTREES_STEER_DRAFTS", str(directory))
+    retained = retain_request(directory, original())
+    raw = manifest()
+    raw.update(scope="global", list=["provider", "list"])
+    raw["view_actions"].append({
+        "key": "refresh", "label": "Provider command", "run": ["provider", "refresh"],
+    })
+    reg = registered(raw)
+
+    async def run():
+        app = PickerApp(_fixture_source(), live=False)
+        async with app.run_test() as pilot:
+            picker = app.query_one(PickerScreen)
+            await _wait_for_initial_setup(pilot, picker)
+            runtime = picker._pivot_runtime(reg)
+            monkeypatch.setattr(runtime, "ensure", lambda *_args: None)
+            runtime._cache[""] = (
+                "ready" if read_state == "replacement" else read_state, [], "board unavailable",
+            )
+            if read_state == "replacement":
+                runtime._inflight.add("")
+            monkeypatch.setattr(runtime, "run_action", lambda *_args: pytest.fail("no provider command"))
+            monkeypatch.setattr(
+                runtime, "run_resolved", lambda *_args, **_kwargs: pytest.fail("no provider query"),
+            )
+            picker.pivots = [{"kind": "registered", "label": reg.label, "pivot": reg}]
+            picker.htab = 0
+            action = reg.view_actions[0]
+            assert not runtime.actions_ready(("",))
+            assert picker._pivot_view_actions() == [action]
+            picker._run_view_action(action)
+            await _wait(pilot, lambda: isinstance(app.screen, RetainedResponsesMenu))
+            assert app.screen.query_one(OptionList).option_count == 1
+            assert retained.exists()
+            app.screen.dismiss(None)
+            await pilot.pause()
+            assert retained.exists()
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("failure", ["write", "publication", "directory"])
 def test_local_request_write_failure_prevents_any_submit(tmp_path, monkeypatch, failure):
     from worktree_manager import form_draft_storage as storage

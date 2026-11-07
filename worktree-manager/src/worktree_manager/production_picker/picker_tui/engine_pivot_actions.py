@@ -35,7 +35,9 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
             self.refresh()
 
         def run():
-            if getattr(action, "card", None) is None and not actions_ready(rt, scopes):
+            if (getattr(action, "card", None) is None
+                    and getattr(action, "internal", None) != "recover-forms"
+                    and not actions_ready(rt, scopes)):
                 self.debug = "Source read is not current; refresh and reopen this action."
                 self.refresh()
                 return
