@@ -135,7 +135,8 @@ class Transport:
                 persist({"envelope_sha": envelope, "phase": "transport-confirmed"})
                 return envelope
             persist({"transport_failure": {
-                "returncode": result.returncode, "stderr": result.stderr[-8192:],
+                "returncode": result.returncode,
+                "stdout": result.stdout[-8192:], "stderr": result.stderr[-8192:],
             }})
             # A lost response can still have published this exact envelope.
             actual = self.tip()
@@ -149,6 +150,6 @@ class Transport:
             persist({"envelope_sha": envelope, "phase": "transport-unknown"})
             raise RuntimeError(
                 "transport effect unknown or rejected; resume this request, do not replay: "
-                + result.stderr[-8192:].strip(),
+                + (result.stdout[-8192:] + "\n" + result.stderr[-8192:]).strip(),
             )
         raise RuntimeError("transport contention limit reached; resume this request")

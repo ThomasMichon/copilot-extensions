@@ -279,3 +279,30 @@ diagnostics stay with the original request. All 64 focused controls and
 touched Python F/E9 lint pass, including the actual native legacy guard,
 local-hook chaining and unrelated-tag preservation. Review, required CI and
 live shared-ref/reuse/failure acceptance remain open.
+
+### 2026-11-07 - Hosted schema skew and result precision
+
+The explicit unmatched-selector request returned a bound failed result with
+zero tests and client exit 1 in run
+[42329653508](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42329653508).
+It never qualified. Refined the tool adapter to distinguish pytest's known
+empty-collection exit 5 with actual empty JUnit as `incomplete`; missing
+reports and genuine failures still fail.
+
+Hosted request `54a2668253d2414aba3b55033c2330ea`, run
+[42330310109](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42330310109),
+tested correction head `dbea2f3c48cb848dd9caa31227069f35cc789d43`.
+Its older protected controller's containment helper omitted sandbox roots
+required by the newer candidate's pytest policy. Collection refused with
+exit 4 before tests ran; this is not a test pass or a provider admission
+failure. The tool subprocess now selects the candidate's canonical
+containment/environment helper source before execution, as the plugin
+runner already does. A future-root schema regression proves the candidate
+owner supplies its own private environment.
+
+Review of #11213 also identified Windows shell-hook newline translation and
+porcelain push rejection details living on stdout. The fixture writes LF
+explicitly; bounded stdout and stderr are both retained and surfaced.
+All 11 targeted classification/schema/hook/diagnostic controls and touched
+Python F/E9 lint pass after these changes. Required review/CI, promotion of
+the updated controller, and hosted revalidation remain open.

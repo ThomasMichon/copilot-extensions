@@ -118,6 +118,13 @@ The result command exits zero only for qualification, one for a returned
 failed/incomplete result, and two for an unavailable or invalid result.
 Artifacts are immutable run evidence, not patches to execute or apply.
 
+Tool execution imports the selected candidate's canonical containment and
+environment helpers before pytest, keeping its sandbox roots aligned with
+that source's test policy even when the protected controller is older.
+A tool pytest exit 5 with an actual empty JUnit report returns `incomplete`
+with `incomplete_reason: empty-selection`. Missing JUnit and other failing
+commands remain `failed`; neither outcome returns qualification success.
+
 ## Per-test diagnosis and residual runs
 
 A timeout is not a default request for one more run with twice the allowance.

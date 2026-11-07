@@ -96,7 +96,7 @@ def test_managed_transport_passes_legacy_pr_guard_without_disabling_local_hooks(
         "#!/bin/sh\n"
         f"{shlex.quote(sys.executable.replace(os.sep, '/'))} -c {shlex.quote(code)} || exit $?\n"
         f"printf 'chained\\n' >> {shlex.quote(marker.as_posix())}\n",
-        encoding="utf-8",
+        encoding="utf-8", newline="\n",
     )
     hook.chmod(0o755)
     monkeypatch.delenv("AGENT_WORKTREES_PR_PUSH", raising=False)
@@ -135,15 +135,18 @@ def test_rejected_push_retains_original_diagnostic_and_does_not_retry(tmp_path):
     def rejected(argv, **kwargs):
         if "push" in argv:
             pushes.append(argv)
-            return subprocess.CompletedProcess(argv, 1, "", "fixture local hook rejected")
+            return subprocess.CompletedProcess(
+                argv, 1, "! [remote rejected] fixture policy rejected\n", "failed to push some refs",
+            )
         return command(argv, **kwargs)
     states = []
-    with pytest.raises(RuntimeError, match="fixture local hook rejected"):
+    with pytest.raises(RuntimeError, match="fixture policy rejected"):
         Transport(root, str(remote), run=rejected).append(source, states.append)
     assert len(pushes) == 1
     assert states[-1]["phase"] == "transport-unknown"
     assert states[-2]["transport_failure"] == {
-        "returncode": 1, "stderr": "fixture local hook rejected",
+        "returncode": 1, "stdout": "! [remote rejected] fixture policy rejected\n",
+        "stderr": "failed to push some refs",
     }
     assert git(root, "ls-remote", "--refs", str(remote)) == ""
 
