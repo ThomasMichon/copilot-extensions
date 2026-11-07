@@ -7,12 +7,18 @@ import json
 import os
 from pathlib import Path
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 
 import typecheck as checker
 from tools import _admission_protocol as admission
 from tools import typecheck_source_views as views
+
+
+@pytest.fixture(autouse=True)
+def fixed_checker_stage(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(checker, "uuid4", lambda: SimpleNamespace(hex=""))
 
 
 @pytest.fixture
@@ -224,7 +230,10 @@ def test_candidate_guard_and_installation_views_keep_independent_custody(
         with pytest.raises(views.SourceViewError, match="source changed"):
             checker.check_project(tmp_path, project, files, all_paths=all_paths)
     assert calls == ["called"] and events == ["acquired", "released"]
-    assert not list(stage.iterdir())
+    if change == "unchanged":
+        assert not stage.exists()
+    else:
+        assert stage.is_dir() and not list(stage.iterdir())
     assert not list(environment.glob("typecheck-*"))
     assert (tmp_path / worker).read_bytes() == worker_bytes
 

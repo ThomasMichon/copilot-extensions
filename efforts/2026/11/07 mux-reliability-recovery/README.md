@@ -4,8 +4,9 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent reviewed plan and implementation PRs
 - **Created:** 2026-11-06
-- **Status:** Active
-- **Vision:** [Session Hosting](../../../visions/session-hosting/README.md), [Worktree Lifetime](../../../visions/plugins/agent-worktrees/README.md), [Picker](../../../visions/picker/README.md)
+- **Status:** Done
+- **Completed:** 2026-11-07
+- **Vision:** [Session Hosting](../../../../visions/session-hosting/README.md), [Worktree Lifetime](../../../../visions/plugins/agent-worktrees/README.md), [Picker](../../../../visions/picker/README.md)
 - **Umbrella issue:** #11255
 - **Related owners:** #7212, #4564, #10627, #8669
 
@@ -66,10 +67,10 @@ The implementation must respect the existing owner split: the hosting/Driver
 boundary owns provider-specific execution and control; Manager presents and
 composes it; Worktrees retains durable agency and bounded observations.
 Existing compatibility adapters must not become a second hosting owner.
-The [architecture principles](../../../docs/patterns/README.md) require
+The [architecture principles](../../../../docs/patterns/README.md) require
 non-destructive observation, literal failures, economical evidence and
 preserved ownership. Additive interfaces follow
-[service-contract evolution](../../../docs/patterns/service-contract-evolution.md).
+[service-contract evolution](../../../../docs/patterns/service-contract-evolution.md).
 
 ## Request
 
@@ -134,9 +135,9 @@ approved changes to running services, installations or sessions.
   durable work, distinguish detach from death, establish installed/running build
   evidence without unsafe version probes, and perform individually authorized
   recovery rather than global cleanup or guessed metadata repair.
-- [ ] Land implementation through exact-source review and required CI; record
+- [x] Land implementation through exact-source review and required CI; record
   source/release/rollout separately. No rollout is required or claimed here.
-- [ ] Resolve every Plan/Validation item or transfer it to a named tracked
+- [x] Resolve every Plan/Validation item or transfer it to a named tracked
   objective, then mark Done and archive through the normal effort lifecycle.
 
 ## Validation Plan
@@ -153,10 +154,10 @@ approved changes to running services, installations or sessions.
   uncertainty-driven retirement/replacement; a live replacement is not cleared.
 - [x] Changed Picker rows distinguish reachable mux, detached mux, uncertain
   mux hosting and genuine process-only hosting without render-time probes.
-- [ ] Run required source lint/type/install-contract gates and exact-source CI.
+- [x] Run required source lint/type/install-contract gates and exact-source CI.
   Record native/clean-room lanes exercised and explicitly explain unavailable
   lanes; unit success is not a claim of live-host recovery.
-- [ ] Re-read the canonical effort after each merge, update only the gates it
+- [x] Re-read the canonical effort after each merge, update only the gates it
   actually closes, and verify final issue/effort disposition.
 
 ## Proposal
@@ -323,3 +324,26 @@ not only its parser. Deployment and repairs to running sessions are separate.
 - The prior published head passed required CI and the hosted Cold roster
   Linux/Windows lanes. This is roster-consumer evidence, not live PSMux server
   recovery. The latest small correction still requires its own review and CI.
+
+### 2026-11-07 - Source delivery complete
+
+- Implementation #11274 merged at its reviewed head after required CI, including
+  the sealed eligible-unit packet and hosted Cold roster Linux/Windows lanes.
+  All eight inline findings are resolved. The current clean Comment verdict
+  satisfies the owner-authored review policy; the ordinary Maintainer
+  CODEOWNER-review exception was used, never a CI bypass.
+- Supplied the required graceful-cutover impact assessment in the PR: existing
+  activation, routing, drain, ownership and termination seams remain unchanged.
+  A metadata-triggered CI run initially made the merge gate expected; waited
+  for that exact run to pass before retrying the merge.
+- Re-read this canonical effort after the merge and resolved its remaining
+  source/validation items. The preservation and recovery truth remains in the
+  maintained mux guide, not only this dated record. Preparing the standard
+  archive publication and closing the source coordination issue completes this
+  source-only effort; related hosting/attachment programs retain their owners.
+- Source is merged; release promotion is separate, and no live rollout,
+  polling change, process termination or incident recovery was performed.
+  Unknown incident attribution and operational approvals remain unchanged.
+- Source coordination issue #11255 is closed with the merged implementation
+  and explicit source-versus-rollout distinction. All Plan and Validation Plan
+  items are resolved; this dated record is the normal closure publication.

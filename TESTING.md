@@ -2360,11 +2360,36 @@ This focused lane uses the managed test environment, a loopback-only model
 provider, disposable Copilot state and the runner's private mux namespace.
 It checks a literal staged seed, fresh launch and same-session native resume,
 broker prompts, real child PID/birth receipts, seed non-replay and exact
-fixture retirement. Discovery uses a read-only adapter to the real private mux,
-not the host's default server or fabricated successful replies.
+fixture retirement. A second control sends literal native terminal input,
+checks that the old broker refuses further prompt delivery, then explicitly
+stops through the original owner and resumes the same conversation through a
+new broker. Each control checks the exact user history and provider request
+count, with no replay of the rejected prompt.
+Discovery uses a read-only adapter to the real private mux, not the host's
+default server or fabricated successful replies. The fixture preserves the
+runner's registry/lifecycle context while scrubbing Copilot settings and
+credentials. Its raw pane entrypoint uses the physical Python interpreter and
+the same managed test packages, avoiding the Windows venv redirector.
 It does not install a runtime or qualify copied setup, the full Manager/embody
-planner, guarded-head recovery, physical terminal input or survival after
-caller cleanup Jobs. Those remain separate acceptance lanes.
+planner, guarded-head or auth-wait recovery, physical keyboard input or survival
+after caller cleanup Jobs. Those remain separate acceptance lanes.
+
+Driver's explicit `tests/native/test_headed_extension.py` lane uses the same
+canonical private mux routing, with raw pane argv separated from mux options
+by `--`. Two finite pane controls check actual script entry, PID and exit with
+default and null fixture configuration, always using a private data directory
+and rejecting inherited config/data overrides. PID and owner-result markers
+are published atomically. The SDK/broker and coordinator
+controls invoke native Copilot or Python directly; they do not qualify the
+Manager PowerShell pane wrapper. Unit isolation controls reject default,
+foreign and whole-server routing before spawn, without mistaking child flags
+after `--` for mux routing.
+The focused `joined_session_reports_pending_read` control queries the executing
+CLI's `session.rpc.tasks.list()` and `session.rpc.schedule.list()` without a
+permission grant, checking the native `tasks` and `entries` arrays in the same
+conversation. Missing/failed/invalid reads do not produce an empty snapshot.
+This is SDK read-support qualification, not complete background-agent evidence,
+active-work/schedule mutation coverage or automatic-idle retirement.
 
 The optional native runtime-removal portfolio includes
 `tools/test_installer_engine_uninstall.py`,

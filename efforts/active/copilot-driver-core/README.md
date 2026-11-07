@@ -1582,3 +1582,111 @@ only transient Windows open contention; complete malformed records still fail.
 Each recovery leg owns a distinct private mux target while retaining the
 same native conversation. Immediate reuse of a retiring mux name is not
 silently treated as qualified.
+
+### 2026-11-07 - Native Python-owner checkpoint merged; parent continues
+
+#11260 merged at 06:05:03 UTC as
+`7ce12dc8d83f7fb746bbb65fe50441a106b86a59`, after Copilot review `5810434897`
+approved exact head `9744d817f999cecbc8754afb47e7874ddcee6b1f`, both review
+threads were resolved and required
+[CI 42344711712](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42344711712)
+passed. The managed merge used the normal Maintainer review exception, not
+a CI bypass. Re-read the parent Plan and Validation Plan; the partial native
+checkpoint does not close their full caller/lifetime/receiving items.
+
+Native pull-forward first auto-aborted the individual replay over the merged
+squash. A tree-identical local fixup of the two owned commits then allowed
+normal synchronization. Continue the real native input/auth-wait observation
+and original-owner same-session controlled-recovery leaf, preserving its
+unsupported/unknown states and the remaining caller matrix. No deployment
+or receiving-acceptance transfer is inferred from this merge.
+
+### 2026-11-07 - Native input fencing and fixture execution checkpoint
+
+The focused Worktrees Python-owner packet passes both controls in 58.24
+seconds (128.02 seconds including managed preparation and cleanup), within
+the unchanged 180-second item, 300-second group and 600-second aggregate
+limits. Literal native terminal input stays in the original conversation,
+fences the old broker with error `-32001`, and never delivers the refused
+prompt. An explicit stop through the original owner yields a certain terminal
+receipt; native resume restores the same conversation under a new broker.
+Exact user/provider counts, live PID/birth agreement, correlated exit codes
+and identity-pinned fixture cleanup pass in both controls.
+
+Fixture diagnosis found two pre-native failures: settings scrubbing removed
+the runner's registry/lifecycle context, and a Windows venv redirector could
+hang before script entry. The fixture now preserves `COPILOT_EXTENSIONS_*`
+context and uses the physical base interpreter with the same managed test
+packages. Private stderr capture identifies original-owner failures without
+printing broker nonces. No production launch, credential or admission policy
+was changed.
+
+The unchanged Driver packet passes 20 controls, with the unrelated standalone
+observer deselected, in 45.12 seconds (65.11 seconds including preparation
+and cleanup). Thirteen unit isolation controls and seven native pane,
+SDK/broker and coordinator controls exercise canonical private mux routing,
+raw child argv and exact retirement. The native SDK/coordinator fixtures now
+launch their actual target directly rather than through a Manager wrapper;
+this evidence does not qualify that wrapper.
+
+This test-only refinement is below architectural altitude. Unit and real
+consumer/native lanes were exercised; first-install clean-room and external
+venue qualification are not applicable to these local Windows fixture
+changes. Installer, copied setup, full Manager/embody, auth-wait, physical
+keyboard, caller-Job lifetime and receiving/skew acceptance remain separate
+open gates. The parent Plan and Validation Plan remain unchanged and Active.
+
+Review of #11275 found a visible-before-complete PID marker and inherited
+PSMux config/data overrides in the finite pane control. Publish the PID and
+original Worktrees owner-result markers by atomic replacement. Reject caller
+overrides, retain a private data directory in both pane controls, and exercise
+default-config versus null-config loading separately. The default-data probe
+could hang before script entry even with the correct physical Python command
+line; do not infer that the venv redirector explained every startup failure.
+With explicit fixture-private data, both pane controls pass in 2.11 seconds
+(28.25 seconds including preparation/cleanup).
+
+A separate native joined-session observation passes in 9.97 seconds
+(36.42 seconds including preparation/cleanup). The executing CLI exposes
+`session.rpc.tasks.list()` and `session.rpc.schedule.list()` with the expected
+`tasks` and `entries` arrays, in the same native conversation and without
+granting extension permissions. Missing/failed reads remain unavailable.
+This does not yet prove complete pending agents, initial/reconnect completeness,
+active schedules or grace-race cancellation; automatic idle retirement stays
+unavailable and the lifetime gate remains open.
+
+The next review found that the foreign socket unit control was relative and
+therefore valid inside the POSIX sandbox. Use an absolute outside-sandbox path,
+and add a POSIX-branch control that distinguishes an owned relative socket from
+that foreign path without spawning a mux. All 14 isolation controls pass in
+0.20 seconds (16.95 seconds including preparation/cleanup).
+
+The declared type-check prerequisite exposed old invocation files beside the
+shared interpreter cache, then an occupied reusable source-view directory.
+Keep each new check's target/configuration and emitted source views in its own
+private staging directory under the existing environment lease. Preserve prior
+files and stages; retire only verified current outputs and the empty current
+directory. This is a validation-tool prerequisite, not a Driver runtime change.
+Focused regression coverage retains previous invocation files while checking
+the actual target/configuration read, source-custody failures and matrix result
+collection. The two checker test files produced 221 passes and two
+failure-path cleanup-assertion mismatches. After correcting those assertions
+to preserve an empty stage on deliberate source drift, the focused three-case
+control passes in 6.15 seconds; the other 221 controls were not repeated.
+Current F/E9 lint and all 40 admitted strict projects pass their declared
+Linux/Windows analysis targets. The module-size gate passes without widening
+any ceiling. No prior cache file or source-view stage was removed.
+
+Copilot review approved head `7066ee88b4dad89c1a0bfb051a3e3fce5131147f`.
+Required CI then refused the older unit-admission digests for the changed
+checker source and candidate test file, before executing the packet. Refresh
+only those two reviewed hashes. Source verification passes with the admitted
+nodes, coverage targets and whole-packet budget unchanged; fresh CI and review
+remain required at the updated head.
+
+The next review has no open issues but notes a shared startup/shutdown
+deadline in the finite pane control. Give shutdown its own ten-second wait
+after release, leaving the original item and packet limits unchanged. Both
+native pane controls pass in 2.44 seconds (35.03 seconds including preparation
+and cleanup). This fixture-only adjustment does not change the qualified
+checker sources or require repeating their settled validation.
