@@ -19,7 +19,7 @@ import pytest
 from agent_procutil import no_window_kwargs
 from agent_procutil.owned_process import run_caller_owned
 from agent_remote_driver.session_host.client import SessionHostClient
-from agent_remote_driver.session_host.osutil import pid_alive
+from agent_remote_driver.session_host.osutil import pid_alive, process_start_time
 
 pytestmark = [
     pytest.mark.timeout(180),
@@ -54,6 +54,7 @@ def test_worktrees_native_fresh_and_resume_keep_one_history_and_real_receipts(tm
     (home / "config.json").write_text(
         json.dumps({"trustedFolders": [str(checkout)]}), encoding="utf-8",
     )
+    (home / ".psmux.conf").write_text("set -g warm off\n", encoding="utf-8")
     requests = []
 
     class Provider(http.server.BaseHTTPRequestHandler):
@@ -80,7 +81,8 @@ def test_worktrees_native_fresh_and_resume_keep_one_history_and_real_receipts(tm
         if not key.startswith(("COPILOT_", "OTEL_"))
         and key not in {
             "GH_TOKEN", "GITHUB_TOKEN", "GITHUB_API_TOKEN", "TMUX", "TMUX_PANE",
-            "PSMUX_PANE", "PSMUX_SESSION", "PSMUX_TARGET_SESSION", "WT_SESSION", "TERM_PROGRAM",
+            "PSMUX_PANE", "PSMUX_SESSION", "PSMUX_TARGET_SESSION", "PSMUX_SESSION_NAME",
+            "PSMUX_DEFAULT_SESSION", "PSMUX_CLAUDE_TEAMMATE_MODE", "WT_SESSION", "TERM_PROGRAM",
         }
     }
     environment.update(
@@ -88,6 +90,7 @@ def test_worktrees_native_fresh_and_resume_keep_one_history_and_real_receipts(tm
         COPILOT_OFFLINE="true", COPILOT_PROVIDER_TYPE="openai",
         COPILOT_PROVIDER_BASE_URL=f"http://127.0.0.1:{provider.server_port}",
         COPILOT_PROVIDER_MODEL_ID="gpt-4.1", COPILOT_MODEL="gpt-4.1", USE_TGREP="false",
+        HOME=str(home), USERPROFILE=str(home),
         PSMUX_DATA_DIR=str(tmp_path / "psmux-data"), PSMUX_CONFIG_FILE=os.devnull,
         PSMUX_NO_WARM="1", WORKTREE_PANE_MIN_RUNTIME="0",
     )
@@ -204,6 +207,7 @@ class Mux {
         )
         record = Path(initialized)
         for leg in ("fresh", "resume"):
+            target = "headed-fixture-" + uuid4().hex
             plan = runtime(
                 "import json,sys;from pathlib import Path;from uuid import uuid4;"
                 "from agent_worktrees import launch_seed_state;"
@@ -241,9 +245,16 @@ class Mux {
                 encoding="utf-8",
             )
             pane = tmp_path / (leg + ".ps1")
+            pane_log = tmp_path / (leg + "-pane.log")
             quote = lambda value: "'" + str(value).replace("'", "''") + "'"
             pane.write_text(
-                f"& {quote(sys.executable)} -I -B {quote(driver)}\nexit $LASTEXITCODE\n",
+                "$ErrorActionPreference='Stop'\ntry {\n"
+                f"  [IO.File]::WriteAllText({quote(pane_log)},'pane started')\n"
+                f"  & {quote(sys.executable)} -I -B {quote(driver)}\n"
+                "  exit $LASTEXITCODE\n"
+                "} catch {\n"
+                f"  [IO.File]::AppendAllText({quote(pane_log)},$_.ToString())\n"
+                "  exit 3\n}\n",
                 encoding="utf-8",
             )
             assert query("has-session", "-t", target).returncode == 1
@@ -263,7 +274,10 @@ class Mux {
                     raise AssertionError(owner_log.read_text(encoding="utf-8"))
                 paths = list(attempt.glob("*/headed.json"))
                 if paths:
-                    value = json.loads(paths[0].read_text(encoding="utf-8"))
+                    try:
+                        value = json.loads(paths[0].read_text(encoding="utf-8"))
+                    except (FileNotFoundError, PermissionError):
+                        return None
                     if value["state"] == "running":
                         return value
 
@@ -271,6 +285,11 @@ class Mux {
                 bound, f"{leg}: Worktrees launch did not bind the common broker",
                 diagnostic=lambda: (
                     query("capture-pane", "-p", "-t", target).stdout[-8192:]
+                    + "\n" + query(
+                        "display-message", "-p", "-t", target,
+                        "#{pane_pid}|#{pane_current_command}|#{pane_start_command}|#{pane_dead}",
+                    ).stdout[-4096:]
+                    + "\n" + (pane_log.read_text(encoding="utf-8") if pane_log.exists() else "pane not started")
                     + "\n" + (owner_log.read_text(encoding="utf-8") if owner_log.exists() else "owner not started")
                     + "\n" + "\n".join(
                         path.read_text(encoding="utf-8", errors="replace")[-4096:]
@@ -286,7 +305,10 @@ class Mux {
             def messages():
                 if not event_file.is_file():
                     return []
-                return [json.loads(line) for line in event_file.read_text(encoding="utf-8").splitlines()]
+                return [
+                    json.loads(line) for line in event_file.read_text(encoding="utf-8").splitlines(True)
+                    if line.endswith("\n")
+                ]
 
             expected_before = 1 if leg == "fresh" else 2
             _until(
@@ -296,13 +318,18 @@ class Mux {
             asyncio.run(broker(state, prompt=prompts[1 if leg == "fresh" else 2]))
             expected = prompts[:2] if leg == "fresh" else prompts
             assert [event["data"]["content"] for event in messages() if event["type"] == "user.message"] == expected
+            execution_files = list(attempt.glob("*.execution.json"))
             executions = [
                 json.loads(path.read_text(encoding="utf-8"))
-                for path in attempt.glob("*.execution.json")
+                for path in execution_files
             ]
             backend, = executions
             spawned, = [event for event in backend["events"] if event["phase"] == "process-spawned"]
             assert spawned["details"]["pid"] == state["child_pid"] != state["host_pid"]
+            birth = spawned["details"]["process_start_time"]
+            assert isinstance(birth, str) and birth
+            assert birth == state["child_process_start_time"] == process_start_time(state["child_pid"])
+            assert state["host_process_start_time"] == process_start_time(state["host_pid"])
             assert runtime(
                 "import json,sys;from pathlib import Path;from agent_worktrees import launch_seed_state;"
                 "print(json.dumps(launch_seed_state.peek(Path(sys.argv[1]),read_only=True) is None))", record,
@@ -313,6 +340,18 @@ class Mux {
                 f"{leg}: exact fixture native processes did not retire",
             )
             _until(result_file.exists, f"{leg}: original Worktrees owner did not report its exit")
+            state_path, = attempt.glob("*/headed.json")
+            exited = json.loads(state_path.read_text(encoding="utf-8"))
+            assert exited["state"] == "child_exited"
+            exit_code = exited["child_exit_code"]
+            assert type(exit_code) is int
+            finished = json.loads(execution_files[0].read_text(encoding="utf-8"))
+            terminal = finished["events"][-1]
+            assert terminal["phase"] == "execution-returned"
+            assert terminal["details"] == {
+                "exit_code": exit_code, "process_exit_code": exit_code, "receipt_uncertain": False,
+            }
+            assert int(result_file.read_text(encoding="utf-8")) == exit_code
             _until(
                 lambda: query("has-session", "-t", target).returncode == 1,
                 f"{leg}: original fixture pane did not close",

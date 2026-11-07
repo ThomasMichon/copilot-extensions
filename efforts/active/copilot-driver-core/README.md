@@ -1572,3 +1572,13 @@ the actual Python launch owner without reinstalling a runtime. This is not
 copied-setup, full Manager/embody planning, guarded-head recovery, physical
 terminal input or all-caller-Job survival acceptance. The complete caller,
 lifetime and receiving gates remain open; no installed rollout occurred.
+
+Review strengthened this checkpoint to compare the receipt birth with both
+the broker record and live OS observation, then require a certain terminal
+receipt and agreement between native, coordinator and original-owner exit
+codes. That native rerun passes in 38.76 seconds (116.14 seconds including
+preparation and cleanup), with the same limits. Live-state polling tolerates
+only transient Windows open contention; complete malformed records still fail.
+Each recovery leg owns a distinct private mux target while retaining the
+same native conversation. Immediate reuse of a retiring mux name is not
+silently treated as qualified.
