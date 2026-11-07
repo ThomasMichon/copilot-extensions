@@ -114,6 +114,7 @@ def test_cohort_registry_retains_runtime_build_and_extra_dependency_closure():
     }
     selected = _registry_distributions(projects, distributions, [
         "application[host]", "transport[client]", "build-tool",
+        "unselected-build-tool; sys_platform == 'unselected'",
     ])
     assert set(selected) == set(distributions) - {("test-only", "1")}
     assert all(selected[key] is distributions[key] for key in selected)
@@ -128,6 +129,66 @@ def test_cohort_registry_refuses_missing_prepared_dependency():
         _registry_distributions({}, {
             ("runtime", "1"): SimpleNamespace(requires=["absent"]),
         }, ["runtime"])
+
+
+@pytest.mark.parametrize(("preparation_only", "prebuild_code"), [
+    (False, 0), (True, 0), (True, 124),
+])
+def test_cohort_native_workflow_selects_lifecycle_and_settles_preparation(
+    tmp_path, monkeypatch, preparation_only, prebuild_code,
+):
+    from types import SimpleNamespace
+    import runpy
+    import subprocess
+    import yaml
+
+    workflow = yaml.safe_load(
+        (PROJECT.parent / ".github" / "workflows" / "installation-context-acceptance.yml").read_text()
+    )
+    steps = workflow["jobs"]["gateway-normal-setup-linux"]["steps"]
+    code = next(step["run"] for step in steps if step.get("name") == "Normal Manager and engine SSH setup")
+    calls = []
+    lease = SimpleNamespace(release=lambda: calls.append("release"))
+    temporary = SimpleNamespace(
+        name=str(tmp_path / "sandbox"), retained=False,
+        retain=lambda: calls.append("retain"),
+    )
+    runner = {
+        "default_python": lambda _component: tmp_path / "venv" / "Scripts" / "python.exe",
+        "ordinary_cache_root": lambda path: path,
+        "acquire": lambda *_args: lease,
+        "TestSandbox": lambda **_options: temporary,
+        "run_prefix": lambda _name: "cohort",
+        "record_owner": lambda *_args, **_options: None,
+        "prepare": lambda *_args: calls.append("prepare"),
+        "isolated_environment": lambda environment, _sandbox: dict(environment),
+        "venv_root": lambda _root: tmp_path / "venvs",
+        "run_contained": lambda *_args, **_options: prebuild_code,
+        "Limits": lambda **options: options,
+        "UnreapedProcessError": type("UnreapedProcessError", (RuntimeError,), {}),
+        "cleanup_sandbox": lambda _temporary: calls.append("cleanup"),
+    }
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    monkeypatch.delenv("COPILOT_EXTENSIONS_SSH_SETUP_COHORT_ONLY", raising=False)
+    if preparation_only:
+        monkeypatch.setenv("COPILOT_EXTENSIONS_SSH_SETUP_COHORT_ONLY", "1")
+    monkeypatch.setattr(runpy, "run_path", lambda _path: runner)
+
+    def run(command, **options):
+        assert "--ephemeral-native-ssh-setup" in command
+        assert options["env"]["COPILOT_EXTENSIONS_SSH_SETUP_COHORT"].endswith("cohort.json")
+        calls.append("lifecycle")
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    if prebuild_code:
+        with pytest.raises(RuntimeError, match="normal Source cohort preparation failed: 124"):
+            exec(compile(code, "<native-cohort-workflow>", "exec"), {})
+    else:
+        exec(compile(code, "<native-cohort-workflow>", "exec"), {})
+    assert calls == ["prepare", "release", *(
+        ["lifecycle"] if not preparation_only and prebuild_code == 0 else []
+    ), "cleanup"]
 
 
 def test_cohort_profile_preparation_overlaps_independent_outputs(tmp_path):

@@ -80,7 +80,7 @@ on:
         type: boolean
         default: false
       runtime_profiles:
-        description: Exercise actual owner-bound runtime-profile policy readers without installation
+        description: Exercise owner-bound profile readers and normal SSH Source profiles without application installation
         type: boolean
         default: false
       update_diagnostics:
@@ -1817,6 +1817,7 @@ jobs:
     timeout-minutes: 6
     env: &gateway-normal-setup-env
       UV_PYTHON: "3.12"
+      COPILOT_EXTENSIONS_SSH_SETUP_COHORT_ONLY: "0"
     steps: &gateway-normal-setup-steps
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -1882,17 +1883,20 @@ jobs:
                   lease = None
               if code:
                   raise RuntimeError(f"normal Source cohort preparation failed: {code}")
-              environment = dict(os.environ)
-              environment["COPILOT_EXTENSIONS_SSH_SETUP_COHORT"] = str(sandbox / "cohort" / "cohort.json")
-              code = subprocess.run(
-                  [sys.executable, str(root / "tools" / "run-standalone-tests.py"),
-                   "fleet-manager", "--timeout", "180", "--ephemeral-native-ssh-setup"],
-                  env=environment, check=False,
-                  creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-              ).returncode
-              if code:
-                  temporary.retain()
-                  raise RuntimeError(f"normal installed cohort lifecycle failed: {code}")
+              if os.environ.get("COPILOT_EXTENSIONS_SSH_SETUP_COHORT_ONLY") == "1":
+                  print("Normal Source profiles prepared; installed lifecycle explicitly not selected", flush=True)
+              else:
+                  environment = dict(os.environ)
+                  environment["COPILOT_EXTENSIONS_SSH_SETUP_COHORT"] = str(sandbox / "cohort" / "cohort.json")
+                  code = subprocess.run(
+                      [sys.executable, str(root / "tools" / "run-standalone-tests.py"),
+                       "fleet-manager", "--timeout", "180", "--ephemeral-native-ssh-setup"],
+                      env=environment, check=False,
+                      creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                  ).returncode
+                  if code:
+                      temporary.retain()
+                      raise RuntimeError(f"normal installed cohort lifecycle failed: {code}")
           finally:
               try:
                   if not temporary.retained:
@@ -1908,6 +1912,24 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 6
     env: *gateway-normal-setup-env
+    steps: *gateway-normal-setup-steps
+
+  gateway-normal-preparation-linux:
+    if: ${{ inputs.runtime_profiles && !inputs.pr_artifacts }}
+    name: Normal SSH Source preparation only (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    env: &gateway-normal-preparation-env
+      UV_PYTHON: "3.12"
+      COPILOT_EXTENSIONS_SSH_SETUP_COHORT_ONLY: "1"
+    steps: *gateway-normal-setup-steps
+
+  gateway-normal-preparation-windows:
+    if: ${{ inputs.runtime_profiles && !inputs.pr_artifacts }}
+    name: Normal SSH Source preparation only (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 6
+    env: *gateway-normal-preparation-env
     steps: *gateway-normal-setup-steps
 
   gateway-role-tunnels:

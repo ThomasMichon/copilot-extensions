@@ -28,6 +28,16 @@ eligibility and faithful consumer selection before expensive qualification.
 Reuse supported prepared environments only where doing so preserves the
 cold-start, concurrency or lifetime property being tested.
 
+The `installation-context-acceptance.yml` manual `runtime_profiles` selection
+includes normal SSH Source/profile preparation on disposable Linux and
+Windows runners, alongside its existing profile-reader controls. Preparation
+preserves the 180-second prebuild and six-minute job limits, real builders,
+dependency feed and cleanup, but does not run the installed
+Manager/engine/Fleet lifecycle. Its result qualifies preparation only, not
+installed setup or full SSH acceptance. The existing `pr_artifacts` selection
+remains the complete lane; selecting it together with `runtime_profiles`
+still runs the full lane and omits the redundant preparation-only jobs.
+
 Keep functional correctness, performance budgets and environment suitability
 separate. A supported diagnostic profile or narrower selection can supply
 useful evidence without passing the original full acceptance gate. Preserve

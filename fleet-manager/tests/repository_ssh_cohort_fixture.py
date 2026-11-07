@@ -26,11 +26,16 @@ def _registry_distributions(projects, distributions, requirements):
     candidates = {}
     for (name, _version), distribution in distributions.items():
         candidates.setdefault(name, []).append(distribution)
-    pending = [Requirement(text) for text in requirements]
+    pending = [(Requirement(text), {""}) for text in requirements]
     selected = {}
     environment = default_environment()
     while pending:
-        requirement = pending.pop()
+        requirement, parent_extras = pending.pop()
+        if requirement.marker and not any(
+            requirement.marker.evaluate({**environment, "extra": extra})
+            for extra in parent_extras
+        ):
+            continue
         name = canonicalize_name(requirement.name)
         extras = {"", *(canonicalize_name(extra) for extra in requirement.extras)}
         if name in selected and extras <= selected[name]:
@@ -47,13 +52,7 @@ def _registry_distributions(projects, distributions, requirements):
                 text for distribution in candidates[name]
                 for text in distribution.requires or []
             ]
-        for text in children:
-            child = Requirement(text)
-            if child.marker is None or any(
-                child.marker.evaluate({**environment, "extra": extra})
-                for extra in selected[name]
-            ):
-                pending.append(child)
+        pending.extend((Requirement(text), selected[name]) for text in children)
     return {
         key: distribution for key, distribution in distributions.items()
         if key[0] in selected
