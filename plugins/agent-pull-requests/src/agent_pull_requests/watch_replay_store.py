@@ -363,6 +363,15 @@ class ReplayStore:
             expires_at=expires_at, checkpoint=checkpoint, persist=False,
         )
 
+    def review_intent_versions(
+        self, *, expires_at: int, checkpoint: Callable[[], None] | None = None,
+    ) -> tuple[int, ...]:
+        """Read the actual adopted contract without provisioning or granting write authority."""
+        return self._review_transaction(
+            lambda document: (1, 2) if document.get("review_intent_version") == 2 else (1,),
+            expires_at=expires_at, checkpoint=checkpoint, persist=False,
+        )
+
     def prepared_review_receipt(
         self, operation_id: str, scope: dict, action_id: str, *,
         expires_at: int, checkpoint: Callable[[], None] | None = None,

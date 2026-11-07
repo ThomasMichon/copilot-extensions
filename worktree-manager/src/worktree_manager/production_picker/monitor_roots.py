@@ -53,7 +53,8 @@ def _current_engine_prefix() -> str | None:
     slot = agent_plugin_runtime.resolve_installed_plugin_slot("agent-worktrees")
     if slot is None:
         return None
-    return os.path.realpath(str(slot))
+    python = agent_plugin_runtime._slot_python(slot)
+    return os.path.realpath(python.parent.parent) if python is not None else None
 
 
 def status_monitor_enabled() -> bool:
