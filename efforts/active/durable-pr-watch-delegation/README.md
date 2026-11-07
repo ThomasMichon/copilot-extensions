@@ -993,6 +993,25 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-11-07 - Diagnose the actual installed first-owner startup failure
+
+- The released `0.3.227-dev1` payload's own normal-upgrade test was exercised
+  in an isolated Windows profile with canonical repository process containment.
+  Initial installation completed, but first owner startup exhausted its
+  original 120-second cutover budget before the upgrade step. Normal cleanup
+  also timed out during reconciliation; recorded test processes have exited.
+  This is failed installed-profile evidence, not native-account acceptance.
+- A read-only profile of running invocation capture took 14.811 seconds;
+  its two snapshot-content traversals consumed 11.238 seconds. This identifies
+  repeated completion validation as measurable cost, not the complete cause
+  of the transaction failure or a controlled speedup comparison.
+- #11231 owns bounded diagnosis and source correction. Preserve fresh
+  governance, completed-slot mutation/link/race refusals, one-writer custody,
+  pending subscriptions and exact process-exit evidence within existing
+  budgets. Do not retry the unchanged broad test, patch deployed copies or
+  treat larger limits as a fix. Bridge #11153 and all parent adoption,
+  delegation, provider and fleet requirements remain separate and open.
+
 ### 2026-11-06 - Retain structured prepared identity before native source adoption
 
 - #11207 actually merged as `4bb05db59c8f836d90bf494afab403d811c6d9b2`
