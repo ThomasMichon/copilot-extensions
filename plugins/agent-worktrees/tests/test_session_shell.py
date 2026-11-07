@@ -1,8 +1,12 @@
 from pathlib import Path
 import json
 import os
+import shlex
 import shutil
 import stat
+import subprocess
+import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -107,6 +111,151 @@ def test_posix_setup_assets_include_literal_reader_and_survive_installation_remo
     shutil.rmtree(runtime)
     assert {path.name: path.read_bytes() for path in prepared.directory.iterdir()} == expected
     assert all(not path.is_symlink() for path in prepared.directory.iterdir())
+
+
+@pytest.mark.parametrize("platform_name", ["nt", "posix"])
+def test_headed_admission_preserves_wrapper_and_literal_native_arguments(launch, monkeypatch, platform_name):
+    from agent_worktrees import installer
+
+    record, runtime, _assets = launch
+    scripts = runtime / "scripts"
+    scripts.mkdir()
+    monkeypatch.setattr(launch_seed_exec, "os", SimpleNamespace(**{**vars(os), "name": platform_name}))
+    monkeypatch.delenv("BASH_ENV", raising=False)
+    monkeypatch.setenv("AGENT_WORKTREES_FINALIZE_STARTUP_MANIFEST", "1")
+    name = "launch-command.ps1" if platform_name == "nt" else "launch-command.sh"
+    wrapper = scripts / name
+    shutil.copyfile(Path(__file__).resolve().parents[1] / "scripts" / name, wrapper)
+    monkeypatch.setattr(installer, "install_dir", lambda: runtime)
+    monkeypatch.setattr(config, "tracking_dir", lambda: record.parent)
+    monkeypatch.setattr(manager_launch_cli, "_worktree_manager_root", lambda: runtime.with_name("manager"))
+    prefix = ["pwsh.exe", "-NoProfile", "-NoLogo", "-File", str(wrapper)] if platform_name == "nt" else [
+        "bash", str(wrapper),
+    ]
+    native = ["copilot", "--session-id", "chosen", "--log-dir", "--resume=literal",
+              "-i", "one\n' \" & $literal", "-C", "--resume=literal-directory", r"-C=C:\two words"]
+    command = launch_seed_exec.deferred_command(
+        [*prefix, "--", *native], record, admission_only=True, preserve_seed_id="retained",
+    )
+    if platform_name == "nt":
+        assert command[5] == "--"
+        assert not list((record.parent / "launch-attempts").glob("*/*.shell/pane-args/*.json"))
+        command = session_shell.startup_command(command)
+        copied = Path(command[4])
+        assert command[5] == "--startup-manifest"
+        manifest = Path(command[6])
+        handoff = json.loads(manifest.read_text(encoding="utf-8"))
+        assert handoff["wrapper"] == str(copied)
+        arguments = handoff["argv"]
+    else:
+        copied = Path(command[1])
+        arguments = command[2:]
+    assert arguments == [
+        "--", sys.executable, "-m", "agent_worktrees.launch_seed_exec",
+        "--record", str(record), "--admission-only", "--preserve-seed-id", "retained",
+        "--", *native,
+    ]
+    from agent_remote_driver.headed.launcher import _native_request
+
+    backend = arguments[arguments.index("--", 1) + 1:]
+    assert _native_request(backend, "chosen") == "one\n' \" & $literal"
+    expected = wrapper.read_bytes()
+    shutil.rmtree(runtime)
+    assert copied.read_bytes() == expected
+
+
+@pytest.mark.parametrize("identity, selected", [
+    ([], None), (["--session-id", "chosen"], "chosen"),
+])
+def test_headed_selection_does_not_promote_a_directory_value_to_a_session(identity, selected):
+    command = ["copilot", *identity, "-C", "--resume=literal-directory"]
+    assert launch_seed_exec._headed_session(command) == selected
+    if selected:
+        from agent_remote_driver.headed.launcher import _native_request
+
+        assert _native_request(command, selected) is None
+
+
+@pytest.mark.parametrize("ambient, environment, mux, legacy", [
+    (None, {"BASH_ENV": "selected-primer.sh"}, False, True),
+    ("ambient-primer.sh", None, False, True),
+    ("ambient-primer.sh", {"BASH_ENV": ""}, False, False),
+    (None, None, True, True),
+    (None, {"BASH_ENV": ""}, True, False),
+    (None, None, False, False),
+])
+def test_headed_bash_keeps_admission_outside_unsafe_shell_startup(
+    launch, monkeypatch, ambient, environment, mux, legacy,
+):
+    record, runtime, _assets = launch
+    scripts = runtime / "scripts"
+    scripts.mkdir()
+    wrapper = scripts / "launch-command.sh"
+    shutil.copyfile(Path(__file__).resolve().parents[1] / "scripts" / wrapper.name, wrapper)
+    monkeypatch.setattr(launch_seed_exec, "os", SimpleNamespace(**{**vars(os), "name": "posix"}))
+    monkeypatch.setattr(launch_seed_exec.installer, "install_dir", lambda: runtime)
+    monkeypatch.setattr(manager_launch_cli, "_worktree_manager_root", lambda: runtime.with_name("manager"))
+    if ambient is None:
+        monkeypatch.delenv("BASH_ENV", raising=False)
+    else:
+        monkeypatch.setenv("BASH_ENV", ambient)
+    monkeypatch.setattr(launch_seed_exec.shutil, "which", lambda *_args, **_kwargs: "/usr/bin/env")
+    command = ["bash", str(wrapper), "--", "copilot", "--session-id", "selected"]
+    prepared = launch_seed_exec.deferred_command(
+        command, record, admission_only=True, environment=environment, mux=mux,
+    )
+    if legacy:
+        assert prepared[:3] == [sys.executable, "-m", "agent_worktrees.launch_seed_exec"]
+        assert prepared[-len(command):] == command
+        assert not (record.parent / "launch-attempts").exists()
+    else:
+        if (environment or {}).get("BASH_ENV") == "":
+            assert prepared[:2] == ["/usr/bin/env", "BASH_ENV="]
+            prepared = prepared[2:]
+        assert prepared[0] == "bash"
+        assert Path(prepared[1]).is_relative_to(record.parent / "launch-attempts")
+        assert prepared[2:6] == ["--", sys.executable, "-m", "agent_worktrees.launch_seed_exec"]
+        assert prepared[-3:] == ["copilot", "--session-id", "selected"]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Native Bash startup admission")
+@pytest.mark.parametrize("termination", ["exit 0", "exec /bin/true"])
+def test_headed_bash_startup_cannot_skip_refused_admission(launch, monkeypatch, termination):
+    record, runtime, _assets = launch
+    scripts = runtime / "scripts"
+    scripts.mkdir()
+    wrapper = scripts / "launch-command.sh"
+    shutil.copyfile(Path(__file__).resolve().parents[1] / "scripts" / wrapper.name, wrapper)
+    monkeypatch.setattr(launch_seed_exec.installer, "install_dir", lambda: runtime)
+    monkeypatch.setattr(manager_launch_cli, "_worktree_manager_root", lambda: runtime.with_name("manager"))
+    entered = record.parent / "bash-entered"
+    primer = record.parent / "primer.sh"
+    primer.write_text(f"printf unsafe > {shlex.quote(str(entered))}\n{termination}\n", encoding="utf-8")
+    monkeypatch.setenv("BASH_ENV", str(primer))
+    command = launch_seed_exec.deferred_command(
+        ["/bin/bash", str(wrapper), "--", "copilot", "--session-id", "selected"],
+        record, admission_only=True,
+    )
+    record.unlink()
+    result = subprocess.run(
+        command, capture_output=True, text=True, timeout=15,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 3, result.stdout + result.stderr
+    assert "Could not hand off staged launch prompt:" in result.stderr
+    assert not entered.exists()
+
+
+def test_windows_headed_wrapper_keeps_legacy_callers_off_the_new_transport(launch, monkeypatch):
+    record, _runtime, _assets = launch
+    monkeypatch.setattr(launch_seed_exec, "os", SimpleNamespace(**{**vars(os), "name": "nt"}))
+    monkeypatch.delenv("AGENT_WORKTREES_FINALIZE_STARTUP_MANIFEST", raising=False)
+    assert launch_seed_exec._headed_admission_command(
+        ["pwsh.exe", "-NoProfile", "-NoLogo", "-File", "not-read.ps1", "--",
+         "copilot", "--resume=original"],
+        record, preserve_seed_id=None, correlation=None,
+    ) is None
+    assert not (record.parent / "launch-attempts").exists()
 
 
 @pytest.mark.parametrize("missing", ["native-seed-reply.sh", "native-seed-boundary.sh", "native-seed-setup.sh"])

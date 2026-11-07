@@ -16,6 +16,7 @@ from agent_procutil import contained_test_mode, no_window_kwargs
 from .backend import HeadedBackend
 from .staging import stage_extension
 from .receipt import PROCESS_RECEIPT
+from ..native_arguments import VALUE_OPTIONS
 from ..session_host.host import SessionHost
 from ..session_host.launcher import (
     _ACQUISITION_ENV, _NONCE_ENV, _STARTUP_ENV,
@@ -97,10 +98,29 @@ def _native_request(argv: list[str], session_id: str) -> str | None:
                     raise ValueError("Missing native session or interactive prompt argument")
                 value = argv[index]
             (identities if name in {"--session-id", "--resume"} else prompts).append(value)
+        elif not separator and (name in VALUE_OPTIONS or name == "-C"):
+            index += 1
+            if index >= len(argv):
+                raise ValueError(f"Missing native value for {name}")
         index += 1
     if identities != [session_id] or len(prompts) > 1:
         raise ValueError("Headed execution requires one matching native session and at most one seed")
     return prompts[0] if prompts else None
+
+
+def _extension_command(argv: list[str], plugin: Path) -> list[str]:
+    index = 1
+    experimental = False
+    while index < len(argv):
+        argument = argv[index]
+        if argument == "--":
+            break
+        experimental = experimental or argument == "--experimental"
+        index += 2 if argument in VALUE_OPTIONS | {"-C", "--resume"} else 1
+    additions = ["--plugin-dir", str(plugin)]
+    if not experimental:
+        additions.append("--experimental")
+    return [*argv[:index], *additions, *argv[index:]]
 
 
 class _PaneChild:
@@ -183,10 +203,7 @@ async def run_headed(
             "nonce": nonce, "hostPid": os.getpid(),
             "client": str(plugin / "extensions" / "copilot-driver-headed" / "host-client.mjs"),
         })
-        argv = _resolve_child_exe(child_argv, child_env.get("PATH"))
-        argv += ["--plugin-dir", str(plugin)]
-        if "--experimental" not in argv:
-            argv.append("--experimental")
+        argv = _extension_command(_resolve_child_exe(child_argv, child_env.get("PATH")), plugin)
         _require_receiving_policy(cwd, policy_context)
         if startup is not None:
             startup.check(child_argv, cwd, session_id, {**os.environ, **(env or {})})

@@ -7,15 +7,8 @@ import re
 from collections.abc import Sequence, Set
 from pathlib import PureWindowsPath
 
-VALUE_OPTIONS = {
-    "-i", "--interactive", "-p", "--prompt", "--model", "--reasoning-effort",
-    "--context", "--auto-tier", "--agent", "-n", "--name", "--session-id",
-    "--log-dir", "--extension-sdk-path", "--log-level", "--stream", "--output-format",
-    "--add-dir", "--attachment", "--disable-mcp-server", "--add-github-mcp-toolset",
-    "--add-github-mcp-tool", "--plugin-dir", "--additional-mcp-config", "--mcp-github-auth",
-    "--max-autopilot-continues", "--mode", "--environment-host", "--environment-compute-id",
-    "--dynamic-retrieval", "--enable-mcp-server", "--max-ai-credits", "--usage-output-file",
-}
+from agent_remote_driver.native_arguments import VALUE_OPTIONS as VALUE_OPTIONS
+
 SETUP_VALUE_OPTIONS = {
     "-machine", "-setuphook", "-configroot", "-runtimepython", "-sessionpath",
     "-envscript", "-copilotpath", "-launchseedrecord", "-launchseedid",

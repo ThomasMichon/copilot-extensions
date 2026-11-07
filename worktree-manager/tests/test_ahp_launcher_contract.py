@@ -23,8 +23,8 @@ def test_windows_launcher_hard_binds_and_disables_post_exit():
     assert "$prop.Name -in @(" in source
     assert "Invoke-ManagedMuxRegister" in source
     assert "$cmd += $CopilotPassthrough" in source
-    assert "$cmd += $ahpArgs" in source
-    assert "$arg -like '--ahp=*' -or $arg -like '--resume=*'" in source
+    assert "(Join-Path $PSScriptRoot 'ahp-command.py') json" in source
+    assert "$cmd = @($reboundJson | ConvertFrom-Json)" in source
     assert "'--ahp', $endpointUrl" in source
     assert '"--resume=$sessionId"' in source
     assert "$plan.post_exit = $false" in source
@@ -58,9 +58,8 @@ def test_posix_launcher_hard_binds_and_disables_post_exit():
     assert "--aw-project" in wrapper
     assert "env -u GITHUB_TOKEN -u AGENT_WORKTREES_AHP_AUTH_TOKEN" in wrapper
     assert 'CMD_ARRAY+=("${COPILOT_PASSTHROUGH[@]}")' in source
-    assert "--ahp=*|--resume=*" in source
-    assert 'CMD_ARRAY+=(--ahp "$_AHP_ENDPOINT"' in source
-    assert '"--resume=$_AHP_SESSION")' in source
+    assert '"$_AHP_HELPER" bash "$_AHP_ENDPOINT" "$_AHP_SESSION" -- "${CMD_ARRAY[@]}"' in source
+    assert 'eval "CMD_ARRAY=( $_AHP_COMMAND )"' in source
     assert "POST_EXIT=0" in source
     assert 'gh auth token --user "$_AHP_ACCOUNT"' in source
     assert "launching via the Worktree Manager Picker" in source

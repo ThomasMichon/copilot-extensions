@@ -2358,20 +2358,29 @@ existing native Copilot executable, and an existing PSMux/PowerShell installatio
 Run `python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_headed_worktrees_copilot.py --allow-explicit-tiers --timeout 300 --plugin-timeout 600 --test-timeout 180`.
 This focused lane uses the managed test environment, a loopback-only model
 provider, disposable Copilot state and the runner's private mux namespace.
-It checks a literal staged seed, fresh launch and same-session native resume,
+It checks literal startup input, fresh launch and same-session native resume,
 broker prompts, real child PID/birth receipts, seed non-replay and exact
 fixture retirement. A second control sends literal native terminal input,
 checks that the old broker refuses further prompt delivery, then explicitly
 stops through the original owner and resumes the same conversation through a
 new broker. Each control checks the exact user history and provider request
-count, with no replay of the rejected prompt.
+count, with no replay of the rejected prompt. A third `manager-no-mux`
+control invokes the actual Manager `launch-session.ps1` and Worktrees resolver,
+using an unmodified private copy of the Manager scripts rather than a synthetic
+resolved plan, through the explicit no-mux path. It checks
+the same native history, broker, PID/birth and original-owner exit receipts.
+These controls use ordinary unseeded admission and an explicit native initial
+prompt; they do not claim staged-seed qualification. The existing real
+PowerShell cold-resume consumer instead verifies Windows refusal before the
+backend starts, with its seed retained, when mux absence is unconfirmed.
 Discovery uses a read-only adapter to the real private mux, not the host's
 default server or fabricated successful replies. The fixture preserves the
 runner's registry/lifecycle context while scrubbing Copilot settings and
 credentials. Its raw pane entrypoint uses the physical Python interpreter and
 the same managed test packages, avoiding the Windows venv redirector.
-It does not install a runtime or qualify copied setup, the full Manager/embody
-planner, guarded-head or auth-wait recovery, physical keyboard input or survival
+It does not install a runtime or qualify copied setup, Manager's muxed
+attached/new-window paths or the full embody planner, guarded-head or auth-wait
+recovery, physical keyboard input or survival
 after caller cleanup Jobs. Those remain separate acceptance lanes.
 
 Driver's explicit `tests/native/test_headed_extension.py` lane uses the same
@@ -2396,6 +2405,60 @@ permission grant, checking the native `tasks` and `entries` arrays in the same
 conversation. Missing/failed/invalid reads do not produce an empty snapshot.
 This is SDK read-support qualification, not complete background-agent evidence,
 active-work/schedule mutation coverage or automatic-idle retirement.
+
+Manager's focused `tests/test_pane_startup.py` controls also execute its actual
+persisted AHP-binding and final startup-serialization blocks against copied
+launch commands. Inline and split resume arguments must be replaced, not duplicated;
+literal drive paths and prompt text survive the final consumer. Companion
+controls refresh the inner runtime before serialization, including recovery
+commands. The Bash inner-owner refresh also recognizes the existing
+`env BASH_ENV=` prefix and leaves native executables unchanged.
+Its runtime-refresh and AHP grammar checks use native Bash on POSIX or Git
+Bash on Windows, disabling MSYS argument translation only in that Windows
+fixture. Git Bash coverage is not native POSIX lifecycle qualification.
+The producer's Windows capability-absence
+control leaves older callers on their legacy path. These are isolated contract
+controls with a synthetic binding/token, not an authenticated AHP connection.
+They preserve selector-shaped interactive/model/agent values and reject
+runtime replacement of a native executable whose literal arguments resemble
+the Python owner. Matching native-Bash AHP controls live in
+`tests/test_launch_session_unwrap.py -k shell_ahp_binding`.
+Worktrees' `tests/test_session_shell.py -k headed_bash` checks effective
+`BASH_ENV` selection before copying and explicit empty-value pinning.
+On POSIX, the same selection executes real Bash exit/exec primers against
+refused admission; neither primer may run before the outer owner.
+The AHP controls also retain the option after a bare `--resume`.
+Both launchers use the bundled `bin/ahp-command.py` read-only adapter for this
+rewrite. Its actual command/argument transport is exercised through both final
+consumers: native positional tails are preserved, authoritative options precede
+their terminator, and copied-wrapper/inner-owner separators remain intact.
+The adapter travels with the launchers' existing runtime assets and uses the
+existing Worktrees option table, not a new installed-peer capability. The
+coupled `test_ahp_launcher_contract.py` pins this delegation and the existing
+credential/post-exit boundaries. Environment prefixes retain assignments,
+unset/chdir flags and env's own terminator before locating native options.
+The supported env grammar uses the standard option parser, including attached
+short-option values and combined flags; incomplete options emit no command.
+Opaque env split-string forms are refused, not interpreted or silently rewritten.
+Driver's `tests/test_headed_launcher.py -k native_validator` checks
+selector-shaped values and missing-value refusal. The existing
+`tests/test_session_host_core.py -k retained_headed_executable` control
+passes a literal `--log-dir` value through the real retained archive and
+verifies native exit. The Worktrees copied-wrapper controls call the same
+validator on the delivered native argv; no native Copilot or rollout is
+implied by these finite-process checks.
+The `retained_headed_extension_options` controls execute the archive and
+observe the real child's argv: extension flags precede the option terminator,
+selector-shaped values remain literal, and only an actual experimental option
+suppresses injection.
+The `headed_selection` controls also keep a selector-shaped split `-C` value
+from inventing a conversation, while preserving a real selected conversation.
+The optional Worktrees `tests/native/test_native_seed_application.py` constructs
+and installs the real wheel application through the canonical build/profile
+owners in a private home, removes its disposable source inputs, and checks
+current-runtime native admission. Its private project registry is empty and
+resident startup remains suppressed by the real pytest-owned test override.
+This first-touch check is distinct from full Manager/Copilot launch qualification.
 
 The optional native runtime-removal portfolio includes
 `tools/test_installer_engine_uninstall.py`,
@@ -5590,6 +5653,10 @@ these units do not qualify Windows read-sharing fences.
 Guardian cleanup checks its operation-owned module namespaces while preserving
 pre-existing modules; legitimate lazy standard-library imports are not treated
 as leaked private modules.
+The existing local-launch boundary fixture loads the core-owned native
+value-option table and Worktrees re-export through restored synthetic package
+namespaces. Both source files are explicitly hash-bound; moving the table does
+not add unit nodes, coverage targets, application imports or actor permissions.
 
 `tools/promotion_unit_tests/test_cell_installer.py` admits the original thirteen
 actor-free Machines release-payload and watchdog controls. The owned process
