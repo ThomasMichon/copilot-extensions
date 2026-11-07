@@ -113,8 +113,7 @@ class PivotProgressScreen(ModalScreen):
              else ("Succeeded: " if ok else "Failed: ") + message)
         )
         self.query_one("#view-cancel", Button).label = "Close"
-        if ok and not self.cancelled.is_set():
-            self.completed()
+        self.completed()
 
     def _message(self, message):
         if self.is_mounted:
@@ -126,7 +125,7 @@ class PivotProgressScreen(ModalScreen):
             self.dismiss()
         else:
             self.cancelled.set()
-            self._message("Cancelling authorization...")
+            self._message("Cancelling operation...")
 
     def on_button_pressed(self, event: Button.Pressed):
         event.stop()

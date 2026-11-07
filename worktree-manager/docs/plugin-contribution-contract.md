@@ -76,7 +76,10 @@ the same lock.
 
 Action completion refreshes the originating row's declared read scope, not a
 later selected machine or the aggregate All sentinel. View-wide completions
-retain their explicit declared scope set. Worker prefetch, joins and the
+retain their explicit declared scope set. Every terminal view-action attempt
+refreshes its source, including failure and cancellation: partial effects and
+restart obligations must not leave the pre-action observation actionable.
+Refreshing does not turn an unsuccessful command into a success. Worker prefetch, joins and the
 visible inventory use the same scope rule, including shared provider commands
 without a `{machine}` selector. If a publication removes a selected row,
 opening Actions refuses rather than falling through to another row.
@@ -90,6 +93,28 @@ One-shot success requires actual JSON output, including an explicit empty array
 or supported empty envelope for an empty scope. Missing or malformed output is
 a read error even when a wrapper reports exit zero; a bounded final stderr line
 is retained to expose provider incompatibility instead of claiming zero rows.
+
+Finite streaming lists retain the 30-second initial-publication/silence budget.
+A valid published row, delta, removal or summary renews that communication
+budget atomically with publication after a first row, so an older expiry cannot
+reject newly committed progress; arbitrary text and `begin` do not. A separate one-hour
+process deadline remains finite even while progress continues. Timeout retains
+partial rows as failed observations, not a completed inventory, and retires the
+owned producer. Finite envelopes also require `done` and exit zero; rows followed
+by EOF or a nonzero exit remain an incomplete read. Older Managers may time out a progressing long observation;
+refresh after updating the consumer rather than claiming the partial read ready.
+Held subscriptions retain their existing first-publication and lifetime rules.
+View-wide executable actions remain unavailable until the consumer has a successful current
+read with no replacement pending. Confirmation and final command dispatch
+recheck the captured scopes, including queued synchronous, progress, Configuration
+and new form commands; a partial summary cannot authorize repair. Partial
+rows and read-only detail cards remain available for inspection.
+The internal `recover-forms` view action also remains available during pending
+or failed board reads: it opens local retained responses without querying or
+executing the provider.
+Explicit receipt checks and identical-request retries from retained-request
+recovery do not depend on a current board read; they retain their original
+provider/action and request validation.
 
 Version-1 compatibility also covers the existing declarative fields:
 

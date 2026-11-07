@@ -79,12 +79,13 @@ class PickerConfigurationMixin:
 
     def _submit_configuration_form(self, reg, action, ctx, values):
         from .pivot_actions import format_form_template
+        from .registered_scopes import action_scopes
         runtime = self._pivot_runtime(reg)
         scope = self._pivot_scope_key()
         argv = format_form_template(action.run, ctx, values)
 
         def work():
-            return runtime.run_resolved(argv, preserve_output=True)
+            return runtime.run_resolved(argv, preserve_output=True, scopes=action_scopes(ctx))
 
         def reload():
             # Reload the originating scope, never the newly selected section.
