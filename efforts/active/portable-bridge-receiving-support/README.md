@@ -1137,3 +1137,12 @@ implementation. The exact support closure follows the consumer trace and tests.
   Those tiers remain open because this source correction has not passed
   review, CI, merge and release. No live service was changed; the source and
   parent efforts remain Active.
+- The first published unit gate refused the two changed registry modules
+  before test execution because their source bindings still named earlier
+  bytes. Re-admitted only those reviewed bindings; hosted Linux units then
+  passed. The local Windows packet separately found a retained-writer fixture
+  comparing a POSIX literal with native `Path` rendering. Made both synthetic
+  sides use the same path representation; all 61 affected controls pass.
+  Re-admitted that one test source without changing node inventory or coverage
+  targets. The complete corrected Windows packet and final-head CI remain
+  required; the earlier 60-case partial result is not qualification.
