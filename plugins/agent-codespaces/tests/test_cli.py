@@ -886,7 +886,7 @@ def test_environment_only_credentials_reach_inventory_and_creation(monkeypatch, 
     monkeypatch.setattr(cli.pool_mod, "list_leases", lambda: [])
     monkeypatch.setattr(cli.pool_mod, "list_status", lambda: [])
     monkeypatch.setattr(cli.pool_mod, "codespaces_in_use", lambda names: {})
-    monkeypatch.setattr(coordination, "list_leases", lambda: {})
+    monkeypatch.setattr(coordination, "list_leases", lambda **kwargs: {})
     monkeypatch.setattr(coordination, "list_cleanliness", lambda: {})
     monkeypatch.setattr("agent_codespaces.driving_worktrees.resolve_current_workstream_box", lambda *args: None)
     bindings = []
@@ -978,16 +978,25 @@ def test_account_resolution_failure_uses_admission_exit(monkeypatch, command, ex
 @pytest.mark.parametrize("inventory_count", [1, 50])
 def test_unmapped_workstream_reuses_bound_account_after_active_switch(monkeypatch, capsys, command, inventory_count):
     import sys
+    import time
     from types import ModuleType, SimpleNamespace
 
     from agent_codespaces import __main__ as cli, account_binding, coordination, gh_account, lifecycle
     from agent_codespaces.config import CodespacesConfig
+    from agent_codespaces import lease, reuse
 
     claims = SimpleNamespace(claims_of_owner=lambda owner, kind: ["retained-venue"])
     peer = ModuleType("agent_worktrees")
     peer.claims_owner = claims
     monkeypatch.setitem(sys.modules, "agent_worktrees", peer)
     monkeypatch.setattr("agent_codespaces.lease.resolve_owner_worktree", lambda: "fixture-worktree")
+    now = time.time()
+    monkeypatch.setattr(reuse, "local_snapshot", lambda: {
+        "retained-venue": lease.Lease(
+            "retained-venue", "", 1, lease._this_host(), now, now,
+            worktree="fixture-worktree",
+        ),
+    })
     monkeypatch.setattr(account_binding, "list_bindings", lambda **kw: [
         account_binding.AccountBinding("retained-venue", "original-owner", 0, "example/project"),
     ])
@@ -1007,7 +1016,7 @@ def test_unmapped_workstream_reuses_bound_account_after_active_switch(monkeypatc
     monkeypatch.setattr(cli.pool_mod, "list_leases", lambda: [])
     monkeypatch.setattr(cli.pool_mod, "list_status", lambda: [])
     monkeypatch.setattr(cli.pool_mod, "codespaces_in_use", lambda names: {})
-    monkeypatch.setattr(coordination, "list_leases", lambda: {})
+    monkeypatch.setattr(coordination, "list_leases", lambda **kwargs: {})
     monkeypatch.setattr(coordination, "list_cleanliness", lambda: {})
     selected = []
 
@@ -1039,7 +1048,7 @@ def test_unmapped_workstream_reuses_bound_account_after_active_switch(monkeypatc
     assert selected == ["original-owner"]
 
 
-def test_owned_capacity_real_cli_process_preserves_override():
+def test_owned_capacity_real_cli_process_preserves_override(tmp_path):
     import subprocess
     import sys
 
@@ -1049,10 +1058,24 @@ def test_owned_capacity_real_cli_process_preserves_override():
 import contextlib
 import io
 import json
-from agent_codespaces import __main__ as cli, lifecycle, pool, coordination, allocation
+import os
+import subprocess
+import sys
+import builtins
+from pathlib import Path
+from agent_codespaces import __main__ as cli, lifecycle, pool, coordination, allocation, lease
+from agent_codespaces import account_binding, driving_worktrees, status, worktrees
 from agent_codespaces.config import CodespacesConfig
 from agent_codespaces.lifecycle import CodespaceInfo
 
+native_list = coordination.list_leases
+native_context = allocation.allocation_context
+original_import = builtins.__import__
+def without_worktrees_package(name, *args, **kwargs):
+    if name == "agent_worktrees" or name.startswith("agent_worktrees."):
+        raise ImportError("separate runtime")
+    return original_import(name, *args, **kwargs)
+builtins.__import__ = without_worktrees_package
 cli.load_merged_config = CodespacesConfig
 cli._require_codespace_scope = lambda operation, **kwargs: None
 cli.validate_context = lambda: None
@@ -1061,8 +1084,10 @@ allocation.allocation_context = lambda repo: ("fixture-owner", {"GH_TOKEN": "fix
 pool.list_leases = lambda: []
 pool.list_status = lambda: []
 pool.codespaces_in_use = lambda names: {}
-coordination.list_leases = lambda: {}
+coordination.list_leases = lambda **kwargs: {}
 coordination.list_cleanliness = lambda: {}
+coordination.owner_ref = lambda: None
+lease.resolve_owner_worktree = lambda: None
 created = []
 cli.create_codespace = lambda *args, **kwargs: (
     created.append(kwargs["account"]) or
@@ -1086,16 +1111,118 @@ for count, force, failed in ((29, False, False), (30, False, False), (31, False,
         create_result = cli.main(argv)
         allocate_result = cli.main(["allocate", "example/project", "--json"])
     results.append([create_result, allocate_result])
-print(json.dumps({"results": results, "created": created}))
+root = Path(sys.argv[1])
+from ssh_manager import locks
+locks.locks_dir = lambda: root / "target-locks"
+lease.LEASE_FILE = root / "leases.json"
+lease._LOCK_FILE = root / "leases.lock"
+lease._DEPLOY_HOLDS_FILE = root / "holds.json"
+lease.ensure_runtime_dir = lambda: None
+lease.resolve_owner_worktree = lambda: "current-worktree"
+account_binding.BINDINGS_FILE = root / "bindings.json"
+account_binding._LOCK_FILE = root / "bindings.lock"
+account_binding.ensure_runtime_dir = lambda: None
+worktrees.validate_context = lambda: None
+status.clear_status = lambda name: None
+os.environ.pop("AGENT_CODESPACES_DISABLE_CLAIM", None)
+coordination.owner_ref = lambda: "machine/project/current-worktree"
+coordination.list_leases = native_list
+cli.load_merged_config = lambda: CodespacesConfig(default_machine_type="premiumLinux")
+pool_rows = [CodespaceInfo(
+    name=f"venue-{index}", display_name="", repository="example/project",
+    branch="retained-feature", state="Shutdown", machine="premiumLinux", account="fixture-owner",
+) for index in range(30)]
+allocation.list_account_codespaces = lambda *args, **kwargs: pool_rows
+record = {"resource": {"kind": "codespace", "key": "venue-0"},
+          "holder": "machine/project/previous", "token": "a" * 40,
+          "state": "released", "live": False}
+calls = []
+obligations = []
+uncertain = False
+def transport(args, **kwargs):
+    calls.append(args)
+    if args == ["--project", "project", "coordination-readiness"]:
+        data = {"version": 1, "ready": True, "code": "ready",
+                "capabilities": [coordination.RELEASED_ONLY_CAPABILITY]}
+    elif args == ["--project", "project", "claims", "current-worktree", "--json"]:
+        data = {"version": 1, "machine": "machine", "repo": "project",
+                "worktree_id": "current-worktree", "outbound": obligations}
+    elif args[:2] == ["lease", "list"]:
+        data = [record]
+    elif args[:2] == ["lease", "inspect"]:
+        data = record
+    elif args[:2] == ["lease", "acquire"]:
+        assert "--released-only" in args and record["state"] == "released"
+        record.update(state="leased", live=True, token="b" * 40,
+                      holder="machine/project/current-worktree")
+        if uncertain:
+            return subprocess.CompletedProcess(args, 4, "", "response lost")
+        data = record
+    elif args[:2] == ["lease", "renew"]:
+        data = record
+    elif args[:2] == ["lease", "release"]:
+        record.update(state="released", live=False, token="c" * 40)
+        data = record
+    elif args[:2] == ["claims", "add"]:
+        if not obligations:
+            obligations.append({"kind": "codespace", "ref": "venue-0", "state": "active"})
+        data = {"worktree_id": "current-worktree", "kind": "codespace",
+                "ref": "venue-0", "state": "active"}
+    elif args[:2] == ["claims", "settle"]:
+        assert "--released" in args
+        obligations.clear()
+        data = {"worktree_id": "current-worktree", "ref": "venue-0", "disposition": "released"}
+    else:
+        raise AssertionError(args)
+    return subprocess.CompletedProcess(args, 0, json.dumps(data), "")
+coordination._run = transport
+from agent_codespaces import live_users
+live_users.codespaces_in_use = lambda names: {}
+retained = root / "retained.txt"
+retained.write_bytes(b"prior effort work")
+with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+    reused = cli.main(["create", "example/project", "--no-wait"])
+    connected = lease.claim("venue-0", "current-worktree", holder_ref="machine/project/current-worktree")
+    returned = lease.release_claim("venue-0", "current-worktree")
+assert reused == 0 and connected.lease_token == "b" * 40 and returned
+assert retained.read_bytes() == b"prior effort work"
+assert pool_rows[0].branch == "retained-feature"
+assert account_binding.bound_account("venue-0") == "fixture-owner"
+assert len([args for args in calls if args[:2] == ["lease", "acquire"]]) == 1
+uncertain = True
+with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+    assert cli.main(["create", "example/project", "--no-wait"]) == 4
+assert record["state"] == "leased" and lease.get_lease("venue-0") is None
+allocation.allocation_context = native_context
+from agent_codespaces import gh_account, owner_inventory
+gh_account.account_for_repo = lambda repo: None
+gh_account.active_account = lambda: "new-active-owner"
+for variable in ("GH_TOKEN", "GITHUB_TOKEN"):
+    os.environ.pop(variable, None)
+selected = []
+owner_inventory.qualified_environment = lambda account: (
+    selected.append(account) or {"GH_TOKEN": "fixture-" + account}
+)
+cli.load_merged_config = lambda: CodespacesConfig(
+    default_machine_type="premiumLinux", max_owned_codespaces=31,
+)
+with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+    retried = cli.main(["create", "example/project", "--no-wait"])
+assert retried == 4 and selected == ["fixture-owner"]
+assert len([args for args in calls if args[:2] == ["lease", "acquire"]]) == 2
+print(json.dumps({"results": results, "created": created, "reused": reused,
+                  "returned": returned, "uncertain_retry": retried}))
 '''
     result = subprocess.run(
-        [sys.executable, "-c", script], capture_output=True, text=True,
+        [sys.executable, "-c", script, str(tmp_path)], capture_output=True, text=True,
         timeout=30, **no_window_kwargs(),
     )
     assert result.returncode == 0, result.stderr
     observed = json.loads(result.stdout)
     assert observed["results"] == [[0, 0], [4, 4], [4, 4], [0, 4], [4, 4]]
     assert observed["created"] == ["fixture-owner", "fixture-owner"]
+    assert observed["reused"] == 0 and observed["returned"] is True
+    assert observed["uncertain_retry"] == 4
 
 
 # --- Top-level --project (command-surface <repo> <slug> surface) ---

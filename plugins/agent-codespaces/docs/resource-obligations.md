@@ -73,6 +73,9 @@ was corrected.
   shells `agent-worktrees claims add codespace <name> --owner-ref <holder_ref>`
   onto the borrowing worktree (resolved by the qualified holder-ref, **not** the
   daemon's cwd project).
+  Ordinary `claim` also journals responsibility, matching the connection path.
+  The sequential reservation flow requires a confirmed native acknowledgement;
+  legacy claim/connect bookkeeping retains its best-effort baseline.
 - **Settle + mirror on disconnect:** on ssh disconnect
   (`_settle_codespace_on_disconnect`), `probe_cleanliness` runs and, on a
   definitive `at_rest`, `coordination.settle_obligation` flips the borrowing
@@ -111,6 +114,10 @@ In all these the shared lease is the single source of truth: whoever settles
 writes the disposition once, and any machine's sweep reads it to reclaim its own
 stale claim. A settled disposition (`at-rest`/`released`) proves the obligation
 dischargeable; an absent/`active` mirror is spare (never reclaimed on a guess).
-`release_claim` tombstones the lease (an absent lease reads as spare —
-conservative), so release relies on the local immediate-release cascade at
-finalize. (Effort `resource-obligation-settlement`, dotfiles#1081 — complete.)
+Tokened `release_claim` confirms shared return and settles the original qualified
+owner's ledger before removing the unchanged local record. Generic and bulk
+release use the same flow. A complete qualified native ledger read can confirm
+an unjournaled legacy entry is absent or already released; a failed read cannot.
+Unknown owner resolution, shared release or settlement retains local custody and
+reports failure, rather than silently dropping the record or settling a newer
+borrower's obligation. Tokenless standalone claims preserve local-only release.

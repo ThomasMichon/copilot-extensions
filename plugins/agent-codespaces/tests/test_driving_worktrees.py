@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import sys
 import types
+import json
+import subprocess
 
 import pytest
 
@@ -159,6 +161,71 @@ def test_current_workstream_account_reports_malformed_binding(monkeypatch):
         account_binding.AccountBinding("cs-web", {"bad": "account"}, 0, "o/web"),
     ])
     with pytest.raises(RuntimeError, match="Malformed"):
+        driving_worktrees.current_workstream_account("web")
+
+
+def test_current_workstream_account_refuses_ambiguous_accounts(monkeypatch):
+    from agent_codespaces import account_binding
+
+    monkeypatch.setattr(driving_worktrees, "_workstream_claim_refs", lambda owner: {"a", "b"})
+    monkeypatch.setattr(account_binding, "list_bindings", lambda **kw: [
+        account_binding.AccountBinding("a", "first", 0, "o/web"),
+        account_binding.AccountBinding("b", "second", 0, "o/web"),
+    ])
+    with pytest.raises(RuntimeError, match="multiple accounts"):
+        driving_worktrees.current_workstream_account("web")
+
+
+@pytest.mark.parametrize("state,expected", [
+    ("active", "original-owner"), ("at-rest", "original-owner"), ("released", None),
+])
+def test_native_workstream_ownership_uses_selected_runtime_without_python_peer(monkeypatch, state, expected):
+    from agent_codespaces import account_binding, coordination
+
+    monkeypatch.setitem(sys.modules, "agent_worktrees", None)
+    monkeypatch.setattr("agent_codespaces.lease.resolve_owner_worktree", lambda: "wt-a")
+    monkeypatch.setattr(coordination, "owner_ref", lambda: "machine/project/wt-a#session")
+    seen = []
+
+    def run(args, **kwargs):
+        seen.append(args)
+        payload = {
+            "version": 1, "machine": "physical", "execution_machine": "machine",
+            "repo": "project", "worktree_id": "wt-a", "owner_ref": "parent/project/owner",
+            "outbound": [{"kind": "codespace", "ref": "cs-web", "state": state}],
+        }
+        if state == "at-rest":
+            payload.pop("version")
+            payload.pop("execution_machine")
+            payload["machine"] = "machine"
+        return subprocess.CompletedProcess(args, 0, json.dumps(payload), "")
+
+    monkeypatch.setattr(coordination, "_run", run)
+    monkeypatch.setattr(account_binding, "list_bindings", lambda **kwargs: [
+        account_binding.AccountBinding("cs-web", "original-owner", 0, "o/web-codespaces"),
+    ])
+    assert driving_worktrees.current_workstream_account("web") == expected
+    assert seen == [["--project", "project", "claims", "wt-a", "--json"]]
+
+
+@pytest.mark.parametrize("response", [
+    None,
+    subprocess.CompletedProcess([], 1, "", "owner unavailable"),
+    subprocess.CompletedProcess([], 0, "not json", ""),
+    subprocess.CompletedProcess([], 0, '{"outbound":[]}', ""),
+    subprocess.CompletedProcess([], 0, json.dumps({
+        "version": 1, "machine": "machine", "repo": "other", "worktree_id": "wt-a",
+        "outbound": [],
+    }), ""),
+])
+def test_native_workstream_lookup_failure_is_not_confirmed_absence(monkeypatch, response):
+    from agent_codespaces import coordination
+
+    monkeypatch.setitem(sys.modules, "agent_worktrees", None)
+    monkeypatch.setattr("agent_codespaces.lease.resolve_owner_worktree", lambda: "wt-a")
+    monkeypatch.setattr(coordination, "owner_ref", lambda: "machine/project/wt-a")
+    monkeypatch.setattr(coordination, "_run", lambda *args, **kwargs: response)
+    with pytest.raises(RuntimeError, match="ownership"):
         driving_worktrees.current_workstream_account("web")
 
 
