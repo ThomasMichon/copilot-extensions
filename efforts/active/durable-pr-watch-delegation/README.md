@@ -341,6 +341,15 @@ _Operator-required outcome; agent-recommended slices and validation._
   adoption, allocation/correlation and installed qualification remain open.
   The [prepared-intent binding refinement](comment-intent-binding.md) addresses
   the missing structured admission fact before new storage/publisher behavior.
+  Its next [durable pre-approval selection refinement](comment-intent-binding.md#durable-pre-approval-selection-and-allocation)
+  precedes automatic allocation or another strict storage/publisher change;
+  retaining a caller-supplied ID does not allocate or recover it.
+- [x] Deliver the finite optional prepared-intent source binding: explicit
+  storage (#11207), native execution/original receipts (#11214), negotiated
+  workspace submission (#11224) and host-bound local preparation before
+  preview/approval (#11237). Caller-retained GUIDs and actual profile/source
+  owners remain required; this is not automatic all-publisher adoption,
+  allocation, acquisition/DB mapping or installed/provider qualification.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -894,6 +903,13 @@ or silently expanding a bounded source claim.
   boundaries, with explicit surface/provider coverage and evidence tiers.
   Preserve every existing attention, native, installed and shadow gate.
 
+- [x] Qualify the finite local preparation -> exact preview -> explicit
+  native/Gateway submission -> durable reopen and confirmed retry source
+  path for comments, replies and owned edits (#11237; 133 coupled cases).
+  Retained-write profile changes, unsupported receiver/binding and caller
+  policy/identity rebinding refuse. Synthetic native responses are not live
+  provider, installed or all-publisher acceptance.
+
 - [x] Qualify the finite B4 source contract through existing-owner storage,
   actual protected synthetic readback and negotiated CLI/client/Gateway/service
   consumers: 232 coupled cases, including exact proof, overlapping operations,
@@ -992,6 +1008,66 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-06 - Review durable selection before automatic identity allocation
+
+- The finite prepared-source completion journal #11244 actually merged after
+  exact-head Copilot approval with no open issues and the latest required CI
+  green. Its Plan/Validation credit remains limited to the delivered optional
+  source chain; the parent stays Active and the source worktree reconciled.
+- The next bounded proposal extends the existing intent-binding refinement
+  with durable pre-approval selection and allocation under the same storage
+  owner. It separates retained preview data from execution admission and
+  original native receipts, with lost-result/restart recovery by original
+  operation identity, bounded retention and explicit old/new compatibility.
+- Review this contract before changing strict storage or publisher behavior.
+  It adds no runtime path, persisted format, GUID allocator, policy authority,
+  production migration or operational permission. Other publishers, mapping,
+  full attention/CLI/provider and installed/shadow acceptance remain open.
+
+### 2026-11-06 - Compose the local producer before preview and explicit submission
+
+- #11237 actually merged as `bb2f7a49c40e44aba3aa65941b5a47085cbec546`
+  after a passing owner-authored Copilot `COMMENTED` verdict with no
+  Medium/High findings and the latest current-head CI and required PR gate
+  green. Its one Low finding, the missing PR-description documentation-impact
+  assessment and links, was corrected and live-audited before merge.
+  The existing source worktree reconciled through managed completion.
+- An optional trusted host binding composes actual profile/source preparation
+  through the existing local CLI/tool before preview/approval. It returns an
+  exact v2 intent without admission or native effects, retains caller-selected
+  identities and bodyless votes, and leaves submission/default v1 unchanged.
+  No new Gateway route, storage layout, owner loader or GUID allocator exists.
+- The final coupled source packet passes 133 cases with bounded cleanup
+  verified. The managed publication rebase preserved every validated producer
+  and workspace test owner unchanged; native/provider/installed adoption is
+  not inferred from that source proof.
+- Re-read the parent Plan/Validation and credited only this finite leaf.
+  Next, resolve durable pre-approval identity allocation/retention through the
+  existing selected-operation owner before enabling automatic allocation;
+  preparation without a retained original cannot establish cross-call
+  uniqueness. Other issue/PR/review/inline publishers, acquisition/mapping,
+  full attention/CLI/provider and installed/shadow acceptance remain open.
+  This source milestone authorizes no rollout or operational effects.
+
+### 2026-11-06 - Negotiate prepared review submission through existing workspaces
+
+- #11224 actually merged as `083c198ce7` after exact-head Copilot approval
+  with no open issues and the latest current-head CI and required PR gate
+  green. The existing source worktree reconciled through managed completion.
+- The optional existing CLI/tool/client/Gateway path negotiates prepared v2
+  submissions and scoped original receipts. Current receiver/storage/native
+  gates remain authoritative; cached support cannot authorize execution.
+  Prior/default bindings remain v1, with no silent fallback or storage adoption.
+- The final workspace, source-checkpoint and native-custody packet passes
+  125 cases with bounded cleanup verified. The corrected credential-denial
+  fixture targets the actual typed producer and proves no credential read
+  started; no SDK or runtime authority was changed.
+- Re-read the full parent Plan and Validation Plan. Continue an optional local
+  producer before final preview and approval, retaining caller-selected IDs
+  and existing profile/source owners. Automatic allocation, all-publisher
+  coverage, native/provider/installed adoption and full parent acceptance
+  remain open. No deployment or operational effect was introduced.
 
 ### 2026-11-06 - Correlate explicitly selected native prepared effects
 

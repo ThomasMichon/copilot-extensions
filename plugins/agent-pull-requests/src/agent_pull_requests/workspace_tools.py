@@ -14,7 +14,8 @@ from .review_workspace import MAX_GENERATION_BYTES, _generation, _scope
 from .review_intent import identifier
 
 TOOL_PROTOCOL = "agent-pull-requests.workspace-tools/v1"
-COMMANDS = ("capabilities", "load", "sync", "materialize", "source", "source-read", "submit", "inspect", "events", "receipt")
+COMMANDS = ("capabilities", "load", "sync", "materialize", "source", "source-read", "submit", "inspect", "events", "receipt",
+            "prepare")
 FIELDS = {
     "capabilities": (),
     "load": ("number", "expected_current", "budget_seconds"),
@@ -25,6 +26,7 @@ FIELDS = {
     "submit": ("number", "intent", "source_attachment", "budget_seconds"),
     "inspect": ("number", "operation_id"),
     "receipt": ("number", "operation_id", "action_id"),
+    "prepare": ("number", "intent", "identities"),
     "events": ("number", "after", "limit"),
 }
 READ_CONTRACT = {
@@ -81,10 +83,13 @@ class WorkspaceTools:
     Neither a Python type nor a capability declaration authenticates a binding.
     """
 
-    def __init__(self, client=None, *, source_owner=None):
+    def __init__(self, client=None, *, source_owner=None, comment_preparer=None):
         if client is not None and not all(callable(getattr(client, name, None)) for name in ("exchange", "materialize")):
             raise ValueError("existing workspace client required")
         self.client, self.source_owner = client, source_owner
+        if comment_preparer is not None and not callable(comment_preparer):
+            raise ValueError("existing comment preparation binding required")
+        self.comment_preparer = comment_preparer
         self._generations = OrderedDict()
         self._native_execution = client is not None and not inspect.iscoroutinefunction(client.exchange)
 
@@ -145,6 +150,11 @@ class WorkspaceTools:
                     name != "receipt" or supports_prepared_review(backend.get("prepared_review_contract"))
                 )
             ]
+            if (
+                callable(self.comment_preparer) and "submit" in available
+                and supports_prepared_review(backend.get("prepared_review_contract"))
+            ):
+                operations.append("prepare")
             if all(name in available for name in ("lookup", "chunk")):
                 operations.append("materialize")
                 source_contract = getattr(self.source_owner, "contract", None)
@@ -188,6 +198,7 @@ class WorkspaceTools:
             "side": {"enum": ["before", "after"]},
             "operation_id": {"type": "string", "minLength": 1, "maxLength": 128},
             "action_id": {"type": "string", "minLength": 1, "maxLength": 128},
+            "identities": {"type": "object"},
             "after": {"anyOf": [{"type": "null"}, {
                 "type": "object", "properties": {
                     "epoch": {"type": "integer", "minimum": 1},
@@ -236,6 +247,8 @@ class WorkspaceTools:
             capabilities["backend_contract"].get("prepared_review_contract")
         ):
             raise WorkspaceToolUnavailable("prepared_review_contract_unsupported")
+        if command == "prepare":
+            return await self._prepare_comments(request)
         if command in ("load", "sync", "submit", "inspect", "events", "receipt"):
             return await _call(self.client.exchange, command, copy.deepcopy(request))
         required = {"number", "generation_id"}
@@ -246,6 +259,57 @@ class WorkspaceTools:
         if set(request) != required:
             raise ValueError("invalid workspace tool request fields")
         return await self._source_command(command, request)
+
+    async def _prepare_comments(self, request: dict) -> dict:
+        from .review_intent import MAX_INTENT_BYTES, intent
+        from .review_preparation import _guid, validate
+
+        request = copy.deepcopy(request)
+        if len(encoded(request)) > 2 * MAX_INTENT_BYTES:
+            raise ValueError("comment preparation request exceeds its byte limit")
+        selected = intent(request["intent"])
+        if type(request["number"]) is not int or request["number"] != selected["scope"]["number"]:
+            raise ValueError("comment preparation target differs")
+        identities = request["identities"]
+        bodies = [action for action in selected["actions"] if "body" in action]
+        if not isinstance(identities, dict) or set(identities) != {action["id"] for action in bodies}:
+            raise ValueError("comment preparation requires exact selected identities")
+        comments, writes = set(), set()
+        for action in bodies:
+            identity = identities[action["id"]]
+            if not isinstance(identity, dict) or set(identity) != {"comment_id", "write_id", "previous"}:
+                raise ValueError("invalid selected comment preparation")
+            comment, write = _guid(identity["comment_id"]), _guid(identity["write_id"])
+            if comment == write or comment in comments or write in writes:
+                raise ValueError("selected comment identities must be distinct")
+            comments.add(comment)
+            writes.add(write)
+        preparer = self.comment_preparer
+        if not callable(preparer):
+            raise WorkspaceToolUnavailable("comment_preparation_binding_unavailable")
+        for action in bodies:
+            identity = identities[action["id"]]
+            prepared = await _call(
+                preparer, action["kind"], action["body"], scope=copy.deepcopy(selected["scope"]), **identity,
+            )
+            if (
+                not isinstance(prepared, dict)
+                or set(prepared) != {"protocol", "identity", "body", "body_id", "effects"}
+                or prepared["protocol"] != "agent-forge-comment.preparation/v1"
+                or prepared["effects"] != "none"
+            ):
+                raise ValueError("unsupported executing comment preparation")
+            binding = validate(
+                {"identity": prepared["identity"], "body_id": prepared["body_id"]}, prepared["body"],
+            )
+            if any(binding["identity"][key] != identity[key] for key in ("comment_id", "write_id")):
+                raise ValueError("preparer changed the selected comment identities")
+            action.update(body=prepared["body"], preparation=binding)
+        selected["version"] = 2
+        return {
+            "protocol": TOOL_PROTOCOL, "intent": intent(selected, versions=(2,)),
+            "effects": "none", "approval_required": True,
+        }
 
     async def _source_command(self, command, request, *, operation=None, read_identity=None):
         immutable = operation is not None and command == "source"

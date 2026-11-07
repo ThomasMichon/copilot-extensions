@@ -129,6 +129,7 @@ agent-pull-requests workspace sync --request -
 agent-pull-requests workspace materialize --request request.json
 agent-pull-requests workspace source --request request.json
 agent-pull-requests workspace source-read --request request.json
+agent-pull-requests workspace prepare --request request.json
 agent-pull-requests workspace submit --request request.json
 agent-pull-requests workspace inspect --request request.json
 agent-pull-requests workspace receipt --request request.json
@@ -162,6 +163,7 @@ Original host cancellation/authority and retained unknown effects remain separat
 | materialize | number, generation_id |
 | source | number, generation_id, budget_seconds |
 | source-read | source fields plus source_attachment, path, side |
+| prepare (optional local binding) | number, intent (v1 draft), identities |
 | submit | number, intent, source_attachment, budget_seconds |
 | inspect | number, operation_id |
 | receipt (optional prepared contract) | number, operation_id, action_id |
@@ -178,13 +180,52 @@ The [optional prepared review receiver](workspace-integration.md#optional-prepar
 enables v2 `submit` and original `receipt` reads only when the actual selected
 owner advertises its supported contract. Default/prior bindings keep v1;
 missing or malformed support refuses before sending v2, not through a legacy
-fallback. The CLI does not prepare text, allocate GUIDs, adopt storage or turn
-receipt correlation into fresh native readback or handled/echo progress.
+fallback. Submission never prepares text, allocates GUIDs, adopts storage or
+turns receipt correlation into fresh native readback or handled/echo progress.
 
 The optional [conversation event reader](conversation-journal.md) needs explicit
 owner-v3 storage and serving adoption. It is read-only and capability-selected;
 unbound/prior hosts remain usable for their existing operations. A returned
 cursor is not an ACK or a handled-review baseline.
+
+## Optional local comment preparation
+
+An existing host may supply `WorkspaceTools(client, comment_preparer=prepare)`.
+This callable composes the actual
+[AI-profile preparer](../../ai-attribution/docs/comment-preparation.md) and
+Worktrees source owner before final preview and approval. It receives
+`prepare(kind, body, scope=scope, comment_id=..., write_id=..., previous=...)`.
+The host validates the destination against its admitted binding and supplies
+the actual audience policy, effective profile and source snapshot. It maps an
+owned edit to the shared preparer's `comment` activity. The JSON request cannot
+select policy, a profile, source identity, a Python module or an owner.
+The callable is a pure preparation binding, not permission to perform native IO.
+
+The local `prepare` command/tool is advertised only with that binding and the
+selected receiver's prepared-review support. It is not a new Gateway route.
+Its `intent` is a strict v1 draft. `identities` contains exactly one entry per
+body-bearing action, keyed by action ID, each with `comment_id`, `write_id`
+and `previous` (the complete retained shared preparation, or `null`).
+The caller supplies public version-4 GUIDs; this source seam does not allocate
+or persist them. Invalid, missing, duplicate or additional selection fields
+refuse rather than preparing only part of the selection.
+
+The output contains the strict v2 `intent`, `effects: none` and
+`approval_required: true`. It retains operation, scope, candidate, source and
+native edit targets, replaces only selected bodies through the actual preparer
+and binds their exact output. Bodyless votes remain bodyless. The tool does not
+submit, write the durable owner, fetch predecessor comments or infer approval.
+Retain this exact returned intent under the caller's existing selected-operation
+custody, preview and approve it, then explicitly submit it through the same
+receiver. Default/unbound hosts and existing v1 submission remain unchanged.
+
+For another preparation of the same selected write, supply its retained shared
+`previous` record; changed body, profile or source refuses rather than rewriting
+that pending write. An intentional edit retains logical identity and supplies a
+fresh write GUID. Without a retained record, this pure seam cannot discover a
+previous preparation or enforce cross-call uniqueness. Confirmed retries use
+the durable submitted intent, not another preparation call. Durable allocation,
+automatic installed-host adoption and other publisher surfaces remain open.
 
 ## Exact local source adapter
 
