@@ -1912,6 +1912,12 @@ def test_worker_launch_uses_canonical_headlessness(monkeypatch, tmp_path):
 
 @pytest.mark.parametrize("has_project", [False, True])
 def test_fresh_preparation_attributes_repository_sources(monkeypatch, tmp_path, has_project):
+    import agent_procutil.owned_process as owned_process
+    import plugin_test_environment as preparation
+    monkeypatch.setattr(owned_process, "run_caller_owned",
+                        lambda *args, **kwargs: pytest.fail("pure preparation test attempted native execution"))
+    monkeypatch.setattr(preparation, "capture_preparation_auth",
+                        lambda *args, **kwargs: {"UV_CREDENTIALS_DIR": str(tmp_path / "fixture-auth")})
     plugin = tmp_path / "plugins" / "example"
     plugin.mkdir(parents=True)
     if has_project:
