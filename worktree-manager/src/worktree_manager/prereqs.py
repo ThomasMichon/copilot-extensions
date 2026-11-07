@@ -14,7 +14,8 @@ import re
 import shutil
 import subprocess
 from contextlib import nullcontext
-from dataclasses import dataclass
+from collections.abc import Iterator
+from dataclasses import dataclass, replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -88,6 +89,16 @@ def _which(name: str) -> tuple[str, str | None]:
     return name, None
 
 
+def _python_candidates(first: str | None) -> Iterator[str]:
+    if first:
+        yield first
+    for exe in _EXE_ALIASES["python3"]:
+        for directory in os.get_exec_path():
+            found = shutil.which(exe, path=directory)
+            if found:
+                yield found
+
+
 def _probe_version(exe: str) -> str | None:
     powershell = Path(exe).stem.lower() == "pwsh"
     context = TemporaryDirectory(prefix="manager-pwsh-probe-") if powershell else nullcontext(None)
@@ -127,16 +138,36 @@ def _probe_version(exe: str) -> str | None:
 
 def detect_prereq(pr: Prereq) -> PrereqStatus:
     _, path = _which(pr.name)
-    version = _probe_version(path) if path else None
-    return PrereqStatus(
+    absent = PrereqStatus(
         name=pr.name,
-        present=path is not None,
-        path=path,
-        version=version,
+        present=False,
         min_required=pr.min,
         optional=pr.optional,
         notes=pr.notes,
     )
+    paths = _python_candidates(path) if pr.name == "python3" else (path,)
+    first = None
+    seen = set()
+    for candidate in paths:
+        if not candidate:
+            continue
+        key = os.path.normcase(os.path.abspath(candidate))
+        if key in seen:
+            continue
+        seen.add(key)
+        store_alias = (
+            pr.name == "python3"
+            and Path(candidate).parent.name.lower() == "windowsapps"
+        )
+        status = replace(
+            absent, present=not store_alias, path=candidate,
+            version=None if store_alias else _probe_version(candidate),
+        )
+        if first is None:
+            first = status
+        if not store_alias and status.satisfied:
+            return status
+    return first or absent
 
 
 def detect_baseline(catalog=None) -> list[PrereqStatus]:

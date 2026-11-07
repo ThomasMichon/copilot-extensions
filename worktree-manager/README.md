@@ -615,9 +615,12 @@ continues in the same invocation when they are available. Failed provisioning
 or unresolved prerequisites stop before the core installer; a PATH-changing
 install that still leaves a gap requests a shell restart. Re-running is
 idempotent and can heal a partial install. Required Python must return a
-successful, supported version from the exact discovered executable; a found
-but unusable or unqualified Python remains a prerequisite gap. Detection does
-not reorder candidates, substitute a private runtime or repair public PATH.
+successful, supported version from the exact discovered executable. Detection
+continues through the existing `python3`/`python` aliases and their PATH entries
+when an earlier Python is unusable or too old, without executing WindowsApps
+Store aliases. If none qualifies, the first candidate remains the diagnostic
+path and Python remains a prerequisite gap. Detection does not change PATH,
+acquire Python, search private runtimes or add launcher/install-root discovery.
 Windows also requires a working PowerShell 7 (`pwsh`) host for the native core
 installer. A missing, older or unqualified host stops setup before core or
 repository work. As with Git, setup reports a manual system-package command;
