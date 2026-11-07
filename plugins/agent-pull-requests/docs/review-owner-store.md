@@ -192,6 +192,10 @@ returning a preview. Restart, contention and lost results use `recover` or the
 same `allocate` key: neither invokes composition or allocates another identity
 when the original record already exists. Current-owner checks remain mandatory;
 recovery does not grant current policy permission.
+An optional trusted pure `validate_intent` callback may enforce the executing
+transport's complete preview/submission limits before retention commits.
+Failure leaves no new selection; it does not reserve a failed preview or
+authorize another body under an already committed key.
 
 Bodyless votes allocate no GUIDs and create no filler comment. This automatic
 path refuses owned edits, including legacy edits, until their original

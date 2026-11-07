@@ -126,7 +126,8 @@ class WorkspaceOperations:
         with self.cache._transaction() as lock:
             self.cache._check(lock)
 
-    def execute(self, operation, payload, *, expires_at, checkpoint):
+    def execute(self, operation, payload, *, expires_at, checkpoint,
+                selection_validator: Callable[[dict], None] | None = None):
         if operation not in OPERATIONS or not isinstance(payload, dict):
             raise ValueError("unsupported workspace operation")
         fields = {
@@ -138,7 +139,7 @@ class WorkspaceOperations:
             "inspect": ({"number", "operation_id"}, set()),
             "receipt": ({"number", "operation_id", "action_id"}, set()),
             "submit": ({"number", "intent", "source_attachment", "budget_seconds"}, set()),
-            "allocate": ({"number", "intent", "budget_seconds"}, set()),
+            "allocate": ({"number", "intent", "source_attachment", "budget_seconds"}, set()),
             "events": ({"number", "after", "limit"}, set()),
         }
         required, optional = fields[operation]
@@ -229,6 +230,7 @@ class WorkspaceOperations:
         if operation == "allocate":
             result = allocate_selection(
                 self, payload, scope, cache, expires_at=expires_at, checkpoint=check,
+                validate_intent=selection_validator,
             )
             check()
             return {"protocol": PROTOCOL, "scope": scope, "result": result}

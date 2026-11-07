@@ -46,7 +46,7 @@ back to ordinary watches or another provider.
 | `inspect` | `number`, original `operation_id` |
 | `receipt` (optional prepared contract) | `number`, original `operation_id`, `action_id` |
 | `submit` | `number`, immutable `intent`, separate `source_attachment`, `budget_seconds` |
-| `allocate` (optional selection contract) | `number`, original v1 `intent`, `budget_seconds` |
+| `allocate` (optional selection contract) | `number`, original v1 `intent`, `source_attachment`, `budget_seconds` |
 
 Load/sync use the current protected read owner and explicit expected-current
 cache CAS. Sync is a full section refresh plus the existing normalized comparison,
@@ -196,6 +196,7 @@ The existing Gateway binding, finite deadline, checkpoint, transaction,
 capacity and request/drain owners remain unchanged.
 
 The receiver validates the original v1 scope and retained generation/revision,
+plus the selected source attachment's immutable manifest identity,
 then commits fresh comment/reply GUIDs and exact final v2 bytes through
 `ReviewSelectionStore.allocate` before returning a preview. Bodyless votes
 receive no comment identity. Owned/legacy edits remain unsupported on this
@@ -206,6 +207,15 @@ execution admission; it does not resolve a new composer or require the old
 cache entry again. Changed original input refuses. Storage contention keeps
 the existing nonblocking refusal and is retried only through that same key.
 Current owner/expiry checkpoints remain mandatory even on recovery.
+
+The Gateway's trusted transport validator measures its complete serialized
+preview response and the exact submission request (including binding and source
+attachment) before the selection transaction commits. Either frame exceeding
+the existing transport limit refuses without retaining an unrecoverable
+preview. This pure validation performs no native or policy IO under the lock.
+Recovery rechecks the current transport's limits without rewriting retained
+bytes. Native-only larger selections are not implicitly transferable through
+a smaller Fleet frame.
 
 Preparation performs no native reads/writes, execution admission, feedback,
 echo, ACK or DB object mapping. Preview approval remains external to this data

@@ -84,7 +84,7 @@ def test_committed_cli_preview_recovers_then_exact_submission_keeps_original_rec
     if kind == "vote":
         draft["actions"] = draft["actions"][-1:]
     host = WorkspaceTools(native if transport == "native" else client)
-    request = {"number": 42, "intent": draft, "budget_seconds": 60}
+    request = {"number": 42, "intent": draft, "source_attachment": attachment, "budget_seconds": 60}
     original = copy.deepcopy(request)
     if lost:
         execute = native.operations.execute
@@ -146,14 +146,14 @@ def test_committed_cli_preview_recovers_then_exact_submission_keeps_original_rec
     asyncio.run(gateway.drain(timeout=2))
 
 
-@pytest.mark.parametrize("change", ["body", "revision", "scope", "target", "caller_policy", "edit", "budget"])
+@pytest.mark.parametrize("change", ["body", "revision", "source", "scope", "target", "caller_policy", "edit", "budget"])
 def test_changed_selection_and_unsupported_edits_refuse_before_native_effects(
     environment: tuple, prepared_workspace: tuple, selection_workspace: tuple, change: str,
 ) -> None:
     store, _, _, _, backend, _ = environment
     gateway, _, native, _, _, _ = prepared_workspace
     draft, state = selection_workspace
-    request = {"number": 42, "intent": draft, "budget_seconds": 60}
+    request = {"number": 42, "intent": draft, "source_attachment": environment[3], "budget_seconds": 60}
 
     async def scenario() -> None:
         host = WorkspaceTools(native)
@@ -163,6 +163,8 @@ def test_changed_selection_and_unsupported_edits_refuse_before_native_effects(
             altered["intent"]["actions"][0]["body"] += " changed"
         elif change == "revision":
             altered["intent"]["revision"]["iteration"] += 1
+        elif change == "source":
+            altered["source_attachment"]["source"]["complete"] = False
         elif change == "scope":
             altered["intent"]["scope"]["principal_id"] = "other"
         elif change == "target":
@@ -193,7 +195,7 @@ def test_native_same_key_contention_reconciles_one_preview_without_another_alloc
     _, _, native, _, _, _ = prepared_workspace
     draft, _ = selection_workspace
     native.exchange("capabilities", {})
-    request = {"number": 42, "intent": draft, "budget_seconds": 60}
+    request = {"number": 42, "intent": draft, "source_attachment": environment[3], "budget_seconds": 60}
 
     def allocate(_: int) -> dict | None:
         try:
@@ -257,7 +259,7 @@ def test_gateway_negotiates_and_validates_actual_selection_contract(
     async def scenario() -> None:
         host = WorkspaceTools(client)
         capabilities = await host.capabilities()
-        request = {"number": 42, "intent": draft, "budget_seconds": 60}
+        request = {"number": 42, "intent": draft, "source_attachment": environment[3], "budget_seconds": 60}
         before = store.path.read_bytes()
         if malformed == "capability":
             assert "allocate" not in capabilities["operations"]
@@ -309,12 +311,77 @@ def test_optional_receiver_support_and_rollback_preserve_old_paths(
         assert "allocate" not in available["operations"] and "submit" in available["operations"]
         calls = len(caller.calls)
         with pytest.raises(WorkspaceToolUnavailable):
-            await host.invoke("allocate", {"number": 42, "intent": draft, "budget_seconds": 60})
+            await host.invoke("allocate", {
+                "number": 42, "intent": draft, "source_attachment": environment[3], "budget_seconds": 60,
+            })
         assert not any(path.endswith("/allocate") for path in caller.calls[calls:])
         native.exchange("capabilities", {})
         with pytest.raises(RuntimeError, match="capability required"):
-            native.exchange("allocate", {"number": 42, "intent": draft, "budget_seconds": 60})
+            native.exchange("allocate", {
+                "number": 42, "intent": draft, "source_attachment": environment[3], "budget_seconds": 60,
+            })
         assert state["results"] == [] and backend.calls == [] and store.path.read_bytes() == before
+        await gateway.drain(timeout=2)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("limited", ["preview", "submission"])
+def test_gateway_rejects_oversized_final_envelopes_before_commit_and_recovers_same_key(
+    environment: tuple, prepared_workspace: tuple, selection_workspace: tuple, comment_preparer: tuple,
+    limited: str,
+) -> None:
+    from fleet_manager.gateway_service_channel import BODY_BYTES
+    from agent_pull_requests.workspace_client import WorkspaceClientError
+    from agent_pull_requests.workspace_operations import PROTOCOL, encoded
+    from agent_pull_requests.workspace_selection import selection_contract
+
+    store, _, _, attachment, backend, _ = environment
+    gateway, client, native, _, _, binding = prepared_workspace
+    draft, state = selection_workspace
+    prepare, _ = comment_preparer
+    state["profile"]["rules"][0].update(header="H" * 500, footer="F" * 500)
+    probe = copy.deepcopy(draft)
+    probe["version"] = 2
+    probe["actions"][0]["body"] = "x"
+    composed = prepare(
+        "comment", "x", scope=draft["scope"], previous=None,
+        comment_id="11111111-1111-4111-8111-111111111111",
+        write_id="22222222-2222-4222-8222-222222222222",
+    )
+    probe["actions"][0].update(
+        body=composed["body"], preparation={
+            "identity": composed["identity"], "body_id": composed["body_id"],
+        },
+    )
+    state["results"].clear()
+    request = {"number": 42, "intent": draft, "source_attachment": attachment, "budget_seconds": 60}
+    if limited == "preview":
+        framed = json.dumps({
+            "binding": binding.document(), "protocol": PROTOCOL, "scope": draft["scope"],
+            "result": {
+                "protocol": selection_contract()["protocol"], "intent": probe,
+                "effects": "none", "approval_required": True,
+            },
+        }, allow_nan=False).encode("utf-8")
+    else:
+        framed = encoded({"binding": binding.document(), "request": {**request, "intent": probe}})
+    draft["actions"][0]["body"] = "x" * (BODY_BYTES - len(framed) + 2)
+    assert len(encoded({"binding": binding.document(), "request": request})) <= BODY_BYTES
+    before = store.path.read_bytes()
+
+    async def scenario() -> None:
+        host = WorkspaceTools(client)
+        with pytest.raises(WorkspaceClientError):
+            await host.invoke("allocate", request)
+        assert store.path.read_bytes() == before and backend.calls == []
+        assert ReviewSelectionStore(store).recover(draft, expires_at=native.expires_at()) is None
+        state["profile"]["rules"][0].update(header="[Selected AI] ", footer="")
+        preview = await host.invoke("allocate", request)
+        retained = ReviewSelectionStore(store).recover(draft, expires_at=native.expires_at())
+        assert retained["intent"] == preview["result"]["intent"]
+        assert await host.invoke("allocate", request) == preview
+        assert backend.calls == []
         await gateway.drain(timeout=2)
 
     asyncio.run(scenario())

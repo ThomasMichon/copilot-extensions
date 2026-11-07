@@ -119,6 +119,7 @@ class ReviewSelectionStore:
     def allocate(
         self, original: dict, *, compose: Callable[..., dict], expires_at: int,
         checkpoint: Callable[[], None] | None = None,
+        validate_intent: Callable[[dict], None] | None = None,
     ) -> dict:
         """Allocate fresh comments/replies under owner custody before returning a preview.
 
@@ -130,6 +131,10 @@ class ReviewSelectionStore:
         original = review_intent.intent(original)
         if not callable(compose) or inspect.iscoroutinefunction(compose):
             raise ValueError("bounded synchronous comment composition required")
+        if validate_intent is not None and (
+            not callable(validate_intent) or inspect.iscoroutinefunction(validate_intent)
+        ):
+            raise ValueError("bounded synchronous selection validation required")
         if any(action["kind"] == "edit_owned_comment" for action in original["actions"]):
             raise ValueError("automatic owned edits require their original native identity binding")
 
@@ -160,6 +165,9 @@ class ReviewSelectionStore:
                     raise ValueError("preparer changed the allocated comment identities")
                 action.update(body=prepared["body"], preparation=binding)
             selected["version"] = 2
-            return self._retain(document, original, self._prepared(original, selected))
+            selected = self._prepared(original, selected)
+            if validate_intent is not None:
+                validate_intent(copy.deepcopy(selected))
+            return self._retain(document, original, selected)
 
         return self.owner._review_transaction(allocate, expires_at=expires_at, checkpoint=checkpoint)

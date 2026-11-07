@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from . import review_intent
 from .generation_cache import GenerationCache
 from .review_selection_store import ReviewSelectionStore
+from .review_workspace import _digest
 
 if TYPE_CHECKING:
     from .workspace_operations import WorkspaceOperations
@@ -32,9 +33,17 @@ def supports_selection(value: object) -> bool:
     )
 
 
+def selection_preview(intent: dict) -> dict:
+    return {
+        "protocol": selection_contract()["protocol"], "intent": copy.deepcopy(intent),
+        "effects": "none", "approval_required": True,
+    }
+
+
 def allocate_selection(
     workspace: WorkspaceOperations, payload: dict, scope: dict, cache: GenerationCache,
     *, expires_at: int, checkpoint: Callable[[], None],
+    validate_intent: Callable[[dict], None] | None = None,
 ) -> dict:
     from .workspace_operations import WorkspaceUnavailable
 
@@ -43,6 +52,21 @@ def allocate_selection(
     original = review_intent.intent(payload["intent"])
     if original["scope"] != scope:
         raise ValueError("selected preparation differs from authorized workspace scope")
+    attachment = payload["source_attachment"]
+    source = attachment.get("source") if isinstance(attachment, dict) else None
+    if (
+        not isinstance(source, dict) or attachment.get("state") != "ready"
+        or attachment.get("scope") != scope or attachment.get("generation_id") != original["generation_id"]
+        or source.get("schema") != "agent-pull-requests.local-source"
+        or type(source.get("version")) is not int or source["version"] != 1
+        or source.get("complete") is not True or source.get("errors") != []
+        or source.get("scope") != scope
+        or not isinstance(source.get("revision"), dict)
+        or any(source["revision"].get(key) != value for key, value in original["revision"].items())
+        or source.get("id") != original["source_id"]
+        or source["id"] != _digest({key: value for key, value in source.items() if key != "id"})
+    ):
+        raise ValueError("selected preparation requires its original source attachment")
     selections = ReviewSelectionStore(workspace.store)
     retained = selections.recover(original, expires_at=expires_at, checkpoint=checkpoint)
     if retained is None:
@@ -57,8 +81,8 @@ def allocate_selection(
         checkpoint()
         retained = selections.allocate(
             original, compose=compose, expires_at=expires_at, checkpoint=checkpoint,
+            validate_intent=validate_intent,
         )["operation"]
-    return {
-        "protocol": selection_contract()["protocol"], "intent": copy.deepcopy(retained["intent"]),
-        "effects": "none", "approval_required": True,
-    }
+    if validate_intent is not None:
+        validate_intent(copy.deepcopy(retained["intent"]))
+    return selection_preview(retained["intent"])

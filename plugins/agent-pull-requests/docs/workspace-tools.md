@@ -165,7 +165,7 @@ Original host cancellation/authority and retained unknown effects remain separat
 | source | number, generation_id, budget_seconds |
 | source-read | source fields plus source_attachment, path, side |
 | prepare (optional local binding) | number, intent (v1 draft), identities |
-| allocate (optional receiver binding) | number, intent (v1 draft), budget_seconds |
+| allocate (optional receiver binding) | number, intent (v1 draft), source_attachment, budget_seconds |
 | submit | number, intent, source_attachment, budget_seconds |
 | inspect | number, operation_id |
 | receipt (optional prepared contract) | number, operation_id, action_id |
@@ -174,6 +174,9 @@ Original host cancellation/authority and retained unknown effects remain separat
 `allocate` selects only the executing receiver's optional
 [pre-approval selection contract](workspace-integration.md#optional-pre-approval-selection-receiver).
 It takes no caller identities, profile, source-origin or approval flag.
+The original source attachment pins the reviewed source and lets the actual
+Gateway validate both final preview and subsequent submission frame sizes
+before committing; an oversized composed selection refuses without retention.
 The response's `result.intent` is the durably committed final v2 preview;
 `approval_required: true` and `effects: none` describe preparation, not execution
 permission. Explicitly submit that exact intent with the existing protected

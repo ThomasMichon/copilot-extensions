@@ -28,7 +28,7 @@ FIELDS = {
     "inspect": ("number", "operation_id"),
     "receipt": ("number", "operation_id", "action_id"),
     "prepare": ("number", "intent", "identities"),
-    "allocate": ("number", "intent", "budget_seconds"),
+    "allocate": ("number", "intent", "source_attachment", "budget_seconds"),
     "events": ("number", "after", "limit"),
 }
 READ_CONTRACT = {
