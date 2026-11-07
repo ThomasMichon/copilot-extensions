@@ -437,6 +437,15 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [hook studies and source-identity journal](<journal/2026/11.07 hook-studies-and-source-identity.md>)
+records two separate first source studies, an uncertified preflight/truncation
+return and an independently corrected captured-blob currentness boundary.
+Both hook contracts, the unchanged instruction-source Draft and the
+compatibility root's whole-program gate remain open. Two identical complete
+scans at 00:18 Pacific measure 811 whole OPEN, 82 above fixed 729; one external
+departure yields no campaign closure credit. All existing acceptance and
+custodians remain, and the campaign stays Active.
+
 The [readiness and finite-closeout journal](<journal/2026/11.06 runner-readiness-and-finite-closeouts.md>)
 records reviewed #11087, #6952's COMPLETED source repair and #6779's separately
 audited NOT_PLANNED retirement beneath OPEN #6917. All technical readiness
@@ -2906,6 +2915,12 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [hook studies and source-identity journal](<journal/2026/11.07 hook-studies-and-source-identity.md>)
+separates current blob identity, source admission, complete inspection, reported
+checks and actual execution. The source budgets are exhausted; no retrospective
+preflight repair, renewed study, product validation or custody release follows.
+All original technical and campaign completion checkboxes remain unchanged.
 
 The [documentary and retained-wake study](<journal/2026/11.06 documentary-and-retained-wake-study.md>)
 records independent current metadata/source-identity checks, exhausted bounded
