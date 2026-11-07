@@ -5915,3 +5915,12 @@ complete current receiving readback and separate source judgments remain.
   helper as stale. Regenerated it through the declared Worktrees payload
   manifest and verified the snapshot; no unrelated archive or source binding
   is changed.
+- Companion encoding coverage reproduced four report-loss cases with inherited
+  ANSI Python streams or raw non-UTF-8 stdout/stderr, while the two original
+  UTF-8 controls stayed green. Pin the stream setting only for synchronous
+  contributed commands and decode invalid bytes with replacement, preserving
+  their output and actual exit status. The complete affected result,
+  transport and Configuration packet passed 57 controls with one existing
+  installed-Workers opt-in skipped, including all six native encoding cases.
+  No global engine environment, streaming transport, deadline or live runtime
+  was changed.

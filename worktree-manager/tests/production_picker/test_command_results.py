@@ -202,17 +202,31 @@ def test_ordinary_command_timeout_retains_terse_compatibility(monkeypatch):
 
 @pytest.mark.skipif(sys.platform != "win32", reason="native ANSI-locale parent")
 @pytest.mark.parametrize("returncode", [0, 7])
-def test_ansi_parent_preserves_utf8_child_report(tmp_path, returncode):
-    report = "\u2713 ready \u00e9 \u2014"
-    diagnostic = "\u2717 diagnostic \u00e9"
-    child = (
-        f"import sys; print({report!r}); print({diagnostic!r}, file=sys.stderr); "
-        f"raise SystemExit({returncode})"
-    )
+@pytest.mark.parametrize("child_encoding", ["utf8", "inherited-cp1252", "raw-cp1252"])
+def test_ansi_parent_preserves_utf8_child_report(tmp_path, returncode, child_encoding):
+    report = "\u2713 ready \u00e9 \u2014" if child_encoding == "utf8" else "caf\u00e9"
+    diagnostic = "\u2717 diagnostic \u00e9" if child_encoding == "utf8" else "diagnostic \u00e9"
+    if child_encoding == "raw-cp1252":
+        child = (
+            f"import sys; sys.stdout.buffer.write({report.encode('cp1252')!r}); "
+            f"sys.stderr.buffer.write({diagnostic.encode('cp1252')!r}); "
+            f"raise SystemExit({returncode})"
+        )
+        report = report.encode("cp1252").decode("utf-8", errors="replace")
+        diagnostic = diagnostic.encode("cp1252").decode("utf-8", errors="replace")
+    else:
+        child = (
+            f"import sys; print({report!r}); print({diagnostic!r}, file=sys.stderr); "
+            f"raise SystemExit({returncode})"
+        )
     parent = tmp_path / "ansi_parent.py"
+    parent_override = (
+        "os.environ['PYTHONIOENCODING'] = 'cp1252'\n" if child_encoding == "inherited-cp1252" else ""
+    )
     parent.write_text(
-        "import json,subprocess,sys\n"
+        "import json,os,subprocess,sys\n"
         "sys.path[:0] = json.loads(sys.argv[1])\n"
+        f"{parent_override}"
         "from worktree_manager.production_picker.picker_tui import pivots,tasks\n"
         "encoding = subprocess._text_encoding()\n"
         "if encoding.lower() != 'cp1252':\n"

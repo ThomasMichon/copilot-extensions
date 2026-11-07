@@ -78,7 +78,10 @@ not proof that an endpoint is healthy. Inactive services do not acquire a new
 credential prerequisite. Captured Windows Git and PowerShell probes stay
 windowless.
 Captured command stdout and stderr are decoded as UTF-8 even when the
-Manager parent's Windows locale is ANSI.
+Manager parent's Windows locale is ANSI. Synchronous commands receive an
+explicit UTF-8 Python stream setting; invalid bytes from other commands remain
+visible as replacement characters without losing the completed command's
+output or exit status.
 Report mode neither creates a cutover lock nor initializes an existing empty
 one. It observes an existing lock without writing it and reports a busy cutover
 without running a census; explicitly requested repair retains its writer lock.
