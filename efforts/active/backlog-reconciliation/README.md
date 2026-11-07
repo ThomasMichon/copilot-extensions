@@ -233,6 +233,12 @@ implementation authority, resource custody or the fixed checkpoint.
 
 ## Plan
 
+The [source-capability and retained-outcome study](<journal/2026/11.06 source-capability-and-retained-outcomes.md>)
+keeps foreign-target conformance, historical vector repair and deliberate
+install/adopt choices distinct from already-shipped capabilities. Actual merge
+and current source identities do not supply the unfinished acceptance or
+receiving transfer. The whole-queue checkpoint and all existing owners remain.
+
 The [authenticated board-waiter cohort](board-waiter-receiving-cohort.md)
 records reviewed #11166, complete actual #5452 receiving/readback and #5410's
 separate NOT_PLANNED tracking retirement. Actual-header regressions and both

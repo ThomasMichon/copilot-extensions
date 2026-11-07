@@ -3,6 +3,8 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-06 - Source capability and retained outcomes](<journal/2026/11.06 source-capability-and-retained-outcomes.md>)
+
 - [2026-11-06 - Runner readiness and finite closeout evidence](<journal/2026/11.06 runner-readiness-and-finite-closeouts.md>)
 
 - [2026-11-05 - Cohort parents, parallel research and actual dispositions](<journal/2026/11.05 cohort-parent-luna-reconciliation.md>)
