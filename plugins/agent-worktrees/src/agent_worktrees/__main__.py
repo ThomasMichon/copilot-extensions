@@ -6447,7 +6447,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         print("One-shot: pr-sweep <repo> --fleet --json")
         print("Guard facts: refresh-guards [--repo PATH] [--json]")
-        print("Fleet inventory (selected project only): fleet [--json] [--timeout N] [--tracking-status S] [--all] [--cache-only]")
+        print("Fleet inventory (selected project only): fleet [--json] [--timeout N] [--tracking-status S] [--all]")
         return 0
 
     # Fast path (checked before manual-dispatch verbs + the blanket

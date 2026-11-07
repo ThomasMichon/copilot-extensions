@@ -49,15 +49,18 @@ To inventory one project across every SSH-ready machine in a single bounded
 call, use the fleet reader instead of per-host SSH scripts:
 
 ```bash
-<agent-worktrees catalog argv[0]> --project <project> fleet --json [--cache-only]
+<agent-worktrees catalog argv[0]> --project <project> fleet --json
 ```
 
-It runs one passive `agent-worktrees --project <project> list --json` per
-target and returns `{"version": 1, "hosts": [...]}`. Live work is rows whose
+It runs one `agent-worktrees --project <project> list --json --passive`
+per target, which never starts or waits for a host's status-monitor, and
+returns `{"version": 1, "hosts": [...]}`. Live work is rows whose
 derived `state == "active"`, not lifecycle `status == "active"`. A row with
 `reachable: false` carries an `error` and is unknown coverage, never zero
-worktrees. `fleet` covers the selected project only; for other projects,
-read each target host's own `repos list --json` and run one read per
+worktrees; a row with `availability` holds saved, possibly stale rows. `fleet`
+covers the selected project only; for other projects, read each target host's
+own `repos list --strict --json`, require `inventory_authority: "complete"`
+(otherwise that host's projects are unknown), and run one read per
 registered project. See the CLI reference's
 [Fleet worktree inventory](../../../docs/cli-reference.md#fleet-worktree-inventory).
 

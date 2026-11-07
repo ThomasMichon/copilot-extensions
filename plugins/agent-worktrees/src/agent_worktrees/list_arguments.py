@@ -19,6 +19,8 @@ ARGUMENTS = (
                     "help": "Include git state classification (state/ahead/behind/dirty; JSON only). Slower: ~5 git calls per worktree."}),
     ("--cache-only", {"action": "store_true",
                       "help": "Cache-only fast paint without caller-side live probes. With --follow, allow labeled saved rows while the resident starts, then follow current publications."}),
+    ("--passive", {"action": "store_true",
+                   "help": "Bounded passive JSON read: one resident attempt that never starts, recovers or waits for the status-monitor and records no demand; otherwise the saved roster labeled availability.status=advisory, or an error when none is saved. Not with --follow, --glance or --refresh."}),
     ("--profile-assignment-history", {"action": "store_true",
                                       "help": "Include bounded profile_assignments history and the latest assignment in each JSON worktree row. Ordinary and cache-polled rows include only current_profile_assignment."}),
     ("--stream", {"action": "store_true",

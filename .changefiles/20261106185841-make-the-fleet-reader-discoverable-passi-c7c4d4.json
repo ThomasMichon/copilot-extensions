@@ -1,5 +1,5 @@
 {
-  "comment": "Make the fleet reader discoverable, passive and Windows-safe: list it in --help and docs, run the local row through the current interpreter and remote rows through the owner CLI with an explicit --project, close child stdin, suppress self-provisioning, and add --cache-only",
+  "comment": "Make the fleet reader discoverable, passive and Windows-safe: list it in --help and docs, run the local row through the current interpreter and remote rows through the owner CLI with an explicit --project, close child stdin, suppress self-provisioning, and read every host through a new list --passive mode that never starts, recovers or waits for the resident",
   "changes": [
     {
       "plugin": "agent-worktrees",

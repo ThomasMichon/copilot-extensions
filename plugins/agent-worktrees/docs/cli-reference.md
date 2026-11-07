@@ -130,16 +130,17 @@ See [one-shot scope, exact command inputs and partial-result semantics](pr-sweep
 ## Fleet worktree inventory
 
 `[--project <project>] fleet [--json] [--timeout N] [--tracking-status S]
-[--all] [--cache-only]` reads one project's worktrees on every Copilot-enabled,
-SSH-ready machine × environment in `machines.yaml`. It starts exactly one
-`list --json` per target: the current environment runs this runtime locally,
-and each remote one runs `agent-worktrees --project <project> list --json`
-over `ssh -o BatchMode=yes`, so a host needs the owner command but no
-`<project>` binstub. `--cache-only` asks each host for its cached rows.
+[--all]` reads one project's worktrees on every Copilot-enabled, SSH-ready
+machine × environment in `machines.yaml`. It starts exactly one
+`list --json --passive` per target: the current environment runs this runtime
+locally, and each remote one runs
+`agent-worktrees --project <project> list --json --passive` over
+`ssh -o BatchMode=yes`, so a host needs the owner command but no `<project>`
+binstub.
 
 `--json` prints `{"version": 1, "hosts": [{"machine", "env", "reachable",
-"worktrees", "error"?}]}`. Each worktree row is the host's own `list --json`
-record:
+"worktrees", "projection"?, "availability"?, "error"?}]}`. Each worktree row is
+the host's own `list --json` record:
 
 - **Live work** is the derived `state == "active"`. Lifecycle
   `status == "active"`, a nonempty `live_session_ids`, and `--glance` are not
@@ -151,8 +152,10 @@ Coverage is explicit, never inferred:
 
 - **Selected project only.** `fleet` covers the current or `--project`
   project, not every repository registered on a host. For broader discovery,
-  read each target host's registry (`repos list --json` on that host) and run
-  one read per registered project.
+  read each target host's registry with `repos list --strict --json` on that
+  host, require `inventory_authority: "complete"`, and run one read per
+  registered project. An error or a reply without that field, as from an older
+  runtime without `--strict`, leaves the host's projects unknown.
 - **Gaps mean unknown.** A target that is unreachable, times out, lacks the
   owner command, exits nonzero, or prints unparseable output becomes
   `reachable: false` with an `error` and `worktrees: []`. Report it as a
@@ -160,9 +163,15 @@ Coverage is explicit, never inferred:
   another target's rows.
 - **Registration is not checked per host.** Confirm that an empty list comes
   from a host that registers the project before counting it as empty.
-- **Passive read.** Every child runs with stdin closed and
-  `AGENT_WORKTREES_NO_SELFPROVISION=1`, so a host without a usable runtime
-  reports a gap instead of provisioning one.
+- **Passive read.** `list --passive` makes one bounded attempt to read the
+  host's status-monitor and never starts, recovers, or waits for it, and
+  records no list demand. If the monitor does not answer, the host returns its
+  saved roster and the row carries `availability` (`status: "advisory"`) and
+  `projection.observed_at`: saved rows that may be stale. A host with no saved
+  roster, or an older runtime that rejects `--passive` as an unrecognized
+  argument, becomes a `reachable: false` gap. Every child also runs with stdin
+  closed and `AGENT_WORKTREES_NO_SELFPROVISION=1`, so a host without a usable
+  runtime reports a gap instead of provisioning one.
 - **Local deadline only.** `--timeout` bounds the SSH connect and the local
   client. Some SSH servers keep the remote command running after the client
   disconnects, so prefer this bounded reader to ad hoc remote scripts.
@@ -1195,6 +1204,13 @@ merely because a read is slow. Authentication, malformed replies, invalid
 requests and unsupported contracts remain explicit failures.
 The internal bounded/advisory reader and explicitly selected saved-preview
 bootstrap retain their separate contracts; saved rows are never labeled current.
+`list --json --passive` selects that bounded reader for unattended and
+cross-host reads such as `fleet`: one resident attempt that never starts,
+recovers or waits for the resident and records no list demand; otherwise the
+saved roster labeled `availability.status: "advisory"` with its
+`projection.observed_at`, or a JSON error (exit 1) when none is saved. It
+cannot be combined with `--follow`, `--glance` or `--refresh`. Runtimes that
+predate it reject `--passive` as an unrecognized argument (exit 2).
 `--stream --follow` holds the engine-owned snapshot/update feed. See the
 [engine/Picker contract](engine-picker-contract.md) for barriers, order,
 selection, recovery and cutover rules.

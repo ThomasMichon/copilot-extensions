@@ -224,7 +224,7 @@ def test_record_read_exact_unpublished_record_and_unchanged_list(record_fixture,
         "projection": {"quality": "current"},
     }
     monkeypatch.setattr(
-        client, "read_current", lambda request: requests.append(request) or publication
+        client, "read_current", lambda request, **_: requests.append(request) or publication
     )
     monkeypatch.setattr(list_cli, "_status_monitor_enabled", lambda: True)
     monkeypatch.setattr(list_cli.list_cache, "note_demand", lambda *a, **kw: None)

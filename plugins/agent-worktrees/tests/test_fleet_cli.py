@@ -256,7 +256,7 @@ def test_local_row_launches_without_a_project_binstub(tmp_path):
     assert Path(cmd[0]).is_file()
     assert cmd[1:] == [
         "-X", "utf8", "-m", "agent_worktrees",
-        "--project", "agent-worktrees", "list", "--json",
+        "--project", "agent-worktrees", "list", "--json", "--passive",
     ]
 
 
@@ -285,16 +285,16 @@ def test_selected_project_reaches_local_and_remote_commands(tmp_path):
         run_side_effect=_record_calls(calls), project="proj-x",
     )
 
-    expected = ["agent-worktrees", "--project", "proj-x", "list", "--json"]
+    expected = ["agent-worktrees", "--project", "proj-x", "list", "--json", "--passive"]
     local = [cmd for cmd, _ in calls if cmd[0] != "ssh"]
     remote = {cmd[-2]: cmd[-1] for cmd, _ in calls if cmd[0] == "ssh"}
     assert len(local) == 1
-    assert local[0][-4:] == ["--project", "proj-x", "list", "--json"]
+    assert local[0][-5:] == ["--project", "proj-x", "list", "--json", "--passive"]
     assert _bash_argv(remote["ember"]) == [
         "AGENT_WORKTREES_NO_SELFPROVISION=1", *expected,
     ]
     script = _decode_pwsh(remote["atlas-core"])
-    assert "& 'agent-worktrees' '--project' 'proj-x' 'list' '--json';" in script
+    assert "& 'agent-worktrees' '--project' 'proj-x' 'list' '--json' '--passive';" in script
 
 
 def test_children_close_stdin_stay_headless_and_never_self_provision(tmp_path):
@@ -371,18 +371,65 @@ def test_missing_command_or_bad_output_is_a_gap_not_zero(tmp_path):
     assert [w["id"] for w in rows["busy"]["worktrees"]] == ["w1"]
 
 
-def test_cache_only_is_passed_through_to_every_host(tmp_path):
-    """``fleet --cache-only`` asks each host for its cached ``list --json``."""
+def test_every_host_read_is_passive_and_saved_rows_keep_provenance(tmp_path):
+    """Each host is read with ``list --json --passive`` so ``fleet`` never
+    starts or waits on a host's status-monitor. A host serving its saved
+    roster keeps ``availability``/``projection`` on its row, so advisory
+    (possibly stale) rows stay distinguishable from current ones."""
     config = _fake_config(tmp_path, machine="atlas-core", platform="wsl")
     calls = []
+    saved = json.dumps({
+        "worktrees": [{"id": "w1", "state": "active"}],
+        "projection": {"quality": "advisory", "observed_at": 1700000000.0},
+        "availability": {"status": "advisory", "reason": "resident not running"},
+    })
 
-    _run_json(
-        ["--json", "--cache-only"], _three_targets(), config,
-        run_side_effect=_record_calls(calls),
+    result = _run_json(
+        ["--json", "--tracking-status", "active"], _three_targets(), config,
+        run_side_effect=_record_calls(calls, stdout=saved),
     )
 
+    tail = ["list", "--json", "--passive", "--tracking-status", "active"]
     local = [cmd for cmd, _ in calls if cmd[0] != "ssh"]
     remote = {cmd[-2]: cmd[-1] for cmd, _ in calls if cmd[0] == "ssh"}
-    assert local[0][-3:] == ["list", "--json", "--cache-only"]
-    assert _bash_argv(remote["ember"])[-3:] == ["list", "--json", "--cache-only"]
-    assert "'list' '--json' '--cache-only';" in _decode_pwsh(remote["atlas-core"])
+    assert local[0][-5:] == tail
+    assert _bash_argv(remote["ember"])[-5:] == tail
+    assert "'list' '--json' '--passive' '--tracking-status' 'active';" in _decode_pwsh(
+        remote["atlas-core"]
+    )
+    for row in result["hosts"]:
+        assert row["reachable"] is True
+        assert row["availability"]["status"] == "advisory"
+        assert row["projection"]["observed_at"] == 1700000000.0
+
+
+def test_runtime_without_passive_or_saved_roster_is_a_gap(tmp_path):
+    """An older host runtime that rejects ``--passive`` (argparse exit 2), or
+    a host with no resident and no saved roster (exit 1 with a JSON error),
+    is unknown coverage -- never a reachable host with zero worktrees."""
+    entries = {
+        name: _entry(name, envs=[("linux", name)]) for name in ("older", "unsaved")
+    }
+    config = _fake_config(tmp_path, machine="observer", platform="wsl")
+    outcomes = {
+        "older": SimpleNamespace(
+            returncode=2, stdout="",
+            stderr="agent-worktrees: error: unrecognized arguments: --passive",
+        ),
+        "unsaved": SimpleNamespace(
+            returncode=1,
+            stdout='{"error": "connection refused; no usable advisory roster"}',
+            stderr="",
+        ),
+    }
+
+    result = _run_json(
+        ["--json"], entries, config, run_side_effect=lambda cmd, **_: outcomes[cmd[-2]],
+    )
+
+    rows = {row["machine"]: row for row in result["hosts"]}
+    assert "unrecognized arguments: --passive" in rows["older"]["error"]
+    assert "no usable advisory roster" in rows["unsaved"]["error"]
+    for row in rows.values():
+        assert row["reachable"] is False
+        assert row["worktrees"] == []

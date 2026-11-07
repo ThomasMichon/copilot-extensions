@@ -306,6 +306,55 @@ def test_cold_read_starts_owner_and_returns_saved_db_without_waiting_for_live_pr
     assert result["availability"]["status"] == "advisory"
 
 
+@pytest.mark.parametrize("saved", [True, False])
+def test_passive_json_list_never_starts_or_awaits_an_absent_resident(
+    tmp_path, monkeypatch, capfd, no_caller_compute, saved,
+):
+    """``list --json --passive`` (the ``fleet`` host read) makes one resident
+    attempt; with the resident absent it returns the saved roster labeled
+    advisory, or a JSON error when none is saved. It never starts, recovers
+    or waits for the status-monitor, and records no list demand."""
+    monkeypatch.setattr(client.monitor, "_aw_runtime_home", lambda: tmp_path)
+    monkeypatch.setattr(client.monitor, "_status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(list_cli, "_status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(list_cli.cfg, "project_name", lambda: "project")
+    monkeypatch.setattr(
+        client.monitor, "_ensure_status_monitor", lambda: pytest.fail("started the resident"),
+    )
+    monkeypatch.setattr(client.time, "sleep", lambda _: pytest.fail("waited for the resident"))
+    monkeypatch.setattr(
+        list_cli.list_cache, "note_demand", lambda *a, **k: pytest.fail("recorded demand"),
+    )
+    monkeypatch.setattr(client, "_resident",
+                        lambda _: (_ for _ in ()).throw(ConnectionRefusedError("absent")))
+    if saved:
+        store = projection.WorktreesProjection(tmp_path / "worktrees-current.sqlite3")
+        store.publish("project", [{"id": "saved"}], observed_at=1)
+
+    rc = list_cli.cmd_list(argparse.Namespace(
+        json=True, passive=True, tracking_status="all", all=True, include_other_platforms=True,
+    ))
+
+    result = json.loads(capfd.readouterr().out)
+    if saved:
+        assert rc == 0
+        assert result["worktrees"] == [{"id": "saved"}]
+        assert result["availability"]["status"] == "advisory"
+        assert result["projection"]["observed_at"] == 1
+    else:
+        assert rc == 1
+        assert "worktrees" not in result
+        assert "absent" in result["error"]
+        assert not (tmp_path / "worktrees-current.sqlite3").exists()
+
+
+def test_passive_list_rejects_follow(capfd):
+    assert list_cli.cmd_list(argparse.Namespace(
+        json=True, passive=True, follow=True, tracking_status="all",
+    )) == 1
+    assert "--passive cannot be combined" in json.loads(capfd.readouterr().out)["error"]
+
+
 @pytest.mark.parametrize("birth", [None, "12345"])
 def test_confirmed_dead_route_recovers_before_attempting_transport(
     tmp_path, monkeypatch, no_caller_compute, birth,

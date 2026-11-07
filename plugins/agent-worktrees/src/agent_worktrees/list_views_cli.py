@@ -151,10 +151,9 @@ def _local_project_argv(project: str) -> list[str]:
     return [sys.executable, "-X", "utf8", "-m", "agent_worktrees", "--project", project]
 
 
-def _parse_list_payload(raw: str) -> list | None:
-    """Extract the ``worktrees`` array from a ``list --json`` payload
-    (always an enveloped ``{"worktrees": [...]}`` object -- see
-    ``cmd_list``'s own ``_json_output({"worktrees": worktrees})``), or
+def _parse_list_envelope(raw: str) -> dict | None:
+    """Extract the enveloped ``list --json`` payload (``{"worktrees": [...],
+    "projection": {...}, "availability": ...}`` -- see ``emit_current``), or
     None on any parse/shape failure.
 
     Tolerates surrounding shell/login-banner noise by scanning for the
@@ -179,8 +178,15 @@ def _parse_list_payload(raw: str) -> list | None:
         data = json.loads(raw[start:end + 1])
     except (ValueError, TypeError):
         return None
-    worktrees = data.get("worktrees") if isinstance(data, dict) else data
-    return worktrees if isinstance(worktrees, list) else None
+    if not isinstance(data, dict) or not isinstance(data.get("worktrees"), list):
+        return None
+    return data
+
+
+def _parse_list_payload(raw: str) -> list | None:
+    """The ``worktrees`` array of :func:`_parse_list_envelope`, or None."""
+    envelope = _parse_list_envelope(raw)
+    return None if envelope is None else envelope["worktrees"]
 
 
 def _probe_host(
@@ -227,12 +233,18 @@ def _probe_host(
     if proc.returncode != 0:
         row["error"] = (proc.stderr or proc.stdout or f"exit {proc.returncode}").strip()[:500]
         return row
-    worktrees = _parse_list_payload(proc.stdout)
-    if worktrees is None:
+    envelope = _parse_list_envelope(proc.stdout)
+    if envelope is None:
         row["error"] = "unparseable or unexpected `list --json` output"
         return row
     row["reachable"] = True
-    row["worktrees"] = worktrees
+    row["worktrees"] = envelope["worktrees"]
+    # Provenance stays with the rows: `availability` is set (status
+    # "advisory") when the host served its saved roster instead of a
+    # current resident publication; `projection.observed_at` dates it.
+    for key in ("projection", "availability"):
+        if isinstance(envelope.get(key), dict):
+            row[key] = envelope[key]
     return row
 
 
@@ -246,10 +258,15 @@ def run_fleet(argv: list[str]) -> int:
         "current or `--project <project>` one), not every project on a host. "
         "A host that is unreachable, times out, lacks the owner command or "
         "exits nonzero degrades to a partial row (`reachable: false` with an "
-        "`error`), which means unknown, not zero worktrees. Registration is "
+        "`error`), which means unknown, not zero worktrees. Each host is read "
+        "with `list --json --passive`: one bounded resident attempt that never "
+        "starts or waits for a host's status-monitor, otherwise that host's "
+        "saved roster labeled by the row's `availability` (status advisory) "
+        "and `projection.observed_at`; a host without a saved roster, or whose "
+        "older runtime rejects `--passive`, is a partial row. Registration is "
         "not checked per host: confirm a host's empty list against that "
-        "host's `repos list --json`. Rows carry both the lifecycle `status` "
-        "and the derived `state`; live work is `state == \"active\"`.",
+        "host's `repos list --strict --json`. Rows carry both the lifecycle "
+        "`status` and the derived `state`; live work is `state == \"active\"`.",
     )
     parser.add_argument("--json", action="store_true", help="JSON output (default: human summary)")
     parser.add_argument(
@@ -267,11 +284,6 @@ def run_fleet(argv: list[str]) -> int:
     parser.add_argument(
         "--all", action="store_true",
         help="Passed through to each host's own `list --json --all`",
-    )
-    parser.add_argument(
-        "--cache-only", action="store_true",
-        help="Passed through to each host's own `list --json --cache-only` "
-        "(cached rows without live probes)",
     )
     args = parser.parse_args(argv)
     # Fail fast on a bad --timeout (0/negative/NaN/inf) -- an uncaught one
@@ -293,13 +305,12 @@ def run_fleet(argv: list[str]) -> int:
     except Exception:
         project = "agent-worktrees"
 
-    extra_args: list[str] = []
+    # Every host read is passive: it never starts or awaits a status-monitor.
+    extra_args: list[str] = ["--passive"]
     if args.tracking_status:
         extra_args += ["--tracking-status", args.tracking_status]
     if args.all:
         extra_args.append("--all")
-    if args.cache_only:
-        extra_args.append("--cache-only")
 
     try:
         targets = list(_fleet_targets(config))
@@ -351,7 +362,8 @@ def run_fleet(argv: list[str]) -> int:
             continue
         n = len(row.get("worktrees", []))
         total += n
-        print(f"  {label:30} {n} worktree(s)")
+        saved = " (saved roster)" if row.get("availability") else ""
+        print(f"  {label:30} {n} worktree(s){saved}")
     print(f"\n{total} worktree(s) across {len(rows)} host(s).")
     return 0
 

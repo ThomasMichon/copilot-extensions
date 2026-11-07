@@ -18,44 +18,57 @@ refusal or missing runtime as unavailable evidence, not permission to install.
 Inventory worktrees with the native, project-scoped readers:
 
 ```text
-<worktrees-argv> --project <project> fleet --json [--cache-only]
-<worktrees-argv> --project <project> list --json --cache-only
-<worktrees-argv> repos list --json
+<worktrees-argv> --project <project> fleet --json
+<worktrees-argv> --project <project> list --json --passive
+<worktrees-argv> repos list --strict --json
 ```
 
 `fleet` reads one project on every Copilot-enabled, SSH-ready machine in one
-bounded call: a single passive `list --json` per target, through each host's
+bounded call: a single `list --json --passive` per target, through each host's
 owner command rather than a project binstub. A target that is unreachable,
 times out, lacks the command or returns unusable output becomes a row with
 `reachable: false` and its `error`; record it as a coverage gap. `fleet`
 covers **only the selected project**, so one call is incomplete for all-agent
 discovery: active work also lives in other registered projects.
 
+`--passive` makes one bounded attempt to read the host's status-monitor and
+never starts, recovers or waits for it. When the monitor is not answering, the
+host returns its saved roster with `availability.status == "advisory"`; that
+row's `availability` and `projection.observed_at` mark it as saved and possibly
+stale. A host with no saved roster, or an older runtime that rejects
+`--passive` as an unrecognized argument, returns an error that is a coverage
+gap. Do not fall back to a plain or `--cache-only` `list --json`: either may
+start a stopped status-monitor and wait for a fresh publication.
+
 For fleet-wide coverage, enumerate projects on each target host, never only on
-the observer. Run that host's `repos list --json` and keep entries whose class
-is `worktree` or `knowledge`. Read each one, either with `fleet` once per
-project (it takes its machine list from the selected project's configuration
-on the observer, so it suits projects the observer also registers) or on that
-host with `agent-worktrees --project <name> list --json --cache-only`, which
-returns the same rows from the host's cache. Give each project read its own
-caller-chosen deadline inside an outer deadline for the sweep; do not assume a
-universal value or raise it automatically. Append each project's rows or its
-error as it completes, for example one JSONL line per project, so a later
-timeout never discards earlier results. Projects not read by the outer
+the observer. Run that host's `repos list --strict --json` and require
+`inventory_authority == "complete"`; an error, a nonzero exit, or a reply
+without that field (as from an older runtime that ignores or rejects
+`--strict`) makes the host's project set unknown, a host-level coverage gap.
+Keep entries whose class is `worktree` or `knowledge`. Read each one, either
+with `fleet` once per project (it takes its machine list from the selected
+project's configuration on the observer, so it suits projects the observer
+also registers) or on that host with
+`agent-worktrees --project <name> list --json --passive`. Give each project
+read its own caller-chosen deadline inside an outer deadline for the sweep; do
+not assume a universal value or raise it automatically. Append each project's
+rows or its error as it completes, for example one JSONL line per project, so
+a later timeout never discards earlier results. Projects not read by the outer
 deadline are unobserved, not empty or offline.
 
 Live work is rows whose derived `state == "active"`. Do not use lifecycle
 `status == "active"`, a nonempty `live_session_ids` or `--glance` as liveness:
 they include idle rows and dead or retained sessions. Keep each row's
-`live_rest`, `fact_provenance` and `observed_at` so busy, live-idle and
-awaiting-operator work stay distinct. Count a paired sibling (shared `pair_id`)
-or a session that appears in several rows once.
+`live_rest`, `fact_provenance` and `observed_at`, and each read's
+`availability` and `projection.observed_at`, so busy, live-idle,
+awaiting-operator and saved work stay distinct. Count a paired sibling (shared
+`pair_id`) or a session that appears in several rows once.
 
-Keep coverage honest. Report unreachable hosts, stale or partial cache,
-projects that are unregistered, unadopted or unavailable on a host, and
-non-worktree sessions such as Bridge or provider sessions as unknown or out of
-scope, never as zero active work. Count an empty list only for a project that
-the host's own registry confirms.
+Keep coverage honest. Report unreachable hosts, saved, stale or partial
+rosters, projects that are unregistered, unadopted or unavailable on a host,
+and non-worktree sessions such as Bridge or provider sessions as unknown or out
+of scope, never as zero active work. Count an empty list only for a current
+(not advisory) read of a project that the host's complete registry confirms.
 
 Do not sweep with `list-sessions`: it scans every session's history and can
 take over a minute on a host with a large history. Use it, and the lineage
@@ -81,10 +94,11 @@ agenda locators without parsing private owner databases.
 For cross-machine reads, first resolve the configured machine alias and shell
 through the topology reader. For a re-resolved roster, read the manifest and
 the SSH capability's read-only reachability check fresh each cycle; do not
-reuse an earlier cycle's readiness. Prefer `fleet` and the per-host cached
-`list --json` read to ad hoc remote scripts. A remote host has no session
-command catalog: invoke its installed owner command `agent-worktrees` with an
-explicit `--project`, not a project binstub, which a host need not have.
+reuse an earlier cycle's readiness. Prefer `fleet` and the per-host
+`list --json --passive` read to ad hoc remote scripts. A remote host has no
+session command catalog: invoke its installed owner command `agent-worktrees`
+with an explicit `--project`, not a project binstub, which a host need not
+have.
 
 When an ad hoc remote read is still necessary, keep it bounded and headless:
 
