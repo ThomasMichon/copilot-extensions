@@ -2849,3 +2849,31 @@ report directory has been declared. The pure regression stub now requires the
 same keyword-only budgets, so it cannot hide this interface mistake. Its five
 admission controls and touched-file lint pass again. The failed run supplies no
 native acceptance credit; qualification must use the revised published head.
+
+### 2026-11-07 - Runtime-only provider native qualification
+
+Exact source `c49a2c51dcd25cffcf1b6094b49ac14c857b28ca` passes manual
+qualification `42322817268` on both disposable hosted platforms. The downloaded
+JUnit bodies confirm fourteen Linux passes and seventeen Windows passes, with
+no errors or failures. Linux exercises Bash and PowerShell Core selection,
+unchanged default inference, repeat runtime-only selection and early refusal;
+Windows exercises Windows PowerShell and PowerShell Core. Unsupported shells
+are explicit platform skips.
+
+All three actual Windows cold-driver cases pass: ordinary entry, runtime-only
+entry and caller abandonment, in 5.041, 3.627 and 3.441 seconds respectively.
+They retain the existing request owner, native reentry, deadline propagation,
+output capture and cleanup assertions. Their Linux skips reflect that fixture's
+Windows-only contract, not native Linux installation coverage. The earlier local
+item timeouts remain unresolved local results; no deadline was raised and no
+local success is inferred from this separate hosted result.
+
+This qualifies the bounded provider seam, not a complete native runtime install
+or fresh-project adoption. The shell-selection controls execute extracted
+production selection code; the cold-driver fixture deliberately substitutes a
+fixed no-install native participant. Normal source review, current-head required
+CI, merge and containing release remain due. Independently deployed callers must
+check the exact selected payload's advertised capability before migration.
+Caller fresh/prior-state policy preservation and whole-flow recovery remain
+under #11178, #5852 and the active #10377 acceptance matrix. No shared runtime,
+service, credentials, registration or installation is changed.
