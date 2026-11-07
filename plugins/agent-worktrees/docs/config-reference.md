@@ -682,6 +682,14 @@ prospective settings with the staged anchor without writing them, checks again
 after observation, and retains the checked profile input for later New staging.
 An edited or unstaged profile cannot silently activate a different roster after
 the application check.
+New also observes the actual prepared worktree before returning its launch plan,
+because its Git tree, local settings or paired preparation may enable different
+plugins from the anchor. This check also runs when instruction projection is
+deferred. It uses the original checked profile input and a separate 60-second
+observation budget, not an unbounded extension of the pre-allocation read.
+If it refuses after allocation, the error retains the created worktree identity;
+repair and recover that existing worktree rather than repeating New. Existing
+sessions, explicit recovery and source-only allocation keep their exemptions.
 Open **Configuration > Application Readiness** to inspect and explicitly repair;
 use **Installation & Updates** when its owner/runtime is unavailable, then retry.
 Admission does not supply credentials, install applications or attest restarts.

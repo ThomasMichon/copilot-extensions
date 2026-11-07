@@ -189,6 +189,22 @@ def test_profile_change_during_application_read_refuses_even_after_reconcile(fam
     assert admission.new_application_error(configuration, source=str(root))
 
 
+def test_received_read_cannot_replace_the_original_profile_input(family, monkeypatch):
+    from agent_worktrees import application_admission as admission
+    from agent_worktrees.launch_preflight import LaunchPreflight, LaunchPreflightError
+
+    root, worktree, configuration = family()
+    configuration = replace(configuration, repos={"tools": replace(
+        configuration.default_repo, require_application_readiness=True)})
+    tool.reconcile_project("tools", root, installer.read_projects_registry())
+    preflight = LaunchPreflight(checked_profile=tool.observe_for_admission(configuration))
+    _json(root / "profile.json", {"enabledPlugins": {"later@tools": True}})
+    tool.reconcile_project("tools", root, installer.read_projects_registry())
+    monkeypatch.setattr(admission, "_selected_runtime", lambda **kw: pytest.fail("replacement profile read"))
+    with pytest.raises(LaunchPreflightError, match="profile changed"):
+        admission.require_received_applications(configuration, str(worktree), preflight)
+
+
 def test_profile_removal_cannot_unmask_an_unobserved_plugin(family):
     root, _, configuration = family()
     _json(root / ".github" / "copilot" / "settings.json", {"enabledPlugins": {"off@tools": True}})

@@ -118,6 +118,12 @@ def test_knowledge_refusal_does_not_probe_applications(tmp_path, monkeypatch):
     ) == "knowledge unavailable"
 
 
+@pytest.mark.parametrize("preflight", [None, launch_preflight.LaunchPreflight()])
+def test_source_only_or_recovery_has_no_received_application_read(tmp_path, monkeypatch, preflight):
+    monkeypatch.setattr(admission, "new_application_preflight", lambda *a, **kw: pytest.fail("new-only read"))
+    admission.require_received_applications(_required(_config(tmp_path)), str(tmp_path), preflight)
+
+
 def test_profile_observation_uses_the_same_budget_and_cannot_start_a_late_owner(tmp_path, monkeypatch):
     from agent_worktrees import copilot_plugin_profile as tool
 
@@ -328,11 +334,7 @@ def test_base_new_retains_checked_profile_for_launch_staging(tmp_path, monkeypat
     assert json.loads(capfd.readouterr().out)["action"] == "exec"
 
 
-@pytest.mark.timeout(60)
-@pytest.mark.portfolio_tier("T2")
-@pytest.mark.effect("process")
-@pytest.mark.contract("agent_worktrees.required_application_admission")
-def test_native_machines_read_is_consumed_without_repair(tmp_path, monkeypatch):
+def _native_machines_fixture(tmp_path, monkeypatch):
     owner_python = os.environ.get("APPLICATION_READINESS_TEST_PYTHON")
     if not owner_python:
         pytest.skip("select the contained Machines test interpreter for native owner consumption")
@@ -359,9 +361,62 @@ def test_native_machines_read_is_consumed_without_repair(tmp_path, monkeypatch):
     monkeypatch.setattr(admission, "_selected_runtime", lambda **k: (
         [owner_python, "-m", "agent_machines"], environment,
     ))
+    return home, project
+
+
+@pytest.mark.timeout(60)
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.contract("agent_worktrees.required_application_admission")
+def test_native_machines_read_is_consumed_without_repair(tmp_path, monkeypatch):
+    home, project = _native_machines_fixture(tmp_path, monkeypatch)
     config = _required(_config(tmp_path))
     assert admission.new_application_error(config, source=str(project))
     assert not list(home.glob("*.ready"))
     for name in ("base", "child"):
         (home / f"agent-example-{name}.ready").write_text("ready", encoding="utf-8")
     assert admission.new_application_error(config, source=str(project)) is None
+
+
+@pytest.mark.timeout(60)
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.contract("agent_worktrees.required_application_admission")
+@pytest.mark.parametrize("ready", [False, True])
+@pytest.mark.parametrize("defer", [False, True])
+def test_native_new_checks_the_prepared_worktree_not_only_the_anchor(tmp_path, monkeypatch, ready, defer):
+    import shutil
+    from agent_worktrees import __main__ as main, tracking
+    from agent_worktrees.worktree_creation import LaunchSeedStagingFailure
+    from test_worktree_creation_seed import _create_config, _stub_create_worktree_core_internals
+
+    home, project = _native_machines_fixture(tmp_path, monkeypatch)
+    settings = project / ".github" / "copilot" / "settings.json"
+    target_settings = json.loads(settings.read_text(encoding="utf-8"))
+    settings.write_text(json.dumps({
+        **target_settings, "enabledPlugins": {"agent-example@fixture": False},
+    }), encoding="utf-8")
+    base = _create_config(tmp_path)
+    config = replace(base, repos={base.repo_name: replace(
+        base.default_repo, anchor=str(project), require_application_readiness=True)})
+    _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
+    records = tmp_path / "tracking"
+    monkeypatch.setattr(main.cfg, "tracking_dir", lambda: records)
+
+    def create(_anchor, path, *args, **kwargs):
+        shutil.copytree(project, path)
+        (Path(path) / ".github" / "copilot" / "settings.json").write_text(
+            json.dumps(target_settings), encoding="utf-8")
+
+    monkeypatch.setattr(main.git_ops, "create_worktree", create)
+    if ready:
+        for name in ("base", "child"):
+            (home / f"agent-example-{name}.ready").write_text("ready", encoding="utf-8")
+        result = main._create_worktree_core(config, defer_projections=defer)
+        assert result["launch"]["work_dir"] == result["worktree"]["path"]
+    else:
+        monkeypatch.setattr(main, "_build_launch_cmd", lambda *a, **kw: pytest.fail("unobserved target launch"))
+        with pytest.raises(LaunchSeedStagingFailure, match="Application Readiness"):
+            main._create_worktree_core(config, defer_projections=defer)
+    assert len(tracking.list_records(records)) == 1
+    assert len(list(home.glob("*.ready"))) == (2 if ready else 0)

@@ -377,7 +377,7 @@ def _observe(config: cfg.Config, family: _Family, profile: str | None, desired: 
     actual = {key: kp._dict_setting(existing, key, path) for key in SETTING_KEYS}
     intended = {key: kp._dict_setting(projected, key, path) for key in SETTING_KEYS}
     if not kp.same_json_value(actual, intended):
-        raise _error("project tool profile is not staged; re-register the project, then retry New")
+        raise _error("project tool profile is not staged; re-register the project")
     return json.dumps([config.repo_name, _identity(root), profile, desired, actual], sort_keys=True)
 
 
@@ -410,7 +410,7 @@ def prepare_checkout(checkout: str | Path, *, config: cfg.Config | None = None,
     selected = getattr(repo, "copilot_plugin_profile", None)
     if selected is None:
         if checked_profile is not None and observe_for_admission(config) != checked_profile:
-            raise _error("project tool profile changed after application admission; retry New")
+            raise _error("project tool profile changed after application admission")
         path = Path(checkout) / ".github" / "copilot" / "settings.local.json"
         if not path.is_file():
             return {"action": "no-op"}
@@ -428,7 +428,7 @@ def prepare_checkout(checkout: str | Path, *, config: cfg.Config | None = None,
             raise _error("checkout is not in the registered project Git family")
         profile, desired = _profile(root, selected)
         if checked_profile is not None and _observe(config, family, profile, desired) != checked_profile:
-            raise _error("project tool profile changed after application admission; retry New")
+            raise _error("project tool profile changed after application admission")
         registry = installer.read_projects_registry(strict=True)
         entry = registry["projects"][project]
         if REGISTRY_KEY in entry and entry[REGISTRY_KEY] != _identity(root):

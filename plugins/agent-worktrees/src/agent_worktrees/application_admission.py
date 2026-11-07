@@ -10,7 +10,7 @@ import time
 
 from agent_procutil.owned_process import OwnedCleanupError, OwnedExecutionBudget, run_caller_owned
 
-from .launch_preflight import LaunchPreflight
+from .launch_preflight import LaunchPreflight, LaunchPreflightError
 
 SCHEMA = "copilot-extensions.installation-repair"
 
@@ -126,7 +126,7 @@ def new_application_error(config, *, source: str) -> str | None:
     return new_application_preflight(config, source=source).error
 
 
-def new_application_preflight(config, *, source: str) -> LaunchPreflight:
+def new_application_preflight(config, *, source: str, checked_profile: str | None = None) -> LaunchPreflight:
     """Observe required applications against a stable prospective tool roster."""
     from . import copilot_plugin_profile as tool
     from .knowledge_plugins import KnowledgePluginError
@@ -136,7 +136,9 @@ def new_application_preflight(config, *, source: str) -> LaunchPreflight:
     reason = "Required application observation is incomplete or not ready."
     try:
         budget = OwnedExecutionBudget.from_timeout(60, cleanup_reserve=5)
-        checked_profile = tool.observe_for_admission(config, deadline=budget.execution_deadline)
+        profile_input = tool.observe_for_admission(config, deadline=budget.execution_deadline)
+        if checked_profile is not None and profile_input != checked_profile:
+            raise KnowledgePluginError("project tool profile changed after application admission")
         if time.monotonic() >= budget.execution_deadline:
             raise TimeoutError("Required application profile selection exhausted its budget")
         prefix, environment = _selected_runtime(budget=budget)
@@ -150,19 +152,31 @@ def new_application_preflight(config, *, source: str) -> LaunchPreflight:
         )
         if (
             _ready(result, source)
-            and tool.observe_for_admission(config, deadline=budget.execution_deadline) == checked_profile
+            and tool.observe_for_admission(config, deadline=budget.execution_deadline) == profile_input
             and time.monotonic() < budget.deadline
         ):
-            return LaunchPreflight(checked_profile=checked_profile)
+            return LaunchPreflight(checked_profile=profile_input)
     except OwnedCleanupError:
         raise
     except KnowledgePluginError as exc:
         reason = str(exc)
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
         reason = "Required application observation is unavailable or unsupported by the selected runtime."
+    boundary = "launch" if checked_profile is not None else "allocation"
+    retry = "this existing worktree" if checked_profile is not None else "New"
     return LaunchPreflight(policy_error=(
-        "New authoring requires application readiness before allocation. " + reason
+        f"New authoring requires application readiness before {boundary}. " + reason
         + " Open Configuration > Application Readiness for the selected repository; "
-        "use Installation & Updates if its owner is unavailable, then retry New. "
+        f"use Installation & Updates if its owner is unavailable, then retry {retry}. "
         "Admission does not install applications, acquire credentials or confirm restarts."
     ))
+
+
+def require_received_applications(config, checkout: str, preflight: LaunchPreflight | None) -> None:
+    """Observe the actual prepared New roster without acquiring a source-only or recovery gate."""
+    checked_profile = getattr(preflight, "checked_profile", None)
+    if checked_profile is None:
+        return
+    result = new_application_preflight(config, source=checkout, checked_profile=checked_profile)
+    if result.error:
+        raise LaunchPreflightError(result.error)

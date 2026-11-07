@@ -89,7 +89,7 @@ def test_create_worktree_core_does_not_embed_pending_seed_in_its_own_launch_cmd(
 
 @pytest.mark.parametrize("drift", [False, True])
 def test_new_creation_retains_checked_profile_through_both_staging_calls(tmp_path, monkeypatch, drift):
-    from agent_worktrees import copilot_plugin_profile, guarded_anchors, local_cache_refresh, tracking
+    from agent_worktrees import application_admission, copilot_plugin_profile, guarded_anchors, local_cache_refresh, tracking
     from agent_worktrees.worktree_creation import LaunchSeedStagingFailure
 
     config = _create_config(tmp_path)
@@ -98,6 +98,12 @@ def test_new_creation_retains_checked_profile_through_both_staging_calls(tmp_pat
     preflight = m.LaunchPreflight(checked_profile="checked-input")
     monkeypatch.setattr(m, "_preflight_launch", lambda *a, **kw: preflight)
     staged = []
+    received = []
+
+    def observe(config_arg, *, source, checked_profile):
+        assert config_arg is config and checked_profile == "checked-input"
+        received.append(source)
+        return m.LaunchPreflight(checked_profile=checked_profile)
 
     def prepare(path, *, config, checked_profile):
         staged.append((str(path), config, checked_profile))
@@ -106,6 +112,7 @@ def test_new_creation_retains_checked_profile_through_both_staging_calls(tmp_pat
         return {"action": "no-op"}
 
     monkeypatch.setattr(copilot_plugin_profile, "prepare_checkout", prepare)
+    monkeypatch.setattr(application_admission, "new_application_preflight", observe)
     monkeypatch.setattr(guarded_anchors, "prepare", lambda *a: None)
     monkeypatch.setattr(local_cache_refresh, "refresh_local_cache", lambda *a, **kw:
                         local_cache_refresh.RefreshResult("ready"))
@@ -114,9 +121,11 @@ def test_new_creation_retains_checked_profile_through_both_staging_calls(tmp_pat
         with pytest.raises(LaunchSeedStagingFailure, match="profile changed"):
             m._create_worktree_core(config)
         assert len(tracking.list_records(tmp_path / "tracking")) == 1
+        assert received == []
     else:
         result = m._create_worktree_core(config)
         assert staged == [(result["worktree"]["path"], config, "checked-input")] * 2
+        assert received == [result["worktree"]["path"]]
 
 
 def test_create_worktree_core_with_no_seed_has_execution_admission_fence(

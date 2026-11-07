@@ -36,6 +36,7 @@ from lazy_cli_dispatch import self_override as _self_override
 
 from . import (
     activity,
+    application_admission,
     codename_tracking,
     creation_diagnostics,
     git_ops,
@@ -48,50 +49,11 @@ from . import (
 from . import config as cfg
 from .launch_progress import step
 from .creation_allocation import AdmittedAllocation, creation_parameters
+from .creation_failures import LaunchSeedStagingFailure as LaunchSeedStagingFailure
 from .creation_identity import IdentityMode, new_machine_identity, require_same_machine_identity, validate_mode
 from .worktree_machine_identity import WorktreeMachineIdentity
 from .receiving_allocation import ReceivingAllocation
 from .creation_owner_claim import _journal_owner_reciprocal_claim as _journal_owner_reciprocal_claim
-
-
-class LaunchSeedStagingFailure(RuntimeError):
-    """Creation succeeded, but seed staging did not produce a confirmed result."""
-
-    def __init__(self, record, seed_id: str, cause: Exception):
-        from .tracking_write import AmbiguousWriteOutcome
-
-        self.worktree = {
-            "id": record.worktree_id, "path": record.worktree_path,
-            "branch": record.branch, "repo": record.repo,
-        }
-        self.seed_id = seed_id
-        self.ambiguous = isinstance(cause, AmbiguousWriteOutcome)
-        super().__init__(
-            f"Worktree {record.worktree_id} was created at {record.worktree_path}, "
-            f"but launch-prompt staging did not confirm: {cause}. "
-            f"Do not retry --new; recover this existing --worktree-id {record.worktree_id}."
-        )
-
-    def payload(self) -> dict:
-        return {
-            "error": str(self), "created": True, "worktree": self.worktree,
-            "launch_seed": {
-                "seed_id": self.seed_id, "status": "unknown" if self.ambiguous else "unconfirmed",
-            },
-            "recovery": {
-                "action": "inspect-and-retry-existing",
-                "worktree_id": self.worktree["id"], "repeat_new": False,
-            },
-        }
-
-    def emit(self, *, json_out: bool) -> int:
-        from . import output
-
-        if json_out:
-            output._json_output(self.payload())
-        else:
-            output.err(str(self))
-        return 3
 
 
 def _core():
@@ -940,13 +902,18 @@ def _create_worktree_core(
             print("Added worktree path to trustedFolders.", file=sys.stderr)
         if build_launch_plan and permissions.ensure_extension_permission_approvals(worktree_path):
             print("Pre-approved facility extension permissions for worktree path.", file=sys.stderr)
-        tool_options = {"checked_profile": checked} if (checked := getattr(launch_preflight, "checked_profile", None)) is not None else {}
+        checked_profile = getattr(launch_preflight, "checked_profile", None)
+        tool_options = {"checked_profile": checked_profile} if checked_profile is not None else {}
         local_cache_refresh.prepare_tool_roster(worktree_path, config=config, **tool_options)
         composition_ready = _complete_created_pair(
             config, record, timestamp=timestamp, suffix=suffix, no_pair=no_pair,
         )
         if build_launch_plan and not defer_projections and composition_ready:
-            local_cache_refresh.prepare_admitted_launch(worktree_path, **({"config": config, **tool_options} if tool_options else {}))
+            local_cache_refresh.prepare_admitted_launch(
+                worktree_path, **({"config": config, **tool_options} if tool_options else {}),
+            )
+        if launches_copilot:
+            application_admission.require_received_applications(config, worktree_path, launch_preflight)
         result = {"worktree": core._worktree_to_dict(record)}
         if receiving_allocation is not None:
             from .receiving_creation_recovery import note_ready

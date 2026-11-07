@@ -16,6 +16,15 @@ The checked input travels in the internal launch preflight through New's later
 tool staging and projection refresh, which reject drift before settings writes.
 An absent profile is also retained without introducing a registry/Git scan.
 
+After New prepares the actual checkout, a second owner observation checks that
+checkout's effective required roster before constructing a launch plan, retaining
+the original checked profile input. This covers differences introduced by the
+selected Git tree, local settings or paired preparation, including deferred
+instruction projection. Refusal preserves the allocated worktree and existing
+recovery protocol rather than allocating another New identity. Each observation
+has its own bounded selection/read/cleanup budget; allocation and preparation
+are not claimed to fit inside either observation's deadline.
+
 `application_admission` selects the existing Machines owner through validated
 same-cell peer launch with retained build identity or the legacy owner's exact
 completed interpreter. It reads support from that selected runtime, then
