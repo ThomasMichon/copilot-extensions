@@ -1,0 +1,6 @@
+{
+  "schema": "copilot-extensions.native-source-install",
+  "version": 1,
+  "windows": {"script": "bootstrap.ps1", "argument": "--install-source"},
+  "posix": {"script": "bootstrap.sh", "argument": "--install-source"}
+}

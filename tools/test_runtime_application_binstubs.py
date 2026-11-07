@@ -30,6 +30,39 @@ from installer_wheel_snapshot import retain_wheel_inputs
 engine = install_source.engine
 
 
+@pytest.mark.parametrize("abi,target", [
+    ("win32", "i686-pc-windows-msvc"),
+    ("win_amd64", "x86_64-pc-windows-msvc"),
+    ("win_arm64", "aarch64-pc-windows-msvc"),
+])
+def test_emitted_launchers_follow_interpreter_abi_not_host_machine(tmp_path, abi, target):
+    wheel = tmp_path / "fixture_app-1.0.0-py3-none-any.whl"
+    wheel.write_bytes(b"fixture")
+    application = emit(
+        tmp_path / "application", distribution="fixture-app", version="1.0.0",
+        requires_python=">=3.13", commands={"fixture-app": "fixture_app:main"},
+        wheels={"fixture-app": wheel},
+        target_environment={
+            "sys_platform": "win32", "platform_machine": "AMD64", "python_full_version": "3.13.0",
+        },
+        target_tags=[f"cp313-cp313-{abi}", "py3-none-any"],
+    )
+    for name in ("fixture-app.ps1", "fixture-app.cmd", "fixture-app.sh"):
+        assert target in (application / name).read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("tags", [None, ["py3-none-any"], ["cp313-cp313-win32", "cp313-cp313-win_amd64"]])
+def test_windows_application_refuses_missing_or_ambiguous_interpreter_abi(tmp_path, tags):
+    with pytest.raises(ValueError, match="unambiguous Windows Python ABI"):
+        emit(
+            tmp_path / "application", distribution="fixture-app", version="1.0.0",
+            requires_python=">=3.13", commands={"fixture-app": "fixture_app:main"}, wheels={},
+            target_environment={"sys_platform": "win32", "platform_machine": "AMD64"},
+            target_tags=tags,
+        )
+    assert not (tmp_path / "application").exists()
+
+
 @pytest.fixture
 def install_transaction(tmp_path, monkeypatch):
     root = tmp_path / "root"

@@ -17,7 +17,7 @@ Paths below are relative to the repository root.
 | ADO general comments and review text | `providers/azure_devops.py`: new thread POST; review text is a separate comment before the selected vote | Existing provider; preserve the two effects and their partial outcomes, never invent a comment for a bodyless vote |
 | ADO remediation replies | `pr_remediation_cli.py` -> `providers/azure_remediation.py` `Remediator.reply` and existing `Ledger` | Separate existing owner; content includes its own operation marker before admission. Compact preparation/correlation is unqualified |
 | ADO remediation evidence comments | `providers/azure_remediation.py` `Remediator.requeue` -> `AdoMutator.evidence_thread` | Separate existing owner; actual evidence comment participates in the selected recovery operation. This inventory grants no requeue |
-| Protected workspace comments, replies and owned edits | `agent-pull-requests` workspace CLI / `WorkspaceTools` / native or service client -> `WorkspaceOperations.execute("submit")` -> `execute_review` -> `providers/azure_owned_review.py` | Existing source embedding with immutable intent and native receipts; explicit preapproved-body composition is qualified below, not automatic preparation |
+| Protected workspace comments, replies and owned edits | `agent-pull-requests` workspace CLI / `WorkspaceTools` / native or service client -> `WorkspaceOperations.execute("submit")` -> `execute_review` -> `providers/azure_owned_review.py` | Explicit composition and optional receiver-owned fresh pre-approval allocation are qualified below; not automatic all-publisher or installed adoption |
 | Protected inline-anchored new comments | No corresponding selected-action shape in `review_intent.py` | Unsupported by this finite protected contract; an unanchored comment is not inline coverage |
 | Standalone issue comments | No issue-publication entry in the reviewed PR workspace/CLI contract | Outside that API; adopter/SDK/MCP issue publishers require their own owner integration |
 | Other SDK/MCP or direct forge-tool writes | Workspace descriptors reuse `WorkspaceTools`; separately registered forge tools and direct vendor CLIs do not automatically traverse it | Source descriptors are not tool registration, all-tool enforcement or installed adoption |
@@ -68,10 +68,23 @@ host policy/source binding and caller-retained GUIDs; it is not automatic
 installed adoption, allocation, fresh readback or DB merge.
 Default submission remains v1 and legacy tagged bodies gain no inferred identity.
 
+The optional
+[receiver-owned pre-approval path](../../../plugins/agent-pull-requests/docs/workspace-integration.md#optional-pre-approval-selection-receiver)
+now allocates fresh comment/reply identities under the same retained-selection
+owner before returning a committed v2 preview (#11299). It requires actual
+receiver/storage discovery and a trusted policy/profile/source resolver.
+The source attachment and full native baseline must match; complete Fleet
+preview/submission frames fit before retention. Lost responses and restart
+recover the same original bytes, while exact submission and original receipts
+remain separate. Bodyless votes stay bodyless; automatic owned/legacy edits
+refuse pending their scoped/native identity binding. This is optional source
+integration, not normal host enrollment, another publisher's adoption or
+installed/provider qualification.
+
 ## Remaining qualification
 
-Actual automatic publication consumers, durable GUID allocation, acquisition/DB
-mapping, broader unknown-outcome native attribution, copied tags, provider
+Actual automatic publication consumers, owned-edit and other-surface allocation,
+acquisition/DB mapping, broader unknown-outcome native attribution, copied tags, provider
 normalization/stripping and installed adoption remain open. A matching marker
 or body alone cannot confirm an unknown effect. Preserve existing native
 actor, scope, target, content/version and receipt checks.

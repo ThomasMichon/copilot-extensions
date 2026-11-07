@@ -49,6 +49,91 @@ def test_packet_preserves_each_payload_and_full_selection(tmp_path):
     assert update_runtime_source.parse_sources(None) is None
 
 
+def test_v2_packet_preserves_native_profile_and_legacy_in_one_selection(tmp_path):
+    data = packet(tmp_path, ("agent-worktrees", "future-app", "legacy-app"))
+    data["version"] = 2
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    record = data["sources"]["future-app"]
+    record.update(install_source=str(snapshot), native={
+        "identity": record["identity"],
+        "runtime_version": record["identity"]["runtime_version"] + ".profile." + "d" * 16,
+        "payload_hash": "e" * 64,
+    })
+    sources = update_runtime_source.parse_sources(json.dumps(data))
+    assert sources["future-app"].version == record["native"]["runtime_version"]
+    assert sources["future-app"].install_source == snapshot
+    assert sources["legacy-app"].install_source is None
+    data["version"] = 1
+    with pytest.raises(ValueError):
+        update_runtime_source.parse_sources(json.dumps(data))
+
+
+@pytest.mark.parametrize("platform", ["windows", "linux"])
+def test_released_native_inputs_are_recognized_without_a_new_sidecar(tmp_path, platform):
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "runtime_install.py").write_text(
+        "parser.add_argument('--install-source')\nfrom install_source import project_inputs\n",
+        encoding="utf-8",
+    )
+    (scripts / "install.ps1").write_text(
+        "param([string]$InstallSource)\n# native forwarding: --install-source\n", encoding="utf-8",
+    )
+    (scripts / "install.sh").write_text(
+        "case $1 in --install-source) ;; esac\n", encoding="utf-8",
+    )
+    actual = update_runtime_source.source_install_entry(tmp_path, platform)
+    assert actual == {
+        "script": "scripts/install.ps1" if platform == "windows" else "scripts/install.sh",
+        "argument": "-InstallSource" if platform == "windows" else "--install-source",
+    }
+
+
+def test_internal_input_flag_alone_does_not_replace_a_legacy_public_flow(tmp_path):
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "runtime_install.py").write_text(
+        "parser.add_argument('--install-source')\nfrom install_source import project_inputs\n",
+        encoding="utf-8",
+    )
+    assert update_runtime_source.source_install_entry(tmp_path, "windows") is None
+
+
+def test_declared_native_inputs_with_missing_handoff_do_not_become_legacy(tmp_path):
+    (tmp_path / "source-install.json").write_text(json.dumps({
+        "schema": "copilot-extensions.native-source-install", "version": 1,
+        "windows": {"script": "scripts/install.ps1", "argument": "-InstallSource"},
+        "posix": {"script": "scripts/install.sh", "argument": "--install-source"},
+    }), encoding="utf-8")
+    with pytest.raises(ValueError, match="unavailable"):
+        update_runtime_source.source_install_entry(tmp_path, "windows")
+
+
+@pytest.mark.parametrize("fault", ["relative", "mismatched-identity", "base-version", "missing-native"])
+def test_invalid_native_profile_never_becomes_legacy(tmp_path, fault):
+    data = packet(tmp_path)
+    data["version"] = 2
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    record = data["sources"]["agent-worktrees"]
+    record.update(install_source=str(snapshot), native={
+        "identity": record["identity"],
+        "runtime_version": record["identity"]["runtime_version"] + ".profile." + "d" * 16,
+        "payload_hash": "e" * 64,
+    })
+    if fault == "relative":
+        record["install_source"] = "relative"
+    elif fault == "mismatched-identity":
+        record["native"]["identity"] = {}
+    elif fault == "base-version":
+        record["native"]["runtime_version"] = record["identity"]["runtime_version"]
+    else:
+        del record["native"]
+    with pytest.raises(ValueError):
+        update_runtime_source.parse_sources(json.dumps(data))
+
+
 @pytest.mark.parametrize("change", [
     "schema", "version", "boolean-version", "unknown", "empty", "list",
     "unsafe-name", "record", "extra-record", "relative", "missing", "identity",
@@ -61,7 +146,7 @@ def test_invalid_packet_has_no_package_only_fallback(tmp_path, change):
     if change == "schema":
         data["schema"] = "other"
     elif change in {"version", "boolean-version"}:
-        data["version"] = True if change == "boolean-version" else 2
+        data["version"] = True if change == "boolean-version" else 3
     elif change == "unknown":
         data["optional-looking"] = "not an extensible request"
     elif change == "empty":

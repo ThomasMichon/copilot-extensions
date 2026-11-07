@@ -142,11 +142,14 @@ def _validate(
 def acquire(
     selection: RuntimeSource, *, root: Path | None = None, deadline: float | None = None,
     environment: dict[str, str] | None = None,
+    branch_repository: str | None = None,
 ) -> Iterator[ResolvedSource]:
     # The payload owns the lease library; acquisition needs no installer or CLI.
     scripts = runtime_scripts(Path(__file__).resolve().parent, running_payload_dir)
     sys.path.insert(0, str(scripts))
-    from versioned_runtime import construction_lease, _AV_RETRY_ATTEMPTS, _AV_RETRY_BACKOFF
+    from versioned_runtime import (
+        construction_lease, _AV_RETRY_ATTEMPTS, _AV_RETRY_BACKOFF, _is_transient_lock,
+    )
 
     _remaining(deadline)
     git_command = _git if deadline is None and environment is None else partial(
@@ -158,9 +161,16 @@ def acquire(
     source_root = installation / "runtime-sources"
     _ordinary(source_root)
     repo = absolute_local_source(selection.repo)
-    digest = hashlib.sha256(repo.encode("utf-8")).hexdigest()
+    authority = None
+    if branch_repository is not None:
+        RuntimeSource("main", repo=branch_repository)
+        authority = absolute_local_source(branch_repository)
+    digest = hashlib.sha256((repo + ("\n" + authority if authority else "")).encode("utf-8")).hexdigest()
     checkout = source_root / digest / "checkout"
     owner = {"schema": "worktree-manager.runtime-source", "repo": repo}
+    if authority is not None:
+        owner["branch_repository"] = authority
+    acquired_authority = False
     source_root.mkdir(parents=True, exist_ok=True)
     with construction_lease(source_root, digest, timeout=_remaining(deadline, 60)):
         _ordinary(checkout)
@@ -173,32 +183,50 @@ def acquire(
                     "--origin", "origin", "--", repo, "checkout",
                 )
                 _ordinary(staging / ".git")
-                git_command(staging, "checkout", "--detach", "refs/remotes/origin/main", "--")
+                if authority is not None:
+                    git_command(
+                        staging, "fetch", "--no-tags", "--", authority,
+                        f"+refs/heads/{selection.branch}:refs/remotes/origin/{selection.branch}",
+                    )
+                    acquired_authority = True
+                initial = selection.branch if authority is not None else "main"
+                git_command(staging, "checkout", "--detach", f"refs/remotes/origin/{initial}", "--")
                 marker = staging / ".git" / "runtime-source-owner.json"
                 _ordinary(marker)
                 marker.write_text(json.dumps(owner, sort_keys=True) + "\n", encoding="utf-8")
                 initial_head = _validate(staging, owner, deadline=deadline, environment=environment)
+                retry_until = time.monotonic() + _remaining(deadline, 15)
                 for attempt in range(_AV_RETRY_ATTEMPTS):
                     _remaining(deadline)
                     _ordinary(checkout)
                     if checkout.exists() or checkout.is_symlink():
                         raise SourceAcquisitionError("Runtime source checkout appeared during initialization")
+                    _remaining(deadline)
+                    if time.monotonic() >= retry_until:
+                        raise SourceAcquisitionError("Runtime source checkout retry deadline exceeded")
                     try:
                         staging.rename(checkout)
                         break
                     except OSError as error:
                         if (
-                            getattr(error, "winerror", None) not in (5, 32, 33)
+                            os.name != "nt" or not _is_transient_lock(error)
                             or attempt == _AV_RETRY_ATTEMPTS - 1
                         ):
                             raise
-                        time.sleep(min(_AV_RETRY_BACKOFF * (attempt + 1), _remaining(deadline)))
+                        time.sleep(max(0, min(
+                            _AV_RETRY_BACKOFF * (attempt + 1), _remaining(deadline),
+                            retry_until - time.monotonic(),
+                        )))
                         if _validate(staging, owner, deadline=deadline, environment=environment) != initial_head:
                             raise SourceAcquisitionError("Runtime source checkout moved during initialization")
         head = _validate(checkout, owner, deadline=deadline, environment=environment)
         branch = selection.branch
         remote_ref = f"refs/remotes/origin/{branch}"
-        git_command(checkout, "fetch", "--no-tags", "origin", f"+refs/heads/{branch}:{remote_ref}")
+        if not acquired_authority:
+            git_command(
+                checkout, "fetch", "--no-tags", *(["--", authority] if authority else ["origin"]),
+                f"+refs/heads/{branch}:{remote_ref}",
+            )
         tip = git_command(checkout, "rev-parse", "--verify", f"{remote_ref}^{{commit}}")
         if selection.channel == "stable":
             tag = f"refs/tags/{selection.ref}"

@@ -14,6 +14,7 @@ from update_driver import (
     InterruptedError, RecoveryError, RequestSpec, StateError, TrustedRunner,
     drain, enqueue, ensure_worker, foundation_status, recover_after_restart,
     recover_foundation_after_restart, recovery_status, status, wait,
+    run_explicit,
 )
 from update_driver import foundation_state as fs
 from update_driver._directory import create_queue_directory
@@ -68,6 +69,30 @@ def test_native_outcomes_preserve_canonical_status_and_uncertainty(space, code, 
         assert result.fenced is (state == "interrupted")
         assert foundation_status(root=space) == result
     assert not list(space.glob(".foundation-operation-*.tmp"))
+
+
+@pytest.mark.parametrize("state", ["running", "interrupted"])
+def test_explicit_foreground_rejects_every_foreign_foundation_fence(space, monkeypatch, state):
+    with custody(space) as owned:
+        operation = fs.begin(space, DIGEST, owned)
+        if state == "interrupted":
+            operation = fs.finish(
+                space, operation, owned, exit_code=None, error="builder_settlement_unknown",
+            )
+    before = (space / fs.FILENAME).read_bytes()
+    effects = []
+    monkeypatch.setattr(fs, "reconcile_lost", lambda *args: pytest.fail("no foreign reconciliation"))
+    monkeypatch.setattr(fs, "finish", lambda *args, **kw: pytest.fail("no foreign settlement"))
+    with pytest.raises(InterruptedError, match="fenced"):
+        run_explicit(
+            RequestSpec("source-recovery"),
+            runner=TrustedRunner((sys.executable, "-c", "pass"), str(space)),
+            root=space, executor=lambda tx: effects.append(tx.request.id) or 0,
+        )
+    assert effects == []
+    assert status(root=space) == ()
+    assert (space / fs.FILENAME).read_bytes() == before
+    assert foundation_status(root=space) == operation
 
 
 def test_begin_requires_exact_live_execution_custody(space):

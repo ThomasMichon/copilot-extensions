@@ -20,6 +20,7 @@ from contextlib import redirect_stderr
 
 import pytest
 from agent_procutil import no_window_kwargs
+from native_acceptance_helpers import _environment, _prepare_command
 
 from worktree_manager import self_install as si
 
@@ -46,16 +47,6 @@ def _run(argv, env, cwd):
         list(map(str, argv)), env=env, cwd=cwd, capture_output=True,
         text=True, encoding="utf-8", timeout=20, **no_window_kwargs(),
     )
-
-
-def _environment(directory):
-    home = directory / "home"
-    home.mkdir(exist_ok=True)
-    env = dict(os.environ, HOME=str(home), USERPROFILE=str(home))
-    env["AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR"] = str(home / ".agent-worktrees" / "control-plane-providers.d")
-    for name in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "__PYVENV_LAUNCHER__", "WORKTREE_MANAGER_ROOT"):
-        env.pop(name, None)
-    return env
 
 
 @pytest.mark.parametrize("phase", ["payload-copy", "inventory"])
@@ -135,15 +126,6 @@ print(json.dumps({"completed":True}))
                         for path in payload.rglob("*") if path.is_file()}
 
 
-def _prepare_command(argv, env, cwd):
-    # The native group owns preparation; the production engine independently
-    # owns each construction child's unchanged deadline.
-    return subprocess.run(
-        list(map(str, argv)), env=env, cwd=cwd, capture_output=True,
-        text=True, encoding="utf-8", **no_window_kwargs(),
-    )
-
-
 def _update_from_payload(payload, root, env, *, activation=None):
     from worktree_manager import mux_daemon_cutover
 
@@ -183,8 +165,15 @@ def _prepare_initial_construction(directory, *, default_data_root=False):
     root = Path(env["USERPROFILE"]) / ".worktree-manager" if default_data_root else directory / "root"
     payload = directory / "input"
     si._copy_payload(SOURCE, payload)
-    with (payload / "pyproject.toml").open("a", encoding="utf-8") as stream:
-        stream.write('\n[dependency-groups]\ndev = ["manager-dev-must-not-be-resolved==0.0.0"]\n')
+    metadata = payload / "pyproject.toml"
+    text = metadata.read_text(encoding="utf-8")
+    group = '[dependency-groups]\n'
+    declaration = 'dev = ["manager-dev-must-not-be-resolved==0.0.0"]\n'
+    if group in text:
+        text = text.replace(group, group + declaration, 1)
+    else:
+        text += "\n" + group + declaration
+    metadata.write_text(text, encoding="utf-8")
     process = _prepare_command([
         getattr(sys, "_base_executable", sys.executable), "-I", "-S", "-B",
         payload / "scripts" / "runtime_install.py",
