@@ -200,6 +200,25 @@ def test_stranded_cold_recovery_retains_original_ordinary_conversation(
     assert queue.latest_reservation(task_id) == reservation
 
 
+def test_gone_ordinary_native_with_pending_wake_stays_started_for_same_native_resume(
+    hosted: tuple[TaskQueue, str],
+) -> None:
+    queue, task_id = hosted
+    before = queue.resume(task_id, OWNER, wake_requested=True, wake_message="revise")
+    [wake] = queue.list_wakes(task_id)
+    assert before.status == "started" and before.wake_operation_id == wake.id
+
+    counts = queue.reconcile_liveness(headless_local_verdict=lambda _session: "gone")
+
+    assert counts["suspended"] == counts["requeued"] == 0
+    current = queue.get(task_id)
+    assert (current.status, current.owner_session_id, current.generation) == (
+        "started", NATIVE, before.generation,
+    )
+    [still] = queue.list_wakes(task_id)
+    assert still.id == wake.id and still.status == "pending"
+
+
 @pytest.mark.parametrize("verdict", ["live", "unknown"])
 def test_liveness_keeps_live_or_unknown_ordinary_owners(
     hosted: tuple[TaskQueue, str], verdict: str,

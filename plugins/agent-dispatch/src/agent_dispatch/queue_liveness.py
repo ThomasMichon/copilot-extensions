@@ -305,6 +305,20 @@ class LivenessMixin:
                 )
                 if ordinary_native and (not owner_session_id or status != Status.STARTED):
                     continue
+                # A current wake still being delivered to the same ordinary
+                # native is how the Bridge resumes it (e.g. a rejected
+                # submission); suspending here would fence that wake stale.
+                if ordinary_native and conn.execute(
+                    "SELECT 1 FROM tasks t JOIN wake_outbox w ON w.id = t.wake_operation_id"
+                    " WHERE t.id = ? AND t.status = ? AND t.generation = ?"
+                    " AND t.owner_session_id = ? AND w.task_id = t.id"
+                    " AND w.generation = t.generation AND w.owner = t.owner"
+                    " AND w.owner_session_id = t.owner_session_id"
+                    " AND w.pool_recovery_revision IS NULL"
+                    " AND w.status IN ('pending', 'delivering') LIMIT 1",
+                    (task_id, Status.STARTED, generation, owner_session_id),
+                ).fetchone():
+                    continue
                 suspend = (cli_embodied or ordinary_native) and status == Status.STARTED
                 if suspend:
                     to_status = Status.SUSPENDED
