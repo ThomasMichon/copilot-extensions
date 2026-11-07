@@ -33,7 +33,9 @@ def _result(stdout="", code=0, stderr=""):
 
 def test_every_adapter_uses_same_cell_worktrees(monkeypatch, tmp_path):
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "cell-one")
-    monkeypatch.setattr(worktrees, "validate_context", lambda: {})
+    monkeypatch.setattr(worktrees, "validate_context", lambda: {
+        "cellRoot": str(tmp_path), "pluginRoot": str(tmp_path / "codespaces"),
+    })
     monkeypatch.setattr(coordination, "owner_ref", REAL_OWNER_REF)
     monkeypatch.setattr(coordination, "preflight", REAL_PREFLIGHT)
     monkeypatch.delenv("AGENT_WORKTREES_OWNER_REF", raising=False)
@@ -45,9 +47,6 @@ def test_every_adapter_uses_same_cell_worktrees(monkeypatch, tmp_path):
         responses = {
             ("repos", "find", "project"): str(tmp_path),
             ("accounts", "show", "login", "--json"): '{"login_flow":"login command"}',
-            ("state-root", "--json"): json.dumps({
-                "requires_external": True, "bound": True, "state_root": str(tmp_path),
-            }),
             ("get", "owner-ref"): "machine/project/worktree",
             ("get", "worktree-dir"): str(tmp_path),
             ("list", "--json"): json.dumps([{"path": str(tmp_path), "status": "active"}]),
@@ -65,7 +64,8 @@ def test_every_adapter_uses_same_cell_worktrees(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     assert cli._chdir_to_project("project")
     assert cli._account_login_remedy("login") == "run: login command"
-    assert config._state_root_config_dir(tmp_path) == tmp_path
+    # No selected Worktrees installation: config must not invoke a legacy peer.
+    assert config._state_root_config_dir(tmp_path) is None
     assert REAL_OWNER_REF() == "machine/project/worktree"
     assert REAL_PREFLIGHT("machine/project/worktree").ready
     assert lease.resolve_owner_worktree() == str(tmp_path)
@@ -73,8 +73,8 @@ def test_every_adapter_uses_same_cell_worktrees(monkeypatch, tmp_path):
     assert gh_account.account_for_repo("owner/repo") == "login"
     assert gh_account.mapped_accounts() == ("login",)
     assert _hook()._aw("related", "list", "--json", "--require-managed", cwd=str(tmp_path)) == "[]"
-    assert len(seen) == 10
-    assert seen[2][1]["cwd"] == seen[-1][1]["cwd"] == str(tmp_path)
+    assert len(seen) == 9
+    assert seen[-1][1]["cwd"] == str(tmp_path)
 
 
 def test_context_refusal_cannot_become_fallback_or_claim(monkeypatch, tmp_path):

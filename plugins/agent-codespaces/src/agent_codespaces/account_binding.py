@@ -121,19 +121,24 @@ def _read(*, strict: bool = False) -> dict[str, AccountBinding]:
 
 def _write(records: dict[str, AccountBinding]) -> None:
     """Atomically write the binding file."""
+    _write_payload({name: asdict(rec) for name, rec in records.items()})
+
+
+def _write_payload(payload: dict) -> None:
     ensure_runtime_dir()
     tmp = BINDINGS_FILE.with_suffix(".json.tmp")
-    payload = {name: asdict(rec) for name, rec in records.items()}
     tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     os.replace(tmp, BINDINGS_FILE)
 
 
-def bind(codespace: str, account: str, repo: str = "") -> AccountBinding | None:
+def bind(
+    codespace: str, account: str, repo: str = "", *, strict: bool = False,
+) -> AccountBinding | None:
     """Persist the owning gh ``account`` for ``codespace``."""
     if not codespace or not account:
         return None
     with _binding_lock():
-        records = _read()
+        records = _read(strict=strict)
         rec = AccountBinding(
             codespace=codespace,
             account=account,
@@ -141,7 +146,20 @@ def bind(codespace: str, account: str, repo: str = "") -> AccountBinding | None:
             bound_at=time.time(),
         )
         records[codespace] = rec
-        _write(records)
+        if strict:
+            try:
+                try:
+                    payload = json.loads(BINDINGS_FILE.read_text(encoding="utf-8"))
+                except FileNotFoundError:
+                    payload = {}
+                if not isinstance(payload, dict) or not isinstance(payload.get(codespace, {}), dict):
+                    raise ValueError("Malformed account binding document")
+                payload[codespace] = {**payload.get(codespace, {}), **asdict(rec)}
+                _write_payload(payload)
+            except (OSError, ValueError, TypeError) as error:
+                raise RuntimeError("Account binding update was not confirmed") from error
+        else:
+            _write(records)
         log.info("CodeSpace %s bound to gh account %s", codespace, account)
         return rec
 
