@@ -25,6 +25,11 @@ refreshes these declared helpers, including standalone installers, through the
 same owned-preimage checks, then rebinds the declaration after candidate rewrites.
 Malformed declarations and foreign candidate replacements still refuse copying.
 
+The single-consumer wrapper used by source preparation and previews invokes the
+same verified refresh after native-reference conversion succeeds. Already-local
+writers and standalone Python consumers are covered there too. The whole-tree
+composer keeps its existing single refresh pass.
+
 Validation phases are explicit:
 
 - `sync-installer-engine.verify(phase="development")` checks canonical producers,

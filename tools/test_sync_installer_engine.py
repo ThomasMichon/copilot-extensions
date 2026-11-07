@@ -1380,6 +1380,40 @@ def test_promotion_checks_actual_postwrite_bytes_before_reporting_success(tmp_pa
     assert not any(line.startswith("OK") for line in log), log
 
 
+@pytest.mark.parametrize("initial", ["absent", "stale", "foreign"])
+def test_single_consumer_release_wrapper_refreshes_local_reference_assets(tmp_path, initial):
+    import materialize_main
+    import materialize_installer_engine as materializer
+
+    source = tmp_path / "source"
+    _promotion_installer_source(source, stale=initial != "absent", consumer_names={"agent-vault"})
+    consumer = source / "plugins/agent-vault"
+    _write_local_refs(consumer / "scripts")
+    candidate = tmp_path / "preview"
+    shutil.copytree(consumer, candidate)
+    target = candidate / "scripts/installer_engine_commands.py"
+    if initial == "foreign":
+        target.write_bytes(b"# foreign replacement\n")
+    before = {path.relative_to(source): path.read_bytes() for path in source.rglob("*") if path.is_file()}
+    candidate_before = {path.relative_to(candidate): path.read_bytes()
+                        for path in candidate.rglob("*") if path.is_file()}
+    log = materialize_main.materialize_installer_engine_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=candidate, canonical_root=source,
+    )
+    if initial == "foreign":
+        assert any(line.startswith("SKIP") and "foreign content" in line for line in log), log
+        assert candidate_before == {path.relative_to(candidate): path.read_bytes()
+                                    for path in candidate.rglob("*") if path.is_file()}
+    else:
+        assert log and not any(line.startswith("SKIP") for line in log), log
+        for canonical, emitted in materializer.derived_file_pairs(
+            source, candidate, copied_consumer=(consumer, candidate),
+        ):
+            assert emitted.read_bytes() == canonical.read_bytes()
+    assert before == {path.relative_to(source): path.read_bytes()
+                      for path in source.rglob("*") if path.is_file()}, log
+
+
 def test_promotion_checks_postwrite_single_link_identity(tmp_path, monkeypatch):
     import materialize_installer_engine as materializer
 

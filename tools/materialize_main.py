@@ -500,12 +500,19 @@ def materialize_installer_engine_ref_into(
     *, source_consumer_dir: Path, dest_consumer_dir: Path, canonical_root: Path,
     dest_root: Path | None = None,
 ) -> list[str]:
-    return mie.materialize_ref_into(
+    log = mie.materialize_ref_into(
         source_consumer_dir=source_consumer_dir,
         dest_consumer_dir=dest_consumer_dir,
         canonical_root=canonical_root,
         dest_root=dest_root,
     )
+    if not any(line.startswith("SKIP") for line in log):
+        log.extend(mie.materialize_derived_files(
+            dest_root or dest_consumer_dir,
+            canonical_root=canonical_root,
+            copied_consumer=(source_consumer_dir, dest_consumer_dir),
+        ))
+    return log
 
 
 def materialize_installer_engine_refs(

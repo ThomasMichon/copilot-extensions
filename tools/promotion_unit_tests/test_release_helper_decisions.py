@@ -462,6 +462,37 @@ def test_standalone_dependency_source_follows_exact_declared_identity(tmp_path, 
             standalone.local_dependency_source(project, "example.lib", source_root=tmp_path)
 
 
+@pytest.mark.parametrize("case", ["absent", "stale", "foreign"])
+def test_single_consumer_wrapper_refreshes_declared_standalone_assets(tmp_path, case):
+    canonical, destination = tmp_path / "canonical", tmp_path / "release"
+    source = canonical / "worktree-manager"
+    _write(source / "scripts/source.txt", "retained\n")
+    _write(destination / "scripts/source.txt", "retained\n")
+    for name in (*engine.PYTHON_FILES, *engine.SUPPORT_FILES):
+        _write(canonical / "libs/installer-engine" / name, "# canonical " + name + "\n")
+    if case != "absent":
+        _write(source / "scripts/installer_engine_commands.py", "# admitted older helper\n")
+        _write(destination / "scripts/installer_engine_commands.py",
+               "# foreign helper\n" if case == "foreign" else "# admitted older helper\n")
+    before = {path.relative_to(canonical): path.read_bytes()
+              for path in canonical.rglob("*") if path.is_file()}
+    log = materializer.materialize_installer_engine_ref_into(
+        source_consumer_dir=source, dest_consumer_dir=destination,
+        canonical_root=canonical,
+    )
+    if case == "foreign":
+        assert any(line.startswith("SKIP") and "foreign content" in line for line in log), log
+        assert not (destination / "scripts/installer_engine.py").exists()
+    else:
+        assert log and all(line.startswith("OK") for line in log), log
+        for name in (*engine.PYTHON_FILES, *engine.SUPPORT_FILES):
+            assert (destination / "scripts" / name).read_bytes() == (
+                canonical / "libs/installer-engine" / name
+            ).read_bytes()
+    assert before == {path.relative_to(canonical): path.read_bytes()
+                      for path in canonical.rglob("*") if path.is_file()}
+
+
 @pytest.mark.parametrize("case", ["valid", "fresh-file", "yanked-file", "missing-hash"])
 def test_public_release_selection_ages_every_file_and_binds_hashes(case):
     def file(digest, timestamp="2026-01-01T00:00:00Z"):
