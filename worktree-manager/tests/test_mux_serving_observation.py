@@ -572,16 +572,21 @@ def test_candidate_health_cannot_succeed_after_its_deadline(tmp_path, monkeypatc
 
 
 @pytest.mark.parametrize(
-    "change", ["none", "route", "selection", "credential", "exited", "candidate-exited", "candidate-reused"],
+    "change", [
+        "none", "route", "selection", "credential", "exited",
+        "candidate-exited", "candidate-reused", "writer-identity-missing",
+    ],
 )
 def test_guarded_reconcile_fences_publication(tmp_path, monkeypatch, change):
     from types import SimpleNamespace
     from zdd import diagnostics, routing
 
     directory = mux_daemon_cutover.routing_dir(tmp_path)
-    altered, running, calls = False, True, []
+    altered, running, writer_missing, calls = False, True, False, []
 
     def birth(pid):
+        if pid == 43 and writer_missing:
+            return None
         if pid == 43 and altered and change == "candidate-reused":
             return "20"
         return {42: "17", 43: "18", 44: "19"}[pid]
@@ -632,6 +637,17 @@ def test_guarded_reconcile_fences_publication(tmp_path, monkeypatch, change):
                 directory, bind="127.0.0.1", port=43125, pid=44, version="other",
                 process_start_time="19",
             )
+        if change == "writer-identity-missing":
+            guard = kwargs["refuse_current"]
+
+            def refuse_then_exit(current):
+                nonlocal writer_missing, running
+                reason = guard(current)
+                if reason is None:
+                    writer_missing, running = True, False
+                return reason
+
+            kwargs["refuse_current"] = refuse_then_exit
         return original_publish(*args, **kwargs)
 
     monkeypatch.setattr(routing, "publish_active_with_previous_guarded", publish)
@@ -648,6 +664,11 @@ def test_guarded_reconcile_fences_publication(tmp_path, monkeypatch, change):
         with pytest.raises(RuntimeError, match="candidate publication or exit is unconfirmed"):
             mux_daemon_cutover.activate_after_update(**options)
         assert routing.read_table(directory, strict=True)["active"]["pid"] != incoming.pid
+        assert calls == ["release"]
+    elif change == "writer-identity-missing":
+        with pytest.raises(routing.ActivePublicationRefused):
+            mux_daemon_cutover.activate_after_update(**options)
+        assert routing.read_table(directory, strict=True)["active"] == raw
         assert calls == ["release"]
     else:
         with pytest.raises(routing.ActivePublicationRefused):

@@ -812,7 +812,7 @@ def activate_after_update(
                 routing.publish_active_with_previous_guarded(
                     routing_dir(resolved_root), bind=_BIND, port=port, pid=incoming.pid,
                     version=version, demote_existing=True, expected_active=expected,
-                    refuse_current=refuse_current,
+                    refuse_current=refuse_current, process_start_time=birth,
                     lock_deadline=time.monotonic() + min(5.0, health_timeout),
                 )
                 published = True
