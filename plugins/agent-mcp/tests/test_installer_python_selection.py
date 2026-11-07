@@ -43,7 +43,7 @@ def _run(host: str, script: str, tmp_path: Path) -> object:
 @pytest.mark.parametrize("host", HOSTS)
 @pytest.mark.parametrize(
     "scenario",
-    ["path", "launcher", "launcher-selector", "known-root", "unsupported", "missing", "admitted", "slot"],
+    ["path", "launcher", "launcher-unc", "launcher-selector", "known-root", "unsupported", "missing", "admitted", "slot"],
 )
 def test_bootstrap_qualifies_each_candidate(tmp_path: Path, host: str, scenario: str) -> None:
     old = tmp_path / "old" / "python.exe"
@@ -56,11 +56,13 @@ def test_bootstrap_qualifies_each_candidate(tmp_path: Path, host: str, scenario:
     launcher.touch()
     slot = tmp_path / "slot"
     slot_python = slot / "Scripts" / "python.exe"
+    unc = r"\\example.invalid\Python313\python.exe"
     slot_python.parent.mkdir(parents=True)
     slot_python.touch()
     commands = {
         "path": {"python3": [old, alias, supported]},
         "launcher": {"py": [launcher]},
+        "launcher-unc": {"py": [launcher]},
         "launcher-selector": {"py": [launcher]},
         "known-root": {},
         "unsupported": {"python": [alias, old]},
@@ -82,6 +84,11 @@ Rename-Item Function:\\Invoke-Hidden Invoke-RealHidden
 $commands=@{{}}
 {command_map}
 $calls=New-Object 'System.Collections.Generic.List[string]'
+function Test-Path {{
+    [CmdletBinding()]param([Parameter(Position=0)]$Path,$LiteralPath,$PathType)
+    if ($LiteralPath -eq {_ps(unc)}) {{ return $true }}
+    Microsoft.PowerShell.Management\\Test-Path @PSBoundParameters
+}}
 function Get-Command {{
     param($Name, [switch]$All, $CommandType, $ErrorAction)
     foreach ($path in @($commands[$Name])) {{
@@ -98,7 +105,7 @@ function Invoke-Hidden {{
         $global:LASTEXITCODE=0
         if ($ArgList[0] -eq '-0p') {{
             if ({_ps(scenario)} -eq 'launcher-selector') {{ $global:LASTEXITCODE=1; return }}
-            return " -V:3.9 * {_ps(old)[1:-1]}`n -V:3.13 {_ps(supported)[1:-1]}"
+            return " -V:3.9 * {_ps(old)[1:-1]}`n -V:3.13 {_ps(unc if scenario == 'launcher-unc' else supported)[1:-1]}"
         }}
         if ($ArgList[0] -eq '-3.12') {{ return {_ps(supported)} }}
         return {_ps(old)}
@@ -128,6 +135,8 @@ $LinkDir=$VenvDir
     )
     details = _run(host, script, tmp_path)
     expected = None if scenario in {"unsupported", "missing"} else str(supported)
+    if scenario == "launcher-unc":
+        expected = unc
     assert details["selected"] == expected
     assert str(alias) not in details["calls"]
     if scenario == "admitted":
