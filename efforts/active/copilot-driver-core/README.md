@@ -1992,3 +1992,29 @@ installation, source removal and native-admission check. No deadline or
 selection protection was widened. This closes only the physical-slot
 admission discrepancy, not the remaining caller/default-setup or lifetime
 matrix. Fresh review and required CI remain mandatory.
+
+At `807d7cabac`, the hosted Windows escape hatch qualifies both selected AHP
+positional-tail controls in 53.30 seconds
+([run](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42375128057)).
+The separate one-case application request returns incomplete: the hosted VM
+has no configured governed feed, so the test skips rather than claiming
+first-touch qualification
+([run](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42375193659)).
+Both returned manifests validate source, selection, controller, run/attempt
+and actual Windows runtime. Local real application proof remains the pass
+above. No new transport ref or source branch was created.
+
+The next review identifies obsolete filter-loop assertions in the existing
+AHP launcher contract file and a real custom env-prefix gap. Update only those
+obsolete implementation pins to the bundled-helper delegation, retaining every
+credential, hard-binding and post-exit assertion. The helper now traverses
+environment assignments, unset/chdir options and env's own option terminator
+before the native boundary. Opaque env split-string forms are explicitly
+unsupported rather than reinterpreted.
+
+All three coupled launcher/contract files pass: seventy controls and four
+platform skips in 69.72 seconds (173.09 seconds including preparation and
+cleanup). This includes both final consumers, original contract guards and
+new custom environment-prefix regressions. The native application and retained
+core inputs are unchanged, so their prior actual passes remain scoped proof;
+the changed AHP helper still needs fresh hosted qualification, review and CI.

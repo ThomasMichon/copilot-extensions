@@ -2433,7 +2433,11 @@ rewrite. Its actual command/argument transport is exercised through both final
 consumers: native positional tails are preserved, authoritative options precede
 their terminator, and copied-wrapper/inner-owner separators remain intact.
 The adapter travels with the launchers' existing runtime assets and uses the
-existing Worktrees option table, not a new installed-peer capability.
+existing Worktrees option table, not a new installed-peer capability. The
+coupled `test_ahp_launcher_contract.py` pins this delegation and the existing
+credential/post-exit boundaries. Environment prefixes retain assignments,
+unset/chdir flags and env's own terminator before locating native options.
+Opaque env split-string forms are refused, not interpreted or silently rewritten.
 Driver's `tests/test_headed_launcher.py -k native_validator` checks
 selector-shaped values and missing-value refusal. The existing
 `tests/test_session_host_core.py -k retained_headed_executable` control

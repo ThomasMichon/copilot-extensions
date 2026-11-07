@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import PureWindowsPath
+import re
 import shlex
 import sys
 
@@ -14,8 +15,29 @@ def _option_start(command: list[str]) -> int:
     start = 0
     while start < len(command):
         executable = PureWindowsPath(command[start]).stem.casefold()
-        if executable == "env" and command[start + 1:start + 2] == ["BASH_ENV="]:
-            start += 2
+        if executable == "env":
+            start += 1
+            options = True
+            while start < len(command):
+                argument = command[start]
+                if options and argument == "--":
+                    options = False
+                elif options and argument in {"-u", "--unset", "-C", "--chdir"}:
+                    if start + 1 == len(command):
+                        raise ValueError(f"Prepared env option {argument} requires a value")
+                    start += 1
+                elif options and (
+                    argument in {"-i", "--ignore-environment", "-v", "--debug"}
+                    or argument.startswith(("--unset=", "--chdir="))
+                ):
+                    pass
+                elif re.match(r"[A-Za-z_][A-Za-z0-9_]*=", argument):
+                    pass
+                elif options and argument.startswith("-"):
+                    raise ValueError(f"Unsupported prepared env option {argument}")
+                else:
+                    break
+                start += 1
             continue
         script = None
         if executable in {"pwsh", "powershell"}:

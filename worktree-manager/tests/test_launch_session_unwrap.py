@@ -232,6 +232,9 @@ def test_shell_ahp_binding_preserves_literal_option_values(tmp_path, literal_arg
 
 
 @pytest.mark.parametrize("prefix", [
+    ["env", "COPILOT_FIXTURE=--resume=environment", "copilot"],
+    ["env", "-u", "COPILOT_FIXTURE", "--", "OTHER_FIXTURE=value",
+     "bash", "-lc", 'exec copilot "$@"', "copilot"],
     ["pwsh", "-NoProfile", "-NoLogo", "-File", "launch-command.ps1", "--",
      "python", "-m", "agent_worktrees.launch_seed_exec", "--record", "--resume=record",
      "--admission-only", "--", "copilot"],
@@ -240,6 +243,8 @@ def test_shell_ahp_binding_preserves_literal_option_values(tmp_path, literal_arg
      "--admission-only", "--", "copilot"],
     ["pwsh", "-NoProfile", "-File", "default-setup.ps1", "-RuntimePython", "--resume=python"],
     ["bash", "default-setup.sh", "--runtime-python", "--ahp=python"],
+    ["env", "-i", "--chdir", "--resume=directory", "OTHER_FIXTURE=value",
+     "bash", "default-setup.sh", "--runtime-python", "--ahp=python"],
 ])
 def test_ahp_binding_keeps_prepared_transport_boundaries(tmp_path, prefix):
     result = subprocess.run(
