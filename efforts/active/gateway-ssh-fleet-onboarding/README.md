@@ -525,8 +525,10 @@ not installation, credential or live-adoption authority.
 
 - [x] Qualify the bounded current-logon Windows source listener with a real
   noninteractive command, expected user SID/session and non-elevated token,
-  using synthetic protected keys and `IdentityAgent=none`. All12 selected
-  native/compatibility controls pass in7.90s; the native case takes6.21s.
+  using synthetic protected keys and `IdentityAgent=none`. The final four
+  native controls pass in11.32s, including cmd.exe, Windows PowerShell and
+  pwsh outer-shell parsing; the native listener case takes6.24s. Eleven
+  unchanged compatibility controls passed in the initial12-case packet.
   Existing identity/pin, refresh/revocation, forwarding refusal and owner
   teardown controls remain intact. This is not installed Fleet/Vault setup,
   actual encrypted-key signing, cold-logon/reconnect or lifecycle adoption.
@@ -636,6 +638,13 @@ completion is asserted.
   takes6.21s; original60s item and180s aggregate limits are unchanged.
   Existing authentication, refresh/revocation, forwarding refusal and
   preservation/teardown assertions pass without production changes.
+- Review identified that a PowerShell/pwsh SSH default shell could expand the
+  nested probe's variables before its execution. The fixed UTF-16LE
+  `-EncodedCommand` probe and three real outer-shell controls address that
+  serialization gap without changing host `DefaultShell` configuration.
+  The final four native controls pass in11.32s with no skips; the listener
+  case takes6.24s. The unchanged eleven compatibility controls retain their
+  earlier pass; these independent results are not a new aggregate15-case run.
 - The source runner contains processes and disposable fixture state, reuses a
   leased prepared dependency environment and selects current first-party
   sources. No source-denying installed runtime, actual Vault pair, encrypted
