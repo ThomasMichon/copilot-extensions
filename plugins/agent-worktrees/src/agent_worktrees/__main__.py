@@ -2083,7 +2083,7 @@ def _build_launch_cmd(
                 resolved_hook = str(Path(anchor) / resolved_hook)
             config_root_path = preflight.config_root_path
             if is_windows:
-                launcher = str(inst.install_dir() / "scripts" / "default-setup.ps1")
+                launcher = str(inst.scripts_dir() / "default-setup.ps1")
                 cmd = [
                     "pwsh.exe",
                     "-NoProfile",
@@ -2106,7 +2106,7 @@ def _build_launch_cmd(
                 if recovery:
                     cmd.append("-Recovery")
             else:
-                launcher = str(inst.install_dir() / "scripts" / "default-setup.sh")
+                launcher = str(inst.scripts_dir() / "default-setup.sh")
                 cmd = [
                     "bash",
                     launcher,
@@ -2133,7 +2133,7 @@ def _build_launch_cmd(
                 and not configured_copilot_path
             )
             if not legacy:
-                setup_path = str(inst.install_dir() / "scripts" / "default-setup.ps1")
+                setup_path = str(inst.scripts_dir() / "default-setup.ps1")
             cmd = [
                 "pwsh.exe",
                 "-NoProfile",
@@ -2162,7 +2162,7 @@ def _build_launch_cmd(
                 and not configured_copilot_path
             )
             if not legacy:
-                setup_path = str(inst.install_dir() / "scripts" / "default-setup.sh")
+                setup_path = str(inst.scripts_dir() / "default-setup.sh")
             cmd = ["bash", setup_path, "--machine", config.machine]
             if session_path_arg and not legacy:
                 cmd += ["--session-path", session_path_arg]
@@ -2227,10 +2227,10 @@ def _build_launch_cmd(
     # This gives optional sibling integrations a single pre-exec seam even for
     # explicit and legacy launch templates, while recovery remains available.
     if is_windows:
-        wrapper = str(inst.install_dir() / "scripts" / "launch-command.ps1")
+        wrapper = str(inst.scripts_dir() / "launch-command.ps1")
         prefix = ["pwsh.exe", "-NoProfile", "-NoLogo", "-File", wrapper]
     else:
-        wrapper = str(inst.install_dir() / "scripts" / "launch-command.sh")
+        wrapper = str(inst.scripts_dir() / "launch-command.sh")
         prefix = ["bash", wrapper]
     if recovery:
         prefix.append("--recovery")

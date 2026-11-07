@@ -104,6 +104,21 @@ class Adoption:
         return selected
 
 
+@dataclass(frozen=True)
+class ControllerSelection:
+    registry: Path
+    selected: providers._ControlPlaneProviderManifest | None
+    registrations: tuple[Path, ...]
+    adoption: Adoption | None
+
+    def verify(self) -> None:
+        selected, registrations = _registration(self.registry)
+        if selected != self.selected or registrations != self.registrations:
+            raise RecoveryRefused("Manager provider selection changed during integration")
+        if self.adoption is not None:
+            self.adoption.verify()
+
+
 def _source(root: Path, slot: Path | None) -> tuple[str, str, list[tuple[Path, str | None]]]:
     config = root / "config.toml"
     data = _read(config)
@@ -224,6 +239,22 @@ def adopted_manager() -> Adoption | None:
     )
     adoption.verify()
     return adoption
+
+
+def controller_selection() -> ControllerSelection:
+    directory = providers._machine_control_plane_providers_dir()
+    selected, registrations = _registration(directory)
+    if selected is not None and selected.provider != "worktree-manager":
+        raise RecoveryRefused("Selected control-plane provider is not the controller's Manager")
+    adoption = adopted_manager() if selected is not None else None
+    if selected is not None and (
+        adoption is None or adoption.root != Path(selected.provider_root)
+        or adoption.command != selected.command or adoption.minimum_version != selected.minimum_version
+    ):
+        raise RecoveryRefused("Manager provider selection changed during admission")
+    result = ControllerSelection(directory, selected, registrations, adoption)
+    result.verify()
+    return result
 
 
 def _runtime_api():

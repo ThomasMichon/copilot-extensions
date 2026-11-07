@@ -10,6 +10,8 @@ from pathlib import Path
 
 from . import installer, output, picker_profiles_cli, update_events
 
+PROJECT_INTEGRATION_CAPABILITY = "project-controller-integration/v1"
+
 
 def prune_stale_pivots() -> None:
     """Auto-remove Picker pivot manifests that just went stale from *this*
@@ -68,8 +70,9 @@ def _selected_payload(payload: Path, environment: Mapping[str, str]):
                 os.environ[key] = value
 
 
-def run_selected(payload: Path, platform_name: str) -> bool:
+def run_selected(payload: Path, platform_name: str, *, controller_args=None) -> bool:
     from . import reconcile
+    from .project_update_controller import _CONTROLLER_OWNS_MANAGER
 
     try:
         environment, _root = reconcile.runtime_installer_environment("agent-worktrees", payload)
@@ -80,23 +83,57 @@ def run_selected(payload: Path, platform_name: str) -> bool:
             f"installation context invalid: {error}",
         )
         return False
+    if getattr(controller_args, "_controller_owns_manager", None) is _CONTROLLER_OWNS_MANAGER:
+        return finish(payload, platform_name, environment, manager_owned_by_controller=True)
     return finish(payload, platform_name, environment)
 
 
-def finish(payload: Path, platform_name: str, environment: Mapping[str, str]) -> bool:
+def finish(
+    payload: Path, platform_name: str, environment: Mapping[str, str],
+    *, manager_owned_by_controller: bool = False,
+) -> bool:
     """Required local outputs cannot be downgraded to advisory skipped work."""
-    from .manager_recovery import recover
+    from . import manager_launch_cli, manager_recovery
+
+    if type(manager_owned_by_controller) is not bool:
+        raise ValueError("Manager ownership must be explicit")
+
+    def verify_selection(selection) -> None:
+        selection.verify()
+        selected = manager_launch_cli._worktree_manager_root().expanduser()
+        if (
+            not selected.is_absolute() or selected.resolve() != controller_root
+            or (selection.adoption is not None and selection.adoption.root.resolve() != controller_root)
+        ):
+            raise manager_recovery.RecoveryRefused(
+                "Manager selection differs from the captured controller root"
+            )
 
     update_events.enter("binstubs")
     recovery_started = time.monotonic()
+    selection = None
+    controller_root = None
     try:
         # The installer also covers an old running updater during self-upgrade.
         with _selected_payload(payload, environment):
-            recovery = recover()
+            if manager_owned_by_controller:
+                root = manager_launch_cli._worktree_manager_root().expanduser()
+                if not root.is_absolute():
+                    raise manager_recovery.RecoveryRefused("Controller Manager root is not absolute")
+                controller_root = root.resolve()
+                selection = manager_recovery.controller_selection()
+                verify_selection(selection)
+                if selection.adoption is None:
+                    recovery = {"status": "not-adopted"}
+                else:
+                    recovery = {"status": "controller-owned"}
+            else:
+                recovery = manager_recovery.recover()
         status = {
             "current": "SKIPPED (current)",
             "not-adopted": "SKIPPED (Manager not adopted)",
             "recovered": "OK (Manager recovered)",
+            "controller-owned": "SKIPPED (Manager owned by project controller)",
         }.get(recovery["status"])
         if status is None:
             raise ValueError("Manager recovery returned an invalid status")
@@ -126,13 +163,34 @@ def finish(payload: Path, platform_name: str, environment: Mapping[str, str]) ->
     else:
         status = "OK"
     update_events.record("binstubs", "project-commands", status, started=started)
+    if manager_owned_by_controller:
+        try:
+            with _selected_payload(payload, environment):
+                verify_selection(selection)
+        except (OSError, ValueError, RuntimeError) as error:
+            output.err(f"Adopted Manager changed during integration: {error}")
+            update_events.record("binstubs", "manager-adoption", f"failed: {error}")
+            return False
     if platform_name == "windows" and recovery["status"] != "not-adopted":
         started = time.monotonic()
         with _selected_payload(payload, environment):
-            profiles_current = picker_profiles_cli._refresh_terminal_profiles()
+            if manager_owned_by_controller:
+                profiles_current = picker_profiles_cli._refresh_terminal_profiles(
+                    manager=selection.selected, verify=lambda: verify_selection(selection),
+                )
+            else:
+                profiles_current = picker_profiles_cli._refresh_terminal_profiles()
         update_events.record(
             "binstubs", "terminal-profiles", "OK" if profiles_current else "profile refresh failed",
             started=started,
         )
         current = current and profiles_current
+    if manager_owned_by_controller:
+        try:
+            with _selected_payload(payload, environment):
+                verify_selection(selection)
+        except (OSError, ValueError, RuntimeError) as error:
+            output.err(f"Adopted Manager changed during integration: {error}")
+            update_events.record("binstubs", "manager-adoption", f"failed: {error}")
+            return False
     return current
