@@ -179,8 +179,9 @@ slot. Current-version, last-known-good and complete-slot fallback order is
 unchanged. UTF-8 markers may include a Windows BOM; redirected slots and
 environment directories are refused. This does not change daemon cutover.
 
-Source identity also recognizes nested `.venv` environments and their exact
-profile/repair suffixes. An installed standalone wrapper supplies the package
+Runtime identity also recognizes flat or nested `.venv` reconstructed slots
+with an exact package-qualified repair suffix, as well as Source profile and
+repair suffixes. An installed standalone wrapper supplies the package
 version only when its own physical Source slot matches; unrelated wrapper
 metadata cannot override the plugin version. A Dispatch process loaded from a
 physical application environment selects relaunches from that application's
