@@ -711,3 +711,15 @@ adopter pilot feedback gates subsequent widening.
 - This closes the previously held source fixture requalification item, not
   the broader objective or an adopter/runtime approval. Fresh exact-head CI and
   actual review remain required before merging the existing first-slice PR.
+
+### 2026-11-07 — Retained publication stays in its native execution space
+- Independently confirmed the next overview concern: owner/Git/ledger agreement
+  did not by itself reject a retained foreign-platform record. The retained
+  predicate now requires both record and configuration to match the actual
+  native platform and retains the current execution-space/full typed tuple
+  check before granting path authority.
+- Both foreign-record and foreign-configuration publication controls refused
+  without record changes. Valid old-root publication and current actual
+  CLI/roundtrip acceptance remained passing: **5 focused native controls**.
+  This tightens the original receiving-authority invariant; it adds no
+  inactive category, runtime effect or allocation preference.
