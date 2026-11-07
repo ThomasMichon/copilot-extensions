@@ -397,7 +397,9 @@ def test_normal_payload_init_refreshes_receipt_and_upgrades_live_owner(tmp_path_
             command, ["restart", "--json"], environment, caller,
             run_root=run_root, phase="startup", timeout=_scenario_remaining(scenario_deadline),
         )
-        assert result.returncode == 0, result.stderr
+        assert result.returncode == 0, (
+            f"{result.stderr}\n{json.dumps(_cutover_failure_details(run_root), sort_keys=True)}"
+        )
         assert json.loads(result.stdout) == {"restarted": True, "was_running": False}
         result = _run(command, ["watch", "health", "--json"], environment, caller, timeout=60)
         assert result.returncode == 0, result.stderr

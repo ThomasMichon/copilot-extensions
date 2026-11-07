@@ -993,6 +993,22 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-11-07 - Retain the unresolved native startup deadline separately from hashing work
+
+- #11231's bounded path-walker improvements preserve full snapshot traversal,
+  exact digests, native identity and metadata fences, reparse rejection and
+  joined descriptor cleanup. Ten focused controls and strict Linux/Windows
+  typing pass. These source results do not establish lifecycle acceptance.
+- The original normal-upgrade scenario still fails at first startup, before
+  upgrade, within its unchanged 120-second cutover budget. The successor
+  bound after about 75 seconds; rollback and exact-instance observations
+  remain explicit failure evidence, not successful activation.
+- Retain the tested source work without publishing a complete-fix claim.
+  Further direction must distinguish reducing validation work within the
+  existing budget from deliberately changing the bounded latency contract.
+  No deadline, verification rule, installed runtime, delegation activation
+  or retained-resource disposition has been changed by that distinction.
+
 ### 2026-11-07 - Diagnose the actual installed first-owner startup failure
 
 - The released `0.3.227-dev1` payload's own normal-upgrade test was exercised
