@@ -233,6 +233,13 @@ implementation authority, resource custody or the fixed checkpoint.
 
 ## Plan
 
+The [provider-guard and consumer qualification study](<journal/2026/11.06 provider-guard-and-consumer-qualification.md>)
+credits delivered fake-provider and author-roster corrections without calling
+unfiltered tests, cold dispatch or consumer subscription complete. Eight
+originals remain OPEN and three protected identities stay metadata-only.
+The 810-whole checkpoint remains 81 above fixed 729; Phase 2 and all original
+acceptance, source ownership and resource custody remain Active.
+
 The [current consumer and qualification study](<journal/2026/11.06 current-consumer-and-qualification-boundaries.md>)
 keeps aggregate scheduling, serial-publication, historical-ref recovery and
 guard-map native acceptance distinct from current source identities and
