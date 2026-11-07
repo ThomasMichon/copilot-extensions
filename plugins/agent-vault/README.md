@@ -467,7 +467,7 @@ diagnostics or plaintext artifacts.
 - Credential reads fail fast by default when locked: they return an actionable error instead of hanging on a hidden prompt. Use `agent-vault unlock`, `agent-vault unlock --terminal`, or `agent-vault get --prompt ...` when you want an interactive prompt.
 - Unlock-source extensions run before prompts, so a configured provider can satisfy locked reads without UI.
 - The CLI cold-starts the daemon when needed. The installer also deploys platform supervision: a Windows Scheduled Task named `AgentVault`, or a Linux/WSL systemd user unit named `agent-vault.service` when systemd is available.
-- Windows updates start the incoming generation independently; the old build settles its work and retires itself. Compatible private auth handoff preserves unexpired unlocked state without resetting its lifetime. See [runtime replacement](docs/runtime-replacement.md) for the contract, readiness distinction and remaining POSIX/systemd migration.
+- Windows updates start the incoming generation independently; the old build preferably settles work and retires itself. A bounded, ownership-checked central retirement handles stuck predecessors, but live credential children retain writer exclusion. Compatible private auth handoff preserves unexpired unlocked state without resetting its lifetime. See [runtime replacement](docs/runtime-replacement.md) for the contract, readiness distinction and remaining POSIX/systemd migration.
 - There is **no** `agent-vault doctor` subcommand today. Use `agent-vault ping`, `agent-vault which`, `agent-vault cache-status`, and the installer `status` action for troubleshooting.
 
 ## Persistent cache and sealed values
