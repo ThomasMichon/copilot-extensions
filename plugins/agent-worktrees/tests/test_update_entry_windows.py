@@ -179,56 +179,165 @@ def _check_supported_breakaway_entry(root, native_powershell, front):
         f"[IO.File]::WriteAllText({escaped(ready)}, [string]$code)\n"
         "Start-Sleep -Seconds 5\nexit $code\n", encoding="utf-8",
     )
+    launch_started = time.time()
     process, job = spawn_sync_in_kill_on_close_job(
         [native_powershell, "-NoProfile", "-File", str(harness)],
         env=environment, cwd=root, require_job=True, allow_breakaway=True,
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         **no_window_kwargs(),
     )
-    pins = []
+    pins = {}
+
+    def pin_owned_children():
+        # Retain the caller's Popen handle through the final scan so its PID cannot be recycled.
+        for child in psutil.process_iter(["pid", "ppid", "create_time"]):
+            info = child.info
+            if (
+                info["ppid"] != process.pid or info["create_time"] is None
+                or info["create_time"] < launch_started or info["pid"] in pins
+            ):
+                continue
+            pin = None
+            try:
+                pin = PinnedProcess(identity(info["pid"]))
+                observed = psutil.Process(info["pid"])
+                if observed.ppid() != process.pid or observed.create_time() != info["create_time"]:
+                    pin.close()
+                    continue
+                pins[info["pid"]] = (pin, False)
+                probe = (
+                    observed.name().casefold() == Path(native_powershell).name.casefold()
+                    and Path(observed.exe()).samefile(native_powershell)
+                )
+                pins[info["pid"]] = (pin, probe)
+            except (psutil.NoSuchProcess, ProcessLookupError, FileNotFoundError):
+                if pin is not None:
+                    pins.pop(info["pid"], None)
+                    pin.close()
+            except Exception:
+                if pin is not None and info["pid"] not in pins:
+                    pin.close()
+                raise
+
     try:
         deadline = time.monotonic() + 15
         while not ready.is_file() and process.poll() is None and time.monotonic() < deadline:
             time.sleep(0.02)
+        pin_owned_children()
         if not ready.is_file() and process.poll() is not None:
             stdout, stderr = process.communicate(timeout=5)
             pytest.fail(f"native breakaway owner was not admitted: {stdout!r} {stderr!r}")
         assert ready.is_file(), "supported entry did not reach the offline bootstrap"
         assert ready.read_text() == "23"
-        parent = psutil.Process(process.pid)
-        children = parent.children()
-        child_names = [(child.pid, child.name()) for child in children]
-        probe_ids = {
-            child.pid for child in children
-            if child.name().casefold() == parent.name().casefold()
-            and Path(child.exe()).samefile(parent.exe())
-        }
-        pins = [PinnedProcess(identity(child.pid)) for child in children]
-        probes = [pin for child, pin in zip(children, pins) if child.pid in probe_ids]
+        probes = [pin for pin, probe in pins.values() if probe]
         deadline = time.monotonic() + 2
         while not all(pin.gone() for pin in probes) and time.monotonic() < deadline:
             time.sleep(0.02)
-        assert all(pin.gone() for pin in probes), f"successful admission left a probe alive: {child_names!r}"
+        assert all(pin.gone() for pin in probes), "successful admission left a probe alive"
         stdout, stderr = process.communicate(timeout=10)
         assert process.returncode == 23, stdout + stderr
         job.terminate_and_wait(10)
         deadline = time.monotonic() + 3
-        while not all(pin.gone() for pin in pins) and time.monotonic() < deadline:
+        while not all(pin.gone() for pin, _probe in pins.values()) and time.monotonic() < deadline:
             time.sleep(0.02)
-        assert all(pin.gone() for pin in pins), f"fixture cleanup left children alive: {child_names!r}"
+        assert all(pin.gone() for pin, _probe in pins.values()), "fixture cleanup left a child alive"
         assert not _updater_profile_files(home)
         assert not list(scratch.iterdir())
     finally:
-        for pin in pins:
+        try:
+            if job.handle is not None:
+                job.terminate_and_wait(10)
+            process.wait(timeout=10)
+        finally:
             try:
-                pin.kill()
+                failures = []
+                try:
+                    pin_owned_children()
+                except Exception as error:
+                    failures.append(error)
+                for pin, _probe in pins.values():
+                    try:
+                        pin.kill()
+                    except Exception as error:
+                        failures.append(error)
+                    try:
+                        pin.close()
+                    except Exception as error:
+                        failures.append(error)
+                assert not failures, f"native fixture child cleanup failed: {failures!r}"
             finally:
-                pin.close()
-        if job.handle is not None:
-            job.terminate_and_wait(10)
-        process.wait(timeout=10)
-        process.stdout.close()
-        process.stderr.close()
+                process.stdout.close()
+                process.stderr.close()
+
+
+@pytest.mark.parametrize("failure", ["reported-failure", "early-exit", "observer-timeout", "metadata-error"])
+def test_native_success_harness_settles_late_breakaway_children(
+    tmp_path, native_powershell, monkeypatch, failure,
+):
+    import io
+    import types
+    helpers = PLUGIN.parents[1] / "libs" / "agent-procutil" / "tests"
+    monkeypatch.syspath_prepend(str(helpers))
+    import caller_owned_fixture
+    import test_caller_owned_native
+    import agent_procutil
+
+    events = []
+    job = types.SimpleNamespace(handle=True)
+    child = types.SimpleNamespace(
+        info={"pid": 54321, "ppid": 12345, "create_time": 0},
+        ppid=lambda: 12345,
+        name=lambda: Path(native_powershell).name, exe=lambda: native_powershell,
+    )
+    child.create_time = lambda: child.info["create_time"]
+    if failure == "metadata-error":
+        def metadata_error():
+            raise OSError("fixture metadata query failed")
+        child.exe = metadata_error
+    process = types.SimpleNamespace(
+        pid=12345, stdout=io.BytesIO(), stderr=io.BytesIO(), returncode=1,
+        communicate=lambda **_kwargs: (b"", b""), wait=lambda **_kwargs: 1,
+    )
+
+    def poll():
+        if failure == "observer-timeout":
+            raise subprocess.TimeoutExpired("native fixture", 15)
+        return 1
+
+    def stop(_timeout):
+        events.append("job-stopped")
+        job.handle = None
+
+    def spawn(_command, **kwargs):
+        child.info["create_time"] = time.time()
+        if failure == "reported-failure":
+            (kwargs["cwd"] / "ready").write_text("1")
+        return process, job
+
+    class Pin:
+        def __init__(self, _record):
+            events.append("birth-pinned")
+
+        def kill(self):
+            events.append("child-killed")
+
+        def close(self):
+            events.append("handle-closed")
+
+    job.terminate_and_wait = stop
+    process.poll = poll
+    fake_psutil = types.SimpleNamespace(
+        process_iter=lambda _attrs: [child] if job.handle is None else [],
+        Process=lambda _pid: child, NoSuchProcess=ProcessLookupError,
+    )
+    monkeypatch.setitem(sys.modules, "psutil", fake_psutil)
+    monkeypatch.setattr(caller_owned_fixture, "identity", lambda pid: {"pid": pid})
+    monkeypatch.setattr(test_caller_owned_native, "PinnedProcess", Pin)
+    monkeypatch.setattr(agent_procutil, "spawn_sync_in_kill_on_close_job", spawn)
+    with pytest.raises((AssertionError, pytest.fail.Exception, subprocess.TimeoutExpired)):
+        _check_supported_breakaway_entry(tmp_path / "failure", native_powershell, "global")
+    assert events == ["job-stopped", "birth-pinned", "child-killed", "handle-closed"]
+    assert process.stdout.closed and process.stderr.closed
 
 
 @pytest.mark.parametrize("front", ["global", "payload"])

@@ -181,7 +181,7 @@ def test_update_entry_fetches_before_python(update_entry_case, front, runtime, n
         ["unknown", "update"],
     ],
 )
-def test_update_entry_leaves_other_calls_unchanged(update_entry_case, native_bash, args):
+def test_posix_update_entry_leaves_other_calls_unchanged(update_entry_case, native_bash, args):
     tmp, _home, _resolver = update_entry_case
     result = subprocess.run(
         [native_bash, str(PLUGIN / "bin/agent-worktrees"), *args],
