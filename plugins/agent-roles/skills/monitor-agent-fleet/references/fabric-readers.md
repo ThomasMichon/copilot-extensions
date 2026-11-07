@@ -38,7 +38,10 @@ row's `availability` and `projection.observed_at` mark it as saved and possibly
 stale. A host with no saved roster, or an older runtime that rejects
 `--passive` as an unrecognized argument, returns an error that is a coverage
 gap. Do not fall back to a plain or `--cache-only` `list --json`: either may
-start a stopped status-monitor and wait for a fresh publication.
+start a stopped status-monitor and wait for a fresh publication. A saved or
+unlabeled roster never proves a delegate's caller gone or terminal: `fleet`
+reports a caller missing from it as `unknown` and keeps the delegate
+non-finalizable (`host-roster-advisory`).
 
 For fleet-wide coverage, enumerate projects on each target host, never only on
 the observer. Run that host's `repos list --strict --json` and require

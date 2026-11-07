@@ -241,10 +241,12 @@ def _probe_host(
     row["worktrees"] = envelope["worktrees"]
     # Provenance stays with the rows: `availability` is set (status
     # "advisory") when the host served its saved roster instead of a
-    # current resident publication; `projection.observed_at` dates it.
-    for key in ("projection", "availability"):
-        if isinstance(envelope.get(key), dict):
-            row[key] = envelope[key]
+    # current resident publication; `projection.observed_at` dates it. Any
+    # availability label is kept so delegate inference fails closed on it.
+    if isinstance(envelope.get("projection"), dict):
+        row["projection"] = envelope["projection"]
+    if envelope.get("availability") is not None:
+        row["availability"] = envelope["availability"]
     return row
 
 
@@ -327,28 +329,8 @@ def run_fleet(argv: list[str]) -> int:
     ]
     from . import delegate_cli
 
-    reachable_hosts = {
-        (str(row.get("machine") or ""), str(row.get("env") or "")): bool(row.get("reachable"))
-        for row in rows
-    }
-    worktrees = [
-        dict(worktree)
-        for row in rows
-        for worktree in row.get("worktrees", [])
-        if isinstance(worktree, dict)
-    ]
-    delegate_cli.annotate_delegate_graph(worktrees, reachable_hosts=reachable_hosts)
-    worktrees_by_id = {
-        str(worktree.get("id")): worktree
-        for worktree in worktrees
-        if isinstance(worktree.get("id"), str)
-    }
-    for row in rows:
-        row["worktrees"] = [
-            worktrees_by_id.get(str(worktree.get("id")), worktree)
-            for worktree in row.get("worktrees", [])
-            if isinstance(worktree, dict)
-        ]
+    # Only a host's current publication can prove a caller gone or terminal.
+    delegate_cli.annotate_fleet_hosts(rows)
 
     if args.json:
         print(json.dumps({"version": 1, "hosts": rows}, default=str))

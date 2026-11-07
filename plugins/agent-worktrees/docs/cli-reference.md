@@ -169,9 +169,11 @@ Coverage is explicit, never inferred:
   saved roster and the row carries `availability` (`status: "advisory"`) and
   `projection.observed_at`: saved rows that may be stale. A host with no saved
   roster, or an older runtime that rejects `--passive` as an unrecognized
-  argument, becomes a `reachable: false` gap. Every child also runs with stdin
-  closed and `AGENT_WORKTREES_NO_SELFPROVISION=1`, so a host without a usable
-  runtime reports a gap instead of provisioning one.
+  argument, becomes a `reachable: false` gap. A saved roster never proves a
+  delegate's caller gone or terminal: a caller missing from it is `unknown`,
+  and the delegate is not finalizable (`host-roster-advisory`). Every child
+  also runs with stdin closed and `AGENT_WORKTREES_NO_SELFPROVISION=1`, so a
+  host without a usable runtime reports a gap instead of provisioning one.
 - **Local deadline only.** `--timeout` bounds the SSH connect and the local
   client. Some SSH servers keep the remote command running after the client
   disconnects, so prefer this bounded reader to ad hoc remote scripts.
@@ -622,7 +624,7 @@ continue to work unchanged.
 | `worktree-lineage` | Project-agnostic, bounded graph of one authoritative worktree's sessions, transitions, handoffs, controllers, normalized reciprocal presentation, projection health, and explicit terminal/fork/cycle/missing-session findings (JSON) |
 | `fleet` | Aggregate one project's `list --json` across every reachable machine × environment -- one SSH/local process per target, never per-worktree. `--json` returns host rows (`machine` / `env` / `reachable` / `worktrees`) and annotates delegate edges with `caller_state`, `delegate_finalizable`, and reverse `delegates` lists. Covers the selected project only; see [Fleet worktree inventory](#fleet-worktree-inventory) for liveness and coverage rules. |
 | `reconcile` | Force-refresh PR state for every tracked worktree (including `finalized`) out of band, so `list` stays a pure file read |
-| `delegates` | Focused cross-machine delegate/caller query built on the fleet snapshot. Dry-run by default: reports every `caller_worktree` delegate plus whether its host is `resolved`, `gone`, `unreachable`, or `ambiguous`, and whether the delegate became finalizable because the host is `finalized` / `complete(d)` / gone. `--execute` finalizes every currently eligible delegate through the owning host. |
+| `delegates` | Focused cross-machine delegate/caller query built on the fleet snapshot. Dry-run by default: reports every `caller_worktree` delegate plus whether its host is `resolved`, `gone`, `unreachable`, `ambiguous`, or `unknown`, and whether the delegate became finalizable because the host is `finalized` / `complete(d)` / gone. Only a host's current roster can prove that; a saved, stale, or unlabeled one leaves the delegate blocked (`host-roster-advisory`). `--execute` finalizes every currently eligible delegate through the owning host. |
 | `conclude-session` / `link-succession` | Project-agnostic write primitives for explicit session conclusion and exact-token handoff succession links (JSON) |
 | `resolve-handoff-successor` | Sanctioned repair for a terminal (`kind` managed, status finalized/complete/completed) worktree whose real handoff successor session ran to completion but was never `register-session`'d (a crash/race in that step), leaving `pending_handoffs`/`resolved_head_session` permanently wedged. `--token` names the still-`pending` handoff and `--successor` the NOT-yet-tracked session id; refuses unless the successor is a real, non-live, non-detached local session (`sessions.validate_session_id`) whose recorded cwd matches the worktree's `worktree_path` and whose transcript's first turn is itself a handoff-seed prompt with real turns beyond it (the same class-G evidence bar `repairing-worktrees` documents). On success it retroactively registers the successor, links the handoff, and immediately concludes it so the worktree lands back in the terminal shape gc already expects -- the sanctioned alternative to hand-editing tracking YAML |
 | `conclude-disposable` | Project-agnostic, exact-id terminal conclusion for an explicitly disposable worker, regardless of CLI/ACP tracking metadata. Requires `--policy disposable-cli` (historical wire spelling) and `--owner`; preserves live sessions, all dirty work (including generated local overlays), local commits, follow-ups, claims, pairs, and open PRs. A clean branch with zero commits ahead of upstream may remain behind without being rewritten, then the command marks the record managed/final without changing its effective interface. `--remove` immediately runs the conservative managed-GC verdict for only that exact id, with fresh lifecycle/liveness checks; an already-removed id is idempotent success. |
@@ -1235,13 +1237,20 @@ record's head, liveness, occupancy, or resume target.
 When a row carries `caller_worktree`, `list --json` also adds a normalized
 `caller_state` object so consumers do not re-derive the host relationship: the
 host worktree id plus the best-known `state` (`resolved`, `gone`,
-`unreachable`, or `ambiguous`) and, when resolved, the host's machine/platform,
+`unreachable`, `ambiguous`, `unresolved`, or -- in cross-host reads --
+`unknown`) and, when resolved, the host's machine/platform,
 path, and tracking status. Every such delegate row also carries
 `delegate_finalizable` + `delegate_finalizable_reason`, encoding the manual
 inheritance rule now made programmatic: a delegate becomes finalizable once its
 host is `finalized`, `complete(d)`, or gone. The reverse edge is surfaced on
 explicit legacy/detail host rows as `delegates` (the delegate worktree ids plus
 their own finalizable/not-finalizable verdicts); current rows omit that graph.
+`fleet` and `delegates` accept a host's roster as proof that a caller is gone
+or terminal only when it is a current publication (`projection.quality:
+"current"` with no `availability` label). A saved, stale, or unlabeled roster
+(for example from an older runtime) leaves a missing caller `unknown` and never
+authorizes finalization (`delegate_finalizable: false`, reason
+`host-roster-advisory`).
 
 When a worktree record carries profile-assignment history, the ordinary
 `list --json` row includes `current_profile_assignment`: the bound assignment
