@@ -176,14 +176,19 @@ def _pid_matches_root(pid: int, *, root: Path) -> bool:
 
 
 class ControlClient:
-    def __init__(self, base_url: str, *, root: Path | None = None, timeout: float = 5.0):
+    def __init__(
+        self, base_url: str, *, root: Path | None = None, timeout: float = 5.0,
+        token: str | None = None,
+    ):
         parsed = urlparse(base_url)
         if parsed.scheme not in ("http", "") or not parsed.hostname or parsed.port is None:
             raise ValueError(f"invalid mux-daemon cutover URL: {base_url!r}")
+        if token is not None and (not isinstance(token, str) or not token.strip()):
+            raise ValueError("invalid mux-daemon control credential")
         self.host = parsed.hostname
         self.port = int(parsed.port)
         self.base_url = base_url
-        self.token = load_or_create_control_token(root)
+        self.token = token if token is not None else load_or_create_control_token(root)
         self.root = root if root is not None else default_root()
         self.timeout = timeout
 
