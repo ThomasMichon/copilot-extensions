@@ -191,7 +191,11 @@ def _sess(w):
             return "MUX(?)"
         if w.get("session_bare_orphan"):
             return "PROC"
-        return "HOST(?)" if w.get("session_lock_live") or w.get("session_bound_live") else "?"
+        return "HOST(?)" if (
+            w.get("session_lock_live") or w.get("session_bound_live")
+            or w.get("session_bridge_live") or w.get("session_ahp_live")
+            or w.get("execution_leg_live")
+        ) else "?"
     if w.get("mux_attached"):
         return f"●{w.get('mux_clients', 1)}"
     if w.get("mux_session"):

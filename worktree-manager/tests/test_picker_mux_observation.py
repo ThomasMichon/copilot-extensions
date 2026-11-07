@@ -23,6 +23,9 @@ def test_legacy_and_current_presentation_remains_compatible(row, expected):
     ({"session_bound_live": True}, "HOST(?)"),
     ({"session_bound_live": True, "session_bare_orphan": True}, "PROC"),
     ({"session_bridge_live": True, "interface": "acp"}, "ACP"),
+    ({"session_bridge_live": True}, "HOST(?)"),
+    ({"session_ahp_live": True}, "HOST(?)"),
+    ({"execution_leg_live": True}, "HOST(?)"),
     ({}, "?"),
 ])
 def test_unknown_mux_evidence_cannot_become_a_count_or_plain_process(
@@ -73,3 +76,45 @@ def test_normalized_unknown_mux_cannot_enable_attachment_controls():
     }, "host", "Win")
     assert row["sess"] == "MUX(?)"
     assert row["mux_live"] is False and row["attached"] is False
+
+
+@pytest.mark.parametrize("mux_fields", [
+    {}, {"mux_clients": 0},
+    {"mux_session": False, "mux_clients": 0, "mux_attached": False},
+])
+def test_actions_query_preserves_unavailable_mux_until_complete_current_observation(
+    tmp_path, monkeypatch, mux_fields,
+):
+    from types import SimpleNamespace
+    from worktree_manager.production_picker import engine_group_c, project_config
+    from worktree_manager.production_picker.picker_tui import worktree_detail_queries
+
+    (tmp_path / "one.yaml").write_text("")
+    monkeypatch.setattr(project_config, "tracking_dir", lambda _: tmp_path)
+    batch = engine_group_c.PickerReconcileLocalBatch(
+        version=1,
+        rows=[{"id": "one", "session_bound_live": True, **mux_fields}],
+        summary={"mux_scan_ok": False},
+    )
+    monkeypatch.setattr(engine_group_c, "picker_reconcile_local", lambda *a, **kw: batch)
+    raw = {
+        "id": "one", "mux_session": True, "mux_attached": True, "mux_clients": 7,
+        "mux_observation_unavailable": True,
+    }
+    rec = derive.norm(raw, "host", "Win")
+    source = SimpleNamespace(is_local=lambda *a: True)
+    row, local = worktree_detail_queries.verify_liveness(rec, source, "project")
+    assert local is True and row["mux_observation_unavailable"] is True
+    data_local._stamp_from_raw(None, raw, row)
+    retained = derive.norm(raw, "host", "Win")
+    assert retained["sess"] == "MUX(?)"
+    assert retained["attached"] is False and retained["mux_live"] is False
+    assert raw["mux_clients"] == 7
+    batch.summary["mux_scan_ok"] = True
+    batch.rows[:] = [{
+        "id": "one", "session_bound_live": True,
+        "mux_session": False, "mux_clients": 0, "mux_attached": False,
+    }]
+    row, _ = worktree_detail_queries.verify_liveness(rec, source, "project")
+    data_local._stamp_from_raw(None, raw, row)
+    assert raw["mux_clients"] == 0 and derive._sess(raw) == "PROC"

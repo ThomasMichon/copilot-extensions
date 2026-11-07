@@ -87,11 +87,15 @@ fallback probes cannot establish absence.
 
 Cleanup retains checkouts and tracking records whenever mux presence is
 unknown, including its lock-held recheck and final managed-removal guard.
+This is not a positive activity verdict: without independent live evidence,
+classification still reads the checkout's actual Git disposition and counts.
 Expired or negative cache hints do not waive this protection, nor does
 `--force` on session cleanup. Fleet `status --mux-details`, nonresident list
 reads and legacy Picker refreshes still return independent facts without
 clearing last-known mux positives. A project publication failure is isolated
 so unrelated resident rosters remain available.
+Actions-menu liveness refinement also retains mux fields and uncertainty
+unless it receives a complete current mux observation.
 
 Picker shows **`MUX(?)`** for known but unconfirmed mux hosting and
 **`HOST(?)`** for a live process whose mux hosting is unknown. A client count

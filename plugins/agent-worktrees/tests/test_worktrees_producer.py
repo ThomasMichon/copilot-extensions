@@ -2,6 +2,7 @@
 
 import json
 import sqlite3
+import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -11,6 +12,57 @@ from agent_worktrees import git_ops, mux_link, reclaim, sessions, tracking
 from agent_worktrees import worktrees_producer as producer
 from agent_worktrees.worktrees_runtime import WorktreesRuntime
 from agent_worktrees.hook_facts_publication import HookFactsPublisher
+
+
+def test_unavailable_windows_mux_does_not_hide_real_git_facts(tmp_path, monkeypatch):
+    from agent_procutil import no_window_kwargs
+
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+
+    def git(*args):
+        subprocess.run(
+            ["git", "-C", str(checkout), "-c", "user.name=Example",
+             "-c", "user.email=example@example.invalid", *args],
+            check=True, capture_output=True, **no_window_kwargs(),
+        )
+
+    git("init", "--initial-branch=worktree/one")
+    git("commit", "--allow-empty", "-m", "Base")
+    git("update-ref", "refs/remotes/origin/main", "HEAD")
+    (checkout / "change.txt").write_text("committed")
+    git("add", "change.txt")
+    git("commit", "-m", "Ahead")
+    (checkout / "change.txt").write_text("dirty")
+    record = tracking.WorktreeRecord(
+        worktree_id="one", branch="worktree/one", worktree_path=str(checkout),
+        repo="project", machine="host", platform="windows", title="Task",
+        started_at="", last_resumed_at="", resume_count=0,
+        status="active", completed_at=None, sessions=[],
+        mux_live=False, mux_live_at="2020-01-01T00:00:00",
+    )
+    monkeypatch.setattr(producer.cfg, "project_name", lambda: "project")
+    config_path = producer.cfg.project_dir("project") / "config.yaml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(json.dumps({
+        "repos": {"project": {"anchor": str(checkout), "default_branch": "main"}},
+    }))
+    monkeypatch.setattr(tracking, "list_records", lambda *a, **kw: [record])
+    monkeypatch.setattr(sessions, "platform", SimpleNamespace(system=lambda: "Windows"))
+    monkeypatch.setattr(sessions, "scan_sessions_fast", lambda _: sessions.SessionContext())
+    monkeypatch.setattr(sessions, "has_mux_session", lambda *a, **kw: pytest.fail("PSMux probe"))
+    monkeypatch.setattr(reclaim, "bare_orphan_worktree_ids", lambda: set())
+    monkeypatch.setattr(reclaim, "live_bridge_worktrees", lambda: set())
+    owner = WorktreesRuntime(tmp_path / "current.sqlite3")
+    owner.activate()
+    try:
+        assert producer.publish_active_project(owner) == 1
+        row = owner.handle({"contract_version": 1, "project": "project"})["worktrees"][0]
+        assert row["state"] != git_ops.WorktreeState.ACTIVE.value
+        assert row["dirty"] == 1 and row["ahead"] == 1 and row["behind"] == 0
+        assert row["fact_provenance"]["mux"]["quality"] == "unavailable"
+    finally:
+        owner.shutdown()
 
 
 @pytest.mark.parametrize(("failure", "managed_state"), [

@@ -461,14 +461,14 @@ def _build_active_paths(
             if rec.worktree_path and sessions.mux_session_name(rec.worktree_id) in mux_sessions:
                 active.add(sessions._normalize_path(rec.worktree_path))
     else:
-        # Unknown PSMux presence preserves every checkout, independent of hint
-        # freshness. Only TMux may use per-session fallback; passive PSMux CLI
-        # execution can reap live servers during startup.
+        # Unknown presence is not activity; cleanup has its own refusal gates.
+        # Only TMux may use per-session fallback; passive PSMux CLI execution
+        # can reap live servers during startup.
         for rec in records:
             if not rec.worktree_path:
                 continue
             hint = _fresh_mux_live_hint(rec)
-            if hint is True or sessions.platform.system() == "Windows":
+            if hint is True:
                 active.add(sessions._normalize_path(rec.worktree_path))
             elif sessions.platform.system() != "Windows" and sessions.has_mux_session(rec.worktree_id):
                 active.add(sessions._normalize_path(rec.worktree_path))

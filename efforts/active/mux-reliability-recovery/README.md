@@ -291,3 +291,21 @@ not only its parser. Deployment and repairs to running sessions are separate.
   tests. Exact conflict-file lint and changed-source module ceilings passed.
   All five original blocking threads have implementation replies and are
   resolved; a fresh review and CI for the rebased head remain outstanding.
+
+### 2026-11-07 - Separate preservation from positive activity
+
+- A later review exposed a distinction the first cleanup correction missed:
+  unknown mux presence must block retirement without marking every Windows
+  checkout active. Removed that activity shortcut while retaining the separate
+  initial/lock-held/final cleanup refusals. A real temporary Git repository
+  now proves the producer publishes dirty/ahead/behind facts through the
+  actual classifier while mux observation remains unavailable.
+- Unknown-host badges retain independently observed bridge, AHP and execution
+  leg liveness. Actions-menu refinement now carries mux scan availability,
+  infers uncertainty from missing fields, and preserves the prior mux fields
+  until a complete current observation arrives.
+- Worktrees' actual classifier/producer, activity and cleanup packet passed 66
+  tests; Manager's query/badge/current-roster packet passed 56. Source lint and
+  module checks passed. These corrections address the two new inline findings
+  and the review's additional Actions-menu observation; fresh exact-source
+  review and CI remain required.

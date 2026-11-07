@@ -84,7 +84,7 @@ def test_windows_passive_classification_does_not_fall_back_to_psmux(hint):
          patch("agent_worktrees.sessions._list_mux_sessions", return_value=None), \
          patch("agent_worktrees.sessions.has_mux_session") as probe:
         active = cli._build_active_paths([rec], session_ctx=_empty_ctx())
-    assert active == {"/tmp/a"}
+    assert active == set()
     probe.assert_not_called()
 
 
@@ -116,3 +116,10 @@ def test_active_paths_include_hosted_session_bindings():
         active = cli._build_active_paths([rec], session_ctx=_empty_ctx())
 
     assert active == {"/tmp/a"}
+
+
+@pytest.mark.parametrize("signal", ["session_bridge_live", "session_ahp_live", "execution_leg_live"])
+def test_legacy_picker_keeps_independent_host_liveness_when_mux_is_unknown(signal):
+    from agent_worktrees.picker_support import derive
+
+    assert derive._sess({"mux_observation_unavailable": True, signal: True}) == "HOST(?)"
