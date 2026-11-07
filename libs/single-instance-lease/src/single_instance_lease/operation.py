@@ -68,6 +68,19 @@ def _plain_file(path: Path) -> os.stat_result:
     return info
 
 
+def _acquire_byte_zero(stream: BinaryIO) -> None:
+    if sys.platform == "win32":
+        import msvcrt
+
+        stream.seek(0)
+        msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+        if os.fstat(stream.fileno()).st_size == 0:
+            stream.seek(0)
+            stream.write(b"\0")
+    else:
+        _acquire_os_lock(stream)
+
+
 def _assert_linux_flock(stream: BinaryIO) -> None:
     if sys.platform != "linux":
         raise OperationOwnershipError("inherited native custody requires Linux descriptor evidence")
@@ -174,13 +187,8 @@ class OperationLock:
                 self._key = key
                 self._owner = (os.getpid(), threading.current_thread())
                 try:
-                    if self._byte_zero and os.name == "nt":
-                        import msvcrt
-
-                        if os.fstat(stream.fileno()).st_size == 0:
-                            stream.write(b"\0")
-                        stream.seek(0)
-                        msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+                    if self._byte_zero:
+                        _acquire_byte_zero(stream)
                     else:
                         _acquire_os_lock(stream)
                 except OSError as error:

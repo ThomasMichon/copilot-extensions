@@ -187,6 +187,46 @@ def test_byte_zero_custody_preserves_existing_file_contents(tmp_path: Path, cont
     assert path.read_bytes() == (b"\0" if os.name == "nt" and not contents else contents)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows byte-range initialization")
+def test_byte_zero_initialization_holds_the_native_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "legacy.lock"
+    path.touch()
+    identity = path.stat()
+    original = os.fstat
+    visits = 0
+    outcomes = []
+    python, extra_env = direct_python(sys.executable)
+    peer = """
+import msvcrt, sys
+f = open(sys.argv[1], "r+b")
+try:
+    msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+except OSError:
+    sys.exit(7)
+f.write(b"legacy metadata")
+f.close()
+"""
+
+    def interleaved(fd: int) -> os.stat_result:
+        nonlocal visits
+        info = original(fd)
+        if os.path.samestat(info, identity):
+            visits += 1
+            if visits == 2:
+                result = subprocess.run(
+                    [python, "-c", peer, str(path)], env={**os.environ, **extra_env},
+                    capture_output=True, text=True, timeout=10, **no_window_kwargs(),
+                )
+                outcomes.append(result.returncode)
+        return info
+
+    monkeypatch.setattr(os, "fstat", interleaved)
+    with OperationLock(path, byte_zero=True) as custody:
+        custody.assert_owned()
+    assert outcomes == [7]
+    assert path.read_bytes() == b"\0"
+
+
 def test_same_process_handles_and_threads_cannot_overlap(tmp_path: Path) -> None:
     path = tmp_path / "operation.lock"
     with OperationLock(path) as custody:

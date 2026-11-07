@@ -4876,7 +4876,7 @@
         "libs/remote-login-shell/tests/test_remote_login_shell.py": "90207324577ffe76445016c76643e66130017d4d90d7a9d4dcf6ebafeb030952",
         "libs/single-instance-lease/src/single_instance_lease/__init__.py": "be9bdd78ca0093a72b68f8f2fd6098166a737e1b5c2bd3b94c08c866807702b9",
         "libs/single-instance-lease/src/single_instance_lease/lease.py": "6d160e9819ce6c8d04f22925c6ee295c69c9898ab594ab5d7d2c3908ce53e605",
-        "libs/single-instance-lease/src/single_instance_lease/operation.py": "71ddb9bff2d04932a004b709ce66d34df36f49c8a90c6b75903a5b113123fc22",
+        "libs/single-instance-lease/src/single_instance_lease/operation.py": "77f77b782bf5976805659d6fd50b6b38fc8c68b84e3aa8122dc36f32dbafe13e",
         "libs/single-instance-lease/src/single_instance_lease/reaper.py": "d1dd3e91b7f526c84bfc1ff4a141915ecbc86312758b69693b7d79082f66f914",
         "libs/single-instance-lease/src/single_instance_lease/supersession.py": "d5d910ad8133514fb0bf46b07803b84092b582a4966faa70d011e93ce9ab431d",
         "libs/ssh-manager/src/ssh_manager/__init__.py": "ce73ddba8c43c34b0fbee60d35aa8277287092ced95c161565fcf239a46c5b3a",
