@@ -1421,3 +1421,65 @@ CP1252 exactly reproduces the hosted mismatched hash; UTF-8 reproduces the
 unchanged expected hash. Select UTF-8 explicitly for both the manifest and
 captured sources, with a focused locale-regression test. Preserve the actual
 fixture bytes, expected source hashes, complete portfolio and all deadlines.
+
+### 2026-11-07 - Exact-source hosted capture and artifact return accepted
+
+The focused CP1252-default regression qualified source
+`b2b771d829b03b1518c726a210457844de040195` in run
+[42335440675](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42335440675).
+Then the same source's canonical packet, request
+`4c32c68fa58e470ea88fde4dd8b83f52`, qualified in run
+[42335682232](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42335682232),
+attempt 1, artifact `13559319605`, protected controller
+`72eb9adc4cf670dd6e70e5d1e3146be67853f53f`.
+The result client validated the complete binding and returned exit 0.
+Result-manifest SHA-256:
+`3ce62539139e1d7382c9e799e6b04952a7999219e13e0f310185af18b62ae075`.
+
+The canonical writer passed both real-owner controls in 45.81 seconds and all
+243 protocol/CLI controls in 110.55 seconds. Independent same-source no-write
+reproduction passed the same complete portfolio in 41.04 and 94.56 seconds.
+No skips, partial-packet stitching or enlarged item/group/aggregate limits
+were needed. Worker phases, including source/selection and preparation, ended
+at 447.750 seconds: writer at 232.969, independent reproduction at 432.844,
+contract verification at 443.297 and export at 447.641.
+
+This ran on disposable hosted Windows Server 2025 AMD64 image
+`win25-vs2026` / `20261103.298.1`, controller Python 3.12.10, not the
+development machine. The existing independent registry verifier passed.
+The source-owned materializer verified export-manifest SHA-256
+`19055c151f46d09809d4fa0bf2e07aab3de385dd7df8ae0d0effb781c1f0dcf1`
+against the actual export receipt, source identity, 245-case inventory and
+all input preimages, then published all 139 canonical outputs successfully.
+The earlier failed request remains retained and is not relabelled as a pass.
+
+Fresh review and required CI on #11016 remain separate gates. Its current
+published head now reports a genuine upstream conflict, so preserve this
+qualified source and artifact before normal managed reconciliation. Any
+changed execution closure needs impact-selected revalidation; this result
+does not qualify an unexamined rebase or complete the parent.
+
+### 2026-11-07 - Reconcile the qualified checkpoint with current development
+
+Preserved the qualified source and generated outputs before reducing the owned
+17-commit stack to one tree-identical local commit. Rebased that net change
+onto `b206e572a1`, resolving the source conflict once: retain upstream's
+precomputed suffix lookup and the distinct per-interpreter capture logs.
+Update the focused lookup control to exercise that canonical implementation.
+Both upstream's caller-association additions and the bounded head reader
+remain in the shared CLI module, within its unchanged 1,000-line ceiling.
+
+The canonical registry codec and locked publication owner retain every
+provenance record from both histories: 10,874 HTTP records and 91 Session Host
+records. The shared CLI source declaration names the genuinely merged bytes;
+this is not new capture evidence. Regenerated the canonical lifecycle archive,
+all 13 adopter copies, the nested Worktrees copy and the affected footprint
+producer hashes from current source. All 652 admitted unit-source hashes,
+installation-context synchronization, the Worktrees payload generator,
+changed-module ceilings and focused F/E9 checks pass.
+
+The current complete packet contains 270 cases, not the earlier 245. The prior
+hosted result remains valid for its original source only. This reconciled
+closure still requires fresh hosted controls, canonical writer, independent
+same-source reproduction, contract verification and receipt-bound artifact
+return before refreshing #11016 for review and required CI.

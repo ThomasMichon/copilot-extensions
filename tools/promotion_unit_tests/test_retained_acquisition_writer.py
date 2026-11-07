@@ -150,7 +150,7 @@ def boundary(monkeypatch):
     calls = []
     prefix = ("/example/pinned-python", "/example/pinned-worktrees")
     identity = {
-        "installation_root": "/example/installation",
+        "installation_root": str(Path("/example/installation")),
         "runtime_generation": "a" * 32,
     }
     requirement = SimpleNamespace(

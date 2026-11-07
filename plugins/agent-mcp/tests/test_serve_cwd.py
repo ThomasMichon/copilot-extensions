@@ -39,7 +39,7 @@ def test_default_home_dir_falls_back_to_dot_agent_mcp(monkeypatch):
 def test_default_socket_path_still_lives_under_home_dir(tmp_path, monkeypatch):
     custom = tmp_path / "custom-agent-mcp-home"
     monkeypatch.setenv("AGENT_MCP_HOME", str(custom))
-    assert ipc.default_socket_path() == custom / "serve.sock"
+    assert ipc.default_socket_path() == custom / "current" / "serve.sock"
 
 
 def test_cmd_serve_pins_cwd_to_agent_mcp_home_before_serving(tmp_path, monkeypatch):
@@ -158,7 +158,10 @@ def test_actual_cli_parent_relative_paths_reach_admitted_server(tmp_path, monkey
     class ObservedServer(serve.Server):
         async def _start_control_listener(self):
             await super()._start_control_listener()
-            assert self.socket_path == home / "serve.sock"
+            expected_socket = (
+                home / "serve.sock" if selection == "socket" else home / "current" / "serve.sock"
+            )
+            assert self.socket_path == expected_socket
             assert Path.cwd() == home
             assert os.environ["AGENT_MCP_HOME"] == str(home)
             observed.append(True)

@@ -19,6 +19,16 @@ plugins. It is the one piece that must work *before* the plugins do.
 > [#1165](https://github.com/ThomasMichon/copilot-extensions/issues/1165) and
 > [#1174](https://github.com/ThomasMichon/copilot-extensions/issues/1174).
 
+## Picker notices and diagnostics
+
+The Picker reserves two fixed notice rows for Knowledge setup and cached-source
+refresh status. Updates to these notices do not insert entries into the worktree
+list or move its selection. Claim-coverage warnings appear as a compact warning
+icon; impacted worktrees offer **Doctor** in Actions for read-only diagnostics
+and full claim inspection. Inspection does not repair or release resources.
+Re-homed resources without a worktree row retain the compact `o: Doctor`
+footer shortcut to their existing inspection screen.
+
 ## Staged launch prompts
 
 Launch prompts require a freshly confirmed cold target. A confirmed live target
@@ -416,6 +426,19 @@ retained file, not unique calls or lifetime totals. Missing, partial, stale and
 unsupported evidence remain visible. Reported completion is not agent retirement.
 Refresh reloads the graph; leaving the app cancels its owned reads.
 
+Graph also lists the worktree's recorded PR associations, but only when the
+selected engine declares `companion-pr-observations-v1` on its status bundle;
+otherwise it shows claim-only text and PR state stays unknown. A recorded
+lifecycle is association bookkeeping, not current openness. Selecting one
+association runs exactly one finite `pr-watch snapshot <repo> <number> --json`
+through that same engine (no host or token overrides); **Re-read PR** repeats
+it. The result shows open, closed without merge, merged, or unknown, with its
+last-observed time and source. A reply must match the selected provider,
+repository, number and endpoint and the version-1 snapshot schema, or it is
+shown as unavailable. Review, check and mergeability fields are diagnostics
+only and never grant consent or merge authority. Refresh or exit invalidates
+in-flight reads. Bounds: 24 associations and a 256 KiB reply.
+
 The optional attention strip shows the selected head CLI's **last-reported**
 busy, idle or awaiting-operator state and transition timestamp. Continuity
 remains unknown: this is not proof of a currently pending question or of no
@@ -566,6 +589,12 @@ idempotent and can heal a partial install. Required Python must return a
 successful, supported version from the exact discovered executable; a found
 but unusable or unqualified Python remains a prerequisite gap. Detection does
 not reorder candidates, substitute a private runtime or repair public PATH.
+Windows also requires a working PowerShell 7 (`pwsh`) host for the native core
+installer. A missing, older or unqualified host stops setup before core or
+repository work. As with Git, setup reports a manual system-package command;
+it does not run WinGet or request elevation for this prerequisite. Install the
+reported package, open a fresh terminal, and retry. POSIX setup does not require
+PowerShell.
 The core install is never
 reimplemented — the Worktree Manager locates and calls agent-worktrees' own
 `install.{ps1,sh}`. Core detection uses the same read-only, installation-context-
@@ -850,6 +879,14 @@ Mux routes and target readiness use the constructed slot's immutable generation,
 including repair/source qualifiers. Health preserves the semantic package
 `version` and separately reports `runtime_generation` from its own interpreter
 prefix, never from the mutable selected marker.
+`python -m worktree_manager.mux_serving_observation --root <manager-root>`
+emits the version-1 `worktree-manager.mux-serving-observation` result. It
+reads the existing authenticated route and native process identity without
+starting a daemon or creating a control credential. It reports `ready` with
+the actual serving generation, `inactive` only when no route or ownership
+markers exist, and otherwise `unknown`. This observation alone does not
+authorize selection or cutover; callers coordinating changes must hold the
+appropriate native ownership and recheck the result.
 Normal mux-daemon startup uses the
 [external Python bytecode cache](../libs/agent-procutil/README.md#managed-python-bytecode-cache)
 under Manager's durable root. Explicitly read-only retention/bootstrap controls
@@ -2069,6 +2106,14 @@ authorize runtime selection. Frozen source provenance and isolated installed
 health precede canonical completion, and candidate custody is retained through
 selection and update-triggered mux cutover.
 
+Installed plugin discovery uses the canonical runtime layout resolver for both
+historical direct-slot environments and prepared applications with a slot-local
+`.venv`. Root attribution and complete-slot selection still apply; a same-named
+command on `PATH` is not an engine selection. Engine bytecode caches remain
+outside the selected slot in either layout. Picker monitor reuse compares the
+selected interpreter's environment prefix with the monitor's recorded prefix,
+so a healthy nested environment does not cause another launch attempt.
+
 Package versions and runtime generations are distinct: a repair adds the
 canonical `+repair.<identity>` qualifier (or `.repair.<identity>` after a local
 version). Existing source-qualified identities retain their canonical identity.
@@ -2333,6 +2378,11 @@ repair contract below owns that choice.
 `worktree-manager update` owns the update run's telemetry: it records the
 self-update as the `manager_self_update` phase, exports the run identity to the
 engine it drives, and writes `~/.copilot-extensions/update/update-status.json`.
+When bootstrap supplies an explicit environment prepared before that run
+started, Manager overlays its run ID, event path and owner for the engine child;
+the original environment and unrelated selection/authentication values remain
+unchanged. The engine participates in that run rather than creating a second
+owner.
 A failed cutover fails the run (`command_failed`, exit 1); the engine's exit
 code is mapped through the shared update exit-code table (0 success, 1
 `command_failed`, 2 usage error, 3 configuration, 4 auth, 5 blocked by a lock,

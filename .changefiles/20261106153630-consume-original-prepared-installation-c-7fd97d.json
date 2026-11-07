@@ -1,0 +1,9 @@
+{
+  "comment": "Consume original prepared installation-cell membership in Windows post-tool shell notifications and advisory reads.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

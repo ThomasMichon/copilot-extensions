@@ -2366,6 +2366,42 @@ removed slot. See the
 [Manager removal operation](../worktree-manager/README.md#remove-an-owned-installation)
 for invocation, supported-target limits, result statuses and rollback behavior.
 
+### Worktrees runtime-only installer composition
+
+The native Worktrees shell installers accept `install` and `update` with
+`-RuntimeOnly` (PowerShell) or `--runtime-only` (POSIX). This explicitly
+suppresses project-name inference and project-specific adoption, configuration,
+registration, hooks and shortcuts. An explicit project name or a different
+action is rejected before lifecycle admission, staging or runtime effects.
+Omission retains the existing defaults; it is not an implicit runtime-only
+request because an existing project configuration can match the caller's CWD.
+
+This mode uses the ordinary runtime constructor, readiness, activation,
+execution-driver custody and shared machine integration. It is not the lean
+`provision` action, an alternative builder or permission to update a host.
+Shared configuration migration and global binstub reconciliation retain their
+existing behavior. Runtime readiness does not claim that a project has been
+registered or that a higher-level installation is complete. A composing caller
+can subsequently use the canonical registration writer with the inspected
+project name, absolute repository root and preserved policy.
+
+The adjacent `scripts/installer-contract.json` declares the
+`agent-worktrees.native-installer` contract, version 1, and capability
+`runtime-only-v1`, including the actions and exact shell spellings. Read it
+from the **same selected payload as the installer that will execute**.
+This is a payload-native boundary, not a declaration about an older installed
+CLI or a running daemon; do not infer support from package versions, a newer
+payload elsewhere or a tool command on PATH. The flag is not an addition to
+the installed `agent-worktrees install` command's own parser.
+
+Provider rollout precedes caller migration. Providers retain old syntax and
+defaults; consumers requiring non-adoption must select this capability before
+effects. A missing, invalid or unsupported declaration, including provider
+rollback to an older payload, requires a truthful pre-effect incompatibility
+result. Do not trial an effectful new invocation and replay an older form, or
+substitute a reserved project name. No old form is retired by this additive
+contract.
+
 ## Update-flow robustness — self-stage, watchdog, completion markers (#935)
 
 The runtime is (re)installed by **four** cooperating mechanisms, and the danger is
@@ -4428,6 +4464,9 @@ approved by the original Release attestation. This command does not obtain
 materials, authorize a profile, sign, upload, install or activate anything.
 It also accepts the existing `--native-lock` and `--offline-wheel-pool`
 selection modes instead of `--guarded-feed`.
+Both this command and `core_native_delivery.py` accept the optional
+`--layout manager-isolated` described below; the default remains the
+single-environment delivery.
 
 `tools/core_native_delivery.py` connects that candidate producer to the
 existing native resolver and delivery owners:
@@ -4594,6 +4633,20 @@ bytes without unpacking or executing them, and yields the original retained
 wheel snapshot plus read-only material handles/paths for the context lifetime.
 The existing wheel inspector verifies the full dependency closure and metadata.
 Byte/file/storage bounds and one deadline cover assembly and readback.
+
+For a core containing the self-contained Worktree Manager wheel, callers can
+select `--layout manager-isolated` on both the transport and delivery commands
+(or pass the same `layout` to their APIs). The envelope uses version 2 and
+retains the unchanged, complete parent profile and wheel set. The reader
+derives a shared closure and a Manager closure from that profile, verifies
+each with the existing wheel inspector, and yields both as
+`DeliverySnapshot.environments` alongside the held wheel snapshot. Every
+parent wheel must belong to at least one derived closure; a shared root cannot
+depend on Manager. Consumers construct each environment from its exact
+snapshot subset, while retaining and independently admitting the parent
+profile. Derived closures are not separately approved profiles. Version 1
+remains the default, and its single-environment collision refusal is unchanged;
+older readers reject version 2, so publishers must migrate consumers first.
 
 This is packaging, not pipeline activation, release approval, acquisition,
 installation, service cutover or license clearance. The existing public
@@ -5005,8 +5058,35 @@ compiler and acquisition owners. Supply `--component worktree-manager` or
 `--component agent-worktrees`, the first-party snapshot through
 `--install-source`, a fresh `--output`, and the selected absolute `--uv`.
 Consume the returned `snapshot` path, not an inferred output directory.
+Manager wheels that embed their declared `first-party-core` libraries require
+only the application distribution, not separate wheels for those libraries.
+Profile preparation binds the embedded Python, package data and license notices
+to the retained source closure through the canonical wheel/source validator.
+Those libraries remain complete construction inputs and contribute to source
+identity; unbundled libraries still require their associated distributions.
 Existing feed policy, artifact seasoning, source identity and installation
 custody still apply; a local snapshot is not independent authorization.
+
+An application may declare a first-party SDK association in its existing
+`pyproject.toml`, separately from its ordinary dependency/extra declaration:
+
+```toml
+[tool.copilot-extensions.application-sources]
+fleet-manager = "standalone:fleet-manager"
+```
+
+Values use the existing canonical project selectors, not registry URLs or UV
+vendored-library paths. The selected application wheel carries this source
+constraint into native profile derivation. Only applicable dependencies require
+their declared associated input; an unselected optional extra stays inert.
+A missing input or a wheel from another project refuses before registry
+compilation/acquisition, even if its distribution name matches. The existing
+repeated `--project` source preparation supplies complete associated applications
+through their normal builders/resources. Dependency-age attribution resolves
+the same explicit declaration to the actual contained, inventoried application,
+checks its distribution/version/extras and audits its external closure. A familiar
+package name without that source declaration is not an exemption.
+
 Worktrees' Windows-native source entry accepts optional `-InputTimeout` with
 `-InstallSource`; its existing native driver and Python consumer forward this
 as `--input-timeout`. The positive finite duration defaults to 600 seconds.

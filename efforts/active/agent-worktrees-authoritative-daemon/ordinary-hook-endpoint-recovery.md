@@ -179,6 +179,59 @@ admission with a true-returning stub, and must trap interpreter lookup while
 retaining changed-input refusal. See the
 [current reader boundary](../../../plugins/agent-worktrees/docs/worktree-observations.md#prepared-windows-membership-reuse).
 
+### Prepared Windows installation-cell prerequisite
+
+The same original producer can expose the already-validated selected cell's
+minimum path observation within its existing association, with the original
+receipt/root/manifest witnesses. Content digests come from the original
+SDK/payload reads that validated those inputs, without observation replay;
+the shell's three content reads are each capped at 1 MiB plus one overflow
+byte. Restored timestamps must not hide changed receipt or manifest bytes.
+The native reader must require exact current
+context/payload and complete canonical source/layout checks, preserving all
+existing ownership witnesses and bounds. It must not clone the receipt parser,
+infer support from an old association or replace the original cold resolver.
+Old-reader/new-producer behavior remains unchanged; new-reader/old-producer
+and rollback retain the original owner path until this additive view is present.
+Real owner-stamped linked-worktree fixtures and interpreter traps must prove
+both current reuse and changed/incomplete-context refusal before acceptance.
+The observation must retain all seven declared lexical/resolved root pairs
+and explicit original validated source-kind eligibility. GitHub, Git URL and
+opaque identities can qualify; directory and unknown source kinds retain
+original admission rather than duplicating namespace source normalization.
+Native regressions must retarget both the directory source and an ancestor,
+not only roots underneath the selected plugin.
+The three receipt-declared canonical comparisons (`payload.root`, `pluginRoot`
+and `namespaceReceipt`) also require original SDK string-read capture during
+that same resolution. Singleton values must directly match validated canonical
+results without another normalization/resolution. Aliased or incomplete capture
+retains original admission; old views missing the complete declaration set
+cannot qualify. Native controls must independently retarget all three aliases
+and preserve valid original fallback within its existing deadline.
+This prerequisite is not full cell post-tool migration or shell-only cold
+reconstruction; those consumers and their remaining contracts stay open.
+
+### Prepared Windows installation-cell post-tool migration
+
+The next finite consumer composes that original prepared-cell association
+with the existing registered read/native/batch/single-shell path. It reads
+only the selected cell's passive discovery and original current-row views.
+Discovery must match the marketplace identity from the already-validated
+cell layout, exact receipt and plugin root before sending a notification
+or using advisory facts. Do not parse the receipts again, reconstruct
+membership, select a different endpoint or relax existing input witnesses.
+
+Retain the original capabilities, process generation, receiver admission,
+event/target normalization, live switches, once-per-event reminder/late
+accounting, wire bounds and no-reply/no-retry semantics. Incompatible
+membership retains original admission; a qualified warm cell with missing
+or old discovery stays shell-only. Native controls must traverse the actual
+registered entry and original publishers/receiver, trap warm interpreter
+and synchronous calls, check read/native/batch/shell effects and distinguish
+foreign discovery, stale receipts, missing rows, live controls and a
+non-replying peer. This closes only a warm source consumer checkpoint;
+cold/directory/POSIX/recovery, installed, composed and throughput gates remain.
+
 ### First additive producer contract
 
 The next finite consumer is the Windows read-event path (`view`, `rg`, `glob`).

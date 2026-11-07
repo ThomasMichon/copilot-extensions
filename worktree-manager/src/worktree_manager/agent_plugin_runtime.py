@@ -421,6 +421,12 @@ def _validated_legacy_root(root: Path, plugin_id: str) -> Path | None:
     return None
 
 
+def _slot_python(slot: Path) -> Path | None:
+    from .self_install import _runtime_installer
+
+    return _runtime_installer().runtime.slot_python(slot.parent.parent, slot.name)
+
+
 def _select_complete_slot(root: Path) -> Path | None:
     """The first marker-selected slot under ``root`` that is both marked
     complete AND actually has its interpreter present, skipping a
@@ -428,8 +434,7 @@ def _select_complete_slot(root: Path) -> Path | None:
     for slot in _runtime_candidates(root):
         if not (slot / ".install-complete.json").is_file():
             continue
-        python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-        if python.is_file():
+        if _slot_python(slot) is not None:
             return slot
     return None
 
@@ -513,7 +518,9 @@ def resolve_installed_plugin_invocation(
     slot = resolve_installed_plugin_slot(plugin_id, environment=environment)
     if slot is None:
         return None
-    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    python = _slot_python(slot)
+    if python is None:
+        return None
     root = slot.parent.parent
     return [
         str(python), *python_cache_args(root, runtime=slot), "-m", module or plugin_id.replace("-", "_"),

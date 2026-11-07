@@ -177,6 +177,27 @@ See the canonical [Worktrees relationship contract](../../agent-worktrees/docs/r
 These conditional adapter controls still do not assemble the real writer
 cohort or activate ordinary coordinator construction.
 
+The opt-in `WorktreeRelationshipWriter.selected(...)` factory retains the
+actual installed Worktrees command before negotiating its executing
+capabilities. Same-cell calls reuse the existing receipt/governance boundary;
+legacy calls recheck legacy ownership before entering the slot-local retention
+bootstrap. Neither form falls back to an ambient executable or adopts a newer
+build after selection. Missing/recreated builds refuse through the original
+pre-import identity check. Ordinary unpinned callers are unchanged.
+
+That factory additionally negotiates `resident_inspect: 1` and performs an
+authenticated `inspect --resident-only` with the original workspace nonce before
+each relationship operation. It validates the returned executing serializer,
+installation, build and resident generation; it never substitutes the direct
+CLI writer. A different compatible resident build can qualify independently,
+and each later operation reobserves its current selection rather than caching
+an earlier readiness result. This costs one additional bounded Worktrees child
+and resident read per relationship operation, not per generic record save.
+The factory still requires both independent admission callbacks. Its CLI and
+resident observations do not qualify Bridge's future keyed creation, its
+original continuation journal or any other participating producer, and cannot
+close the writer cohort or enable ordinary construction.
+
 Queue reconciliation uses the selected adapter's `bind_request` path when
 available, passing an isolated copy of the original audited request before
 reserve or retirement inspection. This path requires the separately supplied
@@ -202,8 +223,16 @@ refuses before the next owner call; earlier effects remain accountable to
 that same retained request. These are optimistic reads, not a transaction
 held across external I/O, so the existing post-I/O CAS remains mandatory.
 They add one indexed, task-scoped snapshot per relationship call, with no
-process or wire probe and no preflight on unrelated record saves. This
-original-queue check does not qualify the resident, Bridge or other writers.
+process or wire probe and no preflight on unrelated record saves.
+For an allocator-prepared request, admission also rereads its exact original
+reservation by key. Task, workspace/project/path, execution machine, nonce,
+required relationship, event and original generation must still agree.
+Supported machine-case aliases remain valid. Missing or changed preparation
+refuses the next owner call without adopting another reservation or dropping
+earlier effects. This additional indexed read retains the original preparation
+across startup continuation and retirement; it does not require the historical
+reservation to remain active. Neither check qualifies the resident, Bridge or
+other writers.
 
 The original direct-claim audit event stores one immutable relationship
 request in `task_events.task_relationship`. Allocator placement still claims
@@ -220,6 +249,13 @@ successful protection. A failed or lost response retains the original request,
 worker and allocation; it cannot report a successfully admitted assignment.
 Exact direct-claim retries and required workspace retries reconcile that same
 request rather than allocating another claim.
+Ordinary Bridge startup carries its existing observation timeout into governed
+workspace preparation, including a retained attachment retry. The client applies
+that budget only to this request's HTTP read phase, without shortening a longer
+or disabled read timeout or changing connect/write/pool and unrelated requests.
+Legacy ungoverned preparation retains its original transport budget. A read
+timeout is still an unresolved original operation, not permission for an
+automatic mutation retry.
 Initial direct-claim acknowledgments and replays require a bound reconciliation
 result and a fresh consistent read of the original claimed status, worker,
 generation and assignment event. Cancellation during reconciliation reports a
@@ -331,10 +367,65 @@ ids, references and blocker text also have bounded inputs.
 
 An internal blocker write rechecks the current binding under the queue lock
 and retains the original result. It cannot certify readiness or submit work.
-The existing completion owner refuses tasks with retained preparations, and a
-persisted SQLite guard prevents older completion code from bypassing that
-refusal. Prepared audit requests cannot be rewritten or deleted. Unprepared
-baseline tasks retain their previous completion behavior.
+Prepared audit requests cannot be rewritten or deleted. Ordinary completion
+uses the guarded path below; persisted SQLite guards prevent older completion
+code from skipping preparation or authoritative advancement. Unprepared
+baseline tasks outside protected assignment scope retain their previous
+completion behavior.
+
+### Ordinary completion of protected assignments
+
+The existing `complete` spelling, HTTP completion route and registered MCP
+completion operation converge on the shared queue owner. A retained workspace
+relationship, a reservation's protected-relationship requirement or a retained
+preparation positively requires guarded submission. The worker cannot opt out
+by omitting workspace or readiness fields. This is not a classification of all
+legacy workers as worktree-free, and it does not activate ordinary relationship
+writer construction.
+
+Under its existing completion lock, the queue resolves the original workspace,
+generation and native binding. It then releases the transaction before invoking
+the existing preparation and advancement owners. A first ordinary request
+derives its stable ID from that assignment and prior preparation event.
+An unconsumed proposal retries its original request; only an exact authoritative
+rejection permits one subsequent proposal. Result, reference and binding changes
+cannot replace a retained request. An explicit expected-status precondition
+remains part of that proposal and is rechecked before authoritative advancement.
+
+The running coordinator advertises `worker_submission_readiness_versions: [1]`
+and `worker_submission_scope: "retained-workspace-assignments"` in its existing
+pool-placement descriptor. No new caller syntax or prerequisite RPC is needed.
+Before first submission, readiness still negotiates the actual selected
+Worktrees provider as described below. An unsupported provider, manual protected
+assignment without qualified managed allocation, unknown original workspace or
+missing independent-review policy refuses visibly; none is success-shaped
+`not_applicable` evidence. Valid preparation and advancement failures retain the
+proposal, its actionable blocker, task owner and accountable assignment.
+Conflicting preparation attempts do not rewrite even the original blocker.
+
+A successful call records `SUBMITTED`, never self-attested acceptance or
+permanent worktree finalization. Exact committed retries, including a lost reply
+or concurrent submission, return the existing receipt without another owner read,
+transition or evaluator request. Historical protected submissions without a
+retained proposal cannot be enriched or retroactively qualified through this
+path. Existing confirmation of already submitted work is unchanged.
+
+The current `DispatchClient` gives completion a read budget of at least
+60 seconds for the three bounded 15-second owner reads and response overhead.
+It preserves a longer or disabled selected read timeout, the selected connection,
+write and pool budgets, and other operations' timeouts. This adds no read-timeout
+retry. Older clients may still have a shorter request budget; a lost response is
+an unknown outcome to reconcile against the original retained task/proposal,
+not evidence that submission failed or permission for cleanup.
+
+The rollback guard also refuses first-result admission **before** the first
+ordinary completion call has retained a proposal. Another persisted guard binds
+advancement to that exact proposal. Upgraded and older callers therefore cannot
+use legacy completion to bypass this requirement on the same queue. Provider
+rollback may refuse unsupported governed work; it never creates weaker admission.
+Legacy tasks outside this positively retained scope preserve their existing
+completion and late-result behavior. General manual/no-managed-worktree
+applicability and installed/native qualification remain open.
 
 ### Internal independent readiness observation
 
@@ -404,13 +495,13 @@ without another observation, transition or evaluator request. An identical
 concurrent commit may also satisfy a caller whose later owner read fails; that
 only returns the exact committed receipt, never authorizes another transition.
 A changed request
-or rejected/reassigned binding cannot reuse it. Legacy completion and late-result
+or rejected/reassigned binding cannot reuse it. Legacy direct writes and late-result
 enrichment refuse prepared tasks, including after restart; SQL also preserves
 the submitted proposal against older backfill code. Internal rejected-proposal
 resubmission uses the lineage below. Post-stop same-native recovery,
-non-circular decline, negotiated
-ordinary callers, manual/absent-workspace applicability and full native
-qualification remain open. Ordinary callers and assignment writers stay disabled.
+non-circular decline, manual/absent-workspace applicability and full native
+qualification remain open. The ordinary completion consumer above does not
+enable assignment writer construction or qualify an installed cohort.
 
 The immutable preparation retains the original native/generation even after
 metadata-only agent detachment. Existing recovery may advance current attachment

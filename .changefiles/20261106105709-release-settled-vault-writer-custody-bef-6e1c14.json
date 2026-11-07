@@ -1,0 +1,9 @@
+{
+  "comment": "Release settled Vault writer custody before transport cleanup and bound exact predecessor retirement",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

@@ -49,6 +49,13 @@ def _plugin_root() -> Path:
 
 
 def _contributor_argv(root: Path, stem: str) -> list[str] | None:
+    if stem == "emit-mesh-pointer":
+        script = root / "scripts" / "snapshot_runtime.py"
+        if script.is_file():
+            python = Path(sys.executable)
+            if python.name.casefold() == "pythonw.exe":
+                python = python.with_name("python.exe")
+            return [str(python), "-I", "-X", "utf8", str(script), "snapshot"]
     if os.name == "nt":
         script = root / "scripts" / f"{stem}.ps1"
         shell = shutil.which("pwsh") or shutil.which("powershell.exe")

@@ -10,6 +10,11 @@ posting, including after daemon cutover. Request versions 1 and 2 retain
 their existing syntax and behavior; an older provider cannot accept version
 3 while silently ignoring its required fields.
 
+Each fenced attempt pins its health check and mutation to the same endpoint,
+even when the startup event observer concurrently follows a replacement daemon.
+A safely retryable refusal starts a new attempt with a fresh qualification;
+an ambiguously delivered mutation is not replayed.
+
 Version 3 requires the existing exact `project` and `worktree_path`, plus
 `worktree_writer`:
 
@@ -109,6 +114,10 @@ creation forms and conflicting stdin refuse before connecting to the daemon.
 The existing client negotiates the capability on each attempt and never retries
 without the requirement. Omitting the option preserves ordinary unpinned behavior.
 This transport does not independently admit the writer or close its cohort.
+The executing CLI advertises `agent-bridge.create` version 1 with
+`keyed-worktree-writer` through its existing `version --contracts-json` response.
+Required callers select that support before using the option; absent or invalid
+metadata does not establish support, including after a CLI rollback.
 
 This route does **not** create an acquisition attempt. Its original
 `workspace_embodiments` row atomically retains the creation facts, workspace
@@ -129,6 +138,24 @@ recovery succeeds. The same row retains each handoff's original successor,
 native and seed progress. An unconfirmed seed is not resent and no retry
 creates a replacement conversation.
 
+Exact-session resume can additionally carry that same `worktree_writer` in an
+optional body on `POST /api/v1/sessions/{id}/resume`. The client requires
+`retained_workspace_creation_writer_resume: 1` before **every** attempt,
+including after a refused connection or draining-provider cutover. The older
+creation capability alone cannot establish enforcement of this new body.
+The receiver matches the exact owned session and original keyed journal,
+requirement, workspace and retained native before resuming with that writer;
+aliases, missing journals and changed requirements refuse before launch.
+Unqualified body-less resume keeps its existing behavior.
+
+The CLI carries it through
+`resume <exact-session-id> --strict --worktree-writer-file <path>` (`-` reads
+stdin). CLI mode, reclaim and `--worktree-id` combinations refuse before
+discovery. A missing exact session never falls back to a worktree or singleton,
+and an unproven response is not replayed. The existing
+`agent-bridge.resume` version-1 executing-CLI descriptor advertises
+`keyed-worktree-writer`; daemon support remains a separate per-attempt check.
+
 `retained_workspace_creation_writer_inspection: 1` adds the optional
 `BridgeClient.get_session(exact_id, worktree_writer=True)` form on the existing
 `GET /api/v1/sessions/{exact_id}?worktree_writer=true`. The negotiated query
@@ -140,6 +167,14 @@ digest, exact session/native/workspace, original requirement, serializer
 contract and Bridge instance. It exposes no command or environment. An
 unqualified exact owner returns 409; an older reader ignoring the query is
 unconfirmed, not successful evidence. Ordinary session reads remain unchanged.
+
+The existing full-session CLI exposes the same optional observation through
+`status <exact-session-id> --full --worktree-writer`. Its
+`agent-bridge.status` CLI contract separately advertises
+`exact-session-worktree-writer`; daemon capability negotiation still governs the
+actual read. See the [CLI reference](../skills/agent-bridge/references/cli-commands.md#service-control)
+for executing-CLI discovery and passive health JSON. This does not add another
+provider operation or change the HTTP generation.
 
 This is read-only qualification of the creation's delegated writer, not a
 ready permit, native-liveness assertion or admission of every other writer

@@ -50,6 +50,23 @@ def test_apply_enforce_writes_scalars(tmp_path):
     assert data["effortLevel"] == "high"
 
 
+def test_settings_apply_refuses_linked_filename_without_switching_writer_locks(tmp_path):
+    home = _settings(tmp_path)
+    original = tmp_path / "linked-settings.json"
+    original.write_text('{"model":"preserved","unmanaged":true}', encoding="utf-8")
+    target = home / "settings.json"
+    try:
+        target.symlink_to(original)
+    except OSError as error:
+        pytest.skip(f"native file symlinks unavailable: {type(error).__name__}")
+    before = original.read_bytes()
+    with pytest.raises(OSError, match="linked"):
+        settings.apply([("enforce", {"model": "changed"})], home=home, dry_run=False)
+    assert target.is_symlink() and original.read_bytes() == before and target.read_bytes() == before
+    assert not original.with_name(original.name + ".lock").exists()
+    assert not (home / "settings.json.lock").exists()
+
+
 def test_ensure_present_unions_without_clobber(tmp_path):
     home = _settings(tmp_path)
     (home / "settings.json").write_text(

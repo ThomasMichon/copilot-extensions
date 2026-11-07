@@ -112,11 +112,13 @@ class RecordSpawnWorktreeBody(BaseModel):
     allocation_project: str | None = None
     worktree_path: str | None = None
     creation_nonce: str | None = Field(default=None, min_length=1)
+    worktree_writer_requirement: dict | None = None
 
 
 class RecordSpawnAllocationBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
     project: str = Field(min_length=1)
+    worktree_writer_requirement: dict | None = None
 
 
 class ReservationDetailBody(BaseModel):
@@ -544,7 +546,9 @@ def register_spawn_routes(
     )
     @app.post("/spawn-reservations/{key}/allocation")
     def record_spawn_allocation(key: str, body: RecordSpawnAllocationBody) -> dict:
-        result = _reservation_guard(lambda: queue.record_spawn_allocation(key, body.project))
+        result = _reservation_guard(lambda: queue.record_spawn_allocation(
+            key, body.project, worktree_writer_requirement=body.worktree_writer_requirement,
+        ))
         bus.publish({"type": "spawn.allocation_bound", "reservation": result})
         return result
 
@@ -561,6 +565,8 @@ def register_spawn_routes(
                 allocation_project=body.allocation_project,
                 worktree_path=body.worktree_path,
                 **({"creation_nonce": body.creation_nonce} if body.creation_nonce is not None else {}),
+                **({"worktree_writer_requirement": body.worktree_writer_requirement}
+                   if body.worktree_writer_requirement is not None else {}),
             )
         )
         bus.publish({"type": "spawn.worktree_recorded", "reservation": result})

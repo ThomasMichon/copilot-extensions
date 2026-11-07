@@ -12,6 +12,7 @@ interactive git/GCM prompts. This is the **public seam** agent-bridge calls
 
 from __future__ import annotations
 
+import asyncio
 import os
 import json
 import re
@@ -21,8 +22,10 @@ import socket
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 from agent_procutil import no_window_flags
+from credential_relay.readiness import build_relay_ping_probe_command
 
 # Static PATs a CodeSpace injects that must be neutralized so a dispatched agent
 # never relies on a stale/expired token instead of the credential relay.
@@ -164,6 +167,30 @@ def warn_if_relay_unavailable(
         file=sys.stderr,
     )
     return False
+
+
+async def ssh_relay_serving(
+    manager: Any, codespace_name: str, relay_port: int, *, timeout: float | None = None,
+) -> bool:
+    """Check the expected far-side listener without requesting credentials."""
+    from ._ssh_retry import exec_with_retry
+
+    budget = timeout if timeout is not None and timeout > 0 else 30.0
+    command = f"bash -l -c {shlex.quote(build_relay_ping_probe_command(relay_port))}"
+    try:
+        result = await asyncio.wait_for(
+            exec_with_retry(
+                manager, codespace_name, command, timeout=budget, attempts=1,
+            ),
+            timeout=budget,
+        )
+        return (
+            not getattr(result, "timed_out", False)
+            and result.exit_code == 0
+            and (result.stdout or "").strip() == "OK"
+        )
+    except Exception:
+        return False
 
 
 def build_relay_portmap_write(relay_port: int) -> str:

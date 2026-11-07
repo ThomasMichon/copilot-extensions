@@ -1344,11 +1344,7 @@ def _ssh_session(
     # clobbered by the relay exports.
     relay_token: str | None = None
     if not args.no_relay:
-        # #122: the relay is owned/run by the agent-bridge daemon; this command
-        # only forwards the port. If the relay isn't listening host-side, the
-        # -R forward dead-ends and git auth over the tunnel silently returns
-        # nothing (ADO 'could not read Username', GitHub/dotfiles 403). Probe it
-        # up front and warn LOUDLY with remediation rather than failing silently.
+        # Host TCP is advisory; the far-side protocol gate below controls admission.
         if not _relay_listening(relay_port):
             log.warning(
                 "Credential relay not listening on 127.0.0.1:%d before connecting "
@@ -1449,16 +1445,6 @@ def _ssh_session(
                 connection = await manager.ensure_connected(
                     args.name, source, port_forwards,
                 )
-                if not args.no_relay and not defer_to_owner and relay_forward is None:
-                    relay_forward = await _start_supervised_relay(
-                        args.name,
-                        connection.config,
-                        relay_port,
-                        context="CodeSpace connect",
-                        host_port_resolver=lambda: relay_launch.effective_relay_port(
-                            config
-                        ),
-                    )
                 tracker.reached(ConnectStage.SSH_TO_TARGET, f"codespace={args.name}")
                 break
             except (ConnectionError, TimeoutError) as exc:
@@ -1482,20 +1468,35 @@ def _ssh_session(
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 1.5, 20.0)
 
-        # Deferring to the Connection Owner: wait briefly for it to bring up this
-        # CodeSpace's relay before any git-dependent provisioning runs, so auth
-        # over the relay is ready. Best-effort -- a timeout only warns (the Owner
-        # keeps reconciling; the token cache cushions the gap).
-        if defer_to_owner:
-            if await _owner.await_owner_relay(args.name):
+        if not args.no_relay:
+            tracker.started(ConnectStage.TARGET_AUTH_ENV, "credential relay")
+            if defer_to_owner:
+                relay_ready = await _owner.await_owner_relay(args.name)
+            else:
+                relay_forward = await _start_supervised_relay(
+                    args.name,
+                    connection.config,
+                    relay_port,
+                    context="CodeSpace connect",
+                    host_port_resolver=lambda: relay_launch.effective_relay_port(config),
+                )
+                relay_ready = relay_forward is not None
+            if relay_ready:
+                relay_ready = await relay_launch.ssh_relay_serving(
+                    manager, args.name, relay_port, timeout=overall_timeout,
+                )
+            if not relay_ready:
+                message = (
+                    f"Required credential relay for CodeSpace '{args.name}' did not "
+                    "become available; refusing provisioning and command delivery."
+                )
+                tracker.failed(ConnectStage.TARGET_AUTH_ENV, message, retryable=True)
+                print(f"[FAIL] {message}", file=sys.stderr)
+                return 1
+            if defer_to_owner:
                 log.info(
                     "Connection Owner relay for %s is live; riding it (no own -R).",
                     args.name,
-                )
-            else:
-                log.warning(
-                    "Connection Owner did not report a live relay for %s within the "
-                    "wait window -- git auth may lag until it reconciles.", args.name,
                 )
 
         # Cross-harness in-CodeSpace lockfile fence (git-ref-resource-leases
@@ -1518,7 +1519,6 @@ def _ssh_session(
             # Stage 4 (target-auth-env): deploy the CodeSpace-side relay helpers
             # so remote auth resolves over the tunnel. Auth verification later
             # in this same stage catches missing local credentials up front.
-            tracker.started(ConnectStage.TARGET_AUTH_ENV, "credential relay")
             await _provision_relay_helpers(manager, args.name)
 
         cs_plugin_dirs: list[str] = []

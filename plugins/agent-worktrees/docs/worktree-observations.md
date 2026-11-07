@@ -77,7 +77,7 @@ not reconstructed.
 The current-roster owner also has an optional small file projection for shell
 consumers. It is separate from the selected observation journal and does
 not replace managed-session admission, canonical write receipts or hook policy.
-The prepared Windows read and native-write consumers below use it; other
+The prepared Windows read, native-write and single-shell consumers below use it; other
 ordinary events retain their existing execution path.
 
 The monitor's original passive discovery record advertises
@@ -151,12 +151,12 @@ requirements are not supplied by these files.
 ### Windows read-event consumer
 
 The ordinary PowerShell entry loads the library in the same shell.
-For legacy native Windows `view`, `rg` and `glob` events within the 1 MiB
+For prepared native Windows `view`, `rg` and `glob` events within the 1 MiB
 prepared-event bound, including outstanding late-guidance watches, evaluation
 has no synchronous resident request, command
 discovery or Python fallback. Read events do not need mutation invalidation.
 The native-write subset below shares this shell-safe evaluation. Other tools,
-installation cells and oversized events keep their original entry and
+unprepared installation cells and oversized events keep their original entry and
 behavior. This is not the complete shell-only transition.
 
 The reader checks the original prepared membership and all its input witnesses.
@@ -231,7 +231,8 @@ notification through the existing hook TCP endpoint. The running receiver
 advertises `read-hook-demand-v1` in `hook_capabilities` and its process-local
 `hook_generation` through the same bounded discovery record. This support is
 independent of advisory-row availability, reminder opt-out and late guidance.
-It is currently selected only for legacy native Windows prepared read events.
+It is selected for native Windows prepared read events, including the
+qualified installation-cell subset below.
 
 The version-1 notification contains only `version`, `kind`, `token`,
 `hook_generation` and `deadline`; it carries no tool arguments, session content
@@ -242,6 +243,10 @@ wrong-installation or old discovery skips the optional send. A connection or
 write failure has unknown acceptance and is not retried, replayed through
 another endpoint or replaced by Python. Provider rollback therefore retains
 the shell-safe advisory baseline, not a blocking compatibility call.
+The sender first checks the runtime's IPv4 support. That capability query can
+initialize the socket subsystem on first use; its cost is part of whole-hook
+entry, not the 50-ms client-allocation/connect/write clock. No probe connection
+or request is made by this preflight, and it does not establish receiver readiness.
 
 Only the advertised process generation can accept the notice. The receiver
 rechecks its own admission and the monitor's live published/non-draining state,
@@ -263,8 +268,8 @@ Prepared single native writes (`create`, `edit`, the supported `str_replace`
 variants, `write`, `write_file`, `insert`, `apply_patch`, `new_file` and
 `multi_edit`) share the same shell reminders and late-guidance evaluation.
 They do not request advisory computation from the resident or fall back to
-Python. Shell tools and batches outside the supported subset below retain
-their original path; this does not qualify shell-command classification.
+Python. Batches outside the supported subset below retain their original
+path. Single shell events have their separate consumer below.
 
 The existing hook IPC owner optionally advertises `native-hook-mutation-v1`.
 The shell sends one `nativeToolMutation` notification with the same version,
@@ -293,7 +298,7 @@ advisory reply, recomputation or lifecycle boot in this notification branch.
 Transport completion is not acceptance or fresh-status proof. Lost/rejected
 notices leave the existing periodic/TTL refresh backstop in charge; they are
 not durably queued. These isolated source controls do not establish installed
-composition, cold/cell/POSIX entry or whole-hook throughput acceptance.
+composition, cold/unprepared-cell/POSIX entry or whole-hook throughput acceptance.
 
 ### Windows native-batch consumer
 
@@ -328,8 +333,117 @@ invalidate their targets and use the original mutation wake.
 Reminders and late-guidance consumption run once per outer event, not per
 call. No current event is replayed, and a lost notification retains the
 existing refresh backstop rather than asserting fresh status. This source
-consumer does not qualify shell batches, installed behavior, cold/cell/POSIX
+consumer does not qualify shell batches, installed behavior, cold/unprepared-cell/POSIX
 entry, complete hook composition or actual throughput.
+
+### Windows single-shell consumer
+
+Prepared single events for the original shell tool aliases use the same
+in-process reminders and late-guidance evaluation. The original IPC owner
+separately advertises `shell-hook-mutation-v1`; a `shellToolMutation` carries
+the tool, original argument fields, workspace and session, without tool results.
+Native-write support alone is not shell support. The same 1 MiB event,
+64 KiB newline-terminated wire, one-second generation-qualified deadline and
+combined 50 ms connect/write bound apply. Missing/old discovery skips the
+optional send. No reply, interpreter fallback, retry or event replay follows.
+Mixed shell/native batches retain their prior path.
+
+The receiver reuses the original guard argument normalizer, including JSON
+strings and raw command strings. Its mutation-only classifier composes the
+original shell segmentation, substitution, literal-target and Git-option
+parsers. It does not evaluate or cache permission: `pull --ff-only` and `fetch`
+can change observed repository state even though the anchor guard permits them.
+Known Git reads and read-only branch flags do not invalidate or wake a sweep;
+an output-file option before the path delimiter makes an otherwise read-only
+Git command a mutation. PowerShell dot invocation is normalized for the same
+classification, including assignment right-hand commands.
+The original literal reader normalizes module-qualified command names and
+reports known-write occurrence even when the target is unresolved. Explicit
+command-evaluation forms invalidate conservatively; quoted evaluation text
+passed to an ordinary read command remains data.
+Other Git subcommands are conservative mutations. Supported literal writes and
+redirections invalidate globally, retaining the original shell target scope.
+Missing commands/parser support and traversal overflow are conservative too,
+with at most 128 segments, eight nested substitution levels and a shared
+131,072-iteration substitution-scan budget per classification. The existing
+invalidation and wake owners can each classify; this adds no permission memo.
+Quoted literal parentheses are not executable PowerShell grouping; assignment
+right-hand commands retain mutation detection without treating quoted data as
+a command. Substitutions are examined before environment-assignment
+normalization. Unsupported executable block/control-flow and complex assignment
+shapes conservatively invalidate rather than being asserted read-only. The
+original quote-aware tokenizer reports unquoted block/type syntax for this
+classification, including pipeline/invocation blocks and typed assignments;
+quoted data does not become executable syntax. Type conservatism applies to
+typed-variable prefixes, not bracketed read paths or ordinary static read
+calls. The original literal reader recognizes clustered in-place `sed` flags
+without treating attached expression/file option values as flags.
+Ordinary tokenizer callers do
+not request that observation and keep their original output. Read-only `sed`
+does not invalidate unless it independently redirects output, while in-place
+forms remain mutations. Batch presence takes precedence over outer shell
+metadata, preserving the original native-batch request kind. Classification
+remains a heuristic, not execution of an arbitrary shell program or proof that
+external programs cannot write.
+
+Unclassified forms retain the original stateless guard's write heuristic rather
+than being silently declared read-only. Confirmed literal/read forms avoid
+that fallback, and source-bound controls use the actual original pattern.
+Dialect-ambiguous aliases and the not-yet-qualified CMD dialect retain the original occurrence rule entirely;
+the receiver does not guess their dialect. This is conservative compatibility,
+not a new permission decision or an assertion of complete command semantics.
+The original tokenizer treats ordinary braced parameter expansions as data,
+without hiding executable substitutions inside them. Post-only assignment
+normalization distinguishes data values and complete read-expression containers
+from unknown executable forms. Control keywords require a complete command
+token and use the declared dialect, so `Select-String`, `Select-Object` and
+PowerShell's `select` alias are not mistaken for POSIX control flow.
+Parameter, command and arithmetic boundaries share one iterative quote-aware
+matcher. Quoted/escaped closing braces and nested executable forms cannot
+swallow a following command; the same boundary is used by the original
+pre-tool guard and post-tool invalidation. Unknown or unterminated post-tool
+input remains conservative, and the original scan-work limit is unchanged.
+
+Original managed admission, current governance/state locks and idle grace
+remain authoritative. Accepted reads renew demand without mutation wake;
+accepted mutations use the original invalidation and wake. Lost notifications
+retain the original refresh backstop and never certify fresh status. This
+qualifies only the isolated prepared Windows source consumer, not installed
+composition, cold/unprepared-cell/POSIX entry or actual throughput.
+
+### Prepared installation-cell post-tool consumer
+
+The same registered Windows entry also consumes the complete prepared-cell
+membership described below. Supported reads, native writes, native/read
+batches and single shell events use the existing event normalization,
+notification capabilities, reminder accounting and late-guidance owners.
+They introduce no new wire format, parser, publisher or lifecycle.
+
+Only after current prepared membership succeeds does the shell select the
+runtime directory beside the exact context pointer. That membership has
+already validated the SDK's canonical marketplace/plugin layout and all
+receipt/manifest witnesses. Passive discovery must match that cell's
+marketplace directory identity, exact install receipt and plugin root before
+either notification or advisory-row consumption. Legacy or foreign
+discovery in the selected cell is unavailable, not a reason to try another
+cell or the legacy endpoint. Producer metadata in the advisory view still
+must match the selected discovery and runtime exactly.
+
+Cell reminders retain their original cell-local `nudge-state` directory;
+legacy discovery and reminder locations above are unchanged. Live opt-out
+does not suppress demand or late guidance. Notifications and reminder
+accounting remain once per outer event, and late notices suppress only the
+original disposition counter. Missing rows do not suppress independent
+idle demand or late guidance.
+
+Old or incompatible cell membership, cold admission, directory-source
+namespaces, oversized events and unsupported batches retain their original
+entry route. This warm-path migration does not remove or qualify their
+Python fallback. A qualified warm event with unavailable/old discovery
+stays shell-only and skips the optional notification without retry or replay.
+The existing 1-MiB event/membership, 16-KiB discovery/fact and 50-ms send
+bounds remain unchanged. Source-native controls are not installed,
+composed-latency, POSIX, recovery or actual-throughput acceptance.
 
 ### Prepared Windows membership reuse
 
@@ -347,13 +461,73 @@ Membership remains distinct from permission, head custody and liveness.
 The read is capped at 1 MiB plus one overflow byte, 256 witnesses, 4,096
 characters per path and 128 path components. Only canonical local Windows
 paths without reparse components are eligible. Missing, changed, malformed,
-oversized, installation-cell, UNC and alias observations retain the existing
+oversized, unsupported-cell, UNC and alias observations retain the existing
 owner admission path. Cold reconstruction still uses that original path.
 This is validated warm-path reuse, not a complete shell-only hook transition
 or a replacement for installation-context validation. Registered post-tool
 tests compose the actual owner association, unchanged shell entry and private
 resident with interpreter lookup trapped; their synthetic project/provider
 does not establish installed, ACP/model or whole-hook throughput acceptance.
+
+#### Prepared installation-cell membership
+
+After the original installation-context resolver validates an explicitly
+selected cell, the same membership producer adds an optional `installation`
+observation to its version-1 association. That observation has version 1,
+the resolved `namespaceReceipt`, `installReceipt`, `payloadRoot`, `cellRoot`
+and `pluginRoot` paths, an explicit `sourceKind`, three `declaredPaths`,
+exactly three `files` digests, and seven `roots`
+entries retaining each receipt-declared lexical path and its resolved path. The original
+registry adapter borrows receipt digests from the SDK's active validated-read
+scope and the manifest digest from its original payload read; it does not
+re-read or re-validate those documents to manufacture evidence. It captures the
+declared roots during the original SDK's root resolution, not another invocation.
+It also captures the SDK's original string reads for receipt `payload.root`,
+`pluginRoot` and `namespaceReceipt`. Each must occur exactly once and directly
+match its validated canonical result; aliases, dot segments and incomplete
+capture retain original admission without a second path resolution or receipt read.
+The original
+sources also witness both receipts, the selected roots and manifest.
+Membership publication adds
+no permission, current-runtime assertion or installation operation.
+Only original validated GitHub, Git URL and opaque namespace identities qualify.
+Directory namespaces retain original admission, including stable-ID directory
+sources: prepared reuse does not duplicate their source normalization or assume
+an external directory's identity remains unchanged. Older observations missing
+the explicit source eligibility cannot qualify.
+
+The Windows reader requires that complete observation, exact selected context
+and payload, the canonical same-cell/plugin layout, every mandatory source
+witness and all original ownership/input checks before reusing membership.
+All three `declaredPaths` must be present, still canonical and unlinked, and
+match their selected paths. Older observations missing them cannot qualify.
+Every declared root and its lexical ancestors must remain canonical and unlinked,
+including roots not used by project membership. Missing directories may be
+created normally; root existence is not cached, so publishing the association
+into an initially absent cache does not invalidate its own observation.
+It neither parses receipts itself nor runs the resolver in shell. Each of
+the three witnessed files is read in process with a 1-MiB-plus-overflow-byte
+bound and compared to the original validated content digest, so restored
+size/timestamps cannot hide changed receipt or manifest bytes. The existing
+association's 1-MiB/256-witness/path bounds are unchanged. Inherited payload
+conflicts, changed or missing witnesses and incomplete older associations refuse reuse.
+Association and content buffers use the opened file's bounded length plus
+one overflow byte, rather than eagerly allocating the maximum for small files.
+A file that already exceeds the cap or fills that sentinel buffer is
+unavailable; a concurrent append cannot turn a valid JSON prefix into a
+complete admitted document. All original content and witness checks remain.
+The original resolver still owns cold or incompatible admission. On a valid
+old association it can publish the additive view without Git/registry traversal;
+an unchanged complete association needs no rewrite.
+
+New producers remain compatible with old readers, which ignore the additive
+field and retain their old cell path. New readers use an old producer's
+association only after its original resolver supplies the required observation;
+they never infer cell support from the schema number alone. An older SDK
+without validated-read capture support supplies no prepared cell observation,
+and retains its normal original-owner admission. This membership proof alone
+does not establish the post-tool consumer above, shell-only cold reconstruction,
+installed hooks or composed throughput.
 
 ## Qualified resident native saves
 

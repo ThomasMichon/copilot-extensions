@@ -49,6 +49,10 @@ try:
         "cohort_anchor_write_guard",
         "plugins/agent-worktrees/scripts/anchor_write_guard.py",
     )
+    stateless = load_source(
+        "cohort_statelessness_guard",
+        "plugins/agent-worktrees/scripts/statelessness_guard.py",
+    )
 finally:
     sys.path[:] = _original_path
 
@@ -65,6 +69,146 @@ def test_native_patch_targets_exclude_content_and_keep_moves():
     assert forms.write_targets("multi_edit", {
         "edits": [{"file_path": "source.py", "new_string": "other/repo.py"}],
     }) == ["source.py"]
+
+
+@pytest.mark.parametrize("command,mutates", [
+    pytest.param("git --no-pager status --short", False, id="read"),
+    pytest.param("git -c core.quotepath=false commit -m test", True, id="global-options"),
+    pytest.param("git pull --ff-only", True, id="pull"),
+    pytest.param("git branch new-branch", True, id="branch"),
+    pytest.param("git branch --show-current", False, id="read-branch"),
+    pytest.param("Write-Output $(git fetch origin)", True, id="substitution"),
+    pytest.param("git status > report.txt", True, id="redirect"),
+    pytest.param("Write-Output 'git commit; Set-Content x value'", False, id="quoted"),
+    pytest.param(";".join(["git status"] * 128), False, id="segment-limit"),
+    pytest.param(";".join(["git status"] * 129), True, id="segment-overflow"),
+    pytest.param("Write-Output $(" * 9 + "git status" + ")" * 9, True, id="depth-overflow"),
+    pytest.param("sed -n '1,100p' file.py", False, id="read-sed"),
+    pytest.param("sed -n '1,100p' file.py > report.txt", True, id="read-sed-redirect"),
+    pytest.param("sed -i.bak 's/old/new/' file.py", True, id="inplace-sed"),
+    pytest.param("$result = git commit -m test", True, id="assignment"),
+    pytest.param("$null = Set-Content file value", True, id="assignment-write"),
+    pytest.param("$result = 'git commit -m test'", False, id="literal-assignment"),
+    pytest.param('Write-Output "' + "(" * 20000 + '"', False, id="quoted-parentheses"),
+    pytest.param("$(" * 1000, True, id="scan-overflow"),
+    pytest.param("& { git commit -m test }", True, id="invoked-block"),
+    pytest.param("if ($true) { Set-Content file value }", True, id="conditional"),
+    pytest.param("Write-Output '& { git commit -m test }'", False, id="literal-block"),
+    pytest.param("$result.Value = git commit -m test", True, id="member-assignment"),
+    pytest.param("$result[0] = Set-Content file value", True, id="indexed-assignment"),
+    pytest.param("[string]$result = git commit -m test", True, id="typed-assignment"),
+    pytest.param("[string]$result = Set-Content file value", True, id="typed-write"),
+    pytest.param("1 | % { Set-Content file value }", True, id="pipeline-block"),
+    pytest.param("Invoke-Command -ScriptBlock { Set-Content file value }", True, id="invocation-block"),
+    pytest.param("Write-Output 'Invoke-Command -ScriptBlock { Set-Content file value }'", False, id="quoted-scriptblock"),
+    pytest.param("Write-Output '[string]$result = git commit -m test'", False, id="quoted-type"),
+    pytest.param("sed -sni s/a/b/ file", True, id="clustered-sed"),
+    pytest.param("sed -bnEi s/a/b/ file", True, id="binary-clustered-sed"),
+    pytest.param("sed -neprint file", False, id="attached-sed-expression"),
+    pytest.param("sed -nf -i file", False, id="sed-option-as-file"),
+    pytest.param("Get-Content -LiteralPath file[ab]", False, id="read-bracket-path"),
+    pytest.param("[IO.File]::ReadAllText('file')", False, id="read-type-call"),
+    pytest.param("[string[]]$result = git commit -m test", True, id="typed-array-assignment"),
+    pytest.param("git diff --output=report.txt", True, id="git-output"),
+    pytest.param("git log --output report.txt", True, id="git-output-argument"),
+    pytest.param("git show --output=report.txt HEAD", True, id="git-show-output"),
+    pytest.param("git diff -- --output=literal-path", False, id="git-output-after-delimiter"),
+    pytest.param("git log --format=--output=literal", False, id="git-output-format-data"),
+    pytest.param(". git commit -m test", True, id="dot-git-write"),
+    pytest.param(". Set-Content file value", True, id="dot-file-write"),
+    pytest.param(". git status --short", False, id="dot-read"),
+    pytest.param("$result = . git commit -m test", True, id="assigned-dot-write"),
+    pytest.param("Invoke-Expression 'Set-Content file value'", True, id="expression-evaluation"),
+    pytest.param("iex 'git commit -m test'", True, id="evaluation-alias"),
+    pytest.param(r"Microsoft.PowerShell.Management\Set-Content file value", True, id="module-write"),
+    pytest.param(r"Microsoft.PowerShell.Management\Set-Content", True, id="module-unknown-target"),
+    pytest.param(r"Microsoft.PowerShell.Management\Get-Content file", False, id="module-read"),
+    pytest.param(r"Write-Output 'Microsoft.PowerShell.Management\Set-Content file value'", False, id="quoted-module"),
+    pytest.param("Write-Output \"Invoke-Expression 'Set-Content file value'\"", False, id="quoted-evaluation"),
+    pytest.param("Select-String -Pattern error -Path file", False, id="select-string-read"),
+    pytest.param("Select-Object -Property Name", False, id="select-object-read"),
+    pytest.param("Write-Output ${env:USERPROFILE}", False, id="braced-variable-read"),
+    pytest.param("${name=part}", False, id="braced-variable-equals"),
+    pytest.param("$value -eq 'a=b'", False, id="comparison-data"),
+    pytest.param("$copy = $value", False, id="variable-assignment-data"),
+    pytest.param("${copy} = 'git commit -m test'", False, id="braced-assignment-data"),
+    pytest.param("[string[]]$copy = $values", False, id="typed-assignment-data"),
+    pytest.param("$copy = $(Get-Date)", False, id="subexpression-assignment-read"),
+    pytest.param("$copy = (Get-Date)", False, id="group-assignment-read"),
+    pytest.param("Write-Output ${name(git commit -m test)}", False, id="braced-name-not-code"),
+    pytest.param("$copy = $(git commit -m test)", True, id="subexpression-assignment-write"),
+    pytest.param("$copy = $value + 1", False, id="variable-arithmetic-data"),
+    pytest.param("${unclosed", True, id="unclosed-variable"),
+    pytest.param(
+        'Write-Output $($inner = (Write-Output "' + "x" * 50000 + '"))',
+        True, id="normalization-budget-exhausted",
+    ),
+])
+def test_shell_invalidation_uses_original_parser_not_permission_exemptions(command, mutates):
+    assert guard.shell_may_mutate(command, "powershell") is mutates
+
+
+@pytest.mark.parametrize("tool", ["bash", "sh"])
+@pytest.mark.parametrize("command,mutates", [
+    pytest.param('result="$(git commit -m test)"', True, id="quoted"),
+    pytest.param("result=$(git commit -m test)", True, id="unquoted"),
+    pytest.param("result='$(git commit -m test)'", False, id="literal"),
+])
+def test_assignment_substitution_precedes_environment_normalization(tool, command, mutates):
+    assert guard.shell_may_mutate(command, tool) is mutates
+
+
+@pytest.mark.parametrize("command,mutates", [
+    pytest.param("echo ${HOME}", False, id="braced-read"),
+    pytest.param("echo ${value:-${fallback}}", False, id="nested-variable-read"),
+    pytest.param("echo ${value:-$(git commit -m test)}", True, id="variable-substitution-write"),
+    pytest.param("select item in one; do touch file; done", True, id="select-control"),
+])
+def test_parameter_expansion_is_data_but_its_substitutions_still_execute(command, mutates):
+    assert guard.shell_may_mutate(command, "bash") is mutates
+
+
+@pytest.mark.parametrize("command,mutates", [
+    pytest.param("echo ${value:-'}'}; git commit -m test", True, id="single-quote"),
+    pytest.param('echo ${value:-"}"}; git commit -m test', True, id="double-quote"),
+    pytest.param(r"echo ${value:-\}}; git commit -m test", True, id="escaped-brace"),
+    pytest.param("echo ${value:-$(printf '}')}; git commit -m test", True, id="command"),
+    pytest.param("echo ${value:-$((1 + 2))}; git commit -m test", True, id="arithmetic"),
+    pytest.param("echo ${value:-${other:-'}'}}; git commit -m test", True, id="nested-variable"),
+    pytest.param("echo ${value:-`printf '}'`}; git commit -m test", True, id="backtick"),
+    pytest.param(r"echo ${value:-$'\'}'}; git commit -m test", True, id="ansi-quote"),
+    pytest.param("echo ${value:-'}'}", False, id="read-only"),
+])
+def test_quoted_parameter_braces_cannot_hide_following_mutations(
+    anchor_evidence, tmp_path, command, mutates,
+):
+    assert guard.shell_may_mutate(
+        command, "bash", legacy_writes=stateless._WRITE_VERBS,
+    ) is mutates
+    root, anchors = anchor_evidence
+    decision = guard.decide(
+        {"toolName": "bash", "cwd": str(root), "toolArgs": {"command": command}},
+        env={}, home=tmp_path, anchors=anchors,
+    )
+    assert bool(decision and decision["permissionDecision"] == "deny") is mutates
+
+
+@pytest.mark.parametrize("tool,command,mutates", [
+    pytest.param("powershell", "pwsh -Command 'Set-Content file value'", True, id="nested-shell"),
+    pytest.param("bash", "command -p git commit -m test", True, id="wrapper-options"),
+    pytest.param("bash", "/usr/bin/git commit -m test", True, id="explicit-executable"),
+    pytest.param("powershell", "Write-Output 'git commit; Set-Content file value'", False, id="read-data"),
+    pytest.param("powershell", "$result = 'git commit -m test'", False, id="literal-assignment"),
+    pytest.param("bash", "result='$(git commit -m test)'", False, id="literal-substitution"),
+    pytest.param("powershell", r"Microsoft.PowerShell.Management\Get-Content Set-Content.txt", False, id="module-read"),
+    pytest.param("powershell", "git log --format=Set-Content", False, id="git-format-data"),
+    pytest.param("powershell", "select -Property Name", False, id="select-alias-read"),
+    pytest.param("powershell", "sls -Pattern 'git commit' file", False, id="select-string-alias-read"),
+])
+def test_unclassified_shell_forms_retain_original_write_heuristic(tool, command, mutates):
+    assert guard.shell_may_mutate(
+        command, tool, legacy_writes=stateless._WRITE_VERBS,
+    ) is mutates
 
 
 def test_native_batch_retains_session_scope_and_valid_calls():

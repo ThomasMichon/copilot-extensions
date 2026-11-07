@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse original validated cell membership in native Windows admission",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -121,6 +121,11 @@ class _FakeManager:
         return SimpleNamespace(config=SimpleNamespace(ssh_target="cs-one"))
 
     async def exec_command(self, *_args, **_kwargs):
+        if "/dev/tcp/127.0.0.1/" in _args[1]:
+            self.calls.append("relay_probe")
+            return SimpleNamespace(
+                stdout="OK\n", stderr="", exit_code=0, timed_out=False,
+            )
         if "agent-policy check" in _args[1]:
             self.calls.append("hosting")
             return SimpleNamespace(

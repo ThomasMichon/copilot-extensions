@@ -4136,19 +4136,15 @@ class _ResidentHookPolicy:
             ] or [cwd]
         if tool not in _HOOK_SHELL_TOOLS:
             return []
-        args = payload.get("toolArgs") or payload.get("tool_input") or {}
-        if not isinstance(args, dict):
-            return []
-        command = next(
-            (
-                str(args.get(key) or "")
-                for key in ("command", "cmd", "script", "commandLine", "commandline", "input")
-                if args.get(key)
-            ),
-            "",
-        )
         module = self._module("statelessness_guard.py")
-        return None if module and module._WRITE_VERBS.search(command) else []
+        shell = self._module("anchor_write_guard.py")
+        if module is None or shell is None:
+            return None
+        args = module._as_args(payload.get("toolArgs") or payload.get("tool_input") or {})
+        command = module._pick(args, module.CMD_ARG_KEYS)
+        if command is not None and tool not in {"bash", "sh", "powershell", "pwsh"}:
+            return None if module._WRITE_VERBS.search(command) else []
+        return None if command is None or shell.shell_may_mutate(command, tool, legacy_writes=module._WRITE_VERBS) else []
 
 
 def _resident_hook_decision(
@@ -4163,11 +4159,13 @@ def _resident_hook_decision(
     if kind == "preToolUse":
         return policy.pre(payload)
 
-    if kind in {"nativeToolMutation", "nativeToolBatchMutation"}:
+    if kind in {"nativeToolMutation", "nativeToolBatchMutation", "shellToolMutation"}:
         tool = payload.get("toolName") or payload.get("tool_name")
         if (kind == "nativeToolBatchMutation" and "toolCalls" not in payload) or (
-            kind == "nativeToolMutation" and (
-                not isinstance(tool, str) or tool.lower() not in _HOOK_WRITE_TOOLS
+            kind != "nativeToolBatchMutation" and (
+                not isinstance(tool, str) or tool.lower() not in (
+                    _HOOK_SHELL_TOOLS if kind == "shellToolMutation" else _HOOK_WRITE_TOOLS
+                )
                 or "toolCalls" in payload
             )
         ):

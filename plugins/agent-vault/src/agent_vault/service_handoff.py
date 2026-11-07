@@ -53,6 +53,7 @@ class AuthReceiver:
         self.cancelled = threading.Event()
         self._lock = threading.Lock()
         self._payload: dict | None = None
+        self._writer_released = False
         self.task: asyncio.Task | None = None
         self.closed = False
         key = uuid.uuid4().hex
@@ -90,6 +91,7 @@ class AuthReceiver:
                     return
                 with self._lock:
                     self._payload = frame["auth"]
+                    self._writer_released = frame.get("credential_writer_released") is True
                 write_frame(channel, {"received": True, "version": frame["version"]}, deadline)
         except Exception:
             # Private transport diagnostics intentionally do not contain frames.
@@ -115,7 +117,13 @@ class AuthReceiver:
             return payload
 
 
-def send_auth_state(status: dict, payload: dict) -> bool:
+    def writer_released(self) -> bool:
+        """Return only the native-authenticated predecessor's release receipt."""
+        with self._lock:
+            return self._writer_released
+
+
+def send_auth_state(status: dict, payload: dict, *, writer_released: bool = False) -> bool:
     """Send only to the independently verified selected successor's native peer."""
     receiver = status.get("auth_handoff_receiver")
     if (
@@ -138,10 +146,13 @@ def send_auth_state(status: dict, payload: dict) -> bool:
 
             channel = connect(Path(receiver["address"]), peer, deadline)
         with contextlib.closing(channel):
-            write_frame(channel, {
+            frame = {
                 "contract": AUTH_STATE_CONTRACT, "version": 1,
                 "target_generation": status["runtime_generation"], "auth": payload,
-            }, deadline)
+            }
+            if writer_released:
+                frame["credential_writer_released"] = True
+            write_frame(channel, frame, deadline)
             response = read_frame(channel, deadline)
             return response.get("received") is True and response.get("version") == 1
     except Exception:

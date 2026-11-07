@@ -600,6 +600,9 @@ def test_real_group_processes_release_readonly_files_before_cleanup(
 def test_explicit_reinstall_invalidates_uv_cached_path_dependency_wheels(
     tmp_path, monkeypatch, reinstall, cached,
 ):
+    import plugin_test_environment as preparation
+    monkeypatch.setattr(preparation, "capture_preparation_auth",
+                        lambda *args, **kwargs: {"UV_CREDENTIALS_DIR": str(tmp_path / "fixture-auth")})
     plugin = tmp_path / "plugin"
     plugin.mkdir()
     monkeypatch.setattr(runner, "_plugin_dir", lambda _name: plugin)
@@ -623,6 +626,12 @@ def test_explicit_reinstall_invalidates_uv_cached_path_dependency_wheels(
         return subprocess.CompletedProcess(command, 0)
 
     def install(uv, arguments, **kwargs):
+        environment = kwargs.pop("env")
+        private = Path(environment["COPILOT_EXTENSIONS_TEST_SANDBOX"])
+        for key in ("HOME", "USERPROFILE", "APPDATA", "XDG_CONFIG_HOME"):
+            assert Path(environment[key]).is_relative_to(private)
+        assert environment["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
+        assert "COPILOT_EXTENSIONS_CONTEXT" not in environment
         assert kwargs == {
             "cwd": plugin, "trusted_source_roots": (runner.REPO,), "check": True,
             "retained_resource_roots": (),
@@ -655,6 +664,9 @@ def selectable_tests(tmp_path, monkeypatch):
     ("agent-dispatch", "service-gateway"), ("agent-ssh", ""),
 ])
 def test_preparation_selects_same_checkout_fleet_dependency(tmp_path, monkeypatch, name, extra):
+    import plugin_test_environment as preparation
+    monkeypatch.setattr(preparation, "capture_preparation_auth",
+                        lambda *args, **kwargs: {"UV_CREDENTIALS_DIR": str(tmp_path / "fixture-auth")})
     monkeypatch.setattr(runner, "REPO", tmp_path)
     monkeypatch.setattr(runner, "VENV_ROOT", tmp_path / "venvs")
     plugin = tmp_path / "plugins" / name
@@ -725,7 +737,17 @@ def test_dispatch_preparation_fingerprints_same_checkout_replay_dependency(tmp_p
 
 
 @pytest.mark.parametrize("bridge_fails", [False, True])
-def test_manager_bridge_is_prepared_only_by_the_test_runner(tmp_path, monkeypatch, bridge_fails):
+@pytest.mark.parametrize("cached_editable", [False, True])
+def test_manager_bridge_is_prepared_only_by_the_test_runner(
+    tmp_path, monkeypatch, bridge_fails, cached_editable,
+):
+    import plugin_test_environment as preparation
+    monkeypatch.setattr(preparation, "capture_preparation_auth",
+                        lambda *args, **kwargs: {"UV_CREDENTIALS_DIR": str(tmp_path / "fixture-auth")})
+    for key in ("HOME", "USERPROFILE", "APPDATA", "XDG_CONFIG_HOME", "AGENT_BRIDGE_CONFIG_DIR"):
+        monkeypatch.setenv(key, str(tmp_path / "host-state"))
+    for key in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE"):
+        monkeypatch.setenv(key, "fixture-host-participant")
     manager = tmp_path / "worktree-manager"
     manager.mkdir()
     (manager / "pyproject.toml").write_text(
@@ -739,11 +761,16 @@ def test_manager_bridge_is_prepared_only_by_the_test_runner(tmp_path, monkeypatc
     monkeypatch.setattr(runner, "VENV_ROOT", tmp_path / "venvs")
     monkeypatch.setattr(runner, "_plugin_dir", lambda _name: manager)
     (runner.VENV_ROOT / "worktree-manager").mkdir(parents=True)
-    python = runner._venv_python("worktree-manager")
-    python.parent.mkdir(parents=True)
-    python.touch()
-    monkeypatch.setattr(runner, "dependency_fingerprint", lambda *_args: "old-editable")
-    (runner.VENV_ROOT / "worktree-manager" / ".dep-fingerprint").write_text("old-editable")
+    if cached_editable:
+        python = runner._venv_python("worktree-manager")
+        python.parent.mkdir(exist_ok=True)
+        python.touch()
+        previous = runner.dependency_fingerprint(
+            "worktree-manager", manager, tmp_path,
+            (*runner.RUNNER_DEPENDENCIES,
+             *runner.EXTERNAL_TEST_DEPENDENCIES.get("worktree-manager", ())),
+        )
+        (runner.VENV_ROOT / "worktree-manager" / ".dep-fingerprint").write_text(previous)
     calls = []
     monkeypatch.setattr(
         runner.subprocess, "run",
@@ -765,10 +792,19 @@ def test_manager_bridge_is_prepared_only_by_the_test_runner(tmp_path, monkeypatc
     manager_arguments, manager_options = calls[0]
     assert str(bridge) not in manager_arguments
     assert "-e" not in manager_arguments
-    assert "--reinstall" in manager_arguments
+    assert ("--reinstall" in manager_arguments) is cached_editable
     assert manager_options["non_editable"] is True
     assert manager_options["cwd"] == manager
     arguments, options = calls[1]
+    for installation in (manager_options, options):
+        environment = installation["env"]
+        private = Path(environment["COPILOT_EXTENSIONS_TEST_SANDBOX"])
+        for key in ("HOME", "USERPROFILE", "APPDATA", "XDG_CONFIG_HOME", "AGENT_BRIDGE_CONFIG_DIR"):
+            assert Path(environment[key]).is_relative_to(private)
+        assert environment["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
+        assert "COPILOT_EXTENSIONS_CONTEXT" not in environment
+        assert "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE" not in environment
+    assert options["env"] == manager_options["env"]
     assert arguments[arguments.index(str(bridge)) - 1] == "-e"
     assert "non_editable" not in options
     assert options["cwd"] == bridge and options["trusted_source_roots"] == (tmp_path,)
@@ -902,7 +938,7 @@ def test_explicit_test_files_preserve_default_grouping_and_filter_only_collectio
 def test_manager_default_discovery_excludes_only_its_prepared_native_lane():
     root = runner._plugin_dir("worktree-manager")
     native = set((root / "tests" / "native").glob("test_*.py"))
-    assert {path.name for path in native} == {
+    assert {
         "test_manager_runtime_install.py", "test_manager_mux_callbacks.py",
         "test_manager_updater_recovery.py",
         "test_manager_runtime_uninstall.py",
@@ -915,19 +951,26 @@ def test_manager_default_discovery_excludes_only_its_prepared_native_lane():
         "test_terminal_launch_native.py", "test_terminal_launch_mux_native.py",
         "test_pane_boundary_native.py", "test_pane_boundary_posix.py",
         "test_manager_suite_replacement.py",
-    }
+    } <= {path.name for path in native}
     default = {path for group in runner._test_file_groups("worktree-manager", 25) for path in group}
     assert default == set((root / "tests").rglob("test_*.py")) - native
 
 
 def test_manager_explicit_native_selection_remains_available():
     root = runner._plugin_dir("worktree-manager")
-    files = tuple(sorted(
-        path.relative_to(root).as_posix() for path in (root / "tests" / "native").glob("test_*.py")
-    ))
+    files = (
+        "tests/native/test_psmux_home_directory.py",
+        "tests/native/test_warm_picker_lifetime.py",
+    )
     assert runner._test_file_groups("worktree-manager", 25, test_files=files) == [
         [root / value for value in files],
     ]
+    files = tuple(sorted(
+        path.relative_to(root).as_posix() for path in (root / "tests" / "native").glob("test_*.py")
+    ))
+    groups = runner._test_file_groups("worktree-manager", 25, test_files=files)
+    assert all(0 < len(group) <= 25 for group in groups)
+    assert [path for group in groups for path in group] == [root / value for value in files]
 
 
 @pytest.fixture
@@ -1270,6 +1313,108 @@ def test_explicit_test_files_reach_contained_pytest_without_unrelated_modules(
 
 
 @pytest.fixture
+def bridge_historical_plan(tmp_path, monkeypatch):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    target = tests / "test_http48_capture_guards.py"
+    target.write_text(textwrap.dedent("""
+    import pytest
+    @pytest.fixture(params=["http48", "http49", "http50", "http51"])
+    def capture_case(request): return request.param
+    @pytest.mark.parametrize("fault", ["one", "two"])
+    def test_http48_guard(capture_case, fault): pass
+    def test_http48_untagged_control(): pass
+    @pytest.mark.parametrize("future", [48, 49, 50, 51])
+    def test_http47_future_history(future): pass
+    @pytest.mark.parametrize("value", ["untagged", "http49-http50-http51"])
+    def test_future_unclassified_contract(value): pass
+    """), encoding="utf-8")
+    (tests / "test_http47_capture_guards.py").write_text(
+        "def test_shared_capture_seed_has_owned_committed_inputs(): pass\n",
+        encoding="utf-8",
+    )
+    for name in runner._INDEPENDENT_SUBSUITE_FILES["agent-bridge"]:
+        (tests / name).write_text("def test_unrelated_native(): pass\n", encoding="utf-8")
+    monkeypatch.setattr(runner, "_plugin_dir", lambda _name: tmp_path)
+    monkeypatch.setattr(runner, "_ensure_venv", lambda *_args, **_kwargs: Path(sys.executable))
+    return tmp_path, target
+
+
+@pytest.mark.parametrize("kexpr", [
+    None, "http48 or shared_capture_seed_has_owned_committed_inputs",
+    "http49", "never_matches",
+])
+@pytest.mark.parametrize("explicit", [False, True])
+def test_bridge_historical_partitions_collect_every_selected_case_exactly_once(
+    bridge_historical_plan, monkeypatch, kexpr, explicit,
+):
+    plugin, target = bridge_historical_plan
+    inventory = []
+
+    class Inventory:
+        def pytest_collection_finish(self, session):
+            inventory.extend(session.items)
+
+    arguments = [
+        "-q", "--collect-only", "--import-mode=importlib", f"--rootdir={plugin}",
+        "-p", "no:cacheprovider",
+    ]
+    if kexpr:
+        arguments += ["-k", kexpr]
+    arguments.append(str(target.relative_to(plugin)) if explicit else "tests")
+    with monkeypatch.context() as context:
+        context.chdir(plugin)
+        expected_status = pytest.main(arguments, plugins=[Inventory()])
+    selections = []
+
+    def collect(command, **kwargs):
+        selector = command[command.index("-k") + 1] if "-k" in command else ""
+        expression = Expression.compile(selector) if selector.strip() else None
+        files = {argument.replace("\\", "/") for argument in command if argument.endswith(".py")}
+        selected = [
+            item.nodeid for item in inventory
+            if item.nodeid.split("::", 1)[0] in files
+            and (expression is None or expression.evaluate(KeywordMatcher.from_item(item)))
+        ]
+        selections.extend(selected)
+        assert "--timeout=30" in command
+        limits = kwargs["limits"]
+        assert 0 < limits.wall_seconds <= 300
+        assert (limits.max_processes, limits.max_memory_mb, limits.max_temp_mb) == (128, 4096, 2048)
+        return 0 if selected else 5
+
+    monkeypatch.setattr(runner, "run_contained", collect)
+    result = runner.run_plugin(
+        "agent-bridge", "unused", reinstall=False, kexpr=kexpr,
+        test_files=(str(runner._BRIDGE_HISTORICAL_FILE),) if explicit else (),
+        collect_only=True, limits=runner.Limits(wall_seconds=300), plugin_timeout=900,
+        test_timeout=30, max_files_per_subsuite=25,
+    )
+    assert result == expected_status
+    assert Counter(selections) == Counter(item.nodeid for item in inventory)
+    assert len(selections) == len(set(selections))
+
+
+def test_bridge_historical_partitions_share_the_original_plugin_deadline(
+    bridge_historical_plan, monkeypatch,
+):
+    clock = iter([0, 0, 250, 650, 901, 901])
+    monkeypatch.setattr(runner, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+    seen = []
+    monkeypatch.setattr(
+        runner, "run_contained",
+        lambda _command, **kwargs: seen.append(kwargs["limits"].wall_seconds) or 0,
+    )
+    assert runner.run_plugin(
+        "agent-bridge", "unused", reinstall=False, kexpr="http48",
+        test_files=(str(runner._BRIDGE_HISTORICAL_FILE),),
+        limits=runner.Limits(wall_seconds=300), plugin_timeout=900, test_timeout=30,
+        max_files_per_subsuite=25,
+    ) == 124
+    assert seen == [300, 300, 250]
+
+
+@pytest.fixture
 def codespaces_native_plan(monkeypatch):
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary).resolve()
@@ -1499,7 +1644,7 @@ def test_codespaces_partition_failures_and_empty_selections_remain_fail_closed(
 def test_codespaces_partitions_share_the_unchanged_plugin_aggregate(
     codespaces_native_plan, monkeypatch, first_result,
 ):
-    clock = iter([0, 0, 250, 650, 901, 901])
+    clock = iter([0, 0, 0, 250, 650, 901, 901])
     monkeypatch.setattr(runner, "time", SimpleNamespace(monotonic=lambda: next(clock)))
     seen = []
     monkeypatch.setattr(
@@ -1767,6 +1912,12 @@ def test_worker_launch_uses_canonical_headlessness(monkeypatch, tmp_path):
 
 @pytest.mark.parametrize("has_project", [False, True])
 def test_fresh_preparation_attributes_repository_sources(monkeypatch, tmp_path, has_project):
+    import agent_procutil.owned_process as owned_process
+    import plugin_test_environment as preparation
+    monkeypatch.setattr(owned_process, "run_caller_owned",
+                        lambda *args, **kwargs: pytest.fail("pure preparation test attempted native execution"))
+    monkeypatch.setattr(preparation, "capture_preparation_auth",
+                        lambda *args, **kwargs: {"UV_CREDENTIALS_DIR": str(tmp_path / "fixture-auth")})
     plugin = tmp_path / "plugins" / "example"
     plugin.mkdir(parents=True)
     if has_project:
@@ -2436,7 +2587,14 @@ def test_codespaces_functional_profile_preparation_strips_test_only_flags(
 
 
 @pytest.mark.parametrize("profile", [None, "standard", "busy-host-functional"])
-def test_codespaces_functional_profile_budgets_and_caps(monkeypatch, capsys, profile, tmp_path):
+@pytest.mark.parametrize("plugin,target", [
+    ("agent-codespaces", "tests/test_installer_engine_adoption.py"),
+    ("agent-ssh", "tests/test_snapshot_runtime.py"),
+    ("agent-ssh", "tests/test_snapshot_windows_visibility.py"),
+])
+def test_codespaces_functional_profile_budgets_and_caps(
+    monkeypatch, capsys, profile, tmp_path, plugin, target,
+):
     class Lease:
         def release(self):
             pass
@@ -2445,8 +2603,8 @@ def test_codespaces_functional_profile_budgets_and_caps(monkeypatch, capsys, pro
     monkeypatch.setattr(runner, "_acquire_admission", lambda *_args: Lease())
     observed = []
     monkeypatch.setattr(runner, "run_plugin", lambda *a, **kw: observed.append(kw) or 0)
-    files = [str(runner._CODESPACES_NATIVE_FILE)]
-    arguments = ["agent-codespaces", "--test-file", files[0], "--junit-dir", str(tmp_path / "reports")]
+    files = [target]
+    arguments = [plugin, "--test-file", files[0], "--junit-dir", str(tmp_path / "reports")]
     if profile is not None:
         arguments += ["--test-profile", profile]
     assert runner.main(arguments) == 0
@@ -2479,6 +2637,12 @@ def test_codespaces_functional_profile_budgets_and_caps(monkeypatch, capsys, pro
     ["agent-codespaces", "--test-file", "tests/test_installer_engine_adoption.py", "--max-memory-mb", "4097"],
     ["agent-codespaces", "--test-file", "tests/test_installer_engine_adoption.py", "--max-temp-mb", "2049"],
     ["agent-codespaces", "--test-file", "tests/test_installer_engine_adoption.py", "--collect-only"],
+    ["agent-ssh", "--test-file", "tests/test_session_snapshot.py"],
+    ["agent-ssh", "--test-file", "tests/test_snapshot_runtime.py", "-k", "native"],
+    ["agent-ssh", "--test-file", "tests/test_snapshot_runtime.py", "--test-timeout", "300"],
+    ["agent-ssh", "--test-file", "tests/test_snapshot_runtime.py", "--allow-host-state"],
+    ["agent-ssh", "--test-file", "tests/test_snapshot_runtime.py", "--max-processes", "129"],
+    ["agent-ssh", "agent-codespaces", "--test-file", "tests/test_snapshot_runtime.py"],
 ])
 def test_codespaces_functional_profile_refuses_unqualified_scope_and_overrides(monkeypatch, arguments):
     monkeypatch.setattr(
@@ -2502,6 +2666,7 @@ def test_codespaces_functional_profile_preserves_partitions_and_clears_ambient(
 ):
     plugin, _, _ = codespaces_native_plan
     monkeypatch.setenv(runner._CODESPACES_PROFILE_ENV, "unrequested-ambient-profile")
+    monkeypatch.setenv(runner._SSH_PROFILE_ENV, "busy-host-functional")
     monkeypatch.setenv("PYTEST_ADDOPTS", "--collect-only -k healthy")
     calls = []
 
@@ -2513,6 +2678,7 @@ def test_codespaces_functional_profile_preserves_partitions_and_clears_ambient(
         assert kwargs["env"].get("PYTEST_ADDOPTS") == (
             "--collect-only -k healthy" if profile == "standard" else None
         )
+        assert runner._SSH_PROFILE_ENV not in kwargs["env"]
         assert (
             kwargs["limits"].max_processes, kwargs["limits"].max_memory_mb,
             kwargs["limits"].max_temp_mb,
@@ -2533,6 +2699,46 @@ def test_codespaces_functional_profile_preserves_partitions_and_clears_ambient(
     )
     assert all(str(runner._CODESPACES_NATIVE_FILE) in command for command in calls)
     assert plugin.is_dir()
+
+
+@pytest.mark.parametrize("profile", ["standard", "busy-host-functional"])
+def test_ssh_functional_profile_keeps_full_inventory_and_isolates_environment(
+    monkeypatch, tmp_path, profile,
+):
+    plugin = tmp_path / "agent-ssh"
+    tests = plugin / "tests"
+    tests.mkdir(parents=True)
+    targets = ("test_snapshot_runtime.py", "test_snapshot_windows_visibility.py")
+    for target in targets:
+        (tests / target).write_text("def test_native(): pass\n", encoding="utf-8")
+    monkeypatch.setattr(runner, "_plugin_dir", lambda _name: plugin)
+    monkeypatch.setattr(runner, "_ensure_venv", lambda *a, **k: Path(sys.executable))
+    monkeypatch.setenv(runner._CODESPACES_PROFILE_ENV, "busy-host-functional")
+    monkeypatch.setenv(runner._SSH_PROFILE_ENV, "busy-host-functional")
+    monkeypatch.setenv("PYTEST_ADDOPTS", "--collect-only -k nonexistent")
+    calls = []
+
+    def execute(command, **kwargs):
+        calls.append(command)
+        assert kwargs["env"].get(runner._SSH_PROFILE_ENV) == (
+            None if profile == "standard" else profile
+        )
+        assert runner._CODESPACES_PROFILE_ENV not in kwargs["env"]
+        assert kwargs["env"].get("PYTEST_ADDOPTS") == (
+            "--collect-only -k nonexistent" if profile == "standard" else None
+        )
+        assert "-k" not in command and "--collect-only" not in command
+        assert all(str(Path("tests") / target) in command for target in targets)
+        return 0
+
+    monkeypatch.setattr(runner, "run_contained", execute)
+    assert runner.run_plugin(
+        "agent-ssh", "unused", reinstall=False, kexpr=None,
+        test_files=tuple(str(Path("tests") / target) for target in targets),
+        test_profile=profile, limits=containment.Limits(),
+        plugin_timeout=900, test_timeout=30, max_files_per_subsuite=25,
+    ) == 0
+    assert len(calls) == 1
 
 
 @pytest.mark.portfolio_tier("T2")
@@ -2590,6 +2796,53 @@ def test_prepare_only_takes_environment_admission(monkeypatch) -> None:
 
     assert runner.main(["alpha", "--prepare-only"]) == 0
     assert acquire_calls == [0.0]
+
+
+@pytest.mark.parametrize("collect_only", [False, True])
+def test_unsafe_child_cleanup_refuses_before_preparation_or_collection(monkeypatch, tmp_path, capsys, collect_only):
+    plugin = tmp_path / "alpha"
+    tests = plugin / "tests"
+    native = tests / "native"
+    native.mkdir(parents=True)
+    selected = tests / "test_safe.py"
+    selected.write_text("def test_safe(): pass\n")
+    child = native / "child.py"
+    child.write_text("def main(): command('kill-server')\n")
+    monkeypatch.setattr(runner, "_has_suite", lambda _name: True)
+    monkeypatch.setattr(runner, "_plugin_dir", lambda _name: plugin)
+    monkeypatch.setattr(runner, "_test_file_groups", lambda *a, **k: [[selected]])
+    monkeypatch.setattr(
+        runner, "_ensure_venv",
+        lambda *a, **k: pytest.fail("unsafe tests reached dependency preparation"),
+    )
+    monkeypatch.setattr(
+        runner, "run_contained",
+        lambda *a, **k: pytest.fail("unsafe tests reached execution"),
+    )
+    assert runner.run_plugin(
+        "alpha", "uv", reinstall=False, kexpr=None, limits=runner.Limits(),
+        plugin_timeout=60, test_timeout=30, max_files_per_subsuite=25,
+        collect_only=collect_only, allow_host_state=True, allow_explicit_tiers=True,
+    ) == 2
+    assert str(child) in capsys.readouterr().err
+
+
+def test_source_preflight_counts_against_plugin_budget_before_preparation(monkeypatch, tmp_path, capsys):
+    plugin = tmp_path / "alpha"
+    clock = [0.0]
+    monkeypatch.setattr(runner, "_has_suite", lambda _name: True)
+    monkeypatch.setattr(runner, "_plugin_dir", lambda _name: plugin)
+    monkeypatch.setattr(runner, "_test_file_groups", lambda *a, **k: [[plugin / "tests/test_one.py"]])
+    monkeypatch.setattr(runner.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(runner, "check_test_sources", lambda _root: clock.__setitem__(0, 61.0))
+    monkeypatch.setattr(
+        runner, "_ensure_venv", lambda *a, **k: pytest.fail("expired preflight reached preparation"),
+    )
+    assert runner.run_plugin(
+        "alpha", "uv", reinstall=False, kexpr=None, limits=runner.Limits(),
+        plugin_timeout=60, test_timeout=30, max_files_per_subsuite=25,
+    ) == 124
+    assert "preflight exhausted" in capsys.readouterr().err
 
 
 def test_run_plugin_prepare_only_never_invokes_pytest(monkeypatch, tmp_path: Path) -> None:

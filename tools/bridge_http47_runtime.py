@@ -46,28 +46,27 @@ def load_request() -> tuple[Path, dict]:
     return path, request
 
 
-def _source_lookup(proof: dict) -> Callable[[str], str | None]:
-    sources: dict[str, list[tuple[int, str, str]]] = {}
+def _source_locator(proof: dict) -> Callable[[str], str | None]:
+    sources: dict[str, str] = {}
     for path in proof:
         if not path.endswith(".py"):
             continue
         suffix = path.split("/src/", 1)[-1] if "/src/" in path else path
-        sources.setdefault(suffix.rsplit("/", 1)[-1], []).append((len(suffix), suffix, path))
+        sources[suffix] = max(sources.get(suffix, ""), path)
 
-    def lookup(filename: str) -> str | None:
-        normalized = filename.replace("\\", "/")
-        candidates = [
-            (length, path)
-            for length, suffix, path in sources.get(normalized.rsplit("/", 1)[-1], ())
-            if normalized.endswith("/" + suffix)
-        ]
-        return max(candidates)[1] if candidates else None
+    def locate(filename: str) -> str | None:
+        remaining = filename.replace("\\", "/")
+        while "/" in remaining:
+            remaining = remaining.split("/", 1)[1]
+            if remaining in sources:
+                return sources[remaining]
+        return None
 
-    return lookup
+    return locate
 
 
 def relative_source(filename: str, proof: dict) -> str | None:
-    return _source_lookup(proof)(filename)
+    return _source_locator(proof)(filename)
 
 
 def _interpreter_log(directory: Path) -> Path:
@@ -159,7 +158,6 @@ def install(*, observer: bool = False) -> None:
     path, request = load_request()
     proof = request["source_proof"]
     root = Path(request["root"])
-    lookup_source = _source_lookup(proof)
     bind_installation = request.get("capture_generation") in (48, 49, 50, 51, 52)
     own = "tools/bridge_http47_runtime.py"
     if sha(Path(__file__).read_bytes()) != proof[own]["sha256"]:
@@ -228,6 +226,7 @@ def install(*, observer: bool = False) -> None:
     for name in early:
         verify_preloaded(sys.modules[name], proof[modules[name]])
         record({"kind": "exec", "source": modules[name], "role": None, "preloaded": True})
+    locate_source = _source_locator(proof)
     checking = False
 
     def audit(event: str, args: tuple) -> None:
@@ -244,7 +243,7 @@ def install(*, observer: bool = False) -> None:
         if event != "exec" or not isinstance(args[0], CodeType):
             return
         code = args[0]
-        source = lookup_source(code.co_filename)
+        source = locate_source(code.co_filename)
         role = entry_role(code.co_filename)
         helper = installation_source(code.co_filename) if bind_installation else None
         if source is None and helper is not None:

@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve the ordinary startup observation budget during guarded workspace preparation",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

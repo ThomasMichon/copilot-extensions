@@ -31,6 +31,9 @@ ROOT_PROJECTION = (
     / "efforts"
     / "completion-gate.instructions.md"
 )
+ROOT_FALLBACK = (
+    ROOT / ".github" / "copilot" / "context-fallbacks" / "efforts" / "completion-gate.md"
+)
 WORKING_CROSS_REPO = (
     ROOT / "plugins" / "agent-worktrees" / "skills" / "working-cross-repo" / "SKILL.md"
 )
@@ -790,8 +793,10 @@ def test_setup_contract_projects_fallback_and_defers_hook_registration() -> None
     assert "issue #1234" in setup
     assert "efforts:static-fallback:start" not in root_instructions
     assert "efforts:static-fallback:end" not in root_instructions
-    assert f"[owner: efforts@{version}]" in root_projection
+    # The checked-in projection is a locator; its reviewed fallback carries the body.
+    assert f'"pluginVersion":"{version}"' in root_projection
     assert "copilot-extension-instruction-projection" in root_projection
+    assert f"[owner: efforts@{version}]" in ROOT_FALLBACK.read_text(encoding="utf-8")
     assert "hooks" not in manifest
     assert "#1234" in readme
 

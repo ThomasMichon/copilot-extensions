@@ -121,6 +121,8 @@ def prepare_workspace(owner, task: dict, reservation: dict) -> dict:
 def record_prepared(
     client, reservation: dict, prepared: dict, *, driver: str,
     creating_host: str | None = None,
+    worktree_writer_requirement: dict | None = None,
+    timeout: float | None = None,
 ) -> None:
     """Persist even incomplete owner results, then refuse unsafe acquisition."""
     worktree = str(prepared["worktree"])
@@ -136,6 +138,8 @@ def record_prepared(
         facts["creation_nonce"] = nonce
     if "execution_machine" in reservation and creating_host is not None:
         facts["execution_machine"] = creating_host
+    if worktree_writer_requirement is not None:
+        facts["worktree_writer_requirement"] = worktree_writer_requirement
     conflicting_project = (
         prepared.get("requested_project")
         and prepared["requested_project"] != facts["allocation_project"]
@@ -150,6 +154,11 @@ def record_prepared(
                 creating_host=creating_host if ownership == "created" else None, driver=driver,
                 **({"execution_machine": creating_host} if "execution_machine" in facts else {}),
                 **({"creation_nonce": facts["creation_nonce"]} if "creation_nonce" in facts else {}),
+                **({"worktree_writer_requirement": worktree_writer_requirement}
+                   if worktree_writer_requirement is not None else {}),
+                **({"timeout": timeout}
+                   if timeout is not None and reservation.get("task_relationship_required") is True
+                   else {}),
             )
         except DispatchError as exc:
             hold(f"workspace {worktree} could not be recorded; retained for repair: {exc}")

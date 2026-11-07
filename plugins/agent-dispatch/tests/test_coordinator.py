@@ -455,7 +455,7 @@ def test_health_includes_slot_descriptor_shape(api):
     # self-retire / abandoned-passive-reap loops happen to be in.
     slot = api.get("/health").json()["slot"]
     assert set(slot) == {
-        "pid", "role", "active", "previous",
+        "pid", "process_start_time", "role", "active", "previous",
         "self_retire", "abandoned_passive_reap",
     }
     assert isinstance(slot["pid"], int)

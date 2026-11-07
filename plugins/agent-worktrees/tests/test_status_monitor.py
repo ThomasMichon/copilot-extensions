@@ -14,7 +14,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import threading
 import time
 import types
@@ -1338,17 +1337,7 @@ def test_resident_pre_hook_does_not_acquire_project(monkeypatch, bounded_windows
 
 
 def test_hook_mutation_targets_are_target_aware():
-    class Guard:
-        _WRITE_VERBS = re.compile(r"Set-Content|git\s+commit", re.IGNORECASE)
-
-    class Client:
-        @staticmethod
-        def _load_sibling(name):
-            if name == "tool_call_forms.py":
-                return m._load_hook_client_module()._load_sibling(name)
-            return Guard
-
-    policy = m._ResidentHookPolicy(Client())
+    policy = m._ResidentHookPolicy(m._load_hook_client_module())
     assert policy.mutation_targets(
         {
             "toolName": "edit",
@@ -1376,6 +1365,64 @@ def test_hook_mutation_targets_are_target_aware():
         )
         is None
     )
+
+
+@pytest.mark.parametrize("args,mutates", [
+    ({"command": "git -c core.quotepath=false --no-pager commit -m test"}, True),
+    ({"command": "git --git-dir=repo/.git --work-tree=repo reset --hard"}, True),
+    ({"command": "git pull --ff-only"}, True),
+    ({"command": "git fetch origin"}, True),
+    ({"command": "git branch new-branch"}, True),
+    ({"command": "git branch --show-current"}, False),
+    ({"command": "git --no-pager merge-base HEAD origin/main"}, False),
+    ({"command": "git -c core.quotepath=false status --short"}, False),
+    ({"command": "Write-Output 'git commit; Set-Content x value'"}, False),
+    ({"command": "git status > report.txt"}, True),
+    ({"command": "Write-Output $(git -c core.quotepath=false commit -m test)"}, True),
+    ({"command": "cd repo; git --no-pager switch branch"}, True),
+    ('{"command":"Set-Content file value"}', True),
+    ("git --no-pager checkout branch", True),
+    ({"command": [], "cmd": "git commit -m test"}, True),
+    ({"command": ["not-a-command"]}, True),
+])
+def test_shell_mutation_reuses_argument_and_git_owners(args, mutates):
+    policy = m._ResidentHookPolicy(m._load_hook_client_module())
+    seen = []
+    cache = types.SimpleNamespace(
+        invalidate=lambda path: pytest.fail("shell targets remain conservative"),
+        invalidate_all=lambda: seen.append("all"),
+    )
+    assert m._resident_hook_decision(
+        "shellToolMutation", {"toolName": "powershell", "toolArgs": args},
+        policy=policy, segment_cache=cache,
+    ) == {}
+    assert seen == (["all"] if mutates else [])
+
+
+@pytest.mark.parametrize("payload", [
+    {"toolName": "edit"}, {"toolName": ["powershell"]}, {},
+    {"toolName": "powershell", "toolCalls": []},
+])
+def test_shell_mutation_rejects_wrong_tool_and_batch_before_effects(payload):
+    from agent_worktrees.hook_ipc import HookUnavailable
+
+    with pytest.raises(HookUnavailable):
+        m._resident_hook_decision(
+            "shellToolMutation", payload, policy=object(), segment_cache=object(),
+        )
+
+
+@pytest.mark.parametrize("tool,command,mutates", [
+    ("terminal", "git log --format=$(git commit -m test)", True),
+    ("run_command", "Write-Output 'Set-Content file value'", True),
+    ("shell", "git status --short", False),
+    ("cmd", "echo ${HOME}", False),
+])
+def test_ambiguous_shell_aliases_retain_original_occurrence_semantics(tool, command, mutates):
+    policy = m._ResidentHookPolicy(m._load_hook_client_module())
+    assert policy.mutation_targets(
+        {"toolName": tool, "toolArgs": {"command": command}},
+    ) == (None if mutates else [])
 
 
 @pytest.mark.parametrize("tool,args,paths", [
@@ -5211,6 +5258,8 @@ def test_status_monitor_backs_off_at_iteration_boundary_without_mutating(
     "handoffWake", "nativeToolMutation", "native-unadmitted",
     "nativeToolBatchMutation", "batch-unadmitted", "batch-reads",
     "legacy-batch-shell", "legacy-batch-native", "legacy-batch-read",
+    "shellToolMutation", "shell-unadmitted", "shell-read",
+    "shell-bash-quoted-brace",
 ])
 def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, monkeypatch, kind):
     """Wiring-level regression: a real ``handoffWake`` request, dialed through
@@ -5231,12 +5280,12 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
 
     class _FakeHookClient:
         def _load_sibling(self, name):
-            if name in {"tool_call_forms.py", "statelessness_guard.py"}:
+            if name in {"tool_call_forms.py", "statelessness_guard.py", "anchor_write_guard.py"}:
                 return original_client._load_sibling(name)
             return object()  # any non-None stub satisfies ready()'s check
 
         def _managed_session_admitted(self, payload):
-            return kind not in {"native-unadmitted", "batch-unadmitted"}
+            return kind not in {"native-unadmitted", "batch-unadmitted", "shell-unadmitted"}
 
     lock = tmp_path / "status-monitor.lock"
     monkeypatch.setattr(m, "_monitor_lock_path", lambda: lock)
@@ -5307,6 +5356,17 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
                         "args": {"path": "one"},
                     }]}
                 legacy = kind.startswith("legacy-batch-")
+                shell = kind in {"shellToolMutation", "shell-unadmitted", "shell-read", "shell-bash-quoted-brace"}
+                if shell:
+                    payload.update(
+                        toolName="powershell",
+                        toolArgs=json.dumps({"command": "git --no-pager status" if kind == "shell-read" else "git -c core.quotepath=false pull --ff-only"}),
+                    )
+                    if kind == "shell-bash-quoted-brace":
+                        payload.update(
+                            toolName="bash",
+                            toolArgs={"command": "echo ${value:-'}'}; git commit -m test"},
+                        )
                 if legacy:
                     payload.update(toolCalls=[None, {"name": "powershell"}])
                     if kind == "legacy-batch-shell":
@@ -5315,7 +5375,7 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
                         payload.update(toolName="view")
                 request = {
                     "version": 1, "token": self.token,
-                    "kind": "postToolUse" if legacy else "nativeToolBatchMutation" if batch else "nativeToolMutation",
+                    "kind": "postToolUse" if legacy else "shellToolMutation" if shell else "nativeToolBatchMutation" if batch else "nativeToolMutation",
                     "hook_generation": self.generation, "deadline": time.time() + 1,
                     "payload": payload,
                 }
@@ -5326,7 +5386,7 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
                     else:
                         dial_results.append(conn.recv(1) == b"")
                 assert self.has_recent_hook_demand() is (
-                    kind not in {"native-unadmitted", "batch-unadmitted"}
+                    kind not in {"native-unadmitted", "batch-unadmitted", "shell-unadmitted"}
                 )
             wake_at_reply.append((before, wake_event.is_set()))
 
@@ -5339,6 +5399,7 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
     # The loop may legitimately consume the event while draining after start().
     assert wake_at_reply == [(False, kind not in {
         "native-unadmitted", "batch-unadmitted", "batch-reads", "legacy-batch-read",
+        "shell-unadmitted", "shell-read",
     })], (
         "a real handoffWake request through the actual HookIpcServer must "
         "set the real wake_event the sweep loop waits on, not just satisfy "

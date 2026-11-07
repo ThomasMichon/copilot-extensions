@@ -280,11 +280,26 @@ def session_writer(method):
     """Retain the same journal owner through later native resume and lineage."""
     @wraps(method)
     async def run(manager, session_id, *args, **kwargs):
+        requirement = kwargs.pop("worktree_writer", None)
+        if requirement is not None:
+            from .acquisition_contract import WorktreeWriterRequirement
+
+            requirement = WorktreeWriterRequirement.model_validate(requirement)
+            if method.__name__ != "resume_session" or session_id not in manager._sessions:
+                raise AcquisitionRefused(
+                    "worktree_writer_unconfirmed", "required resume needs an exact owned session ID",
+                )
         resolved = manager._resolve_ref(session_id) or session_id
+        if requirement is not None and resolved != session_id:
+            raise AcquisitionRefused(
+                "worktree_writer_unconfirmed", "required resume cannot select a session alias",
+            )
         session = manager._sessions.get(resolved)
         from .creation_worktree_writer import continue_session
 
-        handled, result = await continue_session(manager, session, method, resolved, args, kwargs)
+        handled, result = await continue_session(
+            manager, session, method, resolved, args, kwargs, requirement=requirement,
+        )
         if handled:
             return result
         retained_delivery = (session.target.venue or {}).get(DELIVERY_KEY) if session else None

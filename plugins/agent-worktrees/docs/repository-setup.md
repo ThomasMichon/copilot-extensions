@@ -161,6 +161,85 @@ retain that outcome rather than retrying without selection. The repository
 script's request/result protocol below remains version one: continuity is
 engine/Fleet-owned orchestration, not a new responsibility hidden in that script.
 
+### Explicit selected SSH setup
+
+The engine's optional `fleet-ssh` extra declares its Fleet service-Gateway and
+SSH-client SDK dependencies. Select it through the existing complete Source/profile
+preparation (`local_install_profile.py --prepare-profile --component agent-worktrees --extra fleet-ssh`,
+with the normal source, output and UV arguments), using the associated Fleet and
+SSH first-party wheel inputs. This is a dependency selection, not a second installer
+or permission to install packages into a running engine. The normal construction
+owner must retain that selected extra and complete profile on installation/update.
+The default engine dependencies are unchanged; selecting the SDK alone neither
+enrolls a machine nor activates a role. A dependency declaration or prepared profile
+does not replace the executable capability checks below.
+
+The SDK's `[tool.copilot-extensions.application-sources]` declaration maps
+`fleet-manager` to the canonical `standalone:fleet-manager` project. This is
+an associated application input, not a UV vendored-library override. Prepare the
+input snapshot with the existing repeated `local_install_source.py --project`
+selections for `agent-worktrees`, `standalone:fleet-manager` and `agent-ssh`,
+then select `--prepare-profile --component agent-worktrees --extra fleet-ssh` through the normal
+profile command. Existing application builders retain Fleet's resources.
+The profile reader checks the declaration against the actual associated wheel's
+project owner before registry compilation. A missing or different selected Fleet
+input refuses rather than resolving Fleet from a public registry. Without the
+extra, Fleet is not required. Fleet similarly binds its selected SSH-client SDK
+to the canonical `agent-ssh` application input. The dependency-age audit attributes
+the same explicit association to its contained canonical source and still audits
+external dependencies.
+This path uses the already-merged profile APIs; it does not depend on unrelated
+constructor changes or establish the complete installed Manager cohort.
+
+Declaration version `3` retains version-two entrypoints and contexts, adding
+one required `ssh_setup` field to each context. `null` retains outbound-only
+behavior. An absolute/home-relative private request reference explicitly selects
+the [Fleet-owned SSH setup contract](../../../fleet-manager/docs/continuity-bootstrap.md#normal-selected-ssh-setup).
+Inspection validates the reference without opening it. Older strict readers
+refuse version three; never retry as version two or drop the selected role.
+
+```json
+{
+  "version": 3,
+  "entrypoints": {"posix": {"runtime": "bash", "script": "setup-manager.sh"}},
+  "contexts": {
+    "harness-a": {
+      "provider": "local-projection-v1",
+      "source": "~/.config/example/continuity.json",
+      "ssh_setup": "~/.config/example/ssh-setup.json"
+    }
+  }
+}
+```
+
+The selected engine first requires the actual Fleet executable's
+`continuity-ssh-setup-v1`, `continuity-ssh-setup-pin-v1` and
+`continuity-machine-reference-v1` capabilities.
+Public scope/configuration and the exact complete prepared Source/profile
+are checked before bootstrap enrollment. The engine consumes its own packaged
+`prepared-application-install` v1 implementation, not a configurable module,
+ambient installer command, editable checkout or the client-only constructor.
+The profile must contain both `gateway-host` and `ssh-client`.
+
+After the original bootstrap owner establishes outbound access, Fleet prepares
+the v3 reference configuration only against the inspected request digest.
+A changed request is refused before preparation or writes at either its old
+or newly selected installation root. The existing Source application installer
+owns construction/activation. Actual selected host status, including authenticated
+directory convergence and its current input fence, establishes readiness.
+An unchanged ready participant avoids installation. Unknown launch state,
+changed/foreign configuration, changed request/profile or unavailable support
+refuses without another identity or an automatic credential fallback.
+
+This path needs the selected engine's existing Fleet SDK and complete native
+Source inputs, plus the installer's existing UV prerequisite. It does not acquire
+a provider, prepare a missing source/profile, authorize a grant or migrate
+operator configuration. Generated host configuration is created or reused,
+never overwritten; a different configuration needs its owner's reconciliation.
+The repository script request/result protocol and ordinary client-only setup
+remain unchanged. Source qualification is not release, live enrollment or
+fresh-adopter acceptance.
+
 PowerShell receives `-RequestFile <path>`; Bash receives
 `--request-file <path>`. The selected runtime must already be available.
 Execution uses the selected checkout as cwd with inherited stdio. No command

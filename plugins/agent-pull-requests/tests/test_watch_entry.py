@@ -3,13 +3,15 @@
 import json
 import os
 import subprocess
+import sys
 import time
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 from agent_procutil import no_window_kwargs
+from zdd import process_exit
 
 from agent_pull_requests import __main__ as cli
 from agent_pull_requests.watch_control import WatchControlClient
@@ -41,6 +43,140 @@ watch_entry.spawn_daemon = forbidden_spawn
 assert watch_entry.ensure(invocation) is True
 print(json.dumps(watch_entry.dial(invocation)), flush=True)
 """
+
+
+def test_governed_serve_controller_does_not_admit_a_resident(monkeypatch):
+    from agent_procutil import daemon_instances
+    from agent_pull_requests import watch_entry
+
+    invocation = object()
+    seen = []
+    monkeypatch.setattr(cli, "_WATCH_INVOCATION", invocation)
+    monkeypatch.setattr(
+        daemon_instances, "admit_daemon_instance",
+        lambda *_args, **_kwargs: pytest.fail("ephemeral controller admitted as a daemon"),
+    )
+    monkeypatch.setattr(
+        watch_entry, "ensure",
+        lambda actual, **kwargs: seen.append((actual, kwargs)),
+    )
+    assert cli._cmd_serve(SimpleNamespace(passive_instance=None, poll_interval=0.25)) == 0
+    assert seen == [(invocation, {"poll_interval": 0.25})]
+
+
+@pytest.mark.parametrize("governed", [False, True])
+def test_actual_foreground_owners_retain_daemon_admission(monkeypatch, tmp_path, governed):
+    from agent_procutil import daemon_instances
+    from agent_pull_requests import watch_entry
+    import single_instance_lease
+
+    seen = []
+    marker = RuntimeError("actual owner construction")
+
+    @contextmanager
+    def admission(*_args, **_kwargs):
+        seen.append("admitted")
+        try:
+            yield
+        finally:
+            seen.append("closed")
+
+    def owner(*_args, **_kwargs):
+        assert seen == ["admitted"]
+        raise marker
+
+    monkeypatch.setattr(daemon_instances, "admit_daemon_instance", admission)
+    monkeypatch.setattr(single_instance_lease, "SingleInstance", owner)
+    monkeypatch.setattr(watch_entry, "WatchControlOwner", owner)
+    invocation = SimpleNamespace(runtime=SimpleNamespace(runtime_root=tmp_path))
+    monkeypatch.setattr(cli, "_WATCH_INVOCATION", invocation if governed else None)
+    args = SimpleNamespace(
+        passive_instance=str(uuid4()) if governed else None,
+        port=12345 if governed else 0, poll_interval=1,
+    )
+    with pytest.raises(RuntimeError) as caught:
+        cli._cmd_serve(args)
+    assert caught.value is marker
+    assert seen == ["admitted", "closed"]
+
+
+_CONTROLLER = """
+import json, sys, time
+from pathlib import Path
+from types import SimpleNamespace
+from agent_procutil import spawn_daemon
+from agent_procutil.daemon_instances import DaemonInstanceSpec, daemon_entrypoint
+from agent_pull_requests import __main__ as cli, watch_entry
+from zdd.diagnostics import process_start_time
+root = Path(sys.argv[1])
+def ensure(*_args, **_kwargs):
+    child = spawn_daemon(
+        [sys.executable, "-c", CHILD, str(root)], cwd=root, log_path=root / "child.log",
+        instance=DaemonInstanceSpec("serve-lifetime-fixture", root, Path(cli.__file__)),
+    )
+    deadline = time.monotonic() + 15
+    while not (root / "heartbeat").exists():
+        if child.poll() is not None or time.monotonic() >= deadline:
+            raise RuntimeError("fixture child did not become ready")
+        time.sleep(0.02)
+    print(json.dumps({"pid": child.pid, "birth": process_start_time(child.pid)}), flush=True)
+cli._WATCH_INVOCATION = object()
+watch_entry.ensure = ensure
+if ADMIT_CONTROLLER:
+    cli._cmd_serve = daemon_entrypoint(
+        "agent-pull-requests", source=cli.__file__, purpose="production",
+    )(cli._cmd_serve)
+assert cli._cmd_serve(SimpleNamespace(passive_instance=None, poll_interval=1)) == 0
+"""
+
+_LIFETIME_CHILD = """
+import time, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+deadline = time.monotonic() + 30
+tick = 0
+while not (root / "stop").exists() and time.monotonic() < deadline:
+    tick += 1
+    (root / "heartbeat").write_text(str(tick), encoding="ascii")
+    time.sleep(0.05)
+"""
+
+
+@pytest.mark.timeout(60)
+@pytest.mark.skipif(os.name != "nt", reason="requires native Windows caller Job lifetime")
+@pytest.mark.parametrize("admit_controller", [False, True])
+def test_governed_serve_child_survives_only_without_controller_admission(tmp_path, admit_controller):
+    reference = None
+    try:
+        controller = subprocess.run(
+            [sys.executable, "-c", _CONTROLLER.replace(
+                "CHILD", repr(_LIFETIME_CHILD),
+            ).replace("ADMIT_CONTROLLER", repr(admit_controller)), str(tmp_path)],
+            capture_output=True, text=True, timeout=25, **no_window_kwargs(),
+        )
+        assert controller.returncode == 0, controller.stderr
+        child = json.loads(controller.stdout)
+        if admit_controller:
+            deadline = time.monotonic() + 5
+            while not process_exit.observe_original_exit(child["pid"], child["birth"]):
+                assert time.monotonic() < deadline, "old controller admission lost its child Job"
+                time.sleep(0.02)
+            return
+        reference = process_exit.open_process(child["pid"], child["birth"])
+        heartbeat = tmp_path / "heartbeat"
+        before = heartbeat.read_text(encoding="ascii")
+        deadline = time.monotonic() + 5
+        while heartbeat.read_text(encoding="ascii") == before and not reference.wait(0):
+            assert time.monotonic() < deadline, "child stopped progressing after controller exit"
+            time.sleep(0.02)
+        assert not reference.wait(0)
+    finally:
+        (tmp_path / "stop").touch()
+        if reference is not None:
+            try:
+                assert reference.wait(10)
+            finally:
+                reference.close()
 
 
 @pytest.mark.parametrize("native", [False, True])

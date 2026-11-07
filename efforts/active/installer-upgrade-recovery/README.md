@@ -123,12 +123,17 @@ authorize production updates, recovery mutations or new access.
   state. Internal helper success is not whole-flow acceptance.
 - [ ] Repeat for the selected priority cases, preserving existing construction,
   admission, durable-state and lifecycle owners instead of reimplementing them.
-- [ ] Qualify the bounded read-only project-registration prerequisite under
+- [x] Qualify the bounded read-only project-registration prerequisite under
   #10996/U17 before migrating setup consumers. Compose the canonical repository
   and legacy project registry readers; preserve writers and ordinary routing.
   Prove unique alias/exposure resolution, genuinely fresh unclaimed defaults,
   ambiguity/collision/read-failure refusal and no mutations through the native
   CLI boundary. Source release is not caller adoption or installed recovery.
+- [ ] Qualify the incoming inspection bootstrap under #11083/U18. Run the
+  existing reader from canonically constructed incoming code without consulting
+  or changing the selected runtime, registrations, selectors or service state.
+  Keep preparation/read failures distinct from absence, installation and caller
+  adoption; U17's delivered source/release remains complete.
 
 ### Phase 3 - Release and completion
 
@@ -2115,3 +2120,760 @@ writers, #7500 forced-registration preservation, and #4205 family-wide routing
 retain their owners and scope. No writer or ordinary front-door behavior is
 changed by this proposal. Source handle `dusty-contraption` owns only U17.
 The parent remains Active; the proposal clears review before implementation.
+
+The proposal clears that gate in #10997: exact head
+`0d0e7ac88b6d89a6b9e6f4211670bbfe10b60e2f` receives Approve with no active
+issues, required CI `42219424666` passes, and the normal managed flow merges
+at 12:44:02 UTC as `3ca033f94686a7ee3f054e3825b619745fa86b0f`.
+Public body, codename source marker, empty labels and closing references are
+read back. Managed terminal status and pull-forward succeed; #10377 remains
+open. The Plan and Validation Plan are reread before implementation. This
+resolves only the U17 proposal gate, not its source, release or caller outcome.
+
+### 2026-11-06 - Native registration inspection candidate qualified locally
+
+The additive `repos registration inspect` candidate declares
+`copilot-extensions.project-registration-inspection`, version 1, through the
+actual executing read-only response. Existing routing, inventory and writers
+are unchanged. It composes the strict repository owner with the original strict
+project parser before migration can discard legacy anchors. Canonical exposure
+remains authoritative over a stale adoption mirror; known empty legacy defaults
+and singleton mode survive. Unsupported versions and unknown arguments fail
+before acquisition, while malformed/unknown sources do not become absence.
+
+The first actual native-parser regression is red against the old source:
+both exposure variants return the old unknown-subcommand error rather than
+the required unique alias. The first 26 controls then pass. A later namespace
+fixture fails before registry acquisition because it supplies the cell root as
+the payload root; correcting only that fixture yields the residual pass without
+changing product behavior, budgets or containment. That failed attempt is not
+credited as a passing native packet.
+
+Direct review also confirms that Windows extended-path and ordinary spellings
+can identify the same directory while comparing as different strings.
+The candidate uses native file identity for those aliases, retaining ambiguity
+when two project names refer to that anchor. The final complete 34-control
+Windows packet passes in 10.38 seconds, 66.64 seconds including preparation and
+verified cleanup, under the unchanged standard limits. Its actual neutral-CWD
+new-read/old-inventory consumer takes 4.197 seconds for both invocations; this
+is a local functional sample, not fleet throughput, cold provisioning or a
+tail-latency claim.
+
+Nine separate tool controls execute the optional workflow's evidence-admission
+and source-pin predicates against explicitly synthetic fixture reports. Missing,
+duplicate, skipped, empty and failed evidence is refused. These are workflow
+controls, not fabricated product-native evidence. The opt-in
+`registration-inspection` portfolio uses the existing bounded owner on Linux
+and Windows only, requires the exact published source SHA, and adds no
+scheduled or required-unit work or larger resource limits. Its hosted native
+executions remain pending.
+
+F/E9 lint, install-contract, documentation consistency and strict runtime
+resolution checks pass. The actual admitted-unit source-binding check is
+unchanged; no inventory, coverage or budget is relaxed. Source publication,
+current-head review/required CI, exact-source hosted qualification and
+containing release observation remain gates. The provider does not yet migrate
+setup callers or qualify an installed host; #10377 remains Active.
+
+### 2026-11-06 - Strict option review correction and retained closure gate
+
+The first published head `89bd803bc47cfd053735292647a0c421659a03ff` receives
+one Medium review finding: argparse accepts recognized-option prefixes before
+acquisition. The correction disables abbreviation for the entire versioned
+parser, not only one spelling. Four pre-read rejection variants cover the
+unknown option and the anchor/default/contract prefixes. The six impacted
+parser, actual CLI and namespace controls pass in 16.09 seconds, 125.97 seconds
+including preparation and verified cleanup, at unchanged limits. The earlier
+34-control complete packet remains attributed to its original source; the
+current 37-control inventory still needs exact-head hosted qualification.
+
+All failing jobs in CI `42226529545` are inspected. Eligible units execute
+successfully. The guard job fails because HTTP-52's existing execution closure
+includes all Worktrees/Codespaces source modules; the new inspection module
+therefore changes its captured inventory. The required PR gate's failure is
+the consequent failed source guard, not a unit-test failure.
+
+The existing `bridge-http52-capture` portfolio owns the necessary controlled
+capture, independent verification and canonical artifact export. Its source pin,
+contained consumers, existing budgets and publication preimage checks remain
+unchanged. The next revision must clear actual current-head review, then use
+that owner at the corrected exact source and materialize its genuine outputs.
+No stale hashes are hand-edited, no module is relocated to blind the guard,
+and no signing, evidence, CI or containment rule is bypassed. Native inspection,
+retained closure, source merge/release and caller recovery stay separate gates.
+
+### 2026-11-06 - Exact-source native and retained closure qualified
+
+The revised source `61ed09ec2a75fc1ecbda378abd5f01f1ab96928d` receives a
+current-head Comment with no open findings; the prefix defect is resolved.
+Actual optional run
+[42230420118](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42230420118)
+passes both Linux and Windows source-pin and native-consumer jobs.
+Downloaded JUnit contains 37 unique passing cases on each platform, identical
+complete case sets and zero skipped/failed/error cases. Both real neutral-CWD
+CLI and namespaced-owner witnesses and all four prefix variants execute.
+These are complete native results, not an aggregate inferred from local samples.
+
+The existing controlled source-proof run
+[42230558753](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42230558753)
+also succeeds at that exact source. Declared preparation, artifact-boundary
+controls, immutable peer-prefix consumer, current HTTP-52 capture, independent
+verification, canonical validator and historical publication guards all pass.
+The actual exporter records generation 52, 190 cases, 131 canonical outputs
+and manifest digest
+`c9b23ae01243fcca3c38c639f93bfab494bd2daf2138053e10bcb185d1199bb7`.
+
+The downloaded canonical artifact's manifest bytes match that actual producer
+receipt. With the local HEAD still exactly the captured source and the original
+inputs intact, the existing native publication owner validates all paths,
+identities and original preimages and materializes 131 outputs. All 131
+published bytes then match the manifest; only those current contract outputs
+change and prior HTTP-51 evidence remains unchanged. No hashes are hand-edited,
+no capture is relabeled, and no new registration/runtime behavior is introduced
+by the evidence refresh.
+
+The previously failing local required checker now reports
+`OK (2 contracts, 1043 fixtures)`. Admitted-unit source bindings are unchanged.
+An agent-bridge patch changefile accompanies its generated current-evidence
+delta, without changing protocol generation. The implementation and all native
+inspection fixtures remain the qualified source. The next normal same-PR push
+refreshes actual review and required CI for the canonical metadata delta before
+source merge and containing-release observation. No redundant native rerun is
+credited, and the parent/caller/installed gates remain open.
+
+### 2026-11-06 - Preserve accepted upstream inputs during source reconciliation
+
+The generated-evidence head `3a4637641109baf81679d1c9a2ee7b2483a9c39a`
+receives an actual Approve with no active issues. It cannot merge because
+`dev` has advanced and its generated HTTP-52 records conflict; required
+pull-request CI has not been admitted for that conflicted head. The workflow
+is active and the PR remains ready, so this is not treated as an unavailable
+runner or solved by rerunning an older failed head.
+
+The current published base
+`63599c74e559b367df9e674409399db7ea2f90ce` includes legitimate retained-writer
+inspection and continuation-classification changes from #11001/#11012.
+The conflict-safe managed sync first aborts cleanly. The supported owned-branch
+rebase then retains both inspection commits; all 131 conflicts are the known
+generated current contract outputs, not the read implementation. Those exact
+paths are resolved to the published upstream inputs, preserving its new probes
+and immutable provenance rather than selecting the older capture or combining
+incompatible records by hand. No other contributor source is replaced.
+
+The prior 37/37 native and 190-case retained captures remain genuine evidence
+for source `61ed09ec2a`; they are not relabeled as qualification of this
+composed tree. A new exact checkpoint and fresh current-source capture are
+required after reconciliation. Inspection implementation, native fixture and
+qualification-controller equivalence will be checked separately from changed
+shared inputs. Normal same-PR publication, fresh review/CI, source merge and
+containing release remain open; the parent is Active and no installed effect
+or gate bypass is introduced.
+
+### 2026-11-06 - Current capture succeeds but historical packet exceeds its bound
+
+The reconciled-source portfolio `42239617443` is failed, not qualified.
+Every failed job/step is inspected: declared preparation, input boundaries,
+immutable peer prefix, current capture, independent verification, canonical
+validation and artifact export all succeed. The sole failure is the later
+`Exercise immutable bytes and historical publication guards` request.
+
+That request combines `test_http48_source_retention.py`,
+`test_http48_capture_guards.py` and `test_http47_capture_guards.py` under the
+existing selector. The bounded runner reports `wall-clock limit exceeded
+(300s)` and exit 124, 302.92 seconds including cleanup. Anonymous progress
+shows 72 cases at 62 percent and more dots, but has no retained named outcomes
+or per-case timing; those dots cannot license a residual passing subset.
+This is not relabeled as a successful portfolio or retried unchanged.
+
+The exported current artifact remains provisional evidence; it is not
+materialized while the required historical packet is unfinished. The next
+source correction must inspect fixture/packet cost and preserve all selected
+assertions and original item/group/plugin/resource limits. The existing runner's
+independent file-group composition and named JUnit/progress support are the
+first bounded avenue to assess, not a larger timeout or a skipped history guard.
+Source #11003, containing release, caller migration and the parent remain open.
+
+### 2026-11-06 - Diagnose the historical seed and retain named guard results
+
+The existing filtered runner deliberately keeps `-k` selections together;
+`--max-files-per-sub-suite 1` therefore does not split this request. That
+ineffective change is removed, not credited as a fix or used to expand a
+deadline. Named local collection resolves 115 selected cases, rather than an
+inferred count from the prior anonymous dots.
+
+The HTTP-47 composed seed repeatedly parses immutable historical packets for
+each semantic source. It now indexes their exact `(source_path, source_sha256)`
+identities once and retains the same coverage decision, source files, fixtures,
+assertions and fresh consumer repositories. The 2,244-file, approximately
+22-MB source/history seed is not trimmed. The workflow retains named progress,
+slow-case timing and JUnit output on failure without lifting the original
+30/300/900-second item/group/plugin or resource limits.
+
+The workflow admission/retention and existing registration admission controls
+pass locally, 10 cases; touched Python passes `ruff --select F,E9` and the
+diff is whitespace-clean. The first local Windows run times out during repeated
+packet reads; the indexed revision gets past those reads but still reaches the
+30-second setup deadline while staging its real Git seed. Neither is a
+passing guard portfolio. The existing Ubuntu guard-only portfolio is the next
+bounded diagnostic execution before another full current-source capture.
+The provisional earlier artifact is still not materialized. This below-altitude
+test/controller correction changes neither production inspection nor runtime
+behavior; required CI, complete historical qualification, source merge and
+parent completion remain open.
+
+The Ubuntu diagnostic run `42247019069` stops at canonical validation before
+reaching the guards: the literal error is `HTTP-52 historical closure lacks
+required owners`. No historical case runs or passes in that attempt. The
+workflow now exercises the unchanged guard selection after independent capture
+verification but before canonical validation/export. This preserves every
+gate, exposes guard failures even when committed current metadata is stale,
+and prevents exporting a qualified artifact before the guards succeed.
+The updated stage-order/admission packet passes all 10 cases in 4.99 seconds,
+with touched F/E9 lint and whitespace checks passing. A fresh exact published
+checkpoint is required for the next diagnostic execution.
+
+### 2026-11-06 - Preserve native identity and partition the measured publication cost
+
+The named Ubuntu attempt `42247572862` genuinely executes the historical
+request at `9d737dba5d`. Its shared seed and both history-preservation cases
+pass; the latter take approximately 29 seconds each. It then reaches the
+HTTP-51 dirty-source case after named successes through 69 percent, but the
+combined group reaches 300 seconds, exit 124 / 303.15 seconds including cleanup.
+This identifies aggregate composition, not a failing assertion or a pass for
+the unfinished portfolio.
+
+The existing sequential cohort planner now splits only
+`test_http48_capture_guards.py` into four disjoint generation groups.
+The catch-all retains untagged/future cases; overlapping future keywords are
+assigned once. Every other selected file remains. All groups retain the
+30-second item and 300-second group bounds and share the original 900-second
+plugin aggregate, including preparation/cleanup, with unchanged process,
+memory and storage caps. There is no additional worker or capacity request.
+Nine focused collection/deadline controls use real pytest collection and the
+normal runner seam; together with the existing controller and non-Bridge
+planner controls, all 20 pass in 10.32 seconds. An initial synthetic-fixture
+error omitted declared native files and supplied the lower-level Limits
+default rather than the CLI's actual 300 seconds; only that fixture is corrected.
+This is not a qualification of the real historical packet, which still owes
+its next bounded execution.
+
+The new source review also identifies a real native root concern: the text
+`normcase` shortcut can select a foreign root or accept inconsistent roots
+without consulting file identity. Both focused controls fail on that shortcut.
+They retain real distinct directories and native `samefile`, replacing only
+the lossy normalizer seam. The reader now uses native identity first and
+permits only exact resolved spelling when a declared path is absent, never
+case-folded text as authority. The complete native Windows registration packet
+passes 39 cases with no skips, 10.13 seconds / 98.02 seconds including
+preparation and cleanup. Existing extended-path aliases, CLI/namespace,
+policy and preservation controls remain. Fresh exact-source Linux/Windows
+qualification is required; the earlier 37/37 is not relabeled.
+Touched F/E9 lint and whitespace checks pass. Same-PR review, historical
+qualification, fresh current capture/import, CI, merge/release and the parent
+remain open; no installed effect or larger deadline is introduced.
+
+Further local Windows seed trials deduplicate parent-directory creation and
+reuse copied immutable bytes for the identity index. Both still reach the
+original 30-second setup bound, the latter during the real history checker;
+neither is credited as a passing case. Those unqualified extra copy/cache
+changes are not retained. The smaller identity index and measured cohort
+composition remain. Native Windows historical-seed construction is an explicit
+unresolved owned follow-up before worktree finalization, not a flake exemption
+or installed-runtime result. The ordinary Ubuntu historical lane and the
+fresh 39-case native OS lanes still owe genuine current-source qualification.
+
+### 2026-11-06 - Current capture and every historical cohort genuinely qualify
+
+Exact source `50e4bbebc56244f8cdb849a1bdc8aed52269f74b` now independently
+qualifies in native run `42251432592`: Linux and Windows each have 39 unique
+passing cases, no skips/errors and identical complete downloaded sets matching
+the local packet. Both actual source-pin/execution steps and native CLI,
+namespace, prefix and physical-identity controls are audited. Earlier 37/37
+results keep their original attribution.
+
+Full run `42251455469` succeeds, including every preparation, boundary,
+capture, independent verification, historical guard, canonical validation and
+export step. Current capture and independent verification each pass 197 cases
+in 216.68 and 215.44 seconds. The five retained historical JUnit reports contain
+6, 31, 26, 26 and 26 cases: 115 distinct passing cases, no skips/errors, exactly
+three HTTP-47 history/seed cases, three archive cases and 109 publication cases.
+Per-group case durations are 64.006, 100.569, 67.005, 66.134 and 69.841 seconds.
+The historical request takes 376.97 seconds including preparation and cleanup,
+within the original shared 900-second aggregate; each group and item keeps its
+original bounds. This is complete current qualification, not an anonymous
+partial subset or a pass copied from the failed attempts.
+
+The actual export manifest digest
+`5c920b85dcec0bfbbb3835373a58c26ecf1ba08e8d73b00b3246edb2ff459864`
+matches the downloaded producer bytes. At the unchanged source HEAD, the
+native artifact owner validates 3,059 input preimages and materializes all
+132 declared outputs. Independent byte/hash comparison matches every output;
+only declared output paths differ and HTTP-51 remains untouched. The failed
+earlier portfolio's provisional artifact is never used.
+
+Current required CI `42251397433` separately exposes the runner's actual module
+cap failure, not a flake or just stale evidence. The cohort evaluator and its
+policy constants move mechanically into the existing `plugin_test_selection`
+owner; the root wrapper, platform selection, `_plugin_dir` test seam and
+existing constant re-exports remain. No baseline/cap exemption, parallelism,
+deadline or source/protocol behavior changes. All 123 focused runner,
+selection, cohort and workflow controls pass in 139.84 seconds; F/E9 lint and
+whitespace pass. The actual modified runner CLI separately collects exactly
+the 115 previously executed hosted cases, once each, in 98.89 seconds including
+preparation/cleanup. It is collection equivalence, not another full execution.
+The canonical checker passes with 2 contracts / 1,044 fixtures after the move.
+
+The registration implementation, native fixture and hosted registration
+steps remain those genuinely qualified at `50e4`; the subsequent delta is
+canonical evidence plus mechanical test-planner componentization, qualified
+separately rather than relabeling the source pin. The next committed branch
+must pass the exact module guard and fresh review/required CI before merge
+and containing-release observation. The local Windows historical-seed
+performance follow-up and all caller/installed/parent gates remain open.
+
+### 2026-11-06 - Preserve the next accepted upstream cohort before requalification
+
+The qualified-output/componentization candidate `01b7c92c6a` passes the exact
+branch-scoped module guard and is published with an audited current validation
+record. Provider readback then reports an actual merge conflict; required CI
+is not admitted for that conflicted head. Rerunning the older failed head
+cannot resolve this condition. The PR's retained base field is not treated as
+the current remote branch tip.
+
+A local backup preserves the complete qualified candidate. Managed sync aborts
+its conflict safely. The owned-branch rebase onto published
+`5c27efdad108c5e5e63ede1ae4f29025ad53eafe` then encounters exactly 132 conflicts,
+all within the actual producer's declared generated-output inventory. Those
+exact paths take accepted upstream inputs, not the older current capture or
+hand-combined hashes. The native read feature, identity fix, guard correction
+and mechanical planner move survive; no contributor implementation is
+superseded.
+
+The newer cohort includes original keyed creation custody, portable native
+knowledge preferences and original-queue relationship admission. Its current
+capture owner declares 229 cases, not the older 197. All newly accepted cases
+and source inputs are retained. The complete 39/39 native and 197/115 retained
+results remain genuine evidence for `50e4`, never relabeled as proof of this
+composed tree. Fresh exact-source native and complete current capture are
+required before final CI/review/merge/release. The reconciled branch's module
+guard already passes without changing a ceiling. Source #11003 and this parent
+remain open, and no installed effect or larger validation budget is introduced.
+
+### 2026-11-06 - Preserve the 240-second capture bound by indexing admitted source names
+
+Reconciled source `7f31ec078ec27f8dd355389b504cb025bb13f8f8` independently
+passes native run `42259056903`: both actual source-pin/execution steps and
+downloaded Linux/Windows reports have the same complete 39 unique passing
+cases, no skips/errors and every native/prefix/identity witness. This is fresh
+qualification of the newer shared source, not a relabeled earlier pass.
+
+Its full 229-case run `42259071477` fails in current capture before independent
+verification, historical guards, canonical validation or export. The literal
+failure is the existing caller-owned 240-second POSIX deadline in
+`capture_bridge_http48.run_probes`; no assertion failure or passing residual
+set is established by its buffered output. No artifact is imported and the
+deadline is not raised.
+
+The capture audit's `exec` hook currently scans the entire source inventory
+for every source-name lookup, including unowned dynamic code. Against the
+actual 2,012-path earlier proof, 5,000 lookups take 6.92153 seconds locally.
+An admitted interpreter now binds one suffix index after its existing
+self/preloaded-source verification. The lookup retains longest-suffix choice,
+lexical ties, exact case/segment boundaries, Windows separators and unmatched
+refusals. Source bytes, compiled code, origins, roles, launch binding and
+durable audit records are still checked exactly as before; neither hashes
+nor authorization are cached or inferred from the index.
+
+Four focused matching/no-rescan/observer-refusal controls pass in 0.60 seconds
+of tests, 121.39 seconds including declared preparation and verified cleanup.
+The same 5,000-lookups/2,012-path local sample takes 0.003941 seconds with the
+prebound locator and returns the same expected sources. This is a local lookup
+measurement, not a full-portfolio or latency claim. Three new pure locator
+controls join the original 115 historical cases; no existing case is removed.
+The complete 229-case capture and all 118 historical guards still require
+genuine execution at the next committed source with original deadlines and
+resource bounds. Normal current review/CI, import, merge and release remain
+open, as do the caller, Windows historical-seed and parent gates.
+
+### 2026-11-06 - Indexed current capture qualifies all 245 cases within the original bound
+
+Exact indexed source `0055ce93cbf6478e4fad06a3cbbc94d2a2e1c904` independently
+passes fresh native run `42263400947`: both source-pin/execution steps and
+downloaded Linux/Windows reports have 39 unique passing cases each, no
+skips/errors, identical complete sets and every real CLI/namespace/prefix/
+identity witness. This is the source including the newer prepared Windows
+entrypoint inputs, not a relabeled earlier pass.
+
+Full run `42263417055` succeeds in 14m44s. Capture and independent verification
+each pass all 245 declared cases, with test times 183.10 and 180.35 seconds,
+and 196.59 / 193.73 seconds including preparation and cleanup. Both finish
+inside the unchanged 240-second caller-owned POSIX limit. Five historical
+JUnit reports contain 6, 34, 26, 26 and 26 unique passing cases: all original
+115 plus the three new locator controls, 118 total, no skips/errors.
+Their case-duration sums are 61.146, 100.192, 67.783, 66.954 and 71.304 seconds.
+The whole historical request takes 376.97 seconds including preparation and
+cleanup within its original shared 900-second aggregate; group/item/resource
+bounds remain unchanged. This is genuine complete indexed-source execution,
+not the local micro sample, a partial timeout result or an older capture.
+
+Actual current artifact `13526268689` and historical outcomes `13526478412`
+are downloaded and audited. The producer's logged manifest digest
+`1973f62366cf7a6576ead010afc0934b5adb58f339aa8270697c524b9c0826e0`
+matches the downloaded manifest. At unchanged source HEAD `0055`, the native
+publication owner validates all 3,072 original input preimages and materializes
+all 139 declared outputs. Independent hash/byte comparisons match every output;
+only those declared paths differ and HTTP-51 remains untouched. No failed
+229-case or earlier provisional artifact is used.
+
+The next revision contains canonical evidence and this journal only. Production
+read code, native fixture, cohort policy and capture instrumentation remain
+the qualified `0055` source; its source pin is not relabeled. Current required
+CI/review and actual merge/release still precede source completion. The owned
+local Windows historical-seed follow-up and original caller/cold-entry/
+installed recovery gates remain open, with no installed update or larger
+validation budget authorized.
+
+### 2026-11-06 - Final evidence revision passes CI and review before incoming-source reconciliation
+
+Evidence-only revision `87f97ad1cdaf2f3ecca8cbbfb2a262d4f41e5132`
+passes required CI `42267204327` and receives an Approved review at
+18:06:28 UTC. It does not merge: the base advances to `1593247e20`,
+and GitHub reports an actual conflict in the canonical HTTP-52 outputs.
+The membership review thread remains open pending the final reconciled
+publication; a green verdict does not resolve that thread automatically.
+
+All previously qualified source and producer outputs remain on the retained
+pre-reconciliation branch and in their original artifacts. The guarded sync
+aborts without changing the branch. A subsequent owned rebase preserves every
+incoming source change and resolves exactly 139 generated-output conflicts
+using the accepted upstream canonical outputs as a temporary baseline.
+No production, fixture, workflow or instrumentation conflict is discarded.
+That baseline is not qualification of the combined source.
+
+Incoming Bridge status contracts and their seven declared probe instances
+remain included: the next current capture and independent verification must
+execute all 252 cases. Incoming runtime-delivery changes also require fresh
+native qualification. The genuine `0055` 39/39, 245/245 and 118-case passes
+retain their exact source attribution, not a claim about this new tree.
+Current-source capture, verification, historical guards, canonical import,
+review/CI, merge and release remain open under the original bounds.
+Caller, local Windows historical-seed and installed-host recovery gates are
+unchanged; no update, deployment or larger validation budget is authorized.
+
+### 2026-11-06 - Combined source qualifies every incoming case and canonical output
+
+Exact combined source `8c79b42decdd1d75c65cfd4254703edf1a894bee` passes
+fresh native `42269611394`. Both source-pin/execution steps and downloaded
+Linux/Windows reports contain 39 unique passing cases each, no skips/errors
+and complete identical expected sets, including actual CLI/namespace/prefix/
+identity witnesses. Incoming runtime-delivery code is genuinely included.
+
+Full `42269629159` passes every step, including all 252 current capture and
+252 independent-verification cases in 173.27/170.30 seconds of tests under
+the unchanged 240-second caller-owned POSIX bound. The five historical
+reports contain 6/34/26/26/26 unique passing cases, all 118 original-plus-
+locator controls, no skips/errors. Their case-time sums are
+44.400/71.947/49.380/48.876/51.690 seconds. Original group, item, aggregate
+and resource bounds remain; no incoming case or old assertion is removed.
+
+Actual qualified artifact `13530820180` and historical outcomes
+`13530850148` are downloaded and audited. The producer's logged manifest
+digest `19431323dafbf410cc2b47d4e6a9bdb44c9a2c92035cac3453c7efbcbd7cc36c`
+matches downloaded bytes. At unchanged HEAD `8c79`, the native publication
+owner validates all 3,074 input preimages and materializes all 140 declared
+outputs. Every output matches byte-for-byte, only declared paths change and
+HTTP-51 remains untouched. The canonical checker passes
+2 contracts/1,051 fixtures.
+
+The next revision changes canonical metadata and these validation records
+only; executable source, workflows, native fixtures and instrumentation remain
+the qualified `8c79` source. Earlier qualifications retain their own source
+pins and artifacts. Final current-head review/CI, evidence-thread resolution,
+actual merge and containing release remain gates. Caller, local Windows
+historical-seed and installed recovery remain separate unfinished objectives.
+
+### 2026-11-06 - Native registration prerequisite merges after all final gates
+
+Source PR #11003 actually merges at 18:50:38 UTC as
+`82bbc541865e6f5e79d065201dd19190e603dac4`, from exact reviewed head
+`e6715eb2d9fc091c983610b62fd5e89ef5137202`. Final required CI
+`42272970981` passes guards, unit coverage and the required PR gate.
+The exact-head review is Approved at 18:43:52 UTC, with no active findings;
+both review threads are resolved. Reply `4496237579` cites the actual
+combined-source capture and canonical import. No CI gate is bypassed.
+
+The bounded prerequisite qualification item is resolved at the source tier.
+This Plan and Validation Plan are reread; the parent remains Active.
+Containing Dev CI `42274356044` is admitted at the actual merge snapshot;
+release observation remains pending. Earlier successful promotion runs are
+not evidence that this newly merged source is released.
+
+Guarded post-squash sync aborts rather than untangling the old multi-commit
+history in place. With the source merge confirmed by the provider, a clean
+owned branch and exact upstream merge commit verified, the retained merged-
+only branch is advanced to that commit without discarding unmerged work.
+No worktree is finalized. Caller migration, local Windows historical-seed
+qualification, whole-flow and affected-host recovery remain unfinished.
+
+### 2026-11-06 - U17 containing release verified without rollout
+
+Merged-source Dev CI `42274356044` succeeds. Normal promotion
+`42275291989` explicitly admits `82bbc541865e6f5e79d065201dd19190e603dac4`
+against Main `4a6c8e3dc8a479c58eed7796b941ac1efea46590`. Admission,
+frozen composition, real Windows Resume startup, source units, artifact
+construction/attestation, exact-candidate reuse and source-release raw readback
+all succeed. No retry or gate bypass is needed.
+
+Promotion #11071 merges generated candidate
+`565db90d18a042f1c3196105b62538a29228d9f4` at 19:14:41 UTC as Main
+`3a9a766662351a9edde22ea6210caad45bec5a00`. The successful landed-record job
+associates that Main commit with
+`python-artifacts-82bbc541865e6f5e79d065201dd19190e603dac4`.
+The published source archive and manifest exist with immutable SHA-256 assets;
+the released registration reader's Git blob exactly matches the admitted
+source. Worktrees is released as `1.24.510-dev1`. This is source/artifact
+publication, not a local update, deployment or installed-consumer pass.
+
+The bounded U17 source/release leg is delivered. The parent Plan and Validation
+Plan remain Active: selected-case classification, whole-flow incoming readiness,
+current selection and preserved-state proof are still unresolved. Caller
+adoption must compose an independently runnable incoming reader when the old
+runtime cannot answer the versioned request; the old provider must not veto
+incoming construction. Existing construction, registration and routing owners
+retain their mechanisms. Local Windows historical-seed qualification and every
+separate installed-recovery gate remain; no worktree is finalized.
+
+### 2026-11-06 - U18 incoming inspection construction selected
+
+Claimed #11083 after deduplicating the remaining registration work. The
+payload's ordinary command still selects an installed provider, so its presence
+cannot establish that U17 is independently runnable before installation.
+The source-owned inspection entry composes the existing constructor, optional
+closed Source/profile/application inputs, retained owned child and unchanged
+version-1 reader. It adds no registry parser, dependency builder, installation
+receipt, writer or activation path. This closes part of the installer vision's
+authoritative incoming replacement gap without changing that target.
+
+The focused composition and existing-reader packet passes all 48 controls.
+Basic Python lint and the installation-contract checker pass. Native cold
+construction is not yet qualified: an initial fixture redundantly froze,
+committed and copied the full graph, then the 180-second child expired. A
+diagnostic run hit the original 300-second group limit before rendering a
+report. Removing the unnecessary fixture preparation retained actual source
+construction and produced usable phase evidence: source selection took 4.640
+seconds, retention took 59.485 seconds, and local first-party builds were still
+active at the unchanged 180-second child deadline. The final native call lasted
+180.35 seconds; cleanup completed. None of those attempts is a pass or an
+installed result, and no deadline or resource limit was increased.
+
+The existing explicitly dispatched Linux/Windows portfolio now has a separate
+incoming-construction step with exact-source pinning, actual native case
+admission and no skipped/failed evidence. It does not expand required-unit CI
+or add a matrix. Native qualification, complete U18 controls, source review,
+required CI, merge/release and caller adoption remain open. Local cold-source
+construction cost is an unresolved measured boundary, not a flake waiver.
+
+Published checkpoint `41930e203d3da562d0475b39e5edcf60b81b6df9`
+passes exact-source run `42290204186` on both hosted native platforms. Each
+downloaded artifact contains all 49 expected controls with zero skipped,
+failed or error cases: 39 existing-reader controls, nine incoming composition
+controls and one real incoming constructor/reader case. The latter takes
+21.660 seconds on Linux and 20.988 seconds on Windows, preserving the broken
+predecessor and canonical disabled exposure. This is native source-consumer
+evidence, not a local performance pass, installation or completed U18.
+
+The next checkpoint expands the real entry to both exposure choices, genuinely
+fresh native state, ambiguity and an actually unusable incoming UV executable.
+Every case runs twice and preserves existing file bytes, native identities and
+modification times, plus temporary-control cleanup. Its source-pinned native
+result is still required; no first-checkpoint evidence is relabeled for that
+expanded corpus. Item, child, group, plugin and hosted-job limits remain unchanged.
+
+Expanded checkpoint `c0fa12bd08eaa9ef0c9b348a17c81568d7d5ad10`
+runs as `42292146310`. Linux publishes all 53 passing controls, including
+all five actual-entry scenarios with repeats. Their native item times are
+39.241, 39.023, 37.658, 38.312 and 7.127 seconds. Windows publishes the
+original 39 passing reader controls, but its incoming step returns nonzero
+after roughly 304 seconds and no incoming JUnit report is retained. The
+failed-step log has no named native outcome or literal timeout diagnostic.
+That is missing qualification, not evidence that any Windows incoming case
+passed. Recover the exact failing boundary and named progress before another
+attempt; do not guess a timeout class or increase a resource/deadline limit.
+The original first-checkpoint native result remains independently valid for
+its own source and narrower corpus. No source PR is opened or merged yet.
+
+The full Windows job log also lacks runner output: its hidden subprocess
+inherited no explicit captured streams. Both registration qualification steps
+now capture and print stdout and stderr before checking the exit result; the
+incoming step retains flushed per-attempt progress through pytest's tee capture.
+The existing failed-runner guards now assert both diagnostic streams survive.
+All 15 focused portfolio/source guards and touched-file basic lint pass. No
+test case, execution limit or partition changes. A new exact-source run must
+identify the original failing boundary before choosing a runtime or scheduling
+fix; elapsed time alone still does not establish a timeout class.
+
+Diagnostic checkpoint `0729368271987b49041aac97c67d3901425f1408`
+passes exact-source run `42297364665` on both native platforms. Downloaded
+reports contain the complete 53 controls per platform, with no skipped, failed
+or error cases. Linux's five actual first/repeat scenario items take 20.586,
+20.286, 20.561, 20.561 and 3.350 seconds; Windows takes 43.008, 44.894,
+48.819, 45.147 and 2.259 seconds. All original limits remain. No partition
+change was needed. The earlier failed run's missing inner evidence does not
+permit a retrospective timeout or flake classification; future failures now
+retain their runner output and per-attempt progress.
+
+This qualifies ordinary incoming-source construction and the existing reader,
+not the optional complete prepared Source/application path end to end. That
+path has focused composition/custody coverage and retains the existing
+constructor's implementation; its actual prepared-source consumer remains a
+caller-adoption validation obligation. Local cold construction cost and Windows
+historical-seed performance also remain unresolved. Source review, required CI,
+merge and release are still required; parent and installed-recovery gates stay
+open.
+
+### 2026-11-06 - U18 source merged; independent promotion fixture repair pending
+
+Source #11136 receives an exact-head Approved review with no findings at
+`e8a384a2dccf12f68cf1d675b2acee0b07dedad9`. Required CI `42299341557`,
+trusted workflow/source-attribution and identifier guards pass. It merges at
+21:58:46 UTC as `9677262d0904dccefab74ff5d2d60ae733a9a689`; no parent
+closing reference is present and #10377 stays open. The Plan and Validation
+Plan are reread after merge and remain Active. All owned source additions are
+verified in the squash merge. Native squash-aware completion reconciles the
+source worktree after ordinary pull-forward aborts on duplicated historical
+commits; no new local work is discarded.
+
+The containing release is not delivered. Promotion `42301853174` fails only
+`Require real Windows Resume pane startup`: both prewarming variants raise
+`UnsafeTestCommand` because the native fixture invokes PSMux control/cleanup
+without an explicit private socket or runner-owned namespace. Its other
+executed jobs pass; downstream publication/merge remains skipped. The
+successor `42302804638` has the same failing native job when inspected.
+This is distinct from #10960's delivered dependency repair, not a flake waiver.
+The existing #10945/#10946 owner has explicitly claimed the fixture-scoping
+follow-up at 21:55:12 UTC. Preserve that claim, the safety guard, real Resume
+assertions and all finite bounds rather than create a competing patch or retry
+promotion unchanged.
+
+Next, observe the existing owner's repair and a containing qualified release,
+then migrate callers through their normal review gate. Optional prepared-source
+caller proof, local cold construction, historical-seed performance and all
+whole-flow/installed acceptance remain open. No runtime update or deployment is
+performed.
+
+### 2026-11-06 - Fresh project adoption must remain separate from runtime preparation
+
+Caller integration review identifies an additional front-door seam. The native
+PowerShell installer explicitly re-roots marketplace self-staging to the user
+home, then resolves a supplied project's repository from existing project
+configuration, a Git CWD or the canonical registered repository. A fresh
+unregistered project has none of those roots. Supplying its name therefore
+reaches `register-project-entry` without `--repo-dir`; the owning hosting-policy
+check refuses before a caller's later explicit registration can run.
+
+Omitting the name is not an explicit runtime-only contract either: the normal
+front door can infer a project from CWD and existing configuration. The proposed
+bounded prerequisite is a source-owned runtime-only option that prevents
+project inference and adoption while retaining the existing native runtime
+preparation, ownership and readiness path. Default inference stays unchanged;
+contradictory explicit project arguments must refuse. No reserved-name trick,
+fabricated configuration or alternate constructor is accepted. Deduplicate and
+coordinate the precise source stretch before implementation, then qualify the
+real native front door before caller adoption. This is not yet a native
+qualification result, source fix, release or installed recovery.
+
+### 2026-11-06 - Explicit runtime-only provider expansion claimed
+
+The precise source prerequisite is coordinated as #11178 under #10377.
+The existing #5852 parent retains the broader install/adopt and configured
+behavior separation; no open competing runtime-only PR was found. This
+additive slice does not remove legacy default inference or close that parent.
+
+The proposed provider implementation adds native shell `install`/`update`
+runtime-only selection, rejects contradictory project arguments before
+admission, and carries the selection through the existing Windows execution
+driver and ordinary staging. The selected payload's adjacent installer
+contract advertises the capability independently of package versions.
+Separately deployed callers must require that support before effects; rollback
+to an older provider is an explicit incompatibility, not trial-and-replay.
+
+This closes a composition gap under the existing authoritative-runtime-
+replacement intent, not a new lifecycle architecture. Runtime construction,
+readiness, selection, admission, custody and central-only retirement boundaries
+are unchanged. Shared migration and global integration remain ordinary owner
+operations; project registration remains a later explicit native writer action.
+Focused parser/driver and actual-shell controls are being run. Native fresh
+installation, caller policy preservation, source review, CI, merge and release
+remain open. No shared installer, runtime, configuration, service or rollout
+effect is performed by this source preparation.
+
+The initial focused local run reaches all six driver controls successfully.
+Actual Windows shell selections and front-door refusals work; their first
+assertions incorrectly treated PowerShell's own profile cache as installer
+state, so those checks now assert only installer-owned footprints. The broader
+compatibility run reaches an existing cold-driver fixture's original item
+deadline, first during retained-input preparation and then during native
+execution. Removing unrelated library test trees reduces fixture preparation,
+without changing its runtime source closure or any deadline. A bounded
+diagnostic confirms a real running request with no recorded error or output
+before the item expires. This is unresolved qualification, not a flake waiver
+or a successful runtime-only installation.
+
+Five pure workflow controls pass, rejecting failed, skipped, missing and
+wrong-source native evidence. Install-contract synchronization, touched-Python
+lint and documentation consistency pass. The new manual Linux/Windows lane
+retains exact source selection and required native cases. Publication remains
+work-in-progress until the native result is understood and qualified; caller
+migration and parent acceptance remain open.
+
+Separately, the previously blocked #11136 provider is now present in the
+qualified source release #11182. Promotion `42315848596` passes real Resume,
+artifact attestation, publication/readback and non-administrative exact
+candidate merge. Its recorded admitted Dev is
+`d7a258cee28247008412c44258fbda10d4bdaf6b`, not the workflow run's Main-base
+head. The generated Main merge is
+`b4d2d056e282960369201ed68359a9ad76db10f6`, with Worktrees
+`1.24.512-dev1`. The source merge is an ancestor of the actual admitted Dev;
+the helper, native test, composition tests, CLI documentation, workflow and
+acceptance bodies match their source merge and published Main. Changes to
+TESTING and the workflow test file are unrelated additions; all admitted Dev
+bodies match Main. This is released source, not local rollout, caller adoption
+or completion of #10377.
+
+The first exact-head hosted qualification, `42321992914` at
+`b3588819fb6367b441b2654ad689e26b9aba5570`, fails on both platforms before
+test execution. The source-pin probe omitted the owned-process helper's two
+required output budgets; the report uploader then had no declared report path.
+The revised probe supplies finite budgets and the uploader runs only after a
+report directory has been declared. The pure regression stub now requires the
+same keyword-only budgets, so it cannot hide this interface mistake. Its five
+admission controls and touched-file lint pass again. The failed run supplies no
+native acceptance credit; qualification must use the revised published head.
+
+### 2026-11-07 - Runtime-only provider native qualification
+
+Exact source `c49a2c51dcd25cffcf1b6094b49ac14c857b28ca` passes manual
+qualification `42322817268` on both disposable hosted platforms. The downloaded
+JUnit bodies confirm fourteen Linux passes and seventeen Windows passes, with
+no errors or failures. Linux exercises Bash and PowerShell Core selection,
+unchanged default inference, repeat runtime-only selection and early refusal;
+Windows exercises Windows PowerShell and PowerShell Core. Unsupported shells
+are explicit platform skips.
+
+All three actual Windows cold-driver cases pass: ordinary entry, runtime-only
+entry and caller abandonment, in 5.041, 3.627 and 3.441 seconds respectively.
+They retain the existing request owner, native reentry, deadline propagation,
+output capture and cleanup assertions. Their Linux skips reflect that fixture's
+Windows-only contract, not native Linux installation coverage. The earlier local
+item timeouts remain unresolved local results; no deadline was raised and no
+local success is inferred from this separate hosted result.
+
+This qualifies the bounded provider seam, not a complete native runtime install
+or fresh-project adoption. The shell-selection controls execute extracted
+production selection code; the cold-driver fixture deliberately substitutes a
+fixed no-install native participant. Normal source review, current-head required
+CI, merge and containing release remain due. Independently deployed callers must
+check the exact selected payload's advertised capability before migration.
+Caller fresh/prior-state policy preservation and whole-flow recovery remain
+under #11178, #5852 and the active #10377 acceptance matrix. No shared runtime,
+service, credentials, registration or installation is changed.

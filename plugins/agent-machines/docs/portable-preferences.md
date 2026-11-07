@@ -15,6 +15,8 @@ file. Neither command discovers or enrolls a cloud carrier.
 The [reviewed Phase 4 plan](../../../efforts/active/machine-health-heartbeats/preferences.md)
 owns the remaining native adoption and carrier qualification work. Local exchange
 does not establish installed adoption, synchronization health or peer receipt.
+`preferences copilot` is a separate, explicitly confirmed native scalar-floor
+operation described below; neither receiving nor accepting invokes it.
 
 ## Snapshot
 
@@ -238,3 +240,119 @@ manually, relax parsing or replay a different effectful operation.
 Provider rollback preserves the read-only preview baseline. Local policy and
 exchange output have their own strict version-1 schemas, independent of package
 versions; no retirement window is opened by this additive change.
+
+## Confirmed Copilot scalar floors
+
+```text
+agent-machines preferences copilot --state-dir <local-state> [--local-overrides <local.json>]
+agent-machines preferences copilot --state-dir <local-state> [--local-overrides <local.json>] --apply --expect <preview-token>
+```
+
+The local policy must permit `copilot`, and `accepted.json` must already contain
+a valid snapshot from that policy's publisher. No received candidate or cloud
+file is applied directly. Scope comes from the current qualified native
+configuration owner, not a supplied hostname, harness basename or target-machine
+simulation. An unavailable or unresolved owner blocks this operation without
+bootstrap, binding or fallback.
+The native identity resolver supplies the same admitted aliases to discovery
+and layering, including alias-named directories and per-machine overlays.
+Host and guest alias sets remain separate; a different canonical identity refuses.
+An empty repository/knowledge requirement union reports
+`native-defaults-unavailable`: the current native ordinary-default collector
+cannot carry machine-local defaults through an empty union. Adoption refuses
+instead of skipping those sources or manufacturing a requirement package.
+
+Selection retains shared -> matching named-machine -> explicit local preference
+precedence. Only `model` and `effortLevel` enter the native settings owner as
+ordinary scalar floors. Native package discovery, parsing, scope, ordinary
+default selection and authority validation still run. Native defaults and
+existing live values win over these fallback floors; native enforce rules apply
+afterward and conflicting enforce declarations refuse. This does not certify
+that a running client supports the requested model or reasoning value.
+
+The adapter filters native settings contributions to the same two fields; it
+does not reconcile other native settings, resources, modules, permissions,
+bindings or schedules. It never generates requirement YAML. The existing
+settings owner preserves unrelated live keys and backs up before atomic writes.
+Malformed/duplicate-key live settings refuse rather than being repaired.
+
+Preview emits `agent-machines.preferences.copilot`, version `1`, with native
+scope, accepted revision, selected floors, preference provenance, overridden
+fields, proposed changes and a confirmation token. The token binds policy,
+accepted/local data, native context and packages, target and live settings.
+Apply recomputes it and rechecks at the native settings-write precondition;
+changed inputs require a new preview. Withdrawal contributes no floor and
+does not erase a value already adopted. No cross-domain transaction is claimed.
+All native settings applies hold one target-scoped inter-process lock across
+live read, merge, confirmation, backup and replacement. The retained sibling
+`settings.json.lock` is local writer coordination, not synchronized fleet state.
+Different preference-state directories do not bypass it. Read-only previews
+take no writer lock and create no lock file.
+Only the parent directory is resolved for lock identity. Linked settings or
+lock filenames refuse before read/merge/write, including native callers.
+
+Exit `0` is a successful preview or native settings transaction; `2` means
+invalid/unavailable input or a refused confirmation. Inspect
+`configuration_applied` and `changed` independently. `binding_changed` stays
+false and `running_session_delivery` stays `not-performed`; no active-session
+model change, runtime update or service reload is performed.
+
+Discover `copilot` with `preferences --help` on the selected runtime first.
+Older providers retain their existing preview/exchange commands and reject this
+new operation; do not fall back to a general restore or hand-written settings
+change. Snapshot and exchange schemas remain unchanged.
+
+## Confirmed retained-telemetry defaults
+
+```text
+agent-machines preferences telemetry --state-dir <local-state> --producer agent-bridge --directory <absolute preprovisioned base> [--local-overrides <local.json>]
+agent-machines preferences telemetry --state-dir <local-state> --producer agent-bridge --directory <same base> [--local-overrides <local.json>] --apply --expect <preview-token>
+```
+
+`agent-dispatch` is the other supported producer. The policy must permit
+`telemetry`; values come only from an already accepted snapshot and the
+qualified native execution-machine/repository context. Shared, matching
+named-machine and explicit local choices retain their existing precedence.
+The directory is an explicit local selection, never a portable path.
+Its complete `retained` namespace must already exist.
+
+The adapter selects one immutable same-cell peer runtime through the existing
+owner launch boundary. Its capabilities, preview and apply use that same pin
+and revalidate installation governance on execution. An unavailable context,
+legacy/non-pinnable runtime, missing provider, unsupported discovery or a
+rolled-back provider without `input_fence: 1` blocks only this optional
+operation. Ordinary exchange and existing producer commands remain available.
+There is no PATH search, fallback configuration writer, bootstrap or update.
+Before selection and every producer call, Machines refuses a selected producer's
+nonempty `AGENT_BRIDGE_TELEMETRY_SINK` or `AGENT_DISPATCH_TELEMETRY_SINK`
+override. Dispatch adoption also refuses any `AGENT_DISPATCH_TASK_*` environment
+entry. The peer launcher's routing cleanup must not erase a custom sink or turn
+a restricted task into an unrestricted configuration caller; these checks repeat
+at capability discovery, preview and apply, including changes after preview.
+
+For `capture: retained-local`, the native configuration owner validates its
+target, preserves custom/legacy sinks and uses its own lock/atomic writer.
+The Machines confirmation binds the native preview, pinned executable,
+accepted revision, scope, policy and local choices. Digests come from the same
+bounded reads that supplied the validated values, not a second file read.
+Exact policy, accepted-snapshot and optional local-override bytes are passed
+as data-only input fences and rechecked inside the producer's transaction.
+Inputs cannot name or alias the native configuration target or its writer lock.
+Changed inputs require another preview. This does not claim a cross-file
+transaction against arbitrary external editors.
+
+Absent or `disabled` capture choices contribute nothing and contact no producer.
+Withdrawal does not erase adopted configuration, disable an existing sink or
+remove local overrides. Reporting choices remain stored/displayed with
+`reporting_adoption: unsupported`; no native reporting or schedule field is
+invented. Per-producer results are independent, not a fleet transaction.
+
+Output uses `agent-machines.preferences.telemetry`, version `1`. Exit `0` means
+a successful preview, configuration or no-contribution result; `1` means a
+reported native refusal; `2` means invalid/unavailable input or confirmation.
+An unknown native write outcome also exits `2`, never success or a known refusal.
+`configuration_applied`, `changed`, `activation: not-requested` and
+`running_capture: not-observed` are separate facts. A failed native apply with
+an unknown write outcome retains `configuration_applied: null`, not proof of no
+effects. Inspect current native state before deciding another operation.
+No service, sink factory, buffer, scheduled job or carrier is activated.

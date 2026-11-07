@@ -11,6 +11,8 @@
   `delegated-source-with-preserved-custody` and
   `one-supported-workflow-in-consumer-guidance`
 - **Umbrella issue:** #6007
+- **Comment identity intent:** [Compact forge-comment provenance](../../../visions/harness-guidance/README.md#compact-forge-comment-provenance)
+- **Comment identity source:** #11128 (compact metadata and retry-stable comment/write identity)
 - **Sub-issues:** #6286 (PR-owner installation-cell adoption); #7188 (first-class PR service and fleet deployment)
 
 ## Guiding Intent
@@ -41,6 +43,15 @@ native/fleet switch alone does not deliver this service intake model.
 | Author-publication implementation driver | Finite A0-A5 authorship contribution, integration, validation and PR stewardship | Bounded implementation claim #10383; existing broader owners retained |
 
 ## Coordination
+
+The [compact comment-identity extension](comment-identity.md) composes the
+existing AI-attribution profile and Worktrees source-identity owners with
+current publication, intent/receipt and observation custody. Issue-comment
+consumers may reuse the preparation contract without transferring issue
+lifecycle ownership here. Ordinary comment origin never refreshes PR
+ownership; existing source/resource, provider and credential claims remain.
+Review the portable contract before implementation and resolve concrete
+overlaps through normal reviewed contributions, not a new sign-off ceremony.
 
 The direct #2874 unchanged-cursor family keeps waiter and independent periodic-evaluator
 consumers distinct, including honest timeout and retry-ceiling escalation. Preserve
@@ -317,6 +328,19 @@ _Operator-required outcome; agent-recommended slices and validation._
   Protected original-readback proof commits merged in #10977; negotiated v6
   reads merged in #10979. This is the finite synthetic source exit, not native,
   live-provider, installed or full B3/A2 acceptance.
+- [x] Review and land the [compact comment-identity contract](comment-identity.md)
+  before adding preparation, persistence or publisher behavior (#11129).
+- [ ] Deliver the contract's shared preparation, actual all-forge comment
+  consumer inventory, existing-owner correlation and separately qualified
+  adopter leaves. Keep AI-profile/privacy policy, minimal clutter, stable
+  comment/per-write identity and native proof distinct; a helper alone is
+  not full publication coverage.
+  Shared preparation merged in #11146. The
+  [publisher inventory](comment-publication-inventory.md) keeps legacy,
+  explicit-composition and unsupported surfaces distinct; automatic consumer
+  adoption, allocation/correlation and installed qualification remain open.
+  The [prepared-intent binding refinement](comment-intent-binding.md) addresses
+  the missing structured admission fact before new storage/publisher behavior.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -673,9 +697,12 @@ It extends the following checkout-free lane, not the fleet deployment scope.
 - [ ] Complete [A5: qualification and adoption](author-publication.md#a5---qualification-and-adoption), with source, release and authorized installed acceptance distinguished.
 
 The operator selected source-PR completion with remaining adoption tracked
-separately. #10412, assigned to ThomasMichon, retains the remaining A4-A5
-consumer/live/installed and remote-only transport acceptance. Generic guidance
-and source tests do not close those rows or the broader parent effort.
+separately. Historical #10412 was subsumed into the
+[author-publication cohort under #6007](https://github.com/ThomasMichon/copilot-extensions/issues/6007#issuecomment-6668447425),
+preserving its per-item owners and remaining A4-A5 consumer/live/installed and
+remote-only transport acceptance, not marking them complete. #11092 expands
+the portable worker author-policy source contract; its source tests do not
+close these rows or adopt the broader parent campaign.
 
 ### Direct checkout-free operation and inherited ADO matrix from #2700/#2881
 
@@ -862,6 +889,11 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
+- [ ] Resolve the [comment-identity validation obligations](comment-identity.md#validation-obligations)
+  through the real owning preparation, publication, receipt and acquisition
+  boundaries, with explicit surface/provider coverage and evidence tiers.
+  Preserve every existing attention, native, installed and shadow gate.
+
 - [x] Qualify the finite B4 source contract through existing-owner storage,
   actual protected synthetic readback and negotiated CLI/client/Gateway/service
   consumers: 232 coupled cases, including exact proof, overlapping operations,
@@ -960,6 +992,179 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-06 - Retain structured prepared identity before native source adoption
+
+- #11207 actually merged as `4bb05db59c8f836d90bf494afab403d811c6d9b2`
+  after exact-head Copilot approval with no open issues and the latest required
+  CI green. An earlier managed merge correctly refused an expected check from
+  the newer run; it was not replayed until that exact run completed successfully.
+  The source worktree reconciled through its normal completion path.
+- The explicit orthogonal storage extension retains structured original
+  comment/write/source identity and body binding under the current owner.
+  Old strict readers refuse the extension; existing layouts and legacy
+  operations/unknown receipts retain their meanings. No sender or serving
+  capability was enabled by the data-only source change.
+- Review corrected literal-boundary parity with the shared preparer. The final
+  storage/capture/conversation packet passes 102 cases; the legacy native/CLI
+  packet passes 106, both with bounded cleanup verified. The standalone
+  validator passes strict Linux/win32 checking; the overall plugin remains
+  pending type admission, not a strict-project pass.
+- Re-read the parent Plan/Validation and continue the explicitly selected
+  existing native executor and original receipt projection. Preserve default
+  v1, no implicit adoption/fallback, actual native actor/version checks and
+  separate feedback/echo, receiver, provider and installed gates.
+
+### 2026-11-06 - Review original prepared-intent binding before its data extension
+
+- #11203 actually merged as `93d33164b35f5ce7f34928ecad959c3e1330c7f5`
+  after exact-head Copilot approval with no open issues and the latest required
+  CI green. The source worktree reconciled through its normal completion path.
+- The refinement names the missing structured admission fact separately from
+  opaque-body preservation. It retains actual preparation before approval,
+  immutable original GUIDs/bytes/source, strict owner/receiver compatibility
+  and original native receipts without upgrading tags into actor/version,
+  handled or feedback-echo proof.
+- Re-read the parent Plan/Validation and begin the finite existing-owner data
+  admission leaf. Executing producer/receiver composition, native correlation,
+  other surfaces/providers and installed qualification remain open; review
+  of the contract does not implement or activate them.
+
+### 2026-11-06 - Qualify explicit prepared-body consumption before admission changes
+
+- #11197 actually merged as `106bebee5ce46eb290ffb4cc28c8821c5ab77564`
+  after exact-head Copilot approval with no open issues and the latest required
+  CI green. The source worktree reconciled through its normal completion path.
+- All 42 affected workspace CLI/tool cases pass with bounded cleanup verified.
+  The three new cases compose the actual source/profile preparers with native
+  create, reply and owned-edit serialization, real-file retained intent and
+  confirmed retry after owner restart without another send.
+- Review corrected the invalid sibling-plugin development dependency and
+  parent/reply identity reuse. The actual canonical dependency graph and finite
+  release materializer now pass with isolated source imports and a YAML-parser
+  development dependency only. No runtime or request schema changed.
+- Re-read the parent Plan/Validation and publication inventory. Explicit opaque
+  body consumption is qualified; automatic preparation, structured original
+  identity admission/correlation, other surfaces/providers and installed
+  adoption remain open. Review the narrow existing-owner binding refinement
+  before changing strict persisted or receiver shapes. No deployment occurred.
+
+### 2026-11-06 - Land compact comment preparation and continue actual consumers
+
+- #11146 actually merged as `1f92edb9aba7a9f1499dbc36efa7c3981e6abba0`
+  after current-head Copilot approval and the latest required checks passed.
+  The source worktree reconciled through its normal completion path.
+- The optional AI-profile/body helper composes a public-safe source snapshot,
+  supplied comment/write GUIDs and one bounded hidden marker before approval.
+  It preserves retry bytes and refuses foreign/ambiguous/filler metadata;
+  it does not allocate identities, persist intent, publish or prove native effects.
+- Its final focused source packet passes 119 cases with four existing profile
+  skips and verified cleanup. Strict typing passes all seven targets under
+  Linux and win32 settings. The actual origin/body CLI composition case also
+  passes separately; native Windows and installed/provider adoption are not
+  claimed.
+- Re-read the parent Plan and Validation Plan; the effort and #11128 remain
+  open. Continue actual publication-owner inventory and contained opaque-body
+  consumer qualification, retaining allocation, correlation and separately
+  authorized adoption as unfinished work.
+
+### 2026-11-06 - Repair the actual release-candidate projection blocker
+
+- The repair in #10953 is still pending release. Promotion run `42309816584`
+  failed its candidate-freezing job on #11160: the Efforts completion template
+  was 4,167 bytes, above the unchanged 4,096-byte declaration limit. Overlap
+  warnings were not the blocker.
+- Compact wording retains the same effort completion, post-merge digest,
+  continued-driving, authority, hold and agenda rules at 4,049 bytes. The
+  existing shipped-template and enabled-stack regressions reproduced two
+  failures before the edit; all twenty-one tests pass afterward.
+- The actual promotion projection-sync helper also passes on a fresh isolated
+  candidate containing the real Efforts payload. It writes the selector and
+  reviewed fallback, and a second invocation makes no changes. Its owned
+  fixture was removed after successful validation. This is consumer-contract
+  proof, not a full hosted promotion, runtime rollout or operational acceptance.
+- Continue the bounded #11160 contribution through ordinary review, required
+  CI and an actual merge, then observe normal release execution. Preserve all
+  parent and retained-resource gates; do not force the pipeline or reuse a
+  completed qualification grant for a new released-source run.
+
+### 2026-11-06 - Qualify the original released Dispatch preparation path
+
+- #9277's original fresh-release command,
+  `python tools/run-plugin-tests.py --prepare-only agent-dispatch`, passed on
+  Windows with CPython 3.12.10 and UV 0.12.0 at released Main
+  `9007b0ef321d2be24088cd42279564005d39289e`. A separate fresh test environment
+  also passed with UV 0.13.7. Both real runner invocations returned exit zero
+  and confirmed preparation, preserving source constraints and normal
+  dependency admission. No shared resolver or runtime was installed or updated.
+- The issue is closed on this direct Dispatch evidence after #10861, not on
+  the sibling PR-owner/Fleet preparation or #10953's native acceptance.
+  Preparation alone runs no Dispatch pytest suite and does not qualify
+  credentials, deployed delegation, image/provider/fleet operation or the
+  parent effort. All retained resource and custody holds remain unchanged.
+- Continue with the remaining installed-adoption and retained-resource
+  obligations at their existing authority boundaries. Do not repeat the
+  completed preparation or native qualification to substitute for those gates.
+
+### 2026-11-06 - Complete the bounded native watch-owner repair
+
+- #10953 merged as `ea954b226a096c4bea0ebbd1b1ebcdd64c049c81` after
+  exact-head Copilot approval, resolution of both timeout-diagnostic findings
+  and required CI, including the metadata-triggered run `42305029563`.
+  This resolves #10927's four diagnosed failure classes, not the parent.
+- Final-head hosted run `42303184240` at
+  `5cd79cbbd7bee1d15be4e47d09caf96cfc8c83d1` passed all fifteen selected
+  jobs with actual test and cleanup results read for each. Windows/Linux
+  normal upgrade, shipped cells, peer directions, lease-only refusal,
+  controller-death recovery and concurrent upgrades passed; macOS's
+  unsupported governed-identity refusal passed. Linux's seven existing
+  platform-specific legacy skips do not skip native upgrade or a selected job.
+- Both earlier progress-loop candidates also passed their fifteen selected
+  jobs. Each of the three exact temporary tags was removed after a fresh
+  matching-SHA check and absence readback. The final timeout correction
+  preserves Python 3.10-compatible evidence and the original exception;
+  source controls are not a claim of native Python 3.10 execution.
+- Re-read the parent Plan, Validation Plan and direct retained outcomes after
+  merge. They remain open, including #9277's distinct released-tree Dispatch
+  preparation reproduction, configured credentials, running-consumer,
+  image/provider/fleet and retained-resource duties. Release and authorized
+  installed rollout remain separate from this candidate's disposable hosted
+  qualification. No shared runtime, profile, policy or service was changed.
+- Continue by reconciling #9277's exact release-only preparation path against
+  current source and existing fixes; do not infer Dispatch success from the
+  passing PR-owner/Fleet cohort or repeat the completed qualification.
+
+### 2026-11-06 - Land the compact comment-origin producer before its consumer
+
+- #11137 actually merged as `a914f7815b7915c66b7cd8f0f660cc60ee932fe5`
+  after exact-head Copilot approval with no open issues and the latest required
+  CI green. The source worktree reconciled through its normal completion path.
+- The optional Worktrees producer returns a distinct compact comment-origin
+  contract from its actual managed record, defaults to public-safe source
+  data and preserves raw/anonymous/codename policy. It does not compose or
+  post a comment, mint GUIDs or become a PR-ownership refresh.
+- The exact published two-file source packet passes 37 cases with bounded
+  cleanup verified. Fatal lint, module/docs/install contracts pass; the
+  changed module's typecheck project remains pending, not strict evidence.
+- Re-read the current canonical Plan and Validation Plan; the parent and
+  #11128 remain open. Continue configured body/GUID preparation, then actual
+  publisher inventory, durable correlation and separately authorized adopter
+  qualification. No deployment, live feedback or custody transfer occurred.
+
+### 2026-11-06 - Review compact forge-comment provenance before implementation
+
+- #11129 actually merged as `5687588a648f5ac54bcd7acf6e5857fdebe4ada4`
+  after exact-head Copilot approval with no open issues and all required CI
+  green. The source worktree reconciled through its normal completion path.
+- The shared vision and #11128 contract preserve configured AI attribution,
+  compact source provenance, stable comment/per-write identity and the
+  existing native proof/publication owners. Ordinary comment origin cannot
+  become a PR-ownership refresh, and metadata does not get a filler comment.
+- Re-read the current canonical Plan and Validation Plan; the parent remains
+  Active. Begin the finite source-owner origin producer, then shared body
+  preparation, actual publisher inventory/integration and correlation. A pure
+  producer/helper does not close #11128 or all-forge/adopter acceptance.
+  No runtime deployment, live-comment rewrite or custody transfer occurred.
 
 ### 2026-11-06 - Complete the finite historical-readback source leaves
 
@@ -1068,6 +1273,142 @@ callback an implicit credential store.
   new owner.
 - Re-read the complete current Plan and Validation Plan. Keep the parent Active
   and preserve every independent source/resource, provider and rollout gate.
+
+### 2026-11-06 - Retain pinned hosted failures and improve peer diagnostics
+
+- A subsequent, explicitly authorized progress-based repair/retest loop passed
+  all fifteen selected watch-owner jobs in run `42296155145` at
+  `fbdd0a9c0b0b71dd9549001e903388c54a465610`, including real fresh-account
+  Linux/Windows upgrades, shipped-cell and peer isolation, lease-only refusal,
+  controller recovery, concurrent upgrades and macOS refusal. Every selected
+  runner completed its owned cleanup; the exact temporary tag was removed
+  after a matching-SHA check and absence readback. This is hosted qualification,
+  not shared-host rollout, the separate Dispatch reproduction or parent completion.
+- Fresh review then found the new timeout wrapper changed the exception type
+  before startup/upgrade diagnostic handlers could catch it. The helper now
+  emits captured streams to stderr and rethrows the original timeout; both cutover callers combine
+  captured streams with journal, lifecycle, native-birth and original-exit
+  evidence. This does not depend on Python 3.11 exception notes: the plugin
+  retains Python 3.10 support. Eleven focused controls pass, including both
+  actual diagnostic caller phases with exception notes unavailable.
+  Current-head CI, re-review and hosted qualification of this
+  test-helper correction remain pending under the same bounded repair loop.
+- The separately authorized `watch_owner` run `42279632485` exercised
+  #10953's exact candidate `10be300359f85323f012c94fd1124ed50ac70a06`.
+  All fifteen disposable jobs reached pytest: five passed and ten failed.
+  macOS's structured refusal, both controller-death cases and both concurrent
+  upgrades passed. This is not complete installed acceptance.
+- Eight failures stopped in parser construction because the optional attention
+  client imported unavailable `fleet_manager`. Dev already contains #10961's
+  deferred-import repair; the source branch incorporates it through the normal
+  managed sync, without duplicating that patch or changing the approved run.
+  The two peer-roundtrip failures reached the reverse CLI call but returned no
+  JSON; their stderr was not exposed, so the same cause is not yet established.
+- Peer assertions now expose stderr before decoding an empty JSON response.
+  Payload-command timeouts also retain captured stdout/stderr without changing
+  subprocess, containment or deadline policy. A contained Windows check stopped
+  earlier at a snapshot-directory stability refusal. A diagnostic attempt passed
+  that boundary but hit the normal installer's unchanged 300-second timeout;
+  neither attempt reached peer launch or qualifies the shipped-account path.
+  Temporary instrumentation was removed; do not blindly repeat that setup.
+- Rebased source validation passed thirteen refusal, concurrency, diagnostic
+  and native controller-admission controls with one macOS-only skip; four
+  timeout-output, command-shape and original-deadline controls also passed.
+  Fatal lint on all ten affected Python files, the thirteen-plugin installation
+  contract and whitespace checks passed. These remain source controls, not
+  the missing shipped-account or reverse-peer result.
+- The hosted result and provider logs are retained. The temporary tag was
+  deleted only after a fresh exact-SHA check, with absence confirmed afterward.
+  That one-run approval is consumed. Keep #10953 draft while source validation
+  and current-head review/CI proceed; a new hosted pin/run needs a new explicit
+  approval. #10927, #9277 and all installed, operational, retained-resource and
+  parent completion obligations remain open. No runtime was rolled out.
+
+### 2026-11-06 - Repair bounded native acceptance prerequisites
+
+- #10927's Linux/Windows baseline failure came from the concurrency fixture's
+  snapshot hook dropping the production poller's `fetch_revision` keyword.
+  Forwarding the keyword preserves revision fencing and the original held-work,
+  notification, writer-transfer and timeout assertions. The complete isolated
+  race now passes.
+- Shared ZDD now exposes Darwin birth tokens, but the governed owner still
+  supports Windows/Linux decimal tokens. Unsupported formats now refuse at
+  controller/instance capture, before journal or selection publication, rather
+  than persisting evidence its own schema rejects. The native macOS test retains
+  this governed refusal; it no longer assumes shared Darwin exit APIs are absent.
+- Isolated source controls passed: three process tests with one macOS-only skip,
+  plus five read-only failure-evidence controls. Touched Python lint and the
+  thirteen-plugin installation contract passed. No native OS-account, installed
+  or fleet test was run locally.
+- The Windows `serve` controller was also admitted as a resident, unlike the
+  passing `restart` path. Its disposable Windows admission creates an inherited
+  kill-on-close Job. Admission now belongs only to the actual passive and legacy
+  foreground owners. Five focused routing/native controls pass: the corrected
+  child survives caller exit, while restoring old controller admission kills
+  that exact child. Test containment, leases and native checks are unchanged.
+- Actual shipped-account acceptance remains open. An earlier narrowed
+  disposable direct-start experiment failed before publishing child custody,
+  not at the hosted boundary, and is not shipped or counted as acceptance.
+  The shipped-cell failure now records bounded read-only native-birth comparison
+  and original-exit observations separately, retaining unknown/refused evidence
+  without control, retry or cleanup bypass.
+- Fresh hosted qualification needs a new exact-source approval; both earlier
+  one-run grants are consumed. Keep #10927, #9277 and every original installed,
+  operational, resource and parent completion obligation open.
+
+### 2026-11-06 - Confirm the exact candidate checker budget
+
+- Normal promotion `42174892203` produced release #10919 at Main
+  `b17ff8924cd88e2249441f99614ae78e8a5b26d1`; its checker source exactly
+  matches #10909. That producing run's admitted candidate typecheck passed
+  in 127 seconds under the unchanged six-minute limit, and the exact-candidate
+  merge succeeded. #10895 is closed on that evidence, not on a run's creation
+  timestamp, source-only timing or a manual retry.
+- This finite source/release result does not qualify every future workload,
+  authorize rollout or close the installed failures in #10927, the original
+  Dispatch reproduction in #9277, or the parent effort.
+
+### 2026-11-06 - Retain the corrected hosted installed-contract result
+
+- One separately authorized `watch_owner` run, `42178491630`, exercised released
+  `4a3d3e28799c17f7fe16b2af3dfbf34571060e88`. All 15 selected disposable jobs
+  reached pytest: 11 passed and four failed. The earlier preparation blocker
+  is cleared for this PR-owner/Fleet cohort, not the original Dispatch
+  reproduction in #9277 or the complete installed contract.
+- Linux normal upgrade, shipped cells, peer roundtrip, both lease-only refusal
+  cases and controller-death recovery passed. Windows normal upgrade, peer
+  roundtrip, both lease-only refusal cases and controller-death recovery passed.
+- #10927 retains the failed Linux/Windows initial-baseline concurrency waits,
+  unhandled macOS controller-identity refusal, and Windows first-cell health
+  native-identity failure. The logs do not establish their root causes.
+  Keep the existing identity checks, timeout bounds and cleanup custody;
+  passing setup or eleven cells is not complete installed acceptance.
+- The result and provider logs are retained. The exact temporary qualification
+  tag was deleted only after a fresh matching-SHA check; readback confirmed
+  absence. The one-run approval is consumed, with no automatic repeat or
+  local/fleet/shared-service effects. Continue the bounded source repair,
+  retaining all parent Plan, Validation, Coordination and resource holds.
+
+### 2026-11-06 - Reduce checker repetition and retain installed acceptance
+
+- #10909 merged at `20618b0826b4d321e3e7d46ce073772c488e1802`,
+  after current-head Copilot approval with no findings and green required CI
+  `42173423874`. Ordinary MyPy dependency caches are shared without dropping
+  projects, matrix cells, source verification or cache-disabled scopes.
+  The source CI admitted typecheck passed in 116 seconds; exact-candidate
+  timing remains open under #10895.
+- All 40 admitted projects passed their declared matrices across two bounded
+  Windows-host runs, alongside 25 focused controls and actual-MyPy cache
+  invalidation coverage. This is not a single-run six-minute Windows pass or
+  an installed-contract result.
+- Normal promotion `42167730047` completed successfully. Released Main
+  `4a3d3e28799c17f7fe16b2af3dfbf34571060e88` contains the exact #10861
+  test-preparation helper. The earlier one-run hosted approval was consumed;
+  a corrected pinned qualification repeat still needs separate authorization.
+- The complete current Plan, Validation and Coordination were read back.
+  No operational, credential, service/fleet or resource row closes from this
+  tooling optimization. Keep #6007, #9277 and the retained installed exit open;
+  no runtime rollout or owner transfer follows.
 
 ### 2026-11-06 - Land the released-checkout test-preparation repair
 

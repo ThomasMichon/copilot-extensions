@@ -1,0 +1,9 @@
+{
+  "comment": "Carry retained ordinary writer requirements through strict resume",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

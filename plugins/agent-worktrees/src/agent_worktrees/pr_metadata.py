@@ -57,7 +57,7 @@ def update_metadata(config, repo: str, number: int, *, title: str | None = None,
     config = labels.activate(config, publication_origin, publication_labels)
     return update(config, repo, number, title=title, description=body,
                   reviewers=reviewers, work_items=work_items,
-                  origin=labels.selected(config.default_repo.pr))
+                  origin=labels.selected_for_config(config))
 
 
 def update(config, repo: str, number: int, *, title: str | None = None,

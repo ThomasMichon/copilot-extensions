@@ -17,8 +17,9 @@ queue, supervisor, native-session, Worktrees or resource owners.
 The effort remains **Active**. Passing one source phase or PR is not completion.
 
 Current source credit: first-proposal guarded submission merged in #10608;
-same-owner rejected-proposal lineage merged in #10674. The ordinary whole-stack
-case still fails at missing protected assignment/preparation integration.
+same-owner rejected-proposal lineage merged in #10674. The ordinary protected
+completion consumer merged in #11162 and integrates those shared queue owners;
+installed whole-stack submission and the full lifecycle remain unqualified.
 Resident-only inspection and coherent delegated lineage selection are available
 at their source boundaries. Executing-build and delegated-selection observation
 source subsequently merged in #10782. Actual running selections and the complete
@@ -54,10 +55,45 @@ Independent queue-owned request revalidation subsequently merged in #11034.
 The source now rereads durable queue/authority/audit/request facts before each
 external relationship call, retaining post-I/O CAS. Actual installed participant
 and complete-cohort observations remain unqualified.
-Next, assemble generation-aware independent admission of those actual owners
-before ordinary submission consumers,
-then post-stop same-native recovery and the complete running
-lifecycle. No deployment or cleanup permission is implied.
+Ordinary keyed-create CLI requirement transport subsequently merged in #11040,
+including early remote-target refusal and existing per-attempt capability
+negotiation. It carries an independently qualified requirement; it does not
+construct that admission or enable ordinary allocation.
+Opt-in selected CLI and actual resident assembly subsequently merged in #11047.
+It retains the original installed command and reobserves the resident before
+each relationship call, while keeping both independent admission callbacks.
+Bridge's future keyed creation, original continuation journal and other admitted
+writers remain unassembled; the complete cohort is not qualified.
+Ordinary Bridge status observation transport subsequently merged in #11055.
+The existing CLI now carries passive health JSON and optional original keyed-writer
+inspection, with explicit executing-CLI support. This closes a read-transport
+gap, not actual installed-owner or complete-cohort admission.
+The conditional ordinary writer consumer subsequently merged in #11063.
+It retains the original requirement before create, uses the shipped CLI
+discovery command and recovers the original key after a lost reply or moved
+selector. Required exact-session resume subsequently merged in #11078,
+including endpoint-pinned per-attempt capability checks under concurrent
+startup-observer cutover. This is source credit; complete-cohort assembly
+remains open before ordinary activation.
+Original prepared-reservation correlation subsequently merged in #11105.
+Queue reconciliation now checks that exact original reservation before each
+owner call; this source prerequisite does not admit the actual writer cohort.
+Explicit ordinary coordinator configuration now has a conditional trusted
+admission-factory source path, merged in #11117. It retains both independent callbacks and fails
+closed for invalid selections; no permissive policy is provided or installed.
+Prepared-workspace provider expansion merged in #11130, retaining the expected writer
+before the first relationship under its original nonce and request. It does
+not qualify the cohort. The consumer merged in #11145 and derives the new-workspace
+expectation from actual Bridge selection and retains the prepared nonce before
+the first relationship, reconciling pending attachment under its original
+expectation on retry. No complete-cohort admission policy is supplied.
+Generation-aware independent admission of actual owners remains a prerequisite
+to ordinary activation. Fresh isolated qualification exposed a preparation
+HTTP read timeout before native creation: the coordinator later binds the
+original relationship. The bounded correction carries the startup owner's
+existing observation budget through that request; review and running retest
+remain pending. Then qualify guarded completion, post-stop same-native recovery
+and the complete lifecycle. No deployment or cleanup permission is implied.
 
 ## Context
 

@@ -52,6 +52,10 @@ lone dev box or against a designated coordinator host on a shared network:
   per-scope metadata maintenance on the existing coordinator/master cadences.
   Projection fences fresh legacy spawning; this does not migrate ordinary
   allocator or worker-prompt consumers.
+- ``AGENT_DISPATCH_RELATIONSHIP_ADMISSION`` / ``AGENT_DISPATCH_RELATIONSHIP_AUTHORITY``
+  -- explicit trusted ``module:factory`` admission owner and its original
+  ``local``/``central`` queue authority; absent by default. Configuration does
+  not qualify participants or enable pool allocation.
 """
 
 from __future__ import annotations
@@ -184,6 +188,8 @@ class Config:
     handoff_fallback_enabled: bool = False
     handoff_fallback_grace: float = DEFAULT_HANDOFF_FALLBACK_GRACE
     pool_publication_enabled: bool = False
+    relationship_admission: str | None = None
+    relationship_authority: str | None = None
 
     @property
     def url(self) -> str:
@@ -248,6 +254,8 @@ def load_config() -> Config:
         ),
         handoff_fallback_enabled=_truthy_env("AGENT_DISPATCH_HANDOFF_FALLBACK"),
         pool_publication_enabled=_truthy_env("AGENT_DISPATCH_POOL_PUBLICATION"),
+        relationship_admission=os.environ.get("AGENT_DISPATCH_RELATIONSHIP_ADMISSION"),
+        relationship_authority=os.environ.get("AGENT_DISPATCH_RELATIONSHIP_AUTHORITY"),
         handoff_fallback_grace=float(
             os.environ.get("AGENT_DISPATCH_HANDOFF_FALLBACK_GRACE")
             or str(DEFAULT_HANDOFF_FALLBACK_GRACE)

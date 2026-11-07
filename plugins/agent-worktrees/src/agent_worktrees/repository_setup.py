@@ -175,6 +175,7 @@ class ContinuityContext:
     name: str
     provider: str
     source: str
+    ssh_setup: str | None = None
 
 
 @dataclass(frozen=True)
@@ -197,18 +198,18 @@ def inspect(path: Path, url: str) -> Setup:
     declaration = _tracked(source.path, DECLARATION)
     value = _json(declaration)
     version = value.get("version")
-    if type(version) is not int or version not in (1, 2):
+    if type(version) is not int or version not in (1, 2, 3):
         raise SetupError("Unsupported repository setup version.")
-    _fields(value, {"version", "entrypoints"} | ({"contexts"} if version == 2 else set()))
+    _fields(value, {"version", "entrypoints"} | ({"contexts"} if version in (2, 3) else set()))
     contexts = []
-    if version == 2:
+    if version in (2, 3):
         declarations = value["contexts"]
         if not isinstance(declarations, dict) or not 1 <= len(declarations) <= 32:
             raise SetupError("Repository contexts must be a bounded named collection.")
         for name, item in sorted(declarations.items()):
             if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", name):
                 raise SetupError("Repository context name is invalid.")
-            item = _fields(item, {"provider", "source"})
+            item = _fields(item, {"provider", "source"} | ({"ssh_setup"} if version == 3 else set()))
             if item["provider"] != "local-projection-v1":
                 raise SetupError("Unsupported continuity provider.")
             reference = item["source"]
@@ -216,7 +217,14 @@ def inspect(path: Path, url: str) -> Setup:
                     or any(ord(c) < 32 for c in reference)
                     or not Path(reference).expanduser().is_absolute()):
                 raise SetupError("Continuity source requires an absolute or home-relative path.")
-            contexts.append(ContinuityContext(name, item["provider"], reference))
+            ssh_setup = item.get("ssh_setup")
+            if ssh_setup is not None and (
+                not isinstance(ssh_setup, str) or not ssh_setup or len(ssh_setup) > 2048
+                or any(ord(c) < 32 for c in ssh_setup)
+                or not Path(ssh_setup).expanduser().is_absolute()
+            ):
+                raise SetupError("SSH setup requires an absolute or home-relative reference.")
+            contexts.append(ContinuityContext(name, item["provider"], reference, ssh_setup))
     entries = value["entrypoints"]
     if not isinstance(entries, dict) or not entries or set(entries) - {"windows", "posix"}:
         raise SetupError("Setup entrypoints must name supported platforms only.")

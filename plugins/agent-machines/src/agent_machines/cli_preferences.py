@@ -1,4 +1,4 @@
-"""Explicit local preference exchange; no carrier enrollment or native apply."""
+"""Explicit local preference exchange and separately confirmed scalar floors."""
 
 from __future__ import annotations
 
@@ -40,6 +40,20 @@ def add_parser(subparsers) -> None:
         else:
             parser.add_argument("--output", type=Path, required=True, help="exact local publication document")
         parser.set_defaults(func=run_exchange)
+    parser = commands.add_parser("copilot", help="preview or adopt accepted Copilot scalar floors")
+    parser.add_argument("--state-dir", type=Path, required=True, help="local accepted state and policy")
+    parser.add_argument("--local-overrides", type=Path)
+    parser.add_argument("--apply", action="store_true", help="apply only model/reasoning floors through the native owner")
+    parser.add_argument("--expect", default="", help="token from the current native preview")
+    parser.set_defaults(func=run_copilot)
+    parser = commands.add_parser("telemetry", help="preview or adopt accepted retained-telemetry defaults")
+    parser.add_argument("--state-dir", type=Path, required=True)
+    parser.add_argument("--local-overrides", type=Path)
+    parser.add_argument("--producer", choices=("agent-bridge", "agent-dispatch"), required=True)
+    parser.add_argument("--directory", type=Path, required=True, help="explicit preprovisioned local namespace")
+    parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--expect", default="")
+    parser.set_defaults(func=run_telemetry)
 
 
 def run_preview(args) -> int:
@@ -80,4 +94,53 @@ def run_exchange(args) -> int:
     except (preferences.PreferenceError, OSError, TimeoutError) as error:
         reason = str(error) if isinstance(error, preferences.PreferenceError) else "exchange-unavailable"
         print(json.dumps({"ok": False, "error": reason}), file=sys.stderr)
+        return 2
+
+
+def run_copilot(args) -> int:
+    from configuration_layers import ConfigurationError
+    from ._peer_launch import ContextRefused
+    from .manifest import ManifestError
+    from .preference_copilot import adopt
+    from .surfaces._common import SurfaceStateError
+
+    try:
+        result = adopt(
+            args.state_dir, local=args.local_overrides, apply=args.apply, expected=args.expect,
+        )
+        print(json.dumps(result, separators=(",", ":"), allow_nan=False))
+        return 0
+    except (
+        preferences.PreferenceError, ConfigurationError, ContextRefused,
+        ManifestError, SurfaceStateError, OSError,
+    ) as error:
+        reason = str(error) if isinstance(error, preferences.PreferenceError) else "native-configuration-unavailable"
+        print(json.dumps({"ok": False, "error": reason}), file=sys.stderr)
+        return 2
+
+
+def run_telemetry(args) -> int:
+    import subprocess
+    from configuration_layers import ConfigurationError
+    from ._peer_launch import ContextRefused
+    from .preference_telemetry import adopt
+
+    try:
+        result = adopt(
+            args.state_dir, producer=args.producer, directory=args.directory,
+            local=args.local_overrides, apply=args.apply, expected=args.expect,
+        )
+        print(json.dumps(result, separators=(",", ":"), allow_nan=False))
+        if result["status"] in {"error", "unknown"} or result.get("native", {}).get("status") == "error":
+            return 2
+        return 0 if result["eligible"] else 1
+    except (
+        preferences.PreferenceError, ConfigurationError, ContextRefused,
+        OSError, RuntimeError, subprocess.SubprocessError,
+    ) as error:
+        reason = str(error) if isinstance(error, preferences.PreferenceError) else "native-configuration-unavailable"
+        print(json.dumps({
+            "ok": False, "error": reason, "configuration_applied": None if args.apply else False,
+            "activation": "not-requested",
+        }), file=sys.stderr)
         return 2

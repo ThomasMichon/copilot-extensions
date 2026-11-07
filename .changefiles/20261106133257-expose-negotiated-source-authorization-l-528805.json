@@ -1,0 +1,9 @@
+{
+  "comment": "Expose negotiated source-authorization leases through the fixed account HTTP facade without changing token-only callers",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

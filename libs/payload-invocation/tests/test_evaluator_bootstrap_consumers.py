@@ -1,5 +1,7 @@
 """Native PATH evaluator consumers, SDK contracts and finite cleanup."""
 from __future__ import annotations
+from collections.abc import Callable
+from typing import Any, cast
 
 import json
 import os
@@ -21,20 +23,20 @@ base_binding_fixture = test_command_binding.binding_fixture
 
 
 @pytest.fixture(params=PLUGINS)
-def binding_fixture(base_binding_fixture, request):
+def binding_fixture(base_binding_fixture: dict[str, Any], request: pytest.FixtureRequest) -> dict[str, Any]:
     base_binding_fixture["consumer"] = request.param
     return base_binding_fixture
 
 
 @pytest.fixture(params=("powershell", "pwsh"))
-def host(request):
+def host(request: pytest.FixtureRequest) -> str:
     executable = shutil.which(request.param)
     if not executable:
         pytest.skip(f"{request.param} is unavailable")
-    return executable
+    return cast(str, executable)
 
 
-def _fixture(fixture, *, route="selected", namespaced=False):
+def _fixture(fixture: dict[str, Any], *, route: str = "selected", namespaced: bool = False) -> dict[str, str]:
     plugin = fixture["consumer"]
     prefix = plugin.upper().replace("-", "_")
     environment = _adopter(fixture, plugin)
@@ -118,19 +120,19 @@ def _fixture(fixture, *, route="selected", namespaced=False):
     return environment
 
 
-def _run(fixture, environment, host, *arguments):
+def _run(fixture: dict[str, Any], environment: dict[str, str], host: str, *arguments: str) -> tuple[subprocess.CompletedProcess[str], list[dict[str, Any]]]:
     result = subprocess.run(
         [host, "-NoProfile", "-NonInteractive", "-File",
          str(fixture["payload"] / "scripts/runtime-gate.ps1"), *arguments],
         env=environment, cwd=fixture["home"], capture_output=True, text=True,
-        encoding="utf-8", timeout=30, creationflags=subprocess.CREATE_NO_WINDOW,
+        encoding="utf-8", timeout=30, creationflags=cast(Any, subprocess).CREATE_NO_WINDOW,
     )
     log = Path(environment["TEST_READ_LOG"])
     reads = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
     return result, reads
 
 
-def _refusal_snapshot(home):
+def _refusal_snapshot(home: Path) -> dict[str, tuple[bool, int, bytes | None]]:
     snapshot = _snapshot(home)
     # Empty Desktop and Core hosts each rewrite their own CLR startup profile.
     for directory in ("Windows/PowerShell", "PowerShell"):
@@ -147,7 +149,7 @@ def _refusal_snapshot(home):
     pytest.param("product-state", "PowerShell", id="core-product-state"),
     pytest.param("unexpected-write", "PowerShell", id="core-unexpected-write"),
 ))
-def test_refusal_snapshot_preserves_every_other_home_entry(tmp_path, change, profile_directory):
+def test_refusal_snapshot_preserves_every_other_home_entry(tmp_path: Path, change: str, profile_directory: str) -> None:
     profile = tmp_path / f"AppData/Local/Microsoft/{profile_directory}/StartupProfileData-NonInteractive"
     profile.parent.mkdir(parents=True)
     profile.write_bytes(b"first runtime profile")
@@ -166,8 +168,8 @@ def test_refusal_snapshot_preserves_every_other_home_entry(tmp_path, change, pro
 
 @pytest.mark.parametrize("namespaced", (False, True))
 def test_selected_evaluator_is_fresh_isolated_and_releases_before_runtime(
-    binding_fixture, host, namespaced,
-):
+    binding_fixture: dict[str, Any], host: str, namespaced: bool,
+) -> None:
     binding_fixture["payload"] = (
         binding_fixture["payload"].parent / "publisher's \u00e9\u6d4b\u8bd5" / "agent-worktrees"
     )
@@ -217,7 +219,7 @@ def test_selected_evaluator_is_fresh_isolated_and_releases_before_runtime(
 
 
 @pytest.mark.parametrize("route", ("unavailable", "missing", "missing-sdk"))
-def test_missing_prerequisites_refuse_without_any_evaluator(binding_fixture, host, route):
+def test_missing_prerequisites_refuse_without_any_evaluator(binding_fixture: dict[str, Any], host: str, route: str) -> None:
     environment = _fixture(binding_fixture, route=route)
     if route == "missing":
         (binding_fixture["payload"] / "scripts/bootstrap-python.ps1").unlink()
@@ -236,7 +238,7 @@ def test_missing_prerequisites_refuse_without_any_evaluator(binding_fixture, hos
         assert not Path(environment["TEST_EXCLUDED"]).exists()
 
 
-def test_native_path_semantics_still_require_the_python_prerequisite(binding_fixture, host):
+def test_native_path_semantics_still_require_the_python_prerequisite(binding_fixture: dict[str, Any], host: str) -> None:
     environment = _fixture(binding_fixture, route="native-path")
     environment[binding_fixture["consumer"].upper().replace("-", "_") + "_HOME"] = (
         r"%USERPROFILE%\." + binding_fixture["consumer"]
@@ -253,18 +255,18 @@ def test_native_path_semantics_still_require_the_python_prerequisite(binding_fix
     assert "Python 3.10+ must be available as python on PATH" in result.stderr
 
 
-def test_path_lookup_does_not_normalize_or_filter_relative_sdk_arguments(binding_fixture, host):
+def test_path_lookup_does_not_normalize_or_filter_relative_sdk_arguments(binding_fixture: dict[str, Any], host: str) -> None:
     environment = _fixture(binding_fixture)
     environment[binding_fixture["consumer"].upper().replace("-", "_") + "_HOME"] = r".\relative runtime"
     script = binding_fixture["payload"] / "scripts/runtime-gate.ps1"
-    quote = lambda value: "'" + str(value).replace("'", "''") + "'"
+    quote: Callable[[object], str] = lambda value: "'" + str(value).replace("'", "''") + "'"
     result = subprocess.run(
         [host, "-NoProfile", "-NonInteractive", "-Command",
          f"[IO.Directory]::SetCurrentDirectory({quote(binding_fixture['home'].parent)}); "
          f"Set-Location -LiteralPath {quote(binding_fixture['home'])}; "
          f"& {quote(script)}; exit $LASTEXITCODE"],
         env=environment, cwd=binding_fixture["home"], capture_output=True,
-        text=True, encoding="utf-8", timeout=30, creationflags=subprocess.CREATE_NO_WINDOW,
+        text=True, encoding="utf-8", timeout=30, creationflags=cast(Any, subprocess).CREATE_NO_WINDOW,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(Path(environment["TEST_EXCLUDED"]).read_text()) == []
@@ -273,18 +275,18 @@ def test_path_lookup_does_not_normalize_or_filter_relative_sdk_arguments(binding
 
 
 @pytest.mark.parametrize("namespaced", (False, True))
-def test_absent_userprofile_preserves_powershell_home_fallback(binding_fixture, host, namespaced):
+def test_absent_userprofile_preserves_powershell_home_fallback(binding_fixture: dict[str, Any], host: str, namespaced: bool) -> None:
     environment = _fixture(binding_fixture, namespaced=namespaced)
     environment.pop("USERPROFILE", None)
     environment["TEST_FALLBACK_HOME"] = str(binding_fixture["home"])
     script = binding_fixture["payload"] / "scripts/runtime-gate.ps1"
-    quote = lambda value: "'" + str(value).replace("'", "''") + "'"
+    quote: Callable[[object], str] = lambda value: "'" + str(value).replace("'", "''") + "'"
     result = subprocess.run(
         [host, "-NoProfile", "-NonInteractive", "-Command",
          "Set-Variable -Name HOME -Value $env:TEST_FALLBACK_HOME -Force; "
          f"& {quote(script)} version; exit $LASTEXITCODE"],
         env=environment, cwd=binding_fixture["home"], capture_output=True,
-        text=True, encoding="utf-8", timeout=30, creationflags=subprocess.CREATE_NO_WINDOW,
+        text=True, encoding="utf-8", timeout=30, creationflags=cast(Any, subprocess).CREATE_NO_WINDOW,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout) == ["version"]
@@ -304,22 +306,22 @@ def test_absent_userprofile_preserves_powershell_home_fallback(binding_fixture, 
     [], [""], ["version"],
     ["prune", "--max", 5, 'echo "quoted & pipes | ; !" \u00e9\u6d4b\u8bd5', "C:\\space path\\"],
 ))
-def test_native_argument_modes_preserve_empty_numeric_and_quoted_arguments(binding_fixture, host, forwarded):
+def test_native_argument_modes_preserve_empty_numeric_and_quoted_arguments(binding_fixture: dict[str, Any], host: str, forwarded: list[str]) -> None:
     environment = _fixture(binding_fixture)
-    quote = lambda value: "'" + str(value).replace("'", "''") + "'"
+    quote: Callable[[object], str] = lambda value: "'" + str(value).replace("'", "''") + "'"
     values = "@(" + ", ".join(str(value) if isinstance(value, int) else quote(value) for value in forwarded) + ")"
     script = binding_fixture["payload"] / "scripts/runtime-gate.ps1"
     result = subprocess.run(
         [host, "-NoProfile", "-NonInteractive", "-Command",
          f"$forwarded={values}; & {quote(script)} @forwarded; exit $LASTEXITCODE"],
         env=environment, cwd=binding_fixture["home"], capture_output=True,
-        text=True, encoding="utf-8", timeout=30, creationflags=subprocess.CREATE_NO_WINDOW,
+        text=True, encoding="utf-8", timeout=30, creationflags=cast(Any, subprocess).CREATE_NO_WINDOW,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout) == [str(value) for value in forwarded]
 
 
-def test_containers_keeps_the_validated_runtime_root_check(base_binding_fixture, host):
+def test_containers_keeps_the_validated_runtime_root_check(base_binding_fixture: dict[str, Any], host: str) -> None:
     fixture = {**base_binding_fixture, "consumer": "agent-containers"}
     environment = _fixture(fixture, namespaced=True)
     environment["TEST_VALIDATION"] = json.dumps({
@@ -337,8 +339,8 @@ def test_containers_keeps_the_validated_runtime_root_check(base_binding_fixture,
     "validate-exit", "validate-malformed", "generation",
 ))
 def test_post_selection_failures_are_terminal_and_cleanup_is_owned(
-    binding_fixture, host, failure,
-):
+    binding_fixture: dict[str, Any], host: str, failure: str,
+) -> None:
     environment = _fixture(binding_fixture, namespaced=failure.startswith("validate") or failure == "generation")
     if failure == "selector":
         environment["TEST_ROUTE"] = "error"
@@ -388,7 +390,7 @@ def test_post_selection_failures_are_terminal_and_cleanup_is_owned(
 
 
 @pytest.mark.parametrize("plugin", PLUGINS)
-def test_actual_sdk_is_payload_local(plugin) -> None:
+def test_actual_sdk_is_payload_local(plugin: str) -> None:
     gate = (ROOT / "plugins" / plugin / "scripts/runtime-gate.ps1").read_text()
     assert "'installation-context\\installation_context.py'" in gate
     assert "& $bootstrap.Python -I -S -B -X utf8 $portableModeRunner" in gate
@@ -399,7 +401,7 @@ def test_actual_sdk_is_payload_local(plugin) -> None:
     "legacy", "namespaced", "deactivation", "foreign-source", "stale-context", "invalid-policy",
     "legacy-unequal-home", "namespaced-unequal-home",
 ))
-def test_actual_sdk_routes_preserve_complete_status_and_refusals(binding_fixture, host, state):
+def test_actual_sdk_routes_preserve_complete_status_and_refusals(binding_fixture: dict[str, Any], host: str, state: str) -> None:
     environment = _fixture(binding_fixture)
     if state.endswith("-unequal-home"):
         environment["HOME"] = str(binding_fixture["home"] / "different-home")
@@ -482,7 +484,7 @@ def test_actual_sdk_routes_preserve_complete_status_and_refusals(binding_fixture
 
 
 @pytest.mark.portfolio_tier("T3")
-def test_real_path_python_runs_actual_sdk_without_attestation_or_guard(binding_fixture, host):
+def test_real_path_python_runs_actual_sdk_without_attestation_or_guard(binding_fixture: dict[str, Any], host: str) -> None:
     environment = _fixture(binding_fixture)
     plugin = binding_fixture["consumer"]
     scripts = binding_fixture["payload"] / "scripts"

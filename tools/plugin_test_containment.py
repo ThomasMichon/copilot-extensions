@@ -54,8 +54,8 @@ sys.path.insert(
     0, str(Path(__file__).resolve().parents[1] / "libs" / "agent-procutil" / "src")
 )
 try:
-    from agent_procutil import no_window_kwargs
-    from agent_procutil.daemon_instances import DaemonLeasePolicy, daemon_test_lifecycle
+    from agent_procutil import JobHandle, no_window_kwargs
+    from agent_procutil.daemon_instances import DaemonLeasePolicy, daemon_test_lifecycle as daemon_test_lifecycle
 finally:
     sys.path[:] = _previous_path
 
@@ -91,6 +91,10 @@ class ContainmentError(RuntimeError):
 
 class UnreapedProcessError(ContainmentError):
     """Owned processes may still hold the sandbox; cleanup is unsafe."""
+
+    def __init__(self, message: str, *, job: JobHandle | None = None):
+        super().__init__(message)
+        self.job = job
 
 
 class TestSandbox(NativeTemporaryDirectory):
@@ -360,10 +364,10 @@ def _terminate_posix_group(pgid: int, identity: tuple[int, int]) -> None:
         raise UnreapedProcessError("POSIX process group remains live after SIGKILL")
 
 
-def _windows_last_error() -> int:
-    import ctypes
+def _retire_windows_job(owner: JobHandle, timeout: float) -> None:
+    from agent_procutil._windows_caller_owned import _retire_job
 
-    return ctypes.get_last_error()
+    _retire_job(owner, timeout)
 
 
 class _WindowsJob:
@@ -371,14 +375,16 @@ class _WindowsJob:
 
     _JOB_OBJECT_LIMIT_ACTIVE_PROCESS = 0x00000008
     _JOB_OBJECT_LIMIT_JOB_MEMORY = 0x00000200
+    _JOB_OBJECT_LIMIT_BREAKAWAY_OK = 0x00000800
     _JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
     _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
     _PROCESS_SET_QUOTA = 0x0100
     _PROCESS_TERMINATE = 0x0001
 
-    def __init__(self, limits: Limits) -> None:
+    def __init__(self, limits: Limits, *, native_application: bool = False) -> None:
         import ctypes
         from ctypes import wintypes
+        from agent_procutil import _JobBasicAccountingInformation
 
         class _BasicLimit(ctypes.Structure):
             _fields_ = [
@@ -411,18 +417,6 @@ class _WindowsJob:
                 ("JobMemoryLimit", ctypes.c_size_t),
                 ("PeakProcessMemoryUsed", ctypes.c_size_t),
                 ("PeakJobMemoryUsed", ctypes.c_size_t),
-            ]
-
-        class _BasicAccounting(ctypes.Structure):
-            _fields_ = [
-                ("TotalUserTime", wintypes.LARGE_INTEGER),
-                ("TotalKernelTime", wintypes.LARGE_INTEGER),
-                ("ThisPeriodTotalUserTime", wintypes.LARGE_INTEGER),
-                ("ThisPeriodTotalKernelTime", wintypes.LARGE_INTEGER),
-                ("TotalPageFaultCount", wintypes.DWORD),
-                ("TotalProcesses", wintypes.DWORD),
-                ("ActiveProcesses", wintypes.DWORD),
-                ("TotalTerminatedProcesses", wintypes.DWORD),
             ]
 
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -458,6 +452,8 @@ class _WindowsJob:
             | self._JOB_OBJECT_LIMIT_JOB_MEMORY
             | self._JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
         )
+        if native_application:
+            extended.BasicLimitInformation.LimitFlags |= self._JOB_OBJECT_LIMIT_BREAKAWAY_OK
         emergency_processes = max(
             limits.max_processes * 2, limits.max_processes + 16
         )
@@ -479,7 +475,7 @@ class _WindowsJob:
             )
         self._kernel32 = kernel32
         self._handle = job
-        self._BasicAccounting = _BasicAccounting
+        self._BasicAccounting = _JobBasicAccountingInformation
         self._ExtendedLimit = _ExtendedLimit
 
     def assign(self, pid: int) -> None:
@@ -502,42 +498,48 @@ class _WindowsJob:
             self._kernel32.CloseHandle(process)
 
     def close(self, *, qualification: Qualification | None = None) -> None:
-        if self._handle:
+        owner = getattr(self, "_retirement_owner", None)
+        if owner is None:
+            if not self._handle:
+                return
+            owner = self._retirement_owner = JobHandle(self._handle)
+        elif not owner.handle and not getattr(owner, "_native_retirement", None):
+            return
+        deadline = (
+            min(time.monotonic() + 5.0, qualification.boundary.whole_deadline)
+            if qualification is not None else time.monotonic() + 5.0
+        )
+        accounting_error = None
+        try:
             try:
-                if self.active_processes():
-                    if qualification is not None:
-                        qualification.forced_termination = True
-                    if not self._kernel32.TerminateJobObject(self._handle, 124):
-                        raise UnreapedProcessError(
-                            "TerminateJobObject failed with error "
-                            f"{_windows_last_error()}"
-                        )
-                    deadline = (
-                        min(time.monotonic() + 5.0, qualification.boundary.whole_deadline)
-                        if qualification is not None else time.monotonic() + 5.0
-                    )
-                    while self.active_processes():
-                        if time.monotonic() >= deadline:
-                            raise UnreapedProcessError(
-                                "Windows Job Object still has active processes after termination"
-                            )
-                        time.sleep(0.01)
+                if qualification is not None and self._handle and self.active_processes():
+                    qualification.forced_termination = True
+            except (Exception, KeyboardInterrupt) as error:
+                accounting_error = error
+                qualification.forced_termination = True
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
                 if qualification is not None:
-                    qualification.boundary.require(time.monotonic)
-                    qualification.job_zero_observed = True
-            except (ContainmentError, KeyboardInterrupt, OSError) as exc:
-                if isinstance(exc, UnreapedProcessError):
-                    raise
-                raise UnreapedProcessError(
-                    f"Windows Job Object termination could not be verified: {exc}"
-                ) from exc
-            finally:
-                closed = self._kernel32.CloseHandle(self._handle)
-                self._handle = None
-                if qualification is not None:
-                    qualification.job_handle_closed = bool(closed)
-                    if not closed:
-                        raise UnreapedProcessError("Original Windows Job handle could not be closed")
+                    qualification.forced_termination = True
+                handle = owner.handle or getattr(getattr(owner, "_native_retirement", None), "duplicate", None)
+                if not handle or not self._kernel32.TerminateJobObject(handle, 124):
+                    raise OSError("Owned Windows Job termination request could not be issued")
+                raise TimeoutError("Windows Job native retirement budget expired")
+            _retire_windows_job(owner, remaining)
+            if owner.handle or getattr(owner, "_native_retirement", None):
+                raise OSError("Windows Job native retirement retained unconfirmed witnesses")
+            if accounting_error is not None:
+                raise OSError("Preliminary Windows Job accounting was unavailable") from accounting_error
+        except (Exception, KeyboardInterrupt) as exc:
+            raise UnreapedProcessError(
+                f"Windows Job native member exit could not be verified: {exc}", job=owner,
+            ) from exc
+        finally:
+            self._handle = owner.handle
+        if qualification is not None:
+            qualification.boundary.require(time.monotonic)
+            qualification.job_zero_observed = True
+            qualification.job_handle_closed = True
 
     def active_processes(self) -> int:
         import ctypes
@@ -719,6 +721,7 @@ def _run_contained_process(
     sandbox: Path,
     limits: Limits,
     qualification: Qualification | None = None,
+    native_application: bool = False,
 ) -> int:
     """Run ``command`` in an owned process tree and return its exit code."""
     limits.validate()
@@ -782,7 +785,10 @@ def _run_contained_process(
             qualification.capture.start((proc.stdout, proc.stderr))
         if os.name == "nt":
             try:
-                job = _WindowsJob(limits)
+                job = (
+                    _WindowsJob(limits, native_application=True)
+                    if native_application else _WindowsJob(limits)
+                )
                 job.assign(proc.pid)
             except BaseException:
                 try:
@@ -915,70 +921,18 @@ def run_contained(
     daemon_purpose: str = "unattended-test",
     daemon_lease: DaemonLeasePolicy | None = None,
     qualification: Qualification | None = None,
+    native_application: bool = False,
 ) -> int:
     """Run an owned test tree; interactive tests require an explicit lease policy."""
-    lifecycle_results: list[Any] = []
-    if qualification is not None:
-        if os.name != "nt":
-            raise QualificationError("Absolute native qualification requires the original Windows Job owner.")
-        if limits != Limits(wall_seconds=WORK_SECONDS):
-            raise QualificationError("Native qualification must preserve the original process, memory and poll limits.")
-        qualification.validate(sandbox, time.monotonic)
-    environment_snapshot = _read_registry_environment()
-    if qualification is not None:
-        qualification.boundary.require(time.monotonic, work=True)
-    unreaped = None
-    try:
-        with daemon_test_lifecycle(
-            owner=f"contained-test-runner:{os.getpid()}",
-            registry_root=sandbox.resolve() / "daemon-instances",
-            purpose=daemon_purpose,
-            lease=daemon_lease,
-            **(
-                {"deadline": qualification.boundary.whole_deadline, "cleanup_results": lifecycle_results}
-                if qualification is not None else {}
-            ),
-        ) as daemon_environment:
-            result = _run_contained_process(
-                command,
-                cwd=cwd,
-                env={**env, **daemon_environment},
-                sandbox=sandbox,
-                limits=limits,
-                **({"qualification": qualification} if qualification is not None else {}),
-            )
-        if qualification is not None:
-            qualification.boundary.require(time.monotonic)
-            qualification.lifecycle_settled = all(
-                outcome.status in ("settled", "missing") for outcome in lifecycle_results
-            )
-    except UnreapedProcessError as exc:
-        unreaped = exc
-        raise
-    finally:
-        try:
-            if qualification is not None:
-                qualification.boundary.require(time.monotonic)
-            changed = _registry_environment_drift(environment_snapshot)
-            if changed:
-                print(
-                    "[HOST-STATE] contained test changed persistent Windows "
-                    f"environment state; detected without rollback: {', '.join(changed)}",
-                    file=sys.stderr,
-                )
-        except BaseException as audit_error:
-            if unreaped is None:
-                raise
-            raise UnreapedProcessError(
-                f"{unreaped}; environment audit also failed: "
-                f"{type(audit_error).__name__}: {audit_error}"
-            ) from unreaped
-    if changed:
-        return 125
-    if qualification is not None:
-        qualification.registry_unchanged = True
-        qualification.require_settled(time.monotonic)
-    return result
+    if __package__:
+        from .plugin_test_lifecycle import run_contained as run
+    else:
+        from plugin_test_lifecycle import run_contained as run
+    return run(
+        sys.modules[__name__], command, cwd=cwd, env=env, sandbox=sandbox, limits=limits,
+        daemon_purpose=daemon_purpose, daemon_lease=daemon_lease,
+        qualification=qualification, native_application=native_application,
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:

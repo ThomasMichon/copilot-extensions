@@ -78,6 +78,51 @@ def test_explicit_activation_is_required_and_not_sticky():
         labels.activate(conf, "control-plane")
 
 
+@pytest.mark.parametrize("caller_origin", [None, "conflicting"])
+def test_explicit_target_origin_drives_metadata_without_changing_caller(
+    monkeypatch, caller_origin,
+):
+    from agent_worktrees import pr_metadata
+
+    caller = config()
+    caller = replace(caller, repos={caller.repo_name: replace(
+        caller.default_repo, pr=replace(
+            caller.default_repo.pr, publication_origin=(
+                labels.PublicationOrigin("control-plane", ("source:caller",)) if caller_origin else None
+            ),
+        ),
+    )})
+    target = replace(caller.default_repo, pr=replace(
+        caller.default_repo.pr, publication_origin=labels.parse_origin(ORIGIN),
+    ))
+    scoped = replace(caller, explicit_pr_target=target)
+    active = labels.activate(scoped, "control-plane")
+    assert active.repo_name == caller.repo_name and active.default_repo == caller.default_repo
+    assert labels.selected_for_config(active) == labels.parse_origin(ORIGIN)
+    assert labels.selected_for_config(labels.activate(active, None)) is None
+    backend = Backend()
+
+    def update(repo, number, *, origin, **kwargs):
+        return labels.reconcile(backend, repo, number, origin)
+
+    backend.update_pull_metadata = update
+    monkeypatch.setattr(providers, "get_provider", lambda *_: backend)
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *_: None)
+    result = pr_metadata.update_metadata(
+        scoped, "base/project", 7, publication_origin="control-plane",
+    )
+    assert result["ok"] and backend.labels == ["unrelated", "source:control-plane"]
+
+
+def test_explicit_target_controls_reserved_origin_labels():
+    caller = config()
+    target = replace(caller.default_repo, pr=replace(
+        caller.default_repo.pr, automerge_label="source:control-plane",
+    ))
+    with pytest.raises(ValueError, match="merge-consent"):
+        labels.activate(replace(caller, explicit_pr_target=target), "control-plane")
+
+
 @pytest.mark.parametrize("requested", [
     ["source:control-plane"],
     ["source:control-plane", "secondary", "source:control-plane"],

@@ -149,7 +149,8 @@ def boundary(monkeypatch: pytest.MonkeyPatch, source_code) -> ResumeBoundary:
     monkeypatch.setattr(resume, "find_singleton_repo", unavailable)
     discovered: list[bool] = []
 
-    def get_client() -> Any:
+    def get_client(**kwargs: Any) -> Any:
+        assert not kwargs or kwargs == {"ensure": False}
         discovered.append(True)
         return client
 
@@ -160,6 +161,7 @@ def boundary(monkeypatch: pytest.MonkeyPatch, source_code) -> ResumeBoundary:
         _match_agents=unavailable,
         _startup_request_timeout=lambda **kwargs: 17.0,
         _add_stream_args=lambda parser: None,
+        _cmd_session_status=service._cmd_session_status,
     )
     monkeypatch.setattr(package, "__main__", core, raising=False)
     return ResumeBoundary(
@@ -418,7 +420,15 @@ def test_executing_cli_disclosure_matches_actual_parser(
     assert json.loads(capsys.readouterr().out) == {
         "schema": "agent-bridge.cli-contracts", "version": 1,
         "contracts": {
-            "agent-bridge.resume": {"version": 1, "capabilities": ["exact-worktree-target"]},
+            "agent-bridge.create": {
+                "version": 1, "capabilities": ["keyed-worktree-writer"],
+            },
+            "agent-bridge.status": {
+                "version": 1, "capabilities": ["health-json", "exact-session-worktree-writer"],
+            },
+            "agent-bridge.resume": {
+                "version": 1, "capabilities": ["exact-worktree-target", "keyed-worktree-writer"],
+            },
             "bridge-session-current-requests-v1": {
                 "version": 1, "capabilities": ["observe-session-current-requests"],
             },
@@ -431,6 +441,101 @@ def test_executing_cli_disclosure_matches_actual_parser(
     assert boundary.discovered == []
     boundary.invoke("--json", "resume", "--worktree-id", "worktree-123")
     assert json.loads(capsys.readouterr().out)["worktree_id"] == "worktree-123"
+
+
+@pytest.mark.parametrize("ready", [True, False], ids=["ready", "unready"])
+def test_health_json_preserves_actual_response_without_ensuring(
+    boundary: ResumeBoundary, capsys: Any, ready: bool,
+) -> None:
+    boundary.health.update(
+        ready=ready, draining=not ready,
+        worktree_record_writer={"runtime_generation": "original-build"},
+        future_metadata={"opaque": [None, False, 0]},
+    )
+    boundary.invoke("--json", "status")
+    assert json.loads(capsys.readouterr().out) == boundary.health
+    assert boundary.calls == [("GET", "/health", {})]
+    assert boundary.discovered == [True]
+
+
+def test_human_health_output_keeps_legacy_format(boundary: ResumeBoundary, capsys: Any) -> None:
+    boundary.invoke("status")
+    assert capsys.readouterr().out == (
+        "[OK] agent-bridge is running -- agent-bridge (http://example.invalid)\n"
+    )
+    assert boundary.calls == [("GET", "/health", {})]
+
+
+def test_health_json_keeps_legacy_provider_support_unknown(
+    boundary: ResumeBoundary, capsys: Any,
+) -> None:
+    boundary.health.clear()
+    boundary.health["service"] = "legacy"
+    boundary.invoke("--json", "status")
+    assert json.loads(capsys.readouterr().out) == {"service": "legacy"}
+    assert boundary.calls == [("GET", "/health", {})]
+
+
+def test_health_json_failure_emits_no_success_document(
+    boundary: ResumeBoundary, monkeypatch: pytest.MonkeyPatch, capsys: Any,
+) -> None:
+    monkeypatch.setattr(
+        boundary.client, "health",
+        lambda: (_ for _ in ()).throw(boundary.errors.BridgeClientError(503, "draining")),
+    )
+    with pytest.raises(SystemExit) as raised:
+        boundary.invoke("--json", "status")
+    captured = capsys.readouterr()
+    assert raised.value.code == 1 and not captured.out and "draining" in captured.err
+    assert boundary.calls == []
+
+
+@pytest.mark.parametrize("argv", [
+    ["status", "--worktree-writer"],
+    ["status", "owned-123", "--worktree-writer"],
+    ["status", "--full", "--worktree-writer"],
+], ids=["no-session", "compact", "no-session-full"])
+def test_writer_status_rejects_incomplete_form_before_discovery(
+    boundary: ResumeBoundary, capsys: Any, argv: list[str],
+) -> None:
+    with pytest.raises(SystemExit) as raised:
+        boundary.invoke(*argv)
+    assert raised.value.code == 2 and "--full" in capsys.readouterr().err
+    assert not boundary.discovered and not boundary.calls
+
+
+def test_full_session_read_keeps_unpinned_legacy_transport(
+    boundary: ResumeBoundary, capsys: Any,
+) -> None:
+    boundary.invoke("status", "owned-123", "--full")
+    assert json.loads(capsys.readouterr().out) == boundary.response
+    assert boundary.calls == [("GET", "/api/v1/sessions/owned-123", {})]
+
+
+def test_required_writer_status_forwards_exact_optional_read(
+    boundary: ResumeBoundary, monkeypatch: pytest.MonkeyPatch, capsys: Any,
+) -> None:
+    reads = []
+    result = {**boundary.response, "worktree_writer_observation": {"original": True}}
+
+    def get_session(session_id: str, *, worktree_writer: bool = False) -> dict:
+        reads.append((session_id, worktree_writer))
+        return result
+
+    monkeypatch.setattr(boundary.client, "get_session", get_session)
+    boundary.invoke("status", "owned-123", "--full", "--worktree-writer")
+    assert json.loads(capsys.readouterr().out) == result
+    assert reads == [("owned-123", True)]
+    assert boundary.calls == []
+
+
+def test_writer_status_keeps_unknown_argument_rejection(
+    boundary: ResumeBoundary, capsys: Any,
+) -> None:
+    with pytest.raises(SystemExit) as raised:
+        boundary.invoke("status", "owned-123", "--full", "--worktree-writr")
+    assert raised.value.code == 2 and "unrecognized arguments" in capsys.readouterr().err
+    assert boundary.calls == [] and boundary.discovered == []
 
 
 @pytest.mark.parametrize("result", [None, [], "invalid", 1], ids=["empty", "list", "text", "number"])

@@ -10,6 +10,7 @@ agent-codespaces and are covered there.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import socket
@@ -1264,12 +1265,6 @@ async def test_endpoint_serving_probe_transport_error_is_healthy(monkeypatch):
     assert await probe() is True
 
 
-@pytest.mark.skipif(
-    shutil.which("bash") is None or sys.platform == "win32",
-    reason="requires a native POSIX bash sharing the test process's network "
-           "namespace (a Windows bash.exe wrapper delegates to WSL, which "
-           "cannot reach a socket bound by this process)",
-)
 def test_relay_ping_probe_command_round_trips_against_real_listener():
     """End-to-end proof (real bash, no fakes) that the probe script only
     passes when the far side actually speaks the relay protocol -- a bare
@@ -1279,40 +1274,77 @@ def test_relay_ping_probe_command_round_trips_against_real_listener():
     """
     from agent_bridge.session_host.endpoints import build_relay_ping_probe_command
 
+    environment = os.environ.copy()
+    bash = shutil.which("bash")
+    if sys.platform == "win32":
+        git = shutil.which("git")
+        if not git:
+            pytest.skip("requires native Git Bash on Windows")
+        root = Path(git).resolve().parent.parent
+        native_bash = root / "bin" / "bash.exe"
+        if not native_bash.is_file():
+            pytest.skip("requires native Git Bash on Windows")
+        bash = str(native_bash)
+        environment["PATH"] = os.pathsep.join(
+            [str(root / "usr" / "bin"), str(root / "bin"), environment.get("PATH", "")]
+        )
+    if not bash:
+        pytest.skip("requires native Bash sharing this process's network namespace")
+
     def _run_probe(port: int) -> subprocess.CompletedProcess:
         command = build_relay_ping_probe_command(port)
         return subprocess.run(
-            ["bash", "-lc", command],
-            capture_output=True, text=True, timeout=10,
+            [bash, "--noprofile", "--norc", "-c", command],
+            capture_output=True, text=True, timeout=10, env=environment,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
 
-    def _probe_listener(*, reply: bool) -> subprocess.CompletedProcess:
+    def _probe_listener(reply: bytes | None) -> subprocess.CompletedProcess:
         with socket.create_server(("127.0.0.1", 0)) as srv:
             srv.settimeout(5)
+            requests = []
+            finished = threading.Event()
 
             def serve() -> None:
                 conn, _ = srv.accept()
                 with conn:
                     conn.settimeout(5)
-                    conn.recv(4096)
-                    if reply:
-                        conn.sendall(b"pong\n\n")
+                    request = b""
+                    while len(request) < 6:
+                        chunk = conn.recv(6 - len(request))
+                        if not chunk:
+                            break
+                        request += chunk
+                    requests.append(request)
+                    if reply is not None:
+                        conn.sendall(reply)
+                    else:
+                        finished.wait(4)
 
             thread = threading.Thread(target=serve)
             thread.start()
             try:
                 return _run_probe(srv.getsockname()[1])
             finally:
+                finished.set()
                 thread.join(timeout=5)
                 assert not thread.is_alive()
+                assert requests == [b"ping\n\n"]
 
-    live_result = _probe_listener(reply=True)
+    live_result = _probe_listener(b"pong\n\n")
     assert live_result.returncode == 0
-    assert "OK" in live_result.stdout
+    assert live_result.stdout.strip() == "OK"
 
-    stale_result = _probe_listener(reply=False)
-    assert stale_result.returncode != 0
-    assert "OK" not in stale_result.stdout
+    for reply in [None, b"not-a-relay\n\n"]:
+        stale_result = _probe_listener(reply)
+        assert stale_result.returncode != 0
+        assert "OK" not in stale_result.stdout
+
+    with socket.socket() as absent:
+        absent.bind(("127.0.0.1", 0))
+        missing_result = _run_probe(absent.getsockname()[1])
+        assert missing_result.returncode != 0
+        assert "OK" not in missing_result.stdout
 
 
 # -- dispatch-path auth-helper (re)deploy (dotfiles #733 T2) ---------------

@@ -58,10 +58,12 @@ def test_offline_scenarios_have_distinct_evidence_and_explicit_modes() -> None:
     ids = [case["id"] for case in cases]
     assert cases and len(ids) == len(set(ids))
     for case in cases:
-        assert case["mode"] in {"read-only", "steering-authorized"}
+        assert case["mode"] in {
+            "read-only", "steering-authorized", "dormant-correction",
+        }
         assert case["facts"].strip() and case["expected"].strip()
     assert {case["mode"] for case in cases} == {
-        "read-only", "steering-authorized",
+        "read-only", "steering-authorized", "dormant-correction",
     }
 
 
@@ -76,3 +78,140 @@ def test_fabric_reader_suppresses_worktrees_provisioning() -> None:
     assert "AGENT_WORKTREES_NO_SELFPROVISION=1" in text
     assert "for every Worktrees invocation, including on the remote host" in text
     assert "refusal or missing runtime as unavailable evidence" in text
+
+
+def test_watchdog_checks_never_block_and_classify_waits() -> None:
+    skill = " ".join(_read(SKILL / "SKILL.md").split())
+    checks = " ".join(_read(SKILL / "references" / "watchdog-checks.md").split())
+    patterns = " ".join(_read(
+        SKILL / "references" / "misdirection-patterns.md"
+    ).split())
+    charter = " ".join(_read(SKILL / "assets" / "CHARTER.md").split())
+    for requirement in (
+        "**The watchdog never asks a blocking question**",
+        "**Classify every wait as required, productive or waste**",
+        "A merge is not done when the root needs live behavior",
+        "or when a delivered steer stalls past its revisit time",
+        "defer loop rules to `review-pull-requests`",
+    ):
+        assert requirement in skill, requirement
+    for requirement in (
+        "**The watchdog never asks a blocking question.**",
+        "never raises another agent's budget",
+        "not its live context window",
+        "names no failed parent boundary",
+        "Unreadable state is `unknown`, never healthy",
+        "ask whether the work is excessive before asking anyone for a larger limit",
+        "Never steer an agent to deploy without separate deployment authority",
+        "Do not count all waiting as waste",
+        "Escalate once, with the evidence, a recommended decision and its default",
+        "Never repeat the report unchanged",
+        "neither counts toward escalation nor justifies a resend",
+        "../../review-pull-requests/references/throughput-and-loops.md",
+    ):
+        assert requirement in checks, requirement
+    for pattern in (
+        "Unbounded question",
+        "Self-added prerequisite",
+        "Merged treated as done",
+        "Handoff rewrites intent",
+        "Disproportionate validation",
+        "Superseded agent untold",
+        "whether the work itself is excessive",
+    ):
+        assert pattern in patterns, pattern
+    for requirement in (
+        "Active and parked cadences",
+        "Question revisit time and required default",
+        "The monitor asked no blocking question",
+    ):
+        assert requirement in charter, requirement
+
+
+def test_dormant_correction_edits_records_only_under_its_own_grant() -> None:
+    skill = " ".join(_read(SKILL / "SKILL.md").split())
+    text = " ".join(_read(
+        SKILL / "references" / "dormant-correction.md"
+    ).split())
+    charter = " ".join(_read(SKILL / "assets" / "CHARTER.md").split())
+    steering = " ".join(_read(SKILL / "references" / "steering.md").split())
+    patterns = " ".join(_read(
+        SKILL / "references" / "misdirection-patterns.md"
+    ).split())
+    assert "(references/dormant-correction.md)" in skill
+    assert "steering never edits a worker's records" in skill
+    for requirement in (
+        "**records changed: none**",
+        "A read-only or steering grant does not authorize record edits; "
+        "a correction grant does not authorize messages",
+        "they never establish a verdict",
+        "Unknown liveness blocks mutation for that target only",
+        "A finalized workspace is not a Done objective",
+        "it is that owner's subordinate: exclude it",
+        "an operator-set marker stays",
+        "Report filing and other bookkeeping separately",
+        "Do not ask per target",
+        "A newly active target is excluded and reported, never interrupted "
+        "or messaged",
+        "A write without readback is unknown, not done",
+        "Never infer a correction from metadata",
+        "**recommend retirement**",
+        "Only the handoff owner's verified record-only supersede",
+        "makes every existing locator resolve to the replacement",
+        "An ordinary handoff save is not that operation",
+    ):
+        assert requirement in text, requirement
+    assert text.index("## Clear versus ambiguous") < text.index(
+        "## Write safely"
+    )
+    assert text.index("Recheck liveness through the native owner") < (
+        text.index("Write through the owner, then read back")
+    )
+    for requirement in (
+        "| dormant correction",
+        "Dormant correction scope (only if explicitly granted; else \"none\")",
+        "live-idle, newly active and unknown targets were left unchanged",
+    ):
+        assert requirement in charter, requirement
+    assert "[dormant correction](dormant-correction.md)" in steering
+    assert "Over-narrow self-proposed grant" in patterns
+    scenarios = json.loads(_read(SKILL / "assets" / "scenarios.json"))
+    dormant = {
+        case["id"] for case in scenarios["cases"]
+        if case["mode"] == "dormant-correction"
+    }
+    assert {
+        "dormant-stale-blocker",
+        "dormant-ambiguous-root",
+        "dormant-newly-active",
+        "dormant-finalized-open-effort",
+        "dormant-unavailable-evidence",
+        "dormant-stale-baton",
+    } <= dormant
+
+
+def test_recurring_watch_re_resolves_roster_each_cycle() -> None:
+    skill = " ".join(_read(SKILL / "SKILL.md").split())
+    charter = " ".join(_read(SKILL / "assets" / "CHARTER.md").split())
+    readers = " ".join(_read(
+        SKILL / "references" / "fabric-readers.md"
+    ).split())
+    for requirement in (
+        "**re-resolves its roster at the start of every cycle**",
+        "Retire one removed from the manifest, keeping its history",
+        "Keep a declared but unready machine as a coverage gap",
+        "Readiness failures never authorize provisioning, connecting or "
+        "repairing a venue",
+        "Each cycle begins with the roster refresh above.",
+    ):
+        assert requirement in skill, requirement
+    assert skill.index("re-resolves its roster") < skill.index(
+        "## 3. Analyze history"
+    )
+    assert "Roster source: <fixed list | re-resolved each cycle" in charter
+    assert "machines added, retired or kept as gaps" in charter
+    assert "do not reuse an earlier cycle's readiness" in readers
+    scenarios = json.loads(_read(SKILL / "assets" / "scenarios.json"))
+    assert "recurring-roster-refresh" in {
+        case["id"] for case in scenarios["cases"]
+    }

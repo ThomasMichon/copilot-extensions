@@ -212,7 +212,7 @@ def test_ready_runtime_executes_before_any_action_policy_prerequisite(
 ) -> None:
     source = GATE.read_text(encoding="utf-8")
     if resolution == "ready":
-        start = source.index("\n$python = Resolve-Runtime\n")
+        start = source.index("\n$python = if ($configurationOnly)")
         end = source.index("\nif ($env:AGENT_DISPATCH_NO_SELFPROVISION)", start)
     else:
         start = source.index("\n$provisionSource = Select-ProvisionSource\n")
@@ -837,6 +837,49 @@ def run_global_gate(tmp_path: Path, entry: Path, env: dict[str, str], prefix: st
         [PWSH, "-NoProfile", "-NonInteractive", "-File", str(harness)],
         env=env, capture_output=True, text=True, timeout=25, creationflags=HEADLESS,
     )
+
+
+@pytest.mark.parametrize("arguments", [
+    ["telemetry", "capabilities"],
+    ["telemetry", "retained", "--directory", "unused", "--apply", "--confirm", "unused"],
+    ["--url", "unused", "telemetry", "capabilities"],
+    [
+        "--task-token", "unused", "--task-token-file", "unused", "--task-scope", "unused",
+        "--task-url", "unused", "--task-worker", "unused", "telemetry", "capabilities",
+    ],
+    [
+        "--task-token=unused", "--task-token-file=unused", "--task-scope=unused",
+        "--task-url=unused", "--task-worker=unused", "telemetry", "retained",
+        "--directory", "unused", "--apply", "--confirm", "unused",
+    ],
+])
+def test_payload_telemetry_refuses_missing_runtime_without_provision(
+    tmp_path: Path, arguments: list[str],
+) -> None:
+    env, root, global_entry, shared, installer = global_gate_fixture(tmp_path)
+    shared.write_text('{"active":false}', encoding="utf-8")
+    env.pop("AGENT_DISPATCH_PROVISION_OFFLINE", None)
+    payload = Path(env["AGENT_DISPATCH_PAYLOAD_ROOT"])
+    binary = payload / "bin"
+    binary.mkdir(exist_ok=True)
+    entry = binary / "agent-dispatch.ps1"
+    shutil.copyfile(SCRIPTS.parent / "bin" / entry.name, entry)
+    shutil.copyfile(GATE, payload / "scripts" / "runtime-gate.ps1")
+    shutil.copyfile(
+        global_entry.parent / "installation-context" / "installation-context.ps1",
+        payload / "scripts" / "installation-context" / "installation-context.ps1",
+    )
+    before = {path.relative_to(root): path.read_bytes()
+              for path in root.rglob("*") if path.is_file()}
+    result = subprocess.run(
+        [PWSH, "-NoProfile", "-NonInteractive", "-File", str(entry), *arguments],
+        env=env, capture_output=True, text=True, timeout=25, creationflags=HEADLESS,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "configuration-only; no self-provision" in result.stderr
+    assert not installer.exists()
+    assert {path.relative_to(root): path.read_bytes()
+            for path in root.rglob("*") if path.is_file()} == before
 
 
 @pytest.mark.parametrize(("selection", "active", "warm"), [

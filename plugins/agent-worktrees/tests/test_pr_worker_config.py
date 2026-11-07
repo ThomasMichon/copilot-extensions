@@ -118,6 +118,69 @@ def test_export_uses_effective_policy_without_host_paths_or_credentials(host, tm
     assert "machine" not in raw and "token_command" not in repo["pr"]
 
 
+@pytest.mark.parametrize("include_author", [False, True])
+def test_author_export_is_explicit_and_never_transfers_self_merge_grants(
+    host, tmp_path, capsys, include_author,
+):
+    data = json.loads(host.read_text("utf-8"))
+    data["repos"]["target"]["pr"].update(
+        enabled=True, required=True, automerge_label="auto-complete",
+        approval_required=True, allow_stale_approval=True,
+        bypass_policy=True, self_approve=True, merge_actor="submitter-direct",
+    )
+    host.write_text(json.dumps(data), "utf-8")
+    output = tmp_path / "worker-author.json"
+    args = [
+        "checks", "project/repo", "export-config", "--config", str(host),
+        "--workspace", str(tmp_path / "worker"), "--output", str(output), "--json",
+        "--base", "origin/main",
+    ]
+    assert pr_cli.cmd_pr_watch_dispatch([*args, *(["--include-author"] if include_author else [])]) == 0
+    assert json.loads(capsys.readouterr().out)["ok"]
+    policy = json.loads(output.read_text("utf-8"))["repos"]["pr-worker"]["pr"]
+    if include_author:
+        assert policy["enabled"] and policy["required"] and policy["approval_required"]
+        assert policy["allow_stale_approval"] and policy["automerge_label"] == "auto-complete"
+        assert not policy["bypass_policy"] and not policy["self_approve"]
+        assert policy["merge_actor"] == "" and policy["roles"] is None
+        from agent_worktrees import pr_author_cli, pr_config
+        loaded = pr_author_cli.load_author_config(str(output), "project/repo")
+        assert pr_config._pr_flow_profile(loaded.default_repo).profile == "pr-agent-merge"
+    else:
+        assert "enabled" not in policy and "automerge_label" not in policy
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_exported_author_target_cannot_use_registry_or_workspace_policy(
+    host, tmp_path, capsys, monkeypatch, enabled,
+):
+    from agent_worktrees import pr_author_cli, pr_config
+
+    data = json.loads(host.read_text("utf-8"))
+    data["repos"]["target"]["pr"]["enabled"] = enabled
+    host.write_text(json.dumps(data), "utf-8")
+    output = tmp_path / "worker-author.json"
+    assert pr_cli.cmd_pr_watch_dispatch([
+        "checks", "project/repo", "export-config", "--config", str(host),
+        "--workspace", str(tmp_path / "worker"), "--output", str(output),
+        "--base", "origin/main", "--include-author", "--json",
+    ]) == 0
+    capsys.readouterr()
+    monkeypatch.setattr(
+        cfg, "_control_plane_related_pr_map", lambda: pytest.fail("ambient control-plane discovery"),
+    )
+    loaded = pr_author_cli.load_author_config(str(output), "project/repo")
+    monkeypatch.setattr(
+        pr_config, "_resolve_repo_remote", lambda *args: pytest.fail("ambient target resolution"),
+    )
+    resolved = pr_config.resolve_repo_config_for_slug(loaded, "project/repo")
+    assert resolved.resolved and resolved.repo_config.pr.enabled is enabled
+    assert pr_author_cli.capabilities(loaded, "project/repo")["operations"]["metadata-update"] is enabled
+    assert not pr_config.resolve_repo_config_for_slug(loaded, "other/repo").resolved
+    with pytest.raises(ValueError, match="another PR target"):
+        pr_author_cli.load_author_config(str(output), "other/repo")
+
+
 @pytest.mark.parametrize("workspace", ["relative", "../worker", "/worker/../other"])
 def test_export_refuses_nonportable_or_ambiguous_workspace(host, tmp_path, workspace, capsys):
     output = tmp_path / "worker.json"
@@ -170,11 +233,38 @@ def test_github_export_rejects_schemeless_endpoint_data(host, tmp_path, capsys, 
     (["pr-watch", "checks", "project/repo", "lenses", "--config", "policy"], False),
     (["pr-watch", "wait", "project/repo", "1", "--config", "policy", "--workspace", "repo"], False),
     (["pr-watch", "subscribe", "project/repo", "1", "--config", "policy", "--workspace", "repo"], False),
+    (["pr-author-capabilities", "--repo=project/repo", "--config=policy"], True),
+    (["pr-author-capabilities", "--repo=project/repo"], False),
+    (["pr-author-capabilities", "--config=policy"], False),
+    (["pr-update", "--repo=project/repo", "--config=policy"], False),
 ])
 def test_explicit_worker_context_does_not_admit_stateful_operations(argv, allowed):
     from agent_worktrees.front_door_cli import _is_no_project_invocation
 
     assert _is_no_project_invocation(argv) is allowed
+
+
+def test_author_capability_uses_delivered_policy_from_a_fresh_process(host, tmp_path, capsys):
+    data = json.loads(host.read_text("utf-8"))
+    data["repos"]["target"]["pr"].update(enabled=True, required=True, automerge_label="auto-complete")
+    host.write_text(json.dumps(data), "utf-8")
+    output = tmp_path / "worker-author.json"
+    assert pr_cli.cmd_pr_watch_dispatch([
+        "checks", "project/repo", "export-config", "--config", str(host),
+        "--workspace", str(tmp_path / "source"), "--base", "origin/main",
+        "--output", str(output), "--include-author", "--json",
+    ]) == 0
+    capsys.readouterr()
+    home = tmp_path / "fresh-author-home"
+    home.mkdir()
+    result = subprocess.run(
+        [sys.executable, "-m", "agent_worktrees", "pr-author-capabilities",
+         "--repo=project/repo", f"--config={output}", "--json"],
+        cwd=home, env=dict(os.environ, AGENT_HOME=str(home)), capture_output=True,
+        text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout)["operations"]["worker-policy-config"] is True
 
 
 @pytest.mark.parametrize("contents", [None, "{", "[]", "{}", "null", "\x80"])
@@ -296,26 +386,41 @@ def test_exported_config_runs_all_checks_from_fresh_worker_context(host, tmp_pat
     home = tmp_path / "worker-home"
     home.mkdir()
     env = dict(os.environ, AGENT_HOME=str(home))
-    command = [
-        sys.executable, "-m", "agent_worktrees", "pr-watch", "checks", repository,
-    ]
-    missing = subprocess.run(
-        [*command, "lenses", "--workspace", str(worker), "--json"],
-        cwd=worker, env=env, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
-    )
-    assert missing.returncode != 0
+    command = ["pr-watch", "checks", repository]
+    invocations = [[*command, "lenses", "--workspace", str(worker), "--json"]]
     for operation, options in (
         ("lenses", []),
         ("record-self-review", ["--lenses", "runtime", "--summary", "reviewed"]),
         ("verify-self-review", []),
         ("scope-report", []),
     ):
-        result = subprocess.run(
-            [*command, operation, "--workspace", str(worker), "--config", str(output), "--json", *options],
-            cwd=worker, env=env, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert json.loads(result.stdout)["ok"]
+        invocations.append([
+            *command, operation, "--workspace", str(worker), "--config", str(output), "--json", *options,
+        ])
+    driver = """
+import contextlib, io, json, sys
+from agent_worktrees.__main__ import main
+results = []
+for invocation in json.loads(sys.argv[1]):
+    captured = io.StringIO()
+    with contextlib.redirect_stdout(captured):
+        try:
+            code = main(invocation)
+        except SystemExit as exc:
+            code = int(exc.code or 0)
+    results.append({"code": code, "stdout": captured.getvalue()})
+print(json.dumps(results))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", driver, json.dumps(invocations)],
+        cwd=worker, env=env, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    observed = json.loads(result.stdout)
+    assert observed[0]["code"] != 0
+    for item in observed[1:]:
+        assert item["code"] == 0, item["stdout"]
+        assert json.loads(item["stdout"])["ok"]
 
 
 def test_explicit_worker_policy_precedes_a_conflicting_registered_target(
@@ -367,8 +472,9 @@ def test_explicit_worker_policy_precedes_a_conflicting_registered_target(
     assert not calls
 
 
+@pytest.mark.parametrize(("endpoint", "expected"), [("forge.invalid", 0), ("github.com", 2)])
 def test_export_pins_github_host_across_fresh_worker_environments(
-    host, tmp_path, worker, monkeypatch, capsys,
+    host, tmp_path, worker, monkeypatch, capsys, endpoint, expected,
 ):
     data = json.loads(host.read_text("utf-8"))
     data["repos"]["target"]["pr"].update(provider="github", api_base="")
@@ -380,15 +486,14 @@ def test_export_pins_github_host_across_fresh_worker_environments(
     assert json.loads(output.read_text("utf-8"))["repos"]["pr-worker"]["pr"]["api_base"] == "forge.invalid"
     home = tmp_path / "isolated-home"
     home.mkdir()
-    for endpoint, expected in (("forge.invalid", 0), ("github.com", 2)):
-        git(worker, "remote", "set-url", "--push", "origin", f"https://{endpoint}/project/repo.git")
-        result = subprocess.run(
-            [sys.executable, "-m", "agent_worktrees", "pr-watch", "checks", "project/repo",
-             "lenses", "--workspace", str(worker), "--config", str(output), "--json"],
-            cwd=worker, env=dict(os.environ, AGENT_HOME=str(home), GH_HOST="github.com"),
-            capture_output=True, text=True, timeout=30, **no_window_kwargs(),
-        )
-        assert result.returncode == expected, result.stdout + result.stderr
+    git(worker, "remote", "set-url", "--push", "origin", f"https://{endpoint}/project/repo.git")
+    result = subprocess.run(
+        [sys.executable, "-m", "agent_worktrees", "pr-watch", "checks", "project/repo",
+         "lenses", "--workspace", str(worker), "--config", str(output), "--json"],
+        cwd=worker, env=dict(os.environ, AGENT_HOME=str(home), GH_HOST="github.com"),
+        capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert result.returncode == expected, result.stdout + result.stderr
 
 
 @pytest.mark.parametrize("mode", ["different", "additional", "organization", "host"])

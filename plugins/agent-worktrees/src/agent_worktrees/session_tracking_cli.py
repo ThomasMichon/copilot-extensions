@@ -26,17 +26,9 @@ def _core_helper(name: str, local):
 
 
 def add_head_parser(sub) -> None:
-    sp = sub.add_parser(
-        "head-session",
-        help="Show a worktree's asserted head (current) session + state (JSON)",
-    )
-    sp.add_argument(
-        "--worktree",
-        "--worktree-id",
-        dest="worktree_id",
-        required=True,
-        help="Worktree ID (full or 4-char suffix)",
-    )
+    sp = sub.add_parser("head-session", help="Show a worktree's asserted head (current) session + state (JSON)")
+    sp.add_argument("--worktree", "--worktree-id", dest="worktree_id", required=True,
+                    help="Worktree ID (full or 4-char suffix)")
     sp.add_argument("--json", action="store_true", help="Emit JSON (default; accepted for caller compatibility)")
 
 
@@ -125,6 +117,11 @@ def add_parsers(sub) -> None:
             "Bypass the accelerator's cache for this one read (explicit "
             "discretion only -- never set this implicitly)"
         ),
+    )
+    sp.add_argument(
+        "--pr-associations",
+        action="store_true",
+        help="Include bounded canonical PR associations and passive target bindings",
     )
     sp.add_argument(
         "--json", action="store_true", help="Emit JSON (the default; accepted for consistency)"
@@ -633,6 +630,11 @@ def cmd_worktree_status_bundle(args: argparse.Namespace) -> int:
         payload=payload,
         fallback=_fallback,
     )
+    from . import companion_pr_associations
+
+    bundle = {**bundle, "companion_pr_observations": companion_pr_associations.declaration()}
+    if getattr(args, "pr_associations", False):
+        bundle = companion_pr_associations.extend_bundle(bundle, project, yaml_path, record)
     output._json_output(bundle)
     return 0
 

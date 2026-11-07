@@ -45,8 +45,29 @@ class HostUnreachableError(OSError):
 
 
 def default_socket_path() -> Path:
-    """The default serve socket handle: ``$AGENT_MCP_HOME/serve.sock``."""
-    return default_home_dir() / "serve.sock"
+    """Current publication namespace, independent of pre-feature live listeners."""
+    configured = os.environ.get("AGENT_MCP_SERVE_SOCKET")
+    return Path(configured) if configured else default_home_dir() / "current" / "serve.sock"
+
+
+def legacy_socket_path() -> Path:
+    return Path(os.environ.get("AGENT_MCP_SERVE_SOCKET") or default_home_dir() / "serve.sock")
+
+
+def legacy_serving_hint(current: Path) -> bool:
+    """Observe separate legacy namespace intent, never claim its ownership."""
+    legacy = Path(absolute_handle(legacy_socket_path()))
+    if legacy == current:
+        return False
+    for path in (legacy, _endpoint_path(legacy)):
+        try:
+            path.lstat()
+            return True
+        except FileNotFoundError:
+            pass
+        except OSError:
+            return True
+    return False
 
 
 def absolute_handle(raw: str | Path) -> str:
@@ -74,7 +95,7 @@ def daemon_env_overrides(home: Path) -> dict[str, str]:
     env = {"AGENT_MCP_HOME": str(home)}
     raw = os.environ.get("AGENT_MCP_SERVE_SOCKET")
     if raw:
-        env["AGENT_MCP_SERVE_SOCKET"] = absolute_handle(raw)
+        env["AGENT_MCP_SERVE_SOCKET"] = absolute_handle(default_socket_path())
     return env
 
 
@@ -124,7 +145,7 @@ def serve_socket_if_available(explicit: str | None = None) -> Path | None:
     """
     if os.environ.get("AGENT_MCP_NO_SERVE"):
         return None
-    raw = explicit or os.environ.get("AGENT_MCP_SERVE_SOCKET")
+    raw = explicit
     path = Path(raw) if raw else default_socket_path()
     if _read_endpoint(path) is not None:
         return path
@@ -143,7 +164,7 @@ def discard_stale_handle(explicit: str | None = None) -> None:
     it. Best-effort; the winning host re-creates its handle on bind (and holds the
     single-instance lease), so this never disturbs a live host.
     """
-    raw = explicit or os.environ.get("AGENT_MCP_SERVE_SOCKET")
+    raw = explicit
     path = Path(raw) if raw else default_socket_path()
     for p in (path, _endpoint_path(path)):
         try:
@@ -194,12 +215,15 @@ def _read_ack_line(sock: socket.socket) -> bytes:
         if not b:
             break
         buf += b
+        if len(buf) > 65536:
+            raise OSError("serve handshake exceeds its byte budget")
         if b == b"\n":
             break
     return bytes(buf)
 
 
-def attach(path: str | Path, bridge: str | Path) -> socket.socket:
+def attach(path: str | Path, bridge: str | Path, *, expected_generation: str | None = None,
+           expected_root: str | None = None) -> socket.socket:
     """Attach a full MCP session on the host; return the raw connected socket.
 
     Sends the ``attach`` op and verifies the ack; thereafter the caller speaks
@@ -210,13 +234,20 @@ def attach(path: str | Path, bridge: str | Path) -> socket.socket:
     host refuses the attach handshake -- the caller falls back to a direct
     in-process bridge without respawning.
     """
+    from .execution_context import request_fields
     from .request_context import capture_context, supports_context
 
+    fields = request_fields(path, bridge)
     req: dict = {
         "op": "attach", "bridge": str(bridge),
         "configuration_context": capture_context(str(bridge)),
     }
     sock, token = _connect(path)
+    req.update(fields)
+    if expected_generation is not None:
+        req["generation"] = expected_generation
+    if expected_root is not None:
+        req["runtime_root"] = expected_root
     if token is not None:
         req["token"] = token
     try:

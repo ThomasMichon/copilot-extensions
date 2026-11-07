@@ -172,6 +172,19 @@ OS-level disablement. Separately, uninstall de-registers owned tasks, whereas
 normal in-place update preserves registrations. The [literal follow-up](inception-transcript.md#operator---reconstruction-findings-and-cooperative-task-standby)
 and [repair register](reconstruction-findings.md) retain the evidence and limits.
 
+**2026-11-06 clean-host scheduling direction (public-safe summary):** the
+Harness must not require Task Scheduler by default or depend on configuring a
+local administrative account on managed development hosts. Clean deployment
+profiles should have no suite-owned task registrations; explicitly retained
+custom deployments are exceptions selected in private configuration. The
+[literal direction](inception-transcript.md#operator---scheduler-independent-clean-hosts)
+redacts private deployment identifiers only. This does not authorize removal
+of OS/system tasks or loss of existing service capabilities.
+
+The earlier cooperative-standby and registration-preservation requirements
+still apply to deliberately configured scheduled deployments. They do not
+require creating tasks in a clean, on-demand deployment.
+
 ## Plan
 
 **Renderer-admission direction (2026-10-28), summary:** eliminate the blanket
@@ -367,7 +380,28 @@ retains the operator's wording.
   owned tasks; a normal in-place update preserves registrations and enablement
   intent; a maintenance hold keeps installed tasks runnable but quiescent.
   The manual program wipe is not supported-uninstaller conformance evidence.
+- [ ] Make clean install, update, reconciliation and first-use startup work
+  without Task Scheduler or local-account/admin setup. Keep scheduling
+  explicit and retain on-demand service/transport capability.
+  The following implementation/validation bindings are agent-recommended.
+  - [ ] Review each actual registration owner and add only missing native
+    scheduling/absence controls. Preserve existing explicit custom scheduling
+    unless the adopter deliberately selects absence.
+  - [ ] Prove fresh default absence, repeat-update absence, explicit scheduling
+    compatibility and task-only retirement without stopping protected services
+    or deleting their state. Missing scheduling support is not permission to
+    disable the underlying capability or invent another startup supervisor.
+  - [ ] Qualify the normal source/review/CI/release path, then reconcile
+    explicitly selected adopter profiles through those owners and record
+    real non-admin consumer proof. Private machine exceptions remain private.
 - [ ] Verify containing normal Main release and exact released behavior.
+  - [x] Verify the containing #11008 release through normal promotion #11033:
+    Main `cd7e8658ff0bc7334a807880de2c688f7c220f01`, admitted Dev
+    `101e0713c081f4100e6a5a8c7fac446b6bb0556a`, immutable candidate
+    `591ab070343f4a0893102922167d7be53fb69705` and Manager 0.6.317-dev1.
+    All eight selected implementation/test blobs match the reviewed repair.
+    The sole shared TESTING.md delta describes unrelated HTTP-52 controls;
+    admitted source and artifact evidence is published. No rollout is claimed.
   - [x] Verify the containing #10559 release through normal promotion #11007:
     Main `0dbbdd374e1af0b6443c84cead45102333855da3`, admitted Dev
     `2161ab2b11723828c83ad107d8034463774c9870`, Worktrees 1.24.506-dev1,

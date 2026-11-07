@@ -99,6 +99,7 @@ def run_update_steps(
     from .runtime_source_update import prepare_suite
     from .runtime_source import SourceAcquisitionError
 
+    environment = run.child_environment(environment)
     if not preflight_runtime_source(run, suite=not fresh_manager or runtime_source is not None):
         return 1
     project, forwarded = extract_project(rest)

@@ -8,7 +8,7 @@ import math
 import re
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
-from typing import BinaryIO
+from typing import Any, BinaryIO, NoReturn
 
 PROFILE = "copilot-extensions.promotion-units/v1"
 CANDIDATE_PROFILE = "copilot-extensions.promotion-candidate-units/v1"
@@ -18,7 +18,20 @@ MAX_UNIT_EVIDENCE_FILE_BYTES = 192 * 1024 * 1024
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 _SHA = re.compile(r"[0-9a-f]{40}")
 _PACKET = "tools/promotion_unit_tests/"
-BUILD_SOURCE_DATA: frozenset[str] = frozenset()
+BUILD_SOURCE_DATA: frozenset[str] = frozenset({
+    "libs/payload-invocation/python-catalog-inputs.json",
+    "libs/payload-invocation/templates/catalog-multi-posix.tmpl",
+    "libs/payload-invocation/templates/catalog-multi-powershell.tmpl",
+    "libs/payload-invocation/templates/catalog-posix-shell.tmpl",
+    "libs/payload-invocation/templates/catalog-posix.tmpl",
+    "libs/payload-invocation/templates/catalog-powershell.tmpl",
+    "libs/payload-invocation/templates/catalog-python.tmpl",
+    "libs/payload-invocation/templates/cmd-shim.tmpl",
+    "libs/payload-invocation/templates/dispatcher-posix.tmpl",
+    "libs/payload-invocation/templates/dispatcher-powershell.tmpl",
+    "libs/payload-invocation/templates/posix-shim.tmpl",
+    "libs/payload-invocation/templates/powershell-shim.tmpl",
+})
 
 
 class UnitEvidenceError(ValueError):
@@ -39,7 +52,7 @@ def bounded_bytes(stream: BinaryIO, maximum: int) -> bytes:
 
 
 def decode_json(text: str | bytes, *, finite: bool = False) -> object:
-    def unique(pairs):
+    def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
         result = {}
         for key, value in pairs:
             if key in result:
@@ -50,13 +63,13 @@ def decode_json(text: str | bytes, *, finite: bool = False) -> object:
     if not finite:
         return json.loads(text, object_pairs_hook=unique)
 
-    def number(token):
+    def number(token: str) -> float:
         value = float(token)
         if not math.isfinite(value):
             raise ValueError("unit evidence contains a nonfinite number")
         return value
 
-    def constant(_token):
+    def constant(_token: str) -> NoReturn:
         raise ValueError("unit evidence contains a nonfinite number")
 
     return json.loads(
@@ -77,7 +90,7 @@ def relative_file(value: object) -> str:
     return value
 
 
-def admit_manifest(data: object, *, allow_windows_native: bool = False) -> dict:
+def admit_manifest(data: object, *, allow_windows_native: bool = False) -> dict[str, Any]:
     candidate = isinstance(data, dict) and data.get("profile") == CANDIDATE_PROFILE
     fields = {
         "profile", "nodes", "sources", "coverage_targets", "max_seconds",
@@ -155,7 +168,7 @@ def admit_manifest(data: object, *, allow_windows_native: bool = False) -> dict:
     return data
 
 
-def windows_native_manifest(data: object, *, platform: str) -> dict:
+def windows_native_manifest(data: object, *, platform: str) -> dict[str, Any]:
     template = admit_manifest(data)
     if platform != "win32" or template["profile"] != PROFILE:
         raise UnitEvidenceError("Windows-native execution requires Windows and a development unit manifest")
@@ -180,7 +193,7 @@ def verify_sources(root: Path, sources: dict[str, str]) -> None:
 
 
 def verify_observations(
-    expected: list[str], collected: list[str], reports: list[dict],
+    expected: list[str], collected: list[str], reports: list[dict[str, Any]],
     effects: list[str], elapsed: float, maximum: int,
 ) -> None:
     if len(collected) != len(set(collected)) or set(collected) != set(expected):
@@ -210,7 +223,7 @@ def source_sha(value: str) -> str:
     return value
 
 
-def manifest_digest(data: dict) -> str:
+def manifest_digest(data: dict[str, Any]) -> str:
     return hashlib.sha256(
         json.dumps(data, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()

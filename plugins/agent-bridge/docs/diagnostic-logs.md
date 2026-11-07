@@ -202,3 +202,66 @@ ASGI/wire owner or health response is changed.
 metadata only: active/archive locations, policy, namespace provisioning and
 `write_health: "unknown-from-discovery"`. It never imports a custom factory,
 reads event payloads, creates files or treats configuration as live proof.
+
+### Native configuration-only preview and apply
+
+The selected Bridge runtime exposes `agent-bridge telemetry capabilities`.
+Its `process-telemetry.retained-configuration/v1` declaration supports preview
+and confirmed apply; it does not advertise a running daemon's capabilities.
+An older runtime may reject this new discovery command. Callers must then report
+this optional configuration operation as unsupported, not write the file
+themselves or replay an effectful fallback.
+Both payload launcher variants resolve telemetry commands without provisioning.
+A missing selected runtime refuses before installation or parser execution
+(exit 1); unavailable or invalid installation-context support can refuse with
+exit 126. Explicit installation management remains a separate operation.
+
+```text
+agent-bridge telemetry retained --directory <absolute preprovisioned base>
+agent-bridge telemetry retained --directory <same base> --apply --confirm <preview confirmation>
+```
+
+Output is always JSON (`--json` is accepted). Preview reads at most 64 KiB of
+strict UTF-8 object JSON, with duplicate keys and nonfinite values rejected.
+UTF-8 BOMs and UTF-16/32 are rejected like the native loader, including when the
+retained values otherwise match. It creates
+no directories, lock files or spools. The configuration root and the complete
+`directory/retained` path must already be plain, unlinked directories. Linked,
+nonregular or multiply-linked configuration files are refused.
+
+Apply binds confirmation to this runtime's native configuration target, current
+file bytes and identity, directory identities, requested directory and current
+environment sink. It rechecks those inputs under the existing native
+`OperationLock` and writes atomically through the strict configuration I/O owner.
+Other top-level configuration fields survive. Existing `sink`/`spool` declarations,
+an environment sink or a different retained directory are preserved by refusal,
+not overwritten. An unchanged retained configuration is not rewritten.
+Concurrent participating writers use the same retained `telemetry.json.lock`;
+this is not exclusion against arbitrary external editors or filesystem attacks.
+
+The additive `input_fence: 1` capability admits repeated
+`--if-input <absolute file> <sha256>` pairs. At most eight exclusive plain files
+of at most 256 KiB each are read. Exact bytes, file and directory identities
+enter the confirmation and are rechecked under the producer lock before its
+write. No input is executed or modified. A consumer must discover this capability
+on its selected runtime before using the option. Inputs that name or alias the
+native configuration target or its writer lock refuse before confirmation or
+lock acquisition. The original v1 declaration
+without it does not support guarded adoption. This is a local write-boundary
+check, not a transaction spanning independent input writers.
+
+Exit 0 means previewed/configured; exit 2 means refused, invalid, stale,
+contended or unsupported syntax. `activation: not-requested` and
+`write_health: unknown-from-configuration` remain explicit. Apply never calls a
+factory, selects a buffer, starts/reloads a service, creates a namespace, enrolls
+a job or publishes telemetry. A later activation requires its existing owner
+and independent authority. Configuration confirmation is not that authority.
+An error before the atomic writer reports `write_outcome: not-applied`; an
+exception after entering that writer reports `unknown`, since replacement may
+already have occurred. Do not retry an unknown write blindly.
+
+This is a provider-first additive boundary: existing loader, `logs` and legacy
+factory behavior remain unchanged. No consumer is made to require this command
+in the same release. Consumers select v1 support from the executable they
+actually invoke and preserve a pre-effect unsupported result after rollback;
+there is no older equivalent confirmed-write contract.

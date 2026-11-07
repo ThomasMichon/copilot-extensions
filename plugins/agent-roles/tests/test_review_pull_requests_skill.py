@@ -391,6 +391,58 @@ def test_work_conserving_target_and_original_reviewer_survive_capacity_changes()
     _validate_unobserved_example(example)
 
 
+def test_loop_discipline_stops_repetition_and_hands_back_explicitly() -> None:
+    skill = " ".join(_read(SKILL / "SKILL.md").split())
+    loops = " ".join(_read(
+        SKILL / "references" / "throughput-and-loops.md"
+    ).split())
+    charter = " ".join(_read(SKILL / "assets" / "CHARTER.md").split())
+    communication = " ".join(_read(
+        SKILL / "references" / "communication.md"
+    ).split())
+    for requirement in (
+        "zero eligible PRs awaiting reviewer action",
+        "Never republish an identical verdict on an unchanged head without new input",
+        "Cap rounds without new author input per PR",
+        "A watch timeout is a normal no-change result",
+        "explicit hand-back naming the next owner",
+        "do not re-review to prompt it",
+        "two reviewers never serve the same scope",
+    ):
+        assert requirement in skill, requirement
+    for requirement in (
+        "is not new input",
+        "Any qualifying trigger prompts reassessment of a standing change request",
+        "Review only an overlapping delta",
+        "report it once to the scope owner",
+        "diagnose the cause once, retry once",
+        "normal **no-change** result",
+        "back off toward the charter's backstop cadence",
+        "the reviewer never authors the fix",
+        "re-check live state immediately before any request",
+        "ask the scope owner once for a standing, recorded policy",
+        "revisit time and the default action at revisit",
+        "only with the original scope owner's authority",
+        "Two reviewers must not serve the same scope",
+        "not the reviewer's own live transcript, is the state",
+    ):
+        assert requirement in loops, requirement
+    for requirement in (
+        "never an identical verdict on an unchanged head",
+        "Closed hold vocabulary with owner, revisit time and default action",
+        "Predecessor told and released after accepted transfer",
+    ):
+        assert requirement in charter, requirement
+    for requirement in (
+        "Immediately before each send, re-check live state",
+        "consent already present cancels only a consent request",
+        "unchanged state within its cooldown",
+        "the predecessor stands down there",
+        "Never leave two reviewers serving one scope",
+    ):
+        assert requirement in communication, requirement
+
+
 def test_effect_ids_and_receipt_timing_are_not_fabricated_prerequisites() -> None:
     text = _read(SKILL / "SKILL.md")
     assert "provider-native review/comment effect IDs as returned" in text

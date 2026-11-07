@@ -576,6 +576,166 @@ def test_first_party_follows_associated_application_wheels_before_registry(tmp_p
     ) == ["external>=2"]
 
 
+@pytest.fixture
+def embedded_profile_source(tmp_path, monkeypatch, request):
+    import local_install_profile as native
+    from standalone_python_artifacts import injected_resources
+    from test_standalone_python_artifacts import _build
+
+    snapshot = tmp_path / "snapshot"
+    source, wheels, manifest = _build(
+        snapshot / "source", monkeypatch, "worktree-manager", embedded=True,
+        materialized=getattr(request, "param", False),
+    )
+    metadata = source / "pyproject.toml"
+    metadata.write_text(
+        metadata.read_text().replace('version = "1.0"', 'version = "1.0.0"')
+        .replace('name = "worktree_manager"', 'name = "copilot-extensions-worktree-manager"'),
+    )
+    library = (source if getattr(request, "param", False) else source.parent) / "libs/agent-procutil"
+    with (library / "pyproject.toml").open("a") as stream:
+        stream.write('\n[tool.setuptools.package-data]\nagent_procutil=["schema.json"]\n')
+    (library / "src/agent_procutil/schema.json").write_bytes(b'{"version":1}\n')
+    members = {name: path.read_bytes() for name, path in injected_resources(
+        "worktree-manager", source.parent,
+    ).items()}
+    members["worktree_manager/__init__.py"] = (source / "src/worktree_manager/__init__.py").read_bytes()
+    _embedded_profile_wheel(wheels, manifest, members)
+    sources = native.source_inputs.sources
+    digest = sources.assembly_hash(source)
+    identity = sources.SourceIdentity(
+        "worktree-manager", "1.0.0", "a" * 40, "b" * 40, digest,
+        sources.runtime_version("1.0.0", "a" * 40, digest),
+    )
+    (source / sources.SOURCE_FILE).write_text(json.dumps(identity.document()))
+    (snapshot / native.source_inputs.MANIFEST).write_text(json.dumps({
+        "schema": native.source_inputs.SCHEMA, "version": 1, "kind": "source",
+        "source_commit": identity.source_commit, "source_tree": identity.source_tree,
+        "projects": {"standalone:worktree-manager": {
+            "payload": source.relative_to(snapshot).as_posix(),
+            "wheels": wheels.relative_to(snapshot).as_posix(),
+            "source": identity.document(), "artifact": manifest,
+        }},
+    }))
+    return snapshot
+
+
+def _embedded_profile_wheel(directory, manifest, members):
+    from build_toolchain_lock import _hash_fields
+    from wheel_input_fixture import wheel_bytes
+
+    manifest["version"] = "1.0.0"
+    row = manifest["wheels"][0]
+    row.update({
+        "name": "copilot_extensions_worktree_manager",
+        "filename": "copilot_extensions_worktree_manager-1.0.0-py3-none-any.whl",
+    })
+    archive = directory / row["filename"]
+    archive.write_bytes(wheel_bytes(
+        name="worktree_manager", prefix="copilot_extensions_worktree_manager-1.0.0.dist-info/",
+        metadata=b"Metadata-Version: 2.4\nName: copilot-extensions-worktree-manager\nVersion: 1.0.0\n\n",
+        extra=members,
+    ))
+    row["sha256"] = "sha256:" + hashlib.sha256(archive.read_bytes()).hexdigest()
+    manifest["artifact_id"] = "sha256:" + _hash_fields(
+        manifest["payload_hash"], manifest["python_tag"], manifest["abi_tag"],
+        manifest["platform_tag"], manifest["build_toolchain"]["lock_id"],
+        row["filename"], row["sha256"],
+    )
+
+
+@pytest.mark.parametrize("embedded_profile_source", [False, True], indirect=True)
+def test_native_profile_accepts_embedded_libraries_without_separate_distributions(
+    embedded_profile_source, tmp_path,
+):
+    import local_install_profile as native
+    from packaging.markers import default_environment
+
+    deadline = time.monotonic() + 30
+    selected, wheels = native.first_party(
+        embedded_profile_source, deadline=deadline,
+    )
+    assert set(wheels) == {"copilot-extensions-worktree-manager"}
+    assert native.registry_roots(
+        wheels, "copilot-extensions-worktree-manager==1.0.0", {}, deadline=time.monotonic() + 5,
+    ) == []
+    assert len(native.source_inputs.engine._package_roots(selected.payload)) == 2
+    archives = {
+        row["filename"]: embedded_profile_source / row["wheel_directory"] / row["filename"]
+        for row in wheels.values()
+    }
+    with native.retain_wheel_inputs(
+        archives, {row["filename"]: row["sha256"] for row in wheels.values()},
+        max_wheels=2, max_archive_bytes=1 << 20, max_total_bytes=2 << 20,
+        max_snapshot_bytes=2 << 20, deadline=deadline,
+    ) as retained:
+        profile = native.complete_profile(
+            selected, {"device": "cpu", "environment": default_environment(), "tags": ["py3-none-any"]},
+            ["copilot-extensions-worktree-manager==1.0.0"], retained,
+            policy_id="fixture-policy", acquisition_id="fixture-acquisition", deadline=deadline,
+        )
+        prepared = native._write_snapshot(
+            selected, tmp_path / "complete", profile, retained, deadline=deadline,
+        )
+    with native.source_inputs.project_inputs(prepared, "worktree-manager", deadline=deadline) as (
+        observed, inputs,
+    ):
+        construction = native.source_inputs.native_selection(observed, inputs)
+        assert construction["local_packages"] == ["copilot-extensions-worktree-manager"]
+        assert len(native.source_inputs.engine._package_roots(observed.payload)) == 2
+
+
+@pytest.mark.parametrize("member", [
+    "agent_procutil/__init__.py", "agent_procutil/LICENSE", "agent_procutil/schema.json",
+    "worktree_manager/__init__.py",
+])
+def test_native_profile_binds_bundled_wheel_members_to_sources(
+    embedded_profile_source, member,
+):
+    import local_install_profile as native
+    from promotion_python_artifacts import PromotionArtifactError
+    from standalone_python_artifacts import injected_resources
+
+    snapshot = embedded_profile_source
+    selected = native.source_inputs.select_project(snapshot, "worktree-manager")
+    members = {
+        name: path.read_bytes()
+        for name, path in injected_resources("worktree-manager", selected.payload.parent).items()
+    }
+    members["worktree_manager/__init__.py"] = (
+        selected.payload / "src/worktree_manager/__init__.py"
+    ).read_bytes()
+    members[member] = b"substituted bytes\n"
+    _embedded_profile_wheel(
+        snapshot / selected.project["wheels"], selected.project["artifact"], members,
+    )
+    (snapshot / native.source_inputs.MANIFEST).write_text(json.dumps(selected.record))
+    with pytest.raises(PromotionArtifactError, match="wheel payload differs from candidate source"):
+        native.first_party(snapshot, deadline=time.monotonic() + 30)
+
+
+def test_native_profile_still_requires_unbundled_library_distributions(embedded_profile_source):
+    import local_install_profile as native
+
+    snapshot = embedded_profile_source
+    selected = native.source_inputs.select_project(snapshot, "worktree-manager")
+    metadata = selected.payload / "pyproject.toml"
+    metadata.write_text(metadata.read_text().replace(
+        'first-party-core = ["agent-procutil"]', 'first-party-core = []',
+    ))
+    sources = native.source_inputs.sources
+    digest = sources.assembly_hash(selected.payload)
+    identity = sources.SourceIdentity(
+        "worktree-manager", "1.0.0", "a" * 40, "b" * 40, digest,
+        sources.runtime_version("1.0.0", "a" * 40, digest),
+    )
+    (selected.payload / sources.SOURCE_FILE).write_text(json.dumps(identity.document()))
+    selected.project["source"] = identity.document()
+    (snapshot / native.source_inputs.MANIFEST).write_text(json.dumps(selected.record))
+    with pytest.raises(native.ProfileError, match="do not complete"):
+        native.first_party(snapshot, deadline=time.monotonic() + 30)
+
+
 @pytest.mark.parametrize("dependency", ["lib>=2", "lib[unknown]>=1", "external @ https://example.com/x.whl"])
 def test_first_party_registry_projection_refuses_invalid_dependencies(dependency):
     from local_install_profile import ProfileError, registry_roots
@@ -646,6 +806,110 @@ def test_native_registry_lock_refuses_invalid_extras_before_output(tmp_path, mon
             component="app", extras=extras,
         )
     assert not output.exists()
+
+
+@pytest.mark.parametrize(("selected", "association"), [
+    (False, "missing"), (False, "present"), (True, "present"),
+    (True, "missing"), (True, "different"), (True, "missing-ssh"), (True, "different-ssh"),
+])
+def test_native_engine_profile_projects_declared_fleet_ssh_sdk(
+    tmp_path, monkeypatch, selected, association,
+):
+    from contextlib import contextmanager
+    import local_install_profile as native
+    from packaging.markers import Marker, default_environment
+    from packaging.requirements import Requirement
+    from packaging.utils import canonicalize_name
+    from application_sources import application_sources
+
+    root = Path(__file__).resolve().parent.parent
+    payload = root / "plugins/agent-worktrees"
+    wheels = {}
+    for directory in (payload, root / "fleet-manager", root / "plugins/agent-ssh"):
+        metadata = tomllib.loads((directory / "pyproject.toml").read_text())
+        project = metadata["project"]
+        requirements = list(project.get("dependencies", []))
+        extras = project.get("optional-dependencies", {})
+        for extra, values in extras.items():
+            for value in values:
+                requirement = Requirement(value)
+                marker = f'extra == "{extra}"'
+                if requirement.marker:
+                    marker = f"({requirement.marker}) and {marker}"
+                requirement.marker = Marker(marker)
+                requirements.append(str(requirement))
+        wheels[canonicalize_name(project["name"])] = {
+            "version": project["version"], "provides_extras": list(extras),
+            "requires_dist": requirements,
+            "application_sources": application_sources(metadata),
+        }
+    if association == "missing":
+        del wheels["fleet-manager"]
+    else:
+        wheels["fleet-manager"]["source_project"] = (
+            "standalone:fleet-manager"
+            if association in {"present", "missing-ssh", "different-ssh"} else "unrelated"
+        )
+    if association == "missing-ssh":
+        del wheels["agent-ssh"]
+    else:
+        wheels["agent-ssh"]["source_project"] = (
+            "unrelated" if association == "different-ssh" else "agent-ssh"
+        )
+    monkeypatch.setattr(native, "first_party", lambda *a, **kw: (
+        SimpleNamespace(payload=payload), wheels,
+    ))
+    monkeypatch.setattr(native, "_query_marker_environment", lambda *a, **kw: default_environment())
+    compiled = []
+
+    @contextmanager
+    def compiler(uv, arguments, **kwargs):
+        compiled.extend(Path(arguments[0]).read_text().splitlines())
+        raise RuntimeError("native compiler boundary")
+        yield
+
+    monkeypatch.setattr(native.dependencies, "retain_uv_compile", compiler)
+    refused = selected and association != "present"
+    expected_error = native.ProfileError if refused else RuntimeError
+    expected_message = "selected associated application" if refused else "native compiler boundary"
+    with pytest.raises(expected_error, match=expected_message):
+        native.main([
+            "--install-source", str(tmp_path / "input"), "--output", str(tmp_path / "profile"),
+            "--uv", "unused", "--component", "agent-worktrees",
+            *(["--extra", "fleet-ssh"] if selected else []),
+        ])
+    if refused:
+        assert compiled == []
+        assert not (tmp_path / "profile").exists()
+        return
+    names = {canonicalize_name(Requirement(value).name) for value in compiled if value}
+    assert ("aiohttp" in names) is selected
+    assert ("jwcrypto" in names) is selected
+    assert not names & {"fleet-manager", "agent-ssh"}
+
+
+@pytest.mark.parametrize("embedded_profile_source", [False, True], indirect=True)
+def test_native_application_dependency_binds_actual_associated_wheel_owner(
+    embedded_profile_source,
+):
+    import local_install_profile as native
+
+    _, wheels = native.first_party(
+        embedded_profile_source, deadline=time.monotonic() + 30,
+    )
+    name = "copilot-extensions-worktree-manager"
+    wheels["consumer"] = {
+        "version": "1", "provides_extras": [], "requires_dist": [name],
+        "application_sources": {name: "standalone:worktree-manager"},
+    }
+    assert native.registry_roots(
+        wheels, "consumer==1", {}, deadline=time.monotonic() + 5,
+    ) == []
+    wheels["consumer"]["application_sources"][name] = "unrelated"
+    with pytest.raises(native.ProfileError, match="selected associated application"):
+        native.registry_roots(
+            wheels, "consumer==1", {}, deadline=time.monotonic() + 5,
+        )
 
 
 @pytest.mark.parametrize("fault", [None, "missing", "version"])

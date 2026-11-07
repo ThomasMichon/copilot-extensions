@@ -658,10 +658,16 @@ including a private reserved launch that never reached ordinary binding.
 Denied, unknown or unsupported native evidence never means exit, and policy-off
 observation still cannot resume a writer or complete the transaction.
 Native governed-owner identity and exit references currently support Windows
-and Linux. On macOS, unavailable native birth evidence refuses governed startup,
-and unsupported exit evidence refuses cleanup/recovery rather than guessing from
-a PID or switching to legacy state. An absent-owner stop remains bounded;
+and Linux. Other native birth-token formats, including shared ZDD's Darwin
+tokens, refuse governed startup before journal or selection publication.
+Unavailable exit evidence refuses cleanup/recovery rather than guessing from
+a PID or switching to legacy state. Shared-library Darwin exit support does not
+by itself enable governed macOS owners. An absent-owner stop remains bounded;
 ordinary no-context legacy commands retain their existing behavior.
+Governed `serve` is a short-lived controller, not an admitted resident.
+The actual passive owner and legacy foreground owner retain daemon admission,
+including disposable-test leases and containment. A controller's exit must not
+close a daemon-lifetime Job inherited by the governed owner.
 Governed `restart --json` retains the legacy response shape:
 `{"restarted": true, "was_running": <boolean>}`. The incumbent flag comes from
 discovery under the same installation transaction guard; a failed or refused
@@ -914,6 +920,9 @@ receipts. They are not a backend executor or serving authorization.
 The [protected review executor](docs/protected-review-executor.md) orchestrates
 selected actions over those same records and the actual existing owner's pinned
 write transport. Source support is not installed backend authority or adoption.
+Its optional prepared-intent source selection retains original comment/write
+identity through that same native owner; receipt correlation is not fresh
+readback, feedback handling or automatic CLI/HTTP adoption.
 
 The [explicit generation cache](docs/generation-cache.md) stores retained
 immutable views with CAS publication; it starts no provider read or service

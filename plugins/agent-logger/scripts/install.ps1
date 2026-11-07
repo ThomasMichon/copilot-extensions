@@ -1381,25 +1381,23 @@ function Install-Package {
 
     [void](Invoke-VersionedSlotClean)
     if ($script:RuntimeConstructionReuse) {
-        if ($script:SourceRuntimeIdentity) {
-            $selected = Join-Path $InstallDir 'current-version'
-            if (-not (Test-Path -LiteralPath $selected) -or
-                ([IO.File]::ReadAllText($selected)).Trim() -ne $SrcVersion) {
-                if (-not (Invoke-VersionedActivate)) { throw 'Source runtime activation failed' }
-            } else {
-                if (-not (Test-LoggerRuntimeHealthy)) { throw 'Retained runtime slot failed its health gate; not activating' }
-                Assert-SourceRuntime
-                Deploy-ResolverHelpers
-                Assert-SourceRuntime
-            }
-            Publish-PayloadSnapshot | Out-Null
-            Write-SyncTaskLauncher
-            if ($publishGlobalBinstubs) {
-                Write-Binstubs -PythonExe $LinkPython
-                Deploy-SelfProvisioningBinstub
-            }
-            Write-LoggerDeployManifest
+        $selected = Join-Path $InstallDir 'current-version'
+        if (-not (Test-Path -LiteralPath $selected) -or
+            ([IO.File]::ReadAllText($selected)).Trim() -ne $SrcVersion) {
+            if (-not (Invoke-VersionedActivate)) { throw 'Retained runtime activation failed' }
+        } else {
+            if (-not (Test-LoggerRuntimeHealthy)) { throw 'Retained runtime slot failed its health gate; not activating' }
+            Assert-SourceRuntime
+            Deploy-ResolverHelpers
+            Assert-SourceRuntime
         }
+        Publish-PayloadSnapshot | Out-Null
+        Write-SyncTaskLauncher
+        if ($publishGlobalBinstubs) {
+            Write-Binstubs -PythonExe $LinkPython
+            Deploy-SelfProvisioningBinstub
+        }
+        Write-LoggerDeployManifest
         return
     }
 

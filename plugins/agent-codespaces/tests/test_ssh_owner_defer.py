@@ -1,13 +1,14 @@
 """Integration tests for the one-off ``agent-codespaces ssh`` Connection Owner
 defer (dotfiles#1345, slice 2c).
 
-Drives ``_cmd_ssh`` with the external SSH / provisioning seams mocked so the
-hold/skip/release wiring is exercised end-to-end:
+Drives the SSH handler and CLI parser with external SSH / provisioning seams
+mocked so the hold/skip/release and admission wiring is exercised:
 
 - when the Owner is live + enabled, ``_cmd_ssh`` does NOT stand up its own relay
   and places a hold that is released on cleanup; and
 - a busy target (``TargetBusyError`` before the run) does NOT leak a hold --
-  the hold is placed only *after* the target lock is acquired.
+  the hold is placed only *after* the target lock is acquired; and
+- failed relay admission stops downstream work while preserving cleanup.
 
 The connect loop returns a fake connection and the cross-harness fence is forced
 False so ``_run`` returns right after the relay decision, exercising the cleanup
@@ -17,7 +18,9 @@ False so ``_run`` returns right after the relay decision, exercising the cleanup
 from __future__ import annotations
 
 import argparse
+import asyncio
 import types
+from unittest.mock import AsyncMock
 
 import pytest
 import ssh_manager
@@ -42,6 +45,7 @@ class _FakeConn:
 class _FakeManager:
     def __init__(self) -> None:
         self.disconnected: list[str] = []
+        self.commands: list[tuple[str, str, dict]] = []
 
     async def ensure_connected(self, name, source, port_forwards):
         return _FakeConn()
@@ -49,12 +53,19 @@ class _FakeManager:
     async def disconnect(self, name):
         self.disconnected.append(name)
 
+    async def exec_command(self, name, command, **kwargs):
+        self.commands.append((name, command, kwargs))
+        return types.SimpleNamespace(
+            exit_code=0, stdout="OK\n", stderr="", timed_out=False,
+        )
+
 
 class _FakeLock:
     busy = False  # per-test toggle
 
     def __init__(self, target, op=None):
         self.target = target
+        self.released = False
 
     def acquire(self, force=False):
         if _FakeLock.busy:
@@ -64,7 +75,7 @@ class _FakeLock:
             )
 
     def release(self):
-        pass
+        self.released = True
 
 
 def _args(name="cs-test"):
@@ -87,6 +98,10 @@ def harness(monkeypatch, store):
 
     import agent_codespaces.lifecycle as lifecycle
     monkeypatch.setattr(lifecycle, "account_for_codespace", lambda name: None)
+    monkeypatch.setattr(
+        "agent_codespaces.gh_account.credential_account_for_codespace",
+        lambda name: None,
+    )
 
     monkeypatch.setattr(
         m,
@@ -113,11 +128,15 @@ def harness(monkeypatch, store):
     import agent_codespaces.relay_token as relay_token
     monkeypatch.setattr(relay_token, "token_for", lambda name, **kw: "tok")
 
-    monkeypatch.setattr(ssh_manager, "ConnectionManager", _FakeManager)
-    monkeypatch.setattr(ssh_manager, "TargetLock", _FakeLock)
+    manager = _FakeManager()
+    lock = _FakeLock("cs-test")
+    monkeypatch.setattr(ssh_manager, "ConnectionManager", lambda: manager)
+    monkeypatch.setattr(ssh_manager, "TargetLock", lambda *a, **k: lock)
 
     # Force the live-defer decision without a real daemon; keep hold/release real.
-    monkeypatch.setattr(owner, "should_defer_to_owner", lambda *a, **k: True)
+    monkeypatch.setattr(
+        owner, "should_defer_to_owner", lambda *a, **k: not k.get("no_relay", False)
+    )
 
     async def _served(name, **k):
         return True
@@ -138,7 +157,7 @@ def harness(monkeypatch, store):
     monkeypatch.setattr(m, "_check_cross_harness_fence", _fence)
 
     _FakeLock.busy = False
-    return types.SimpleNamespace(calls=calls)
+    return types.SimpleNamespace(calls=calls, manager=manager, lock=lock)
 
 
 def test_ssh_defers_and_releases_hold(monkeypatch, harness):
@@ -168,3 +187,123 @@ def test_ssh_busy_target_does_not_leak_hold(harness):
     # nothing and never stands up a relay.
     assert owner.list_holds() == []
     assert harness.calls["relay"] == 0
+
+
+@pytest.mark.parametrize("defer_to_owner", [True, False], ids=["owner", "direct"])
+@pytest.mark.parametrize("entrypoint", ["command", "cli"])
+def test_ssh_refuses_failed_relay_before_downstream_work(
+    monkeypatch, harness, capsys, defer_to_owner, entrypoint,
+):
+    monkeypatch.setattr(owner, "should_defer_to_owner", lambda *a, **k: defer_to_owner)
+
+    async def unavailable(*a, **k):
+        return False
+
+    async def downstream(*a, **k):
+        pytest.fail("failed relay admission reached downstream work")
+
+    monkeypatch.setattr(owner, "await_owner_relay", unavailable)
+    monkeypatch.setattr(m, "_check_cross_harness_fence", downstream)
+
+    if entrypoint == "cli":
+        rc = m.main(["ssh", "cs-test", "--remote-cmd", "true"])
+    else:
+        rc = m._cmd_ssh(_args())
+
+    assert rc == 1
+    assert "credential relay" in capsys.readouterr().err.lower()
+    assert harness.manager.disconnected == ["cs-test"]
+    assert harness.lock.released
+    assert owner.list_holds() == []
+    assert harness.calls["relay"] == (0 if defer_to_owner else 1)
+    assert harness.manager.commands == []
+
+
+@pytest.mark.parametrize("mode", ["owner", "direct", "no-relay"])
+def test_ssh_preserves_successful_relay_and_explicit_no_relay(
+    monkeypatch, harness, mode,
+):
+    calls = []
+
+    class Relay:
+        async def stop(self):
+            calls.append("stop")
+
+    async def ready(*a, **k):
+        calls.append("start")
+        return Relay()
+
+    monkeypatch.setattr(
+        owner, "should_defer_to_owner", lambda *a, **k: mode == "owner"
+    )
+    monkeypatch.setattr(m, "_start_supervised_relay", ready)
+    args = _args()
+    args.no_relay = mode == "no-relay"
+
+    assert m._cmd_ssh(args) == m._BUSY_EXIT
+    assert calls == (["start", "stop"] if mode == "direct" else [])
+    assert harness.lock.released
+    assert owner.list_holds() == []
+    assert len(harness.manager.commands) == (0 if mode == "no-relay" else 1)
+
+
+@pytest.mark.parametrize("defer_to_owner", [True, False], ids=["owner", "direct"])
+@pytest.mark.parametrize("failure", ["missing", "wrong-service", "transport"])
+def test_ssh_refuses_unserved_relay_before_downstream_work(
+    monkeypatch, harness, capsys, defer_to_owner, failure,
+):
+    probes = []
+    relay = types.SimpleNamespace(stop=AsyncMock())
+    monkeypatch.setattr(owner, "should_defer_to_owner", lambda *a, **k: defer_to_owner)
+    monkeypatch.setattr(m, "_start_supervised_relay", AsyncMock(return_value=relay))
+
+    async def run(name, command, **kwargs):
+        probes.append((name, command, kwargs))
+        if failure == "transport":
+            raise ConnectionError("probe transport unavailable")
+        return types.SimpleNamespace(
+            exit_code=1 if failure == "missing" else 0,
+            stdout="" if failure == "missing" else "NOT OK\n",
+            stderr="", timed_out=False,
+        )
+
+    async def downstream(*a, **k):
+        pytest.fail("unserved relay reached downstream work")
+
+    monkeypatch.setattr(harness.manager, "exec_command", run)
+    monkeypatch.setattr(m, "_check_cross_harness_fence", downstream)
+
+    assert m.main(["ssh", "cs-test", "--remote-cmd", "true", "--timeout", "90"]) == 1
+    assert "credential relay" in capsys.readouterr().err.lower()
+    assert len(probes) == 1
+    assert probes[0][0] == "cs-test"
+    assert "/dev/tcp/127.0.0.1/3000" in probes[0][1]
+    assert probes[0][2]["timeout"] == 90.0
+    assert harness.manager.disconnected == ["cs-test"]
+    assert harness.lock.released
+    assert owner.list_holds() == []
+    assert relay.stop.await_count == (0 if defer_to_owner else 1)
+
+
+@pytest.mark.parametrize("defer_to_owner", [True, False], ids=["owner", "direct"])
+def test_ssh_cancelled_protocol_probe_preserves_cleanup(
+    monkeypatch, harness, defer_to_owner,
+):
+    relay = types.SimpleNamespace(stop=AsyncMock())
+    monkeypatch.setattr(owner, "should_defer_to_owner", lambda *a, **k: defer_to_owner)
+    monkeypatch.setattr(m, "_start_supervised_relay", AsyncMock(return_value=relay))
+    monkeypatch.setattr(
+        harness.manager, "exec_command", AsyncMock(side_effect=asyncio.CancelledError),
+    )
+
+    async def downstream(*a, **k):
+        pytest.fail("cancelled protocol probe reached downstream work")
+
+    monkeypatch.setattr(m, "_check_cross_harness_fence", downstream)
+
+    with pytest.raises(asyncio.CancelledError):
+        m._cmd_ssh(_args())
+    assert harness.manager.disconnected == ["cs-test"]
+    assert harness.lock.released
+    assert owner.list_holds() == []
+    assert relay.stop.await_count == (0 if defer_to_owner else 1)

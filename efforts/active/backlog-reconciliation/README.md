@@ -233,6 +233,51 @@ implementation authority, resource custody or the fixed checkpoint.
 
 ## Plan
 
+The [current consumer and qualification study](<journal/2026/11.06 current-consumer-and-qualification-boundaries.md>)
+keeps aggregate scheduling, serial-publication, historical-ref recovery and
+guard-map native acceptance distinct from current source identities and
+delivered preventive fixes. New #11231 retains its existing diagnosis owner.
+Two identical complete scans measure 810 whole OPEN, 81 above fixed 729;
+Phase 2, all original acceptance and source/resource custody remain Active.
+
+The [account-relay and consumer-source study](<journal/2026/11.06 account-relay-and-consumer-source-closeout.md>)
+records #8551's finite delivered source completion and keeps current typing,
+controller, namespace and native-digest gaps distinct from changed-file identity.
+Two identical complete scans measure 810 whole OPEN, 81 above fixed 729;
+Phase 2, original acceptance and all source/resource custody remain Active.
+
+The [canonical-copy and current-inflow study](<journal/2026/11.06 canonical-copy-sync-and-current-inflow.md>)
+records #8972's verified source-only completion and retains incomplete native,
+consumer, monitoring and streaming work at its actual evidence boundaries.
+Two complete scans measure 810 whole OPEN, 81 above fixed 729; Phase 2 and
+the whole-queue completion gates remain Active.
+
+The [source-capability and retained-outcome study](<journal/2026/11.06 source-capability-and-retained-outcomes.md>)
+keeps foreign-target conformance, historical vector repair and deliberate
+install/adopt choices distinct from already-shipped capabilities. Actual merge
+and current source identities do not supply the unfinished acceptance or
+receiving transfer. The whole-queue checkpoint and all existing owners remain.
+
+The [authenticated board-waiter cohort](board-waiter-receiving-cohort.md)
+records reviewed #11166, complete actual #5452 receiving/readback and #5410's
+separate NOT_PLANNED tracking retirement. Actual-header regressions and both
+delegated/relay consumers remain independent unchecked lanes; no implementation
+or source/resource custody transfer follows.
+
+The [managed validation cohorts](managed-validation-evidence-cohorts.md)
+retain #4835's finite contained-Windows exit-state lane directly in OPEN
+#6917 after reviewed #11171, complete actual receiving/readback and its
+separate NOT_PLANNED tracking retirement. Fixture and shared-primitive owners
+remain separate from the accepted shared-runner writer; all technical
+acceptance stays unchecked.
+
+The [runner-readiness and finite-closeout study](<journal/2026/11.06 runner-readiness-and-finite-closeouts.md>)
+independently verifies eighteen PR records and twenty-four source identities.
+It distinguishes a delivered staging-lease repair, one satisfied WSL-fixture
+sub-clause and published SSH/supervisor source from unresolved native,
+installed, correlation and ownership outcomes. A direct managed-runner lane
+is evaluated separately from an unsupported all-native umbrella.
+
 The 2026-11-05 operator clarification makes cohort-sized canonical bugs and
 audited individual dispositions the principal deliverable. Research related
 originals together, ensure the actual parent encompasses the planned work and
@@ -329,6 +374,122 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 - [x] Preserve the initial cohort and oldest-first cursor in structured session state.
 
 ### Phase 2 - Continuing reconciliation
+
+The [readiness and finite-closeout journal](<journal/2026/11.06 runner-readiness-and-finite-closeouts.md>)
+records reviewed #11087, #6952's COMPLETED source repair and #6779's separately
+audited NOT_PLANNED retirement beneath OPEN #6917. All technical readiness
+rows and existing custody remain. Two identical complete scans at 12:11:33 PST
+measure 805 whole OPEN and 1,027 audited outcomes, 76 above fixed 729:
+two eligible arrivals exactly outweighed the two campaign departures.
+The campaign remains Active, including original-cohort, inflow and excluded
+identities; the next bounded cohort/completed-work study continues.
+
+The [managed validation cohorts](managed-validation-evidence-cohorts.md)
+record reviewed #11076 and three separately audited NOT_PLANNED tracking
+retirements beneath still-OPEN #6917/#4217, without technical completion
+or custody transfer. Two identical complete scans measure 802 whole OPEN
+and 1,025 audited outcomes, 73 above fixed 729. Before these dispositions,
+three eligible arrivals outweighed one external departure; no subset count
+replaces the whole-queue gate. The campaign and all remaining acceptance stay Active.
+
+The [managed validation cohorts](managed-validation-evidence-cohorts.md)
+retain #7136/#8521 directly in OPEN #6917 and #8511 directly in OPEN
+#4217. Complete actual parent bodies preserve independent preparation,
+diagnostics, grouped results, deterministic CI and default-artifact ownership
+acceptance. All technical rows and existing source/resource custodians remain;
+those three subordinate trackers retired only after reviewed delivery.
+The later whole #6779 timeout-readiness contract is now directly retained
+in the 13,056-character OPEN #6917 body through MR5/MRV6 and unchanged
+single-writer/fixture custody. This fourth tracker also retired only after
+reviewed delivery and fresh disposition. Newer source/path metadata is not assumed
+semantic repair, and the full native portfolio stays separate.
+
+The [supervisor-recovery cohort](supervisor-recovery-cohort.md) records
+reviewed #11060 and #6186's separately audited NOT_PLANNED retirement
+under independently OPEN #6185, without technical completion or release.
+Two identical complete scans measure 803 whole OPEN and 1,022 audited
+outcomes: the one campaign departure is outweighed by two eligible arrivals.
+The [quality study](launch-pipe-and-logger-quality-cohorts.md) retains
+#6407's actual consumer gate and #6917's ordinary-group residual. Fixed
+729 stays 74 away; new source research and actual ownership holds continue.
+
+The [supervisor-recovery cohort](supervisor-recovery-cohort.md) records
+the complete OPEN #6185 parent receiving #6186 as an independent emitter
+convergence/recovery lane. Current source credits actual-start writing,
+fingerprint restart and crash revival while retaining inner conclusion
+progress and actual incident causality. One whole retry source remains
+withheld; original alternatives, all technical acceptance and custody
+remain. #6186 awaits planning review and a separate current-parent audit;
+the last complete whole count is still 802, 73 above fixed 729.
+
+The [caller-pipe study](launch-pipe-and-logger-quality-cohorts.md) records
+reviewed #11054 and #6880's separately audited NOT_PLANNED retirement
+under independently OPEN #5716. All technical lanes and custody remain.
+Two identical complete scans measure 802 whole OPEN and 1,021 audited
+outcomes: the one campaign departure is offset by eligible metadata-only
+arrival #11050, now separately qualified as an in-progress producer-owned
+configuration prerequisite, not a completion candidate. Fixed 729 stays
+73 away; new source studies and actual fleet-reconcile intake continue.
+
+The [caller-pipe study](launch-pipe-and-logger-quality-cohorts.md) now records
+the complete independently OPEN #5716 parent's fourth finite lane, #6880.
+Current source separates root exit from captured-output EOF; the exact
+logger/watchdog/session/daemon regression remains unchecked. Three completed
+source studies retain #7010's native long-path gap, #7136's manifest-only
+cache regression and #8511's nonexclusive default allocation. None supplies
+technical completion, receiving transfer or resource release. Latest complete
+census remains 802 whole OPEN, 73 above fixed 729; planning review and a
+separate current-parent tracking audit precede any #6880 retirement.
+
+The journal records reviewed #11051 delivery of the three audited outcomes
+and completed-work correction. All three current document blobs match the
+reviewed head, the complete published study was read back, and the actual
+campaign Plan/Validation remains Active. Three independent source studies
+continue; the separate captured-output/root-exit contract is qualified for
+current-source assessment, not an accepted transfer or new native execution.
+Latest complete census remains 802 whole OPEN, 73 above fixed 729.
+
+The [anchor/owner study](anchor-and-owner-observation-cohorts.md) now records
+reviewed #11048, two separately audited NOT_PLANNED tracking retirements
+under OPEN #4173/#4619, and #7039's finite completed source correction in
+actual merged #8855. All identity acceptance and source/resource custody
+remain. Complete 09:43 PST scans measure 802 whole OPEN and 1,020 audited
+outcomes, 73 above fixed 729. Three new independent current-source studies
+cover #7010/#7136/#8511 rather than repeating unchanged packet summaries.
+No native execution, implementation or claim/resource release follows;
+the canonical Plan/Validation and fixed checkpoint remain Active.
+
+The [registered-anchor and current-owner observation cohorts](anchor-and-owner-observation-cohorts.md)
+account for twenty complete qualified originals and two independent
+actual OPEN parent intakes: #7689 under #4173 and #7180 under #4619.
+Complete current bodies preserve incumbent scope, direct Plan/global
+Validation, exact record/anchor authority and every existing source/
+resource owner. Both originals stay OPEN pending normal planning review
+and separate disposition. Eighteen other contracts retain finite
+acceptance and actual holds; no new native/installed proof is inferred.
+The journal retains the 805-whole-open/1,017-audit observation and the
+still-Active canonical Plan/Validation and fixed 729 checkpoint.
+
+The journal records reviewed #11045 delivery, complete published
+target-to-delivery readback and separate #6752 NOT_PLANNED tracking
+retirement under OPEN #6394. All mechanical receipt/nudge requirements,
+actual source/publisher custody and the unresolved phase decision remain.
+Complete 09:20 PST scans measure 805 whole OPEN, 1,017 audited dispositions
+and 76 above 729. Three completed studies cover the measured next twenty
+qualified originals without widening source/author boundaries; their
+receiving decisions and any future dispositions remain separate.
+The canonical Plan/Validation and fixed checkpoint remain Active.
+
+The [target-to-delivery and reconcile study](bridge-target-and-reconcile-contracts.md)
+accounts for 24 more whole originals and actual OPEN #6394's complete
+#6752 target-diagnostic intake, preserving mechanical receipt/nudge
+acceptance and the original source owner's unresolved phase decision.
+Twenty-two other contracts retain their finite outcomes and custodians;
+the Fleet reconcile proposal has no invented receiving issue.
+The journal records reviewed #11044 and three separately audited
+NOT_PLANNED tracking retirements. Complete 09:12 PST scans measure
+806 whole OPEN, 1,016 audited dispositions and 77 above 729.
+The canonical Plan/Validation and fixed checkpoint remain Active.
 
 The [pipe lifecycle and Logger quality cohorts](launch-pipe-and-logger-quality-cohorts.md)
 retain 24 complete originals and two additive actual parent intakes:
@@ -2683,6 +2844,24 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [board-waiter receiving matrix](board-waiter-receiving-cohort.md)
+preserves the author's withdrawn universal claim, complete affected-module
+audit, actual constructed-header assertions and both nonlocal consumers.
+Source facts and reviewed plans are not authentication, test execution,
+actual receiving delivery or technical completion.
+
+The [runner-readiness and finite-closeout study](<journal/2026/11.06 runner-readiness-and-finite-closeouts.md>)
+keeps actual provider checks distinct from reported tests, source definitions,
+release and installed acceptance. Complete original clauses, genuine holds,
+source/resource custody and unit-only required CI remain; sampled progress
+or assignment alone is not a completion or refusal criterion.
+Its older-contract follow-through credits the current session-bound routing
+predicate without conflating it with cause-preserving file lookup, and keeps
+argument fidelity, truthful native startup, Windows pipe acceptance,
+write-time artifact policy, bounded diagnostics and large-response framing
+as distinct finite outcomes. Uninspected alternate surfaces remain unknown;
+no repeated retain comment, source definition or shared theme closes them.
 
 The [release/stamp/inventory study](finite-release-stamp-inventory-contracts.md)
 separates fourteen whole-message, one protected-message, one fresh

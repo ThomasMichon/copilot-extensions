@@ -1,0 +1,9 @@
+{
+  "comment": "Route protected ordinary completion through retained preparation and authoritative readiness",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

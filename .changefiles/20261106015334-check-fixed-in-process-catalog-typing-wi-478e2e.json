@@ -1,0 +1,9 @@
+{
+  "comment": "Check fixed in-process catalog typing witnesses with source-bound producer and template diagnostics",
+  "changes": [
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "patch"
+    }
+  ]
+}

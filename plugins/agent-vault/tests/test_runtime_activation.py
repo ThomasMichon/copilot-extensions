@@ -12,7 +12,7 @@ from agent_procutil import no_window_kwargs
 
 from .test_bootstrap_check_reconcile_always_on import _clean_env, _make_fake_plugin
 from .test_bootstrap_driver import native_bootstrap
-from .test_identity_payload_gate import prepare_payload, prepare_runtime, invoke
+from .test_identity_payload_gate import prepare_payload, prepare_runtime, invoke, launcher
 from .test_install_snapshot_ps1 import _isolated_install_env, _stage_payload
 
 PLUGIN = Path(__file__).resolve().parents[1]
@@ -36,6 +36,46 @@ def test_native_cold_contract_query_never_provisions(tmp_path, scoped):
         "capabilities": [], "runtime_prepared": False,
     }
     assert not runtime.exists()
+
+
+def test_native_batch_reads_real_cache_without_service(tmp_path, monkeypatch):
+    from agent_vault.cache import PersistentCache
+
+    home, payload, runtime, _identity, context = prepare_payload(tmp_path, "namespaced")
+    (home / "native.json").write_text(json.dumps({
+        "enabled": True, "kpdb": str(home / "unused.kdbx"), "group": "Example",
+    }), encoding="utf-8")
+    prepare_runtime(runtime, payload)
+    monkeypatch.setenv("AGENT_VAULT_CACHE", "1")
+    cache = PersistentCache(runtime / "cache")
+    assert cache.put("Example/one", "password", "synthetic \u2603")
+    assert cache.put("Example/two", "username", "synthetic-user")
+    env = _clean_env({
+        "HOME": str(home), "USERPROFILE": str(home),
+        "COPILOT_PLUGIN_ROOT": str(payload), "COPILOT_EXTENSIONS_CONTEXT": context,
+        "AGENT_VAULT_HOME": str(runtime), "AGENT_VAULT_CONFIG": str(home / "native.json"),
+        "AGENT_VAULT_CACHE": "1", "AGENT_VAULT_NO_SELFPROVISION": "1",
+    })
+    requests = [
+        {"entry": "Example/one", "field": "password"},
+        {"entry": "Example/two", "field": "username"},
+        {"entry": "Example/one", "field": "password"},
+    ]
+    result = subprocess.run(
+        [*launcher(payload), "batch-get"], input=json.dumps(requests),
+        env=env, cwd=home, capture_output=True, text=True, encoding="utf-8",
+        timeout=30, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    records = json.loads(result.stdout)["results"]
+    assert [(row["entry"], row["field"]) for row in records] == [
+        (row["entry"], row["field"]) for row in requests
+    ]
+    assert [row["value"] for row in records] == [
+        "synthetic \u2603", "synthetic-user", "synthetic \u2603",
+    ]
+    assert all(row["ok"] is True and row["source"] == "cache" for row in records)
+    assert not (runtime / "run").exists()
 
 
 @pytest.mark.parametrize("environment_database", [False, True])
@@ -79,7 +119,7 @@ def test_native_payload_configuration_root_keeps_caller_paths(tmp_path, environm
         payload, env, home, "--configuration-root", str(project), "invocation-contract", "--json",
     )
     assert metadata.returncode == 0, metadata.stdout + metadata.stderr
-    assert json.loads(metadata.stdout)["capabilities"] == ["configuration-root-v1"]
+    assert json.loads(metadata.stdout)["capabilities"] == ["configuration-root-v1", "batch-get-v1"]
     assert not (runtime / "run").exists()
 
 
@@ -283,7 +323,7 @@ def test_native_user_shortcut_preserves_cold_scope_and_read_only_contract(
     if prepared and operation == "scope":
         assert json.loads(result.stdout)["group"] == "selected"
     if prepared and operation == "contract":
-        assert json.loads(result.stdout)["capabilities"] == ["configuration-root-v1"]
+        assert json.loads(result.stdout)["capabilities"] == ["configuration-root-v1", "batch-get-v1"]
     if not prepared and dispatcher_aware and operation == "contract":
         assert json.loads(result.stdout)["runtime_prepared"] is False
     assert (runtime / "versions").exists() is prepared

@@ -1,0 +1,71 @@
+name: Prepared membership native acceptance
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["pr/**"]
+    paths:
+      - ".github/workflows/prepared-membership-native.yml"
+      - "plugins/agent-worktrees/scripts/managed-session.ps1"
+      - "plugins/agent-worktrees/scripts/managed_session.py"
+      - "plugins/agent-worktrees/scripts/registry_root.py"
+      - "plugins/agent-worktrees/tests/test_managed_session.py"
+      - "plugins/agent-worktrees/scripts/hook-facts.ps1"
+      - "plugins/agent-worktrees/scripts/post-tool-hook.ps1"
+      - "plugins/agent-worktrees/tests/test_post_tool_shell.py"
+
+permissions:
+  contents: read
+
+jobs:
+  prepared-membership-windows:
+    name: Prepared cell membership (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Require actual Windows PowerShell and PowerShell 7 membership and post-tool controls
+        env:
+          AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP: "1"
+          PYTHONUTF8: "0"
+          PYTEST_ADDOPTS: "-vv --tb=short --durations=10"
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_managed_session.py
+          --test-file tests/test_post_tool_shell.py
+          -k "prepared_cell_membership or registered_prepared_cell"
+          --allow-explicit-tiers --test-timeout 30 --timeout 300
+
+  prepared-membership-linux:
+    name: Selected cell membership producer (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Qualify original stamped cell publication and isolation
+        shell: bash
+        run: |
+          runner=tools/run-plugin-tests.py
+          if command -v docker >/dev/null && command -v devcontainer >/dev/null; then
+            runner=tools/run_tests_in_devcontainer.py
+          fi
+          python "$runner" agent-worktrees \
+            --test-file tests/test_managed_session.py \
+            -k real_installation_cells_do_not_share_admission_or_fall_back \
+            --allow-explicit-tiers --test-timeout 30 --timeout 180

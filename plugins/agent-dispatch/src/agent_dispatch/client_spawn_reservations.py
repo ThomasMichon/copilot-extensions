@@ -11,6 +11,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+import httpx
+
 
 class SpawnReservationClientMixin:
     """``list_reservations``/``get_reservation``, mixed into
@@ -29,10 +31,16 @@ class SpawnReservationClientMixin:
             json={"startup_revision": startup_revision},
         ))
 
-    def record_spawn_allocation(self, key: str, project: str) -> dict:
+    def record_spawn_allocation(
+        self, key: str, project: str, *, worktree_writer_requirement: dict | None = None,
+    ) -> dict:
         """Persist the selected execution repository before allocation effects."""
         return self._unwrap(self._http.post(
-            f"/spawn-reservations/{key}/allocation", json={"project": project},
+            f"/spawn-reservations/{key}/allocation", json={
+                "project": project,
+                **({"worktree_writer_requirement": worktree_writer_requirement}
+                   if worktree_writer_requirement is not None else {}),
+            },
         ))
 
     def record_spawn_worktree(
@@ -41,11 +49,24 @@ class SpawnReservationClientMixin:
         driver: str | None = None, allocation_project: str | None = None,
         worktree_path: str | None = None,
         creation_nonce: str | None = None,
+        worktree_writer_requirement: dict | None = None,
+        timeout: float | None = None,
     ) -> dict:
         """Retain workspace provenance and its independent execution machine."""
         if creation_nonce is not None:
             from .client_task_relationships import require_support
             require_support(self)
+        if worktree_writer_requirement is not None:
+            from .client_errors import DispatchError
+            versions = self.pool_placement_contract().get("prepared_writer_requirement_versions")
+            if not isinstance(versions, list) or not any(type(v) is int and v == 1 for v in versions):
+                raise DispatchError(409, "selected task owner cannot retain a prepared writer requirement")
+        options = {}
+        if timeout is not None:
+            selected = httpx.Timeout(self._http.timeout)
+            if selected.read is not None:
+                selected.read = max(selected.read, timeout)
+            options["timeout"] = selected
         return self._unwrap(self._http.post(
             f"/spawn-reservations/{key}/worktree",
             json={
@@ -54,7 +75,10 @@ class SpawnReservationClientMixin:
                 "allocation_project": allocation_project, "worktree_path": worktree_path,
                 **({"execution_machine": execution_machine} if execution_machine is not None else {}),
                 **({"creation_nonce": creation_nonce} if creation_nonce is not None else {}),
+                **({"worktree_writer_requirement": worktree_writer_requirement}
+                   if worktree_writer_requirement is not None else {}),
             },
+            **options,
         ))
 
     def record_created_agent(

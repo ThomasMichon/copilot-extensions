@@ -88,6 +88,111 @@ def _foreign_resolution(
     )
 
 
+@pytest.mark.parametrize(("attribution", "configured", "codename_source", "marker"), [
+    (False, True, "built-in", False),
+    ("codename", False, "custom", False),
+    ("codename", True, "custom", True),
+])
+def test_author_export_roundtrip_preserves_attribution_consent(
+    monkeypatch, tmp_path, _tracking_setup, attribution, configured, codename_source, marker,
+):
+    from dataclasses import replace
+    from agent_worktrees import pr_author_cli, pr_worker_config
+
+    tracking_d, wid = _tracking_setup
+    record = tracking.load_record(tracking_d / f"{wid}.yaml")
+    record.codename = "shimmering-quartz"
+    record.codename_source = codename_source
+    tracking.save_record(record)
+    target = _foreign_resolution(
+        source_attribution=attribution, source_attribution_configured=configured,
+    ).repo_config
+    target = replace(target, pr=replace(target.pr, api_base="https://forge.invalid"))
+    policy = tmp_path / "worker-author.json"
+    pr_worker_config.export_config(
+        "owner/other-repo", target, str(tmp_path / "worker"), "origin/dev", policy,
+        include_author=True,
+    )
+    monkeypatch.setattr(
+        cfg, "load_config",
+        lambda path=None, **options: (
+            _config() if path is None else cfg._load_config_uncached(path, **options)
+        ),
+    )
+    loaded = pr_author_cli.load_author_config(str(policy), "owner/other-repo", claimant=True)
+    backend = _FakeProvider(result=_FakePull(url="https://forge.invalid/7", number=7))
+    monkeypatch.setattr(providers, "get_provider", lambda *_: backend)
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *_: None)
+    result = pr_foreign_create.create_foreign_pr_from_branch(
+        wid, loaded, target_repo="owner/other-repo", from_branch="topic", title="Fix", body="Details",
+    )
+    assert result["pr_opened"] and result["claimed"], result
+    assert ("agent-worktrees:source" in backend.calls[0][0].body) is marker
+    assert pr_config.resolve_repo_config_for_slug(
+        loaded, "owner/other-repo",
+    ).repo_config.pr.source_attribution_configured is configured
+
+
+@pytest.mark.parametrize("body", ["Incomplete description", "## Intent\n\nComplete description"])
+@pytest.mark.parametrize("caller_origin", [None, "conflicting"])
+def test_author_export_roundtrip_enforces_required_body_and_labels(
+    monkeypatch, tmp_path, _tracking_setup, body, caller_origin,
+):
+    from dataclasses import replace
+    from agent_worktrees import pr_author_cli, pr_publication_labels, pr_worker_config
+
+    _, wid = _tracking_setup
+    caller = _config()
+    caller = replace(caller, repos={caller.repo_name: replace(
+        caller.default_repo, pr=replace(
+            caller.default_repo.pr, publication_origin=(
+                pr_publication_labels.PublicationOrigin("author", ("source:caller",))
+                if caller_origin else None
+            ),
+        ),
+    )})
+    target = _foreign_resolution(
+        required_body_sections=("Intent",), labels=("policy-required",), source_attribution=False,
+    ).repo_config
+    target = replace(target, pr=replace(
+        target.pr, api_base="https://forge.invalid", push_timeout_seconds=37.5,
+        publication_origin=pr_publication_labels.PublicationOrigin("author", ("source:target",)),
+    ))
+    policy = tmp_path / "worker-author.json"
+    pr_worker_config.export_config(
+        "owner/other-repo", target, str(tmp_path / "worker"), "origin/dev", policy,
+        include_author=True,
+    )
+    monkeypatch.setattr(
+        cfg, "load_config",
+        lambda path=None, **options: (
+            caller if path is None else cfg._load_config_uncached(path, **options)
+        ),
+    )
+    loaded = pr_author_cli.load_author_config(str(policy), "owner/other-repo", claimant=True)
+    backend = _FakeProvider(result=_FakePull(url="https://forge.invalid/7", number=7))
+    current = ["unrelated"]
+    backend.get_publication_labels = lambda *a, **k: tuple(current)
+    backend.add_publication_labels = lambda repo, number, values, **k: current.extend(values)
+    monkeypatch.setattr(providers, "get_provider", lambda *_: backend)
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *_: None)
+    result = pr_foreign_create.create_foreign_pr_from_branch(
+        wid, loaded, target_repo="owner/other-repo", from_branch="topic", title="Fix", body=body,
+        publication_origin="author",
+    )
+    if body.startswith("## Intent"):
+        assert result.get("pr_opened"), result
+        assert backend.calls[0][0].labels == ("policy-required",)
+        assert result["publication_labels"]["ok"]
+        assert current == ["unrelated", "source:target"]
+    else:
+        assert "missing required non-empty section" in result["error"]
+        assert not backend.calls
+    assert pr_config.resolve_repo_config_for_slug(
+        loaded, "owner/other-repo",
+    ).repo_config.pr.push_timeout_seconds == 37.5
+
+
 @pytest.mark.parametrize("qualified", [True, False])
 def test_qualified_foreign_creation_retains_claim_and_postcreate_uncertainty(
     monkeypatch, _tracking_setup, qualified,

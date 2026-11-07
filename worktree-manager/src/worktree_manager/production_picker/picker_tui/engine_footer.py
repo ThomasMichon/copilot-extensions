@@ -104,6 +104,8 @@ class PickerFooterMixin:
                      else "Enter/Esc close")
         else:
             hints = self._focus_hint()
+            if self._kind() == "worktrees" and self._orphans:
+                hints = "o: Doctor · " + hints
         f = Text(" " + hints, style=C_META)
         if self._busy_label:
             dbg = f"· {self.spin()} {self._busy_label}… "
