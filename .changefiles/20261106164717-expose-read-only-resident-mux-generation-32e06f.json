@@ -1,0 +1,9 @@
+{
+  "comment": "Expose read-only resident mux generation observation",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
