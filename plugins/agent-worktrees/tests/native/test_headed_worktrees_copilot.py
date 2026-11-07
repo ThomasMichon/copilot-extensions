@@ -47,6 +47,10 @@ def _until(check, label, timeout=30, diagnostic=None):
 
 @pytest.mark.parametrize("control", ["broker", "native-input", "manager-no-mux", "manager-mux"])
 def test_worktrees_native_fresh_and_resume_keep_one_history_and_real_receipts(tmp_path, control):
+    _qualify_native_worktrees(tmp_path, control)
+
+
+def _qualify_native_worktrees(tmp_path, control, *, manager_script=None, manager_environment=None):
     from plugin_test_command_safety import private_mux_args
 
     executable = os.environ.get("COPILOT_NATIVE_TEST_EXECUTABLE")
@@ -120,6 +124,7 @@ def test_worktrees_native_fresh_and_resume_keep_one_history_and_real_receipts(tm
         DRIVER_FIXTURE_MANAGER_TARGET=manager_target,
         DRIVER_FIXTURE_MUX_LOG=str(tmp_path / "mux-commands.txt"),
     )
+    environment.update(manager_environment or {})
     mux_directory = tmp_path / "discovery"
     mux_directory.mkdir()
     namespace = private_mux_args(tmp_path)
@@ -320,12 +325,14 @@ class Mux {
                 AGENT_RT_ROOT=str(runtime_root), WORKTREE_NO_UPDATE="1",
                 WORKTREE_NO_RECONCILE="1", WORKTREE_NO_PROVISION="1",
             )
-            manager_bin = tmp_path / "manager-runtime" / "bin"
-            shutil.copytree(source_root / "worktree-manager" / "bin", manager_bin)
-            manager_script = manager_bin / "launch-session.ps1"
-            assert manager_script.read_bytes() == (
-                source_root / "worktree-manager" / "bin" / "launch-session.ps1"
-            ).read_bytes()
+            if manager_script is None:
+                manager_bin = tmp_path / "manager-runtime" / "bin"
+                shutil.copytree(source_root / "worktree-manager" / "bin", manager_bin)
+                manager_script = manager_bin / "launch-session.ps1"
+                assert manager_script.read_bytes() == (
+                    source_root / "worktree-manager" / "bin" / "launch-session.ps1"
+                ).read_bytes()
+            assert manager_script.is_file()
         for leg in ("fresh", "resume"):
             namespace = private_mux_args(tmp_path)
             environment["DRIVER_FIXTURE_MUX_NAMESPACE"] = namespace[1]

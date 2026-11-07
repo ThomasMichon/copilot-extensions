@@ -133,6 +133,19 @@ def test_fresh_manager_application_exposes_its_real_launcher_to_worktrees(tmp_pa
                 "print(json.dumps({'directory':str(directory)}))",
             ], cwd=caller, env=environment, deadline=deadline)
             assert Path(json.loads(consumer.stdout)["directory"]).samefile(script.parent)
+            if (
+                os.name == "nt"
+                and os.environ.get("COPILOT_NATIVE_TEST_EXECUTABLE")
+                and os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") == "1"
+            ):
+                from test_headed_worktrees_copilot import _qualify_native_worktrees
+
+                native = tmp_path / "native-launch"
+                native.mkdir()
+                _qualify_native_worktrees(
+                    native, "manager-no-mux", manager_script=script,
+                    manager_environment={**lifecycle, "WORKTREE_MANAGER_ROOT": str(root)},
+                )
             assert (slot / engine.runtime.COMPLETE_MARKER).read_bytes() == completion
     finally:
         assert all(result.status == "settled" for result in cleanup), cleanup

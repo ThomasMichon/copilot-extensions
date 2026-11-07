@@ -2518,6 +2518,16 @@ Manager's focused `test_self_install.py -k app_only_self_install` and
 qualification, activation and startup-outcome refusals while accepting native
 path aliases. These are distinct from full native Copilot launch, desktop or
 all-caller-cleanup-Job qualification.
+With both `COPILOT_NATIVE_TEST_EXECUTABLE` and
+`COPILOT_DRIVER_HEADED_MUX_E2E=1`, that same application case also invokes its
+actual packaged Manager launcher through the existing private native
+`manager-no-mux` flow. Fresh and resumed offline Copilot conversations must
+expose the common broker, retain one history and publish exact native
+process/exit receipts after disposable Manager source inputs are gone.
+Application construction, native calls and resident cleanup share the existing
+300-second case deadline. The Worktrees resolver remains the managed test
+runtime; this does not qualify an installed Worktrees application, Manager mux
+metadata, desktop attachment or caller cleanup-Job escape.
 
 Manager's `tests/test_shutdown_exit.py` also runs the application probe in
 bounded children with the CPython 3.13 shutdown-workaround branch armed.
