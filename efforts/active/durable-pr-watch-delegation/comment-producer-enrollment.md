@@ -123,10 +123,11 @@ material generation and pins that exact reference through
 `connectionData.authorizedUser`, candidate/policy reads and selected writes.
 Check current owner admission, expiry/revocation and that same reference at
 dispatch; renewal or account changes cannot replace it within an operation.
-A generation mismatch before dispatch leaves the action unattempted; loss after
-the durable attempt fence preserves unknown effects and original receipt
-recovery. Never retry a write with freshly acquired material to conceal that
-loss.
+A generation mismatch during preflight leaves the action unattempted. Once the
+durable attempt fence is entered, preserve unknown effects and original receipt
+recovery even if dispatch subsequently refuses; do not infer an unattempted
+action from a transport error. Never retry a write with freshly acquired
+material to conceal that loss.
 
 The factory supplies the actual owner's action-relevant review-policy guard
 and finite request/drain lifetime to `AdoReviewContext`. There is no permissive
