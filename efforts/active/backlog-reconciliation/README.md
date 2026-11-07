@@ -437,6 +437,15 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [admitted hook-source follow-through](<journal/2026/11.07 admitted-hook-source-followthrough.md>)
+records prospective full-source inspection, a bounded resolver follow-through
+and qualified public research comments without repairing the earlier invalid
+views. The literal guidance-floor, healthy-output and independent-writer
+contracts remain open. New #11290 is whole-source held; its eligible arrival
+offsets the external #11245 departure. Two equal complete scans at 01:32 Pacific
+measure 811 whole OPEN, 82 above fixed 729, with no campaign closure credit.
+Existing owners, acceptance and campaign completion remain unchanged.
+
 The [hook studies and source-identity journal](<journal/2026/11.07 hook-studies-and-source-identity.md>)
 records two separate first source studies, an uncertified preflight/truncation
 return and an independently corrected captured-blob currentness boundary.
@@ -2915,6 +2924,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [admitted hook-source follow-through](<journal/2026/11.07 admitted-hook-source-followthrough.md>)
+records current whole-source qualification before complete reads and
+independent Dev/Main object verification. Defined Windows assertions,
+reported checks, actual execution, supported interpreters and writer
+isolation remain distinct. All original technical and campaign completion
+checkboxes remain unchanged.
 
 The [hook studies and source-identity journal](<journal/2026/11.07 hook-studies-and-source-identity.md>)
 separates current blob identity, source admission, complete inspection, reported
