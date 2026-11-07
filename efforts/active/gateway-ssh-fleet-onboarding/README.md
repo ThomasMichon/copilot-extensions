@@ -384,9 +384,10 @@ The current [Vault preparation contract](../../../plugins/agent-vault/docs/ssh-k
 and [native Gateway SSH implementation](../../../plugins/agent-ssh/src/agent_ssh/gateway_sshd.py)
 are the starting seams, not new deployment mechanisms. The
 [native authentication packet](../../../plugins/agent-ssh/tests/test_gateway_sshd_native.py)
-uses synthetic protected keys and a client without commands (`ssh -N -T`).
-Its authentication, authorization and ownership assertions do not satisfy the
-inbound-command or whole-logon lifetime rows above.
+uses synthetic protected keys. Its authentication-only client (`ssh -N -T`)
+remains distinct from the added real command-completion and selected Windows
+SID/session/non-elevated-token assertions. Those bounded source assertions do
+not qualify installed setup, downstream credentials or whole-logon lifetime.
 
 Primary platform documentation bounds this proposal rather than proving the
 installed implementation:
@@ -414,9 +415,11 @@ and leave delayed central-only retirement independent of setup completion.
 
 ### Phase 1 - Reviewed integration and ownership
 
-- [ ] Review the [user-logon SSH/signing proposal](#user-logon-ssh-and-selected-signing-readiness)
+- [x] Review the [user-logon SSH/signing proposal](#user-logon-ssh-and-selected-signing-readiness)
   under #11123 before executable changes; retain the existing setup,
-  credential, SSH and host-role lifecycle owners.
+  credential, SSH and host-role lifecycle owners. #11286 merged the approved
+  contract at `38d8e519f6e0a00c7615e004c47aab61c9f09696`; implementation
+  and installed/native acceptance remain open.
 - [ ] Review the [selected-role setup contract](role-host-setup.md), then admit
   its bounded implementation through the existing construction and lifecycle
   owners rather than relabel client installation or foreground serving.
@@ -520,6 +523,15 @@ not installation, credential or live-adoption authority.
 
 ## Validation Plan
 
+- [x] Qualify the bounded current-logon Windows source listener with a real
+  noninteractive command, expected user SID/session and non-elevated token,
+  using synthetic protected keys and `IdentityAgent=none`. The final four
+  native controls pass in11.32s, including cmd.exe, Windows PowerShell and
+  pwsh outer-shell parsing; the native listener case takes6.24s. Eleven
+  unchanged compatibility controls passed in the initial12-case packet.
+  Existing identity/pin, refresh/revocation, forwarding refusal and owner
+  teardown controls remain intact. This is not installed Fleet/Vault setup,
+  actual encrypted-key signing, cold-logon/reconnect or lifecycle adoption.
 - [ ] Qualify the selected native Windows outbound client both with the normal
   protected Vault pair and, when explicitly selected and authorized, an
   existing encrypted-key signer. Verify unchanged key protection and host
@@ -610,6 +622,33 @@ setup/apply, enrollment, live rollout, lifecycle takeover or implementation
 completion is asserted.
 
 ## Journal
+
+### 2026-11-07 - User-logon contract reviewed; command qualification selected
+
+- #11286 merged at `38d8e519f6e0a00c7615e004c47aab61c9f09696`, with
+  current Copilot approval and required checks passing. This closes proposal
+  review only; #11123 and all native/installed/lifecycle obligations stay open.
+- Comment6704851631 reserves only the existing native listener test's new
+  noninteractive command-completion and selected user-context assertions plus
+  this journal. Production listener, credential and lifecycle files remain
+  unchanged; existing synthetic fixture custody and teardown are preserved.
+- The bounded current-logon Windows packet passes all12 selected controls
+  in7.90s, including actual command exit/EOF, matching selected SID/session,
+  non-elevated token and agent-free synthetic-key signing. The native case
+  takes6.21s; original60s item and180s aggregate limits are unchanged.
+  Existing authentication, refresh/revocation, forwarding refusal and
+  preservation/teardown assertions pass without production changes.
+- Review identified that a PowerShell/pwsh SSH default shell could expand the
+  nested probe's variables before its execution. The fixed UTF-16LE
+  `-EncodedCommand` probe and three real outer-shell controls address that
+  serialization gap without changing host `DefaultShell` configuration.
+  The final four native controls pass in11.32s with no skips; the listener
+  case takes6.24s. The unchanged eleven compatibility controls retain their
+  earlier pass; these independent results are not a new aggregate15-case run.
+- The source runner contains processes and disposable fixture state, reuses a
+  leased prepared dependency environment and selects current first-party
+  sources. No source-denying installed runtime, actual Vault pair, encrypted
+  operator key, fresh logon, sleep/reconnect, Linux lane or rollout is claimed.
 
 ### 2026-11-07 - User-logon SSH and signing contract proposed
 
