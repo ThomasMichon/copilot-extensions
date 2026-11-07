@@ -272,8 +272,9 @@ def test_gateway_negotiates_and_validates_actual_selection_contract(
             assert any(row["name"] == "pr_workspace_allocate" for row in definitions)
             if malformed == "rollback":
                 native.operations.prepared_reviews = False
-            with pytest.raises(WorkspaceClientError):
+            with pytest.raises(WorkspaceClientError) as failure:
                 await host.invoke("allocate", request)
+            assert failure.value.outcome_unknown is True
         if malformed == "response":
             monkeypatch.setattr(client, "_exchange", exchange)
             result = await host.invoke("allocate", request)
@@ -382,6 +383,44 @@ def test_gateway_rejects_oversized_final_envelopes_before_commit_and_recovers_sa
         assert retained["intent"] == preview["result"]["intent"]
         assert await host.invoke("allocate", request) == preview
         assert backend.calls == []
+        await gateway.drain(timeout=2)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("lost", [False, True])
+def test_gateway_selection_uncertainty_reconciles_original_key_without_native_effects(
+    environment: tuple, prepared_workspace: tuple, selection_workspace: tuple,
+    monkeypatch: pytest.MonkeyPatch, lost: bool,
+) -> None:
+    from fleet_manager.gateway_service_channel import TransportError
+    from agent_pull_requests.workspace_client import WorkspaceClientError
+
+    store, _, _, attachment, backend, _ = environment
+    gateway, client, native, _, caller, _ = prepared_workspace
+    draft, state = selection_workspace
+    original_request = caller._request
+
+    async def fail(method: str, target: str, **kwargs: object) -> object:
+        if lost:
+            await original_request(method, target, **kwargs)
+        raise TransportError("outcome-unknown" if lost else "credentials-unavailable", 502 if lost else 401)
+
+    async def scenario() -> None:
+        await client.capabilities()
+        request = {"number": 42, "intent": draft, "source_attachment": attachment, "budget_seconds": 60}
+        monkeypatch.setattr(caller, "_request", fail)
+        with pytest.raises(WorkspaceClientError) as failure:
+            await client.exchange("allocate", request)
+        assert failure.value.outcome_unknown is lost and backend.calls == []
+        retained = ReviewSelectionStore(store).recover(draft, expires_at=native.expires_at())
+        assert (retained is not None) is lost
+        monkeypatch.setattr(caller, "_request", original_request)
+        result = await client.exchange("allocate", request)
+        assert state["resolutions"] == 1
+        if retained is not None:
+            assert result["result"]["intent"] == retained["intent"]
+        assert len(json.loads(store.path.read_bytes())["reviews"]) == 1 and backend.calls == []
         await gateway.drain(timeout=2)
 
     asyncio.run(scenario())

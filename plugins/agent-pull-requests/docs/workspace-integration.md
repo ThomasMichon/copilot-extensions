@@ -216,6 +216,9 @@ preview. This pure validation performs no native or policy IO under the lock.
 Recovery rechecks the current transport's limits without rewriting retained
 bytes. Native-only larger selections are not implicitly transferable through
 a smaller Fleet frame.
+Post-dispatch failures or malformed allocation responses conservatively report
+`outcome_unknown` for the possible selection commit, not a native effect.
+Always reconcile the original selection key; no error authorizes a fresh key.
 
 Preparation performs no native reads/writes, execution admission, feedback,
 echo, ACK or DB object mapping. Preview approval remains external to this data

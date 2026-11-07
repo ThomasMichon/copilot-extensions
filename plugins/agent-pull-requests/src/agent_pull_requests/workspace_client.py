@@ -66,13 +66,14 @@ class WorkspaceClient:
             )
         except TransportError as error:
             raise WorkspaceClientError(error.code, http_status=error.status,
-                                       outcome_unknown=operation == "submit" and error.code == "outcome-unknown") from None
+                                       outcome_unknown=operation in ("submit", "allocate")
+                                       and error.code == "outcome-unknown") from None
         if response.status != 200:
             raise WorkspaceClientError(
                 "workspace_unsupported" if response.status == 404 else (
                     "workspace_access_refused" if response.status == 403 else "workspace_unavailable"
                 ),
-                http_status=response.status, outcome_unknown=operation == "submit",
+                http_status=response.status, outcome_unknown=operation in ("submit", "allocate"),
             )
         try:
             types = [value for key, value in response.headers if key.lower() == "content-type"]
@@ -84,7 +85,9 @@ class WorkspaceClient:
             value.pop("binding")
             return value
         except (ValueError, UnicodeError, RecursionError):
-            raise WorkspaceClientError("invalid_workspace_response", outcome_unknown=operation == "submit") from None
+            raise WorkspaceClientError(
+                "invalid_workspace_response", outcome_unknown=operation in ("submit", "allocate"),
+            ) from None
 
     async def capabilities(self, *, checkpoint=None):
         self._discovery_epoch += 1
@@ -159,7 +162,9 @@ class WorkspaceClient:
             value.get("scope") != {**self._scope, "number": payload.get("number")}
             or not isinstance(value.get("result"), dict)
         ):
-            raise WorkspaceClientError("workspace_scope_changed", outcome_unknown=operation == "submit")
+            raise WorkspaceClientError(
+                "workspace_scope_changed", outcome_unknown=operation in ("submit", "allocate"),
+            )
         if operation == "receipt" and (
             value["result"].get("protocol") != prepared_review_contract()["receipt_protocol"]
             or value["result"].get("scope") != value["scope"]
@@ -179,7 +184,7 @@ class WorkspaceClient:
                     raise ValueError
                 ReviewSelectionStore._prepared(payload["intent"], result["intent"])
             except (ValueError, KeyError, TypeError):
-                raise WorkspaceClientError("invalid_selection_response", outcome_unknown=False) from None
+                raise WorkspaceClientError("invalid_selection_response", outcome_unknown=True) from None
         return value
 
     def preparation_contract(self):
