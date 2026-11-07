@@ -243,6 +243,10 @@ wrong-installation or old discovery skips the optional send. A connection or
 write failure has unknown acceptance and is not retried, replayed through
 another endpoint or replaced by Python. Provider rollback therefore retains
 the shell-safe advisory baseline, not a blocking compatibility call.
+The sender first checks the runtime's IPv4 support. That capability query can
+initialize the socket subsystem on first use; its cost is part of whole-hook
+entry, not the 50-ms client-allocation/connect/write clock. No probe connection
+or request is made by this preflight, and it does not establish receiver readiness.
 
 Only the advertised process generation can accept the notice. The receiver
 rechecks its own admission and the monitor's live published/non-draining state,
@@ -507,6 +511,11 @@ bound and compared to the original validated content digest, so restored
 size/timestamps cannot hide changed receipt or manifest bytes. The existing
 association's 1-MiB/256-witness/path bounds are unchanged. Inherited payload
 conflicts, changed or missing witnesses and incomplete older associations refuse reuse.
+Association and content buffers use the opened file's bounded length plus
+one overflow byte, rather than eagerly allocating the maximum for small files.
+A file that already exceeds the cap or fills that sentinel buffer is
+unavailable; a concurrent append cannot turn a valid JSON prefix into a
+complete admitted document. All original content and witness checks remain.
 The original resolver still owns cold or incompatible admission. On a valid
 old association it can publish the additive view without Git/registry traversal;
 an unchanged complete association needs no rewrite.

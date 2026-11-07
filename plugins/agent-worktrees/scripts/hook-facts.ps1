@@ -400,6 +400,7 @@ function Send-PostToolReadDemand {
             $Discovery.hook_token -cnotmatch '^[A-Za-z0-9_-]{1,256}$') { return }
         $port = [int]($Discovery.hook_endpoint.Substring(10))
         if ($port -lt 1 -or $port -gt 65535) { return }
+        if (-not [Net.Sockets.Socket]::OSSupportsIPv4) { return }
         $request = @{
             version = 1; kind = 'readHookDemand'; token = $Discovery.hook_token
             hook_generation = $Discovery.hook_generation
