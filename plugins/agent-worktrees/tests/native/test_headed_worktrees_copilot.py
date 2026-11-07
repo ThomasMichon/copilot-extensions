@@ -45,7 +45,7 @@ def _until(check, label, timeout=30, diagnostic=None):
     raise AssertionError(label + ("\n" + diagnostic() if diagnostic else ""))
 
 
-@pytest.mark.parametrize("control", ["broker", "native-input"])
+@pytest.mark.parametrize("control", ["broker", "native-input", "manager-no-mux"])
 def test_worktrees_native_fresh_and_resume_keep_one_history_and_real_receipts(tmp_path, control):
     from plugin_test_command_safety import private_mux_args
 
@@ -56,6 +56,7 @@ def test_worktrees_native_fresh_and_resume_keep_one_history_and_real_receipts(tm
     assert binary and shell, "Select existing native Copilot, PSMux and PowerShell"
     owner_python = physical_executable(getattr(sys, "_base_executable", sys.executable))
     assert owner_python
+    source_root = Path(__file__).resolve().parents[4]
     site_packages = sysconfig.get_paths()["purelib"]
     prefix = [sys.executable, "-I", "-B", "-X", "utf8"]
     home, checkout = tmp_path / "copilot-home", tmp_path / "checkout"
@@ -238,24 +239,50 @@ class Mux {
             "project.mkdir(parents=True,exist_ok=True);"
             "(project/'config.yaml').write_text(json.dumps({'repo_name':'native-copilot','machine':'fixture',"
             "'repos':{'native-copilot':{'anchor':str(checkout),'default_branch':'dev'}}}),encoding='utf-8');"
+            "tracking_path=project/'worktrees' if sys.argv[3]=='manager-no-mux' else checkout;"
+            "tracking_path.mkdir(parents=True,exist_ok=True);"
             "record=tracking.create_new_record(sys.argv[2],'worktree/native-copilot',str(checkout),"
-            "'native-copilot','fixture','win32',checkout);print(json.dumps(str(record.yaml_path)))",
-            checkout, tmp_path.name,
+            "'native-copilot','fixture',cfg.detect_platform() if sys.argv[3]=='manager-no-mux' else 'win32',"
+            "tracking_path);print(json.dumps(str(record.yaml_path)))",
+            checkout, tmp_path.name, control,
         )
         record = Path(initialized)
+        if control == "manager-no-mux":
+            selected = runtime(
+                "import json;from agent_worktrees import config;"
+                "print(json.dumps(str(config.install_dir())))",
+            )
+            runtime_root = Path(selected)
+            assert runtime_root.is_relative_to(Path(os.environ["COPILOT_EXTENSIONS_TEST_SANDBOX"]))
+            scripts = runtime_root / "scripts"
+            scripts.mkdir(parents=True, exist_ok=True)
+            for name in ("launch-command.ps1", "reconcile-machine-settings.ps1"):
+                shutil.copyfile(source_root / "plugins" / "agent-worktrees" / "scripts" / name, scripts / name)
+            resolver = runtime_root / "bin" / "resolve-runtime.ps1"
+            resolver.parent.mkdir(parents=True, exist_ok=True)
+            resolver.write_text(
+                "$AwPy = '" + sys.executable.replace("'", "''") + "'\n", encoding="utf-8",
+            )
+            environment.update(
+                AGENT_RT_ROOT=str(runtime_root), WORKTREE_NO_UPDATE="1",
+                WORKTREE_NO_RECONCILE="1", WORKTREE_NO_PROVISION="1",
+            )
+            manager_bin = tmp_path / "manager-bin"
+            shutil.copytree(source_root / "worktree-manager" / "bin", manager_bin)
+            manager_script = manager_bin / "launch-session.ps1"
+            assert manager_script.read_bytes() == (
+                source_root / "worktree-manager" / "bin" / "launch-session.ps1"
+            ).read_bytes()
         for leg in ("fresh", "resume"):
             namespace = private_mux_args(tmp_path)
             environment["DRIVER_FIXTURE_MUX_NAMESPACE"] = namespace[1]
             target = "headed-fixture-" + uuid4().hex
             plan = runtime(
                 "import json,sys;from pathlib import Path;from uuid import uuid4;"
-                "from agent_worktrees import launch_seed_state;"
                 "record=Path(sys.argv[1]);"
-                "seed=launch_seed_state.stage(record,kind='new',text=sys.argv[2]) if sys.argv[3]=='fresh' else None;"
                 "attempt,resolution=uuid4().hex,uuid4().hex;"
-                "print(json.dumps({'attempt':attempt,'resolution':resolution,"
-                "'seed':seed.seed_id if seed else None}))",
-                record, prompts[0], leg,
+                "print(json.dumps({'attempt':attempt,'resolution':resolution}))",
+                record,
             )
             attempt = record.parent / "launch-attempts" / plan["attempt"]
             native_args = [
@@ -264,24 +291,51 @@ class Mux {
                 "--no-custom-instructions", "--no-color", "--no-ask-user",
                 "--log-dir", str(tmp_path / ("logs-" + leg)),
             ]
+            if leg == "fresh":
+                native_args += ["-i", prompts[0]]
+            invocation = (
+                "    from agent_worktrees import launch_seed_exec,launch_execution\n"
+                f"    code=launch_seed_exec.launch(Path({str(record)!r}),{[executable, *native_args]!r},"
+                "admission_only=True,"
+                f"correlation=launch_execution.Correlation({plan['attempt']!r},{plan['resolution']!r}))\n"
+            )
+            if control == "manager-no-mux":
+                runtime(
+                    "import json,sys;from agent_worktrees import config;"
+                    "path=config.project_dir('native-copilot')/'config.yaml';"
+                    "value=json.loads(path.read_text(encoding='utf-8'));"
+                    "value['repos']['native-copilot']['launch']={'windows':json.loads(sys.argv[1])};"
+                    "path.write_text(json.dumps(value),encoding='utf-8');print('true')",
+                    json.dumps([executable, *native_args]),
+                )
+                manager_command = [
+                    shell, "-NoProfile", "-NonInteractive", "-File",
+                    str(manager_script),
+                    "--project", "native-copilot", "--worktree-id", tmp_path.name,
+                    "--no-mux", "--no-update", "--no-resume", "--no-fast-forward",
+                ]
+                invocation = (
+                    "    import subprocess\n"
+                    "    # headless-guard: allow the real Manager consumer to inherit the fixture's private ConPTY\n"
+                    f"    code=subprocess.call({manager_command!r})\n"
+                )
+                previous_attempts = set(record.parent.glob("launch-attempts/*"))
             driver = tmp_path / (leg + ".py")
             result_file = tmp_path / (leg + "-result.txt")
             owner_log = tmp_path / (leg + "-owner.log")
             driver.write_text(
-                "import contextlib,ctypes,msvcrt,os,site,sys,traceback\nfrom pathlib import Path\n"
-                f"with Path({str(owner_log)!r}).open('w',encoding='utf-8') as log,"
-                "contextlib.redirect_stderr(log):\n"
+                "import sys,traceback\n"
+                f"with open({str(owner_log)!r},'w',encoding='utf-8') as log:\n"
                 "  try:\n"
+                "    log.write('original owner started\\n');log.flush()\n"
+                "    import ctypes,msvcrt,os,site\n    from pathlib import Path\n"
+                "    sys.stderr=log\n"
                 "    os.dup2(log.fileno(),2)\n"
                 "    set_stderr=ctypes.windll.kernel32.SetStdHandle\n"
                 "    set_stderr.argtypes=[ctypes.c_ulong,ctypes.c_void_p]\n"
                 "    assert set_stderr(-12,msvcrt.get_osfhandle(2))\n"
-                "    log.write('original owner started\\n');log.flush()\n"
                 f"    site.addsitedir({site_packages!r})\n"
-                "    from agent_worktrees import launch_seed_exec,launch_execution\n"
-                f"    code=launch_seed_exec.launch(Path({str(record)!r}),{[executable, *native_args]!r},"
-                f"invoke=True,seed_id={plan['seed']!r},"
-                f"correlation=launch_execution.Correlation({plan['attempt']!r},{plan['resolution']!r}))\n"
+                + invocation +
                 "  except BaseException:\n"
                 "    traceback.print_exc(file=log);code=3\n"
                 f"  result=Path({str(result_file)!r})\n"
@@ -296,7 +350,9 @@ class Mux {
                 "new-session", "-d", "-s", target, "-c", str(checkout),
                 "--", owner_python, "-I", "-B", str(driver),
             )
-            assert launched.returncode == 0, launched.stderr
+            assert launched.returncode == 0, launched.stderr + (
+                owner_log.read_text(encoding="utf-8") if owner_log.exists() else ""
+            )
             observed = query(
                 "display-message", "-p", "-t", target, "#{session_id}:#{session_created}|#{pane_id}",
             )
@@ -304,19 +360,26 @@ class Mux {
             identity = observed.stdout.strip()
 
             def bound():
+                nonlocal attempt
                 if result_file.exists():
                     raise AssertionError(owner_log.read_text(encoding="utf-8"))
-                paths = list(attempt.glob("*/headed.json"))
+                if control == "manager-no-mux":
+                    candidates = set(record.parent.glob("launch-attempts/*")) - previous_attempts
+                    paths = [path for candidate in candidates for path in candidate.glob("*/headed.json")]
+                else:
+                    paths = list(attempt.glob("*/headed.json"))
                 if paths:
                     try:
                         value = json.loads(paths[0].read_text(encoding="utf-8"))
                     except (FileNotFoundError, PermissionError):
                         return None
                     if value["state"] == "running":
+                        attempt = paths[0].parent.parent
                         return value
 
             state = _until(
                 bound, f"{leg}: Worktrees launch did not bind the common broker",
+                timeout=60 if control == "manager-no-mux" else 30,
                 diagnostic=lambda: (
                     query("capture-pane", "-p", "-t", target).stdout[-8192:]
                     + "\n" + pane_process()
@@ -328,6 +391,15 @@ class Mux {
                             "host_process_start_time", "child_process_start_time",
                         }}
                         for path in attempt.glob("*/headed.json")
+                    ])
+                    + "\n" + json.dumps([
+                        [{"phase": event["phase"], "details": {
+                            key: value for key, value in event.get("details", {}).items()
+                            if key in {"pid", "boundary", "exit_code", "process_exit_code", "receipt_uncertain"}
+                        }} for event in json.loads(
+                            path.read_text(encoding="utf-8")
+                        ).get("events", [])]
+                        for path in record.parent.glob("launch-attempts/*/*.execution.json")
                     ])
                     + "\n" + query(
                         "display-message", "-p", "-t", target,

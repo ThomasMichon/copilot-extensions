@@ -58,6 +58,35 @@ starts a bare Copilot process instead. Use `--no-mux` (or
 `WORKTREE_NO_MUX=1`) only when you intentionally want the direct,
 non-persistent diagnostic path.
 
+Ordinary unseeded direct CLI plans with a selected native conversation now
+enter the same retained Driver core as headed setup. The original Worktrees
+owner keeps its admission fence, native process receipt and exit result.
+Canonical launch-command wrappers remain in the path; on Windows their copied
+startup manifest carries literal argv, including drive-qualified `-C=...`
+values, without a second PowerShell parameter-binding pass. Nonlocal,
+ambiguous and unsupported commands retain their existing path.
+Windows callers opt into the new path only when they own final startup
+serialization. Current Manager declares that ability for the resolver call,
+restores the process environment afterward, and keeps argv visible while
+refreshing the inner runtime and applying the authoritative AHP binding.
+It serializes only at the final launch boundary. Older Manager callers keep
+the existing plan path; older Worktrees providers can ignore the declaration
+without accepting new CLI syntax.
+POSIX hoisting requires a known empty effective `BASH_ENV`; nonempty values
+or an unknown mux-server environment retain the outer admission owner.
+An explicitly empty planned value is pinned with `env BASH_ENV=` before Bash
+starts. Authoritative AHP rebinding preserves literal option values rather
+than treating prompt/model/agent text as connection selectors. Bare `--resume`
+does not consume a following option. Worktrees and Driver share the native
+value-option table and preserve split `-C` directory values when detecting
+the selected conversation or validating a retained headed command.
+
+This does not turn unknown mux state into absence or permit a cold seed.
+Admission-only execution cannot claim a pending prompt; a changed prompt
+blocks the launch. Staged seed handoff and special native-head recovery retain
+their cold-stop checks. In particular, negative PSMux evidence remains
+unqualified under the recovery policy below.
+
 > **Windows over SSH:** the interactive TUI picker auto-falls back to a simpler
 > flow (a ConPTY limitation), but the muxed-session model is the same. See
 > [picker.md](picker.md).

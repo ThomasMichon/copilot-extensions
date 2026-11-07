@@ -1069,33 +1069,12 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
     fi
 
     if [[ "$_AHP_RESUME_AVAILABLE" == "1" ]]; then
-        _FILTERED_CMD=()
-        _SKIP_NEXT=0
-        _HAS_EXPERIMENTAL=0
-        for _ARG in "${CMD_ARRAY[@]}"; do
-            if [[ "$_SKIP_NEXT" == "1" ]]; then
-                _SKIP_NEXT=0
-                continue
-            fi
-            case "$_ARG" in
-                --ahp)
-                    _SKIP_NEXT=1
-                    ;;
-                --ahp=*|--resume=*)
-                    ;;
-                --experimental)
-                    _HAS_EXPERIMENTAL=1
-                    _FILTERED_CMD+=("$_ARG")
-                    ;;
-                *)
-                    _FILTERED_CMD+=("$_ARG")
-                    ;;
-            esac
-        done
-        CMD_ARRAY=("${_FILTERED_CMD[@]}")
-        [[ "$_HAS_EXPERIMENTAL" == "1" ]] \
-            || CMD_ARRAY+=(--experimental)
-        CMD_ARRAY+=(--ahp "$_AHP_ENDPOINT" "--resume=$_AHP_SESSION")
+        _AHP_HELPER="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-launch-session.sh}")" && pwd)/ahp-command.py"
+        if ! _AHP_COMMAND=$("$PYTHON" "$_AHP_HELPER" bash "$_AHP_ENDPOINT" "$_AHP_SESSION" -- "${CMD_ARRAY[@]}"); then
+            setup_log ERROR "Could not rebind the prepared native AHP command."
+            exit 3
+        fi
+        eval "CMD_ARRAY=( $_AHP_COMMAND )"
     fi
 
     # Identity vars are stripped from the CHILD Copilot process so the session
@@ -1122,6 +1101,26 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
         "${CMD_ARRAY[1]:-}" == "-m" &&
         "${CMD_ARRAY[2]:-}" == "agent_worktrees.launch_seed_exec" ]]; then
         CMD_ARRAY[0]="$PYTHON"
+    fi
+    _HEADED_SHELL_INDEX=0
+    if [[ "${CMD_ARRAY[0]##*/}" == "env" && "${CMD_ARRAY[1]:-}" == "BASH_ENV=" ]]; then
+        _HEADED_SHELL_INDEX=2
+    fi
+    _HEADED_SHELL="${CMD_ARRAY[$_HEADED_SHELL_INDEX]:-}"
+    _HEADED_WRAPPER="${CMD_ARRAY[$((_HEADED_SHELL_INDEX + 1))]:-}"
+    _HEADED_OWNER_INDEX=$((_HEADED_SHELL_INDEX + 3))
+    if [[ "${CMD_ARRAY[$((_HEADED_SHELL_INDEX + 2))]:-}" == "--recovery" ]]; then
+        _HEADED_OWNER_INDEX=$((_HEADED_OWNER_INDEX + 1))
+    fi
+    if [[ "${_HEADED_SHELL##*/}" == "bash" && "${_HEADED_WRAPPER##*/}" == "launch-command.sh" &&
+        "${CMD_ARRAY[$((_HEADED_OWNER_INDEX - 1))]:-}" == "--" &&
+        "${CMD_ARRAY[$((_HEADED_OWNER_INDEX + 1))]:-}" == "-m" &&
+        "${CMD_ARRAY[$((_HEADED_OWNER_INDEX + 2))]:-}" == "agent_worktrees.launch_seed_exec" ]]; then
+        case "${CMD_ARRAY[$_HEADED_OWNER_INDEX]##*/}" in
+            python|python[0-9]|python[0-9].[0-9]*)
+                CMD_ARRAY[$_HEADED_OWNER_INDEX]="$PYTHON"
+                ;;
+        esac
     fi
 
     # Patch a stale `--runtime-python` embedded in CMD_ARRAY (#stale-venv).

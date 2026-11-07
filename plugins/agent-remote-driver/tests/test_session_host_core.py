@@ -140,7 +140,8 @@ def test_retained_headed_executable_propagates_actual_native_exit(
     python = physical_executable(getattr(sys, "_base_executable", sys.executable))
     state_file = tmp_path / "headed.json"
     command = prepare_headed_command(
-        [python, "-I", "-c", program, "--session-id", "fixture-native"],
+        [python, "-I", "-c", program, "--session-id", "fixture-native",
+         "--log-dir", "--resume=literal"],
         session_id="fixture-native", attempt_directory=tmp_path / "attempt",
         state_file=state_file, cwd=str(tmp_path),
     )
@@ -151,6 +152,40 @@ def test_retained_headed_executable_propagates_actual_native_exit(
     assert result.returncode == expected, result.stdout + result.stderr
     state = json.loads(state_file.read_text(encoding="utf-8"))
     assert state["child_exit_code"] == native_exit and state["state"] == "child_exited"
+
+
+@pytest.mark.parametrize("before,after,experimental", [
+    (["--log-dir", "--experimental"], [], False),
+    ([], ["--", "--experimental", "literal"], False),
+    (["--log-dir", "--"], ["--", "literal"], False),
+    (["--experimental"], ["--", "literal"], True),
+])
+def test_retained_headed_extension_options_respect_native_boundaries(
+    tmp_path, before, after, experimental,
+):
+    from agent_procutil._interpreter import physical_executable
+    from agent_remote_driver.headed.launcher import prepare_headed_command
+
+    python = physical_executable(getattr(sys, "_base_executable", sys.executable))
+    command = prepare_headed_command(
+        [python, "-I", "-c", "import json,sys; print(json.dumps(sys.argv[1:]))",
+         "--session-id", "fixture-native", *before, *after],
+        session_id="fixture-native", attempt_directory=tmp_path / "attempt",
+        state_file=tmp_path / "headed.json", cwd=str(tmp_path),
+    )
+    result = subprocess.run(
+        command, cwd=tmp_path, env={**os.environ, "COPILOT_EXTENSIONS_TEST_CONTAINED": "1"},
+        capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    actual = json.loads(result.stdout)
+    plugin_index = actual.index("--plugin-dir")
+    plugin = actual[plugin_index + 1]
+    assert Path(plugin).is_dir()
+    assert actual == [
+        "--session-id", "fixture-native", *before, "--plugin-dir", plugin,
+        *([] if experimental else ["--experimental"]), *after,
+    ]
 
 
 def test_legacy_entrypoint_defaults_to_its_declared_lifetime(monkeypatch, capsys):

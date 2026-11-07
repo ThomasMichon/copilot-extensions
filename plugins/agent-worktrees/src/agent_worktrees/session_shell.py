@@ -61,6 +61,8 @@ def prepare(
     if record.yaml_path != record_path:
         raise ValueError("Session shell record identity changed")
     names = {
+        "launch-command.ps1": ("launch-command.ps1",),
+        "launch-command.sh": ("launch-command.sh",),
         "pane-wrapper.ps1": ("pane-wrapper.ps1", "pane-launch.ps1"),
         "pane-wrapper.sh": ("pane-wrapper.sh",),
         "default-setup.ps1": (

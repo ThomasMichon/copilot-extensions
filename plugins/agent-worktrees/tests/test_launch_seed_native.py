@@ -214,6 +214,64 @@ def test_python_native_boundary_invokes_selected_core_and_records_actual_native_
     assert saved["events"][-1]["details"]["process_exit_code"] == 17
 
 
+@pytest.mark.parametrize("preserved", [False, True])
+def test_admission_only_python_owner_keeps_fence_and_does_not_claim_a_seed(record, monkeypatch, preserved):
+    from agent_remote_driver.headed import caller
+
+    seed = seeds.stage(record, kind="resume", text="retained intent") if preserved else None
+    captured = {}
+    monkeypatch.setattr(
+        legacy, "_final_cold_error",
+        lambda *_: pytest.fail("Ordinary unseeded direct launch does not require mux absence"),
+    )
+
+    def execute(argv, **options):
+        captured.update(options)
+        assert argv == ["copilot", "--resume=chosen"]
+        with pytest.raises(launch_admission.LaunchAdmissionBusy):
+            with launch_admission.guard(record):
+                pytest.fail("The original owner must retain admission")
+        options["admit"]()
+        options["spawned"](os.getpid(), locks.process_start_time(os.getpid()))
+        assert seeds.peek(record) == seed
+        return 17, True
+
+    monkeypatch.setattr(caller, "execute", execute)
+    assert legacy.launch(
+        record, ["copilot", "--resume=chosen"], admission_only=True,
+        preserve_seed_id=seed.seed_id if seed else None,
+    ) == 17
+    with launch_admission.guard(record):
+        pass
+    attempt = captured["attempt_directory"]
+    saved = audit.read(record.parent, attempt.parent.name, attempt.name)
+    assert [event["phase"] for event in saved["events"]] == [
+        "execution-requested", "process-spawned", "execution-returned",
+    ]
+    assert saved["events"][-1]["details"]["process_exit_code"] == 17
+
+
+def test_admission_only_python_owner_rejects_newer_prompt_before_core_creation(record, monkeypatch):
+    from agent_remote_driver.headed import caller
+
+    seed = seeds.stage(record, kind="new", text="newer intent")
+    monkeypatch.setattr(caller, "execute", lambda *_a, **_k: pytest.fail("Changed intent must not launch"))
+    assert legacy.launch(record, ["copilot", "--session-id", "chosen"], admission_only=True) == 3
+    assert seeds.peek(record) == seed
+
+
+@pytest.mark.parametrize("native_resume", [False, True])
+def test_seeded_admission_cannot_disable_the_cold_stop_check(record, native_resume):
+    correlation = audit.Correlation("a" * 32, "b" * 32)
+    with pytest.raises(ValueError, match="Only ordinary admission-only"):
+        with native.admission(
+            record, correlation, "c" * 32, require_cold_stop=False,
+            admission_only=native_resume,
+            native_resume_session="chosen" if native_resume else None,
+        ):
+            pytest.fail("Seeded admission must retain the cold-stop requirement")
+
+
 def test_unknown_coordinator_receipt_never_restores_or_completes_seed(record, monkeypatch):
     from agent_remote_driver.headed import caller
 
@@ -502,8 +560,12 @@ def test_native_provider_declares_receipt_expansion_without_changing_legacy_repl
     assert declaration["nul_reply_schema"] == native.NUL_REPLY_SCHEMA
 
 
-@pytest.mark.parametrize("fault", [None, "captured-old-slot", "missing-completion", "missing-bootstrap", "foreign-root"])
-def test_native_cli_selects_only_current_completed_same_installation(tmp_path, monkeypatch, fault):
+@pytest.mark.parametrize("fault", [
+    None, "captured-old-slot", "missing-completion", "missing-bootstrap", "foreign-root",
+    "separate-registry",
+])
+@pytest.mark.parametrize("application", [False, True])
+def test_native_cli_selects_only_current_completed_same_installation(tmp_path, monkeypatch, fault, application):
     root = tmp_path / "engine"
     prefix = root / "versions" / "1.2.3"
     (prefix / ".runtime-bootstrap").mkdir(parents=True)
@@ -512,7 +574,9 @@ def test_native_cli_selects_only_current_completed_same_installation(tmp_path, m
     complete.write_text("{}", encoding="utf-8")
     bootstrap = prefix / ".runtime-bootstrap" / "runtime_launcher.py"
     bootstrap.write_text("# fixture\n", encoding="utf-8")
-    monkeypatch.setattr(native.sys, "prefix", str(prefix))
+    environment = prefix / ".venv" if application else prefix
+    environment.mkdir(exist_ok=True)
+    monkeypatch.setattr(native.sys, "prefix", str(environment))
     monkeypatch.setattr(cfg, "install_dir", lambda: root)
     if fault == "captured-old-slot":
         (root / "current-version").write_text("1.2.4\n", encoding="utf-8")
@@ -523,8 +587,12 @@ def test_native_cli_selects_only_current_completed_same_installation(tmp_path, m
     elif fault == "foreign-root":
         foreign = tmp_path / "another-engine"
         foreign.mkdir()
-        monkeypatch.setattr(cfg, "install_dir", lambda: foreign)
-    if fault:
+        root = foreign
+    elif fault == "separate-registry":
+        registry = tmp_path / "registry"
+        registry.mkdir()
+        monkeypatch.setattr(cfg, "install_dir", lambda: registry)
+    if fault and fault != "separate-registry":
         with pytest.raises(ValueError):
             native.require_current_runtime(root)
     else:
