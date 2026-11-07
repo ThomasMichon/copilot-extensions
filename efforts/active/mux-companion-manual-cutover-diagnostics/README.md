@@ -650,7 +650,7 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
       associations separately and performs one explicit, cancellable passive
       `pr-watch snapshot` point read per operator selection. #11194 merged after
       independent review and every required green check. Joint PR-state
-      validation rows 1-3, full live topology and every original parent gate
+      validation rows 1-4, full live topology and every original parent gate
       remain open.
 
 - [x] Step 7 finite activity-evidence distinction: actual ACP callback reports,

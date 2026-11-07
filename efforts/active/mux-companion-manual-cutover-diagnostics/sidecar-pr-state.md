@@ -145,10 +145,14 @@ performance, installed and archival gates remain unchanged.
       provider-open versus locally landed, closed-unmerged, merged, pending
       mergeability, foreign identity, malformed enums/booleans/object IDs,
       provider errors and bounded output failure. Do not mock beyond construction.
-- [x] Real Textual controls cover explicit one-association selection, literal/
+- [ ] Real Textual controls cover explicit one-association selection, literal/
       narrow rendering, Refresh, reassignment/head changes, old/unsupported
       providers, late replies and blocked-read dismissal with exact cleanup.
       All independent views remain usable; no action is performed on a PR.
+      Covered by #11194: wide-viewport selection, Refresh, reassignment/head
+      changes, old/unsupported providers and late replies with fixture point
+      reads. Still open: narrow PR rendering and blocked real-subprocess
+      dismissal with exact cleanup.
 - [x] Record source/private-process/Textual evidence separately from installed,
       native input-ready performance and any future admitted push coverage.
       Required review, green CI, actual merge and immediate whole-parent
@@ -322,9 +326,10 @@ pinned the engine runtime, revalidated the association before the point read,
 invalidated a pending refresh before awaiting, kept literal Text labels and
 bound the read to the source project and creation nonce. The panel was split
 into its own module under the size guard; 305 curated Companion tests passed
-with verified cleanup. The six R2 rows and Validation rows 4-5 close. Rows 1-3
+with verified cleanup. The six R2 rows and Validation row 5 close. Rows 1-4
 stay open: they require actual private tracking records, real cross-version
-parser/process controls and the actual snapshot construction rather than
-fixture replies. Full live topology and every original parent gate remain
+parser/process controls, the actual snapshot construction rather than fixture
+replies, narrow PR rendering and blocked real-subprocess dismissal with exact
+cleanup. Full live topology and every original parent gate remain
 open. No rollout, real daemon wake, live Mux binding, model/data or head/baton
 operation was performed.
