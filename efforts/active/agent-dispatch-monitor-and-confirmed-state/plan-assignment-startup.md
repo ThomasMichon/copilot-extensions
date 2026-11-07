@@ -223,6 +223,14 @@ Canonical component of [this same Active effort](README.md). This is not a child
       Corrected source passes 171 coupled controls with qualified detachment
       and exact concurrent-replay coverage.
       Rejected resubmission, ordinary callers and native qualification stay open.
+- [x] Land the bounded shared ordinary protected completion consumer in
+      [#11162](https://github.com/ThomasMichon/copilot-extensions/pull/11162),
+      merged as `39a0a7339d` after current-head independent approval and required CI.
+      The [receipt](journal/2026/11.06-retained-acquisition.md#shared-ordinary-submission-consumer-reviewed-and-merged)
+      records exact proposal/rejection custody, first-preparation rollback refusal
+      and the delayed-owner HTTP budget. This source item does not close
+      participating-writer admission, manual/no-worktree intake, stopped-native
+      recovery or full running lifecycle qualification.
 - [x] Land read-only [task-obligation provider evidence](journal/2026/11.03-task-obligation-provider.md)
       in [#10365](https://github.com/ThomasMichon/copilot-extensions/pull/10365),
       merged as `e9c3c3f9bd` after exact-head approval and required CI.

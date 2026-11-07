@@ -18,7 +18,7 @@ The effort remains **Active**. Passing one source phase or PR is not completion.
 
 Current source credit: first-proposal guarded submission merged in #10608;
 same-owner rejected-proposal lineage merged in #10674. The ordinary protected
-completion consumer now integrates those shared queue owners in source;
+completion consumer merged in #11162 and integrates those shared queue owners;
 installed whole-stack submission and the full lifecycle remain unqualified.
 Resident-only inspection and coherent delegated lineage selection are available
 at their source boundaries. Executing-build and delegated-selection observation
@@ -87,10 +87,13 @@ not qualify the cohort. The consumer merged in #11145 and derives the new-worksp
 expectation from actual Bridge selection and retains the prepared nonce before
 the first relationship, reconciling pending attachment under its original
 expectation on retry. No complete-cohort admission policy is supplied.
-Next, assemble generation-aware independent admission of those actual owners
-before ordinary submission consumers,
-then post-stop same-native recovery and the complete running
-lifecycle. No deployment or cleanup permission is implied.
+Generation-aware independent admission of actual owners remains a prerequisite
+to ordinary activation. Fresh isolated qualification exposed a preparation
+HTTP read timeout before native creation: the coordinator later binds the
+original relationship. The bounded correction carries the startup owner's
+existing observation budget through that request; review and running retest
+remain pending. Then qualify guarded completion, post-stop same-native recovery
+and the complete lifecycle. No deployment or cleanup permission is implied.
 
 ## Context
 
