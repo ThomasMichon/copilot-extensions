@@ -1911,3 +1911,18 @@ Driver already honors. A selector-shaped directory must not invent a session
 or hide a real one. Four focused detector/copied-wrapper/real-validator
 controls pass in 1.63 seconds (65.95 seconds including preparation and cleanup).
 These narrow corrections still require exact-head review and required CI.
+
+The next review confirms both findings resolved and identifies the matching
+Bash inner-runtime refresh gap. After an independent update, the copied wrapper
+must invoke the newly selected Python rather than a path from the resolved
+plan. The Bash consumer now refreshes only the typed inner Python owner,
+including recovery and the existing empty-`BASH_ENV` prefix; native executable
+arguments remain literal. This is the same boundary already covered in the
+PowerShell consumer, with no new process or protocol.
+
+Six final Bash grammar controls pass in 2.97 seconds (88.53 seconds including
+preparation and cleanup), using actual Git Bash on Windows. They cover normal/
+recovery/prefixed owners, native non-rewrite and authoritative AHP argument
+preservation. This also executes the two AHP grammar cases previously skipped
+on this host. It does not claim stock macOS Bash, native POSIX process lifetime
+or a complete Manager launch; those remain separate gates.

@@ -1146,6 +1146,26 @@ print("|" + "|".join(sorted(VALUE_OPTIONS | SETUP_VALUE_OPTIONS | {"-C", "--exec
         "${CMD_ARRAY[2]:-}" == "agent_worktrees.launch_seed_exec" ]]; then
         CMD_ARRAY[0]="$PYTHON"
     fi
+    _HEADED_SHELL_INDEX=0
+    if [[ "${CMD_ARRAY[0]##*/}" == "env" && "${CMD_ARRAY[1]:-}" == "BASH_ENV=" ]]; then
+        _HEADED_SHELL_INDEX=2
+    fi
+    _HEADED_SHELL="${CMD_ARRAY[$_HEADED_SHELL_INDEX]:-}"
+    _HEADED_WRAPPER="${CMD_ARRAY[$((_HEADED_SHELL_INDEX + 1))]:-}"
+    _HEADED_OWNER_INDEX=$((_HEADED_SHELL_INDEX + 3))
+    if [[ "${CMD_ARRAY[$((_HEADED_SHELL_INDEX + 2))]:-}" == "--recovery" ]]; then
+        _HEADED_OWNER_INDEX=$((_HEADED_OWNER_INDEX + 1))
+    fi
+    if [[ "${_HEADED_SHELL##*/}" == "bash" && "${_HEADED_WRAPPER##*/}" == "launch-command.sh" &&
+        "${CMD_ARRAY[$((_HEADED_OWNER_INDEX - 1))]:-}" == "--" &&
+        "${CMD_ARRAY[$((_HEADED_OWNER_INDEX + 1))]:-}" == "-m" &&
+        "${CMD_ARRAY[$((_HEADED_OWNER_INDEX + 2))]:-}" == "agent_worktrees.launch_seed_exec" ]]; then
+        case "${CMD_ARRAY[$_HEADED_OWNER_INDEX]##*/}" in
+            python|python[0-9]|python[0-9].[0-9]*)
+                CMD_ARRAY[$_HEADED_OWNER_INDEX]="$PYTHON"
+                ;;
+        esac
+    fi
 
     # Patch a stale `--runtime-python` embedded in CMD_ARRAY (#stale-venv).
     # `resolve` (run BEFORE the update-apply above) bakes the interpreter that

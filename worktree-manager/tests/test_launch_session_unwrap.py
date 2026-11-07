@@ -43,6 +43,17 @@ _LAUNCH_SCRIPT = _BIN / "launch-session.sh"
 _LAUNCH_PS1 = _BIN / "launch-session.ps1"
 
 
+def _bash_grammar_executable():
+    if os.name == "nt":
+        git = shutil.which("git")
+        bash = Path(git).resolve().parents[1] / "bin" / "bash.exe" if git else None
+    else:
+        bash = Path("/bin/bash")
+    if bash is None or not bash.is_file():
+        pytest.skip("Bash grammar qualification requires native Bash or Windows Git Bash")
+    return str(bash)
+
+
 def _unwrap(plan: dict) -> dict:
     out = subprocess.run(
         [sys.executable, "-c", _UNWRAP_SNIPPET],
@@ -181,7 +192,6 @@ def test_powershell_launcher_contains_unwrap():
     assert "$plan = $plan.launch" in text
 
 
-@pytest.mark.skipif(os.name != "posix", reason="Native Bash AHP binding")
 @pytest.mark.parametrize("literal_args", [
     ["-i", "--resume", "--model", "--ahp=literal", "--agent", "--experimental"],
     ["--interactive", "--resume=literal", "--model", "--ahp"],
@@ -204,9 +214,12 @@ def test_shell_ahp_binding_preserves_literal_option_values(tmp_path, literal_arg
         _BIN.parents[1] / "plugins" / "agent-worktrees" / "src",
     ))
     environment.pop("BASH_ENV", None)
+    if os.name == "nt":
+        environment["MSYS2_ARG_CONV_EXCL"] = "*"
     result = subprocess.run(
-        ["/bin/bash", "-c", code], cwd=tmp_path, env=environment,
+        [_bash_grammar_executable(), "-c", code], cwd=tmp_path, env=environment,
         capture_output=True, text=True, timeout=15,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout) == [
@@ -262,6 +275,48 @@ def test_seed_interpreter_refresh_preserves_native_hosts(tmp_path, command):
         )
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout) == [expected, *command[1:]]
+
+
+@pytest.mark.parametrize("environment_prefix,recovery,executable", [
+    (False, False, "/old-runtime/python"),
+    (True, True, "/old-runtime/python3.12"),
+    (False, False, "copilot"),
+    (True, False, "copilot"),
+])
+def test_shell_refreshes_only_the_inner_python_owner(
+    tmp_path, environment_prefix, recovery, executable,
+):
+    command = [
+        *(["/usr/bin/env", "BASH_ENV="] if environment_prefix else []),
+        "/bin/bash", "/retained/launch-command.sh",
+        *(["--recovery"] if recovery else []),
+        "--", executable, "-m", "agent_worktrees.launch_seed_exec",
+        "--record", "/private/fixture.yaml", "--admission-only", "--", "copilot",
+    ]
+    source = _LAUNCH_SCRIPT.read_text(encoding="utf-8")
+    start = source.index('    if [[ "$_PENDING_NEW_SEED" == "1" &&')
+    refresh = source[start:source.index("    aw_assert_cold_resume", start)]
+    code = "\n".join([
+        "set -euo pipefail",
+        "CMD_ARRAY=(" + shlex.join(command) + ")",
+        f"_PENDING_NEW_SEED=0; PYTHON={shlex.quote(sys.executable)}; setup_log() {{ :; }}",
+        refresh,
+        '"$PYTHON" -c \'import json,sys; print(json.dumps(sys.argv[1:]))\' "${CMD_ARRAY[@]}"',
+    ])
+    environment = dict(os.environ)
+    environment.pop("BASH_ENV", None)
+    if os.name == "nt":
+        environment["MSYS2_ARG_CONV_EXCL"] = "*"
+    result = subprocess.run(
+        [_bash_grammar_executable(), "-c", code], cwd=tmp_path, env=environment,
+        capture_output=True, text=True, timeout=15,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    expected = list(command)
+    if executable != "copilot":
+        expected[expected.index(executable)] = sys.executable
+    assert json.loads(result.stdout) == expected
 
 
 def test_launchers_pass_project_to_resolve_and_post_exit():

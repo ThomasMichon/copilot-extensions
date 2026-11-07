@@ -2411,7 +2411,12 @@ persisted AHP-binding and final startup-serialization blocks against copied
 launch commands. Inline and split resume arguments must be replaced, not duplicated;
 literal drive paths and prompt text survive the final consumer. Companion
 controls refresh the inner runtime before serialization, including recovery
-commands. The producer's Windows capability-absence
+commands. The Bash inner-owner refresh also recognizes the existing
+`env BASH_ENV=` prefix and leaves native executables unchanged.
+Its runtime-refresh and AHP grammar checks use native Bash on POSIX or Git
+Bash on Windows, disabling MSYS argument translation only in that Windows
+fixture. Git Bash coverage is not native POSIX lifecycle qualification.
+The producer's Windows capability-absence
 control leaves older callers on their legacy path. These are isolated contract
 controls with a synthetic binding/token, not an authenticated AHP connection.
 They preserve selector-shaped interactive/model/agent values and reject
