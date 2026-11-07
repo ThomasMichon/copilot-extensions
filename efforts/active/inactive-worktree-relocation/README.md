@@ -594,3 +594,14 @@ adopter pilot feedback gates subsequent widening.
 - Both focused native retirement cuts passed. This is a test-only correction;
   production behavior/deadlines, the existing creation-repair concurrency/seed
   assertions and the broader Active completion gate are unchanged.
+
+### 2026-11-07 — Structured output during stale-lock recovery
+- Independently verified the next unpublished overview concern: the shared
+  finalization lock's default stale warning can precede a move's JSON result.
+  Added an optional diagnostic sink without changing existing lock consumers,
+  claim semantics, output helpers or process-global streams. Move and abort
+  direct only that warning to stderr.
+- An actual CLI move recovered a newly owned stale fixture lock, completed the
+  real flow and emitted one parseable JSON object on stdout with its diagnostic
+  on stderr. The focused native control passed. This is not a production
+  output redesign or a change to the concurrent creation-repair assertions.
