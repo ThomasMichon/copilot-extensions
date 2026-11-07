@@ -12,6 +12,7 @@ starting point the agent refines, never an authoritative record of intent.
 from __future__ import annotations
 
 import argparse
+import re
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -25,7 +26,13 @@ sys.path.insert(0, str(SCRIPTS))
 from agenda import AgendaError  # noqa: E402
 from agenda_outline import SCHEMA, clip, preview, render_text  # noqa: E402
 
-ACK_LIMIT = 40
+ACK_LIMIT = 60
+# A short turn is an acknowledgement only when every word is conversational filler, never by length alone.
+ACK_WORDS = frozenset("""
+ok okay k kk yes yep yeah yup sure sounds good great cool nice perfect awesome excellent fine alright right
+thanks thank you ty thx lgtm sgtm got it go ahead do that please continue proceed keep going carry on on
+and that's thats works wonderful amazing love sweet
+""".split())
 ACTION_LIMIT = 400
 # Harness-injected turns arrive without a source; they are continuity plumbing, not operator intent.
 INJECTED_PREFIXES = ("[Context Handoff", "Continue the task in a fresh context window", "<system_", "<session_memory")
@@ -66,6 +73,11 @@ def _requests(events: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     return requests, facts
 
 
+def acknowledgement(content: str) -> bool:
+    words = re.findall(r"[a-z']+", content.lower())
+    return len(content) <= ACK_LIMIT and all(word in ACK_WORDS for word in words)
+
+
 def _todos(database: Path) -> list[dict[str, Any]]:
     if not database.is_file():
         return []
@@ -99,7 +111,7 @@ def digest(folder: Path) -> dict[str, Any]:
     requests, facts = _requests(events)
     todos = _todos(folder / "session.db")
     for request in requests:
-        request["acknowledgement"] = len(request["content"]) < ACK_LIMIT
+        request["acknowledgement"] = acknowledgement(request["content"])
         request["todos"] = []
     substantive = [request for request in requests if not request["acknowledgement"]]
     for todo in todos:

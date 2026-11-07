@@ -15,6 +15,19 @@ agendas the ordinary default where an adopter opts in, while keeping the
 active agent in control of its own agenda: a strong nudge and a short path,
 never a rigid lock or an automatic mutation.
 
+## Participants
+
+| Participant | Role in this effort | Reached via |
+|-------------|---------------------|-------------|
+| Agenda-adoption host agent | All slices (efforts helpers, agent-worktrees switch and guidance, samples) | copilot-extensions worktree `lambda-core-wsl-20261107-143326-ba88` |
+
+## Coordination
+
+- **Topology:** independent per-slice PRs against `dev`
+- **Host (owns PRs):** agenda-adoption host agent
+- **Delegates:** none
+- **Handoff:** context-handoff brief and checkpoint of the host worktree; a successor resumes the next open Plan item
+
 ## Context
 
 - Agenda skill and managed CLI: `plugins/efforts/skills/driving-effort-agendas/`.
@@ -78,6 +91,10 @@ never a rigid lock or an automatic mutation.
 - [ ] Unit tests: preference composition across tiers; guidance and nudge
       appear only when enabled.
 - [ ] Sample backfills of real completed sessions reviewed by the operator.
+
+## Proposal
+
+Pending: no separate proposal; the Plan is source-only and lands through reviewed PRs.
 
 ## Journal
 

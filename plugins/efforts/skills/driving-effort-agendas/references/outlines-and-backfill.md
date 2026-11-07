@@ -40,6 +40,7 @@ Run from the skill's `scripts/` payload with the plugin's Python:
 ```text
 agenda_outline.py expand <outline.json>              # request-v2 init JSON
 agenda_outline.py preview <outline.json> [--format text|json]
+agenda_outline.py adopt <outline.json> --state-home <new-dir> [--session ID] [--actor NAME]
 agenda_outline.py from-effort <effort README.md>     # outline of open Plan/Validation items
 agenda_backfill.py digest  <session-folder>          # bounded evidence for authoring
 agenda_backfill.py outline <session-folder>          # first-pass reconstructed outline
@@ -48,8 +49,17 @@ agenda_backfill.py preview <session-folder> [--format text|json]
 
 `preview` initializes a temporary standalone store, replays item statuses
 (done items complete, current items start, nested items open subqueues) and
-renders the same display graph the Companion uses. A queued parent's children
-appear once the parent runs. Warnings report statuses the queue cannot
+renders the same display graph the Companion uses. When replay reaches a
+parent that is not `waiting`, its subqueue opens, so a parent's children are
+shown even when their statuses are omitted.
+
+`expand` emits only the `init` (definitions and order, no progress). To keep a
+reviewed outline's progress and hierarchy, `adopt` initializes a **new or
+empty** explicit state home (for example a worktree-local
+`.effort-agenda/<lane>/`) and replays the same outcomes, expansions and
+returns as `preview`, recorded under your session. It refuses a non-empty home
+and never rewrites an existing lane. Managed placements still start from
+`expand` plus the managed `init`; drive progress through the normal commands. Warnings report statuses the queue cannot
 represent, such as a `done` item after the current one.
 
 ## Deriving from an effort
@@ -66,7 +76,9 @@ checkpoint index:
 
 - operator requests are user messages without a relay/automation source;
   harness continuity turns (context-handoff notices, fresh-window recovery
-  prompts) and short acknowledgements are skipped;
+  prompts) and acknowledgements made only of conversational filler ("ok",
+  "thanks, go ahead") are skipped; short instructions such as "Fix the
+  parser" are kept;
 - each todo is attached to the latest substantive request created before it;
 - earlier requests are `done` with their finished todos; their unfinished
   todos move to a final "Open work carried from earlier requests" item;

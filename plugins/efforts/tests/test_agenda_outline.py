@@ -50,14 +50,49 @@ def test_expand_keeps_colliding_items_distinct() -> None:
     outline = {"source": {"kind": "task", "ref": "fixture"}, "items": [
         {"action": "Retry", "source_ref": "caf\u00e9", "status": "done"},
         {"action": "Retry", "source_ref": "cafe\u0301", "status": "done"},
-        {"id": "retry-2", "action": "Something else"}]}
+        {"id": "retry-2", "action": "Something else"},
+        # A disambiguated ref must not land on a ref an earlier item already took.
+        {"id": "first", "action": "One", "source_ref": "source#third"},
+        {"id": "second", "action": "Two", "source_ref": "source"},
+        {"id": "third", "action": "Three", "source_ref": "source"}]}
 
     request, _ = OUTLINE.expand(outline)
 
     items = request["change"]["board"]["items"]
-    assert len(items) == 3
-    assert len({value["source_ref"] for value in items.values()}) == 3
+    assert len(items) == 6
+    assert len({value["source_ref"] for value in items.values()}) == 6
     assert OUTLINE.preview(outline)["graph"]["items"]
+
+
+def test_preview_opens_subqueue_of_reached_parent_with_default_statuses() -> None:
+    outline = {"source": {"kind": "task", "ref": "fixture"}, "items": [
+        {"action": "Earlier work", "status": "done"},
+        {"action": "Carried parent", "children": [{"action": "Leftover A"}, {"action": "Leftover B"}]}]}
+
+    graph = OUTLINE.preview(outline)["graph"]
+
+    states = _states(graph)
+    assert states["Leftover A"] == "running"
+    assert states["Leftover B"] == "queued"
+
+
+def test_adopt_replays_progress_into_new_state_home(tmp_path: Path) -> None:
+    outline = {"source": {"kind": "task", "ref": "fixture"}, "provenance": "reconstructed", "items": [
+        {"action": "Old request", "status": "done"},
+        {"action": "Current request", "status": "current", "children": [
+            {"action": "Done step", "status": "done"}, {"action": "Next step"}]}]}
+    graph_module = importlib.import_module("agenda_v2_graph")
+    store = importlib.import_module("agenda_store")
+    home = tmp_path / "lane"
+
+    OUTLINE.adopt(outline, home, session="fixture-session")
+
+    state = store.read(home)
+    states = _states(graph_module.graph(state["documents"], state["records"]))
+    assert states == _states(OUTLINE.preview(outline)["graph"])
+    assert states["Next step"] == "running"
+    with pytest.raises(AGENDA.AgendaError, match="new or empty state home"):
+        OUTLINE.adopt(outline, home)
 
 
 def test_from_effort_outlines_open_remainder(tmp_path: Path) -> None:
@@ -98,18 +133,21 @@ def test_backfill_reconstructs_requests_todos_and_carried_work(tmp_path: Path) -
     folder = _session(tmp_path / "s", [
         ("2026-01-01T01:00:00Z", "Please build the importer for the legacy format", None),
         ("2026-01-01T01:30:00Z", "Thanks!", None),
+        ("2026-01-01T01:35:00Z", "Fix the parser", None),
         ("2026-01-01T01:40:00Z", "relayed peer message that is long enough to count", "agent-bridge"),
         ("2026-01-01T01:50:00Z", "[Context Handoff -- native] Context utilization is high; checkpoint now", None),
         ("2026-01-01T02:00:00Z", "Now add an exporter that mirrors the importer", None)],
         [("parse", "Parsing legacy rows", "done", "2026-01-01 01:05:00"),
          ("dedupe", "Deduplicating rows", "pending", "2026-01-01 01:10:00"),
+         ("fix", "Fixing the parser", "done", "2026-01-01 01:36:00"),
          ("export", "Writing exporter", "in_progress", "2026-01-01 02:05:00")], ended=False)
 
     outline = BACKFILL.outline(folder)
 
     assert outline["provenance"] == "reconstructed"
-    assert [item["id"] for item in outline["items"]] == ["request-1", "request-2", "carried-open-work"]
-    first, second, carried = outline["items"]
+    assert [item["id"] for item in outline["items"]] == ["request-1", "request-2", "request-3", "carried-open-work"]
+    first, short, second, carried = outline["items"]
+    assert short["action"] == "Fix the parser" and short["children"][0]["action"] == "Fixing the parser"
     assert first["status"] == "done" and [child["action"] for child in first["children"]] == ["Parsing legacy rows"]
     assert second["status"] == "current" and second["children"][0]["status"] == "current"
     assert [child["action"] for child in carried["children"]] == ["Deduplicating rows"]

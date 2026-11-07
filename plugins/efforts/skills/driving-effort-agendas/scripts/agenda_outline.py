@@ -161,8 +161,11 @@ def expand(outline: dict[str, Any], *, operation_id: str | None = None) -> tuple
         # The store treats an NFC-normalized source_ref as semantic identity; keep every item distinct.
         ref = _text(node["value"].get("source_ref")
                     or f"{outline['source']['kind']}:{outline['source']['ref']}#{node['id']}", "item source_ref")
+        base, suffix = ref, 2
         if unicodedata.normalize("NFC", ref) in seen:
-            ref = f"{ref}#{node['id']}"
+            ref = f"{base}#{node['id']}"
+        while unicodedata.normalize("NFC", ref) in seen:
+            ref, suffix = f"{base}#{node['id']}-{suffix}", suffix + 1
         seen.add(unicodedata.normalize("NFC", ref))
         node["source_ref"] = ref
     caps = {**DEFAULT_CAPS,
@@ -199,13 +202,16 @@ def _proof(exits: list[str], node: dict[str, Any], provenance: str) -> list[dict
 class _Replay:
     """Drive a fresh standalone store through an outline's recorded statuses."""
 
-    def __init__(self, home: Path, request: dict[str, Any], provenance: str) -> None:
+    def __init__(self, home: Path, request: dict[str, Any], provenance: str, *,
+                 session: str = "outline-preview", actor: str | None = None) -> None:
         import agenda_store as store
 
         self.store, self.home, self.provenance = store, home, provenance
+        self.session, self.actor = session, actor
+        self.prefix = request["operation_id"]
         self.board = request["change"]["board"]["items"]
         self.warnings: list[str] = []
-        store.mutate(home, request, session="outline-preview")
+        store.mutate(home, request, session=session, actor=actor)
 
     def _cursor(self) -> tuple[str, str, str]:
         cursor = self.store.read(self.home)["documents"]["cursor"]
@@ -216,9 +222,9 @@ class _Replay:
     def _update(self, change: dict[str, Any]) -> dict[str, Any]:
         revision = self.store.read(self.home)["revision"]
         request = {"schema": "efforts.agenda-request", "version": 2, "mode": "context-qualified",
-                   "expected_revision": revision, "operation_id": f"outline-replay-{revision}",
+                   "expected_revision": revision, "operation_id": f"{self.prefix}-replay-{revision}",
                    "change": change}
-        result, _ = self.store.mutate(self.home, request, session="outline-preview")
+        result, _ = self.store.mutate(self.home, request, session=self.session, actor=self.actor)
         transition = result.get("transition", {})
         if transition.get("decision") == "not-admitted":
             raise AgendaError(f"outline replay not admitted: {transition.get('reason_code')}")
@@ -235,7 +241,8 @@ class _Replay:
         for index, node in enumerate(nodes):
             status = node["status"]
             started = any(child["status"] != "queued" for child in _all(node["children"]))
-            if node["children"] and (status == "done" or started):
+            # Reaching a parent means it is the running head; open its subqueue unless it is parked.
+            if node["children"] and (status != "waiting" or started):
                 frame, item, attempt = self._cursor()
                 expansion = self._update({
                     "operation": "expand", "frame_id": frame, "item_id": item, "attempt_id": attempt,
@@ -264,6 +271,23 @@ class _Replay:
             if node["status"] != "queued":
                 self.warnings.append(
                     f"{node['id']}: marked {node['status']} after an unfinished earlier item; shown as queued")
+
+
+def adopt(outline: dict[str, Any], home: Path, *, session: str | None = None,
+          actor: str | None = None) -> dict[str, Any]:
+    """Initialize a fresh explicit state home from an outline, replaying its progress and hierarchy."""
+    import agenda_store as store
+
+    home = Path(home)
+    if home.exists() and any(home.iterdir()):
+        raise AgendaError("adopt requires a new or empty state home; it never rewrites an existing lane")
+    home.mkdir(parents=True, exist_ok=True)
+    request, roots = expand(outline)
+    replay = _Replay(home, request, outline.get("provenance", "authored"),
+                     session=session or "outline-adopt", actor=actor)
+    replay.run(roots)
+    state = store.read(home)
+    return {"revision": state["revision"], "snapshot": state["snapshot"], "warnings": replay.warnings}
 
 
 def preview(outline: dict[str, Any]) -> dict[str, Any]:
@@ -351,12 +375,17 @@ def _load(path: str) -> dict[str, Any]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
-    init = sub.add_parser("expand", help="outline JSON -> request-v2 init JSON")
+    init = sub.add_parser("expand", help="outline JSON -> request-v2 init JSON (definitions only, no progress)")
     init.add_argument("outline", help="outline JSON path or - for stdin")
     init.add_argument("--operation-id")
     show = sub.add_parser("preview", help="render an outline offline as the Companion display graph")
     show.add_argument("outline", help="outline JSON path or - for stdin")
     show.add_argument("--format", choices=("text", "json"), default="text")
+    take = sub.add_parser("adopt", help="initialize a new explicit state home, replaying outline progress")
+    take.add_argument("outline", help="outline JSON path or - for stdin")
+    take.add_argument("--state-home", type=Path, required=True)
+    take.add_argument("--session")
+    take.add_argument("--actor")
     effort = sub.add_parser("from-effort", help="outline the open remainder of an effort README")
     effort.add_argument("readme", type=Path)
     effort.add_argument("--worktree")
@@ -364,6 +393,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "expand":
             output: Any = expand(_load(args.outline), operation_id=args.operation_id)[0]
+        elif args.command == "adopt":
+            output = adopt(_load(args.outline), args.state_home, session=args.session, actor=args.actor)
         elif args.command == "from-effort":
             output = from_effort(args.readme, worktree=args.worktree)
         else:
