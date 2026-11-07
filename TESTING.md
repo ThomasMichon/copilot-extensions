@@ -4644,6 +4644,20 @@ cross-host writer fence or completed update/rollback lifecycle.
 
 ## Optional SSH service and native relay
 
+The separate `plugins/agent-ssh/tests/test_gateway_sshd_native.py` source
+packet has an opt-in `AGENT_SSH_VAULT_NATIVE=1` / `-k vault-pair` case.
+Select the current first-party agent-ssh and agent-vault sources with prepared
+test dependencies, actual KeePassXC CLI and native OpenSSH server/client/keygen
+under the canonical contained runner. It reuses the PID-owned disposable Vault
+fixture, public-only preparation and pinned protected installation, then uses
+that exact pair for the existing listener's command/context, authorization,
+preservation and teardown assertions. Locked new setup refuses while the
+materialized pair remains usable; no system agent or production Vault is used.
+`-k 'not vault-pair'` preserves the independent synthetic-key/outer-shell packet.
+On Linux, retain the disposable-account/host-state prerequisites below.
+This is current-source first-touch consumer proof, not installed setup,
+encrypted-key signing or user-logon lifetime. Default runs skip the Vault case.
+
 The independent `ssh_service=true` selector runs the contained standalone
 `services/ssh` suite on Linux and Windows. It covers installed foreground
 Gateway registration, later-machine enrollment/notifications, original-request
