@@ -70,7 +70,9 @@ class _SchemaMixin:
                 if recorded is not None and recorded["version"] >= 34:
                     validate_turn_schema(conn)
                 if recorded is not None and recorded["version"] >= 35:
-                    validate_acquisition_schema(conn)
+                    validate_acquisition_schema(
+                        conn, require_worktree_writer=recorded["version"] >= 42,
+                    )
                 if recorded is not None and recorded["version"] >= 36:
                     validate_creation_schema(conn)
                 if recorded is not None and recorded["version"] >= 37:
@@ -889,3 +891,12 @@ class _SchemaMixin:
             conn.execute("UPDATE schema_version SET version=?", (41,))
             conn.commit()
             log.info("Schema migrated to version 41: retained ordinary keyed creation writer")
+
+        if from_version < 42:
+            from .acquisition_custody_schema import ensure_schema, validate_schema
+
+            ensure_schema(conn)
+            validate_schema(conn)
+            conn.execute("UPDATE schema_version SET version=?", (42,))
+            conn.commit()
+            log.info("Schema migrated to version 42: retained acquisition Worktrees writer")
