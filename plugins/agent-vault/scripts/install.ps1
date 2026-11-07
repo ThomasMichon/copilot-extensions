@@ -75,17 +75,27 @@ if ($env:AGENT_VAULT_CONFIG) {
     $env:AGENT_VAULT_CONFIG = $vaultConfigPath
 }
 
-if ($Action -in @('install', 'update', 'stamp', 'provision', 'start')) {
-    . (Join-Path $PSScriptRoot 'runtime-activation.ps1')
+if ($Action -in @('install', 'update', 'stamp', 'provision', 'start', 'schedule')) {
+    if ((Get-Location).Provider.Name -cne 'FileSystem') {
+        throw 'Vault project selection requires a filesystem invocation directory'
+    }
     $activationProject = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) {
         $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT
     } else { (Get-Location).ProviderPath }
+    $activationProject = (Resolve-Path -LiteralPath $activationProject -ErrorAction Stop).ProviderPath
+    if (-not (Test-Path -LiteralPath $activationProject -PathType Container)) {
+        throw 'Vault project selection must name an available directory'
+    }
+    $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT = $activationProject
+}
+
+if ($Action -in @('install', 'update', 'stamp', 'provision', 'start')) {
+    . (Join-Path $PSScriptRoot 'runtime-activation.ps1')
     $activation = Get-VaultRuntimeActivation -Project $activationProject
     if ($activation.state -ceq 'configuration-empty') {
         Write-Output "[SKIP] $($activation.detail)"
         exit 0
     }
-    $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT = $activationProject
 }
 
 # === install-contract:v4 payload-copy -- keep byte-identical across plugins ===
@@ -1052,8 +1062,22 @@ function Assert-OwnedVaultTask {
     if (@($Task.Actions).Count -ne 1) { throw 'Refusing ambiguous Vault task actions' }
     $taskAction = @($Task.Actions)[0]
     $launcher = [regex]::Escape((Join-Path $InstallDir 'service.ps1'))
-    if ((Split-Path -Leaf ([string]$taskAction.Execute)) -notin @('conhost.exe', 'pwsh.exe', 'powershell.exe') -or
-        ([string]$taskAction.Arguments) -notmatch "(?:^|\s)-File\s+(?:`"$launcher`"|$launcher)(?:\s|$)") {
+    $executor = [string]$taskAction.Execute
+    $arguments = [string]$taskAction.Arguments
+    # -File terminates shell options; later -File tokens are only script input.
+    $shell = '(?:"(?:[^"]*\\)?(?:pwsh|powershell)\.exe"|(?:[^\s"]*\\)?(?:pwsh|powershell)\.exe)'
+    if ((Split-Path -Leaf $executor) -ieq 'conhost.exe') {
+        if ($arguments -notmatch "^\s*--headless\s+$shell\s+(?<shellArguments>.*)$") {
+            throw 'Refusing foreign Vault scheduled task'
+        }
+        $arguments = $Matches.shellArguments
+    } elseif ((Split-Path -Leaf $executor) -notin @('pwsh.exe', 'powershell.exe')) {
+        throw 'Refusing foreign Vault scheduled task'
+    }
+    $options = '(?:(?:-NoProfile|-NonInteractive|-NoLogo)\s+|-ExecutionPolicy\s+Bypass\s+|-WindowStyle\s+Hidden\s+)*'
+    $operand = "`"$launcher`""
+    if ((Join-Path $InstallDir 'service.ps1') -notmatch '\s') { $operand += "|$launcher" }
+    if ($arguments -notmatch "^\s*$options-File\s+(?:$operand)\s*$") {
         throw 'Refusing foreign Vault scheduled task'
     }
 }
