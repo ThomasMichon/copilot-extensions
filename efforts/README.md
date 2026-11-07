@@ -19,6 +19,7 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Durable Goals and Steers](active/durable-goals-and-steers/README.md) | Draft; reviewed Goal/corpus/reset/agenda integration proposal before implementation | #11403; existing continuity, state and authority owners retained; installed rollout adopter-owned |
 | [Podman Runtime and Image Sources](active/podman-runtime-and-image-sources/README.md) | Draft; reviewed driver/consumer proposal before implementation | #11386; existing runtime-driver, fleet/lease and credential owners retained; no engine/machine/image/venue effects or rollout |
 | [Installed Manager TTY Qualification](active/installed-manager-tty-qualification/README.md) | Draft; reviewed install-to-interactive-consumer gate before implementation | #11377; extends existing #3336/#7529 qualification, preserves native and launcher owners; no live rollout |
 | [Mux Question Answers](active/mux-question-answers/README.md) | Draft; explicit single-question fallback plan before implementation | #11371; native preferred, permissions and existing sessions protected; separately authorized rollout |

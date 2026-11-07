@@ -74,6 +74,81 @@ select supported trusted references, not manufacture a private binding or turn
 an observation route into a writer. Actual live credential/backend enrollment
 and native effects require their own applicable authorization.
 
+#### Provider-first protected writer expansion
+
+The current Fleet `ForgeScope` and Worktrees `ObservationCredentials` require
+`permission == "observe"`. The worker, controller and sealed credential receipt
+preserve that exact binding. Keep those types and their existing wire/config
+forms observation-only; accepting a write permission in that form is not a
+compatible expansion. `AdoReader` remains a reader, and the standalone host
+continues to construct only its existing read handlers until the separate
+writer dependency is available.
+
+Expand the existing credential/provider owners with a separately identified,
+optional protected-review contract. Its trusted selection must bind the actual
+provider/HTTPS endpoint, repository/project, native PR and native principal,
+permitted review action kinds, account/audience and finite credential lifetime.
+The custodian must verify the actual acquired material against that selection;
+copied scope fields, an opaque broad token or the Gateway's authentication of a
+caller do not establish native write permission. Review permission never
+includes merge, completion settings, another principal's vote or general HTTP.
+Any broader underlying native credential remains behind the selected owner's
+operation restrictions; do not describe routing restrictions as token
+downscoping or permission verification.
+
+Retain the existing acquisition, controller verification, encrypted delivery and
+worker receipt checks rather than creating another issuer or delivery channel.
+Every hop must retain the separate review binding, including renewal and result
+verification. An observation binding cannot satisfy it, and a review binding
+cannot silently satisfy an observation-only consumer. Old credential
+configuration and signed receipt forms keep their existing meanings. Where a
+strict reader needs a new field or variant, expand its owning versioned parser
+first; never start sending an extension merely because it looks additive.
+
+Advertise support through the actual selected provider's existing discovery
+and authenticated session/response seams, separately from package versions.
+Gateway receiver support alone does not establish support in the selected
+controller, credential verifier, worker or native transport. Resolve the whole
+selected path before requesting review material. A missing, old, withdrawn or
+rolled-back dependency makes only protected review unavailable before credential
+acquisition or native effects; preserve ordinary observation and original
+operation recovery. No effectful compatibility probe or retry through ambient
+authentication is permitted.
+
+The native ADO provider owns the concrete finite protected request path.
+Compose its existing HTTPS/deadline/response-bound machinery with the selected
+credential owner, rather than wrapping legacy ambient CLI/curl authentication
+or adding a parallel forge client. The factory acquires one immutable private
+material generation and pins that exact reference through
+`connectionData.authorizedUser`, candidate/policy reads and selected writes.
+Check current owner admission, expiry/revocation and that same reference at
+dispatch; renewal or account changes cannot replace it within an operation.
+A generation mismatch during preflight leaves the action unattempted. Once the
+durable attempt fence is entered, preserve unknown effects and original receipt
+recovery even if dispatch subsequently refuses; do not infer an unattempted
+action from a transport error. Never retry a write with freshly acquired
+material to conceal that loss.
+
+The factory supplies the actual owner's action-relevant review-policy guard
+and finite request/drain lifetime to `AdoReviewContext`. There is no permissive
+default guard. Validate native identity/target and current candidate evidence
+through that same transport before writes. Bound method/route/body selection
+to the existing native review adapter; a serialized host reference cannot
+install an arbitrary request function. Keep the original replay store,
+pre-effect unknown fence and post-effect settlement rules; credentials,
+authorization headers and private material references never enter prepared
+intent, receipt JSON or logs.
+
+Deliver this expansion before its host consumer. Qualify actual parser and
+transport seams with contained synthetic credentials: old/current callers and
+providers, provider rollback, missing/withdrawn support, observe/review
+substitution, wrong endpoint/repository/PR/principal/action, expiry/revocation,
+rotation between identity read and dispatch, malformed/oversize/late responses,
+and response loss after an entered write. Prove refusal before acquisition for
+unsupported paths, no writes from default/read-only configuration, no credential
+leakage and no replay after unknown effects. Source controls are not installed
+controller support, actual native permission verification or live enrollment.
+
 ### Recovery, compatibility and lifecycle
 
 Continue the existing original-operation key and final prepared selection.

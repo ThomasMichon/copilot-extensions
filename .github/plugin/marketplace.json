@@ -74,7 +74,7 @@
     {
       "name": "efforts",
       "description": "Efforts planning system - comprehensive planning folders with explicit repository adoption, a read-only target capability probe, a README-as-shared-contract, a static completion-gate fallback, and a staged session policy producer; ships the planning-efforts and efforts-setup skills",
-      "version": "0.2.0-dev1",
+      "version": "0.2.1-dev1",
       "source": "plugins/efforts"
     },
     {
@@ -152,7 +152,7 @@
     {
       "name": "agent-roles",
       "description": "Sustained agent role charters over existing owners: a fleet monitor (task master) for progress audits and separately authorized corrective steers, and a pull-request reviewer role with independent lanes. Guidance-only, with no task queue, scheduler, daemon or required companion plugin.",
-      "version": "0.1.7-dev1",
+      "version": "0.1.8-dev1",
       "source": "plugins/agent-roles"
     }
   ]
