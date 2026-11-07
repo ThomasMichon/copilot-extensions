@@ -8,7 +8,7 @@ on:
         type: boolean
         default: false
       immutable_runtime_ref:
-        description: Full immutable 40-hex commit for runtime qualification (empty uses the dispatch SHA)
+        description: Full immutable 40-hex application Source for runtime or normal SSH cohort qualification (empty uses dispatch SHA)
         type: string
         default: ""
       guardian_followthrough:
@@ -1818,6 +1818,7 @@ jobs:
     env: &gateway-normal-setup-env
       UV_PYTHON: "3.12"
       COPILOT_EXTENSIONS_SSH_SETUP_COHORT_ONLY: "0"
+      COPILOT_EXTENSIONS_SSH_SETUP_SOURCE_COMMIT: ${{ inputs.immutable_runtime_ref || github.sha }}
     steps: &gateway-normal-setup-steps
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -1826,6 +1827,24 @@ jobs:
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
+      - name: Retain the selected immutable application Source
+        shell: python
+        run: |
+          import os
+          import re
+          import subprocess
+
+          selected = os.environ["COPILOT_EXTENSIONS_SSH_SETUP_SOURCE_COMMIT"]
+          if re.fullmatch(r"[0-9a-f]{40}", selected) is None:
+              raise ValueError("Select a full immutable lowercase application Source commit")
+          flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+          probe = ["git", "cat-file", "-e", selected + "^{commit}"]
+          if subprocess.run(probe, check=False, timeout=10, creationflags=flags).returncode:
+              subprocess.run(
+                  ["git", "fetch", "--no-tags", "--depth=1", "origin", selected],
+                  check=True, timeout=30, creationflags=flags,
+              )
+              subprocess.run(probe, check=True, timeout=10, creationflags=flags)
       - name: Prepare the declared engine dependency support
         run: python tools/run-plugin-tests.py agent-worktrees --prepare-only
       - name: Prepare the declared Manager dependency support
@@ -1867,11 +1886,17 @@ jobs:
               runner["prepare"]("fleet-manager", python)
               environment = runner["isolated_environment"](os.environ, sandbox)
               environment["COPILOT_EXTENSIONS_TEST_VENV_ROOT"] = str(runner["venv_root"](root))
+              inputs = [
+                  str(python), "-I", "-B",
+                  str(root / "fleet-manager" / "tests" / "repository_ssh_cohort_fixture.py"),
+                  "--output", str(sandbox / "cohort"),
+              ]
+              selected = os.environ.get("COPILOT_EXTENSIONS_SSH_SETUP_SOURCE_COMMIT")
+              if selected:
+                  inputs.extend(["--source-commit", selected])
               try:
                   code = runner["run_contained"](
-                      [str(python), "-I", "-B",
-                       str(root / "fleet-manager" / "tests" / "repository_ssh_cohort_fixture.py"),
-                       "--output", str(sandbox / "cohort")],
+                      inputs,
                       cwd=root, env=environment, sandbox=sandbox,
                       limits=runner["Limits"](wall_seconds=180),
                   )
@@ -1922,6 +1947,7 @@ jobs:
     env: &gateway-normal-preparation-env
       UV_PYTHON: "3.12"
       COPILOT_EXTENSIONS_SSH_SETUP_COHORT_ONLY: "1"
+      COPILOT_EXTENSIONS_SSH_SETUP_SOURCE_COMMIT: ${{ inputs.immutable_runtime_ref || github.sha }}
     steps: *gateway-normal-setup-steps
 
   gateway-normal-preparation-windows:

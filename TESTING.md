@@ -38,6 +38,20 @@ installed setup or full SSH acceptance. The existing `pr_artifacts` selection
 remains the complete lane; selecting it together with `runtime_profiles`
 still runs the full lane and omits the redundant preparation-only jobs.
 
+The existing `immutable_runtime_ref` input can independently select a full
+lowercase40-hex application Source for these normal SSH jobs. Empty selection
+still uses the dispatch commit. The disposable checkout probes that exact
+commit and fetches it from its existing `origin` only when absent, with
+bounded native children; malformed or unavailable inputs refuse instead of
+falling back. The fixture's optional `--source-commit` feeds the existing
+Source composer and real profile builders, not a copied constructor patch.
+The fixture/workflow source, selected application Source and prepared
+dependency inputs are distinct evidence. Testing a published unmerged
+candidate supplies feedback on that candidate only, not acceptance of its
+whole PR, current-Dev qualification, release or installation authority.
+The25-input limit, original selectors, complete dependency bytes, provenance/
+health checks, preparation/lifecycle clocks and cleanup remain unchanged.
+
 Keep functional correctness, performance budgets and environment suitability
 separate. A supported diagnostic profile or narrower selection can supply
 useful evidence without passing the original full acceptance gate. Preserve

@@ -337,7 +337,14 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
     assert normal["timeout-minutes"] == 6
     assert normal["needs"] == "gateway-continuity-application-" + platform
     normal_steps = [step for step in normal["steps"] if "run" in step]
-    assert [shlex.split(step["run"]) for step in normal_steps[:-1]] == [
+    source = normal_steps[0]
+    assert source["name"] == "Retain the selected immutable application Source"
+    assert source["shell"] == "python"
+    ast.parse(source["run"])
+    assert normal["env"]["COPILOT_EXTENSIONS_SSH_SETUP_SOURCE_COMMIT"] == (
+        "${{ inputs.immutable_runtime_ref || github.sha }}"
+    )
+    assert [shlex.split(step["run"]) for step in normal_steps[1:-1]] == [
         ["python", "tools/run-plugin-tests.py", "agent-worktrees", "--prepare-only"],
         ["python", "tools/run-plugin-tests.py", "worktree-manager", "--prepare-only"],
         ["python", "tools/run-plugin-tests.py", "agent-worktrees",
@@ -360,11 +367,14 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
         "wall_seconds": 180,
     }
     constants = {node.value for node in ast.walk(tree) if isinstance(node, ast.Constant)}
-    assert {"repository_ssh_cohort_fixture.py", "--ephemeral-native-ssh-setup", "180"} <= constants
+    assert {"repository_ssh_cohort_fixture.py", "--source-commit", "--ephemeral-native-ssh-setup", "180"} <= constants
     preparation = workflow["jobs"]["gateway-normal-preparation-" + platform]
     assert preparation["if"] == "${{ inputs.runtime_profiles && !inputs.pr_artifacts }}"
     assert preparation["timeout-minutes"] == 6
     assert preparation["env"]["COPILOT_EXTENSIONS_SSH_SETUP_COHORT_ONLY"] == "1"
+    assert preparation["env"]["COPILOT_EXTENSIONS_SSH_SETUP_SOURCE_COMMIT"] == (
+        normal["env"]["COPILOT_EXTENSIONS_SSH_SETUP_SOURCE_COMMIT"]
+    )
     assert preparation["steps"] == normal["steps"]
     expressions = []
     for step in steps + followthrough + [lifecycle]:
