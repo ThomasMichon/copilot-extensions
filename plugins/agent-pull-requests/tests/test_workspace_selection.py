@@ -13,6 +13,7 @@ from single_instance_lease import OperationLockedError
 
 from agent_pull_requests.review_selection_store import ReviewSelectionStore
 from agent_pull_requests.watch_replay_store import ReplayStore
+from agent_pull_requests.workspace_operations import WorkspaceUnavailable
 from agent_pull_requests.workspace_tools import WorkspaceTools, WorkspaceToolUnavailable
 from test_review_executor import environment as environment
 from test_review_owner_store import prepared_intent as prepared_intent
@@ -182,7 +183,7 @@ def test_changed_selection_and_unsupported_edits_refuse_before_native_effects(
         else:
             altered["budget_seconds"] = float("inf")
         before = store.path.read_bytes()
-        with pytest.raises(ValueError):
+        with pytest.raises(WorkspaceUnavailable if change == "edit" else ValueError):
             await host.invoke("allocate", altered)
         assert store.path.read_bytes() == before and backend.calls == []
         assert len(state["results"]) == 1

@@ -1052,6 +1052,20 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-11-07 - Review compatible selected-edit consumers
+
+- #11375 actually merged as `a34b256ad1479c705071a1829b34c0b0d6b67f6a`
+  after exact-head Copilot approval with no open issues and latest CI
+  `42415921281`, including its required PR gate, passed. Managed completion
+  retained the source backup and reconciled only the merged proposal.
+- The reviewed default-off receiver extension retains the exact fresh
+  allocation capability and adds a separately selected edit declaration
+  through the existing operation. Current receiver/source/receipt authority,
+  original-key recovery and explicit approval/submission remain separate.
+- Continue finite CLI/native/Fleet/Gateway source qualification. This proposal
+  does not enroll normal hosts or close full publication, provider/installed,
+  attention, CLI/Dispatch, shadow or parent acceptance. No rollout occurred.
+
 ### 2026-11-07 - Bind selected edits through original native custody
 
 - #11374 actually merged as `a7aafaadeedf78c1c5f13cbd2b7bf29b54d6b858`
