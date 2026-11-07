@@ -1,9 +1,0 @@
-{
-  "comment": "Move unchanged source-attribution refresh tests into a focused workflow suite.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

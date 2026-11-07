@@ -1,9 +1,0 @@
-{
-  "comment": "Partition unchanged real-Git push-changes integration tests.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}
