@@ -97,9 +97,14 @@ permissions and the authoritative record, and verify the real consumer before
 removing the unchanged original. Cross-volume transfer is not an atomic rename.
 Destination data and recovery/pointer files are flushed before retiring the
 source. Namespace publication uses native write-through replacement on Windows
-and parent-directory synchronization on POSIX. A barrier failure keeps the
-original copy and the journal for recovery. No global multi-file pointer
-transaction is claimed.
+and parent-directory synchronization on POSIX. Retirement first renames the
+verified original to `<id>.retiring-<original-stage-token>` beside the old
+location through the same exclusive native publication owner. It then verifies
+and removes that owned duplicate and synchronizes the old parent before
+checkpointing completion. A barrier failure can retain the original under its
+old name or this tokenized retirement name; the original journal recovers either
+without another allocation. Do not remove that copy manually. No global
+multi-file pointer transaction is claimed.
 Retry validates the partial stage's plain entries and access before copying.
 POSIX retry replaces owned staged files and temporarily makes owned staged
 directories writable, restoring source metadata through the normal copy owner;

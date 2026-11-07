@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 from . import config as cfg, git_ops
 
 
 def _git(directory: Path, *args: str) -> str:
-    return git_ops.git(
-        *args, cwd=directory, timeout=10, kill_tree=True,
-        isolated_repository=True,
-    ).stdout.strip()
+    try:
+        return git_ops.git(
+            *args, cwd=directory, timeout=10, kill_tree=True,
+            isolated_repository=True,
+        ).stdout.strip()
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError("retained checkout Git proof timed out; authority is unavailable") from exc
 
 
 def require_git_checkout(checkout: Path, anchor: Path, branch: str) -> None:

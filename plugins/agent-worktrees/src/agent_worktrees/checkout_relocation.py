@@ -44,6 +44,14 @@ def _digest(root: Path) -> str:
     return hashlib.sha256(json.dumps(transfer.manifest(root), sort_keys=True).encode()).hexdigest()
 
 
+def _require_retirement_copy(record, original: Path, target: Path) -> None:
+    _stopped(record, original)
+    _sessionless(original)
+    remaining, verified = transfer.manifest(original), transfer.manifest(target)
+    if any(verified.get(name) != item for name, item in remaining.items()):
+        raise ValueError("original copy changed after publication; source retained")
+
+
 def _identity(record) -> dict:
     return {
         "machine_identity": record.machine_identity.to_record_fields() if record.machine_identity else None,
@@ -427,13 +435,16 @@ def move(worktree_id: str, destination: str, config) -> dict:
                   and (kind != "trust" or report["permissions"][kind])),
             ])
             state.write(ledger, report)
+            retirement = source.with_name(source.name + ".retiring-" + stage.name.rsplit("-", 1)[1])
             if source.exists():
-                _stopped(record, source)
-                _sessionless(source)
-                remaining, verified = transfer.manifest(source), transfer.manifest(target)
-                if any(verified.get(name) != item for name, item in remaining.items()):
-                    raise ValueError("original copy changed after publication; source retained")
-                shutil.rmtree(source)
+                if retirement.exists():
+                    raise ValueError("original and retirement copies both exist; retain original custody")
+                _require_retirement_copy(record, source, target)
+                durability.replace(source, retirement, existing=False)
+            if retirement.exists():
+                _require_retirement_copy(record, retirement, target)
+                shutil.rmtree(retirement)
+            durability.directory(source.parent)
             report["phase"] = "complete"
             state.write(ledger, report)
         return {**report, "apply": True}

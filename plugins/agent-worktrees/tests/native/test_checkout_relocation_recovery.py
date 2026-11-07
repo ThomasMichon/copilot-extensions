@@ -6,6 +6,7 @@ import os
 import sqlite3
 import subprocess
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -187,3 +188,57 @@ def test_new_destination_reference_after_copy_still_allows_prepublication_abort(
     result = relocation.abort(checkout.record.worktree_id, str(checkout.destination), checkout.config)
     assert result["phase"] == "cancelled" and checkout.source.exists()
     assert (directory / "workspace.yaml").exists() and not checkout.destination.exists()
+
+
+def test_retained_root_timeout_never_fabricates_authority_or_leaks_a_resume_exception(checkout, monkeypatch):
+    from agent_worktrees import retained_checkout
+
+    config = replace(checkout.config, repos={"sample": replace(
+        checkout.config.default_repo, worktree_root=str(checkout.home / "future-root"),
+    )})
+    assert retained_checkout.matches(checkout.record, config)
+    before = checkout.record.yaml_path.read_bytes()
+    def expired(*args, **kwargs):
+        raise subprocess.TimeoutExpired(["git", "rev-parse"], 10)
+    monkeypatch.setattr(retained_checkout.git_ops, "git", expired)
+    assert retained_checkout.matches(checkout.record, config) is False
+    with pytest.raises(ValueError, match="timed out; authority is unavailable"):
+        retained_checkout.require_git_checkout(checkout.source, checkout.anchor, checkout.record.branch)
+    assert checkout.record.yaml_path.read_bytes() == before
+
+
+@pytest.mark.timeout(120)
+@pytest.mark.parametrize("cut", ["rename", "parent-sync"])
+def test_original_name_retirement_is_recoverable_before_complete(checkout, monkeypatch, cut):
+    original_replace, original_directory = relocation.durability.replace, relocation.durability.directory
+    def renamed(source, target, **kwargs):
+        original_replace(source, target, **kwargs)
+        if source == checkout.source:
+            raise OSError("injected retirement rename interruption")
+    def synchronized(path):
+        if path == checkout.source.parent:
+            raise OSError("injected retirement parent-sync interruption")
+        original_directory(path)
+    with monkeypatch.context() as injection:
+        injection.setattr(relocation.durability, "replace" if cut == "rename" else "directory",
+                          renamed if cut == "rename" else synchronized)
+        with pytest.raises(OSError, match="retirement"):
+            relocation.move(checkout.record.worktree_id, str(checkout.destination), checkout.config)
+    retained = state.read(checkout.record.yaml_path)
+    retirement = checkout.source.with_name(
+        checkout.source.name + ".retiring-" + Path(retained["stage"]).name.rsplit("-", 1)[1],
+    )
+    assert retained["phase"] == "rebound"
+    assert not checkout.source.exists() and checkout.destination.exists()
+    assert retirement.exists() is (cut == "rename")
+    observed = []
+    def completed(path):
+        if path == checkout.source.parent:
+            observed.append(state.read(checkout.record.yaml_path)["phase"])
+        original_directory(path)
+    with monkeypatch.context() as injection:
+        injection.setattr(relocation.durability, "directory", completed)
+        result = relocation.move(checkout.record.worktree_id, str(checkout.destination), checkout.config)
+    assert result["phase"] == "complete" and "rebound" in observed
+    assert result["stage"] == retained["stage"]
+    assert not checkout.source.exists() and not retirement.exists()
