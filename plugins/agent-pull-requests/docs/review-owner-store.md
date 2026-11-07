@@ -145,11 +145,12 @@ All added bytes count toward the existing review/receipt reservation.
 
 Legacy v1 intents and their unresolved receipts remain unchanged and do not
 acquire preparation evidence from body markers. The default intent parser and
-protected executor still select v1; executing receiver negotiation, producer
-composition and native correlation are not enabled by this data-only extension.
-No new CLI/HTTP operation, capability advertisement, runtime adoption or
-installed/provider qualification is claimed. Rollback cannot remove the
-extension or downgrade a file with unresolved v2 records.
+protected executor still select v1. A separate
+[explicit native execution selection](protected-review-executor.md#prepared-native-intent-and-original-receipt-projection)
+can use v2 and read original receipt correlation; the data extension alone
+activates neither. No new CLI/HTTP operation, capability advertisement, runtime
+adoption or installed/provider qualification is claimed. Rollback cannot remove
+the extension or downgrade a file with unresolved v2 records.
 
 ## Explicit remaining boundary
 
