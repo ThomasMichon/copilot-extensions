@@ -341,6 +341,9 @@ _Operator-required outcome; agent-recommended slices and validation._
   adoption, allocation/correlation and installed qualification remain open.
   The [prepared-intent binding refinement](comment-intent-binding.md) addresses
   the missing structured admission fact before new storage/publisher behavior.
+  Its next [durable pre-approval selection refinement](comment-intent-binding.md#durable-pre-approval-selection-and-allocation)
+  precedes automatic allocation or another strict storage/publisher change;
+  retaining a caller-supplied ID does not allocate or recover it.
 - [x] Deliver the finite optional prepared-intent source binding: explicit
   storage (#11207), native execution/original receipts (#11214), negotiated
   workspace submission (#11224) and host-bound local preparation before
@@ -1005,6 +1008,22 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-06 - Review durable selection before automatic identity allocation
+
+- The finite prepared-source completion journal #11244 actually merged after
+  exact-head Copilot approval with no open issues and the latest required CI
+  green. Its Plan/Validation credit remains limited to the delivered optional
+  source chain; the parent stays Active and the source worktree reconciled.
+- The next bounded proposal extends the existing intent-binding refinement
+  with durable pre-approval selection and allocation under the same storage
+  owner. It separates retained preview data from execution admission and
+  original native receipts, with lost-result/restart recovery by original
+  operation identity, bounded retention and explicit old/new compatibility.
+- Review this contract before changing strict storage or publisher behavior.
+  It adds no runtime path, persisted format, GUID allocator, policy authority,
+  production migration or operational permission. Other publishers, mapping,
+  full attention/CLI/provider and installed/shadow acceptance remain open.
 
 ### 2026-11-06 - Compose the local producer before preview and explicit submission
 
