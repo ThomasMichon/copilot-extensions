@@ -54,8 +54,17 @@ When the selected Bridge client/service has a documented no-wake read path:
 ```
 
 Do not assume a status-like command is passive: some clients ensure or repair a
-service before querying it. If no no-wake path is available, use already
-available source snapshots or report that reader unavailable.
+service before querying it. When the client offers a documented no-ensure
+switch, set it for every read, including remote ones. If no no-wake path is
+available, use already available source snapshots or report that reader
+unavailable.
+
+A live-session registry can be per host: one host's roster may omit sessions
+on another host or in a guest environment on the same machine. Read each host
+in the roster rather than inferring fleet coverage from one registry. A
+session's turn state can read running while it waits on a parked question;
+read its pending-input or attention field too (see
+[parked questions](pending-input.md)).
 
 ACP event ranges are cursor-neutral. A represented interactive CLI's bounded
 result snapshot is not a complete conversation; obtain its native transcript
