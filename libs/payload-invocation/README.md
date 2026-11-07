@@ -93,7 +93,9 @@ tooling to import or a replacement for the tooling's own module globals.
 
 Dev CI explicitly uses `generate.py --all --source-check`: it computes the
 complete canonical output inventory, validates destination custody and Python
-grammar, and neither writes nor requires old derived mirrors. This is not a
+grammar, and neither writes nor requires old derived mirrors. Existing output leaves
+must be ordinary single-link files and existing ancestors must be directories.
+Absent outputs remain valid source layouts. This is not a
 claim that existing output bytes match. `--check` retains actual-output
 comparison; the candidate materializer additionally verifies exact binary/text
 bytes and executable modes after writing, before composition can freeze.

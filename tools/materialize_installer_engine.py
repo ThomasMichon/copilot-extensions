@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import json
 import shutil
 import stat
 from pathlib import Path
@@ -74,6 +75,11 @@ def derived_file_pairs(
         consumers.setdefault(consumer, set()).update((*ier.PYTHON_FILES, *ier.SUPPORT_FILES))
     for consumer in ier.native_adopter_dirs(canonical_root):
         consumers.setdefault(consumer, set()).update(ier.STANDALONE_NATIVE_FILES)
+    for plugin in ier.human_output_adopters(canonical_root, ier.ADOPTERS):
+        consumer = canonical_root / "plugins" / plugin
+        declaration = ier.human_output_entrypoint(consumer).with_suffix(".human-output.json")
+        if declaration.exists() or declaration.is_symlink():
+            consumers.setdefault(consumer, set()).add(ier.HUMAN_HELPER)
     pairs = []
     for consumer, names in sorted(consumers.items()):
         if copied_consumer is not None:
@@ -131,12 +137,15 @@ def _read_canonical_snapshot(path: Path, root: Path) -> tuple[bytes, tuple[int, 
 
 def materialize_derived_files(
     dest: Path, *, canonical_root: Path, copied_consumer: tuple[Path, Path] | None = None,
+    file_names: frozenset[str] | None = None,
 ) -> list[str]:
     """Refresh approved derived slots in the candidate, never the source tree."""
     plan = []
     canonical: dict[Path, tuple[bytes, tuple[int, ...], int]] = {}
     try:
         for source, target in derived_file_pairs(canonical_root, dest, copied_consumer=copied_consumer):
+            if file_names is not None and source.name not in file_names:
+                continue
             previous = (
                 canonical_root / target.relative_to(dest) if copied_consumer is None
                 else copied_consumer[0] / target.relative_to(copied_consumer[1])
@@ -208,6 +217,16 @@ def materialize_ref_into(
         human_sources = validate_human_output_sources(
             canonical_root, consumers=(source_consumer_dir,),
         )
+    if source_consumer_dir.resolve() in human_sources:
+        helper = dest_consumer_dir / "scripts" / ier.HUMAN_HELPER
+        canonical_helper = canonical_root / "libs" / "installer-engine" / ier.HUMAN_HELPER
+        if not helper.exists() or helper.read_bytes() != canonical_helper.read_bytes():
+            log.extend(_materialize_human_output_into(
+                source_consumer_dir=source_consumer_dir,
+                dest_consumer_dir=dest_consumer_dir,
+                entrypoint=ier.human_output_entrypoint(source_consumer_dir).name,
+                canonical_root=canonical_root, dest_root=dest_root_r,
+            ))
 
     for ext in ("ps1", "sh"):
         source_script = source_consumer_dir / "scripts" / f"install.{ext}"
@@ -315,6 +334,7 @@ def materialize_ref_into(
         log.append(f"OK   {dest_engine} <- {canonical.relative_to(canonical_root).as_posix()}")
     if source_consumer_dir.resolve() in human_sources:
         log.extend(_materialize_human_output_into(
+            source_consumer_dir=source_consumer_dir,
             dest_consumer_dir=dest_consumer_dir,
             entrypoint=ier.human_output_entrypoint(source_consumer_dir).name,
             canonical_root=canonical_root, dest_root=dest_root_r,
@@ -342,32 +362,54 @@ def validate_human_output_sources(
         for path in (declaration, script, helper, canonical_helper):
             if _find_symlinked_ancestor(path, canonical_root) is not None:
                 raise ValueError(f"{path}: linked human-output source refused")
-        if (declaration.read_text(encoding="utf-8") != ier.human_output_json(script)
-                or helper.read_bytes() != canonical_helper.read_bytes()):
-            raise ValueError(f"{script}: conflicting native human-output assets")
+            root = canonical_root if path == canonical_helper else consumer
+            if problem := derived_path_problem(path, root, required=path != helper):
+                raise ValueError(problem)
+        try:
+            original = declaration.read_text(encoding="utf-8")
+            recorded = json.loads(original)
+            if not isinstance(recorded, dict):
+                raise ValueError("human-output declaration must be an object")
+            initializer_sha256 = None
+            if not helper.exists():
+                initializer_sha256 = recorded.get("initializer_sha256")
+                if initializer_sha256 is None:
+                    raise ValueError("human-output initializer digest is missing")
+            if original != ier.human_output_json(script, initializer_sha256=initializer_sha256):
+                raise ValueError("human-output declaration differs from its source preimage")
+        except (OSError, ValueError) as error:
+            raise ValueError(f"{script}: conflicting native human-output assets") from error
         declared.add(consumer.resolve())
     return frozenset(declared)
 
 
 def _materialize_human_output_into(
-    *, dest_consumer_dir: Path, entrypoint: str, canonical_root: Path, dest_root: Path,
+    *, source_consumer_dir: Path, dest_consumer_dir: Path, entrypoint: str,
+    canonical_root: Path, dest_root: Path,
 ) -> list[str]:
     script = dest_consumer_dir / "scripts" / entrypoint
     declaration = script.with_suffix(".human-output.json")
     helper = script.parent / ier.HUMAN_HELPER
     canonical_helper = canonical_root / "libs" / "installer-engine" / ier.HUMAN_HELPER
     for path in (script, declaration, helper):
-        if _find_symlinked_ancestor(path, dest_root) is not None:
-            raise ValueError(f"{path}: linked human-output asset refused")
-    if helper.exists() and helper.read_bytes() != canonical_helper.read_bytes():
-        raise ValueError(f"{script}: conflicting native human-output assets")
-    if not helper.exists():
-        shutil.copyfile(canonical_helper, helper)
+        if problem := derived_path_problem(path, dest_root, required=path == script):
+            raise ValueError(problem)
+    log = []
+    if not helper.exists() or helper.read_bytes() != canonical_helper.read_bytes():
+        log = materialize_derived_files(
+            dest_root, canonical_root=canonical_root,
+            copied_consumer=(source_consumer_dir, dest_consumer_dir),
+            file_names=frozenset({ier.HUMAN_HELPER}),
+        )
+        if any(line.startswith("SKIP") for line in log) or (
+            not helper.is_file() or helper.read_bytes() != canonical_helper.read_bytes()
+        ):
+            raise ValueError(f"{script}: conflicting native human-output assets")
     expected = ier.human_output_json(script)
     if not declaration.is_file() or declaration.read_bytes().decode("utf-8") != expected:
         declaration.write_bytes(expected.encode("utf-8"))
-        return [f"OK   {declaration} <- materialized native output contract"]
-    return []
+        log.append(f"OK   {declaration} <- materialized native output contract")
+    return log
 
 
 def materialize_human_output_declarations(
@@ -380,6 +422,7 @@ def materialize_human_output_declarations(
         if (destination.is_dir()
                 and (canonical_root / "plugins" / plugin).resolve() in human_sources):
             log.extend(_materialize_human_output_into(
+                source_consumer_dir=canonical_root / "plugins" / plugin,
                 dest_consumer_dir=destination,
                 entrypoint=ier.human_output_entrypoint(
                     canonical_root / "plugins" / plugin,

@@ -318,6 +318,11 @@ def verify(*, phase: str = "materialized") -> list[str]:
             script = ier.human_output_entrypoint(scripts.parent)
             declaration = script.with_suffix(".human-output.json")
             try:
+                if development:
+                    if problem := materializer.derived_path_problem(declaration, REPO, required=True):
+                        raise ValueError(problem)
+                    materializer.validate_human_output_sources(REPO, consumers=(scripts.parent,))
+                    continue
                 for path in (source, helper, script, declaration):
                     if uer._find_symlinked_ancestor(path, REPO.resolve()) is not None:
                         raise ValueError(f"{path}: linked human-output asset refused")

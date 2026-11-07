@@ -552,6 +552,11 @@ def test_whole_payload_human_contract(
     source_root = Path("source")
     destination = Path("payload")
     _copy_real_installer_engine(source_root)
+    for name in contract.PYTHON_FILES:
+        shutil.copyfile(
+            REPO / "libs" / "installer-engine" / name,
+            source_root / "libs" / "installer-engine" / name,
+        )
     manager = source_root / "worktree-manager"
     manager.mkdir()
     (manager / "pyproject.toml").write_text(
@@ -600,6 +605,60 @@ def test_whole_payload_human_contract(
         assert (script.parent / contract.HUMAN_HELPER).read_bytes() == (
             REPO / "libs" / "installer-engine" / contract.HUMAN_HELPER
         ).read_bytes()
+
+
+@pytest.mark.parametrize("plugin", ["agent-bridge", "agent-mcp"])
+@pytest.mark.parametrize("initial", ["stale", "absent"])
+def test_promotion_refreshes_declared_human_helper_preimages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, plugin: str, initial: str,
+) -> None:
+    import materialize_installer_engine
+
+    contract = sync_installer_engine.ier
+    root = tmp_path / "source"
+    _copy_real_installer_engine(root)
+    for name in contract.PYTHON_FILES:
+        shutil.copyfile(
+            REPO / "libs" / "installer-engine" / name,
+            root / "libs" / "installer-engine" / name,
+        )
+    interpreter = Path("libs/agent-procutil/src/agent_procutil/_interpreter.py")
+    (root / interpreter).parent.mkdir(parents=True)
+    shutil.copyfile(REPO / interpreter, root / interpreter)
+    consumer = _real_human_consumer(root, plugin, "canonical")
+    script = contract.human_output_entrypoint(consumer)
+    helper = script.parent / contract.HUMAN_HELPER
+    if initial == "stale":
+        helper.write_bytes(b"# admitted older human-output initializer\n")
+        script.with_suffix(".human-output.json").write_text(
+            contract.human_output_json(script), encoding="utf-8",
+        )
+    else:
+        helper.unlink()
+    monkeypatch.setattr(sync_installer_engine, "REPO", root)
+    monkeypatch.setattr(sync_installer_engine, "CANONICAL_DIR", root / "libs" / "installer-engine")
+    monkeypatch.setattr(sync_installer_engine, "ADOPTERS", (plugin,) if plugin == "agent-bridge" else ())
+    monkeypatch.setattr(contract, "ADOPTERS", sync_installer_engine.ADOPTERS)
+    monkeypatch.setattr(sync_installer_engine, "PYTHON_ADOPTERS", ())
+    assert sync_installer_engine.verify(phase="development") == []
+    assert sync_installer_engine.verify(phase="materialized")
+    before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    candidate = tmp_path / "candidate"
+    shutil.copytree(root, candidate)
+    human_sources = materialize_installer_engine.validate_human_output_sources(root)
+    log = materialize_installer_engine.materialize_refs(
+        candidate, canonical_root=root, human_sources=human_sources,
+    )
+    log.extend(materialize_installer_engine.materialize_human_output_declarations(
+        candidate, canonical_root=root, human_sources=human_sources,
+    ))
+    assert not any(line.startswith("SKIP") for line in log), log
+    emitted = contract.human_output_entrypoint(candidate / "plugins" / plugin)
+    assert (emitted.parent / contract.HUMAN_HELPER).read_bytes() == (
+        root / "libs" / "installer-engine" / contract.HUMAN_HELPER
+    ).read_bytes()
+    assert _human_admission()(emitted)
+    assert {path: path.read_bytes() for path in root.rglob("*") if path.is_file()} == before
 
 
 @pytest.mark.parametrize(
