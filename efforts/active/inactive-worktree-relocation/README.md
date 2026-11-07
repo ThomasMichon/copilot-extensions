@@ -655,3 +655,21 @@ adopter pilot feedback gates subsequent widening.
   **30 controls**. No operator data, runtime, default or real worktree moved.
   The source objective remains Active and actual current-head review/CI/merge
   are still required; no disposition or rollout authority is inferred.
+
+### 2026-11-07 — Complete inventories and cancellation checkpoint ordering
+- Completed reviewer diagnostics identified swallowed directory errors in
+  session/launch inventories and the absent post-cancellation parent barrier.
+  Operational matching now uses bounded explicit enumeration; unreadable,
+  redirected or incomplete directories refuse instead of appearing empty.
+- Applied the same fail-closed enumeration to checkout, access, copy-security
+  and durability inventories. Unknown subtrees cannot be omitted from the
+  qualified content or synchronization set.
+- The cancellation parent barrier now precedes `cancelled` and repeats during
+  recovery even when the stage has already disappeared. Source and destination
+  authority, original operation and source edits remain unchanged.
+- Focused inventory/cancellation controls and preserved companion retry
+  assertions passed **9 cases**. The resulting strict-inventory, actual
+  CLI/roundtrip and all five existing effect-cut packet passed **14 cases**.
+  A local test-collection indentation error was corrected without deleting
+  assertions before these passing runs. Current source review/CI/merge remain
+  mandatory; this does not widen inactive scope or authorize operator effects.

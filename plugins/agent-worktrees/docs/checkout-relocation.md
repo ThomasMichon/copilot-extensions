@@ -24,6 +24,8 @@ standalone operation.
 Without `--apply` or `--abort`, the command is read-only. It never backfills
 missing receiving receipts, prepares a journal, recovers databases, or creates
 launch/record sidecars. Unknown owner proof is an explicit refusal.
+Operational and checkout inventories propagate directory-enumeration failures;
+an unreadable subtree is never treated as proof that no references/data exist.
 
 ## Initial supported scope
 
@@ -131,6 +133,8 @@ Cancellation removes only the positively owned stage and leaves the original
 checkout, including newly authored source edits, unchanged. Uncertain stage
 creation, destination publication or active stage owners refuse. After
 publication, use forward recovery rather than guessing a rollback.
+The cancellation parent barrier precedes its terminal receipt and repeats when
+recovery finds the owned stage already removed.
 
 A subsequent qualified move is a new location revision of the same worktree.
 The completed/cancelled preceding journal is archived byte-for-byte, not
