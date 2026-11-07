@@ -233,6 +233,13 @@ implementation authority, resource custody or the fixed checkpoint.
 
 ## Plan
 
+The [late-provider and incremental-capture study](<journal/2026/11.06 late-provider-and-incremental-capture-boundaries.md>)
+confirms the current pre-filter enumeration defect and keeps two OPEN MCP
+providers, a merged strict-mode correction and daemon observation qualification
+at their actual evidence boundaries. New guidance-floor and independent-writer
+originals retain distinct acceptance. The 813-whole checkpoint remains 84 above
+fixed 729; Phase 2, original acceptance and all source/resource custody stay Active.
+
 The [provider-guard and consumer qualification study](<journal/2026/11.06 provider-guard-and-consumer-qualification.md>)
 credits delivered fake-provider and author-roster corrections without calling
 unfiltered tests, cold dispatch or consumer subscription complete. Eight
