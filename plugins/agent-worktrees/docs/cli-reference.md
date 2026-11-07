@@ -789,6 +789,20 @@ do not produce a ready-looking replacement catalog. The hook uses its existing
 stderr-write convention so diagnostics preserve the structural output-free
 session-start contract without relaxing the scanner's stdout refusals.
 
+Import-time helper failures, such as an interpreter too old for the binding
+helper, degrade the catalog the same way. When the catalog, enrichment or
+guidance rendering is unavailable, the exact-session guidance file is still
+written under the same per-session lock and launch ordering, as a minimal
+degraded floor rather than a ready catalog: one warning with a short reason
+code (`unsupported-interpreter`, `import-error`, `command-catalog-unavailable`,
+`runtime-helper-unavailable` or `session-start-error`), a statement that the
+command catalog is unavailable, and the `get worktree-dir` and `state-root`
+commands that obtain lifecycle facts directly. If the hook's own runtime helper
+is missing, only the stderr warning is emitted and no guidance file is written.
+On Windows, the session-start hook selects the first non-WindowsApps `python`
+on PATH that reports Python 3.10 or newer, falling back to the first such
+`python` when none does; the floor then reports `unsupported-interpreter`.
+
 On Windows, the cold hook checks the shared bootstrap killswitch before entering
 the canonical ownership lifecycle with its existing Python interpreter and one
 native installer child. It passes that interpreter to the installer, avoiding
