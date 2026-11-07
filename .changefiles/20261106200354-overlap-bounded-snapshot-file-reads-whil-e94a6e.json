@@ -1,5 +1,5 @@
 {
-  "comment": "Overlap bounded snapshot file reads while retaining fresh mutation and custody checks",
+  "comment": "Reduce snapshot validation overhead while retaining fresh lifecycle and custody checks",
   "changes": [
     {
       "plugin": "agent-bridge",

@@ -39,6 +39,53 @@ def test_cold_activation_selects_actual_completed_runtime_without_spawning_or_ad
     _no_owner(installation)
 
 
+def test_selection_read_uses_one_fresh_completed_target_and_never_reuses_it(cell, monkeypatch):
+    installation, _, target = cell
+    with installation.transaction(timeout=1, environment={}) as guard:
+        journal = _begin(cell, guard, live=False)
+        validate = watch_selection.api.validate_runtime_slot_completion
+        reads = []
+
+        def counted(**arguments):
+            reads.append(arguments["runtime_version"])
+            return validate(**arguments)
+
+        monkeypatch.setattr(watch_selection.api, "validate_runtime_slot_completion", counted)
+        selection = WatchSelection(journal)
+        _, actual, _ = selection._read()
+        assert actual == target
+        assert reads == [target.runtime_version]
+        snapshot = installation.plugin_root / "snapshots" / target.snapshot_id / "entry.py"
+        snapshot.write_bytes(b"changed after the previous selection read")
+        with pytest.raises(watch_selection.api.InstallationContextError):
+            selection._read()
+        assert reads == [target.runtime_version, target.runtime_version]
+    _no_owner(installation)
+
+
+@pytest.mark.parametrize("damage", ["snapshot", "governance"])
+def test_manifest_publication_revalidates_while_metadata_locks_are_still_held(cell, monkeypatch, damage):
+    installation, _, target = cell
+    replace = watch_selection._replace_metadata
+
+    def changed(path, value, **arguments):
+        replace(path, value, **arguments)
+        if damage == "snapshot":
+            snapshot = installation.plugin_root / "snapshots" / target.snapshot_id / "entry.py"
+            snapshot.write_bytes(b"changed during manifest publication")
+        else:
+            _policy(installation.os_profile, False)
+
+    with installation.transaction(timeout=1, environment={}) as guard:
+        journal = _begin(cell, guard, live=False)
+        monkeypatch.setattr(watch_selection, "_replace_metadata", changed)
+        with pytest.raises((watch_selection.api.InstallationContextError, PermissionError)):
+            WatchSelection(journal).publish()
+        assert (installation.plugin_root / "deploy-manifest.json").read_bytes() == _manifest(target)
+        assert journal._document["phase"] == "prepared"
+    _no_owner(installation)
+
+
 @pytest.mark.parametrize("interrupted", ["current-version", "last-known-good", "manifest"])
 @pytest.mark.parametrize("recover_forward", [False, True])
 def test_interrupted_cold_selection_recovers_only_captured_prior_or_target_without_owner(

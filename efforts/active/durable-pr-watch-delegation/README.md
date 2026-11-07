@@ -993,6 +993,27 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-11-07 - Pass first startup and isolate the remaining upgrade race
+
+- #11231 now composes freshly validated journal target/instance evidence within
+  each action instead of reconstructing it again. Actual health/control
+  exchanges keep fresh completion and native-birth checks on both sides;
+  selection publication checks before and after the write under its metadata
+  locks. No proof cache or cutover deadline change was introduced.
+- Nine focused journal/selection/archive controls pass. The original Windows
+  scenario then passed first startup: binding took about 36 seconds and native
+  publication about 68 seconds. The whole lifecycle still failed during upgrade,
+  after predecessor drain, on a changing JSON read; route rollback subsequently
+  exhausted its remaining deadline. This is progress, not lifecycle acceptance.
+- The canonical JSON reader now names the file in changing-read diagnostics
+  without altering its refusal or handoff semantics; all sixteen focused JSON
+  and lock-handoff controls pass. A narrowed normal-init/startup/upgrade
+  diagnostic retains named phases, the original 120-second cutover and governed
+  cleanup to identify the actual race rather than repeat a broad packet blindly.
+- Source work remains useful WIP. Required review, CI, promotion, authorized
+  installation and installed-owner acceptance remain outstanding, as do
+  Bridge #11153 and the parent delegation/provider/fleet/resource gates.
+
 ### 2026-11-07 - Retain the unresolved native startup deadline separately from hashing work
 
 - #11231's bounded path-walker improvements preserve full snapshot traversal,
