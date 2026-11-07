@@ -239,6 +239,54 @@ def test_direct_new_refuses_before_create_mutations(tmp_path, monkeypatch, capfd
     assert not (tmp_path / "worktrees").exists()
 
 
+@pytest.mark.parametrize("selector", ["--new", "--auto"])
+def test_base_repo_new_refuses_before_launch_effects(tmp_path, monkeypatch, capfd, selector):
+    from agent_worktrees import __main__ as main
+    from agent_worktrees import state_root
+
+    base = _required(_config(tmp_path))
+    config = replace(base, repos={base.repo_name: replace(base.default_repo, base_repo=True)})
+    monkeypatch.setattr(main.cfg, "load_config", lambda *a, **k: config)
+    monkeypatch.setattr(state_root, "resolve_config_root", lambda *a, **k: state_root.ConfigRoot(
+        str(tmp_path / "configuration"), "machine_local", config.repo_name, False, True,
+    ))
+    monkeypatch.setattr(launch_preflight, "new_knowledge_error", lambda *a, **k: None)
+    calls = []
+
+    def incomplete(config, *, source):
+        calls.append(source)
+        return "Application Readiness is incomplete"
+
+    monkeypatch.setattr(admission, "new_application_error", incomplete)
+    monkeypatch.setattr(main, "_build_launch_cmd", lambda *a, **k: pytest.fail("base New bypassed readiness"))
+    assert main.cmd_resolve(main.build_parser().parse_args(["resolve", "--json", selector])) != 0
+    assert calls == [config.default_repo.anchor]
+    assert "Application Readiness" in json.loads(capfd.readouterr().out)["error"]
+
+
+@pytest.mark.parametrize("arguments", [
+    ["resolve", "--base", "--dry-run"], ["resolve", "--new", "--recovery", "--dry-run"],
+])
+def test_base_repo_existing_and_recovery_do_not_acquire_new_admission(
+    tmp_path, monkeypatch, capfd, arguments,
+):
+    from agent_worktrees import __main__ as main
+    from agent_worktrees import state_root
+
+    base = _required(_config(tmp_path))
+    config = replace(base, repos={base.repo_name: replace(base.default_repo, base_repo=True)})
+    monkeypatch.setattr(state_root, "resolve_config_root", lambda *a, **k: state_root.ConfigRoot(
+        str(tmp_path / "configuration"), "machine_local", config.repo_name, False, True,
+    ))
+    monkeypatch.setattr(admission, "new_application_error", lambda *a, **k: pytest.fail("existing New gate"))
+    monkeypatch.setattr(main, "_build_launch_cmd", lambda *a, **k: ["copilot"])
+    monkeypatch.setattr(main, "_build_env", lambda *a, **k: {})
+    with main.output.stdout_to_stderr():
+        result = main._resolve_base_repo(config, main.build_parser().parse_args(arguments))
+    assert result == 0
+    assert json.loads(capfd.readouterr().out)["action"] == "none"
+
+
 @pytest.mark.timeout(60)
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("process")

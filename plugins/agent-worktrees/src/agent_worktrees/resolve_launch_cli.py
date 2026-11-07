@@ -327,7 +327,11 @@ def _resolve_base_repo(
         _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
         return 3
     repo = config.default_repo
-    launch_preflight = _preflight_launch(config, args, repo.anchor)
+    new_authoring = getattr(args, "new_worktree", False) or getattr(args, "auto", False)
+    launch_preflight = _preflight_launch(
+        config, args, repo.anchor,
+        **({"allocation_source": repo.anchor} if new_authoring else {}),
+    )
     if launch_preflight.error:
         return _launch_preflight_error(launch_preflight)
     print()

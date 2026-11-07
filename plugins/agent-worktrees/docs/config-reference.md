@@ -666,6 +666,8 @@ observation after the existing knowledge prerequisite. The native New planner
 and initial structured New admission enforce it; creation-time rechecking keeps
 an admitted-but-unstarted request's original allocation recoverable. Source-only
 allocation, existing sessions and recovery do not acquire this New-only gate.
+Base-repo `--new` and `--auto` requests use the same source admission before a
+launch plan; ordinary base-repo launch and recovery retain their exemptions.
 Absence/false preserves the prior behavior; nonboolean values are invalid.
 
 The observation uses the selected Machines runtime's existing
