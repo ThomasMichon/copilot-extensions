@@ -84,6 +84,28 @@ def test_reconstructed_slot_accepts_equivalent_package_versions(tmp_path: Path, 
     ) == generation
 
 
+def test_missing_packaging_does_not_break_runtime_identity(tmp_path: Path, monkeypatch) -> None:
+    import builtins
+
+    original = builtins.__import__
+
+    def without_packaging(name, *args, **kwargs):
+        if name.startswith("packaging"):
+            raise ModuleNotFoundError(name)
+        return original(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", without_packaging)
+    generation = "1.2.3+repair." + "a" * 32
+    prefix = tmp_path / "versions" / generation
+    assert effective_runtime_version(
+        "1.2.3", prefix=prefix, module_path=prefix / "lib" / "source_build.py",
+    ) == generation
+    prefix = tmp_path / "versions" / ("1.2.3-rc4+repair." + "a" * 32)
+    assert effective_runtime_version(
+        "1.2.3rc4", prefix=prefix, module_path=prefix / "lib" / "source_build.py",
+    ) == "1.2.3rc4"
+
+
 @pytest.mark.parametrize("qualified", [False, True])
 def test_standalone_wrapper_metadata_qualifies_only_its_own_source_slot(tmp_path, monkeypatch, qualified):
     from importlib import metadata

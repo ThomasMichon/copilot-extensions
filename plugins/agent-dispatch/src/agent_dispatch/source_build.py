@@ -32,18 +32,19 @@ def effective_runtime_version(
         match = _REPAIR_VERSION.fullmatch(generation)
         if match is None or ("+" in match["package"]) != (match["separator"] == "."):
             return package_version
-    if match.re is _REPAIR_VERSION:
-        from packaging.version import InvalidVersion, Version
-
+    package = package_version.lower().replace("-", ".").replace("_", ".")
+    selected = match["package"].lower().replace("-", ".").replace("_", ".")
+    if package != selected:
+        if match.re is not _REPAIR_VERSION:
+            return package_version
+        try:
+            from packaging.version import InvalidVersion, Version
+        except ImportError:
+            return package_version
         try:
             if Version(package_version) != Version(match["package"]):
                 return package_version
         except (InvalidVersion, TypeError):
-            return package_version
-    else:
-        package = package_version.lower().replace("-", ".").replace("_", ".")
-        selected = match["package"].lower().replace("-", ".").replace("_", ".")
-        if package != selected:
             return package_version
     if not (module_path or Path(__file__)).resolve().is_relative_to(candidate.resolve()):
         return package_version
