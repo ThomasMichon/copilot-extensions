@@ -115,6 +115,45 @@ There is no atomic multi-action or head-CAS guarantee. Post-effect readback can
 report candidate drift while retaining a confirmed native effect; no compensating
 vote, rollback or duplicate comment is inferred.
 
+## Prepared native intent and original receipt projection
+
+An actual trusted Python embedding may explicitly select
+`execute_review(..., prepared_intent=True)` for review-intent/v2 after the
+[existing owner's prepared storage extension](review-owner-store.md#optional-prepared-intent-storage-extension)
+has been adopted. The flag must be a boolean and selects v2 only; the default
+still selects v1 only. A missing/older function or unadopted store refuses
+before native effects, with no legacy-send fallback.
+
+The producer composes the actual shared source/profile preparation before final
+preview/approval and immutable admission. Execution sends its retained body
+unchanged through the same pinned context, candidate/discussion/owned-target
+checks, caller policy, unknown fence and native receipt path. It allocates no
+GUID, decorates no selected text and acquires no additional write authority.
+The existing workspace CLI/HTTP request shapes and default handlers remain
+unchanged; no prepared receiver capability or installed adoption is advertised.
+
+`ReplayStore.prepared_review_receipt(operation_id, scope, action_id,
+expires_at=..., checkpoint=...)` reads one original selected action through the
+same scoped owner. Its `agent-pull-requests.prepared-comment-receipt/v1` result
+binds retained declared identity/body hash to original operation/intent and
+native receipt state. `status: retained` is not a delivery verdict:
+`action_state` separately retains `unattempted`, `unknown` or `confirmed`, and
+partial native IDs remain partial. Legacy v1 bodies and bodyless votes report
+original preparation unavailable, even when body text contains matching tags.
+
+This projection performs no native read, persistence, ACK, handled/echo update,
+Dispatch emission or native-object/DB merge. `fresh_native_read: false` remains
+explicit. The source snapshot is declared provenance, not native authorship;
+native actor/scope/target and effect attribution remain with the protected owner.
+Copied tags cannot establish an unknown effect. Actual confirmed native replies
+and attributable reconciliation still supply native IDs through the existing
+owner, not by searching for the public comment GUID.
+
+Original confirmation is separate from fresh current-version readback. A later
+native edit can leave the original receipt confirmed while actual feedback
+readback is unavailable and no handled progress advances. B3/B4 capture and
+version proof keep their own contracts and original frontiers.
+
 ## Unknown outcomes and native attribution
 
 Once a write path is entered, transport loss, malformed/partial response or

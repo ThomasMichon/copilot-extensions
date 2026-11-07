@@ -14,6 +14,7 @@ from agent_procutil.owned_process import run_caller_owned
 
 from test_review_executor import environment as environment
 from test_workspace_integration import integration as integration
+from test_review_owner_store import prepared_intent as prepared_intent
 
 from agent_pull_requests.workspace_tools import WorkspaceTools, dispatch_tool
 from agent_pull_requests import __main__ as cli
@@ -223,6 +224,28 @@ def test_preapproved_compact_body_survives_actual_cli_native_write_and_restart(
     assert code == 0 and retry["result"]["status"] == "complete"
     assert retry["result"]["entered_writes"] == 0
     assert len([call for call in backend.calls if call[0] != "GET"]) == 1
+
+
+def test_existing_workspace_cli_does_not_implicitly_select_prepared_native_execution(
+    environment: tuple, integration: tuple, prepared_intent: dict,
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    store, selected, _, attachment, backend, _ = environment
+    _, _, native, _, _, _ = integration
+    store.adopt_prepared_reviews(
+        lifecycle_checkpoint=lambda: None, expires_at=native.expires_at(),
+    )
+    selected["version"] = 2
+    selected["actions"][0].update({
+        key: copy.deepcopy(prepared_intent["actions"][0][key]) for key in ("body", "preparation")
+    })
+    host = WorkspaceTools(native)
+    before = store.path.read_bytes()
+    code, response = invoke_cli(host, "submit", {
+        "number": 42, "intent": selected, "source_attachment": attachment, "budget_seconds": 60,
+    }, monkeypatch, capsys)
+    assert code != 0 and response["error"]
+    assert backend.calls == [] and store.path.read_bytes() == before
 
 
 @pytest.mark.parametrize("path,side,classification", [

@@ -52,10 +52,19 @@ authority or add fields to strict v1 requests. If structured correlation needs
 more than the retained opaque body, expand the owning storage/wire contract
 through review first.
 
+## Explicit prepared native source selection
+
+The [protected native owner](../../../plugins/agent-pull-requests/docs/protected-review-executor.md#prepared-native-intent-and-original-receipt-projection)
+also supports an explicitly selected v2 source embedding after prepared storage
+adoption. It retains structured identity through original native execution and
+provides a read-only original receipt projection. This is not a new
+CLI/HTTP/MCP prepared receiver, automatic preparation, fresh readback or DB merge.
+Default submission remains v1 and legacy tagged bodies gain no inferred identity.
+
 ## Remaining qualification
 
-Actual automatic publication consumers, durable GUID allocation, structured
-mapping, unknown-outcome native attribution, copied tags, provider
+Actual automatic publication consumers, durable GUID allocation, acquisition/DB
+mapping, broader unknown-outcome native attribution, copied tags, provider
 normalization/stripping and installed adoption remain open. A matching marker
 or body alone cannot confirm an unknown effect. Preserve existing native
 actor, scope, target, content/version and receipt checks.

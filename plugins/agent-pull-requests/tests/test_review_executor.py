@@ -2,6 +2,7 @@
 
 from contextlib import contextmanager
 import copy
+import importlib
 import json
 from pathlib import Path
 import re
@@ -12,6 +13,7 @@ import pytest
 from agent_pull_requests.review_executor import execute_review
 from agent_pull_requests.review_workspace import _digest, build_generation
 from agent_pull_requests.watch_replay_store import ReplayStore
+from test_review_owner_store import prepared_intent as prepared_intent
 
 
 @pytest.fixture
@@ -233,6 +235,207 @@ def run(environment):
 
 def writes(backend):
     return [call for call in backend.calls if call[0] != "GET"]
+
+
+@pytest.fixture
+def prepared_environment(environment: tuple, prepared_intent: dict) -> tuple:
+    store, selected, _, _, _, _ = environment
+    selected["version"] = 2
+    selected["actions"][0].update({
+        key: copy.deepcopy(prepared_intent["actions"][0][key]) for key in ("body", "preparation")
+    })
+    store.adopt_prepared_reviews(lifecycle_checkpoint=lambda: None, expires_at=int(time.time()) + 600)
+    return environment
+
+
+def run_prepared(environment: tuple) -> dict:
+    store, selected, generation, attachment, backend, _ = environment
+    return execute_review(
+        store, selected, generation, attachment, context_factory=backend.context,
+        checkpoint=backend.checkpoint, expires_at=int(time.time()) + 600,
+        budget_seconds=120, prepared_intent=True,
+    )
+
+
+def test_prepared_native_delivery_and_original_receipt_survive_restart_without_another_send(
+    prepared_environment: tuple,
+) -> None:
+    store, selected, _, _, backend, _ = prepared_environment
+    assert run_prepared(prepared_environment)["status"] == "complete"
+    expected = copy.deepcopy(selected["actions"][0])
+    assert writes(backend)[0][2]["comments"][0]["content"] == expected["body"]
+    restarted = ReplayStore(store.root, store.namespace, service_identity=store.service_identity)
+    before_bytes, before_calls = store.path.read_bytes(), len(backend.calls)
+    receipt = restarted.prepared_review_receipt(
+        selected["operation_id"], selected["scope"], "finding", expires_at=int(time.time()) + 600,
+    )
+    assert receipt["identity"] == expected["preparation"]["identity"]
+    assert receipt["body_id"] == expected["preparation"]["body_id"]
+    assert receipt["action_state"] == "confirmed"
+    assert receipt["receipt"]["platform_ids"] == {"thread_id": 100, "comment_id": 1}
+    assert receipt["effects"] == "none" and receipt["fresh_native_read"] is False
+    assert "body" not in receipt and len(backend.calls) == before_calls
+    assert store.path.read_bytes() == before_bytes
+    vote = restarted.prepared_review_receipt(
+        selected["operation_id"], selected["scope"], "verdict", expires_at=int(time.time()) + 600,
+    )
+    assert vote["status"] == "unavailable" and "identity" not in vote
+    resumed = (restarted, *prepared_environment[1:])
+    retry = run_prepared(resumed)
+    assert retry["status"] == "complete" and retry["entered_writes"] == 0
+    assert len(writes(backend)) == 2
+
+
+def test_lost_prepared_result_uses_original_native_attribution_not_new_comment_guids(
+    prepared_environment: tuple,
+) -> None:
+    store, selected, _, _, backend, _ = prepared_environment
+    backend.lose_reply = True
+    assert run_prepared(prepared_environment)["status"] == "unknown"
+    original = store.prepared_review_receipt(
+        selected["operation_id"], selected["scope"], "finding", expires_at=int(time.time()) + 600,
+    )
+    assert original["action_state"] == "unknown" and original["receipt"] is None
+    backend.lose_reply = False
+    restarted = ReplayStore(store.root, store.namespace, service_identity=store.service_identity)
+    assert run_prepared((restarted, *prepared_environment[1:]))["status"] == "complete"
+    reconciled = restarted.prepared_review_receipt(
+        selected["operation_id"], selected["scope"], "finding", expires_at=int(time.time()) + 600,
+    )
+    assert reconciled["identity"] == original["identity"]
+    assert reconciled["action_state"] == "confirmed"
+    assert reconciled["receipt"]["origin"] == "attributable_readback"
+    assert len([call for call in writes(backend) if call[0] == "POST"]) == 1
+
+
+def test_copied_prepared_body_or_wrong_scope_cannot_invent_original_native_delivery(
+    prepared_environment: tuple,
+) -> None:
+    store, selected, _, _, backend, _ = prepared_environment
+    store.admit_review(selected, expires_at=int(time.time()) + 600)
+    store.begin_review_action(
+        selected["operation_id"], selected["scope"], "finding", expires_at=int(time.time()) + 600,
+    )
+    backend.threads = [{"id": 100, "status": 1, "comments": [{
+        "id": 1, "content": selected["actions"][0]["body"],
+        "author": {"id": selected["scope"]["principal_id"]},
+    }]}]
+    assert run_prepared(prepared_environment)["status"] == "unknown" and writes(backend) == []
+    receipt = store.prepared_review_receipt(
+        selected["operation_id"], selected["scope"], "finding", expires_at=int(time.time()) + 600,
+    )
+    assert receipt["action_state"] == "unknown" and receipt["receipt"] is None
+    with pytest.raises(ValueError, match="outside selected scope"):
+        store.prepared_review_receipt(
+            selected["operation_id"], {**selected["scope"], "number": 43}, "finding",
+            expires_at=int(time.time()) + 600,
+        )
+
+
+def test_partial_prepared_response_keeps_original_identity_and_partial_native_ids(
+    prepared_environment: tuple,
+) -> None:
+    store, selected, _, _, backend, _ = prepared_environment
+    backend.partial_reply = True
+    assert run_prepared(prepared_environment)["status"] == "unknown"
+    receipt = store.prepared_review_receipt(
+        selected["operation_id"], selected["scope"], "finding", expires_at=int(time.time()) + 600,
+    )
+    assert receipt["action_state"] == "unknown"
+    assert receipt["receipt"]["platform_ids"] == {"thread_id": 100}
+    assert receipt["identity"] == selected["actions"][0]["preparation"]["identity"]
+    assert len(writes(backend)) == 1
+
+
+@pytest.mark.parametrize("kind", ["reply", "edit_owned_comment"])
+def test_prepared_reply_and_owned_edit_use_actual_target_and_original_receipt(
+    prepared_environment: tuple, kind: str,
+) -> None:
+    from agent_pull_requests.review_workspace import _record
+
+    store, selected, generation, attachment, backend, _ = prepared_environment
+    original = copy.deepcopy(selected["actions"][0])
+    parent = original["body"] if kind == "edit_owned_comment" else "Legacy parent note."
+    thread = {"id": 50, "status": 1, "comments": [{
+        "id": 1, "parentCommentId": 0, "commentType": 1, "content": parent,
+        "author": {"id": selected["scope"]["principal_id"]},
+    }]}
+    backend.threads = [copy.deepcopy(thread)]
+    generation["sections"]["discussions"]["data"] = [_record("discussions", thread)]
+    generation["id"] = _digest({key: value for key, value in generation.items() if key != "id"})
+    selected["generation_id"] = attachment["generation_id"] = generation["id"]
+    action = selected["actions"][0]
+    action.update(kind=kind, thread_id=50)
+    if kind == "edit_owned_comment":
+        preparation = importlib.import_module("comment_preparation")
+        profiles = importlib.import_module("attribution_profile")
+        previous = {
+            "protocol": preparation.PROTOCOL, "body": original["body"], "effects": "none",
+            **original["preparation"],
+        }
+        identity = previous["identity"]
+        edited = preparation.prepare(
+            "Intentional selected edit.", profiles.validate({"version": 1}),
+            {"domain": "forge", "visibility": "public", "activity": "comment", "required": True},
+            identity["source"], comment_id=identity["comment_id"],
+            write_id="33333333-3333-4333-8333-333333333333", previous=previous,
+        )
+        action.update(
+            body=edited["body"], preparation={"identity": edited["identity"], "body_id": edited["body_id"]},
+            comment_id=1, expected_content_id=_digest(parent),
+        )
+    assert run_prepared(prepared_environment)["status"] == "complete"
+    receipt = store.prepared_review_receipt(
+        selected["operation_id"], selected["scope"], "finding", expires_at=int(time.time()) + 600,
+    )
+    assert receipt["action_state"] == "confirmed"
+    assert receipt["identity"] == action["preparation"]["identity"]
+    assert receipt["receipt"]["platform_ids"] == {"thread_id": 50, "comment_id": 1 if kind == "edit_owned_comment" else 2}
+    if kind == "edit_owned_comment":
+        assert receipt["identity"]["comment_id"] == original["preparation"]["identity"]["comment_id"]
+        assert receipt["identity"]["write_id"] != original["preparation"]["identity"]["write_id"]
+    else:
+        assert backend.threads[0]["comments"][0]["content"] == parent
+
+
+def test_prepared_execution_is_explicit_and_legacy_markers_do_not_gain_original_identity(
+    environment: tuple, prepared_intent: dict,
+) -> None:
+    store, selected, _, _, backend, _ = environment
+    selected["actions"][0]["body"] = prepared_intent["actions"][0]["body"]
+    store.adopt_prepared_reviews(lifecycle_checkpoint=lambda: None, expires_at=int(time.time()) + 600)
+    with pytest.raises(ValueError, match="invalid review intent"):
+        run_prepared(environment)
+    legacy = run(environment)
+    assert legacy["status"] == "complete"
+    unavailable = store.prepared_review_receipt(
+        selected["operation_id"], selected["scope"], "finding", expires_at=int(time.time()) + 600,
+    )
+    assert unavailable["status"] == "unavailable" and "identity" not in unavailable
+    prepared = copy.deepcopy(selected)
+    prepared["version"] = 2
+    prepared["operation_id"] = "prepared-but-not-selected"
+    prepared["actions"][0].update({
+        key: copy.deepcopy(prepared_intent["actions"][0][key]) for key in ("body", "preparation")
+    })
+    before = len(backend.calls)
+    with pytest.raises(ValueError, match="invalid review intent"):
+        run((store, prepared, *environment[2:]))
+    assert len(backend.calls) == before
+
+
+def test_unadopted_prepared_storage_refuses_native_execution_without_io_or_mutation(
+    environment: tuple, prepared_intent: dict,
+) -> None:
+    store, selected, _, _, backend, _ = environment
+    selected["version"] = 2
+    selected["actions"][0].update({
+        key: copy.deepcopy(prepared_intent["actions"][0][key]) for key in ("body", "preparation")
+    })
+    before = store.path.read_bytes()
+    with pytest.raises(ValueError, match="explicit storage adoption"):
+        run_prepared(environment)
+    assert backend.calls == [] and store.path.read_bytes() == before
 
 
 @pytest.mark.parametrize("endpoint", ["identity", "pr"])

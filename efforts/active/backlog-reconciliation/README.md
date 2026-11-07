@@ -233,6 +233,12 @@ implementation authority, resource custody or the fixed checkpoint.
 
 ## Plan
 
+The [canonical-copy and current-inflow study](<journal/2026/11.06 canonical-copy-sync-and-current-inflow.md>)
+records #8972's verified source-only completion and retains incomplete native,
+consumer, monitoring and streaming work at its actual evidence boundaries.
+Two complete scans measure 810 whole OPEN, 81 above fixed 729; Phase 2 and
+the whole-queue completion gates remain Active.
+
 The [source-capability and retained-outcome study](<journal/2026/11.06 source-capability-and-retained-outcomes.md>)
 keeps foreign-target conformance, historical vector repair and deliberate
 install/adopt choices distinct from already-shipped capabilities. Actual merge
