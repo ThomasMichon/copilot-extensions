@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 from pathlib import Path
@@ -19,6 +20,8 @@ pytestmark = pytest.mark.skipif(os.name != "nt", reason="Windows installer selec
 
 
 def _ps(value: object) -> str:
+    if not str(value).isascii():
+        return "(ConvertFrom-Json " + _ps(json.dumps(str(value))) + ")"
     return "'" + str(value).replace("'", "''") + "'"
 
 
@@ -67,11 +70,13 @@ ConvertTo-Json -InputObject $true -Compress
 @pytest.mark.parametrize("host", HOSTS)
 @pytest.mark.parametrize("plugin", ["agent-index", "agent-dispatch"])
 @pytest.mark.parametrize(
-    "scenario", ["path", "launcher", "launcher-unc", "launcher-selector", "known-root", "unsupported", "admitted", "slot"],
+    "scenario", ["path", "launcher", "launcher-unc", "launcher-selector", "launcher-selector-unicode", "known-root", "unsupported", "admitted", "slot"],
 )
 def test_bootstrap_candidates(tmp_path: Path, host: str, plugin: str, scenario: str) -> None:
     old = tmp_path / "old" / "python.exe"
     supported = tmp_path / "Programs" / "Python" / "Python313" / "python.exe"
+    if scenario == "launcher-selector-unicode":
+        supported = supported.parent / chr(0x4F8B) / "python.exe"
     alias = tmp_path / "WindowsApps" / "python.exe"
     launcher = tmp_path / "py.exe"
     slot = tmp_path / "slot"
@@ -85,6 +90,7 @@ def test_bootstrap_candidates(tmp_path: Path, host: str, plugin: str, scenario: 
         "launcher": {"py": [launcher]},
         "launcher-unc": {"py": [launcher]},
         "launcher-selector": {"py": [launcher]},
+        "launcher-selector-unicode": {"py": [launcher]},
         "known-root": {},
         "unsupported": {"python": [alias, old]},
         "admitted": {"python3": [old]},
@@ -122,11 +128,17 @@ function Invoke-Hidden {{
     if ($FilePath -eq {_ps(launcher)}) {{
         $global:LASTEXITCODE=0
         if ($ArgList[0] -eq '-0p') {{
-            if ({_ps(scenario)} -eq 'launcher-selector') {{ $global:LASTEXITCODE=1; return }}
-            return " -V:3.9 * {_ps(old)[1:-1]}`n -V:3.13 {_ps(unc if scenario == 'launcher-unc' else supported)[1:-1]}"
+            if ({_ps(scenario)} -like 'launcher-selector*') {{ $global:LASTEXITCODE=1; return }}
+            return " -V:3.9 * {_ps(old)[1:-1]}`n -V:3.13 {_ps(unc if scenario == 'launcher-unc' else old if scenario == 'launcher-selector-unicode' else supported)[1:-1]}"
         }}
-        if ($ArgList[0] -eq '-3.12') {{ return {_ps(supported)} }}
-        return {_ps(old)}
+        $base=if ($ArgList[0] -eq '-3.12') {{ {_ps(supported)} }} else {{ {_ps(old)} }}
+        $prefix='import sys; sys.stdout.reconfigure(encoding="cp1252",errors="strict"); sys.executable=' +
+            (ConvertTo-Json -Compress ([string]$base)) + '; '
+        $code=$ArgList[[array]::IndexOf($ArgList, '-c')+1]
+        $captured=''
+        return Invoke-RealHidden -FilePath {_ps(sys.executable)} -ArgList @(
+            '-I','-S','-B','-c',($prefix+$code)
+        ) -ErrorOutput ([ref]$captured)
     }}
     $version=if ($FilePath -eq {_ps(old)}) {{
         if ({_ps(scenario)} -in @('path','launcher','launcher-selector')) {{ '(3,9)' }} else {{ '(3,10)' }}
@@ -150,9 +162,12 @@ $LinkDir=$VenvDir
         script += f"$script:{pin}={_ps(supported)}\n"
     script += (
         "$selected=Get-BootstrapPython" + ("" if scenario == "slot" else " -ExternalOnly") + "\n"
+        "if ($selected) { $selected=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($selected)) }\n"
         "@{selected=$selected;calls=@($calls.ToArray())} | ConvertTo-Json -Compress\n"
     )
     details = _run(host, script, tmp_path)
+    if details["selected"]:
+        details["selected"] = base64.b64decode(details["selected"]).decode("utf-8")
     expected = None if scenario == "unsupported" else str(slot_python if scenario == "slot" else supported)
     if scenario == "launcher-unc":
         expected = unc

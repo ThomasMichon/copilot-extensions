@@ -72,6 +72,11 @@ Environments are private repository test-cache entries keyed by requirements,
 host platform and interpreter version. A check never silently installs packages
 or falls back to another interpreter; missing preparation prints the exact
 command to run.
+Each check uses an invocation-private source-view directory for emitted files,
+the target list and MyPy configuration, under the existing environment lease.
+Successful cleanup removes only that invocation's verified outputs and empty
+directory. Previous cache files or source-view directories are preserved and
+are not reused as inputs to a new check.
 
 Preparation captures one immutable flat requirements export, then uses those
 same bytes for both the environment key and installation. Nested requirement
