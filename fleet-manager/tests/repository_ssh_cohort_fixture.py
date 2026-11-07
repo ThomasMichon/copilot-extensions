@@ -7,6 +7,7 @@ import importlib.metadata
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import sys
 import time
@@ -92,7 +93,19 @@ def _prepare_profiles(snapshot, output, profiles, uv, progress, started):
     return outputs
 
 
-def prepare_cohort(tmp_path, monkeypatch, feeds, progress):
+def _selected_source_commit(root, selected):
+    if selected is None:
+        result = run(["git", "-C", str(root), "rev-parse", "HEAD"])
+        assert result.returncode == 0, "Fixture source HEAD is unavailable"
+        selected = result.stdout.strip()
+    if re.fullmatch(r"[0-9a-f]{40}", selected) is None:
+        raise ValueError("Select a full immutable lowercase application Source commit")
+    result = run(["git", "-C", str(root), "cat-file", "-e", selected + "^{commit}"])
+    assert result.returncode == 0, "Selected application Source commit is unavailable"
+    return selected
+
+
+def prepare_cohort(tmp_path, monkeypatch, feeds, progress, *, source_commit=None):
     progress("normal Source cohort: inspect prepared dependency inputs")
     root = PROJECT.parent
     monkeypatch.syspath_prepend(str(root / "tools"))
@@ -122,10 +135,9 @@ def prepare_cohort(tmp_path, monkeypatch, feeds, progress):
 
     started = time.monotonic()
     snapshot = tmp_path / "source"
-    commit = run(["git", "-C", str(root), "rev-parse", "HEAD"])
-    assert commit.returncode == 0, commit.stderr
-    progress("normal Source cohort: compose selected Git source")
-    record = sources.compose(root, commit.stdout.strip(), None, snapshot)
+    commit = _selected_source_commit(root, source_commit)
+    progress("normal Source cohort: compose selected Git source " + commit)
+    record = sources.compose(root, commit, None, snapshot)
     progress(f"normal Source cohort materialized: {time.monotonic() - started:.2f}s")
     projects = (
         "standalone:worktree-manager", "agent-worktrees",
@@ -226,6 +238,7 @@ def main():
 
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--source-commit", help="Full immutable application Source commit; default is fixture HEAD")
     arguments = parser.parse_args()
     sys.path.insert(0, str(PROJECT.parent / "tools"))
     from test_installer_wheel_acquisition import feeds
@@ -236,6 +249,7 @@ def main():
             outputs = prepare_cohort(
                 arguments.output, environment, next(servers),
                 lambda message: print(message, flush=True),
+                source_commit=arguments.source_commit,
             )
         document = {key: str(value) for key, value in outputs.items()}
         (arguments.output / "cohort.json").write_text(json.dumps(document), encoding="utf-8")

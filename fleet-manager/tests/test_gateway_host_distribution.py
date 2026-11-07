@@ -131,6 +131,86 @@ def test_cohort_registry_refuses_missing_prepared_dependency():
         }, ["runtime"])
 
 
+@pytest.mark.parametrize("selected", ["dev", "--help", "A" * 40, "a" * 39, "a" * 41])
+def test_cohort_source_commit_refuses_nonimmutable_inputs_before_git(monkeypatch, tmp_path, selected):
+    import repository_ssh_cohort_fixture as fixture
+
+    monkeypatch.setattr(fixture, "run", lambda *_args: pytest.fail("Invalid source reached Git"))
+    with pytest.raises(ValueError, match="full immutable"):
+        fixture._selected_source_commit(tmp_path, selected)
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_cohort_source_commit_preserves_head_default_and_explicit_selection(monkeypatch, tmp_path, explicit):
+    from types import SimpleNamespace
+    import repository_ssh_cohort_fixture as fixture
+
+    selected = "a" * 40
+    calls = []
+
+    def run(command):
+        calls.append(command)
+        return SimpleNamespace(returncode=0, stdout=selected + "\n")
+
+    monkeypatch.setattr(fixture, "run", run)
+    assert fixture._selected_source_commit(tmp_path, selected if explicit else None) == selected
+    assert calls == [
+        *([] if explicit else [["git", "-C", str(tmp_path), "rev-parse", "HEAD"]]),
+        ["git", "-C", str(tmp_path), "cat-file", "-e", selected + "^{commit}"],
+    ]
+
+
+def test_cohort_source_commit_does_not_fallback_when_selected_object_is_missing(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    import repository_ssh_cohort_fixture as fixture
+
+    calls = []
+
+    def run(command):
+        calls.append(command)
+        return SimpleNamespace(returncode=128, stdout="")
+
+    monkeypatch.setattr(fixture, "run", run)
+    with pytest.raises(AssertionError, match="application Source commit is unavailable"):
+        fixture._selected_source_commit(tmp_path, "a" * 40)
+    assert len(calls) == 1 and "rev-parse" not in calls[0]
+
+
+@pytest.mark.parametrize(("selected", "missing"), [("a" * 40, False), ("a" * 40, True), ("dev", False)])
+def test_cohort_native_workflow_retains_only_valid_selected_source(monkeypatch, selected, missing):
+    from types import SimpleNamespace
+    import subprocess
+    import yaml
+
+    workflow = yaml.safe_load(
+        (PROJECT.parent / ".github" / "workflows" / "installation-context-acceptance.yml").read_text()
+    )
+    code = next(
+        step["run"] for step in workflow["jobs"]["gateway-normal-setup-linux"]["steps"]
+        if step.get("name") == "Retain the selected immutable application Source"
+    )
+    calls = []
+
+    def run(command, **options):
+        calls.append((command, options["check"], options["timeout"]))
+        assert options["creationflags"] == (subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        return SimpleNamespace(returncode=128 if missing and len(calls) == 1 else 0)
+
+    monkeypatch.setenv("COPILOT_EXTENSIONS_SSH_SETUP_SOURCE_COMMIT", selected)
+    monkeypatch.setattr(subprocess, "run", run)
+    if selected == "dev":
+        with pytest.raises(ValueError, match="full immutable"):
+            exec(compile(code, "<native-source-selection>", "exec"), {})
+        assert calls == []
+    else:
+        exec(compile(code, "<native-source-selection>", "exec"), {})
+        probe = ["git", "cat-file", "-e", selected + "^{commit}"]
+        assert calls == [(probe, False, 10), *(
+            [(["git", "fetch", "--no-tags", "--depth=1", "origin", selected], True, 30), (probe, True, 10)]
+            if missing else []
+        )]
+
+
 @pytest.mark.parametrize(("preparation_only", "prebuild_code"), [
     (False, 0), (True, 0), (True, 124),
 ])
@@ -163,12 +243,15 @@ def test_cohort_native_workflow_selects_lifecycle_and_settles_preparation(
         "prepare": lambda *_args: calls.append("prepare"),
         "isolated_environment": lambda environment, _sandbox: dict(environment),
         "venv_root": lambda _root: tmp_path / "venvs",
-        "run_contained": lambda *_args, **_options: prebuild_code,
+        "run_contained": lambda command, **options: (
+            calls.append(("source", command[-2:], options["limits"])), prebuild_code
+        )[1],
         "Limits": lambda **options: options,
         "UnreapedProcessError": type("UnreapedProcessError", (RuntimeError,), {}),
         "cleanup_sandbox": lambda _temporary: calls.append("cleanup"),
     }
     monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_SSH_SETUP_SOURCE_COMMIT", "a" * 40)
     monkeypatch.delenv("COPILOT_EXTENSIONS_SSH_SETUP_COHORT_ONLY", raising=False)
     if preparation_only:
         monkeypatch.setenv("COPILOT_EXTENSIONS_SSH_SETUP_COHORT_ONLY", "1")
@@ -186,7 +269,7 @@ def test_cohort_native_workflow_selects_lifecycle_and_settles_preparation(
             exec(compile(code, "<native-cohort-workflow>", "exec"), {})
     else:
         exec(compile(code, "<native-cohort-workflow>", "exec"), {})
-    assert calls == ["prepare", "release", *(
+    assert calls == ["prepare", ("source", ["--source-commit", "a" * 40], {"wall_seconds": 180}), "release", *(
         ["lifecycle"] if not preparation_only and prebuild_code == 0 else []
     ), "cleanup"]
 
