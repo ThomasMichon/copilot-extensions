@@ -26,6 +26,17 @@ def _assert_cache_arguments(arguments, root):
 PLUGIN = Path(__file__).resolve().parents[1]
 REPO = PLUGIN.parents[1]
 
+# Routing tests replace only native launch admission; real Job refusal is tested separately.
+_SUPPORTED_UPDATE_SHELL = """
+Add-Type -TypeDefinition @'
+namespace CopilotExtensions {
+    public static class UpdateBreakawayProbe {
+        public static int Check(string executable) { return 0; }
+    }
+}
+'@
+"""
+
 
 @pytest.fixture
 def update_entry_case(tmp_path: Path, monkeypatch, request):
@@ -454,6 +465,7 @@ def test_update_entry_powershell_before_runtime(
     command = str(PLUGIN / "bin/agent-worktrees.ps1").replace("'", "''")
     source = str(downloaded).replace("'", "''")
     harness.write_text(
+        _SUPPORTED_UPDATE_SHELL +
         f"function Invoke-WebRequest {{ param($Uri, $OutFile, [switch]$UseBasicParsing)\n"
         f"  [IO.File]::Copy('{source}', $OutFile)\n}}\n"
         f"& '{command}' --project sample update --force 'module with spaces'\nexit $LASTEXITCODE\n"

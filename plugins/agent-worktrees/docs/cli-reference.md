@@ -1477,6 +1477,14 @@ updater instead. The controller owns source selection and must honor configured
 runtime-source policy and any explicit prepared-source input; selection happens
 before Manager acquisition, without changing that policy.
 
+On Windows, ordinary update entry points first test whether the current shell
+can create the breakaway process required for durable execution. Refusal exits
+before controller discovery, downloads, builds or request submission; existing
+requests are untouched. Re-run in the execution host's explicit detached/outside-Job
+shell mode (for example async with `detach=true`). Plain async execution and the
+updater's `--detach` flag do not escape an enclosing Job. Help, read-only status
+and explicit diagnostic/repair selections remain available.
+
 The public command submits a durable request before Manager or standalone
 execution. `--wait` observes it by default; `--detach --json` returns an
 acceptance receipt, and `--request-status <id> --json` is a project-independent

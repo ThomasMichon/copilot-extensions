@@ -37,10 +37,90 @@ if (@($_updateArgs | Where-Object {
     return
 }
 if (@($_updateArgs | Where-Object {
-    $_ -cin @('--no-manager', '--auth-report', '--help', '-h',
+    $_ -cin @('--auth-report', '--help', '-h',
         '--request-status', '--recovery-status', '--recover-after-restart', '--recover-for-repair') -or
     $_.StartsWith('--request-status=')
 }).Count) { return }
+if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+    try {
+        if (-not ('CopilotExtensions.UpdateBreakawayProbe' -as [type])) {
+            Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+namespace CopilotExtensions {
+    public static class UpdateBreakawayProbe {
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct StartupInfo {
+            public int Size;
+            public string Reserved, Desktop, Title;
+            public int X, Y, XSize, YSize, XCountChars, YCountChars, FillAttribute, Flags;
+            public short ShowWindow, ReservedSize;
+            public IntPtr ReservedBytes, StandardInput, StandardOutput, StandardError;
+        }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ProcessInformation {
+            public IntPtr Process, Thread;
+            public int ProcessId, ThreadId;
+        }
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CreateProcessW(
+            string application, string commandLine, IntPtr processAttributes, IntPtr threadAttributes,
+            bool inheritHandles, int flags, IntPtr environment, string directory,
+            ref StartupInfo startup, out ProcessInformation process);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool TerminateProcess(IntPtr process, int exitCode);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern int WaitForSingleObject(IntPtr handle, int milliseconds);
+        [DllImport("kernel32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CloseHandle(IntPtr handle);
+        public static int Check(string executable) {
+            var startup = new StartupInfo { Size = Marshal.SizeOf(typeof(StartupInfo)) };
+            ProcessInformation process;
+            // Suspended and windowless: no shell code runs during the capability probe.
+            if (!CreateProcessW(executable, null, IntPtr.Zero, IntPtr.Zero, false,
+                    0x09000004, IntPtr.Zero, null, ref startup, out process))
+                return Marshal.GetLastWin32Error();
+            try {
+                if (!TerminateProcess(process.Process, 0))
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Breakaway probe cleanup failed");
+                int wait = WaitForSingleObject(process.Process, 5000);
+                if (wait != 0)
+                    throw new Win32Exception(
+                        wait == -1 ? Marshal.GetLastWin32Error() : wait,
+                        "Breakaway probe cleanup was not confirmed");
+                return 0;
+            } finally {
+                CloseHandle(process.Thread);
+                CloseHandle(process.Process);
+            }
+        }
+    }
+}
+'@
+        }
+        $_breakawayError = [CopilotExtensions.UpdateBreakawayProbe]::Check((Get-Process -Id $PID).Path)
+        if ($_breakawayError -ne 0) {
+            throw "Windows refused the required breakaway process (WinError $_breakawayError)."
+        }
+    } catch {
+        [Console]::Error.WriteLine(
+            "[agent-worktrees] Update launch preflight failed: $($_.Exception.Message) " +
+            'No update was started or request submitted. Re-run in the execution host''s ' +
+            'explicit detached/outside-Job shell mode (for example async with detach=true). ' +
+            'Plain async execution or update --detach does not remove an enclosing Job. ' +
+            'Do not retry in the same bounded shell.'
+        )
+        if ($_awUpdateStandalone) { exit 1 }
+        $_awUpdateHandled = $true
+        $global:LASTEXITCODE = 1
+        return
+    }
+}
+if ($_updateArgs -ccontains '--no-manager') { return }
 # The Git-sh handoff disables conversion only for the native invocation.
 Remove-Item Env:MSYS2_ARG_CONV_EXCL -ErrorAction SilentlyContinue
 if (-not $_updateHasProject) {
