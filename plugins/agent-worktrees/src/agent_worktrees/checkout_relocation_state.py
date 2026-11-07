@@ -42,7 +42,7 @@ def read(ledger: Path) -> dict | None:
     if not isinstance(data, dict) or data.get("schema") != "agent-worktrees.checkout-relocation.v1":
         raise ValueError("unsupported relocation journal")
     if (
-        data.get("phase") not in {"prepared", "copying", "copied", "published", "git-repaired", "rebound", "complete", "cancelling", "cancelled"}
+        data.get("phase") not in {"prepared", "copying", "copied", "published", "git-repaired", "rebound", "retiring", "complete", "cancelling", "cancelled"}
         or not isinstance(data.get("identity"), dict)
         or any(not isinstance(data.get(key), str) for key in ("source", "destination", "stage", "fingerprint"))
         or not re.fullmatch(r"[a-f0-9]{64}", data["fingerprint"])

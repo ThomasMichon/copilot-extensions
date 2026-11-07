@@ -45,11 +45,12 @@ def _digest(root: Path) -> str:
     return hashlib.sha256(json.dumps(transfer.manifest(root), sort_keys=True).encode()).hexdigest()
 
 
-def _require_retirement_copy(record, original: Path, target: Path) -> None:
+def _require_retirement_copy(record, original: Path, target: Path, *, allow_partial: bool = False) -> None:
     _stopped(record, original)
     _sessionless(original)
     remaining, verified = transfer.manifest(original), transfer.manifest(target)
-    if any(verified.get(name) != item for name, item in remaining.items()):
+    changed = any(verified.get(name) != item for name, item in remaining.items()) if allow_partial else remaining != verified
+    if changed:
         raise ValueError("original copy changed after publication; source retained")
 
 
@@ -389,6 +390,8 @@ def move(worktree_id: str, destination: str, config) -> dict:
         if report["phase"] == "copied":
             if stage.exists() and not target.exists():
                 _sessionless(target)
+                if _digest(source) != report["fingerprint"]:
+                    raise ValueError("original copy changed after copying; source retained")
                 durability.replace(stage, target, existing=False)
             if stage.exists() or not target.is_dir() or _digest(target) != report["fingerprint"]:
                 raise ValueError("destination publication is ambiguous; retain original move custody")
@@ -419,7 +422,7 @@ def move(worktree_id: str, destination: str, config) -> dict:
                 ])
             report["phase"] = "rebound"
             state.write(ledger, report)
-        if report["phase"] == "rebound":
+        if report["phase"] in {"rebound", "retiring"}:
             record = tracking.load_record(ledger)
             if (
                 record.worktree_path != str(target) or not retained_checkout.matches(record, config)
@@ -440,13 +443,21 @@ def move(worktree_id: str, destination: str, config) -> dict:
             ])
             state.write(ledger, report)
             retirement = source.with_name(source.name + ".retiring-" + stage.name.rsplit("-", 1)[1])
-            if source.exists():
+            if report["phase"] == "rebound":
+                if source.exists():
+                    if retirement.exists():
+                        raise ValueError("original and retirement copies both exist; retain original custody")
+                    _require_retirement_copy(record, source, target)
+                    durability.replace(source, retirement, existing=False)
                 if retirement.exists():
-                    raise ValueError("original and retirement copies both exist; retain original custody")
-                _require_retirement_copy(record, source, target)
-                durability.replace(source, retirement, existing=False)
+                    _require_retirement_copy(record, retirement, target)
+                durability.directory(source.parent)
+                report["phase"] = "retiring"
+                state.write(ledger, report)
+            if source.exists():
+                raise ValueError("original name reappeared during owned retirement; retain custody")
             if retirement.exists():
-                _require_retirement_copy(record, retirement, target)
+                _require_retirement_copy(record, retirement, target, allow_partial=True)
                 shutil.rmtree(retirement)
             durability.directory(source.parent)
             report["phase"] = "complete"

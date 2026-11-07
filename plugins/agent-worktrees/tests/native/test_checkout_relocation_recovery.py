@@ -236,7 +236,7 @@ def test_original_name_retirement_is_recoverable_before_complete(checkout, monke
     retirement = checkout.source.with_name(
         checkout.source.name + ".retiring-" + Path(retained["stage"]).name.rsplit("-", 1)[1],
     )
-    assert retained["phase"] == "rebound"
+    assert retained["phase"] == ("rebound" if cut == "rename" else "retiring")
     assert not checkout.source.exists() and checkout.destination.exists()
     assert retirement.exists() is (cut == "rename")
     observed = []
@@ -247,7 +247,7 @@ def test_original_name_retirement_is_recoverable_before_complete(checkout, monke
     with monkeypatch.context() as injection:
         injection.setattr(relocation.durability, "directory", completed)
         result = relocation.move(checkout.record.worktree_id, str(checkout.destination), checkout.config)
-    assert result["phase"] == "complete" and "rebound" in observed
+    assert result["phase"] == "complete" and "retiring" in observed
     assert result["stage"] == retained["stage"]
     assert not checkout.source.exists() and not retirement.exists()
 
@@ -297,3 +297,53 @@ else:
     )
     assert refused.returncode == 97 and not refused.stdout
     assert "fixture child scope refused" in refused.stderr
+
+
+@pytest.mark.timeout(120)
+@pytest.mark.parametrize("cut", ["copy", "permissions"])
+def test_postcopy_source_deletion_never_silently_restores_ignored_content(checkout, monkeypatch, cut):
+    original = relocation.transfer.copy if cut == "copy" else relocation.permission_paths.apply
+    def changed(*args):
+        original(*args)
+        (checkout.source / "ignored.bin").unlink()
+    with monkeypatch.context() as injection:
+        injection.setattr(relocation.transfer if cut == "copy" else relocation.permission_paths,
+                          "copy" if cut == "copy" else "apply", changed)
+        with pytest.raises(ValueError, match="original copy changed"):
+            relocation.move(checkout.record.worktree_id, str(checkout.destination), checkout.config)
+    retained = state.read(checkout.record.yaml_path)
+    assert checkout.source.exists() and not (checkout.source / "ignored.bin").exists()
+    if cut == "copy":
+        assert retained["phase"] == "copied" and not checkout.destination.exists()
+        result = relocation.abort(checkout.record.worktree_id, str(checkout.destination), checkout.config)
+        assert result["phase"] == "cancelled" and not (checkout.source / "ignored.bin").exists()
+    else:
+        assert retained["phase"] == "rebound" and checkout.destination.exists()
+        assert (checkout.destination / "ignored.bin").read_bytes() == bytes(range(256))
+        with pytest.raises(ValueError, match="original copy changed"):
+            relocation.move(checkout.record.worktree_id, str(checkout.destination), checkout.config)
+        assert state.read(checkout.record.yaml_path)["phase"] == "rebound"
+        assert checkout.source.exists() and not (checkout.source / "ignored.bin").exists()
+
+
+@pytest.mark.timeout(120)
+def test_partial_retirement_is_not_allowed_before_complete_copy_verification(checkout, monkeypatch):
+    original = relocation.durability.replace
+    def renamed(source, target, **kwargs):
+        original(source, target, **kwargs)
+        if source == checkout.source:
+            (target / "ignored.bin").unlink()
+    with monkeypatch.context() as injection:
+        injection.setattr(relocation.durability, "replace", renamed)
+        with pytest.raises(ValueError, match="original copy changed"):
+            relocation.move(checkout.record.worktree_id, str(checkout.destination), checkout.config)
+    retained = state.read(checkout.record.yaml_path)
+    retirement = checkout.source.with_name(
+        checkout.source.name + ".retiring-" + Path(retained["stage"]).name.rsplit("-", 1)[1],
+    )
+    assert retained["phase"] == "rebound" and retirement.exists() and not checkout.source.exists()
+    assert not (retirement / "ignored.bin").exists()
+    assert (checkout.destination / "ignored.bin").read_bytes() == bytes(range(256))
+    with pytest.raises(ValueError, match="original copy changed"):
+        relocation.move(checkout.record.worktree_id, str(checkout.destination), checkout.config)
+    assert state.read(checkout.record.yaml_path)["phase"] == "rebound" and retirement.exists()
