@@ -4,17 +4,16 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-import runpy
 import sys
 
 
-def main() -> None:
+def main() -> int:
+    from worktree_manager.__main__ import main as manager_main
+
     sys.argv = ["worktree-manager", "--version"]
-    try:
-        runpy.run_module("worktree_manager", run_name="__main__", alter_sys=True)
-    except SystemExit as result:
-        if result.code not in (None, 0):
-            raise
+    code = manager_main(["--version"])
+    if code != 0:
+        return code
 
     from worktree_manager.relocated_launch import _relocated_launch_script
     from worktree_manager.runtime_identity import running_application_slot
@@ -26,9 +25,12 @@ def main() -> None:
     for ancestor in directory.parents:
         if ancestor.samefile(slot):
             print(json.dumps({"launcher_directory": str(directory.relative_to(ancestor))}))
-            return
+            return 0
     raise RuntimeError("Manager application launcher is outside its runtime slot")
 
 
 if __name__ == "__main__":
-    main()
+    from worktree_manager._shutdown_exit import run_and_exit
+
+    # Apply Manager's finalization workaround only after the resource report.
+    run_and_exit(main)

@@ -2479,6 +2479,12 @@ qualification, activation and startup-outcome refusals while accepting native
 path aliases. These are distinct from full native Copilot launch, desktop or
 all-caller-cleanup-Job qualification.
 
+Manager's `tests/test_shutdown_exit.py` also runs the application probe in
+bounded children with the CPython 3.13 shutdown-workaround branch armed.
+The real callable CLI version handler must finish and the resource JSON must
+be emitted before the final hard exit; a failed version result emits no
+resource report. This covers exit ordering, not native CPython 3.13 installation.
+
 The optional native runtime-removal portfolio includes
 `tools/test_installer_engine_uninstall.py`,
 `tools/test_installer_engine_commands.py`,

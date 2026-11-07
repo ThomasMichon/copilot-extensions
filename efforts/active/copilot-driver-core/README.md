@@ -2123,3 +2123,20 @@ owner. Documentation and both consumer patch declarations accompany this slice;
 fresh source gates, review and CI still gate publication. The actual
 Manager/default-setup Copilot flow, broader caller matrix and parent lifetime/
 receiving gates remain open.
+
+The first review of #11334 identifies a Windows CPython 3.13 defect in the
+resource probe: entering Manager through its process wrapper can hard-exit
+before the launcher JSON is emitted. Call the actual callable
+`main(["--version"])` and honor its result, then apply Manager's existing
+finalization workaround only around the completed probe. This preserves the
+shutdown workaround without letting the nested version check terminate work.
+
+All fifteen shutdown/probe controls pass in 2.68 seconds (108.86 seconds
+including preparation and cleanup). Two bounded-child regressions arm the real
+hard-exit branch: successful version handling must emit the resource report
+before exit, and a failed version result must preserve its exit code without
+emitting a report. This is branch/ordering proof, not a native Python 3.13
+installation. The source-removal/activation/cleanup fixture remains retained
+at the prior source: construction, ownership and discovery are unchanged;
+this scoped correction changes only the probe's callable/exit sequencing.
+Fresh exact-head hosted controls, review and CI remain required.
