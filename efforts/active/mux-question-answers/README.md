@@ -172,3 +172,14 @@ runtime remediation, elevated operation or destructive cleanup is authorized.
 - The new backend also resolved an actual selected-owner Windows binding
   read-only. This is not an installed answer claim: normal review/CI, source
   merge, promotion, authorized updates and both installed live proofs remain.
+
+### 2026-11-07 - Completion-evidence review correction
+
+- Review of #11390 identified prefix question matching and arbitrary answer
+  suffix matching that could falsely classify an answer as accepted.
+- Completion now requires the full question message followed immediately by
+  its exact rendered field-label/value pair. Negative controls reject question
+  extensions, misleading value suffixes, other labels and detached answers;
+  stale echoes remain insufficient.
+- This changes source semantics. Repeat affected validation and canonical
+  source qualification before the next whole-surface audit and review round.

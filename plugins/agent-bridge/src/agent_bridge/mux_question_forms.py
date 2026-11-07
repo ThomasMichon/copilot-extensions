@@ -109,18 +109,18 @@ def parse_form(screen: str, *, typed: str = "") -> Form | None:
 
 def completion_echo(before: str, after: str, form: Form, answer: str) -> bool:
     """Require a newly rendered matching answer, never an old success echo."""
-    question = " ".join(line.rstrip(":") for line in form.question)
-    # Native rendering may show the label separately from the question message.
-    messages = [question, *[line.rstrip(":") for line in form.question]]
-    for message in messages:
-        marker = "Asked user " + message
-        old_count = before.count(marker)
-        positions = [match.start() for match in re.finditer(re.escape(marker), after)]
-        if len(positions) <= old_count:
-            continue
-        tail = after[positions[-1]:].splitlines()
-        for line in tail[1:4]:
-            content = line.strip().removeprefix("└").strip()
-            if content == answer or content.endswith(": " + answer):
-                return True
-    return False
+    marker = "Asked user " + " ".join(form.question[:-1])
+    expected = form.question[-1] + " " + answer
+
+    def matching_echoes(screen: str) -> int:
+        lines = screen.splitlines()
+        count = 0
+        for index, line in enumerate(lines[:-1]):
+            if line.strip().removeprefix("●").strip() != marker:
+                continue
+            content = lines[index + 1].strip().removeprefix("└").strip()
+            if content == expected:
+                count += 1
+        return count
+
+    return matching_echoes(after) > matching_echoes(before)

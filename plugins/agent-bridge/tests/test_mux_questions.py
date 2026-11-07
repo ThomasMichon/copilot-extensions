@@ -161,11 +161,23 @@ def test_restart_expiry_and_other_session_tokens_have_no_input_authority(mux_api
     assert mux_api.backend.keys == []
 
 
-def test_key_failure_is_unknown_and_blocks_reinspection_after_restart(mux_api):
+@pytest.mark.parametrize("failure", ["key", "question-prefix", "answer-suffix"])
+def test_key_failure_is_unknown_and_blocks_reinspection_after_restart(mux_api, failure):
     token = inspect(mux_api)
     def fail():
         raise MuxQuestionError("synthetic key outcome unknown")
-    mux_api.backend.before_key = fail
+    if failure == "key":
+        mux_api.backend.before_key = fail
+    else:
+        capture = mux_api.backend.capture
+        def mismatched_echo(*args):
+            screen = capture(*args)
+            if mux_api.backend.done:
+                if failure == "question-prefix":
+                    return screen.replace("fixture color", "fixture color for another deployment")
+                return screen.replace("Color: Blue", "Color: Do not select: Blue")
+            return screen
+        mux_api.backend.capture = mismatched_echo
     result = mux_api.client.post(BASE, json={
         "inspection_id": token, "sender": "controller", "option": 1,
     }).json()
@@ -266,4 +278,14 @@ def test_completion_requires_a_new_exact_answer_echo_not_old_history():
     assert not completion_echo(old, old + "Working", form, "Blue")
     assert not completion_echo("", old, form, "Green")
     assert completion_echo("", old, form, "Blue")
+    for mismatched in (
+        "Asked user Choose a fixture color for another deployment\n└ Color: Green\n",
+        "Asked user Choose a fixture color\n└ Color: Do not select: Green\n",
+        "Asked user Choose a fixture color\n└ Other field: Green\n",
+        "Asked user Choose a fixture color\n└ Green\n",
+        "Asked user Choose a fixture color\nWorking\n└ Color: Green\n",
+    ):
+        assert not completion_echo("", mismatched, form, "Green")
+    assert completion_echo("", old.replace("Asked user", "● Asked user"), form, "Blue")
+    assert completion_echo(old, old + old, form, "Blue")
     assert answer_text("-literal option-looking text") == "-literal option-looking text"

@@ -50,3 +50,12 @@ def test_native_echo_is_exact_and_new(forms):
     assert forms.completion_echo(panel, completion, form, "blue")
     assert not forms.completion_echo(completion, completion, form, "blue")
     assert not forms.completion_echo(panel, completion, form, "red")
+    assert not forms.completion_echo(
+        panel, completion.replace("Choose", "Choose another deployment"), form, "blue",
+    )
+    assert not forms.completion_echo(
+        panel, completion.replace("Color: blue", "Color: Do not select: blue"), form, "blue",
+    )
+    assert not forms.completion_echo(
+        panel, completion.replace("Color: blue", "Another field: blue"), form, "blue",
+    )

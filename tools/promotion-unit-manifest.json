@@ -5306,8 +5306,8 @@
         "libs/payload-invocation/generate.py": "592ed4a2497f02f0b2110002db9b37015f8fc5db431129e25ef852b205f02e68",
         "tools/promotion_unit_tests/test_live_question_answers.py": "51b9c884787883d6fec7ce81db0075d0d13f54b32df71d3bff6c92227a9134bf",
         "plugins/agent-bridge/src/agent_bridge/live_question_validation.py": "61900a7eb7acbdf924fabaabf1175ddfbe337672971a3ec4ac9016c4d720fdba",
-        "plugins/agent-bridge/src/agent_bridge/mux_question_forms.py": "44d1a6a9076701a258d94ef206cea228057378e40357a25b8533ad12e1e5a4d8",
-        "tools/promotion_unit_tests/test_mux_question_forms.py": "af0a8ad487bb2269258e1e6b081b9caf2a959bd1ed8246a5d0d700eaf05dfc78"
+        "plugins/agent-bridge/src/agent_bridge/mux_question_forms.py": "6a0972f69234f84d9cea1c4c07f616c4f67a49d7743dbaf92f60c934c66bc1d2",
+        "tools/promotion_unit_tests/test_mux_question_forms.py": "5577dbff0b0b1d9dd2b262539dc967b068b3f5ba7325ba5b6dd9ca5c895b63d6"
     },
     "coverage_targets": [
         "plugins/agent-dispatch/src/agent_dispatch/queue_submission_consumer.py",
