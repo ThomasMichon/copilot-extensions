@@ -48,7 +48,7 @@ real_run = subprocess.run
 def run(args, **kwargs):
     assert kwargs['stdin'] is subprocess.DEVNULL
     if spec['path'] == 'local':
-        assert args == [sys.executable, '-X', 'utf8', '-m', 'agent_worktrees',
+        assert args == [sys.executable, '-I', '-X', 'utf8', '-m', 'agent_worktrees',
             '--project', 'probe-project', 'list', '--json', '--passive'], args
         return real_run([spec['console'], '-I', '-c',
             "import time; time.sleep(0.5); print('{\\"worktrees\\": []}')"],

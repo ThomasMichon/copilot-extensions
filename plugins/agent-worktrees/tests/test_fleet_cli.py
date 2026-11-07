@@ -255,7 +255,7 @@ def test_local_row_launches_without_a_project_binstub(tmp_path):
     (cmd, _kwargs), = calls
     assert Path(cmd[0]).is_file()
     assert cmd[1:] == [
-        "-X", "utf8", "-m", "agent_worktrees",
+        "-I", "-X", "utf8", "-m", "agent_worktrees",
         "--project", "agent-worktrees", "list", "--json", "--passive",
     ]
 
@@ -271,6 +271,24 @@ def test_local_project_argv_runs_the_real_cli():
     assert proc.returncode == 0, proc.stderr
     assert "fleet [--json]" in proc.stdout
     assert "selected project only" in proc.stdout
+
+
+def test_local_project_argv_ignores_a_shadowing_package_in_cwd(tmp_path):
+    """A passive fleet read must not execute workspace code: an
+    ``agent_worktrees`` package in the caller's working directory must not
+    shadow the installed runtime."""
+    shadow = tmp_path / "agent_worktrees"
+    shadow.mkdir()
+    (shadow / "__init__.py").write_text("", encoding="utf-8")
+    (shadow / "__main__.py").write_text("print('SHADOW-EXECUTED')\n", encoding="utf-8")
+    proc = subprocess.run(
+        [*fleet._local_project_argv("example"), "--help"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=120, stdin=subprocess.DEVNULL, cwd=tmp_path, **no_window_kwargs(),
+    )
+    assert "SHADOW-EXECUTED" not in proc.stdout + proc.stderr
+    assert proc.returncode == 0, proc.stderr
+    assert "fleet [--json]" in proc.stdout
 
 
 def test_selected_project_reaches_local_and_remote_commands(tmp_path):

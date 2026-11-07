@@ -145,10 +145,13 @@ def _local_project_argv(project: str) -> list[str]:
     shims on Windows), and an argv-list ``subprocess.run`` cannot launch a
     ``.ps1`` or reliably resolve PATHEXT, so a binstub lookup made the local
     fleet row fail on Windows. ``sys.executable`` keeps the child on the
-    same interpreter and inherited environment as the caller on every
-    platform, and needs no ``<project>`` binstub at all.
+    same interpreter as the caller on every platform, and needs no
+    ``<project>`` binstub at all. ``-I`` keeps this passive read from
+    importing a shadowing ``agent_worktrees`` out of the caller's working
+    directory or a ``PYTHON*`` variable, matching the package's other
+    self-invocations.
     """
-    return [sys.executable, "-X", "utf8", "-m", "agent_worktrees", "--project", project]
+    return [sys.executable, "-I", "-X", "utf8", "-m", "agent_worktrees", "--project", project]
 
 
 def _parse_list_envelope(raw: str) -> dict | None:
