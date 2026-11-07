@@ -92,10 +92,24 @@ so an inherited finite guardian is not unlocked by the caller's exit trap.
   confirmed apply uses the existing settings merge. Native defaults, live
   values and enforce constraints retain precedence. No requirement YAML,
   resource/module execution, binding or running-session delivery is implied.
+- **Guarded retained-telemetry defaults.** `preferences telemetry` projects
+  accepted capture choices and uses a capable pinned native producer for
+  explicit configuration-only preview/apply. Exact accepted/policy/local inputs
+  are checked again by that producer before writing. Custom sinks survive;
+  withdrawal does not disable capture. Reporting has no adoption field yet.
+  See [the telemetry preference contract](docs/portable-preferences.md#confirmed-retained-telemetry-defaults).
 - **Bounded local telemetry reports.** `health report` projects explicit local
   typed telemetry into 168 UTC-hour buckets and an optional static chart,
   preserving unknown coverage. It starts no collector or periodic job and never
   activates telemetry. See [the report contract](docs/health-report.md).
+- **Explicit hourly health storage.** `health record` confirms typed local
+  observations into 168 absolute-hour slots; `health inspect` reports ages,
+  gaps and stale/unknown evidence. Neither executes probes nor publishes to a
+  carrier. See [the local observation contract](docs/health-report.md#explicit-local-hourly-observations).
+- **Passive local listener observation.** `health observe` reads an explicitly
+  selected loopback Bridge `/health` endpoint once and emits a typed observation
+  for the local record flow. It starts nothing, uses no credentials and does
+  not infer authentication or agent counts from listener health.
 - **Live Copilot CLI controls.** `copilot-cli` inspects native update preferences
   and cached versions, previews/applies live on/off and native update operations,
   and deliberately launches a cached version without another installer or

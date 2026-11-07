@@ -1,4 +1,4 @@
-"""Portable read/check policy for an explicitly selected worker workspace."""
+"""Portable policy for an explicitly selected worker workspace."""
 from __future__ import annotations
 
 from dataclasses import asdict
@@ -97,6 +97,7 @@ def _export_endpoint(pr) -> str:
 
 def export_config(
     repository: str, repo: RepoConfig, workspace: str, base: str | None, destination: Path,
+    *, include_author: bool = False,
 ) -> dict:
     """Export effective policy, never credentials, machine identity or merge grants."""
     if (
@@ -116,7 +117,7 @@ def export_config(
     ):
         raise ValueError("worker policy needs --base <configured-remote>/<branch>")
     publication = repo.pr.publication_checks
-    if publication is None and repo.pr.publication_origin is None:
+    if publication is None and repo.pr.publication_origin is None and not include_author:
         raise ValueError("this repository has no configured publication checks")
     pr = {
         key: getattr(repo.pr, key) for key in (
@@ -133,6 +134,20 @@ def export_config(
         publication_origin=origin_dict(repo.pr.publication_origin),
         observation=_observation(repo.pr.observation),
     )
+    if include_author:
+        pr.update({
+            key: getattr(repo.pr, key) for key in (
+                "enabled", "required", "automerge_label", "approval_required",
+                "allow_stale_approval", "squash", "delete_source_branch", "push_timeout_seconds",
+            )
+        })
+        pr.update(bypass_policy=False, self_approve=False, merge_actor="", roles=None)
+        pr.update(
+            required_body_sections=list(repo.pr.required_body_sections),
+            labels=list(repo.pr.labels),
+        )
+        if repo.pr.source_attribution_configured or repo.pr.source_attribution != "codename":
+            pr["source_attribution"] = repo.pr.source_attribution
     if (
         parse_publication_checks(pr["publication_checks"]) != publication
         or parse_observation(pr["observation"]) != repo.pr.observation

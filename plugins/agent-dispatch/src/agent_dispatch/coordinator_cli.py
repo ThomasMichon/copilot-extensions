@@ -210,6 +210,8 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         control_token=getattr(args, "control_token", None) or _config.resolve_control_token(),
         sweep_interval=base.sweep_interval,
         pool_publication_enabled=base.pool_publication_enabled,
+        relationship_admission=base.relationship_admission,
+        relationship_authority=base.relationship_authority,
     )
     try:
         serve(cfg, passive=passive, force=force)

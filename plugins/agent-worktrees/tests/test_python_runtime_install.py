@@ -1386,7 +1386,10 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
                         lambda: not old_slot_retained(),
                         message="resident did not settle the exited predecessor's runtime custody",
                     )
-                    new_lock = json.loads(lock_path.read_text(encoding="utf-8"))
+                    new_lock = _wait_for(
+                        lambda: locks.read_lock(lock_path),
+                        message="successor monitor lock was never readable",
+                    )
                     assert new_lock["pid"] == successor.pid
                     health = ControlClient(successor.base_url, token=token.read_text().strip()).health()
                     assert health["published"] is True and health["status"] == "ready"
@@ -1418,7 +1421,10 @@ runpy.run_module("agent_worktrees", run_name="__main__", alter_sys=True)
                 root, old.name, kind="retention", shared=False, timeout=0,
             ):
                 pass
-            new_lock = json.loads(lock_path.read_text(encoding="utf-8"))
+            new_lock = _wait_for(
+                lambda: locks.read_lock(lock_path),
+                message="successor monitor lock was never readable",
+            )
             assert new_lock["pid"] == successor.pid
             assert Path(new_lock["prefix"]).resolve() == candidate.resolve()
             health = ControlClient(successor.base_url, token=token.read_text().strip()).health()

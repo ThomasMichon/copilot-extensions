@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -27,8 +28,8 @@ def configuration(tmp_path, monkeypatch):
     return root / "telemetry.json", directory
 
 
-def invoke(capsys, directory, *, apply=False, confirm=None):
-    args = argparse.Namespace(directory=directory, apply=apply, confirm=confirm)
+def invoke(capsys, directory, *, apply=False, confirm=None, inputs=None):
+    args = argparse.Namespace(directory=directory, apply=apply, confirm=confirm, if_input=inputs)
     with pytest.raises(SystemExit) as outcome:
         telemetry_cli.run(args)
     return outcome.value.code, json.loads(capsys.readouterr().out)
@@ -158,6 +159,111 @@ def test_native_writer_exclusion(configuration, capsys):
         code, result = invoke(capsys, directory, apply=True, confirm=result["confirmation"])
         assert code == 2
     assert not target.exists()
+
+
+@pytest.mark.parametrize("changed", ["policy", "accepted", "local"])
+def test_external_input_fence_is_rechecked_inside_native_lock(
+    configuration, tmp_path, monkeypatch, capsys, changed,
+):
+    target, directory = configuration
+    inputs = []
+    for name in ("policy", "accepted", "local"):
+        path = tmp_path / f"{name}.json"
+        path.write_text('{"revision":1}', encoding="utf-8")
+        inputs.append([str(path), hashlib.sha256(path.read_bytes()).hexdigest()])
+    code, result = invoke(capsys, directory, inputs=inputs)
+    assert code == 0 and not target.exists()
+
+    class ChangedLock(OperationLock):
+        def __enter__(self):
+            super().__enter__()
+            (tmp_path / f"{changed}.json").write_text('{"revision":2}', encoding="utf-8")
+            return self
+
+    monkeypatch.setattr(telemetry_cli, "OperationLock", ChangedLock)
+    code, result = invoke(
+        capsys, directory, inputs=inputs, apply=True, confirm=result["confirmation"],
+    )
+    assert code == 2 and "configuration input changed" in result["reason"]
+    assert not target.exists()
+    assert list((directory / "retained").iterdir()) == []
+
+
+def test_normal_cli_guarded_input_change_refuses_before_configuration(configuration, tmp_path):
+    target, directory = configuration
+    source = tmp_path / "accepted.json"
+    source.write_text('{"revision":1}', encoding="utf-8")
+    command = [
+        sys.executable, "-m", "agent_bridge", "telemetry", "retained",
+        "--directory", str(directory), "--if-input", str(source),
+        hashlib.sha256(source.read_bytes()).hexdigest(),
+    ]
+
+    def call(arguments):
+        return subprocess.run(
+            command + arguments, env=dict(os.environ), capture_output=True, text=True, timeout=20,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+
+    result = call([])
+    assert result.returncode == 0, result.stderr
+    token = json.loads(result.stdout)["confirmation"]
+    source.write_text('{"revision":2}', encoding="utf-8")
+    result = call(["--apply", "--confirm", token])
+    assert result.returncode == 2, result.stderr
+    assert not target.exists() and not target.with_suffix(".json.lock").exists()
+    command[-1] = hashlib.sha256(source.read_bytes()).hexdigest()
+    result = call([])
+    assert result.returncode == 0, result.stderr
+    result = call(["--apply", "--confirm", json.loads(result.stdout)["confirmation"]])
+    assert result.returncode == 0, result.stderr
+    assert json.loads(target.read_bytes())["retained_spool"]["directory"] == str(directory)
+
+
+def test_native_write_failure_does_not_claim_configuration_was_untouched(configuration, monkeypatch, capsys):
+    target, directory = configuration
+    _, result = invoke(capsys, directory)
+    original = telemetry_cli.write_json_object_atomic
+
+    def failed_ack(path, value):
+        original(path, value)
+        raise OSError("synthetic acknowledgement failure")
+
+    monkeypatch.setattr(telemetry_cli, "write_json_object_atomic", failed_ack)
+    code, result = invoke(capsys, directory, apply=True, confirm=result["confirmation"])
+    assert code == 2 and result["write_outcome"] == "unknown"
+    assert json.loads(target.read_bytes())["retained_spool"]["directory"] == str(directory)
+
+
+@pytest.mark.parametrize("invalid", ["mismatch", "oversize", "duplicate"])
+def test_invalid_input_fence_never_creates_configuration(configuration, tmp_path, capsys, invalid):
+    target, directory = configuration
+    source = tmp_path / "source.json"
+    source.write_bytes(b"{}" if invalid != "oversize" else b" " * (256 * 1024 + 1))
+    digest = hashlib.sha256(source.read_bytes()).hexdigest() if invalid != "mismatch" else "0" * 64
+    inputs = [[str(source), digest]]
+    if invalid == "duplicate":
+        inputs *= 2
+    code, result = invoke(capsys, directory, inputs=inputs)
+    assert code == 2 and result["write_outcome"] == "not-applied"
+    assert not target.exists() and not target.with_suffix(".json.lock").exists()
+
+
+@pytest.mark.parametrize("selected", ["target", "lock"])
+def test_fenced_input_cannot_be_native_output(configuration, capsys, selected):
+    target, directory = configuration
+    lock = target.with_name(target.name + ".lock")
+    source = target if selected == "target" else lock
+    source.write_bytes(b'{"read_only":true}\n')
+    original = source.read_bytes()
+    inputs = [[str(source), hashlib.sha256(original).hexdigest()]]
+    for apply in (False, True):
+        code, result = invoke(capsys, directory, inputs=inputs, apply=apply, confirm="0" * 64 if apply else None)
+        assert code == 2 and result["status"] == "error"
+        assert result["write_outcome"] == "not-applied"
+        assert "overlaps native output" in result["reason"]
+        assert source.read_bytes() == original
+        assert not (lock if selected == "target" else target).exists()
 
 
 def test_linked_target_is_not_followed(configuration, tmp_path, capsys):

@@ -32,6 +32,7 @@ parent return before a detour, and deliver once the actual gates pass.
 |---------|--------|
 | "Task master: audit the agents on these machines read-only" | Dated roster, inferred goals, history coverage, classified work/waits, matched misdirection patterns and ranked recommendations; **messages sent: none** |
 | "Monitor this fleet under this charter; steer within this scope" | The same assessment on the charter's cadence, plus at most one persisted, deduplicated steer per target and issue to the resolved current head |
+| "Correct the charters of last week's dormant worktrees" | Per-candidate verdicts from full chronology; clear record corrections written through their owners with a pre-write liveness recheck and readback, ambiguous cases in one decision packet; **messages sent: none** |
 | "Set up sustained PR attention with three lanes" | A filled reviewer charter, qualified adapter/policy table, complete census and lane assignment through existing owners |
 
 Example read-only sweep result:
@@ -55,7 +56,8 @@ coordination examples and one static progress instruction.
 **Does not provide:** a task queue, reviewer engine, watcher, scheduler,
 daemon, agent launcher, message transport, permission broker or rollout.
 Enabling the plugin starts no monitor and sends no message. Recurring
-observation and steering each require their own explicit assignment.
+observation, steering and dormant correction each require their own explicit
+assignment.
 
 For PR review, missing required authority, bindings or receipts remain explicit
 adapter blockers or permitted manual handoffs. Optional server fencing is not a
@@ -72,6 +74,12 @@ obligations, prerequisite growth, budgets, validation weight, delivery state
 and handoff fidelity, classify every wait as required, productive or waste,
 and escalate once when a delivered steer stalls; the watchdog never asks a
 blocking question itself.
+Its separately granted dormant correction mode fixes an inactive owner's
+persisted charter (effort plan, workspace title/summary, agenda cursor or,
+only through a verified record-only supersede, a pending baton) through each
+record's owner. It never messages,
+writes checkouts or claims, finalizes or retires work; live-idle, newly active
+and unknown targets stay unchanged.
 
 ## Dependencies & assumptions
 
@@ -101,6 +109,7 @@ references where available, and a private writable report home.
 | `skills/monitor-agent-fleet/references/guidance-delta.md` | Source, payload, consumer-copy and context-delivery differences |
 | `skills/monitor-agent-fleet/references/interventions.md` | Testing, review and priority interventions |
 | `skills/monitor-agent-fleet/references/fabric-readers.md` | Optional existing reader adapters |
+| `skills/monitor-agent-fleet/references/dormant-correction.md` | Separately granted record correction for inactive owners |
 | `skills/review-pull-requests/SKILL.md` | Sustained PR reviewer runbook |
 | `skills/review-pull-requests/assets/` | Reviewer charter and synthetic ledger example |
 | `skills/review-pull-requests/references/` | Setup/adapters, coordination/recovery and communication |

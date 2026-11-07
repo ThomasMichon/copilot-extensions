@@ -22,6 +22,7 @@ ACTION = "get-account-token"
 SOURCE_LEASE_ACTION = "get-account-source-lease"
 DESCRIBE_ACTION = "describe-account-relay"
 SOURCE_LEASE_CONTRACT = "credential-relay.account-source-lease/v1"
+SOURCE_LEASE_EXCHANGE = "connection-bound/v1"
 REQUEST_FIELDS = frozenset({"source", "account", "recipient", "host", "action"})
 
 
@@ -210,12 +211,22 @@ class AccountRelay:
             if len(data) > 16384:
                 return
             lines = data.decode("utf-8").strip().splitlines()
-            if lines == [DESCRIBE_ACTION]:
+            connection_bound = lines == [DESCRIBE_ACTION, f"exchange={SOURCE_LEASE_EXCHANGE}"]
+            if lines == [DESCRIBE_ACTION] or connection_bound:
                 writer.write(
-                    f"contract={SOURCE_LEASE_CONTRACT}\noperation={SOURCE_LEASE_ACTION}\n\n".encode(),
+                    (
+                        f"contract={SOURCE_LEASE_CONTRACT}\noperation={SOURCE_LEASE_ACTION}\n"
+                        + (f"exchange={SOURCE_LEASE_EXCHANGE}\n" if connection_bound else "")
+                        + "\n"
+                    ).encode(),
                 )
                 await asyncio.wait_for(writer.drain(), timeout=5)
-                return
+                if not connection_bound:
+                    return
+                data = await asyncio.wait_for(reader.readuntil(b"\n\n"), timeout=20)
+                if len(data) > 16384 or not self._active:
+                    return
+                lines = data.decode("utf-8").strip().splitlines()
             if not lines or lines[0] not in {ACTION, SOURCE_LEASE_ACTION}:
                 return
             fields = {}

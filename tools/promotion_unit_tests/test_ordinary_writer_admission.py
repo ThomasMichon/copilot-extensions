@@ -104,6 +104,67 @@ def test_future_admission_needs_no_impossible_prior_journal(admission):
     assert calls == [["--json", "version", "--contracts-json"], ["--json", "status"]]
 
 
+def test_selected_writer_is_observed_before_workspace_identity_exists(admission):
+    owner, health, _, _, _, calls, run = admission
+    selected = type(owner).selected_writer(run)
+    assert selected == owner.requirement["identity"]
+    health["worktree_record_writer"]["runtime_generation"] = "b" * 32
+    assert selected == owner.requirement["identity"]
+    assert calls == [["--json", "version", "--contracts-json"], ["--json", "status"]]
+
+
+@pytest.mark.parametrize("identity", [
+    None, {}, {"installation_root": "/writer", "runtime_generation": True},
+    {"installation_root": "", "runtime_generation": "a" * 32},
+], ids=["missing", "empty", "generation", "root"])
+def test_selected_writer_refuses_malformed_identity_before_preparation(admission, identity):
+    owner, health, _, _, _, _, run = admission
+    health["worktree_record_writer"] = identity
+    with pytest.raises(TaskError, match="selected writer identity"):
+        type(owner).selected_writer(run)
+
+
+def test_prepared_requirement_preserves_original_expectation_without_agent_or_journal(admission):
+    owner, *_ = admission
+    module = sys.modules[type(owner).__module__]
+    row = {
+        "worktree_writer_requirement": None, "task_relationship_required": True,
+        "task_relationship_event_id": None, "driver": "ordinary-bridge",
+        "creation_key": "original-key", "agent_info": None, "session_handle": None,
+        "creation_nonce": None,
+    }
+    facts = dict(worktree="tree", project="project", path="/workspace", creation_nonce="original")
+    retained = module.prepared_requirement(row, **facts, value=owner.requirement)
+    row.update(worktree_writer_requirement=retained, task_relationship_event_id=7,
+               creation_nonce="original")
+    assert module.prepared_requirement(row, **facts, value=None) == retained
+    assert json.loads(retained) == owner.requirement
+    with pytest.raises(TaskError, match="cannot change"):
+        module.prepared_requirement(
+            row, **facts, value={**owner.requirement, "identity": {
+                "installation_root": "/different", "runtime_generation": "b" * 32,
+            }},
+        )
+
+
+@pytest.mark.parametrize("change", ["legacy", "nonce", "historical", "native"])
+def test_prepared_requirement_refuses_unproven_original_attachment(admission, change):
+    owner, *_ = admission
+    module = sys.modules[type(owner).__module__]
+    row = {
+        "worktree_writer_requirement": None, "task_relationship_required": change != "legacy",
+        "task_relationship_event_id": 7 if change == "historical" else None,
+        "driver": "ordinary-bridge", "creation_key": "original-key",
+        "agent_info": None, "session_handle": "native" if change == "native" else None,
+        "creation_nonce": None,
+    }
+    with pytest.raises(TaskError, match="writer requirement|workspace incarnation"):
+        module.prepared_requirement(
+            row, worktree="tree", project="project", path="/workspace",
+            creation_nonce="changed" if change == "nonce" else "original", value=owner.requirement,
+        )
+
+
 def test_discovery_argv_executes_the_shipped_bridge_parser_and_contract(admission, monkeypatch):
     root = Path(__file__).resolve().parents[2] / "plugins/agent-bridge/src/agent_bridge"
     package = "promotion_ordinary_bridge_cli"

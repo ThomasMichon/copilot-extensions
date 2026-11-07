@@ -29,7 +29,7 @@ def cmd_publication_labels(args):
         if args.repo or args.number is not None:
             if not args.repo or args.number is None or args.number < 1:
                 raise ValueError("Explicit repair needs --repo and a positive --number")
-            origin = labels.selected(config.default_repo.pr)
+            origin = labels.selected_for_config(config)
             if origin is None:
                 raise ValueError("Explicit repair requires --publication-origin")
             resolution = pr_config.resolve_repo_config_for_slug(config, args.repo)

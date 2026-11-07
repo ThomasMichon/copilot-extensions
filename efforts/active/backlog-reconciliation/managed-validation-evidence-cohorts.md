@@ -60,6 +60,38 @@ Any overlapping shared runner/tests/guide hunk coordinates through #6909's
 accepted single writer. MR1 still aborts timeout/containment/resource failures;
 readiness classification does not turn them into ordinary assertion exit 1.
 
+## Proposed contained-Windows exit-state lane
+
+Add #4835 as a sixth independent managed-runner acceptance lane under existing
+OPEN #6917, after reviewed planning and actual whole-parent delivery/readback.
+This is an agent-recommended tracking proposal, not an accepted implementation
+assignment or a claim that the fixture or shared liveness primitive is repaired.
+
+- [ ] MR6 (#4835) - Make the named stale launch-lock pruning regression
+  deterministic under the supported contained Windows runner without depending
+  on when its containment owner releases independent process handles. Preserve
+  the original kill/wait/released-test-handle setup, exclusion of the terminated
+  PID and stale-lock pruning assertions. A narrow fixture or identity-bound
+  exit-state correction may suffice; do not require a broad lifecycle rewrite
+  or mislabel the reported test interaction as a production launch-lock leak.
+- [ ] MRV7 - Exercise the named regression under its supported contained runner
+  and preserve PID/start-time identity and unknown/access-denied-as-protection
+  behavior. Distinguish an exited process object retained by containment from
+  a running target; the test's own handle release cannot release its owner's
+  separate handle. Keep existing containment and item/group/resource limits,
+  focused positive/refusal assertions and the periodic/explicit native lane.
+  Do not weaken production protection or restore native required-PR CI to
+  obtain a pass.
+
+The original fixture, launch-registry and shared liveness owners retain their
+work. #6909's accepted integrator remains the single writer only for overlapping
+shared runner/tests/guide changes; this intake does not appoint that owner to
+another maintainer's primitive or fixture. MR6 progresses independently of
+MR1-MR5. No process action, test, native run, environment change, implementation,
+claim or source/resource transfer follows. Only separate #4835 tracking may
+retire NOT_PLANNED after complete direct receiving and current eligible readback;
+all technical acceptance remains unchecked and #6917 stays OPEN.
+
 ## Deterministic clean-room evidence
 
 #4217 receives #8511's default host-artifact ownership defect beside its

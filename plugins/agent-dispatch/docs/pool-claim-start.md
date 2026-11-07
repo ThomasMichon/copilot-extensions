@@ -100,6 +100,35 @@ held. A keyed recovery receipt cannot authorize a newly held task's launch.
 
 ### Conditional ordinary writer consumer
 
+The prepared-workspace provider can retain the same optional
+`worktree_writer_requirement` in `POST /spawn-reservations/{key}/worktree`,
+atomically with the original nonce and audited relationship request, before
+the first external relationship call. This is distinct from later allocation
+storage: its capability is `prepared_writer_requirement_versions: [1]` in the
+existing placement descriptor. The client negotiates that support before
+sending the field; an older provider is not retried without it.
+The requirement must match the original ordinary creation key, complete
+workspace and nonce. Replays preserve it when omitted, reject replacement,
+and cannot retrofit it after an unpinned relationship or native exists.
+A lost relationship reply retains the same expectation and original request.
+
+The ordinary new-workspace consumer negotiates preparation storage support
+before workspace creation, then observes the executing Bridge CLI contracts
+and passive active-instance selection. The existing preparation owner combines
+that selected expectation with the authoritative creation nonce and retains it
+through this endpoint before the first relationship. An explicit caller
+expectation must agree with the selection and prepared nonce. A pending
+relationship reply is reconciled through the same prepared-workspace owner on
+retry, preserving its original requirement and creation key; a changed current
+selection cannot replace them. Already prepared historical workspaces without
+an original requirement are not retrofitted.
+
+This conditional composition stores an expectation, not successful admission.
+Independent queue/request, ground-owner and complete participating-writer
+checks still govern the first relationship. A future acquisition journal or
+caller-ready boolean cannot establish those checks. No admission policy is
+installed and no complete participating cohort is qualified by this consumer.
+
 The internal ordinary Bridge caller accepts an explicit `worktree_writer`
 expectation for an already prepared workspace. It is the existing version-1
 Bridge keyed-creation requirement: installed writer identity and original

@@ -13,6 +13,7 @@ def snapshot_payload(snapshot: PRSnapshot, repo: str, number: int, provider: str
     return {
         "schema": "agent-worktrees.pr-snapshot", "version": 1,
         "provider": provider, "api_base": api_base, "repo": repo, "pr": number,
+        "endpoint": snapshot.endpoint,
         "pr_state": snapshot.pr_state, "merged": snapshot.merged,
         "head_sha": snapshot.head_sha, "base_ref": snapshot.base_ref,
         "base_sha": (

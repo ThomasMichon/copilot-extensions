@@ -53,14 +53,18 @@ def ready(tmp_path, monkeypatch, request):
         owner_session_id="native",
         expected_generation=queue.get(task.id).generation,
     )
-    proposal = queue.prepare_submission(
+    result = getattr(request, "param", {"answer": "done"})
+    unprepared = isinstance(result, tuple) and result[0] == "unprepared"
+    if unprepared:
+        result = result[1]
+    proposal = None if unprepared else queue.prepare_submission(
         task.id,
         workspace.worker_id,
         request_id="proposal",
         expected_generation=task.generation,
         expected_owner_session_id="native",
         workspace=workspace,
-        result=getattr(request, "param", {"answer": "done"}),
+        result=result,
     )
     allocation = {
         "task_id": task.id,

@@ -324,7 +324,23 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--admission-wait", type=float, default=0.0)
     parser.add_argument("--timeout", type=float)
+    parser.add_argument(
+        "--ephemeral-native-ssh-setup", action="store_true",
+        help="qualify Fleet SSH application lifetime in an explicitly disposable hosted CI job",
+    )
     args = parser.parse_args(argv)
+    native_ssh = args.ephemeral_native_ssh_setup
+    if native_ssh and (
+        args.component != "fleet-manager"
+        or os.environ.get("COPILOT_EXTENSIONS_SSH_SETUP_NATIVE") != "1"
+        or os.environ.get("GITHUB_ACTIONS") != "true"
+        or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted"
+        or not os.environ.get("RUNNER_TEMP")
+        or not Path(os.environ["RUNNER_TEMP"]).is_absolute()
+        or not Path(os.environ["RUNNER_TEMP"]).is_dir()
+        or os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") == "1"
+    ):
+        parser.error("native SSH application testing requires explicitly selected disposable hosted CI")
     if (args.chat_suite or args.chat_membership_report) and args.component != "services/chat":
         parser.error("Chat qualification options are only defined for services/chat")
     if args.chat_membership_report and (
@@ -415,7 +431,10 @@ def main(argv: list[str] | None = None) -> int:
         # Windows: it tries to create the temp dir under a nonexistent
         # subdirectory). Sanitize for this use only.
         safe_component = args.component.replace("/", "-")
-        temporary = TestSandbox(prefix=run_prefix(safe_component), dir=runs_root(REPO))
+        temporary = TestSandbox(
+            prefix=run_prefix(safe_component),
+            dir=Path(os.environ["RUNNER_TEMP"]) if native_ssh else runs_root(REPO),
+        )
         try:
             sandbox = Path(temporary.name)
             record_owner(sandbox, REPO, retention="disposable after verified process cleanup")
@@ -448,6 +467,7 @@ def main(argv: list[str] | None = None) -> int:
                 env=env,
                 sandbox=sandbox,
                 limits=limits,
+                **({"native_application": True} if native_ssh else {}),
             )
             if chat_suite is not None:
                 return export_chat_membership(

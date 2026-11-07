@@ -17,6 +17,12 @@ verbs into a superset plugin:
 
 ## Verb surface
 
+The examples below describe the legacy GitHub route. For target-qualified
+native author operations and their optional delivered worker `--config`, see
+[native author operations](author-operations.md). Native status, wait and merge
+retain the selected Worktrees peer's policy and do not accept that author-only
+configuration option.
+
 ```text
 agent-pull-requests status --repo <owner/repo> --number <n> [--json]
 agent-pull-requests create --repo <owner/repo> --head <branch> [--base <branch>] --title <t> [--body <b>] [--draft] [--json]
@@ -198,8 +204,8 @@ For shutdown/restart boundaries, durability, and recovery detail, see
 
 ## Not implemented yet
 
-- non-GitHub `status`/`create`/`merge`/`wait` verbs (native ADO watch observation
-  is available through the attributed snapshot driver described in the README)
+- other direct forge adapters beyond the existing attributed Worktrees/native
+  route described in [native author operations](author-operations.md)
 - worktree-tracking integration (`set-pr`, active-PR selection, reconcile)
 
 Those remain later parity/migration slices, kept separate so this plugin's

@@ -236,6 +236,11 @@ custom/legacy sinks and unrelated fields, and rechecks its token-bound inputs at
 the write boundary. Output is always JSON; exit 0 means previewed/configured and
 exit 2 means refusal/error. It starts no coordinator or buffer and makes no
 health, activation or delivery claim.
+The additive `input_fence: 1` capability supports the same repeated
+`--if-input <absolute file> <sha256>` write-boundary checks as Bridge.
+Task-projected invocations retain native task-only admission; explicit
+task-worker root options do not allow a cold telemetry launch to provision.
+Apply errors distinguish `write_outcome: not-applied` from `unknown`.
 
 The [Bridge configuration contract](../../../plugins/agent-bridge/docs/diagnostic-logs.md#native-configuration-only-preview-and-apply)
 defines the identical bounds, confirmation, path, environment, exclusion and

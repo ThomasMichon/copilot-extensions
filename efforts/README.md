@@ -19,6 +19,7 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Bridge and Dispatch Worker Contract Qualification](active/bridge-dispatch-worker-contract-qualification/README.md) | Draft; handoff proposal, no implementation claimed | #6467/#3556/#7268 existing owners; #11106 result bindings and #11108 effective profiles; no new driver or rollout |
 | [Inactive Worktree Relocation](active/inactive-worktree-relocation/README.md) | Active; proposal before implementation, complete stopped-clean flow first | #10879; mixed roots and broader inactive continuity; existing owners retained, no live migration or rollout |
 | [Maintainer Vision Adherence Review](active/maintainer-vision-adherence-review/README.md) | Active; public lens and paired skill proposed | #10864; existing vision/pattern/conformance and review owners retained, no runtime rollout |
 | [Machine Health Heartbeats](active/machine-health-heartbeats/README.md) | Active; local report and configuration-only adoption complete, portable-preference amendment before code | #10873; native configuration/binding/domain owners retained, no new daemon; carrier and activation separately gated |
@@ -173,6 +174,7 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Effort Readback Economy](2026/11/06%20effort-readback-economy/README.md) | Done; effort digest helper and targeted-readback guidance merged in #11149 after review and required CI | #11143; README restructuring continues in #11148; no rollout |
 | [Repository Write Guidance](2026/11/06%20repository-write-guidance/README.md) | Done; native write guidance reviewed, released and installed as Worktrees 1.24.493-dev1; all five actual native controls and owned fixture cleanup passed | #10778 retains immediate archive, native focus/worktree/claim and issue settlement; broader latency qualification stays #7935; no fleet rollout |
 | [Copilot Driver Core Vision](2026/11/05%20copilot-driver-core-vision/README.md) | Done; coherent core-app, broker, caller and lifetime vision merged in #10768 after approval and required CI | #10765 retains implementation and acceptance; existing component owners retained, no extraction or rollout |
 | [Embody Session State](2026/11/05%20embody-session-state/README.md) | Done for source scope; truthful native-state receipts and optional bounded observation merged in #10749 after review and required CI | #10745 retains archive, focus/worktree and issue settlement; normal promotion #3336 and authorized adoption separate, no rollout |

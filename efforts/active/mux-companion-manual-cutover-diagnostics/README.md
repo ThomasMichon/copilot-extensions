@@ -473,7 +473,8 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 - [ ] Implement a compact topology presentation for phases, sub-agents,
       bridges, downstream worktrees, open PRs and accumulated tool-call stats,
       using the same sources as other companion clients.
-      The [owner-qualified PR-state realization](sidecar-pr-state.md) proposes
+      The [owner-qualified PR-state realization](sidecar-pr-state.md), reviewed
+      in #10920, plans
       an optional exact-association, explicit passive point-read using the
       existing snapshot owner. Claims alone remain unknown PR-state evidence;
       full live topology and every native/installed gate remain open.

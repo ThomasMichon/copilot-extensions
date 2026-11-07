@@ -71,8 +71,9 @@ def test_bridge_historical_guards_preserve_selection_and_failure_diagnostics():
 
 
 @pytest.mark.parametrize("outcome", ["passed", "failed", "skipped", "missing", "empty", "duplicate"])
+@pytest.mark.parametrize("step_id", ["readers", "incoming"])
 def test_registration_inspection_portfolio_requires_complete_native_evidence(
-    tmp_path, monkeypatch, outcome,
+    tmp_path, monkeypatch, capsys, outcome, step_id,
 ):
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
@@ -82,7 +83,21 @@ def test_registration_inspection_portfolio_requires_complete_native_evidence(
         "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'registration-inspection'"
     )
     assert workflow["jobs"]["registration-inspection-windows"]["steps"] == job["steps"]
-    step = next(value for value in job["steps"] if value.get("id") == "readers")
+    step = next(value for value in job["steps"] if value.get("id") == step_id)
+    required_names = (
+        [
+            "test_actual_neutral_cwd_cli_and_existing_inventory_remain_read_only",
+            "test_native_namespace_selection_and_invalid_context_do_not_use_legacy_state",
+        ] if step_id == "readers" else [
+            "test_closed_source_retains_native_inputs_and_application_through_reader",
+            *(
+                "test_incoming_inspection_ignores_broken_prior_runtime_and_preserves_state[" + scenario + "]"
+                for scenario in (
+                    "alias-disabled", "alias-enabled", "fresh", "ambiguous", "preparation-failure",
+                )
+            ),
+        ]
+    )
     tools = tmp_path / "tools"
     tools.mkdir()
     (tools / "run-plugin-tests.py").write_text(f"""import json, sys
@@ -91,21 +106,20 @@ import xml.etree.ElementTree as ET
 arguments = sys.argv[1:]
 Path("arguments.json").write_text(json.dumps(arguments))
 if {outcome!r} == "failed":
+    print("runner failure progress", flush=True)
+    print("runner failure reason", file=sys.stderr, flush=True)
     sys.exit(17)
 reports = Path(arguments[arguments.index("--junit-dir") + 1])
 reports.mkdir(parents=True)
 root = ET.Element("testsuites")
 suite = ET.SubElement(root, "testsuite")
-names = [
-    "test_actual_neutral_cwd_cli_and_existing_inventory_remain_read_only",
-    "test_native_namespace_selection_and_invalid_context_do_not_use_legacy_state",
-]
+names = {required_names!r}
 if {outcome!r} == "missing":
     names.pop()
 if {outcome!r} == "empty":
     names.clear()
 if {outcome!r} == "duplicate":
-    names.append(names[0])
+    names.append(names[-1])
 for name in names:
     case = ET.SubElement(suite, "testcase", name=name)
     if {outcome!r} == "skipped":
@@ -114,6 +128,7 @@ ET.ElementTree(root).write(reports / "synthetic-admission-control.xml")
 """, encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("RUNNER_TEMP", str(tmp_path / "runner-temp"))
+    monkeypatch.setenv("REGISTRATION_INSPECTION_REPORTS", str(tmp_path / "runner-temp"))
     monkeypatch.setenv("GITHUB_ENV", str(tmp_path / "job-environment"))
     body = compile(step["run"], "<registration-inspection-workflow>", "exec")
     if outcome == "passed":
@@ -122,9 +137,20 @@ ET.ElementTree(root).write(reports / "synthetic-admission-control.xml")
         expected = subprocess.CalledProcessError if outcome == "failed" else AssertionError
         with pytest.raises(expected):
             exec(body, {})
+    if outcome == "failed":
+        captured = capsys.readouterr()
+        assert "runner failure progress" in captured.out
+        assert "runner failure reason" in captured.err
     arguments = json.loads((tmp_path / "arguments.json").read_text())
-    assert arguments[:3] == ["agent-worktrees", "--test-file", "tests/test_registration_inspection.py"]
-    assert not set(arguments) & {"--allow-host-state", "--allow-explicit-tiers", "--timeout", "--plugin-timeout"}
+    expected_file = (
+        "tests/test_registration_inspection.py"
+        if step_id == "readers" else "tests/test_incoming_registration_inspection.py"
+    )
+    assert arguments[:3] == ["agent-worktrees", "--test-file", expected_file]
+    assert ("--allow-explicit-tiers" in arguments) == (step_id == "incoming")
+    assert not set(arguments) & {"--allow-host-state", "--timeout", "--plugin-timeout"}
+    if step_id == "incoming":
+        assert "tests/native/test_incoming_registration_inspection_native.py" in arguments
 
 
 @pytest.mark.parametrize("expected", ["", "b" * 40, "a" * 40])
@@ -217,11 +243,14 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
     workflow = yaml.safe_load(
         (root / ".github" / "workflows" / "installation-context-acceptance.yml").read_text()
     )
+    events = workflow.get("on", workflow.get(True))
+    assert len(events["workflow_dispatch"]["inputs"]) <= 25
     job = workflow["jobs"]["gateway-host-application-" + platform]
     steps = [step for step in job["steps"] if "run" in step]
-    assert job["timeout-minutes"] == 6 and len(steps) == 2
+    assert job["timeout-minutes"] == 6 and len(steps) == 3
     assert [shlex.split(step["run"]) for step in steps] == [
         ["python", "tools/run-standalone-tests.py", "fleet-manager", "--prepare", "--timeout", "180"],
+        ["python", "tools/run-standalone-tests.py", "fleet-manager", "--timeout", "180"],
         ["python", "tools/run-standalone-tests.py", "fleet-manager", "--timeout", "180"],
     ]
     assert not any(step.get("continue-on-error") for step in steps)
@@ -233,8 +262,22 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
     assert shlex.split(followthrough[0]["run"]) == [
         "python", "tools/run-standalone-tests.py", "fleet-manager", "--prepare", "--timeout", "180",
     ]
+    normal = workflow["jobs"]["gateway-normal-setup-" + platform]
+    assert normal["timeout-minutes"] == 6
+    assert normal["needs"] == "gateway-continuity-application-" + platform
+    normal_steps = [step for step in normal["steps"] if "run" in step]
+    assert [shlex.split(step["run"]) for step in normal_steps] == [
+        ["python", "tools/run-plugin-tests.py", "agent-worktrees", "--prepare-only"],
+        ["python", "tools/run-plugin-tests.py", "agent-worktrees",
+         "--test-file", "tests/test_repository_continuity.py",
+         "-k", "normal_ssh_setup or setup_status"],
+        ["python", "tools/run-standalone-tests.py", "fleet-manager", "--prepare", "--timeout", "180",
+         "--ephemeral-native-ssh-setup"],
+    ]
+    assert not any(step.get("continue-on-error") for step in normal_steps)
+    assert normal_steps[2]["env"]["COPILOT_EXTENSIONS_SSH_SETUP_NATIVE"] == "1"
     expressions = []
-    for step in steps + followthrough:
+    for step in steps + followthrough + [normal_steps[2]]:
         arguments = shlex.split(step["env"]["PYTEST_ADDOPTS"])
         expressions.append(Expression.compile(arguments[arguments.index("-k") + 1]))
     original = Expression.compile(
@@ -243,6 +286,7 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
         "or test_ssh_machine or test_machine_identity or test_credential_references"
         " or test_provider_owned_caller_reuses_enrollment_without_export_rotation_or_reenrollment"
         " or test_provider_caller_does_not_recreate_a_concurrently_removed_identity"
+        " or test_ssh_setup or normal_manager_engine_ssh_first_touch_repeat_update_and_stop"
     )
     nodes = {
         path.name + "::" + node.name
@@ -261,22 +305,31 @@ def test_gateway_native_groups_preserve_the_complete_disjoint_selection(platform
     assert groups[0] == {
         "test_gateway_host_distribution.py::test_selected_gateway_application_first_touch_repeat_update_and_stop",
     }
-    assert groups[0].isdisjoint(groups[1])
-    assert groups[2] == {
+    assert groups[1] == {
+        "test_gateway_host_distribution.py::"
+        "test_selected_ssh_application_first_touch_repeat_update_and_stop",
+    }
+    assert groups[3] == {
         "test_gateway_host_distribution.py::"
         "test_selected_continuity_ssh_application_first_touch_repeat_update_and_stop",
     }
-    assert groups[2].isdisjoint(groups[0] | groups[1])
-    assert groups[0] | groups[1] | groups[2] == selected(original)
-    assert "test_gateway_host_distribution.py::test_selected_ssh_application_first_touch_repeat_update_and_stop" in groups[1]
+    assert groups[4] == {
+        node for node in nodes if node.startswith("test_ssh_setup.py::")
+    } | {
+        "test_repository_ssh_setup_installed.py::"
+        "test_normal_manager_engine_ssh_first_touch_repeat_update_and_stop",
+    }
+    for index, group in enumerate(groups):
+        assert group.isdisjoint(set().union(*groups[:index]))
+    assert set().union(*groups) == selected(original)
     assert (
         "test_continuity_bootstrap.py::"
         "test_provider_owned_caller_reuses_enrollment_without_export_rotation_or_reenrollment"
-    ) in groups[1]
+    ) in groups[2]
     assert (
         "test_continuity_bootstrap.py::"
         "test_provider_caller_does_not_recreate_a_concurrently_removed_identity"
-    ) in groups[1]
+    ) in groups[2]
 
 
 @pytest.mark.parametrize(
@@ -482,6 +535,33 @@ def test_dispatch_maintenance_native_acceptance_is_manual_bounded_and_source_pin
         assert "--timeout 300 --plugin-timeout 360" in job["steps"][-1]["run"]
         assert "--allow-host-state" not in words
         assert not any(step.get("continue-on-error", False) for step in job["steps"])
+
+
+def test_optional_mux_safety_qualification_uses_disposable_pinned_windows_tooling() -> None:
+    workflow = yaml.safe_load(
+        (HERE.parent / ".github/workflows/installation-context-acceptance.yml").read_text()
+    )
+    for key, platform in (
+        ("interactive-completion-linux", "ubuntu-latest"),
+        ("interactive-completion-windows", "windows-latest"),
+    ):
+        job = workflow["jobs"][key]
+        assert job["if"] == "${{ inputs.interactive_completion }}"
+        assert job["runs-on"] == platform
+        steps = job["steps"]
+        tooling = next(step for step in steps if step.get("name", "").startswith("Prepare pinned PSMux"))
+        assert tooling["if"] == "${{ runner.os == 'Windows' }}"
+        assert "RUNNER_TEMP" in tooling["run"] and "GITHUB_PATH" in tooling["run"]
+        assert "v3.4.0/psmux-v3.4.0-windows-x64.zip" in tooling["run"]
+        assert "a66b6be7c13c6fa0dc3660a267b9e34eaa91a4eb7f07fbd55a0468018bd0f721" in tooling["run"]
+        assert "Get-FileHash" in tooling["run"]
+        native = next(step for step in steps if step.get("name") == "Qualify warm UI lifetime in a private native mux")
+        assert native["if"] == "${{ runner.os == 'Linux' || runner.os == 'Windows' }}"
+        assert "--allow-explicit-tiers" in native["run"]
+        assert "tests/native/test_warm_picker_lifetime.py" in native["run"]
+        assert "tests/test_mux_active_pane.py" in native["run"]
+        assert "--allow-host-state" not in native["run"]
+        assert "kill-server" not in native["run"]
 
 
 def test_displaced_native_sources_and_unavailable_portfolio_remain_explicit() -> None:
@@ -1000,6 +1080,7 @@ def test_full_derived_native_acceptance_has_explicit_bounded_matrix() -> None:
         "ssh-service-linux", "ssh-service-windows",
         "pr-artifacts-linux", "pr-artifacts-windows",
         "gateway-role-tunnels", "gateway-host-application-linux", "gateway-host-application-windows",
+        "gateway-continuity-application-linux", "gateway-continuity-application-windows",
         "dependency-compile-linux", "dependency-compile-windows",
         "source-build-linux", "source-build-windows",
         "source-cache-linux", "source-cache-windows",

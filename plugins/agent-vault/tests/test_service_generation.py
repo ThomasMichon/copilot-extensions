@@ -266,6 +266,55 @@ def test_native_generation_ping_does_not_resolve_configuration_or_backend(
     asyncio.run(exercise())
 
 
+def test_connections_close_does_not_wait_forever_on_stalled_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_vault.service_connections import VaultConnections
+
+    class StalledServer:
+        def close(self) -> None:
+            pass
+
+        async def wait_closed(self) -> None:
+            await asyncio.Event().wait()
+
+    vault = SimpleNamespace(_shutdown=False)
+    connections = VaultConnections(vault, None)
+    monkeypatch.setattr(VaultConnections, "SERVER_CLOSE_GRACE", .05)
+    cleaned = []
+
+    async def exercise() -> None:
+        await asyncio.wait_for(
+            connections.close([StalledServer()], [], lambda: cleaned.append(True)), 5,
+        )
+
+    asyncio.run(exercise())
+    assert cleaned == [True]
+
+
+def test_connections_close_still_retries_and_reports_server_close_errors() -> None:
+    from agent_vault.service_connections import VaultConnections
+
+    class FlakyServer:
+        attempts = 0
+
+        def close(self) -> None:
+            pass
+
+        async def wait_closed(self) -> None:
+            self.attempts += 1
+            if self.attempts == 1:
+                raise OSError("fixture close failure")
+
+    server = FlakyServer()
+    connections = VaultConnections(SimpleNamespace(_shutdown=False), None)
+    cleaned = []
+    with pytest.raises(OSError, match="fixture close failure"):
+        asyncio.run(connections.close([server], [], lambda: cleaned.append(True)))
+    assert server.attempts == 2
+    assert cleaned == [True]
+
+
 def test_native_generation_ping_accepts_legacy_full_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

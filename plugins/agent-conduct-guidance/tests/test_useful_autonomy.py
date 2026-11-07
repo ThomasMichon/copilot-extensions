@@ -82,6 +82,16 @@ def test_skill_and_record_are_discoverable_without_a_runtime():
     "reconcile unknown prior effects",
     '"Pause here" is not an alternative',
     "not automatic tool approval",
+    "not its narrowest past invocation",
+    "a failure followed by a reviewed fix is such a retry",
+    "accepted rerun caps",
+    "a pin or one-shot limit in the agent's only approving option is its proposal",
+    "seek class-level pre-clearance",
+    "managing its own PRs and the branches it created never needs an approval prompt",
+    "push or force-push its own branch",
+    "re-request review and reply to threads",
+    "A mechanical rebase or conflict-only push is not a new revision of intent",
+    "caps bind intent-changing revisions",
 ])
 def test_kernel_preserves_useful_work_and_real_authority_boundaries(clause):
     assert clause in " ".join(_TEMPLATE.read_text().split())
@@ -111,6 +121,45 @@ def test_kernel_preserves_useful_work_and_real_authority_boundaries(clause):
     (
         "Original approval evidence is missing or unreadable",
         "Name the affected gap, use bounded evidence recovery and continue other authorized work.",
+    ),
+    (
+        "Agent wrote a single attempt or revision pin into its own question and the operator "
+        "chose the only approving option",
+        "Record it as an agent-proposed precaution, not an operator pin; reuse the granted class "
+        "within its effects.",
+    ),
+    (
+        "A run under a cleared class fails and a reviewed fix lands",
+        "Treat the rerun as an ordinary bounded retry; refresh execution evidence instead of "
+        "asking again.",
+    ),
+    (
+        "The same operation class would need approval a second time",
+        "Ask once for class-level pre-clearance with a bounded rerun policy, not per invocation.",
+    ),
+    (
+        "Operator accepts a class-level rerun policy with a run cap",
+        "The cap binds as granted scope; ask for an amendment before exceeding it.",
+    ),
+    (
+        "Author agent's own approved PR conflicts with its target branch",
+        "Rebase its own branch, resolve the understood conflict, regenerate derived artifacts "
+        "and push without an approval prompt; required review and CI apply to the new head.",
+    ),
+    (
+        "A mechanical rebase or conflict-only push meets a review-round, revision or attempt cap",
+        "Do not count it against the cap; caps bind intent-changing revisions.",
+    ),
+    (
+        "Agent drafts a how-to-proceed question whose options are all narrow "
+        '("exact", "one", "only", "read-only", a revision pin)',
+        "Rewrite it: recommend the broadest option within the requested authority, add a "
+        "standing option if it can recur and keep narrower options beside it with a named risk.",
+    ),
+    (
+        "Operator picks a narrower option offered beside a broader one",
+        "The narrowing binds; record it as operator-chosen and ask once at class level if the "
+        "work later needs more.",
     ),
 ])
 def test_record_preserves_explicit_decision_cases(situation, required):
@@ -142,3 +191,30 @@ def test_blocking_question_follows_decision_preparation_not_presence_polling():
         "not a daemon, approval renewal",
     ):
         assert clause in packet.lower()
+
+
+def test_skill_checks_recorded_grants_and_limit_origin_before_asking():
+    skill = " ".join(_SKILL.read_text().split())
+    for clause in (
+        "Before asking for approval of an operation, run this self-check",
+        "Classify each recorded revision pin or one-shot limit by origin",
+        "Accepted rerun caps, budgets and deadlines bind as granted scope",
+        "only agent-proposed limits stand in the way",
+        "Offer narrower one-shot or revision-pinned options only as clearly labeled alternatives",
+        "Worked example: repeated qualification runs",
+    ):
+        assert clause in skill
+
+
+def test_skill_treats_own_pr_maintenance_as_delivery_not_a_new_revision():
+    skill = " ".join(_SKILL.read_text().split())
+    for clause in (
+        "never needs an operator approval prompt",
+        "pushing or force-pushing its own branch",
+        "regenerating derived artifacts",
+        "re-requesting review and replying to review threads",
+        "does not count against any review-round, revision or attempt cap",
+        "Branches and PRs the agent did not create stay with their owners",
+        "Worked example: rebasing an approved PR",
+    ):
+        assert clause in skill

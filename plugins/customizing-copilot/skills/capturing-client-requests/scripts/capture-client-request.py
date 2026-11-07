@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import ExitStack
 import hmac
 import json
 import math
@@ -18,14 +19,16 @@ import sys
 import threading
 import time
 from typing import BinaryIO
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from snapshot_artifacts import local_output, reserve_output, write_report
+from snapshot_inventory import copilot_home
 from snapshot_preferences import PreferenceError, resolve_preferences
 from snapshot_report import analyze_file
+from snapshot_rounds import GuidanceSnapshot, MAX_ROUNDS
 
 MAX_BODY_BYTES = 16 * 1024 * 1024
 REPLY = "LOCAL_REQUEST_CAPTURE_COMPLETE"
@@ -39,10 +42,19 @@ def authorization(key: str) -> str:
 class CaptureServer(HTTPServer):
     allow_reuse_address = False
 
-    def __init__(self, output: BinaryIO, key: str, deadline: float):
+    def __init__(
+        self, output: BinaryIO, key: str, deadline: float, *,
+        snapshot: GuidanceSnapshot | None = None,
+        round_outputs: list[tuple[Path, BinaryIO]] | None = None,
+        round_timeout: float = 60,
+    ):
         self.output = output
         self.key = key
-        self.deadline = deadline
+        self.overall_deadline = deadline
+        self.round_timeout = round_timeout
+        self.snapshot = snapshot
+        self.round_outputs = round_outputs or []
+        self.deadline = min(deadline, time.monotonic() + round_timeout) if snapshot else deadline
         self.captured_bytes = 0
         self.failure: str | None = None
         self.finished = threading.Event()
@@ -69,6 +81,10 @@ class CaptureServer(HTTPServer):
     def serve_capture(self) -> None:
         while not self.finished.is_set() and time.monotonic() < self.deadline:
             self.handle_request()
+        if not self.finished.is_set() and self.snapshot:
+            self.failure = "round_timeout"
+            self.snapshot.finish(self.failure)
+            self.finished.set()
 
     def close_capture(self, worker: threading.Thread) -> None:
         self.finished.set()
@@ -152,9 +168,20 @@ class CaptureHandler(BaseHTTPRequestHandler):
         ):
             self._reject(400, "unsupported_request_shape")
             return
-        self.server.output.write(body)
-        self.server.output.flush()
-        self.server.captured_bytes = len(body)
+        snapshot = self.server.snapshot
+        message = {"role": "assistant", "content": REPLY}
+        output = self.server.output
+        if snapshot:
+            if len(snapshot.rounds) >= MAX_ROUNDS or snapshot.finished:
+                self._reject(400, "round_limit")
+                return
+            capture_path, output = self.server.round_outputs[len(snapshot.rounds)]
+        output.write(body)
+        output.flush()
+        self.server.captured_bytes += len(body)
+        if snapshot:
+            message = snapshot.receive(payload, len(body), capture_path)
+        terminal = "tool_calls" not in message
         response = {
             "id": "local-capture",
             "object": "chat.completion",
@@ -162,14 +189,16 @@ class CaptureHandler(BaseHTTPRequestHandler):
             "model": payload["model"],
             "choices": [{
                 "index": 0,
-                "message": {"role": "assistant", "content": REPLY},
-                "finish_reason": "stop",
+                "message": message,
+                "finish_reason": "stop" if terminal else "tool_calls",
             }],
         }
         streaming = payload.get("stream", False)
         if streaming:
             response["object"] = "chat.completion.chunk"
             response["choices"][0]["delta"] = response["choices"][0].pop("message")
+            for index, call in enumerate(message.get("tool_calls", [])):
+                call["index"] = index
             encoded = ("data: " + json.dumps(response) + "\n\ndata: [DONE]\n\n").encode()
         else:
             encoded = json.dumps(response).encode()
@@ -183,7 +212,12 @@ class CaptureHandler(BaseHTTPRequestHandler):
         except OSError:
             self.server.failure = "response_delivery_failed"
         finally:
-            self.server.finished.set()
+            if terminal or self.server.failure:
+                self.server.finished.set()
+            else:
+                self.server.deadline = min(
+                    self.server.overall_deadline, time.monotonic() + self.server.round_timeout,
+                )
 
     def do_GET(self) -> None:
         self._reject(405, "unexpected_method")
@@ -218,14 +252,20 @@ def capture(
     prompt: str, model: str, timeout: float,
     reasoning_effort: str | None = None, context: str | None = None,
     session_id: str | None = None,
+    load_session_guidance: bool = False, round_timeout: float = 60,
 ) -> dict[str, object]:
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("timeout must be finite and positive")
+    if not math.isfinite(round_timeout) or round_timeout <= 0:
+        raise ValueError("round timeout must be finite and positive")
+    if load_session_guidance and (
+        session_id is None or str(UUID(session_id)) != session_id
+    ):
+        raise ValueError("multi-round capture requires an owned UUID session")
     cwd = working_directory.resolve(strict=True)
     if not cwd.is_dir():
         raise ValueError("working directory must be a directory")
     output_path = local_output(output_path)
-    descriptor = os.open(output_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     result: dict[str, object] = {
         "schema": "copilot-extensions.local-request-capture",
         "version": 1,
@@ -236,11 +276,28 @@ def capture(
     server = None
     worker = None
     child = None
+    outputs = []
+    snapshot = None
     try:
-        with os.fdopen(descriptor, "wb") as output:
+        with ExitStack() as stack:
+            paths = [output_path]
+            if load_session_guidance:
+                paths.extend(
+                    output_path.with_name(f"{output_path.stem}.round-{index}{output_path.suffix}")
+                    for index in range(2, MAX_ROUNDS + 1)
+                )
+                snapshot = GuidanceSnapshot(
+                    copilot_home(working_directory=cwd) / "session-state" / session_id / "instructions"
+                )
+            for path in paths:
+                output = stack.enter_context(os.fdopen(reserve_output(path), "wb"))
+                outputs.append((path, output))
             key = secrets.token_urlsafe(32)
             deadline = time.monotonic() + timeout
-            server = CaptureServer(output, key, deadline)
+            server = CaptureServer(
+                outputs[0][1], key, deadline, snapshot=snapshot,
+                round_outputs=outputs, round_timeout=round_timeout,
+            )
             worker = threading.Thread(target=server.serve_capture, daemon=True)
             worker.start()
             argv = [
@@ -253,6 +310,8 @@ def capture(
             if session_id is not None:
                 argv.append(f"--session-id={session_id}")
                 result["session_id"] = session_id
+            if load_session_guidance:
+                argv.extend(["--allow-tool", "glob", "--allow-tool", "view"])
             # headless-guard: allow standalone payload has no installed process runtime
             child = subprocess.Popen(
                 argv, cwd=cwd,
@@ -261,9 +320,15 @@ def capture(
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
             )
             try:
-                child.wait(timeout=max(0.01, deadline - time.monotonic()))
+                while True:
+                    try:
+                        child.wait(timeout=max(0.01, min(0.1, deadline - time.monotonic())))
+                        break
+                    except subprocess.TimeoutExpired:
+                        if time.monotonic() >= deadline or server.failure:
+                            raise
             except subprocess.TimeoutExpired:
-                result["error"] = "client_timeout"
+                result["error"] = server.failure or "client_timeout"
             else:
                 result["client_exit_code"] = child.returncode
                 if child.returncode != 0:
@@ -274,6 +339,8 @@ def capture(
                     result["error"] = server.failure or "no_request"
                 elif server.failure:
                     result["error"] = server.failure
+                elif snapshot and snapshot.state != "complete":
+                    result["error"] = snapshot.reason or "incomplete_guidance_snapshot"
                 else:
                     result["status"] = "captured"
             finally:
@@ -283,11 +350,16 @@ def capture(
                 server.close_capture(worker)
                 worker = None
             result["captured_bytes"] = server.captured_bytes
+            if snapshot:
+                if not snapshot.finished:
+                    snapshot.finish(str(result.get("error", "incomplete_guidance_snapshot")))
+                result["multi_round"] = snapshot.report()
     finally:
         if server is not None and worker is not None:
             server.close_capture(worker)
-        if server is None or server.captured_bytes == 0:
-            output_path.unlink()
+        for path, output in outputs:
+            if path.stat().st_size == 0:
+                path.unlink()
     return result
 
 
@@ -304,6 +376,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--reasoning-effort", help="override the operator's current effortLevel")
     parser.add_argument("--context", help="override the operator's current contextTier")
     parser.add_argument("--timeout-seconds", type=float, default=300)
+    parser.add_argument("--load-session-guidance", action="store_true",
+                        help="capture up to three requests using native glob/view calls")
+    parser.add_argument("--round-timeout-seconds", type=float, default=60)
     parser.add_argument("--agent-worktrees-command", help="catalog command for registry-source inventory")
     args = parser.parse_args(argv)
     executable = shutil.which(args.copilot_command)
@@ -330,14 +405,20 @@ def main(argv: list[str] | None = None) -> int:
             model=preferences["model"], timeout=args.timeout_seconds,
             reasoning_effort=preferences["reasoning_effort"], context=preferences["context"],
             session_id=session_id,
+            load_session_guidance=args.load_session_guidance,
+            round_timeout=args.round_timeout_seconds,
         )
         result["launch_preferences"] = preferences
-        if result["status"] == "captured":
+        if result["status"] == "captured" or result.get("multi_round", {}).get("rounds"):
+            rounds = result.get("multi_round", {}).get("rounds", [])
+            analysis_input = Path(rounds[-1]["capture_path"]) if rounds else output
             report = analyze_file(
-                output, args.working_directory, session_id=session_id,
+                analysis_input, args.working_directory, session_id=session_id,
                 agent_worktrees_command=args.agent_worktrees_command,
                 launch_preferences=preferences,
             )
+            if "multi_round" in result:
+                report["multi_round"] = result["multi_round"]
             write_report(descriptor, report)
             report_written = True
             result["analysis_path"] = str(report_path)

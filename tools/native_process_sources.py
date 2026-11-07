@@ -22,8 +22,9 @@ TOOLS = (
     "native_process_sources.py", "native_process_stage.py", "native_process_qualification.py",
     "native_process_artifacts.py",
     "native_qualification_receiver.py", "native_qualification_contract.py",
-    "plugin_test_containment.py", "plugin_test_environment.py",
+    "plugin_test_containment.py", "plugin_test_lifecycle.py", "plugin_test_environment.py",
     "plugin_test_containment_posix.py", "plugin_test_containment_observation.py",
+    "plugin_test_containment_darwin.py",
     "native_test_paths.py", LAUNCHER,
 )
 SDK_HELPERS = (

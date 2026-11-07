@@ -271,25 +271,9 @@ class WorktreesView:
     def build_data(self, add, width, sel, *, deferred=False):
         eng = self._eng
         btn_focus = sel == ("BTN", 0)
-        readiness = getattr(eng, "_knowledge_readiness", None)
-        if isinstance(readiness, dict) and readiness.get("ready") is not True:
-            message = (
-                "Knowledge binding is required before an ordinary New task."
-                if readiness.get("code") == "knowledge_binding_required" else
-                "Knowledge readiness is unavailable; inspect Configuration before New."
-            )
-            add(Text(f"  {message}", style=C_WARN))
         from .source_read_notices import worktree_read_feedback
-        notices = worktree_read_feedback(eng)
+        notices = [notice for notice in worktree_read_feedback(eng) if not notice.cached]
         for notice in notices[:6]:
-            if notice.cached:
-                status = (
-                    "Refreshing" if notice.state == "loading" else
-                    "Updates paused · connection unavailable" if notice.failure_kind == "connection"
-                    else "Updates paused · refresh failed"
-                )
-                add(Text(f"  {notice.label} · {status} · showing last loaded worktrees", style=C_DIM))
-                continue
             if notice.state == "loading":
                 add(Text(f"  {notice.loading_frame} Loading worktrees · {notice.label}", style=C_LOAD))
                 continue
@@ -304,10 +288,41 @@ class WorktreesView:
             add(Text(""))
         if len(notices) > 6:
             add(Text(f"  +{len(notices) - 6} other sources; select a source to inspect.", style=C_DIM))
-        if notices and not any(notice.cached for notice in notices) and (
-            not eng.is_all() or not eng._scope_data()
-        ):
+        if notices and (not eng.is_all() or not eng._scope_data()):
             return
+        self._build_rows(add, width, sel, btn_focus, deferred=deferred)
+
+    def notice_lines(self):
+        """Two reserved rows, independent of the scrolling list and its cursor."""
+        eng = self._eng
+        lines = [Text(""), Text("")]
+        readiness = getattr(eng, "_knowledge_readiness", None)
+        if isinstance(readiness, dict) and readiness.get("ready") is not True:
+            message = (
+                "Checking Knowledge setup..."
+                if readiness.get("code") == "loading" else
+                "Knowledge binding is required before an ordinary New task."
+                if readiness.get("code") == "knowledge_binding_required" else
+                "Knowledge readiness is unavailable; inspect Configuration before New."
+            )
+            lines[0] = Text(f"  {message}", style=C_DIM)
+        from .source_read_notices import worktree_read_feedback
+        notices = [notice for notice in worktree_read_feedback(eng) if notice.cached]
+        if notices:
+            notice = next((notice for notice in notices if notice.state != "loading"), notices[0])
+            status = (
+                "Refreshing" if notice.state == "loading" else
+                "Updates paused · connection unavailable" if notice.failure_kind == "connection"
+                else "Updates paused · refresh failed"
+            )
+            extra = f" · +{len(notices) - 1} sources" if len(notices) > 1 else ""
+            lines[1] = Text(
+                f"  {notice.label} · {status} · showing last loaded worktrees{extra}", style=C_DIM,
+            )
+        return lines
+
+    def _build_rows(self, add, width, sel, btn_focus, *, deferred=False):
+        eng = self._eng
         cols, sections = eng.current_list_visible()
         worker_index = eng._worktree_supervised_workers_index(
             [rec for _label, rows in sections for rec in rows])

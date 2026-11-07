@@ -240,6 +240,18 @@ def start(
         task_id=task.get("id"), generation=task["generation"], reservation_key=key,
         secrets={"TASK_PROMPT_SECRET": assignment or "", "STARTUP_PROMPT_SECRET": prompt},
     )
+
+    def run(
+        argv: list[str], *, prompt_input: str | None = None, read_only: bool = False,
+    ) -> subprocess.CompletedProcess[str]:
+        from .ordinary_bridge_diagnostics import run as observed_run
+
+        diagnostics.secrets["BRIDGE_INPUT_SECRET"] = prompt_input or ""
+        return observed_run(
+            prefix, argv, diagnostics=diagnostics, runner=subprocess.run,
+            prompt_input=prompt_input, read_only=read_only, timeout=timeout,
+        )
+
     try:
         with diagnostics.stage("ordinary_read_reservation"):
             reservation = client.get_reservation(key)
@@ -266,17 +278,24 @@ def start(
         worktree_writer = retained_writer
     elif info and (worktree_writer is not None or REQUIREMENT in info):
         raise BridgeCarriedSessionBusy("historical ordinary agent has no original writer requirement")
-    if reservation.get("task_relationship_required") is True and worktree_writer is None:
-        raise BridgeCarriedSessionBusy("governed ordinary startup lacks its qualified writer requirement")
-    writer_admission = (
-        OrdinaryWriterAdmission(worktree_writer, reservation) if worktree_writer is not None else None
+    prepare_writer = (
+        reservation.get("task_relationship_required") is True and not writer_retained
+        and execution_machine is not None and not info
+        and not reservation.get("worktree") and not reservation.get("session_handle")
+        and reservation.get("task_relationship_event_id") is None
     )
-    if writer_admission is not None:
+    if reservation.get("task_relationship_required") is True and worktree_writer is None and not prepare_writer:
+        raise BridgeCarriedSessionBusy("governed ordinary startup lacks its qualified writer requirement")
+    if worktree_writer is not None or prepare_writer:
         try:
             support = client.pool_placement_contract()
             versions = support.get("ordinary_writer_requirement_versions")
             if not isinstance(versions, list) or not any(type(v) is int and v == 1 for v in versions):
                 raise TaskError("coordinator lacks original ordinary writer requirement storage")
+            if prepare_writer:
+                versions = support.get("prepared_writer_requirement_versions")
+                if not isinstance(versions, list) or not any(type(v) is int and v == 1 for v in versions):
+                    raise TaskError("coordinator lacks prepared ordinary writer requirement storage")
         except (AttributeError, DispatchError, TaskError) as exc:
             raise BridgeCarriedSessionBusy(f"ordinary writer storage is unqualified: {exc}") from exc
     if execution_machine is not None:
@@ -306,13 +325,25 @@ def start(
     if execution_machine is not None and not info:
         from .ordinary_pool_startup import prepare_owned_workspace
         try:
+            selected_writer = OrdinaryWriterAdmission.selected_writer(run) if prepare_writer else None
+            if prepare_writer and worktree_writer is not None and (
+                writer_requirement(worktree_writer)["identity"] != selected_writer
+            ):
+                raise TaskError("ordinary Bridge selected writer differs from the expected writer")
             reservation = prepare_owned_workspace(
                 task, reservation, client=client, project=project,
                 machine=execution_machine, no_pair=no_pair, timeout=timeout,
+                **({"writer_identity": selected_writer, "worktree_writer": worktree_writer}
+                   if prepare_writer else {}),
             )
+            if prepare_writer:
+                worktree_writer = writer_requirement(reservation.get(REQUIREMENT))
         except (SpawnPreparationRetained, OSError, subprocess.SubprocessError, DispatchError,
-                RuntimeError) as exc:
+                RuntimeError, TaskError) as exc:
             raise CreatedAgentUnrecorded(f"ordinary workspace preparation retained: {exc}") from exc
+    writer_admission = (
+        OrdinaryWriterAdmission(worktree_writer, reservation) if worktree_writer is not None else None
+    )
     assigned = bool(reservation.get("worktree") and not info) or bool(
         info and info.get("fact_kind") == "resumed"
     )
@@ -333,17 +364,6 @@ def start(
             bind_allocation(client, reservation, project)
         except SpawnPreparationRetained as exc:
             raise CreatedAgentUnrecorded(str(exc)) from exc
-
-    def run(
-        argv: list[str], *, prompt_input: str | None = None, read_only: bool = False,
-    ) -> subprocess.CompletedProcess[str]:
-        from .ordinary_bridge_diagnostics import run as observed_run
-
-        diagnostics.secrets["BRIDGE_INPUT_SECRET"] = prompt_input or ""
-        return observed_run(
-            prefix, argv, diagnostics=diagnostics, runner=subprocess.run,
-            prompt_input=prompt_input, read_only=read_only, timeout=timeout,
-        )
 
     def resumed_info(session_id: str) -> dict:
         if writer_admission is not None:

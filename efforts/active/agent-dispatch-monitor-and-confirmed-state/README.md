@@ -17,8 +17,9 @@ queue, supervisor, native-session, Worktrees or resource owners.
 The effort remains **Active**. Passing one source phase or PR is not completion.
 
 Current source credit: first-proposal guarded submission merged in #10608;
-same-owner rejected-proposal lineage merged in #10674. The ordinary whole-stack
-case still fails at missing protected assignment/preparation integration.
+same-owner rejected-proposal lineage merged in #10674. The ordinary protected
+completion consumer now integrates those shared queue owners in source;
+installed whole-stack submission and the full lifecycle remain unqualified.
 Resident-only inspection and coherent delegated lineage selection are available
 at their source boundaries. Executing-build and delegated-selection observation
 source subsequently merged in #10782. Actual running selections and the complete
@@ -70,8 +71,22 @@ gap, not actual installed-owner or complete-cohort admission.
 The conditional ordinary writer consumer subsequently merged in #11063.
 It retains the original requirement before create, uses the shipped CLI
 discovery command and recovers the original key after a lost reply or moved
-selector. This is source credit; explicit-resume per-attempt support and
-complete-cohort assembly remain open before ordinary activation.
+selector. Required exact-session resume subsequently merged in #11078,
+including endpoint-pinned per-attempt capability checks under concurrent
+startup-observer cutover. This is source credit; complete-cohort assembly
+remains open before ordinary activation.
+Original prepared-reservation correlation subsequently merged in #11105.
+Queue reconciliation now checks that exact original reservation before each
+owner call; this source prerequisite does not admit the actual writer cohort.
+Explicit ordinary coordinator configuration now has a conditional trusted
+admission-factory source path, merged in #11117. It retains both independent callbacks and fails
+closed for invalid selections; no permissive policy is provided or installed.
+Prepared-workspace provider expansion merged in #11130, retaining the expected writer
+before the first relationship under its original nonce and request. It does
+not qualify the cohort. The consumer merged in #11145 and derives the new-workspace
+expectation from actual Bridge selection and retains the prepared nonce before
+the first relationship, reconciling pending attachment under its original
+expectation on retry. No complete-cohort admission policy is supplied.
 Next, assemble generation-aware independent admission of those actual owners
 before ordinary submission consumers,
 then post-stop same-native recovery and the complete running

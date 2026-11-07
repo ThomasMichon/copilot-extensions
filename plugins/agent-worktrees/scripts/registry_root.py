@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 import os
 import platform
@@ -32,6 +33,8 @@ def _legacy_home(environment: Mapping[str, str]) -> Path:
 def _payload_root(
     environment: Mapping[str, str],
     explicit: str | os.PathLike[str] | None,
+    *,
+    manifest_witness: dict[str, str] | None = None,
 ) -> Path:
     raw = explicit
     if raw is None:
@@ -47,7 +50,8 @@ def _payload_root(
             "the owning agent-worktrees payload root is unavailable"
         )
     try:
-        manifest = json.loads((root / "plugin.json").read_text(encoding="utf-8"))
+        content = (root / "plugin.json").read_bytes()
+        manifest = json.loads(content.decode("utf-8"))
     except (OSError, UnicodeError, ValueError, TypeError) as error:
         raise RegistryRootError(
             "the owning agent-worktrees payload manifest is invalid"
@@ -56,7 +60,10 @@ def _payload_root(
         raise RegistryRootError(
             "the selected payload is not agent-worktrees"
         )
-    return root.resolve()
+    root = root.resolve()
+    if manifest_witness is not None and len(content) <= 1024 * 1024:
+        manifest_witness[str(root / "plugin.json")] = hashlib.sha256(content).hexdigest()
+    return root
 
 
 def _load_context_helper(payload_root: Path) -> ModuleType:
@@ -136,6 +143,7 @@ def resolve_registry_context(
     *,
     payload_root: str | os.PathLike[str] | None = None,
     environment: Mapping[str, str] | None = None,
+    capture_membership: bool = False,
 ) -> dict:
     """Return the validated explicit agent-worktrees installation context."""
     environment = environment if environment is not None else os.environ
@@ -155,19 +163,100 @@ def resolve_registry_context(
             "COPILOT_EXTENSIONS_CONTEXT is outside the installation-cell layout"
         ) from error
 
-    owner = _payload_root(environment, payload_root)
+    manifest_witness = {}
+    owner = (
+        _payload_root(environment, payload_root, manifest_witness=manifest_witness)
+        if capture_membership else _payload_root(environment, payload_root)
+    )
     helper = _load_context_helper(owner)
+    roots = {}
+    declared = {name: [] for name in ("root", "pluginRoot", "namespaceReceipt")}
+    original_string = getattr(helper, "_string_property", None)
+    if capture_membership and callable(original_string):
+        def capture_string(value, name, default=""):
+            result = original_string(value, name, default)
+            if name in declared:
+                declared[name].append(result)
+            return result
+
+        helper._string_property = capture_string
+    original_root = getattr(helper, "_resolve_relative_root", None)
+    if capture_membership and callable(original_root):
+        def capture_root(plugin_root, relative, name):
+            resolved_root = original_root(plugin_root, relative, name)
+            roots[name] = {
+                "path": str(plugin_root / relative),
+                "resolved": str(resolved_root),
+            }
+            return resolved_root
+
+        helper._resolve_relative_root = capture_root
     try:
-        resolved = helper.resolve_context(
-            context=pointer,
-            plugin_id=_PLUGIN_ID,
-            payload_root=owner,
-            durable_home=durable_home,
-            environment=environment,
-        )
+        def resolve():
+            value = helper.resolve_context(
+                context=pointer,
+                plugin_id=_PLUGIN_ID,
+                payload_root=owner,
+                durable_home=durable_home,
+                environment=environment,
+            )
+            source = value.get("source")
+            declared_paths = {}
+            for name, target in (
+                ("root", "payloadRoot"), ("pluginRoot", "pluginRoot"),
+                ("namespaceReceipt", "namespaceReceipt"),
+            ):
+                captured = declared[name]
+                if (
+                    len(captured) == 1 and isinstance(captured[0], str)
+                    and os.path.normcase(captured[0]) == os.path.normcase(value[target])
+                ):
+                    declared_paths[target] = captured[0]
+            if capture_membership and isinstance(source, dict) and source.get("kind") in {
+                "github", "git", "opaque",
+            }:
+                cache = getattr(helper, "_VALIDATED_FILE_SHA256", None)
+                getter = getattr(cache, "get", None)
+                files = getter() if callable(getter) else None
+                if isinstance(files, dict):
+                    paths = [
+                        value["namespaceReceipt"], value["installReceipt"],
+                    ]
+                    witnesses = dict(manifest_witness)
+                    for path in paths:
+                        key = os.path.normcase(os.path.abspath(path))
+                        witness = files.get(key)
+                        metadata = getattr(witness, "metadata", None)
+                        digest = getattr(witness, "digest", None)
+                        if (
+                            not isinstance(metadata, (tuple, list)) or len(metadata) < 2
+                            or type(metadata[1]) is not int or not 0 <= metadata[1] <= 1024 * 1024
+                            or not isinstance(digest, str) or len(digest) != 64
+                            or any(char not in "0123456789abcdef" for char in digest)
+                        ):
+                            break
+                        witnesses[path] = digest
+                    if len(witnesses) == 3 and len(declared_paths) == 3 and set(roots) == {
+                        "versions", "snapshots", "state", "run", "logs", "cache", "launchers",
+                    }:
+                        value = {
+                            **value, "membershipFiles": witnesses, "membershipRoots": roots,
+                            "membershipSourceKind": source["kind"],
+                            "membershipDeclaredPaths": declared_paths,
+                        }
+            return value
+
+        scope = getattr(helper, "_validation_scope", None)
+        # Borrow digests of the bytes the original resolver actually validated.
+        resolved = scope(resolve)() if capture_membership and callable(scope) else resolve()
         root = Path(resolved["pluginRoot"])
     except Exception as error:
         raise RegistryRootError(str(error)) from error
+    finally:
+        if capture_membership and callable(original_string):
+            helper._string_property = original_string
+        if capture_membership and callable(original_root):
+            helper._resolve_relative_root = original_root
     if not root.is_absolute():
         raise RegistryRootError(
             "installation-context validation returned a relative plugin root"

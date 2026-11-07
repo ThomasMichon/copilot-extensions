@@ -104,6 +104,134 @@ def test_interactive_daemons_require_an_explicit_runner_policy(tmp_path, monkeyp
         )
 
 
+@pytest.mark.parametrize("refusal", ["host", "self-hosted", "outside", "contained"])
+def test_native_application_refuses_without_disposable_owner(tmp_path, monkeypatch, refusal):
+    monkeypatch.setenv("GITHUB_ACTIONS", "false" if refusal == "host" else "true")
+    monkeypatch.setenv(
+        "RUNNER_ENVIRONMENT", "self-hosted" if refusal == "self-hosted" else "github-hosted",
+    )
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    monkeypatch.setenv(plugin_test_containment.CONTAINED_ENV, "1" if refusal == "contained" else "0")
+    monkeypatch.setattr(
+        plugin_test_containment, "daemon_test_lifecycle",
+        lambda **kwargs: pytest.fail("native refusal must precede lifecycle or process effects"),
+    )
+    with pytest.raises(plugin_test_containment.ContainmentError, match="disposable"):
+        plugin_test_containment.run_contained(
+            ["unused"], cwd=tmp_path, env={}, limits=Limits(), native_application=True,
+            sandbox=tmp_path.parent if refusal == "outside" else tmp_path,
+        )
+
+
+@pytest.mark.parametrize("cleanup", ["settled", "held", "error"])
+@pytest.mark.parametrize("controller_failure", [False, True])
+def test_native_application_retains_runner_lease_limits_and_cleanup(
+    tmp_path, monkeypatch, cleanup, controller_failure,
+):
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+    from tools import plugin_test_lifecycle
+
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    monkeypatch.delenv(plugin_test_containment.CONTAINED_ENV, raising=False)
+    monkeypatch.setattr(plugin_test_lifecycle, "_native_scope_environment", lambda env: env)
+    events = []
+    limits = Limits(wall_seconds=180)
+    environment = {plugin_test_containment.CONTAINED_ENV: "1", "KEEP": "yes"}
+    original = plugin_test_containment.ContainmentError("controller failed")
+    teardown_error = OSError("cleanup could not inspect the daemon registry")
+
+    @contextmanager
+    def lifecycle(**kwargs):
+        events.append("lease")
+        try:
+            yield {"LEASE": "owned"}
+        finally:
+            events.append("cleanup")
+            if cleanup == "error":
+                raise teardown_error
+            kwargs["cleanup_results"].append(SimpleNamespace(status=cleanup))
+
+    def run(command, **kwargs):
+        assert kwargs["limits"] is limits and kwargs["native_application"] is True
+        assert kwargs["env"] == {"KEEP": "yes", "LEASE": "owned"}
+        events.append("run")
+        if controller_failure:
+            raise original
+        return 0
+
+    monkeypatch.setattr(plugin_test_containment, "daemon_test_lifecycle", lifecycle)
+    monkeypatch.setattr(plugin_test_containment, "_run_contained_process", run)
+    monkeypatch.setattr(plugin_test_containment, "_read_registry_environment", lambda: None)
+    monkeypatch.setattr(plugin_test_containment, "_registry_environment_drift", lambda _: [])
+    if cleanup != "settled":
+        with pytest.raises(plugin_test_containment.UnreapedProcessError, match="unsettled") as refused:
+            plugin_test_containment.run_contained(
+                ["unused"], cwd=tmp_path, env=environment, sandbox=tmp_path,
+                limits=limits, native_application=True,
+            )
+        assert refused.value.__cause__ is (
+            teardown_error if cleanup == "error" else original if controller_failure else None
+        )
+        if cleanup == "error" and controller_failure:
+            assert teardown_error.__context__ is original
+    elif controller_failure:
+        with pytest.raises(plugin_test_containment.ContainmentError) as refused:
+            plugin_test_containment.run_contained(
+                ["unused"], cwd=tmp_path, env=environment, sandbox=tmp_path,
+                limits=limits, native_application=True,
+            )
+        assert refused.value is original
+    else:
+        assert plugin_test_containment.run_contained(
+            ["unused"], cwd=tmp_path, env=environment, sandbox=tmp_path,
+            limits=limits, native_application=True,
+        ) == 0
+    assert events == ["lease", "run", "cleanup"]
+    assert environment[plugin_test_containment.CONTAINED_ENV] == "1"
+
+
+@pytest.mark.parametrize("failure", [None, "missing", "foreign", "ordinary"])
+def test_native_application_selects_only_the_existing_owned_user_bus(monkeypatch, failure):
+    import stat
+    from types import SimpleNamespace
+    from agent_procutil import linux_daemon_scope
+    from tools import plugin_test_lifecycle as lifecycle
+
+    class Bus:
+        def __init__(self, value):
+            assert value == "/run/user/1001/bus"
+            self.value = value
+
+        def __str__(self):
+            return self.value
+
+        def lstat(self):
+            if failure == "missing":
+                raise FileNotFoundError
+            return SimpleNamespace(
+                st_mode=stat.S_IFREG if failure == "ordinary" else stat.S_IFSOCK,
+                st_uid=1002 if failure == "foreign" else 1001,
+            )
+
+    monkeypatch.setattr(lifecycle, "sys", SimpleNamespace(platform="linux"))
+    monkeypatch.setattr(lifecycle, "os", SimpleNamespace(getuid=lambda: 1001))
+    monkeypatch.setattr(lifecycle, "Path", Bus)
+    monkeypatch.setattr(linux_daemon_scope, "caller_unit", lambda: "fixture.service")
+    environment = {"XDG_RUNTIME_DIR": "sandbox-run", "DBUS_SESSION_BUS_ADDRESS": "unselected"}
+    if failure:
+        with pytest.raises(ValueError, match="user-manager bus"):
+            lifecycle._native_scope_environment(environment)
+    else:
+        assert lifecycle._native_scope_environment(environment) == {
+            "XDG_RUNTIME_DIR": "sandbox-run",
+            "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1001/bus",
+        }
+    assert environment == {"XDG_RUNTIME_DIR": "sandbox-run", "DBUS_SESSION_BUS_ADDRESS": "unselected"}
+
+
 def test_runner_passes_pause_tolerant_policy_and_keeps_renewal_custody(tmp_path, monkeypatch):
     from contextlib import contextmanager
 
