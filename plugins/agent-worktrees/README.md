@@ -208,7 +208,8 @@ supervision, never a second installation writer.
 
 `update --inventory --json` advertises
 `project_controller_delegation` version 1 only when the running engine and
-its driver support a full project controller's custody-bound engine fallback.
+its driver belong to the selected installed slot and support a full project
+controller's custody-bound engine fallback.
 This is not evidence that other installed or running update writers are
 capable or quiescent, and it does not select an authority.
 

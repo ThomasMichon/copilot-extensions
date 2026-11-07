@@ -22,7 +22,17 @@ def delegation_capability():
     """Advertise only the selected runtime's usable driver-backed seam."""
     try:
         import update_driver
-    except ImportError:
+        from agent_procutil._daemon_instance_identity import runtime_slot_paths
+
+        prefix = Path(sys.prefix).resolve()
+        slot = runtime_slot_paths(prefix)
+        if (
+            slot is None or Path(slot[2]).resolve() != cfg.install_dir().resolve()
+            or not Path(__file__).resolve().is_relative_to(prefix)
+            or not Path(update_driver.__file__).resolve().is_relative_to(prefix)
+        ):
+            return None
+    except (AttributeError, ImportError, OSError, TypeError, ValueError):
         return None
     if (
         getattr(update_driver, "UPDATE_AUTHORITY_CAPABILITY", None) != "suite-update-authority/v1"

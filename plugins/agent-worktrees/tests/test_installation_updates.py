@@ -64,9 +64,24 @@ def test_inventory_is_read_only_and_does_not_confuse_versions(installed, monkeyp
     assert before == {p: p.read_bytes() for p in before}
 
 
+def installed_capability_runtime(tmp_path, monkeypatch):
+    from agent_worktrees import project_update_controller
+
+    root = tmp_path / "engine"
+    prefix = root / "versions" / "1.0"
+    monkeypatch.setattr(sys, "prefix", str(prefix))
+    monkeypatch.setattr(
+        project_update_controller, "__file__", str(prefix / "site" / "agent_worktrees" / "project_update_controller.py"),
+    )
+    monkeypatch.setattr(owner.config, "install_dir", lambda: root)
+    return prefix
+
+
 @pytest.mark.parametrize("capable", [False, True])
-def test_inventory_advertises_delegation_only_with_a_capable_driver(installed, monkeypatch, capable):
+def test_inventory_advertises_delegation_only_with_a_capable_driver(installed, monkeypatch, tmp_path, capable):
+    prefix = installed_capability_runtime(tmp_path, monkeypatch)
     driver = SimpleNamespace(
+        __file__=str(prefix / "site" / "update_driver" / "__init__.py"),
         UPDATE_AUTHORITY_CAPABILITY="suite-update-authority/v1" if capable else None,
         current_authority=lambda **_kwargs: None,
         borrowed_custody=lambda: None,
@@ -82,10 +97,34 @@ def test_inventory_advertises_delegation_only_with_a_capable_driver(installed, m
     } if capable else None)
 
 
-def test_inventory_does_not_advertise_an_incomplete_driver(installed, monkeypatch):
+def test_inventory_does_not_advertise_an_incomplete_driver(installed, monkeypatch, tmp_path):
+    prefix = installed_capability_runtime(tmp_path, monkeypatch)
     monkeypatch.setitem(sys.modules, "update_driver", SimpleNamespace(
+        __file__=str(prefix / "site" / "update_driver" / "__init__.py"),
         UPDATE_AUTHORITY_CAPABILITY="suite-update-authority/v1",
     ))
+    assert owner.inventory()["project_controller_delegation"] is None
+
+
+@pytest.mark.parametrize("foreign", ["controller", "driver", "installation"])
+def test_inventory_does_not_advertise_foreign_runtime_code(installed, monkeypatch, tmp_path, foreign):
+    from agent_worktrees import project_update_controller
+
+    prefix = installed_capability_runtime(tmp_path, monkeypatch)
+    driver = SimpleNamespace(
+        __file__=str(prefix / "site" / "update_driver" / "__init__.py"),
+        UPDATE_AUTHORITY_CAPABILITY="suite-update-authority/v1",
+        current_authority=lambda **_kwargs: None, borrowed_custody=lambda: None,
+        participant_environment=lambda: {}, status=lambda *_a, **_k: None,
+        runtime_command=lambda *_a, **_k: None,
+    )
+    monkeypatch.setitem(sys.modules, "update_driver", driver)
+    if foreign == "controller":
+        monkeypatch.setattr(project_update_controller, "__file__", str(tmp_path / "checkout" / "controller.py"))
+    elif foreign == "driver":
+        driver.__file__ = str(tmp_path / "checkout" / "driver.py")
+    else:
+        monkeypatch.setattr(owner.config, "install_dir", lambda: tmp_path / "other-engine")
     assert owner.inventory()["project_controller_delegation"] is None
 
 
