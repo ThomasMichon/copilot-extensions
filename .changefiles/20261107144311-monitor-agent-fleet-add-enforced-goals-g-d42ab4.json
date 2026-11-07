@@ -1,0 +1,9 @@
+{
+  "comment": "monitor-agent-fleet: add enforced goals (G1-G5) with per-sweep evidence and a self-improvement loop with a weak-point catalogue template",
+  "changes": [
+    {
+      "plugin": "agent-roles",
+      "type": "patch"
+    }
+  ]
+}

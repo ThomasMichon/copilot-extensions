@@ -37,6 +37,30 @@ recover a pre-clearance. Resolve exact commands from their owning session
 catalogs, not ambient PATH. Missing optional siblings are coverage gaps, not
 installation instructions.
 
+## Enforced goals
+
+Every sweep advances these goals, and its report shows evidence for each
+applicable one. **A sweep report that lacks evidence for an applicable goal is
+incomplete**, not healthy. A finite one-shot request ("are the agents on
+track?") gets one read-only sweep reported against G1-G4 only; **G5 applies
+only to a recorded recurring assignment**. The goals describe outcomes; they
+never widen the charter's mode, steering, answer or source-change authority.
+
+| # | Goal | Each sweep must show |
+|---|------|----------------------|
+| G1 | **Discover the fleet regularly** from every declared roster and topology source | A per-venue coverage line: read, or a gap with the literal error |
+| G2 | **Keep every target on-charter**: correct detours, tangents and loops | A disposition per live head (running, required wait, productive wait or waste) and, for every waste, a steer within scope or a recorded reason not to send one (in read-only mode, the recommended steer) |
+| G3 | **Find weak points in guidance, efforts and charters** that let agents drift, and propose fixes | Each new finding mapped to a [weak-point catalogue](assets/WEAK-POINTS.md) pattern with a proposed fix, or "no new pattern" |
+| G4 | **Find weak points in this monitor's own charter, skill and readers**, and recommend improvements | Reader corrections and monitor blind spots captured per [self-improvement](references/self-improvement.md), or "none" |
+| G5 | **Recur until confident** every target works under optimum guidance (recorded recurring assignments only) | Current cadence and consecutive healthy-sweep count; the confidence cadence relaxes only after the charter's required healthy sweeps (default two), and any waste finding returns it to the confidence cadence |
+
+Cadences and the healthy-sweep count are charter parameters; a consumer's
+adapter may override the defaults. The end state is **a fleet that stays
+on-charter without a monitor**: G3 and G4 exist to make the monitor's own work
+unnecessary. Under a recurring assignment, run until its recorded end
+condition and report confidence per goal; **never self-declare an open-ended
+assignment done**.
+
 ## 1. Establish the charter
 
 Fill [the charter](assets/CHARTER.md) in the existing canonical effort,
@@ -208,8 +232,9 @@ for a new target, a significant change, a suspected loop or missing context.
 Consume incremental ranges without changing another reader's cursor.
 
 For an assigned recurring watch, use the existing scheduler/event mechanism.
-Prefer expected completion/review events; choose the charter's active and
-parked cadences, not per-agent minute pollers, and observe early on the
+Prefer expected completion/review events; use the charter's confidence
+cadence until G5's healthy-sweep count is met, then its active and parked
+cadences, not per-agent minute pollers, and observe early on the
 watchdog checks' early triggers. Each cycle begins with the roster refresh
 above. Healthy agents get one log line, not a message. Preserve an explicit next observation and reason,
 batch unchanged waits, and stop the owned watch when its assignment ends.
@@ -222,15 +247,18 @@ audit's own reads and delegated work; disclose incomplete coverage rather than
 spending indefinitely reconstructing low-value history. The monitor must not
 become a second busy loop or consume the coordinator it is supporting.
 
-Learn as you go. Record each monitor difficulty (a reader that failed, a
-blind spot, a recurring worker pattern) as one line in the supervisory record
-during the sweep, never stopping the sweep to fix it. Report them as proposed
-improvements at the end of the sweep. Applying one is a source change, not
-observation: only with recorded source-change and publication authority, and
-through each owner's contribution flow, fold facility lessons into the
-consuming repository's adapter and promote lessons that apply to any
-repository to this skill's owner as a batched, anonymized change rather than
-one per observation.
+Learn as you go: improve the fleet, not just the agent, and improve the
+monitor itself (G3 and G4). Follow [self-improvement](references/self-improvement.md).
+Map every steer or waste finding to a weak-point pattern with a proposed
+guidance, effort or charter fix, and record each monitor difficulty (a reader
+that failed, a blind spot) as one tagged line in the supervisory record during
+the sweep, never stopping the sweep to fix it. Fold them at the end of the
+sweep and report them as proposed improvements. Applying one is a source
+change, not observation: only with recorded source-change and publication
+authority, and through each owner's contribution flow, fold consumer-specific
+lessons into the consuming repository's adapter and weak-point catalogue on one
+rolling change, and promote lessons that apply to any repository to this
+skill's owner as a batched, anonymized change rather than one per observation.
 
 Finish a finite sweep with a private per-agent report, ranked interventions and
 coverage limits. Report source changes, publication and deployment separately.
