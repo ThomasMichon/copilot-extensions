@@ -175,12 +175,29 @@ first committed final bytes, not a later origin/profile's candidate. Existing
 nonblocking lock contention refuses; reconcile the same key after it clears.
 An uncertain commit must be reconciled by that same original key.
 
-This is a **data-only prerequisite**, not automatic GUID allocation, a public
-producer capability or preparation provenance. The caller still supplies the
-already-prepared intent; actual policy/profile/source resolution and preparation
-remain outside the file lock. Allocation and producer integration are separate
-remaining work under the
+This is a **data-only prerequisite**, not a public producer capability or
+preparation provenance. `retain` still accepts the caller's already-prepared
+intent. Producer integration remains separate work under the
 [reviewed pre-approval contract](../../../efforts/active/durable-pr-watch-delegation/comment-intent-binding.md#durable-pre-approval-selection-and-allocation).
+
+The optional source-only `allocate(original, compose=..., expires_at=...,
+checkpoint=...)` creates fresh version-4 comment/write GUIDs for **new comments
+and replies**. Resolve actual policy, effective profile and source through their
+existing owners before calling it; `compose` must be a bound synchronous,
+bounded pure preparer, not a resolver or native/network IO callback. Under the
+same owner lock, allocation first reconciles the original key, then composes
+the exact final v2 bytes, validates the selected identities and commits before
+returning a preview. Restart, contention and lost results use `recover` or the
+same `allocate` key: neither invokes composition or allocates another identity
+when the original record already exists. Current-owner checks remain mandatory;
+recovery does not grant current policy permission.
+
+Bodyless votes allocate no GUIDs and create no filler comment. This automatic
+path refuses owned edits, including legacy edits, until their original
+logical/native binding is supplied by the actual protected source pipeline.
+The explicit caller-ID prepared path remains unchanged. This API adds no
+storage format, public request syntax, capability advertisement, callback
+loader, policy owner, publisher rollout or installed adoption.
 
 A retained selection is not execution-admitted. Existing execution inspection,
 attempt, receipt/projection and feedback-capture paths refuse it. Only
