@@ -598,3 +598,26 @@ def test_retained_foreign_platform_never_acquires_publication_authority(checkout
     with pytest.raises(pr_source_publication.SourcePublicationError, match="does not own"):
         pr_source_publication._caller(checkout.record.worktree_id, config)
     assert checkout.record.yaml_path.read_bytes() == before
+
+
+def test_native_relative_git_backpointer_retains_same_family_and_publication_authority(checkout):
+    from agent_worktrees import git_ops, pr_source_publication, retained_checkout, tracking
+
+    result = git_ops.git("worktree", "repair", "--relative-paths", str(checkout.source),
+                         cwd=checkout.anchor, check=False)
+    if result.returncode and "unknown option" in result.stderr:
+        pytest.skip("native Git does not support relative worktree repair")
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    administrative = Path(git_ops.git("rev-parse", "--absolute-git-dir", cwd=checkout.source).stdout.strip())
+    assert not Path((administrative / "gitdir").read_text().strip()).is_absolute()
+    config = replace(checkout.config, repos={"sample": replace(
+        checkout.config.default_repo, worktree_root=str(checkout.home / "future-allocation"),
+    )})
+    checkout.record.status = "active"
+    tracking.save_record(checkout.record)
+    assert retained_checkout.matches(checkout.record, config)
+    assert pr_source_publication._caller(checkout.record.worktree_id, config).worktree_path == str(checkout.source)
+    (administrative / "gitdir").write_text(os.path.relpath(checkout.home / "foreign" / ".git", administrative) + "\n")
+    assert retained_checkout.matches(checkout.record, config) is False
+    with pytest.raises(pr_source_publication.SourcePublicationError, match="does not own"):
+        pr_source_publication._caller(checkout.record.worktree_id, config)

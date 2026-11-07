@@ -40,9 +40,10 @@ def require_git_checkout(checkout: Path, anchor: Path, branch: str) -> None:
     administrative = Path(_git(checkout, "rev-parse", "--absolute-git-dir"))
     if administrative.parent.resolve() != Path(_git(anchor, *common)).resolve() / "worktrees":
         raise ValueError("retained checkout is not a linked checkout of the receiving anchor")
-    if Path((administrative / "gitdir").read_text(encoding="utf-8").strip()).resolve() != (
-        checkout / ".git"
-    ).resolve():
+    backpointer = Path((administrative / "gitdir").read_text(encoding="utf-8").strip())
+    if not backpointer.is_absolute():
+        backpointer = administrative / backpointer
+    if backpointer.resolve() != (checkout / ".git").resolve():
         raise ValueError("Git worktree registration points at another location")
 
 
