@@ -456,29 +456,6 @@ def test_passive_list_falls_back_to_saved_roster_when_an_older_resident_rejects_
         owner.shutdown()
 
 
-def test_passive_list_keeps_the_resident_not_refreshed_label(
-    tmp_path, monkeypatch, capfd, no_caller_compute,
-):
-    """A publication the monitor no longer refreshes reaches the passive caller
-    with its stale label intact, so it is never read as current zero work."""
-    owner = runtime.WorktreesRuntime(tmp_path / "worktrees-current.sqlite3")
-    owner.activate()
-    owner.publish("project", [], observed_at=1)
-    owner.begin_refresh_sweep()
-    owner.begin_refresh_sweep()
-
-    server = _serve_passive_resident(tmp_path, monkeypatch, owner.handle)
-    try:
-        rc, result = _passive_list(capfd)
-        assert rc == 0 and result["worktrees"] == []
-        assert result["projection"]["quality"] == "current"
-        assert result["availability"] == {"status": "stale", "reason": runtime.NOT_REFRESHED}
-        assert owner.demand_projects() == set()
-    finally:
-        server.close()
-        owner.shutdown()
-
-
 @pytest.mark.parametrize("birth", [None, "12345"])
 def test_confirmed_dead_route_recovers_before_attempting_transport(
     tmp_path, monkeypatch, no_caller_compute, birth,

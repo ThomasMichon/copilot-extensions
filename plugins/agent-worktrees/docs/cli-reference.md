@@ -170,17 +170,11 @@ Coverage is explicit, never inferred:
   published the project, or predates the demand-free read and rejects it, the
   host returns its saved roster and the row carries `availability`
   (`status: "advisory"`) and
-  `projection.observed_at`: saved rows that may be stale. When the monitor
-  answers from a publication its sweeps no longer refresh (no demand,
-  subscription or served session keeps the project warm), the row keeps
-  `projection.quality: "current"` but carries `availability`
-  (`status: "stale"`, reason starting `not-refreshed`); count it as unknown
-  coverage, never as zero work. A host with no saved
+  `projection.observed_at`: saved rows that may be stale. A host with no saved
   roster, or an older runtime that rejects `--passive` as an unrecognized
-  argument, becomes a `reachable: false` gap. A saved or stale-labeled roster
-  never proves a delegate's caller gone or terminal: a caller missing from it
-  is `unknown`, and the delegate is not finalizable (`host-roster-advisory`).
-  Every child
+  argument, becomes a `reachable: false` gap. A saved roster never proves a
+  delegate's caller gone or terminal: a caller missing from it is `unknown`,
+  and the delegate is not finalizable (`host-roster-advisory`). Every child
   also runs with stdin closed and `AGENT_WORKTREES_NO_SELFPROVISION=1`, so a
   host without a usable runtime reports a gap instead of provisioning one.
 - **Local deadline only.** `--timeout` bounds the SSH connect and the local
@@ -1222,9 +1216,6 @@ demand (the request carries `passive: true`, which the resident honors by
 neither renewing scan demand nor waking its producer for an unpublished
 project); otherwise the saved roster labeled `availability.status: "advisory"`
 with its `projection.observed_at`, or a JSON error (exit 1) when none is saved.
-A running resident's publication that its sweeps have stopped refreshing is
-returned with `availability.status: "stale"` and a reason starting
-`not-refreshed`, because nothing renews it without demand.
 A resident that predates the marker rejects it as an invalid request; the
 passive read then also returns the labeled saved roster, never a demand read. It
 cannot be combined with `--follow`, `--glance` or `--refresh`, and the feed

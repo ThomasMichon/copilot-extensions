@@ -24,7 +24,6 @@ CONTRACT_VERSION = 1
 READ_ACTION = "worktrees-read"
 CAPABILITY = "worktrees-current-v1"
 _DEMAND_LINGER_SECONDS = 30.0
-NOT_REFRESHED = "not-refreshed: the status-monitor is not refreshing this project"
 _FIELDS = frozenset(
     {
         "contract_version",
@@ -132,9 +131,6 @@ class WorktreesRuntime:
         self._publication_errors: dict[str, str] = {}
         self._demand: dict[str, float] = {}
         self._unready_demand: set[str] = set()
-        # Projects the monitor's previous and current sweeps actually republished.
-        self._refreshed_previous: set[str] = set()
-        self._refreshed_current: set[str] = set()
         self._wake = wake
         self._now = now
         self._elected = elected
@@ -375,7 +371,6 @@ class WorktreesRuntime:
             if demand:
                 self._record_demand_locked(project)
             publication_error = self._publication_errors.get(project)
-            refreshed = self._refreshed_locked(project)
         try:
             result = self.store.read(
                 project, **selection, contract_version=payload["contract_version"],
@@ -393,25 +388,7 @@ class WorktreesRuntime:
             result["project"] = project
         if publication_error is not None:
             result["availability"] = {"status": "stale", "reason": publication_error}
-        elif not demand and not refreshed:
-            # Without demand nothing renews this publication, so a passive
-            # reader must not treat it as current zero-work or caller evidence.
-            result["availability"] = {"status": "stale", "reason": NOT_REFRESHED}
         return result
-
-    def _refreshed_locked(self, project: str) -> bool:
-        return project in self._refreshed_current or project in self._refreshed_previous
-
-    def begin_refresh_sweep(self) -> None:
-        """Start a monitor iteration's refresh window.
-
-        A project stays refreshed while the previous or current sweep has
-        republished it, so one the sweeps stop selecting (or a monitor that
-        stops sweeping) loses that standing within two iterations.
-        """
-        with self._lock:
-            self._refreshed_previous = self._refreshed_current
-            self._refreshed_current = set()
 
     def _failure(self, code: str, message: str) -> dict:
         return {
@@ -462,7 +439,6 @@ class WorktreesRuntime:
         with self._lock:
             self._publication_errors.pop(project, None)
             self._unready_demand.discard(project)
-            self._refreshed_current.add(project)
         self.feed.changed(project)
 
     def publication_failed(self, project: str, error: Exception) -> None:

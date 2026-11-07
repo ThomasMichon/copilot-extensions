@@ -467,10 +467,7 @@ The existing authenticated monitor control endpoint advertises
 optional status/platform/ID/codename selection and Boolean `include_missing`.
 An optional Boolean `passive: true` marks a demand-free read: the resident
 answers from its publication but neither renews project scan demand nor wakes
-its producer for an unpublished project, and the feed refuses it. A passive
-read of a publication that neither the monitor's previous nor current sweep
-republished carries `availability.status: stale` with a reason starting
-`not-refreshed`; ordinary reads renew demand instead. Residents
+its producer for an unpublished project, and the feed refuses it. Residents
 that predate the field reject it as `invalid-request`; a passive client then
 returns the labeled advisory saved roster, never a demand read.
 Results carry `ok`, `contract_version`, `worktrees` and `projection`:
