@@ -4697,6 +4697,8 @@
         "plugins/agent-dispatch/src/agent_dispatch/queue_submission_consumer.py",
         "tools/application_sources.py",
         "tools/local_install_profile.py",
+        "tools/local_install_source.py",
+        "tools/prepare_runtime_source.py",
         "plugins/agent-dispatch/src/agent_dispatch/ordinary_writer_admission.py",
         "plugins/agent-bridge/src/agent_bridge/workspace_creation_cli.py",
         "libs/repository-policy/src/repository_policy/receiving.py",
