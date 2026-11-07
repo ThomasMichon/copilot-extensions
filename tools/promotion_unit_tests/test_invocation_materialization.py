@@ -79,6 +79,25 @@ def test_pinned_invocation_owner_refuses_corrupted_actual_write(
     assert not any(line.startswith("MATERIALIZE Invocation ") for line in log), log
 
 
+@pytest.mark.parametrize("blocked", ["output-directory", "parent-file"])
+def test_source_phase_refuses_unmaterializable_output_types(tmp_path, blocked):
+    source, _candidate_root, _plugin = _candidate(tmp_path)
+    spec = owner.importlib.util.spec_from_file_location(
+        "_unit_invocation_source_check", ROOT / "libs/payload-invocation/generate.py",
+    )
+    assert spec and spec.loader
+    generator = owner.importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(generator)
+    manifest = source / "plugins/sample/payload-invocation.json"
+    output = manifest.parent / "bin/sample.ps1"
+    if blocked == "output-directory":
+        output.mkdir(parents=True)
+    else:
+        output.parent.write_bytes(b"not a directory")
+    with pytest.raises(ValueError, match="generated output has unsafe custody"):
+        generator.source_check(manifest, canonical_root=source)
+
+
 @pytest.mark.parametrize(("relative", "expected"), [
     ("tools/materialize_payload_invocation.py", {"libs/payload-invocation/generate.py"}),
     ("libs/payload-invocation/generate.py", {"libs/payload-invocation/runtime_admission.py"}),

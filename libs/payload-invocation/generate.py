@@ -911,7 +911,7 @@ def validate_output_paths(manifest: Path, outputs: dict[Path, str | bytes]) -> N
                 if (
                     stat.S_ISLNK(info.st_mode)
                     or getattr(info, "st_file_attributes", 0) & 0x400
-                    or not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode))
+                    or not (stat.S_ISREG(info.st_mode) if component == path else stat.S_ISDIR(info.st_mode))
                     or stat.S_ISREG(info.st_mode) and info.st_nlink != 1
                 ):
                     raise ValueError(f"{manifest}: generated output has unsafe custody: {component}")

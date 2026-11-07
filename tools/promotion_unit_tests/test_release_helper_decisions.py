@@ -399,6 +399,50 @@ def test_installer_reference_materialization_preserves_comments_and_refuses_ambi
         assert (target / f"scripts/install.{ext}").read_text() == text
 
 
+@pytest.mark.parametrize("case", ["stale", "absent", "foreign", "absent-bad-digest"])
+def test_declared_human_initializer_refresh_uses_source_preimage(tmp_path, case):
+    canonical, destination = tmp_path / "canonical", tmp_path / "release"
+    source, target = canonical / "plugins/agent-mcp", destination / "plugins/agent-mcp"
+    script = source / "scripts/init.ps1"
+    text = "$ErrorActionPreference = 'Stop'\n\n" + engine.HUMAN_PROLOGUE + "\n"
+    _write(script, text)
+    _write(script.parent / engine.HUMAN_HELPER, "# admitted prior initializer\n")
+    declaration = engine.human_output_json(script)
+    if case == "absent-bad-digest":
+        data = json.loads(declaration)
+        data["initializer_sha256"] = "invalid"
+        declaration = json.dumps(data, indent=2) + "\n"
+    _write(script.with_suffix(".human-output.json"), declaration)
+    if case.startswith("absent"):
+        (script.parent / engine.HUMAN_HELPER).unlink()
+    _write(canonical / "libs/installer-engine" / engine.HUMAN_HELPER, "# current initializer\n")
+    _write(target / "scripts/init.ps1", text)
+    _write(target / "scripts/init.human-output.json", declaration)
+    if not case.startswith("absent"):
+        _write(target / "scripts" / engine.HUMAN_HELPER,
+               "# foreign initializer\n" if case == "foreign" else "# admitted prior initializer\n")
+    before = {path.relative_to(canonical): path.read_bytes()
+              for path in canonical.rglob("*") if path.is_file()}
+    kwargs = dict(
+        source_consumer_dir=source, dest_consumer_dir=target,
+        canonical_root=canonical, dest_root=destination,
+    )
+    if case in {"foreign", "absent-bad-digest"}:
+        with pytest.raises(ValueError, match="conflicting native human-output assets"):
+            installers.materialize_ref_into(**kwargs)
+        assert (target / "scripts/init.human-output.json").read_text() == declaration
+    else:
+        log = installers.materialize_ref_into(**kwargs)
+        assert log and all(line.startswith("OK") for line in log), log
+        emitted = target / "scripts/init.ps1"
+        assert emitted.with_suffix(".human-output.json").read_text() == engine.human_output_json(emitted)
+        assert (emitted.parent / engine.HUMAN_HELPER).read_bytes() == (
+            canonical / "libs/installer-engine" / engine.HUMAN_HELPER
+        ).read_bytes()
+    assert before == {path.relative_to(canonical): path.read_bytes()
+                      for path in canonical.rglob("*") if path.is_file()}
+
+
 @pytest.mark.parametrize("case", ["valid", "wrong-name", "conditional", "escape"])
 def test_standalone_dependency_source_follows_exact_declared_identity(tmp_path, case):
     project = tmp_path / "services/example"

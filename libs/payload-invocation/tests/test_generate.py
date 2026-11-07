@@ -2472,6 +2472,25 @@ def test_check_detects_drift(tmp_path: Path) -> None:
     assert generator.process_manifest(manifest, check=True)
 
 
+@pytest.mark.parametrize("blocked", ["output-directory", "parent-file"])
+def test_source_check_rejects_unwritable_output_types(tmp_path: Path, blocked: str) -> None:
+    manifest = _manifest(tmp_path)
+    output = manifest.parent / "bin" / "agent-example.ps1"
+    if blocked == "output-directory":
+        output.mkdir(parents=True)
+    else:
+        output.parent.write_bytes(b"not a directory")
+    with pytest.raises(ValueError, match="generated output has unsafe custody"):
+        generator.source_check(manifest)
+
+
+def test_source_check_accepts_absent_generated_outputs(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path)
+    assert generator.source_check(manifest) == []
+    generator.process_manifest(manifest, check=False)
+    assert generator.process_manifest(manifest, check=True) == []
+
+
 def test_manifest_validation_fails_closed(tmp_path: Path) -> None:
     manifest = _manifest(tmp_path)
     data = json.loads(manifest.read_text(encoding="utf-8"))

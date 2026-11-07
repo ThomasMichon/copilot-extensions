@@ -18,6 +18,13 @@ therefore receives current Installer assets before its caller can consume it;
 its reviewed library source, not a missing developer mirror, supplies the
 admitted preimage. This works with shared or separate source/candidate roots.
 
+Native human-output declarations bind the original entrypoint and initializer
+preimage, not equality with today's canonical initializer. An absent initializer
+retains its declared digest; an existing one must match that digest. Promotion
+refreshes these declared helpers, including standalone installers, through the
+same owned-preimage checks, then rebinds the declaration after candidate rewrites.
+Malformed declarations and foreign candidate replacements still refuse copying.
+
 Validation phases are explicit:
 
 - `sync-installer-engine.verify(phase="development")` checks canonical producers,
