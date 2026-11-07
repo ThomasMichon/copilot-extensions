@@ -444,7 +444,7 @@ print(json.dumps(sys._base_executable if sys.argv[1] == 'base' else sys.executab
             $listed = Invoke-Hidden -FilePath $launcher.Source -ArgList @('-0p') -ErrorOutput ([ref]$nativeError)
             $launcherMatches = @()
             if ($LASTEXITCODE -eq 0) {
-                $launcherMatches = @([regex]::Matches("$listed", '(?m)([A-Za-z]:[\\/].*python(?:[0-9.]*)?\.exe)"?\s*$'))
+                $launcherMatches = @([regex]::Matches("$listed", '(?m)((?:[A-Za-z]:[\\/]|\\\\).*python(?:[0-9.]*)?\.exe)"?\s*$'))
             }
             if ($launcherMatches.Count) {
                 foreach ($match in $launcherMatches) { $candidates += $match.Groups[1].Value }

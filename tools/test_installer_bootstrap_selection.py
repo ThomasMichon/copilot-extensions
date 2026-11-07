@@ -67,7 +67,7 @@ ConvertTo-Json -InputObject $true -Compress
 @pytest.mark.parametrize("host", HOSTS)
 @pytest.mark.parametrize("plugin", ["agent-index", "agent-dispatch"])
 @pytest.mark.parametrize(
-    "scenario", ["path", "launcher", "launcher-selector", "known-root", "unsupported", "admitted", "slot"],
+    "scenario", ["path", "launcher", "launcher-unc", "launcher-selector", "known-root", "unsupported", "admitted", "slot"],
 )
 def test_bootstrap_candidates(tmp_path: Path, host: str, plugin: str, scenario: str) -> None:
     old = tmp_path / "old" / "python.exe"
@@ -76,12 +76,14 @@ def test_bootstrap_candidates(tmp_path: Path, host: str, plugin: str, scenario: 
     launcher = tmp_path / "py.exe"
     slot = tmp_path / "slot"
     slot_python = slot / "Scripts" / "python.exe"
+    unc = r"\\example.invalid\Python313\python.exe"
     for path in (old, supported, alias, launcher, slot_python):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch()
     commands = {
         "path": {"python3": [old, alias, supported]},
         "launcher": {"py": [launcher]},
+        "launcher-unc": {"py": [launcher]},
         "launcher-selector": {"py": [launcher]},
         "known-root": {},
         "unsupported": {"python": [alias, old]},
@@ -100,6 +102,11 @@ $commands=@{{}}
 {command_map}
 $calls=New-Object 'System.Collections.Generic.List[string]'
 function Resolve-DispatchBasePython {{ return {_ps(old)} }}
+function Test-Path {{
+    [CmdletBinding()]param([Parameter(Position=0)]$Path,$LiteralPath,$PathType)
+    if ($LiteralPath -eq {_ps(unc)}) {{ return $true }}
+    Microsoft.PowerShell.Management\\Test-Path @PSBoundParameters
+}}
 function Get-Command {{
     param($Name, [switch]$All, $CommandType, $ErrorAction)
     foreach ($path in @($commands[$Name])) {{
@@ -116,7 +123,7 @@ function Invoke-Hidden {{
         $global:LASTEXITCODE=0
         if ($ArgList[0] -eq '-0p') {{
             if ({_ps(scenario)} -eq 'launcher-selector') {{ $global:LASTEXITCODE=1; return }}
-            return " -V:3.9 * {_ps(old)[1:-1]}`n -V:3.13 {_ps(supported)[1:-1]}"
+            return " -V:3.9 * {_ps(old)[1:-1]}`n -V:3.13 {_ps(unc if scenario == 'launcher-unc' else supported)[1:-1]}"
         }}
         if ($ArgList[0] -eq '-3.12') {{ return {_ps(supported)} }}
         return {_ps(old)}
@@ -147,6 +154,8 @@ $LinkDir=$VenvDir
     )
     details = _run(host, script, tmp_path)
     expected = None if scenario == "unsupported" else str(slot_python if scenario == "slot" else supported)
+    if scenario == "launcher-unc":
+        expected = unc
     assert details["selected"] == expected
     assert str(alias) not in details["calls"]
     if scenario == "admitted":
