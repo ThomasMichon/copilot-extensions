@@ -1068,6 +1068,25 @@ callback an implicit credential store.
   consumer qualification, retaining allocation, correlation and separately
   authorized adoption as unfinished work.
 
+### 2026-11-07 - Confirm normal release of the qualified PR-owner repair
+
+- Normal promotion `42314791785` completed successfully, including candidate
+  freezing, eligible source coverage, first-party construction and attestation,
+  real Windows Resume startup, exact source-unit reuse, publication readback
+  and non-administrative candidate merge.
+- Published Main `2f10aac90cc7c1ee8e6a644eb3d626678a6adc8f` contains all four
+  PR-owner implementation files from #10953 byte-for-byte. The compact Efforts
+  template from #11167 is unchanged apart from its normal release-version
+  stamp and remains 4,049 bytes. #11160 closed on the earlier actual hosted
+  candidate-freezing proof; full promotion now supplies distinct release proof.
+- The parent digest still has eighty-three open Plan/Validation items.
+  Release does not establish installed adoption, configured credentials,
+  deployed delegation, image/provider/fleet operation or retained-resource
+  settlement. No local runtime, profile, policy or service was changed.
+- Continue with the remaining source and installed-adoption obligations under
+  their existing owners and effect bounds. The completed disposable hosted
+  qualification grant does not authorize another run or a local rollout.
+
 ### 2026-11-06 - Land the bounded projection repair and retain release proof
 
 - #11167 merged as `3f29614f05a93fdd979a9e71b2735aab297aa768` after
