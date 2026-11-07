@@ -190,7 +190,8 @@ def test_shell_ahp_binding_preserves_literal_option_values(tmp_path, literal_arg
     source = _LAUNCH_SCRIPT.read_text(encoding="utf-8")
     start = source.index('    if [[ "$_AHP_RESUME_AVAILABLE" == "1" ]]; then\n        if ! _VALUE_OPTIONS=')
     mutate = source[start:source.index("    # Identity vars", start)]
-    command = ["copilot", "--resume", "original", *literal_args, "--resume=passthrough"]
+    command = ["copilot", "--resume", "original", "--resume", "", "--resume", "--model", "selected",
+               *literal_args, "--resume=passthrough"]
     code = "\n".join([
         "set -euo pipefail",
         "CMD_ARRAY=(" + shlex.join(command) + ")",
@@ -209,7 +210,7 @@ def test_shell_ahp_binding_preserves_literal_option_values(tmp_path, literal_arg
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout) == [
-        "copilot", *literal_args, "--experimental",
+        "copilot", "--model", "selected", *literal_args, "--experimental",
         "--ahp", "http://127.0.0.1:1234", "--resume=authoritative",
     ]
 

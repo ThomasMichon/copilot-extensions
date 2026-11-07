@@ -76,7 +76,9 @@ POSIX hoisting requires a known empty effective `BASH_ENV`; nonempty values
 or an unknown mux-server environment retain the outer admission owner.
 An explicitly empty planned value is pinned with `env BASH_ENV=` before Bash
 starts. Authoritative AHP rebinding preserves literal option values rather
-than treating prompt/model/agent text as connection selectors.
+than treating prompt/model/agent text as connection selectors. Bare `--resume`
+does not consume a following option. Worktrees and Driver share the native
+value-option table, including when validating a retained headed command.
 
 This does not turn unknown mux state into absence or permit a cold seed.
 Admission-only execution cannot claim a pending prompt; a changed prompt

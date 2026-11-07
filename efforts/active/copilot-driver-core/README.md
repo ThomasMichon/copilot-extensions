@@ -1867,3 +1867,20 @@ tables, without a new CLI/schema or optional peer feature. No settled native
 Windows lifecycle test was repeated for these scoped argument/environment
 changes. Parent acceptance and the source-location startup discrepancy remain
 open; this correction still needs fresh review and required CI.
+
+The next review confirms the Bash guard correction, but finds two further
+argument-boundary gaps. Bare `--resume` has an optional selector and must not
+consume the next option during AHP rebinding. Both launchers now use lookahead.
+The retained Driver validator must also skip ordinary value options before
+interpreting selectors or execution modes. Move the existing native option
+table into the standalone core, retaining Worktrees' original import as a
+re-export, and include that module in the retained artifact. This changes no
+CLI/schema or independent peer feature and adds no dependency.
+
+Thirteen focused Driver controls pass in 3.38 seconds (26.84 seconds total),
+with one POSIX signal skip. They include actual retained-archive execution and
+native exit with a selector-shaped log-directory value. Two Worktrees
+copied-wrapper/real-validator controls pass in 1.87 seconds (63.41 seconds total).
+Six Manager final-consumer rebinding controls pass in 36.95 seconds (144.36
+seconds total), with two native-Bash skips. Native Copilot, the source-location
+discrepancy and the remaining parent gates are not requalified by this packet.

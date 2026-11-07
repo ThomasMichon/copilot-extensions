@@ -90,9 +90,9 @@ def test_picker_startup_handoff_reaches_real_copied_reader(tmp_path, direct):
     assert not manifest.exists()
 
 
-@pytest.mark.parametrize("resume_args", [["--resume=original"], ["--resume", "original"]])
+@pytest.mark.parametrize("resume_args", [["--resume=original"], ["--resume", "original"], ["--resume"]])
 @pytest.mark.parametrize("literal_args", [
-    ["-i", "--resume", "--model", "--ahp=literal", "--agent", "--experimental"],
+    ["--model", "--ahp=literal", "-i", "--resume", "--agent", "--experimental"],
     ["--interactive", "--resume=literal", "--model", "--ahp"],
 ])
 def test_manager_serializes_direct_resume_after_authoritative_binding(tmp_path, resume_args, literal_args):

@@ -2422,6 +2422,14 @@ Worktrees' `tests/test_session_shell.py -k headed_bash` checks effective
 `BASH_ENV` selection before copying and explicit empty-value pinning.
 On POSIX, the same selection executes real Bash exit/exec primers against
 refused admission; neither primer may run before the outer owner.
+The AHP controls also retain the option after a bare `--resume`.
+Driver's `tests/test_headed_launcher.py -k native_validator` checks
+selector-shaped values and missing-value refusal. The existing
+`tests/test_session_host_core.py -k retained_headed_executable` control
+passes a literal `--log-dir` value through the real retained archive and
+verifies native exit. The Worktrees copied-wrapper controls call the same
+validator on the delivered native argv; no native Copilot or rollout is
+implied by these finite-process checks.
 
 The optional native runtime-removal portfolio includes
 `tools/test_installer_engine_uninstall.py`,

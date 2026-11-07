@@ -1283,7 +1283,8 @@ if ($ahpArgs.Count -gt 0) {
     $skipNext = $false
     $keepNext = $false
     $hasExperimental = $false
-    foreach ($arg in $cmd) {
+    for ($argIndex = 0; $argIndex -lt $cmd.Count; $argIndex++) {
+        $arg = [string]$cmd[$argIndex]
         if ($keepNext) {
             $filteredCmd.Add([string]$arg)
             $keepNext = $false
@@ -1293,7 +1294,11 @@ if ($ahpArgs.Count -gt 0) {
             $skipNext = $false
             continue
         }
-        if ($arg -in @('--ahp', '--resume')) {
+        if ($arg -ceq '--resume') {
+            $skipNext = $argIndex + 1 -lt $cmd.Count -and -not $cmd[$argIndex + 1].StartsWith('-')
+            continue
+        }
+        if ($arg -ceq '--ahp') {
             $skipNext = $true
             continue
         }

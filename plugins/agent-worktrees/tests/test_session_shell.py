@@ -132,7 +132,8 @@ def test_headed_admission_preserves_wrapper_and_literal_native_arguments(launch,
     prefix = ["pwsh.exe", "-NoProfile", "-NoLogo", "-File", str(wrapper)] if platform_name == "nt" else [
         "bash", str(wrapper),
     ]
-    native = ["copilot", "--session-id", "chosen", "-i", "one\n' \" & $literal", r"-C=C:\two words"]
+    native = ["copilot", "--session-id", "chosen", "--log-dir", "--resume=literal",
+              "-i", "one\n' \" & $literal", r"-C=C:\two words"]
     command = launch_seed_exec.deferred_command(
         [*prefix, "--", *native], record, admission_only=True, preserve_seed_id="retained",
     )
@@ -154,6 +155,10 @@ def test_headed_admission_preserves_wrapper_and_literal_native_arguments(launch,
         "--record", str(record), "--admission-only", "--preserve-seed-id", "retained",
         "--", *native,
     ]
+    from agent_remote_driver.headed.launcher import _native_request
+
+    backend = arguments[arguments.index("--", 1) + 1:]
+    assert _native_request(backend, "chosen") == "one\n' \" & $literal"
     expected = wrapper.read_bytes()
     shutil.rmtree(runtime)
     assert copied.read_bytes() == expected
