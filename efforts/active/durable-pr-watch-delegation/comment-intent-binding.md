@@ -192,3 +192,52 @@ reply identity and intentional/legacy edits. Prove that preparation performs no
 native IO and cannot advance admission, feedback/echo, watch ACK, Dispatch or
 DB object mapping. Keep this finite protected source exit separate from other
 issue/PR/review/inline publishers, all three providers and installed adoption.
+
+### Selected owned-edit binding under the same owner
+
+The next provider-first source slice may extend the existing allocation library
+with an optional protected selection/source binding. The ordinary receiver
+continues to advertise `owned_edits: false` and refuse automatic edits until a
+separate compatible consumer is qualified; do not flip that strict declaration
+or withdraw the existing fresh-comment contract. Explicit caller-ID preparation
+and v1/v2 submission retain their current semantics.
+
+Resolve the original v1 selection against the actual complete generation and
+local-source attachment through the existing protected selection validator.
+Keep its complete source/revision, discussion, current native author, selected
+thread/comment and expected-content checks. A caller's `previous`, a parsed
+marker or equal body hash cannot replace that binding. Current policy/profile
+and producer origin still come from their existing owners, outside the replay
+lock. The binding is source data, not a new proof issuer or permission to write.
+
+Inside the existing allocation transaction, consult the same owner's admitted
+operations and native receipts in the exact endpoint/account/repository/PR and
+principal scope. A previously prepared comment needs one unambiguous logical
+identity, a confirmed receipt for that native target and the exact selected
+baseline content. Pass the retained original preparation to the actual pure
+composer, preserve its logical-comment GUID and allocate a fresh write GUID.
+Conflicting logical identities, a later unmatched body, or an unresolved effect
+that could refer to that native target refuse without committing another
+selection. Unattempted previews are not native evidence.
+
+A genuinely legacy target may receive its first GUID only during its explicitly
+selected ordinary edit, when the protected baseline proves the native author
+and no retained prepared identity or potentially matching unknown effect
+contradicts that classification. Foreign/copied outer metadata refuses rather
+than becoming provenance; quoted examples remain content. Do not scan for
+unselected legacy targets, backfill old receipts or infer a new logical identity
+for an edited prepared comment whose original binding is unavailable.
+
+Retain only the existing final v2 selection and original-input digest; no new
+layout, body archive, caller authority field or allocation ledger is needed.
+The same original key recovers committed edits before re-resolution, preserving
+the first body/identity through restart or a lost result. Subsequent explicit
+admission and native execution still use the existing protected path. This
+library slice alone adds no CLI/HTTP syntax, host enrollment or live publisher.
+
+Qualify prepared create-to-edit and repeated edit chains, a genuinely legacy
+selected edit, scope/native-target/author/source mismatches, copied markers,
+conflicting histories, potentially matching unknown receipts, changed-input
+retry, lost commit/restart and unchanged old receiver refusal. Exercise actual
+shared composition, real-file owner retention and the protected native fixture;
+no fixture result substitutes for provider or installed adoption.
