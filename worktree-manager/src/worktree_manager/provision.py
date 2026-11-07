@@ -52,6 +52,15 @@ _RECIPES: dict[str, dict] = {
         "requires": None,
         "note": "System package — install it yourself, then re-run.",
     },
+    "pwsh": {
+        "method": "manual",
+        "changes_path": True,
+        "cmds": {
+            "windows": "winget install --id Microsoft.PowerShell --exact --source winget",
+        },
+        "requires": None,
+        "note": "Install PowerShell 7, open a fresh terminal, then re-run setup.",
+    },
     "psmux": {
         "method": "manual",
         "changes_path": True,
