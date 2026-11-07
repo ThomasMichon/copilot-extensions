@@ -95,3 +95,38 @@ An older version-1-only receiver refuses the opted-in resource on rollback
 rather than overwriting it; unaffected version-1 resources remain usable.
 Upgrade the selected receiver to resume that resource. Do not retry an
 effectful new invocation with older syntax merely because its result is unknown.
+
+## Permanent service custody receiver
+
+The resource owner can also **read**, but cannot yet publish, the distinct
+`agent-service-custody-envelope-v1` envelope in that **same** kind/key ref.
+`lease inspect`, `status` and `list` report `state: service-owned`,
+`custody_type: service`, its current commit `token`, and bounded service identity
+and acceptance-digest fields. They do not invent a task holder, TTL, expiry or
+renewal deadline. The digests identify retained evidence; parsing them is not
+verification of provider authorization or proof of actual adoption.
+
+Mixed histories retain every task predecessor. An accepted service record must
+name its actual Git parent, follow a leased task record and have an acceptance
+timestamp within that parent's safe interval. The receiver rejects root service
+records, malformed/unknown envelopes and any successor to service custody in
+this protocol generation. Retirement is not implemented.
+
+Task acquire/borrow, renew, transfer and release refuse permanent custody.
+The CLI returns exit **3** with `code: service_custody_conflict` for task
+mutations; elapsed time or using the former task's holder/token cannot override
+it. Task-only Python `inspect`/`status`/`list` raise `ServiceCustodyConflict`
+(a `LeaseLost` subtype); explicit mixed inventory uses
+`inspect_resource`/`list_resources`. Released-task history compaction skips
+service records without rewriting their predecessors.
+
+**Receiver support is not a live adoption capability.** No service writer or
+CLI adoption/retirement verb is enabled. Before any writer can be introduced,
+the selected running provider/controller generations must enforce custody,
+serialize outstanding effects with adoption and refuse incompatible legacy,
+forced and rollback paths. An older parser's rejection alone does not protect
+a provider whose unavailable-coordination path permits local borrowing.
+Gateway outage, config deletion and agent finalization must never become
+authority to release service custody. Those provider/effect and installed-peer
+qualification gates remain open in the
+[custody implementation plan](../../../../../efforts/active/linux-role-fleet/runner-service-custody.md).
