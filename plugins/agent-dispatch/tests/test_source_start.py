@@ -248,10 +248,11 @@ def test_reconcile_refuses_changed_preflight_route_before_contact(tmp_path):
         )
 
 
-def test_reconcile_rechecks_selected_generation_before_reusing_coordinator(tmp_path, monkeypatch):
+@pytest.mark.parametrize("change", ["selection", "breadcrumb"])
+def test_reconcile_rechecks_selected_generation_before_reusing_coordinator(tmp_path, monkeypatch, change):
     from agent_dispatch import client, source_start
     from agent_dispatch.config import Config
-    from zdd import diagnostics, routing
+    from zdd import breadcrumb, diagnostics, routing
 
     cfg = Config(host="127.0.0.1", db_path=str(tmp_path / "tasks.db"))
     birth = diagnostics.process_start_time(os.getpid())
@@ -286,9 +287,12 @@ def test_reconcile_rechecks_selected_generation_before_reusing_coordinator(tmp_p
     def selected():
         calls.append(True)
         if len(calls) > 1:
-            raise ValueError("selection changed")
+            if change == "selection":
+                raise ValueError("selection changed")
+            breadcrumb.breadcrumb_path(tmp_path).write_text("unsettled", encoding="utf-8")
 
-    with pytest.raises(ValueError, match="selection changed"):
+    expected_error = ValueError if change == "selection" else RuntimeError
+    with pytest.raises(expected_error, match="selection changed" if change == "selection" else "owner changed"):
         source_start.run_coordinator(
             cfg, tmp_path, token=None, spawn_passive=lambda _port: pytest.fail("unexpected start"),
             pick_free_port=lambda: pytest.fail("unexpected allocation"), timeout=1.0,
@@ -833,6 +837,52 @@ def test_reconcile_checks_same_generation_behavior(tmp_path, monkeypatch, behavi
         start_if_missing=False, confirm_inactive=lambda _table: True,
     )
     assert result["status"] == expected
+
+
+@pytest.mark.parametrize("record", ['{"state":"committed","self_retirement":true}', "invalid"])
+def test_reconcile_refuses_unsettled_breadcrumb_before_same_generation_reuse(
+    tmp_path, monkeypatch, record,
+):
+    from agent_dispatch import coordinator_observation, source_start
+    from agent_dispatch.config import Config
+    from zdd import breadcrumb, diagnostics, routing
+
+    cfg = Config(host="127.0.0.1", db_path=str(tmp_path / "tasks.db"))
+    pid = os.getpid()
+    birth = diagnostics.process_start_time(pid)
+    assert birth
+    routing.publish_active(
+        tmp_path, bind="127.0.0.1", port=43123, pid=pid,
+        version=source_start.__version__, process_start_time=birth,
+    )
+    breadcrumb.breadcrumb_path(tmp_path).write_text(record, encoding="utf-8")
+
+    class Client:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def health(self):
+            return {
+                "status": "ok", "version": source_start.__version__,
+                "runtime_config_identity": source_start.config_identity(cfg),
+                "runtime_behavior_identity_v1": source_start.behavior_identity(cfg),
+                "data_auth_required": False, "data_token_match_v1": False,
+                "slot": {"pid": pid, "process_start_time": birth, "role": "active"},
+            }
+
+    monkeypatch.setattr(coordinator_observation, "_local_client", Client)
+    with pytest.raises(RuntimeError, match="unsettled"):
+        source_start.run_coordinator(
+            cfg, tmp_path, token=None, spawn_passive=lambda _port: pytest.fail("unexpected spawn"),
+            pick_free_port=lambda: 43124, timeout=1.0, verify_selected=lambda: None,
+            start_if_missing=False, confirm_inactive=lambda _table: True,
+        )
 
 
 @pytest.mark.parametrize("enforced", [False, True])

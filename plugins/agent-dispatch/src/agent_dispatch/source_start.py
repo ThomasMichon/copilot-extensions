@@ -187,6 +187,8 @@ def run_coordinator(
     table = routing.read_table(routing_root, strict=True) or {}
     if expected_table is not None and table != expected_table:
         raise RuntimeError("coordinator preflight route changed")
+    if not start_if_missing and os.path.lexists(breadcrumb.breadcrumb_path(routing_root)):
+        raise RuntimeError("previous cutover remains unsettled; owner-led recovery is required")
     raw = table.get("active")
     old = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
     if raw is not None and old is None:
@@ -316,6 +318,7 @@ def run_coordinator(
             if (
                 (routing.read_table(routing_root, strict=True) or {}).get("active") != raw
                 or not old_is_live()
+                or (not start_if_missing and os.path.lexists(breadcrumb.breadcrumb_path(routing_root)))
             ):
                 raise RuntimeError("selected coordinator owner changed during readiness")
             return {"ok": True, "status": "reused", "pid": old.pid, "new_port": old.port}
