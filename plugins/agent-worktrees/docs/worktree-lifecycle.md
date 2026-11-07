@@ -86,6 +86,10 @@ poison an otherwise unstarted request's fixed allocation.
 Previously admitted request recovery keeps its existing ownership checks.
 If project configuration itself cannot resolve, `coordination-readiness` and
 JSON `resolve` return a nonzero error envelope, not invented readiness facts.
+The readiness JSON also advertises optional receiver support in an additive
+`capabilities` array. `lease-acquire-released-only-v1` describes the
+[no-stale-takeover acquisition mode](../skills/worktree/references/leases.md#acquisition-without-stale-takeover);
+it does not change `ready`, grant ownership or make expiry a release.
 
 Before creating an ordinary or paired worktree, agent-worktrees fetches the
 configured remote and chooses the fetched remote default branch as the start

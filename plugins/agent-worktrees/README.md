@@ -11,6 +11,10 @@ sibling plugin to use local worktree isolation. Those sibling plugins compose
 gracefully when installed (extra picker pivots, cross-machine delegation,
 CodeSpace/container resolvers), but their absence only disables those features.
 
+For exclusive cross-machine resources, the [lease reference](skills/worktree/references/leases.md)
+documents ordinary acquisition and optional `--released-only` acquisition,
+which refuses expired-but-unreleased holders. Existing callers remain unchanged.
+
 Open and Resume preserve the worktree's existing repository and paired plugin
 setup; they do not submit software updates or implicitly fast-forward a branch.
 Use `sync --paired --worktree-id <id> --json` (or Picker **Sync**) to safely advance both
