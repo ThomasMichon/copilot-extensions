@@ -3742,12 +3742,12 @@
       "sha256": "98a82eb020b4534a56c4c02685870c2af46829c478e3adc909ac007f6eb6bdbb"
     },
     "plugins/agent-bridge/src/agent_bridge/status_remote.py": {
-      "blob": "a7cc3f05b3c7c54a11d21d777f094b87a55fab8d",
-      "sha256": "f7a04f3ae608ba22258de3e9f99958c8fa8eceab359d5a06dd7331e29e6a1223"
+      "blob": "3be5430043a34a57ff0f54a536125a21efc45222",
+      "sha256": "997d310009bf21c64e270635c8c8730c81bfa31fa69316b83bf4700e12810b7a"
     },
     "plugins/agent-bridge/src/agent_bridge/status_runtime.py": {
-      "blob": "a3b9f403d87d941e18151c957aeb53b4550b4e3e",
-      "sha256": "1e237ded55f0d6d50a27dec3da0da2afd252fc10034e5b9048a435b44def30f3"
+      "blob": "508e987f307837f04234656e53255d64ae0e968d",
+      "sha256": "766b5bd6ee088fabec3337b2c3ca62a7a29691675d742c31930b9504dd5c4529"
     },
     "plugins/agent-bridge/src/agent_bridge/status_schema.py": {
       "blob": "5e6823b250607c67b7894fc3b52f3216b8d17647",
@@ -3978,8 +3978,8 @@
       "sha256": "e81f0e1101e521ba2677991e8e720d34045b152bf188419e1956744232604c00"
     },
     "plugins/agent-bridge/tests/test_host_status.py": {
-      "blob": "56ae181783c7273da11bbcca357e3c447faa4d59",
-      "sha256": "b4ace9dc96c3cc57f8190afde3794d403a9ecf85858f45e8930803bafa4976ca"
+      "blob": "befb3b405de3233529df0912058629029f0bd8bc",
+      "sha256": "50a3c9c0ccc2a81f05d04c703f2bb5e1b085975addaf00e273d38b3fee2b3087"
     },
     "plugins/agent-bridge/tests/test_host_status_clients.py": {
       "blob": "1689c7856285597f87ed7ae8883b3e2bd1ae4244",
@@ -4002,8 +4002,8 @@
       "sha256": "7c9df7bbadc5095d16b51d1bd96690552613be534db45e06b09afab4e017c426"
     },
     "plugins/agent-bridge/tests/test_http51_capture_probes.py": {
-      "blob": "dfee712ae5a1198a07a5cf15d338a4378fb07f7e",
-      "sha256": "79402d18d6b64e2421571612dc1357a25d3ded28b5423dd1b95e4b661b3922e7"
+      "blob": "db177da201ea45708ffb105b39f18172793a2310",
+      "sha256": "921feaf1e7a2b3f6ddd4edcd7edd3ec519e02ca32ab7e68855a19c042da74aa0"
     },
     "plugins/agent-bridge/tests/test_inbox_consumer_enrollment.py": {
       "blob": "b0e56a0c8e94a11f17e3ef487d6a78fc13048212",
@@ -7374,8 +7374,8 @@
       "sha256": "553691f6ec04ee428538246a11df891b64d705c790bfa8134f4ce793a1138058"
     },
     "tools/bridge_http52_evidence.py": {
-      "blob": "d9bfe302608420b97f3b93470058a1e4069bf0c7",
-      "sha256": "772f2e49c7486001c2671aee40e209f8af10b0a8bdbcfb1e64753e1cec9b39ee"
+      "blob": "11d732813c53d757648c819baaf13b91a26acc21",
+      "sha256": "d37d8eda8090b10a3546c58dbadd7d3ac4b01a3a5f6d631cf1f1ffae09bc8838"
     },
     "tools/bridge_http_retained_evidence.py": {
       "blob": "cf680ef56f8bdd67173826d7cf209453561742f6",
@@ -9150,7 +9150,7 @@
       "sha256": "a9925c3f74fe1e6a3adf3450d58af86260ccfa52eb63ccd88b98316c02409bf9"
     }
   },
-  "execution_closure_sha256": "14f782cc5b10f47b89205ec5074c1c51c8994eecd33fd104a155b7d6669a5c12",
+  "execution_closure_sha256": "46318d78d9e374e2f75092f3a12cadeda51caf733ff303307048814d1986e645",
   "runtime_binding_policy": "every-owned-interpreter-source-and-entrypoint-v1",
   "runtime_roles": [
     "observer"
@@ -9205,6 +9205,7 @@
     "test_host_status_coalesced_flow": 1,
     "test_host_status_shared_host_stream": 1,
     "test_host_status_prior_and_rollback_refusal": 1,
+    "test_host_status_legacy_timeout_compatibility": 1,
     "test_live_question_provider_advertises_actual_capability": 1,
     "test_passive_native_correlation_is_exact_and_charged_to_its_budget": 4,
     "test_current_native_roundtrip_and_durable_outcome": 2,
@@ -9315,7 +9316,7 @@
   },
   "scope": "model-free native-send and known-session observation ASGI/journal evidence; not SDK/native qualification; membership transcripts use a virtual reader clock; separate deadline-expiry and actual SQLite VM-cutoff probes; not wall-clock read qualification; portable launch joins actual archive/policy readers, ASGI/SQLite and driver HTTP with controlled SDK, native mux, provider process, SSH, Owner, claims, forwards and POSIX-to-private-scratch namespace fixtures; not native Copilot, mux, remote authentication or installed qualification",
   "captured_from": {
-    "commit": "26db681bf442aa477b70e6113c3f41bd491f6a30",
+    "commit": "1843cd905642c52f96052fc98f041e9160ccfe05",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 52,
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
