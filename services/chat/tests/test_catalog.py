@@ -1,9 +1,10 @@
 import base64
 import hashlib
+import os
 from importlib import metadata
 from pathlib import Path
 from types import SimpleNamespace
-from typing import NoReturn
+from typing import Any, NoReturn
 
 import pytest
 
@@ -221,7 +222,7 @@ def test_catalog_refuses_linked_resource_evidence(
     original = Path.lstat
     target = installation.package / "transport.py"
 
-    def lstat(path, *args, **kwargs):
+    def lstat(path: Path, *args: Any, **kwargs: Any) -> os.stat_result | SimpleNamespace:
         info = original(path, *args, **kwargs)
         if path == target:
             return SimpleNamespace(st_mode=info.st_mode, st_file_attributes=0x400)

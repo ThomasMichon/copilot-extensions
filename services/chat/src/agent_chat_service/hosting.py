@@ -12,7 +12,7 @@ from pathlib import Path
 import signal
 import socket
 import socketserver
-import sqlite3
+import sqlite3 as sqlite3
 import stat
 import sys
 import threading

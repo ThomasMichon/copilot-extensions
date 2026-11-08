@@ -3,12 +3,13 @@
 from contextlib import contextmanager
 import hashlib
 import importlib.util
+import importlib.machinery
 import json
 import os
 from pathlib import Path
 import sys
 from types import SimpleNamespace
-from typing import Any, Iterator, TYPE_CHECKING
+from typing import Any, Callable, Iterator, TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from versioned_runtime_publication import CopyPublication, PhysicalState
@@ -22,12 +23,12 @@ from agent_chat_service.client import ClientError
 @pytest.fixture
 def installation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     source = Path(__file__).resolve().parents[3] / "libs" / "versioned-runtime"
-    spec = importlib.util.spec_from_file_location(
+    spec = cast(importlib.machinery.ModuleSpec, importlib.util.spec_from_file_location(
         "chat_setup_test_publication", source / "versioned_runtime_publication.py",
-    )
+    ))
     publication = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, publication)
-    spec.loader.exec_module(publication)
+    cast(importlib.machinery.SourceFileLoader, spec.loader).exec_module(publication)
     monkeypatch.setattr(setup, "_publication", lambda: publication)
     runtime = SimpleNamespace(
         is_complete=lambda root, version, **kwargs: (root / "versions" / version).is_dir(),
@@ -99,6 +100,7 @@ def test_fresh_repeat_update_and_preserving_uninstall(installation: SimpleNamesp
 
 @pytest.mark.parametrize("target", setup._TARGETS)
 def test_same_bytes_foreign_replacement_is_never_withdrawn(installation: SimpleNamespace, target: str) -> None:
+    operation: Callable[[], object]
     case = installation
     setup.install(case.root, "example", **case.arguments)
     path = case.root / target

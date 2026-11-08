@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import base64
 import hashlib
-from importlib import metadata
+from importlib import metadata as metadata
 from pathlib import Path
-import stat
-import sys
-import sysconfig
-from typing import Any, NoReturn
+import stat as stat
+import sys as sys
+import sysconfig as sysconfig
+from typing import Any, NoReturn, cast
 
-from . import __version__
+from . import __version__ as __version__
 from .client import ClientError
 
 MAX_RESOURCE_BYTES = 1024 * 1024
@@ -85,7 +85,8 @@ def installed_catalog() -> dict[str, Any]:
             entry = matches[0]
             if entry.hash is None or entry.hash.mode != "sha256":
                 _refuse()
-            path = Path(distribution.locate_file(entry)).absolute()
+            # SimplePath does not promise PathLike; Path retains the validating conversion.
+            path = Path(cast(Any, distribution.locate_file(entry))).absolute()
             if path != package / name:
                 _refuse()
             data = _resource(path)

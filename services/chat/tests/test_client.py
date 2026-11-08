@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
-from typing import Any, Callable, Iterator, NoReturn, TypeAlias
+from typing import Any, Callable, IO, Iterator, NoReturn, TypeAlias, cast
 
 import pytest
 
@@ -338,7 +338,7 @@ def test_scan_validates_body_free_returned_only_progress_without_reading(pair: P
 def test_pending_original_is_retained_and_only_explicit_same_id_recovery_sends(pair: Pair) -> None:
     client, transport, store = pair
 
-    def lost(request: dict[str, Any], result: dict[str, Any]) -> NoReturn:
+    def lost(request: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
         if request["op"] == "post":
             raise ClientError("unavailable", "Synthetic lost response.")
         return result
@@ -433,7 +433,7 @@ def test_local_reader_lock_is_shared_and_crash_released(
     )
     try:
         deadline = time.monotonic() + 5
-        last_error = None
+        last_error: OSError | None = None
         injected = False
         original_read = Path.read_text
         original_exists = Path.exists
@@ -488,7 +488,7 @@ def test_local_reader_lock_is_shared_and_crash_released(
             process.wait(timeout=5)
         if job is not None:
             job.close()
-        process.stderr.close()
+        cast(IO[str] | IO[bytes], process.stderr).close()
 
 
 def test_response_json_can_be_large_without_widening_default_request_bounds() -> None:

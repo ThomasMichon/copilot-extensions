@@ -1,10 +1,15 @@
+from __future__ import annotations
+
 import json
 import os
 from pathlib import Path
 import subprocess
 import time
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from agent_procutil import JobHandle
 
 from endpoint_rendezvous import read_endpoint
 from agent_procutil import spawn_sync_in_kill_on_close_job
@@ -26,7 +31,7 @@ def test_fresh_installed_host_source_removed_independent_participants_and_crash_
         str(installed_chat.core_python), "-I", "-m", "agent_chat_service.hosting",
         "--config", str(config_file),
     ], cwd=tmp_path, capture_output=True, text=True, timeout=15,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0)
     assert core_refusal.returncode == 1 and core_refusal.stdout == ""
     assert json.loads(core_refusal.stderr) == {"error": "host_service_dependencies_missing"}
     assert json.loads(run([
@@ -67,7 +72,7 @@ def test_fresh_installed_host_source_removed_independent_participants_and_crash_
     absent = subprocess.run([
         str(interpreter), "-I", "-m", "agent_chat_service.hosting", *host_args,
     ], cwd=tmp_path, capture_output=True, text=True, timeout=15,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0)
     assert absent.returncode == 1 and not Path(config["data_dir"]).exists()
     Path(config["data_dir"]).mkdir(mode=0o700)
     initialized = json.loads(run([
@@ -76,13 +81,14 @@ def test_fresh_installed_host_source_removed_independent_participants_and_crash_
     ], cwd=tmp_path))
     assert initialized["installation_id"] == config["installation_id"]
     environment = {key: value for key, value in os.environ.items() if key != "PYTHONPATH"}
-    options = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    options = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW")} if os.name == "nt" else {}
 
-    def start():
+    def start() -> tuple[subprocess.Popen[bytes], JobHandle | None, dict[str, str]]:
         previous = read_endpoint(run_dir)
         stdout = (tmp_path / "host-stdout").open("wb")
         stderr = (tmp_path / "host-stderr").open("wb")
         try:
+            process: subprocess.Popen[bytes]
             process, job = spawn_sync_in_kill_on_close_job([
                 str(interpreter), "-I", "-m", "agent_chat_service.hosting",
                 *host_args,
@@ -106,7 +112,7 @@ def test_fresh_installed_host_source_removed_independent_participants_and_crash_
             stop(process, job)
             raise
 
-    def stop(process, job):
+    def stop(process: subprocess.Popen[bytes], job: JobHandle | None) -> None:
         try:
             if job is not None:
                 job.terminate_and_wait(5)

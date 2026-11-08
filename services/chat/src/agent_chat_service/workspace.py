@@ -5,12 +5,12 @@ from __future__ import annotations
 import re
 from pathlib import Path
 import sys
-import time
+import time as time
 from typing import Any, NoReturn, cast
 
 from .client import ClientError
 from .store import ChatError, strict_json
-from .transport import command, run_command
+from .transport import command, run_command as run_command
 
 _KEY = re.compile(r"[A-Za-z0-9_.-]{1,256}")
 _SESSION = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")

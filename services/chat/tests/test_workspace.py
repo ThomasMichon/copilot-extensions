@@ -167,6 +167,7 @@ def test_existing_owner_head_and_execution_tuple_are_not_reassigned(owner: Owner
     "session-missing", "session-path", "session-large", "cwd-relative", "cwd-missing", "cwd-file",
 ])
 def test_invalid_initialization_refuses_before_executing_owner(owner: OwnerFixture, change: str) -> None:
+    session: str | None
     session, cwd = "startup-1", owner["cwd"]
     if change == "session-missing":
         session = None
@@ -275,7 +276,7 @@ def test_workspace_deadline_rounding_never_exceeds_original_budget(
     original = workspace.run_command
     timeouts = []
 
-    def read(*args: object, **options: Any) -> bytes:
+    def read(*args: Any, **options: Any) -> bytes:
         timeouts.append(options["timeout"])
         return original(*args, **options)
 

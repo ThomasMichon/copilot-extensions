@@ -11,7 +11,7 @@ import importlib
 import importlib.util
 import os
 from pathlib import Path
-import sys
+import sys as sys
 import threading
 from types import ModuleType
 from typing import Any, Iterator, TYPE_CHECKING

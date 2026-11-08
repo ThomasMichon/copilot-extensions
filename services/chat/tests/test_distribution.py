@@ -7,6 +7,7 @@ import subprocess
 import tarfile
 import zipfile
 from types import SimpleNamespace
+from typing import IO, cast
 
 import pytest
 
@@ -113,9 +114,9 @@ finally:
     expected_version = request.node.callspec.params["installed_chat"]
     if expected_version is None:
         manifest = Path(__file__).resolve().parents[1] / "pyproject.toml"
-        expected_version = re.search(
+        expected_version = cast(re.Match[str], re.search(
             r'(?m)^version = "([^"]+)"$', manifest.read_text(encoding="utf-8"),
-        )[1]
+        ))[1]
     assert result["version"] == expected_version
     assert result["installed"] and result["messages"] == 1 and result["cursor"] == 0
     console = installed_chat.console
@@ -213,12 +214,12 @@ def test_wheel_and_independent_sdist_deliver_exact_canonical_construction(
             member, = (
                 item for item in members if item.name.endswith("/src/agent_chat_service/" + name)
             )
-            with archive.extractfile(member) as stream:
+            with cast(IO[bytes], archive.extractfile(member)) as stream:
                 data = stream.read()
             assert data == source.read_bytes()
             assert catalog["resource_sha256s"][name] == hashlib.sha256(data).hexdigest()
         helper, = (item for item in members if item.name.endswith("/_standalone_runtime_build.py"))
-        with archive.extractfile(helper) as stream:
+        with cast(IO[bytes], archive.extractfile(helper)) as stream:
             assert stream.read() == (runtime / "standalone_build.py").read_bytes()
     assert not catalog["release_selection_verified"]
 
@@ -254,7 +255,7 @@ def test_installed_catalog_worker_preserves_isolation(
         [*catalog["commands"][0]["argv"], "--config", str(config), "join", "room"],
         cwd=shadow if shadow_source == "cwd" else tmp_path,
         env=environment, capture_output=True, text=True, encoding="utf-8", timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW") if os.name == "nt" else 0,
     )
     assert not marker.exists(), "HTTP worker imported the shadow package"
     assert result.returncode == 0, result.stdout + result.stderr
