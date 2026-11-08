@@ -56,6 +56,11 @@ AFFECTED = (
         "creation_worktree_writer.py", "creation_writer_schema.py",
         "creation_writer_inspection.py",
         "_peer_launch.py",
+        "status_schema.py", "status_store.py", "status_producers.py",
+        "status_notices.py", "status_runtime.py", "status_remote.py",
+        "status_carrier.py", "routes/status.py", "client_status.py",
+        "events.py", "live_message_receipts.py", "remote_operations.py",
+        "restored_app.py", "app.py", "runtime_transfer.py",
     )),
     *("plugins/agent-worktrees/src/agent_worktrees/" + name for name in (
         "retained_record_writer.py", "resource_relationship_cli.py", "tracking_write.py",
@@ -73,6 +78,10 @@ AFFECTED = (
 )
 EXTRA_PATHS = (
     *retained.EXTRA_PATHS, INPUT, CAPTURE, "tools/bridge_http52_evidence.py",
+    "plugins/agent-bridge/tests/test_host_status.py",
+    "plugins/agent-bridge/tests/test_host_status_remote.py",
+    "plugins/agent-bridge/tests/test_host_status_clients.py",
+    "plugins/agent-bridge/docs/host-status-feed.md",
     "plugins/agent-bridge/tests/test_acp_current_requests.py",
     "plugins/agent-bridge/tests/test_inbox_consumer_enrollment.py",
     "plugins/agent-bridge/tests/test_live_inbox_producer.py",
@@ -133,6 +142,10 @@ PROBES = {
     "test_real_cli_parser_send_and_existing_receipt_share_one_http_ledger": 1,
     "test_module_cli_observes_over_loopback_without_starting_service": 1,
     "test_extension_pending_snapshot_and_capability_wire": 1,
+    "test_host_status_coalesced_flow": 1,
+    "test_host_status_shared_host_stream": 1,
+    "test_host_status_prior_and_rollback_refusal": 1,
+    "test_host_status_legacy_timeout_compatibility": 1,
     "test_live_question_provider_advertises_actual_capability": 1,
     "test_passive_native_correlation_is_exact_and_charged_to_its_budget": 4,
     "test_current_native_roundtrip_and_durable_outcome": 2,
@@ -243,6 +256,7 @@ PROBES = {
 }
 TEST = retained.TEST
 CAPABILITY_VERSIONS = {
+    "host_status_feed": 1,
     **retained.CAPABILITY_VERSIONS, "owner_membership": 52,
     "bridge-session-current-requests-v1": 1,
     "bridge-session-tool-statistics-v1": 1,

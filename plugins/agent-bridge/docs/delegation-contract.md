@@ -64,6 +64,7 @@ delegated-agent facade.
 | Admit an exact live CLI prompt | `send <exact-session-id> --live-exact` with the exact expected session, key, sender and stdin prompt | `POST .../messages/keyed-exact/v1`, capability `live_keyed_receipt: 1` | Original live inbox receipt; no alias, ACP, queue or native replacement |
 | Observe an exact keyed live CLI prompt | Same binding with `--live-receipt-only` | `POST .../messages/keyed-receipt/v1`, same capability | Read-only retained receipt; a miss is unproven, not permission to send |
 | Notify one exact live CLI native | `send <exact-session-id> --live-exact-notify --kind notify`, same exact binding | `POST .../messages/exact-notify/v1`, capability `live_exact_notify: 1` | Informational inbox admission only; no alias, work-bearing prompt, ACP or replacement |
+| Subscribe to selected-agent status | `BridgeClient.status_*` methods | `/api/v1/status`, capability `host_status_feed: 1` | [Bounded metadata feed, explicit acknowledgement and one coalesced existing-inbox notice](host-status-feed.md); shared host carrier streams, not per-agent polling |
 
 Against older daemons, receipt-only sends retain legacy outcomes without
 receipt evidence. Explicit reply waiting refuses before submitting a message

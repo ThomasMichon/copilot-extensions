@@ -439,14 +439,20 @@ _Operator-required outcome; agent-recommended slices and validation._
 - [x] Review the [persisted acquisition mapping refinement](comment-observation-correlation.md#persisted-acquisition-mapping-refinement)
   before changing strict owner or serving schemas. Reuse retained intent and
   receipt identity; add only bounded acquired evidence under the same owner
-  (#11538; storage/acquisition/read implementation remains open).
+  (#11538; finite storage and consumer delivery below).
 - [x] Deliver its finite explicitly adopted data-owner/library transaction and
   scoped retained-read leaves (#11542; final affected packet: 100 source cases).
   Preserve original confirmation, unknown outcomes and B3/B4 proof.
-- [ ] Complete actual workspace load/sync enrollment and negotiated serving
-  for that persisted acquisition mapping,
+- [x] Deliver actual explicitly selected workspace load/sync acquisition and
+  negotiated retained serving for that persisted mapping (#11556; final 56
+  actual-boundary source controls),
   preserving original confirmation, unknown outcomes and B3/B4 proof; keep
   all-publisher, provider and installed acceptance separate.
+- [x] Select retained mappings through the existing standalone foreground
+  host's trusted per-route configuration and fresh-only storage adoption.
+  Preserve default-off hosting, read-only native scope and retained inspection
+  after optional preparation-provider withdrawal; this is source hosting,
+  not protected publication or production enrollment (#11561).
 - [x] Review the [tracked comment/review consumer refinement](tracked-comment-consumers.md)
   before changing legacy commands (#11525).
 - [x] Qualify one explicit tracked comment/review source binding
@@ -1007,11 +1013,19 @@ or silently expanding a bounded source claim.
   targets, explicit/capacity-refused adoption, old strict readers, receipt
   invalidation, uncertain replacement, cache-before-journal failure and
   normalization/digest reuse (#11542; final 100 affected source cases).
-  Actual load/sync and negotiated serving remain separate.
-- [ ] Qualify the [persisted acquisition mapping controls](comment-observation-correlation.md#provider-first-delivery-and-validation):
+  Actual load/sync source controls follow below.
+- [x] Qualify finite [persisted acquisition mapping source controls](comment-observation-correlation.md#provider-first-delivery-and-validation):
   same-owner native joins, real-file restart/contention, monotone evidence,
   capacity and uncertain replacement, no duplicate IO or false feedback,
-  strict old/new/rollback peers and unchanged default hosting.
+  strict old/new/rollback peers, additive discovery and unchanged default
+  hosting (#11542/#11556; final 56 consumer controls). Normal installed
+  enrollment and live provider acceptance remain with P3-P5, not this source leaf.
+- [x] Qualify that standalone mapping selection through strict passive parsing,
+  fresh-only adoption, unsupported existing volumes, route isolation and the
+  real foreground/Gateway/native-exporter boundary with a synthetic prior
+  receipt. Separate retained current-content evidence from native-send,
+  original-version, feedback/handled and installed/provider acceptance
+  (#11561; final 105 standalone controls).
 - [x] Qualify the explicit tracked comment/review consumer through its actual
   resolution and workspace CLI/tool/client boundary: exact scoped selection,
   final preview and separate submission, original-key restart/lost-result
@@ -1235,6 +1249,91 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-08 - Expire journal metadata during quiet observations
+
+- The existing P1/P2 lane now removes the aged metadata suffix on admitted
+  unchanged observations while retaining the last cursor anchor. Expiry does
+  not allocate events, acknowledge a cursor or promote feedback. Terminal
+  summaries and other replay-owner state retain their existing custody.
+- The focused journal, workspace-projection and CLI/HTTP integration packet
+  passes 53 cases under the bounded local runner. Both disposable-container
+  attempts failed during the pinned `uv` download with HTTP 504, before
+  collection, and verified cleanup; this is not container qualification.
+  Fatal lint, documentation consistency and install-contract gates pass.
+- Acquisition-owner inspection confirms that the current relay returns text,
+  not authoritative acquisition metadata. Keep protected review unavailable;
+  internal Azure CLI credential methods are not a supported relay boundary.
+  The existing enrollment contract retains that dependency without probing
+  credentials or enabling another source.
+- Source review/merge remains pending. Coordinated body/cache/outbox
+  retention, all-publisher/provider/installed qualification, full
+  CLI/Dispatch and shadow/presentation outcomes remain open. No activation,
+  deployment or existing resource release is implied.
+
+### 2026-11-08 - Select acquired mappings in the existing standalone host
+
+- #11561 merged as `139f39067c6b18159366550b807f8ed0f85524eb`.
+  The current-head Comment verdict was assessed under the owner-authored
+  review policy, with actionable findings fixed and explained findings
+  resolved. Required current-head checks passed; no further approval
+  round was required after that accepted condition.
+- Final standalone qualification passes 105 cases; strict service analysis
+  passes all 14 files on Linux and Windows targets. The actual foreground
+  fixture qualifies a present preparer before later withdrawal and restart,
+  using a synthetic original receipt seeded before its writer starts.
+- Re-read the parent Plan/Validation and close only the two finite host
+  leaves above. The next protected-host prerequisite is still actual
+  supported acquisition-source grant/audience and current-custodian
+  verification, not observation credentials or injected callbacks.
+  All-publisher, provider/installed, full retention/CLI/Dispatch and
+  shadow/pane acceptance remain open. No live host was activated or updated.
+
+### 2026-11-08 - Correct canonical legacy install-root negotiation
+
+- Implement the narrow #11565 source correction: capture only an absolute,
+  normalized canonical legacy home install root as intrinsic routing.
+  Namespaced receipt validation and every other caller override remain
+  unchanged; this is not a new credential-context capability.
+- The canonical contained CLI/context selection passes all 70 cases without
+  skips, including default-root negotiation and foreign, relative and
+  default-plus-token refusal. An actual source-bound Python `-I` process
+  confirms those routing decisions without mocks or service effects.
+  Ruff `F,E9`, install-contract and documentation-consistency checks pass.
+- The equivalent-root spelling control also passes: retain the original
+  environment value after proving normalized equivalence, because the
+  credential guard compares that original value exactly. The expanded
+  focused selection passes all 71 cases without skips.
+- These are unit/simple-process results, not full deployed-consumer evidence.
+  Preserve the still-open installed consumer, configured-credential,
+  live-service/fleet and retained-resource gates. No additional hosted run,
+  shared-service mutation or local adoption occurred in this correction.
+
+### 2026-11-08 - Merge the finite prerequisite record and continue deployed-consumer validation
+
+- #11555 merged at `6fb38bc450431e806fdc4b525d5f49dde5c77001`.
+  Exact-head Copilot review `5817296462` approves the documentation-only
+  prerequisite record with no open issues; required CI `42465432427` passes.
+  No runtime, dependency or CI behavior changed, and no additional native run
+  or local rollout was performed.
+- The complete parent remains Active. Current main Plan/Validation has 84
+  unchecked items; the per-origin annex retains 73 unchecked checks. The
+  finite installed-cell/lifecycle exit is qualified, not the broader
+  configured-credential, live-consumer, service/fleet or resource disposition.
+- Next, exercise the installed Dispatch/PR-owner consumer contract in isolated
+  state against an existing authorized PR target. Preserve shared coordinators,
+  subscriptions and peers; distinguish real provider/credential observations
+  from synthetic controls and do not enable production delegation.
+- The next-path preflight finds #11565: the generated native Dispatch command
+  assigns its canonical default install root, but legacy context capture gives
+  negotiation no intrinsic environment. The actual deployed `0.18.306-dev1`
+  guard accepts a clean caller and rejects that assignment alone, before any
+  owner capability probe. Current source has the same logic.
+- Correct only canonical absolute default-root routing, retaining credential,
+  nondefault-root and relative-root fallback and all namespaced ownership
+  checks. The existing source integration fixture's synthetic runtime markers
+  and source-path injection are not deployed acceptance; validate complete
+  installed bits and real intrinsic routing after the source correction.
 
 ### 2026-11-08 - Clear the finite installed-owner prerequisite with exact-release native evidence
 
