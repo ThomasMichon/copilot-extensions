@@ -168,6 +168,50 @@ def test_legacy_native_helper_defers_without_replaying_global_collection(tmp_pat
     assert not calls.exists()
 
 
+@pytest.mark.parametrize("helper_kind", ("legacy", "marker-only", "readonly-marker"))
+def test_bash_rollback_cannot_reuse_inherited_native_contract(tmp_path, helper_kind):
+    shell = _bash()
+    if shell is None:
+        pytest.skip("native Bash unavailable (never substitute WSL)")
+    helper_root = tmp_path / "rollback-helper"
+    helper_root.mkdir()
+    calls = tmp_path / "must-not-collect"
+    legacy = 'reconcile_daemon_instances() { printf unsafe > "$FIXTURE_LEGACY_CALLS"; }\n'
+    marker = (
+        "daemon_instance_reconcile_contract() { "
+        "printf '%s\\n' 'copilot-daemon-reconcile-v1'; }\n"
+    )
+    (helper_root / "daemon_instances.sh").write_text(
+        marker if helper_kind == "marker-only" else legacy, encoding="utf-8",
+    )
+    setup = legacy if helper_kind == "marker-only" else ""
+    if helper_kind == "readonly-marker":
+        setup += "readonly -f daemon_instance_reconcile_contract;\n"
+    command = (
+        '. "$1"; . "$2/installer-instance-reconcile.sh"; ' + setup
+        + 'before="$(declare -f daemon_instance_reconcile_contract; '
+        'declare -f reconcile_daemon_instances)"; '
+        'reconcile_installer_instances "$3" "$4" "$4"; '
+        'after="$(declare -f daemon_instance_reconcile_contract; '
+        'declare -f reconcile_daemon_instances)"; '
+        '[[ "$before" == "$after" ]] || exit 92; printf caller-retained'
+    )
+    result = subprocess.run(
+        [
+            shell, "--noprofile", "--norc", "-c", command, "rollback-test",
+            str(REPO / "libs/agent-procutil/src/agent_procutil/daemon_instances.sh"),
+            str(ENGINE), str(helper_root), str(tmp_path),
+        ],
+        env={**os.environ, "FIXTURE_LEGACY_CALLS": calls.as_posix()},
+        text=True, capture_output=True, timeout=15,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stderr
+    assert not calls.exists()
+    assert result.stdout == "caller-retained"
+    assert "native-contract-unavailable" in result.stderr
+
+
 def test_explicit_root_and_budget_use_one_native_call(tmp_path, monkeypatch):
     calls = []
 

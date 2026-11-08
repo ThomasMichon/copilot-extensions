@@ -1239,7 +1239,11 @@ New native callers query the executing helper's read-only `reconcile-contract`
 before cleanup: contract version 1 requires termination-policy and runtime-scope
 support. The Bash wrapper also declares `daemon_instance_reconcile_contract`;
 installer PowerShell adapters check the loaded facade's parameters before
-calling it. Legacy or rolled-back helpers that cannot enforce these requirements
+calling it. Bash installer adapters clear inherited contract and reconciliation
+functions in their private subshell before loading the addressed helper; only
+that helper's definitions may authorize cleanup. An inherited read-only function
+that cannot be cleared safely defers the optional backstop without changing the
+caller's bindings. Legacy or rolled-back helpers that cannot enforce these requirements
 defer reconciliation before any cleanup request, without replaying an unscoped
 or termination-enabled fallback. Older callers remain syntactically accepted by
 new providers but inherit the termination-free default. This intentional safety

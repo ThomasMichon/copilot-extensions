@@ -69,7 +69,13 @@ another installation's record and artifacts are not cleanup candidates.
 Observed-exit artifacts retain their existing exact-ownership checks. Missing
 scope or a legacy helper without termination-policy/runtime-scope support defers
 this optional cleanup before effects, preserving installation success without
-falling back to a global sweep. The count limit bounds all scanned records,
+falling back to a global sweep. Bash adapters do not accept capability markers
+or reconciliation functions inherited from their caller: both are cleared in
+the existing private subshell before loading the addressed helper. A failed
+clear or missing helper-owned declaration defers cleanup, retaining the caller's
+bindings. Healthy installation-cell replay uses the validated cell root, not
+the legacy default directory.
+The count limit bounds all scanned records,
 including foreign-root records; each runtime scope has its own progress cursor
 so interleaved installers cannot advance past another installation's work.
 Python and native wrappers share that cursor namespace (case-normalized on

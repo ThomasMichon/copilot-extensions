@@ -1395,6 +1395,7 @@ if ($Action -eq 'cell-provision') {
         Write-Fail 'cell-provision context receipt is incomplete'
         exit 1
     }
+    $InstallDir = $pluginRoot
     $currentMarker = Join-Path (Split-Path -Parent $versionsRoot) 'current-version'
     if (
         (Test-Path -LiteralPath $currentMarker -PathType Leaf) -and
@@ -1469,7 +1470,6 @@ if ($Action -eq 'cell-provision') {
         exit $LASTEXITCODE
     }
     $CellMode = $true
-    $InstallDir = $pluginRoot
     $VenvDir = Join-Path $versionsRoot $SrcVersion
     if ($env:OS -eq 'Windows_NT') {
         $VenvPython = Join-Path $VenvDir 'Scripts\python.exe'

@@ -1135,6 +1135,7 @@ if [[ "$ACTION" == "cell-provision" ]]; then
         _fail "cell-provision context receipt is incomplete"
         exit 1
     }
+    INSTALL_DIR="$PLUGIN_ROOT"
     CURRENT_MARKER="$(dirname -- "$VERSIONS_ROOT")/current-version"
     if [[ -f "$CURRENT_MARKER" && ! -L "$CURRENT_MARKER" &&
           "$(cat "$CURRENT_MARKER")" == "$SRC_VERSION" ]]; then
@@ -1189,7 +1190,6 @@ if [[ "$ACTION" == "cell-provision" ]]; then
             --origin-payload-root "$ORIGIN_PAYLOAD_ROOT"
     fi
     CELL_MODE=1
-    INSTALL_DIR="$PLUGIN_ROOT"
     VENV_DIR="$VERSIONS_ROOT/$SRC_VERSION"
     VENV_PYTHON="$VENV_DIR/bin/python"
     LINK_DIR="$VENV_DIR"

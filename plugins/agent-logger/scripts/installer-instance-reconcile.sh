@@ -15,11 +15,16 @@ reconcile_installer_instances() (
         printf '%s\n' '[installer-instance-gc] deferred: native-helper-unavailable' >&2
         return 0
     fi
+    if ! unset -f daemon_instance_reconcile_contract reconcile_daemon_instances 2>/dev/null; then
+        printf '%s\n' '[installer-instance-gc] deferred: native-contract-unavailable' >&2
+        return 0
+    fi
     if ! . "$helper"; then
         printf '%s\n' '[installer-instance-gc] deferred: native-helper-load-failed' >&2
         return 0
     fi
     if ! declare -F daemon_instance_reconcile_contract >/dev/null ||
+        ! declare -F reconcile_daemon_instances >/dev/null ||
         [[ "$(daemon_instance_reconcile_contract)" != 'copilot-daemon-reconcile-v1' ]]; then
         printf '%s\n' '[installer-instance-gc] deferred: native-contract-unavailable' >&2
         return 0
