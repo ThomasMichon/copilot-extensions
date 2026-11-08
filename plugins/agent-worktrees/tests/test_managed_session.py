@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import io
 import json
@@ -663,6 +664,74 @@ def test_prepared_native_membership_reuses_original_association(tmp_path, monkey
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout == "True", result.stdout + result.stderr
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows registered pre-tool consumer")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("case", ["read", "write", "revoked"])
+def test_registered_pre_tool_entry_reuses_prepared_membership(tmp_path, monkeypatch, shell, case):
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    module = load("managed_session")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    anchor, registry = fixture_project(tmp_path)
+    workspace = fixture_linked_worktree(tmp_path, anchor)[0]
+    session = tmp_path / ".copilot" / "session-state" / "pre-tool"
+    session.mkdir(parents=True)
+    payload = {
+        "sessionId": "pre-tool", "cwd": str(workspace),
+        "toolName": "view" if case == "read" else "edit",
+        "toolArgs": {"path": "non-ascii-\u00e9.txt", "text": "quote'\"\\\n\t"},
+    }
+    assert module.admitted(payload, home=tmp_path)
+    plugin = tmp_path / "payload"
+    scripts = plugin / "scripts"
+    scripts.mkdir(parents=True)
+    for name in (
+        "pre-tool-hook.ps1", "managed-session.ps1", "hook-read-policy.json",
+        "statelessness_guard.py", "cross_repo_guard.py", "anchor_write_guard.py",
+        "pr_supersede_guard.py",
+    ):
+        shutil.copyfile(SCRIPTS / name, scripts / name)
+    contract = json.loads((scripts / "hook-read-policy.json").read_text(encoding="utf-8"))
+    for guard in contract["guards"]:
+        text = (scripts / guard).read_text(encoding="utf-8").replace("\r\n", "\n")
+        contract["guards"][guard] = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    (scripts / "hook-read-policy.json").write_text(json.dumps(contract), encoding="utf-8")
+    observed = tmp_path / "policy-input"
+    (scripts / "resolve-runtime.ps1").write_text(
+        "$AwPy='" + sys.executable.replace("'", "''") + "'\n",
+        encoding="utf-8",
+    )
+    (scripts / "hook_policy_process.py").write_text(
+        "import base64,json,sys\nfrom pathlib import Path\n"
+        + f"with Path({str(observed)!r}).open('xb') as output: output.write(base64.b64decode(sys.stdin.readline()))\n"
+        + "print(json.dumps({'permissionDecision':'deny','permissionDecisionReason':'fixture policy'}))\n",
+        encoding="utf-8",
+    )
+    if case == "revoked":
+        (registry / "projects.yaml").write_text("projects: {}\n", encoding="utf-8")
+    env = environment(tmp_path, workspace)
+    env["COPILOT_PLUGIN_ROOT"] = str(plugin)
+    env.pop("AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION", None)
+    entry = json.loads((SCRIPTS.parent / "hooks.json").read_text(encoding="utf-8"))["hooks"]["preToolUse"][0]
+    raw = json.dumps(payload, ensure_ascii=False, indent=2)
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-Command", entry["powershell"]],
+        input=raw.encode("utf-8"), capture_output=True, timeout=10,
+        cwd=workspace, env=env, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == b""
+    if case == "write":
+        assert observed.read_bytes() == raw.encode("utf-8")
+        assert json.loads(result.stdout) == {
+            "permissionDecision": "deny", "permissionDecisionReason": "fixture policy",
+        }
+    else:
+        assert not observed.exists()
+        assert result.stdout == b""
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows prepared cell membership")

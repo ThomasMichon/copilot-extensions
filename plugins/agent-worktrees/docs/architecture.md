@@ -3292,7 +3292,13 @@ decision; it is not authorization or proof that policy was satisfied. Confirmed
 protected violations retain their existing deny/ask outcomes.
 
 Native JSON readers reject non-object roots before PowerShell can enumerate
-a singleton array. Non-exempt native fallback uses the strict entry and checks
+a singleton array. On PowerShell 6+, the pre-tool reader reuses managed
+admission's same-engine JSON helper instead of initializing the JSON cmdlet
+again. This covers event, stop-state, installation-context and policy-response
+decoding without changing admission or forwarding the decoded event to Python:
+the original raw UTF-8 input still reaches the policy worker. PowerShell 5
+retains its existing plain serializer and metadata behavior. Non-exempt native
+fallback uses the strict entry and checks
 a bounded, typed object response before forwarding diagnostics. Empty,
 malformed and down-level unknown-entry responses report unavailable evaluation
 without a permission decision. Child UTF-8 settings override inherited
