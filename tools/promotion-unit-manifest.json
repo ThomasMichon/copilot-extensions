@@ -5437,6 +5437,7 @@
         "services/chat/src/agent_chat_service/store.py",
         "tools/_admission_protocol.py",
         "tools/cache_directory_paths.py",
+        "tools/plugin_test_resources.py",
         "tools/native_test_paths.py",
         "tools/typecheck.py",
         "tools/typecheck_source_views.py",
