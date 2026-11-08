@@ -19,7 +19,8 @@ _REAL_IN_USE = reclaim.in_use
 
 def _git(cwd, *args):
     subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True,
-                   env=reclaim.git_environment())
+                   env=reclaim.git_environment(),
+                   creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)))
 
 
 @pytest.fixture(autouse=True)
@@ -305,6 +306,31 @@ def test_multi_argument_rmtree_failure_is_reported_without_blind_retry(
     code, result = _run("--apply-plan", plan, "--confirm-writers-stopped", capsys=capsys)
     assert code == 1 and result["candidates"][0]["status"] == "partial"
     assert "open denied" in result["candidates"][0]["errors"][0]
+    assert (target / "linux" / "plugin" / "python").is_file()
+    assert not list(repo.glob(".test-venvs.reclaiming-*"))
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX fd-based rmtree")
+def test_real_rmtree_open_failure_restores_and_reports(repo, tmp_path, capsys, monkeypatch):
+    if not reclaim.shutil.rmtree.avoids_symlink_attacks:
+        pytest.skip("fd-based rmtree unavailable")
+    target = _legacy(repo)
+    code, plan = _plan(repo, tmp_path, target, capsys=capsys)
+    assert code == 0
+    open_directory = os.open
+    seen = []
+
+    def denied(path, flags, mode=0o777, *, dir_fd=None):
+        if ".reclaiming-" in os.fsdecode(path):
+            seen.append(path)
+            raise PermissionError("directory open denied")
+        return open_directory(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(reclaim.os, "open", denied)
+    code, report = _run("--apply-plan", plan, "--confirm-writers-stopped", capsys=capsys)
+    assert seen and code == 1
+    assert report["candidates"][0]["status"] == "partial"
+    assert any("directory open denied" in error for error in report["candidates"][0]["errors"])
     assert (target / "linux" / "plugin" / "python").is_file()
     assert not list(repo.glob(".test-venvs.reclaiming-*"))
 
