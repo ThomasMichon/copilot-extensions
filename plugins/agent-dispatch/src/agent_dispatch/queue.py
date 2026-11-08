@@ -112,6 +112,7 @@ from .queue_schema_migrations import run_queue_schema_migrations
 from .queue_pool_catalog import QueuePoolCatalogMixin
 from .queue_pool_decline import PoolDeclineMixin
 from .queue_schedule_registry import ScheduleRegistrationMixin
+from .queue_spawn_history import SpawnHistoryMixin
 from .queue_spawn_rearm import SpawnRearmMixin
 from .queue_spawn_conclusion import SpawnConclusionMixin
 from .queue_spawn_reservations import (  # noqa: F401 -- re-exported for existing call sites/tests
@@ -180,6 +181,7 @@ class TaskQueue(
     SpawnReservationMixin,
     SpawnConclusionMixin,
     SpawnRearmMixin,
+    SpawnHistoryMixin,
     ProducerFenceMixin,
     QueueStorageMixin,
     AgentBackedRepoMixin,
