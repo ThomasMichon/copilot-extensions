@@ -108,6 +108,22 @@ authorized resources and the existing runner/lease/cleanup boundaries.
   result to separately authorized adoption. Hold widening for initial pilot
   feedback; source approval itself never starts that pilot.
 
+### Phase 1b — Qualified owner observation and receiving continuity
+
+The [scoped prerequisite proposal](receiving-continuity.md) preserves the
+old-final-first ordering. It is agent-recommended realization of the original
+request, not a new migration or runtime-effect grant.
+
+- [ ] Obtain a qualified non-mutating native mux-ownership observation through
+  its existing owner; unavailable evidence remains a hold, not inactive proof.
+- [ ] Qualify explicit source-owned receiving-proof inspection/reconciliation
+  separately from read-only planning, preserving the original operation.
+- [ ] Support the first clean, sessionless, unpaired concluded receiving
+  allocation with settled origin responsibility and an owner-serialized
+  current-location revision; immutable allocation provenance stays unchanged.
+- [ ] Prove the complete native consumer and interrupted/refused paths before
+  source merge/release or separately authorized adopter practice.
+
 ### Phase 2 — Broader inactive continuity
 - [ ] Incorporate generic first-flow feedback; support inactive WIP with exact
   index and dirty/untracked/ignored preservation, not forced commit or discard.
@@ -156,6 +172,10 @@ effects remain separate gates. Phase 1 source implementation is admitted;
 adopter pilot feedback gates subsequent widening.
 
 ## Journal
+
+[2026-11-08 — Owner observation and receiving proof](journal/2026/11.08%20Owner%20observation%20and%20receiving%20proof.md)
+records the source-confirmed boundary and current prerequisite proposal.
+Earlier inline entries below remain historical source evidence.
 
 ### 2026-11-05 — Planning and coordination
 - Rechecked public issue/PR title searches; no relocation claimant found.

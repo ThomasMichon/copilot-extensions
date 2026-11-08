@@ -159,6 +159,13 @@ The native-write subset below shares this shell-safe evaluation. Other tools,
 unprepared installation cells and oversized events keep their original entry and
 behavior. This is not the complete shell-only transition.
 
+Prepared entry uses native file/path operations without loading PowerShell's
+Management module. Fully qualified source paths defer cwd repair until the
+original fallback is needed; relative, drive-relative and root-relative paths
+retain early repair. Runtime-root resolution preserves both normalized-path
+validation and literal ancestor/reparse checks, including ancestors hidden by
+dot segments. This changes neither prepared admission nor fallback policy.
+
 The reader checks the original prepared membership and all its input witnesses.
 It then reads the binding owner's `worktree-binding.json`. Only the owner's
 guarded exact-record recheck adds the `hookFacts` version-1 locator with resolved

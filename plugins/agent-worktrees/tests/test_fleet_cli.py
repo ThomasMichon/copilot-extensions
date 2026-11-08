@@ -22,6 +22,7 @@ import pytest
 from agent_procutil import no_window_kwargs
 
 from agent_worktrees import config as cfg
+from agent_worktrees import delegate_cli
 from agent_worktrees import list_views_cli as fleet
 
 
@@ -382,8 +383,10 @@ def test_missing_command_or_bad_output_is_a_gap_not_zero(tmp_path):
         assert rows[name]["error"]
         assert rows[name]["worktrees"] == []
     assert "command not found" in rows["missing"]["error"]
+    # An unlabeled reply (no current-roster provenance) is reachable but unproven.
     assert rows["empty"] == {
         "machine": "empty", "env": "linux", "reachable": True, "worktrees": [],
+        "availability": {"status": "stale", "reason": delegate_cli._UNPROVEN_ROSTER_REASON},
     }
     assert rows["busy"]["reachable"] is True
     assert [w["id"] for w in rows["busy"]["worktrees"]] == ["w1"]
@@ -419,6 +422,68 @@ def test_every_host_read_is_passive_and_saved_rows_keep_provenance(tmp_path):
         assert row["reachable"] is True
         assert row["availability"]["status"] == "advisory"
         assert row["projection"]["observed_at"] == 1700000000.0
+
+
+def test_resident_freshness_and_stale_label_reach_fleet_rows(tmp_path, capsys):
+    """A resident roster read passively carries ``projection.freshness``; one
+    not republished within the resident's bound is labeled stale and named
+    apart from a saved roster in the human view."""
+    config = _fake_config(tmp_path, machine="atlas-core", platform="wsl")
+    fresh = {"quality": "current", "observed_at": 1.0,
+             "freshness": {"refreshed_age_s": 5.0, "bound_s": 90.0}}
+    replies = {
+        "local": {"worktrees": [], "projection": fresh},
+        "ember": {
+            "worktrees": [{"id": "w1"}],
+            "projection": {**fresh, "freshness": {"refreshed_age_s": 95.0, "bound_s": 90.0}},
+            "availability": {"status": "stale", "reason": "current roster refresh overdue"},
+        },
+        "atlas-core": {
+            "worktrees": [],
+            "projection": {"quality": "advisory", "observed_at": 1.0},
+            "availability": {"status": "advisory", "reason": "resident not running"},
+        },
+    }
+
+    def _fake_run(cmd, **_kwargs):
+        reply = replies["local" if cmd[0] != "ssh" else cmd[-2]]
+        return SimpleNamespace(returncode=0, stdout=json.dumps(reply), stderr="")
+
+    result = _run_json(["--json"], _three_targets(), config, run_side_effect=_fake_run)
+    rows = {(row["machine"], row["env"]): row for row in result["hosts"]}
+    assert rows[("atlas-core", "wsl")]["projection"]["freshness"]["refreshed_age_s"] == 5.0
+    assert "availability" not in rows[("atlas-core", "wsl")]
+    assert rows[("ember", "linux")]["availability"]["status"] == "stale"
+    assert rows[("ember", "linux")]["projection"]["freshness"]["bound_s"] == 90.0
+
+    with patch.object(fleet.cfg, "load_config", return_value=config), \
+         patch.object(fleet.cfg, "load_machines_yaml", return_value=_three_targets()), \
+         patch.object(fleet.cfg, "project_name", return_value="agent-worktrees"), \
+         patch.object(fleet.subprocess, "run", side_effect=_fake_run):
+        assert fleet.run_fleet([]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert any("ember" in line and "(stale roster)" in line for line in lines)
+    assert any("windows" in line and "(saved roster)" in line for line in lines)
+    assert not any("wsl" in line and "roster)" in line for line in lines)
+
+
+def test_unproven_current_reply_is_not_shown_as_a_plain_count(tmp_path, capsys):
+    """An older resident answers ``quality: "current"`` without the freshness
+    proof or an availability label; the human view still qualifies it, and the
+    JSON row is labeled stale so a consumer cannot read it as zero work."""
+    config = _fake_config(tmp_path, machine="atlas-core", platform="wsl")
+    reply = {"worktrees": [], "projection": {"quality": "current", "observed_at": 1.0}}
+    proc = SimpleNamespace(returncode=0, stdout=json.dumps(reply), stderr="")
+    result = _run_json(["--json"], _three_targets(), config, run_side_effect=lambda *a, **k: proc)
+    assert [row["availability"]["status"] for row in result["hosts"]] == ["stale"] * 3
+    with patch.object(fleet.cfg, "load_config", return_value=config), \
+         patch.object(fleet.cfg, "load_machines_yaml", return_value=_three_targets()), \
+         patch.object(fleet.cfg, "project_name", return_value="agent-worktrees"), \
+         patch.object(fleet.subprocess, "run", return_value=proc):
+        assert fleet.run_fleet([]) == 0
+    hosts = [line for line in capsys.readouterr().out.splitlines() if line.startswith("  ")]
+    assert len(hosts) == 3
+    assert all("0 worktree(s) (stale roster)" in line for line in hosts)
 
 
 def test_runtime_without_passive_or_saved_roster_is_a_gap(tmp_path):
