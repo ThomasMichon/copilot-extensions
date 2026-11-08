@@ -1,0 +1,9 @@
+{
+  "comment": "Add an installed public Worktrees caller fixture with current Manager prerequisites.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -71,6 +71,28 @@ Each capture retains its own existing aggregate clock, including managed test
 environment preparation; the workflow timeout does not enlarge it.
 Returned files are data: the client never applies the generated outputs.
 
+`submit --packet native-worktrees-embody` selects only the installed public
+Worktrees detached caller. The candidate must supply `test_public_embody` in
+`tests/native/test_native_seed_application.py`; controller support does not
+provide or qualify that source fixture. The protected controller prepares hash-pinned,
+disposable Copilot 1.0.105 and PSMux 3.3.8 binaries, checks their actual versions,
+and requires anonymous access to the configured non-public HTTPS package feed
+from that hosted runner. The repository owner explicitly configures
+`WINDOWS_QUALIFICATION_INDEX_URL` as an Actions secret containing only the feed
+URL, without credentials, query or fragment. No endpoint is committed here.
+It is injected only for this named packet, not generic tests. Captured logs,
+JUnit and result files redact URLs and the configured feed hostname before
+upload; a separate protected post-execution step repeats this sanitization
+after worker interruption. Unsafe or oversized text is omitted and cannot
+qualify. Console masking alone does not sanitize artifact contents.
+The packet retains the public caller's 900-second functional case,
+1200-second plugin aggregate, separate 420/300/180-second preparation/native
+bounds, startup limits and exact cleanup. Missing prerequisites, empty or
+skipped tests and a different actual caller never qualify. This is evidence
+for the recorded native versions, not the operator's installed build, attached
+or new-window use, or survival across caller cleanup Jobs. New packet support
+must be reviewed and promoted to the protected controller before submission.
+
 Before any staging or dispatch, the client reads the selected protected
 controller's `tools/windows-qualification-support.json`. Missing/unsupported
 request, result or selection support refuses without publishing source.
@@ -2537,6 +2559,28 @@ admission case retains its 300-second bound and the plugin aggregate stays 600.
 This is installed execution-owner evidence, not the public Worktrees command,
 Manager integration, desktop attachment or survival across caller cleanup Jobs.
 The existing managed-environment controls remain separate and unchanged.
+
+Select `-k public_embody` with the same installed-broker prerequisites and
+900/1200/900 runner bounds for the public detached caller. That case builds and
+installs both real applications, deletes their disposable source inputs, and invokes
+the installed `agent-worktrees.exe --project <fixture> embody` against a private
+project configuration and worktree record. Worktrees must discover the installed
+current Manager's native pane wrapper; a Worktrees-only fixture does not
+qualify this public Windows launch path. The packaged default setup selects
+the native executable; recovery mode suppresses unrelated host reconciliation.
+Fresh launch uses a literal explicit seed, cold resume selects the existing
+conversation without a supplied resume argument, and live reuse must preserve
+the mux incarnation without creating another attempt or replaying a seed.
+The same broker, history, process-birth and exact retirement checks remain.
+This checks the public detached-command boundary, not attached `copilot`, desktop
+new-window behavior, setup-hook adoption or survival across caller cleanup Jobs.
+The functional public-caller case has separate 420-second Worktrees preparation,
+300-second Manager preparation and 180-second caller-owned native bounds.
+Measured wheel/profile preparation can consume most of the original admission
+case's clock before this distinct consumer even starts; this case is not a
+300-second Worktrees construction-performance check. The existing 300-second
+admission case and 300+180 installed execution-owner case remain unchanged,
+as do the native startup and cleanup limits.
 
 The adjacent `tests/native/test_manager_application_launch.py` builds and
 installs the real Manager wheel application through the canonical standalone
