@@ -5471,16 +5471,12 @@ _ALL_KNOWN_VERBS: frozenset[str] = frozenset(_LAZY_DISPATCH_TABLE.keys()) | froz
 from .cli_cluster_free import CLUSTER_FREE_MODULES as _CLUSTER_FREE_MODULES
 
 
-def _dispatch_lazy(command: str, args_list: list[str]) -> int:
-    """Fast-path dispatch for a module-delegated subcommand.
+def _dispatch_lazy(command: str, args_list: list[str], *, commands: dict | None = None) -> int:
+    """Dispatch through the shared owner with the command's original parser.
 
-    Thin wrapper around the shared ``lazy_cli_dispatch`` mechanism
-    (agent-cli-lazy-dispatch effort Phase 2's own first adopter, extracted
-    from this exact function): imports and registers only the ONE module
-    that owns `command`'s parser and handler (per _LAZY_DISPATCH_TABLE),
-    instead of build_parser()'s full eager surface. The resulting
-    parser/help text for this one subcommand is identical to what
-    build_parser() would have produced for it.
+    Only the selected module is registered, not build_parser()'s eager
+    surface. An explicit handler map lets an optional source embedding
+    retain the same parser, dispatch table and cluster-loading behavior.
     """
     return _shared_dispatch_lazy(
         command, args_list,
@@ -5496,7 +5492,7 @@ def _dispatch_lazy(command: str, args_list: list[str]) -> int:
         # surface, or a test that monkeypatches COMMAND_MAP[command] to
         # intercept dispatch, gets the override it expects instead of
         # silently bypassing it).
-        command_map=globals().get("COMMAND_MAP"),
+        command_map=commands if commands is not None else globals().get("COMMAND_MAP"),
         register_cli_modules=frozenset({"pane_lifecycle"}),
     )
 
@@ -6298,7 +6294,7 @@ def _print_boot_provenance() -> None:
 
 # git collaboration surfaces are componentized into git_cli.py.
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, publication: object | None = None) -> int:
     global _INVOCATION_CWD
     try:
         _INVOCATION_CWD = Path.cwd()
@@ -6307,6 +6303,9 @@ def main(argv: list[str] | None = None) -> int:
 
     output.ensure_utf8_stdio()
     args_list = argv if argv is not None else sys.argv[1:]
+    if publication is not None:
+        from .pr_selected_publication import dispatch
+        return dispatch(args_list, publication)
 
     if args_list and args_list[0] in {"__source-setup", "__source-start"}:
         parser = argparse.ArgumentParser(allow_abbrev=False)

@@ -6,9 +6,13 @@ import argparse
 import shlex
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from . import config as cfg, output, pr_ops, tracking, worktree_identity
 from . import context_cli, pr_config
+
+if TYPE_CHECKING:
+    from .pr_selected_publication import Publication
 
 
 def add_parsers(sub) -> None:
@@ -663,7 +667,11 @@ def cmd_pr_diff(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_pr_comment(args: argparse.Namespace) -> int:
+def cmd_pr_comment(args: argparse.Namespace, *, publication: Publication | None = None) -> int:
+    if publication is not None:
+        from .pr_selected_publication import run
+
+        return run(args, publication, command="pr-comment")
     from . import pr_reviewer_ops
 
     use_json = getattr(args, "json", False)
@@ -693,7 +701,11 @@ def cmd_pr_comment(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_pr_review(args: argparse.Namespace) -> int:
+def cmd_pr_review(args: argparse.Namespace, *, publication: Publication | None = None) -> int:
+    if publication is not None:
+        from .pr_selected_publication import run
+
+        return run(args, publication, command="pr-review")
     from . import pr_reviewer_ops
 
     use_json = getattr(args, "json", False)

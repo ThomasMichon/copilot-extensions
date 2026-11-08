@@ -436,8 +436,9 @@ _Operator-required outcome; agent-recommended slices and validation._
   Preserve original
   receipt/unknown states and observation age; a current content match is not
   original-version proof, persisted DB mapping or full C3/provider acceptance.
-- [ ] Review the [tracked comment/review consumer refinement](tracked-comment-consumers.md)
-  before changing legacy commands; then qualify one explicit source binding
+- [x] Review the [tracked comment/review consumer refinement](tracked-comment-consumers.md)
+  before changing legacy commands (#11525).
+- [ ] Qualify one explicit tracked comment/review source binding
   through the existing workspace selection/receipt owner. Preserve distinct
   ADO text/vote outcomes and keep unsupported native surfaces explicit.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer

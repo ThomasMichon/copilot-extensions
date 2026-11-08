@@ -13,9 +13,14 @@ docstring for the reasoning.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from . import config as cfg, pr_ops, tracking
 from .config import Config
 from .pr_nudge_ops import _provider_mismatch_error
+
+if TYPE_CHECKING:
+    from .pr_selected_publication import Publication
 
 
 def _resolve_active_pr(worktree_id: str, config: Config | None):
@@ -77,8 +82,17 @@ def pr_diff(worktree_id: str, *, config: Config | None = None) -> dict:
     return out
 
 
-def pr_comment(worktree_id: str, body: str, *, config: Config | None = None) -> dict:
+def pr_comment(
+    worktree_id: str, body: str, *, config: Config | None = None,
+    publication: Publication | None = None,
+) -> dict:
     """Post a general comment on the active tracked PR."""
+    if publication is not None:
+        from .pr_selected_publication import publish
+
+        return publish(
+            worktree_id, publication=publication, command="pr-comment", body=body, config=config,
+        )
     base, active, provider_name, target_repo, api_base, config, err = (
         _resolve_active_pr(worktree_id, config)
     )
@@ -102,8 +116,16 @@ def pr_comment(worktree_id: str, body: str, *, config: Config | None = None) -> 
 
 def pr_review(
     worktree_id: str, *, event: str, body: str = "", config: Config | None = None,
+    publication: Publication | None = None,
 ) -> dict:
     """Publish a review verdict on the active tracked PR."""
+    if publication is not None:
+        from .pr_selected_publication import publish
+
+        return publish(
+            worktree_id, publication=publication, command="pr-review",
+            body=body, event=event, config=config,
+        )
     base, active, provider_name, target_repo, api_base, config, err = (
         _resolve_active_pr(worktree_id, config)
     )

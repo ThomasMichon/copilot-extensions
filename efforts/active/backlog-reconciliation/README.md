@@ -53,7 +53,7 @@ it does not implement fixes, change product behavior, or declare deployment.
   `COMPLETED`. Verify the complete requested outcome against actual delivery,
   acknowledge that the request has been fulfilled, and link the delivering PR
   and relevant evidence in the public explanation. Do not close another
-  person's request as a duplicate of a campaign-authored issue. The exception
+  person's request as a duplicate. The exception
   permits neither speculative completion nor consolidation of their unfinished
   work; uncertain outcomes remain OPEN. Existing editor/comment provenance,
   whole-source holds, acquisition limits, ownership and acceptance conditions
@@ -74,6 +74,17 @@ it does not implement fixes, change product behavior, or declare deployment.
   requirement-preserving aggregation are authorized. No implementation,
   deployment, service changes, administrative bypass, owner reassignment,
   deletion, abandonment of ideas or weakening of acceptance gates.
+- **Standing completion checks:** Whenever a merged PR fulfills an issue in
+  this campaign, the coordinator may perform one metadata-only issue recheck,
+  one complete collaborator-roster check and one metadata-only PR review/check
+  verification. This standing approval covers later qualifying completions
+  without a new per-issue permission request, including when earlier research
+  metadata/roster allowances are exhausted. If the fulfillment and provenance
+  gates pass, close `COMPLETED` with an acknowledgment and a link to the
+  fulfilling PR. Record each use; an unknown outcome is not permission to
+  replay. This does not renew body allowances, release source holds, authorize
+  test execution or native operations, or change source/resource custody.
+  Never close another party's issue as a duplicate.
 - **Completed exception:** The operator separately authorized the bounded
   CI-installer repair #7746 while journal publication was blocked. It merged
   and reached normal Main release; research/tracker-only authority is restored.
@@ -264,7 +275,24 @@ a campaign-authored filing. This narrow author-membership exception leaves
 editor/comment provenance, actual source holds, acquisition limits, custody
 and acceptance gates unchanged; it authorizes no implementation.
 
+Standing completion-check approval, 2026-11-07, summary:
+
+For each campaign issue demonstrably fulfilled by a merged PR, perform the
+three final metadata checks specified in Coordination and, if they pass, close
+`COMPLETED` with acknowledgment and the fulfilling PR link. Reuse this approval
+campaign-wide rather than asking again per issue. Body allowances, source holds,
+test execution and native-operation boundaries are not renewed. Never close
+another party's issue as a duplicate. This is a public summary, not a copy of
+the non-public approval conversation.
+
 ## Plan
+
+The [fulfilled-request and bridge-identity checkpoint](<journal/2026/11.07 fulfilled-requests-and-bridge-identity.md>)
+records the campaign-wide standing completion-check approval, #11445's audited
+`COMPLETED` source outcome in merged #11508 and three independent OPEN
+contracts. No body allowance, source hold or native authority is renewed.
+Two equal complete scans measure 837 whole OPEN, 108 above fixed 729;
+all existing completion check states remain unchanged and the campaign Active.
 
 The fulfilled-request rule above replaces the blanket original-author roster
 exclusion only for demonstrated completion of a known third party's request.
@@ -3650,7 +3678,10 @@ incumbent parent check state remains unchanged.
   count in the whole-queue census and fixed checkpoint.
 - [ ] Each fulfilled third-party request closes only `COMPLETED`, with an
   acknowledgment and delivering PR/evidence links after complete outcome
-  verification; none is dismissed as a duplicate of a campaign-authored filing.
+  verification; none is dismissed as a duplicate.
+- [ ] Each use of the standing completion-check approval retains the actual
+  issue, complete roster and PR review/check metadata results and its conditional
+  disposition, without resetting body/source allowances or other owners' holds.
 - [ ] Every consolidation explicitly preserves all unique unresolved
   requirements, acceptance conditions and owner responsibilities in its successor.
 - [ ] _(Agent-recommended)_ Every eligible open issue appears in the graph
@@ -3716,7 +3747,7 @@ residual requirements would be speculative. Use GitHub's completed closure
 reason only for demonstrated completed scope; use not-planned for explicitly
 superseded eligible tracking, explaining that the successor remains planned.
 For another person's fulfilled request, use the narrow completed-request rule
-above, not duplicate consolidation into a campaign-authored issue.
+above, not duplicate consolidation.
 
 ## Journal
 
