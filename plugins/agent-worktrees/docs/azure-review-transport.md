@@ -66,7 +66,7 @@ definitions refuse.
 
 The documented
 [Has Permissions GET](https://learn.microsoft.com/en-us/rest/api/azure/devops/security/permissions/has-permissions?view=azure-devops-rest-7.1)
-evaluates their combined mask for both the actual repository and PR target
+evaluates each action bit separately for both the actual repository and PR target
 branch with `alwaysAllowAdministrators=false`. Both results must be literal
 `true` in a complete response. This deliberately conservative contract requires
 repository-wide PR access as well as an allowed target; branch-only grants
@@ -78,8 +78,10 @@ Each non-slash branch component is UTF-16LE hex; case, nested branches and
 Unicode remain distinct. Missing or unsupported refs never fall back to a
 broader token.
 
-These are two additional bounded GETs per policy check, with no cross-check
+These are three additional bounded GETs per policy check, with no cross-check
 cache, administrator shortcut, write probe, reacquisition or separate client.
+Separate action evaluations avoid assuming an undocumented all/any aggregation
+rule for a combined mask.
 Denied permissions raise the existing authorization refusal; unavailable
 information remains unavailable. Denial before the durable fence leaves the
 action unattempted; denial afterward preserves its original unknown attempt.

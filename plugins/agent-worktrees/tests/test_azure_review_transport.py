@@ -67,7 +67,9 @@ def backend(tmp_path):
             if callable(control.get("on_read")):
                 control["on_read"]()
             if callable(control.get("on_permission_read")) and "/_apis/permissions/" in self.path:
-                control["on_permission_read"]()
+                control["permission_reads"] = control.get("permission_reads", 0) + 1
+                if control["permission_reads"] == 2:
+                    control["on_permission_read"]()
             if control.get("identity"):
                 body = {"authorizedUser": {"id": control["identity"]}}
             self.respond(body)
@@ -177,8 +179,9 @@ def test_real_transport_keeps_private_generation_through_reads_and_all_actions(b
         assert value == expected
     assert [row[0] for row in observed if row[0] != "GET"] == ["POST", "POST", "PATCH", "PUT"]
     permission_reads = [row for row in observed if "/_apis/permissions/" in row[1]]
-    assert len(permission_reads) == 8
-    assert all(f"/_apis/permissions/{NAMESPACE}/10?" in row[1] for row in permission_reads)
+    assert len(permission_reads) == 16
+    assert all(f"/_apis/permissions/{NAMESPACE}/{bit}?" in row[1]
+               for row, bit in zip(permission_reads, [2, 8] * 8))
 
 
 @pytest.mark.parametrize("wrong", ["observe", "endpoint", "repository", "principal", "pr", "action", "expired",

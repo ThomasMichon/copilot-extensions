@@ -26,7 +26,7 @@ def _collection(body: dict[str, Any]) -> list[Any]:
     return values
 
 
-def _namespace(body: dict[str, Any]) -> tuple[str, int]:
+def _namespace(body: dict[str, Any]) -> tuple[str, tuple[int, int]]:
     values = _collection(body)
     if any(not isinstance(value, dict) for value in values):
         raise ValueError("native security namespaces are malformed")
@@ -60,7 +60,7 @@ def _namespace(body: dict[str, Any]) -> tuple[str, int]:
         or selected["readPermission"] != actions["GenericRead"]
     ):
         raise ValueError("native Git review actions are unavailable")
-    return namespace, actions["GenericRead"] | actions["PullRequestContribute"]
+    return namespace, (actions["GenericRead"], actions["PullRequestContribute"])
 
 
 def _tokens(scope: dict[str, Any], pr: dict[str, Any]) -> tuple[str, str]:
@@ -101,12 +101,13 @@ def require_review_permissions(
     No response is cached across preflight or dispatch.
     """
     tokens = _tokens(scope, pr)
-    namespace, mask = _namespace(read_json(scope["endpoint"] + "/_apis/securitynamespaces?api-version=7.1"))
-    url = scope["endpoint"] + f"/_apis/permissions/{namespace}/{mask}?" + urlencode({
-        "tokens": ",".join(tokens), "alwaysAllowAdministrators": "false", "api-version": "7.1",
-    })
-    values = _collection(read_json(url))
-    if len(values) != len(tokens) or any(type(value) is not bool for value in values):
-        raise ValueError("native permission results are incomplete")
-    if not all(values):
-        raise PermissionError("native read/review permission is denied")
+    namespace, bits = _namespace(read_json(scope["endpoint"] + "/_apis/securitynamespaces?api-version=7.1"))
+    for bit in bits:
+        url = scope["endpoint"] + f"/_apis/permissions/{namespace}/{bit}?" + urlencode({
+            "tokens": ",".join(tokens), "alwaysAllowAdministrators": "false", "api-version": "7.1",
+        })
+        values = _collection(read_json(url))
+        if len(values) != len(tokens) or any(type(value) is not bool for value in values):
+            raise ValueError("native permission results are incomplete")
+        if not all(values):
+            raise PermissionError("native read/review permission is denied")

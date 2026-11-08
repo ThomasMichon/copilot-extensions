@@ -9,7 +9,7 @@ from agent_worktrees.providers.azure_review_permissions import require_review_pe
 from test_azure_review_transport import NAMESPACE, PROJECT, REPOSITORY, namespaces
 
 
-def evaluate(*, namespace=None, permissions=None, target="refs/heads/main", mutate_pr=None):
+def evaluate(*, namespace=None, permissions=None, target="refs/heads/main", mutate_pr=None, denied_bit=None):
     scope = {
         "endpoint": "https://forge.invalid/org", "project_id": PROJECT,
         "repository_id": REPOSITORY, "number": 42,
@@ -26,6 +26,8 @@ def evaluate(*, namespace=None, permissions=None, target="refs/heads/main", muta
         calls.append(url)
         if "/securitynamespaces?" in url:
             return copy.deepcopy(namespaces() if namespace is None else namespace)
+        if denied_bit is not None and f"/{denied_bit}?" in url:
+            return {"count": 2, "value": [True, False]}
         return copy.deepcopy({"count": 2, "value": [True, True]} if permissions is None else permissions)
 
     require_review_permissions(read, scope=scope, pr=pr)
@@ -35,9 +37,10 @@ def evaluate(*, namespace=None, permissions=None, target="refs/heads/main", muta
 @pytest.mark.parametrize("branch", ["main", "Main", "team/topic", "café/😀"])
 def test_native_branch_token_preserves_case_slashes_and_utf16(branch):
     calls = evaluate(target="refs/heads/" + branch)
-    assert len(calls) == 2
+    assert len(calls) == 3
     permission = urlsplit(calls[-1])
-    assert permission.path == f"/org/_apis/permissions/{NAMESPACE}/10"
+    assert urlsplit(calls[1]).path == f"/org/_apis/permissions/{NAMESPACE}/2"
+    assert permission.path == f"/org/_apis/permissions/{NAMESPACE}/8"
     query = parse_qs(permission.query)
     root = f"repoV2/{PROJECT}/{REPOSITORY}"
     encoded = "/".join(part.encode("utf-16-le").hex() for part in branch.split("/"))
@@ -51,6 +54,12 @@ def test_native_branch_token_preserves_case_slashes_and_utf16(branch):
 def test_repository_and_branch_denial_cannot_be_substituted(values):
     with pytest.raises(PermissionError):
         evaluate(permissions={"count": 2, "value": values})
+
+
+@pytest.mark.parametrize("bit", [2, 8])
+def test_read_and_review_permissions_must_each_be_positive(bit):
+    with pytest.raises(PermissionError):
+        evaluate(denied_bit=bit)
 
 
 @pytest.mark.parametrize("body", [
