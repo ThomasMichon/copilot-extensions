@@ -557,6 +557,42 @@ def test_advisory_feed_keeps_stale_feedback_without_claiming_authoritative_rows(
     assert loader.state_for_source(source.source_id) == "loading"
 
 
+@pytest.mark.parametrize("local", [False, True])
+@pytest.mark.parametrize("stale_phase", [0, 1], ids=["fast", "classified"])
+def test_nonstreaming_machine_reads_preserve_stale_feedback_in_each_phase(
+    monkeypatch, local, stale_phase,
+):
+    from worktree_manager.production_picker.picker_tui import derive
+
+    screen, loader, source = screen_and_loader()
+    source.local = screen.source_tabs[screen.machine_idx]["local"] = local
+    source.argv = ["fixture-command list --json --classify"]
+    monkeypatch.setattr(data_ssh, "_stream_enabled", lambda: False)
+    calls = []
+    fast_notices = []
+
+    def fetch(current, **_kwargs):
+        phase = len(calls) % 2
+        if phase:
+            screen.data = loader.records()
+            fast_notices.append("Updates paused" in body(screen))
+        calls.append(phase)
+        raw = {"id": "one", "title": "Kept worktree"}
+        if stale and phase == stale_phase:
+            raw["_availability"] = {"status": "stale", "reason": "cached machine rows"}
+        return [derive.norm(raw, current.machine, current.env, source_id=current.source_id)]
+
+    monkeypatch.setattr(data_ssh, "_fetch", fetch)
+    for stale in (True, False):
+        loader._load_one(source)
+        screen.data = loader.records()
+        assert fast_notices[-1] == (stale and stale_phase == 0)
+        assert ("Updates paused" in body(screen)) == (stale and stale_phase == 1)
+        assert loader.state_for_source(source.source_id) == "ready"
+        assert loader.records()[0]["title"] == "Kept worktree"
+    assert calls == [0, 1, 0, 1]
+
+
 @pytest.mark.parametrize("record", [
     ["invalid"], {"id": "one", "raw": ["invalid"]},
     {"id": "one", "raw": {"_availability": "invalid"}},
