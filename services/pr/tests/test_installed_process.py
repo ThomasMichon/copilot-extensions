@@ -20,6 +20,7 @@ from cryptography.hazmat.primitives import serialization
 
 from agent_pull_requests_service.hosting import ready
 
+# The strict service target analyzes canonical sources, not generated bundled copies.
 if TYPE_CHECKING:
     from attribution_profile import load_profile
     from comment_preparation import prepare

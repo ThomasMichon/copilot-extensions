@@ -35,12 +35,8 @@ def _mapping_store() -> Any:
     try:
         from agent_pull_requests.review_comment_mapping import CommentMappingStore
         from agent_pull_requests.workspace_comment_mapping import contract
-    except ModuleNotFoundError as error:
-        if error.name not in {
-            "agent_pull_requests.review_comment_mapping",
-            "agent_pull_requests.workspace_comment_mapping",
-        }:
-            raise
+        value = contract()
+    except (ImportError, AttributeError, TypeError, ValueError, RuntimeError):
         return None
     expected = {
         "protocol": "agent-pull-requests.retained-comment-reader/v1",
@@ -49,7 +45,6 @@ def _mapping_store() -> Any:
         "acquisition": "workspace-projection/v1",
         "effects": "none",
     }
-    value = contract()
     return CommentMappingStore if isinstance(value, dict) and all(
         value.get(name) == selected for name, selected in expected.items()
     ) else None
@@ -230,7 +225,7 @@ def _workspaces(value: object, bindings: list[WatchScopeBinding],
         if type(mapping) is not bool:
             raise ValueError("comment_mappings requires a JSON boolean")
         if mapping and "preparation" not in entry:
-            raise ValueError("comment mappings require explicit preparation hosting")
+            raise ValueError("comment_mappings requires explicit preparation hosting")
         key = (entry["principal"], entry["target"])
         if key not in scopes or any((p, t) == key for p, t, _ in readers):
             raise ValueError("workspace requires one existing admitted caller/target")

@@ -484,7 +484,9 @@ def test_host_mapping_selection_does_not_spread_to_other_admitted_routes(
     )["operations"]
 
 
-@pytest.mark.parametrize("support", ["missing-store", "missing-receiver", "incompatible"])
+@pytest.mark.parametrize("support", [
+    "missing-store", "missing-receiver", "incompatible", "nested-import", "contract-error",
+])
 def test_optional_mapping_core_skew_preserves_baseline_and_refuses_fresh_adoption(
     prepared_host: tuple[HostConfig, Path, Path], monkeypatch: pytest.MonkeyPatch, support: str,
 ) -> None:
@@ -499,6 +501,21 @@ def test_optional_mapping_core_skew_preserves_baseline_and_refuses_fresh_adoptio
     if support == "incompatible":
         contract = workspace_comment_mapping.contract()
         monkeypatch.setattr(workspace_comment_mapping, "contract", lambda: {**contract, "effects": "write"})
+    elif support == "nested-import":
+        import builtins
+        original_import = builtins.__import__
+
+        def missing_dependency(name: str, *args: Any, **kwargs: Any) -> Any:
+            if name == "agent_pull_requests.review_comment_mapping":
+                raise ImportError("synthetic nested optional dependency unavailable")
+            return original_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", missing_dependency)
+    elif support == "contract-error":
+        def invalid_contract() -> dict[str, str]:
+            raise ValueError("synthetic optional declaration invalid")
+
+        monkeypatch.setattr(workspace_comment_mapping, "contract", invalid_contract)
     else:
         module = "review_comment_mapping" if support == "missing-store" else "workspace_comment_mapping"
         monkeypatch.setitem(sys.modules, "agent_pull_requests." + module, None)

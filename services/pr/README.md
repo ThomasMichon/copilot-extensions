@@ -354,7 +354,8 @@ The host resolves the executing PR core's existing retained-reader declaration
 before selecting its new constructor input. A missing or incompatible optional
 core leaves baseline serving intact and receives no new keyword. Explicit fresh
 mapping provisioning instead refuses before creating state; it cannot claim to
-adopt an unavailable contract.
+adopt an unavailable contract. Expected optional import/declaration failures
+also report unavailable support, without exposing dependency diagnostics.
 
 Explicit **fresh** provisioning adopts the existing bounded
 `review_comment_mapping_version:1` extension under the same writer exclusion
