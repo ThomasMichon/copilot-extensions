@@ -77,6 +77,7 @@ def test_exact_origin_and_boundary_path(tmp_path: Path) -> None:
         "https://api.example.test:0/v1/",
         "https://api.example.test:65536/v1/",
         "https://api.example.test/v1/#fragment",
+        "https://api.example.test/v1/#",
         "file:///v1/",
     ],
 )
@@ -106,6 +107,7 @@ def test_disabled_missing_and_overlapping_bindings_fail_closed(tmp_path: Path) -
         {"entry": "bare-name"},
         {"entry": " API/service"},
         {"url_prefix": "https://api.example.test/v1/?scope=admin"},
+        {"url_prefix": "https://api.example.test/v1/?"},
         {"unknown": True},
     ],
 )
@@ -155,6 +157,26 @@ def test_extension_policy_and_absent_default(
         lambda cwd: {"http_bindings": str(tmp_path / "extension.json")}
     )
     assert binding_file() == tmp_path / "extension.json"
+
+
+def test_extension_receives_selected_configuration_directory(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    registry = ExtensionRegistry()
+    registry._loaded = True
+    monkeypatch.setattr("agent_vault.extensions._REGISTRY", registry)
+    monkeypatch.setattr(config, "load_global_config", lambda **kwargs: {})
+    selected = str(tmp_path / "selected")
+    monkeypatch.setattr(config, "configuration_source", lambda cwd: selected)
+    received: list[str | None] = []
+
+    def source(cwd: str | None) -> dict[str, str]:
+        received.append(cwd)
+        return {"http_bindings": str(tmp_path / "extension.json")}
+
+    registry.register_config_source(source)
+    assert binding_file() == tmp_path / "extension.json"
+    assert received == [selected]
 
 
 @pytest.mark.parametrize("value", [None, False, "", [], {}])

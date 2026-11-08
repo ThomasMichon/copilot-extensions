@@ -1686,13 +1686,9 @@ def _main(argv: list[str] | None = None):
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=ssh_key_install_command)
 
-    from .batch_reads import add_commands as add_read_commands
-
-    add_read_commands(sub, cmd_get)
-
-    from .authenticated_curl import add_commands as add_http_commands
-
-    add_http_commands(sub)
+    from . import authenticated_curl, batch_reads
+    batch_reads.add_commands(sub, cmd_get)
+    authenticated_curl.add_commands(sub)
 
     p = sub.add_parser("has", help="Check if an entry exists")
     p.add_argument("entry", help="Entry path")

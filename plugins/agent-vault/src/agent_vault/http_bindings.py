@@ -53,10 +53,10 @@ def destination(url: str, *, prefix: bool = False) -> Destination:
         or not re.fullmatch(r"[a-zA-Z0-9.:-]+", host)
         or parsed.username is not None
         or parsed.password is not None
-        or parsed.fragment
+        or "#" in url
         or "\\" in url
         or not 1 <= port <= 65535
-        or (prefix and parsed.query)
+        or (prefix and "?" in url)
     ):
         raise BindingError("URL must use an exact HTTP(S) host without userinfo or fragment")
     path = parsed.path or "/"
