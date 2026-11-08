@@ -176,6 +176,14 @@ authorize interrupting a shared process.
   and a named tracked follow-up before effort closure. Record unavailable
   clean-room/live lanes with their exact reason and named follow-up as well.
 
+The current finite installation exit qualifies Windows/Linux at the exact
+released tree in native run `42461516789`. macOS has native startup refusal and
+bounded absent-owner stop without effects, not positive governed operation:
+the owner schema still refuses Darwin birth-token formats. Positive macOS
+identity, cleanup and recovery are explicitly tracked in #11545. That tested
+fail-closed disposition and named follow-up are the current platform exemption;
+they do not permit unverified signaling or claim positive macOS lifecycle proof.
+
 Required source gates remain owning-plugin tests, changed shared-library tests,
 fatal Python lint, canonical generation/vendor checks, module-size,
 headless-launch, install-contract, changefiles, current-head review, and required

@@ -20,7 +20,7 @@ def validate_private_file(path: Path) -> None:
         raise PlanError("private input is not a regular file")
     if os.name == "nt":
         windows_private(path)
-    elif info.st_uid != os.getuid() or info.st_mode & 0o077:
+    elif info.st_uid != os.geteuid() or info.st_mode & 0o077:
         raise PlanError("private input is not private to its owner")
 
 
@@ -36,7 +36,7 @@ def read_private_file(path: Path, maximum: int) -> bytes:
                 raise PlanError("private input is not a bounded regular file")
             if os.name == "nt":
                 windows_private(path, descriptor=stream.fileno())
-            elif opened.st_uid != os.getuid() or opened.st_mode & 0o077:
+            elif opened.st_uid != os.geteuid() or opened.st_mode & 0o077:
                 raise PlanError("private input is not private to its owner")
             data = stream.read(maximum + 1)
             after, named = os.fstat(stream.fileno()), _file_stat(path)
@@ -214,5 +214,5 @@ def validate_private_directory(path: Path) -> None:
         raise PlanError("state root is not an ordinary private directory")
     if os.name == "nt":
         windows_private(path)
-    elif info.st_uid != os.getuid() or info.st_mode & 0o077:
+    elif info.st_uid != os.geteuid() or info.st_mode & 0o077:
         raise PlanError("state root is not private to its owner")

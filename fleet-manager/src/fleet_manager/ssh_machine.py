@@ -48,7 +48,7 @@ def _validate_lease(path):
         raise PlanError("SSH client lease is not an ordinary owned file")
     if os.name == "nt":
         windows_private(path)
-    elif info.st_uid != os.getuid() or info.st_mode & 0o077:
+    elif info.st_uid != os.geteuid() or info.st_mode & 0o077:
         raise PlanError("SSH client lease is not private to its owner")
 
 
