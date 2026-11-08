@@ -87,6 +87,9 @@ Self-improvement (see references/self-improvement.md)
   Upstream route: <owner of this generic skill; anonymized issue or change>
 
 Holds and later narrowing: <references, newest first>
+Thread register: <monitor-owned notes file referenced from the checkpoint;
+  see references/thread-register.md. Seeded with the main and
+  self-improvement threads>
 Acceptance: <what a completed sweep or a healthy service period must show>
 ```
 
@@ -115,5 +118,8 @@ Acceptance: <what a completed sweep or a healthy service period must show>
   required, productive or waste with evidence.
 - Each escalation was reported once with evidence, a recommended decision and
   its default, after the steer ladder or for a decision only the operator owns.
+- Every operator message was classified in the thread register; each reply
+  named the threads that moved, side-quests were delegated with a recorded
+  owner, and no thread closed without its exit criterion.
 - Static documentation tests do not qualify runtime behavior, delivery or
   rollout of this role.

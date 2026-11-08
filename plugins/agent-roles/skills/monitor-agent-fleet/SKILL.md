@@ -83,6 +83,19 @@ Answering a worker's parked question is a separate **answer scope**: it names
 recipients and the routine question classes the monitor may answer. Without
 it, report the question with a recommended answer.
 
+### Track threads, not interruptions
+
+Keep a durable [thread register](references/thread-register.md) in a
+monitor-owned notes file referenced from the checkpoint: ID, kind, origin
+(operator message and time), owner, status, next check and exit criterion.
+Classify every operator message on arrival as **one-shot** (answer and close
+the same turn), **charter** (extends the main thread), **steer-followup**
+(attach to an existing thread) or **side-quest** (delegate to a bridge agent or
+sub-agent, record the owner, and only monitor it). Each sweep walks the due
+threads before anything ad hoc, each reply names which threads moved, and a
+thread closes only on its exit criterion. Monitor weak points found during a
+sweep are recorded against the self-improvement thread, not handled in passing.
+
 Correcting an inactive owner's persisted charter is a separate **dormant
 correction** mode with its own grant; follow
 [dormant correction](references/dormant-correction.md). It never messages a
@@ -244,7 +257,8 @@ batch unchanged waits, and stop the owned watch when its assignment ends.
 No daemon, cron entry, automatic joining, or background service is supplied.
 
 Keep the supervisory note compact: targets, root pointers, coverage cursor,
-last delta, current blocker, outstanding steer and next observation. Do not
+last delta, current blocker, outstanding steer, next observation and a pointer
+to the thread register. Do not
 copy every worker's plan or require a PR for every observation. Bound the
 audit's own reads and delegated work; disclose incomplete coverage rather than
 spending indefinitely reconstructing low-value history. The monitor must not

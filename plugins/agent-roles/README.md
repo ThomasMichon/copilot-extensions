@@ -81,6 +81,9 @@ Each sweep reports evidence against enforced goals (fleet discovery, on-charter
 agents, fleet weak points, monitor weak points and, for recurring assignments
 only, recurring until confident), and a self-improvement loop folds learnings
 into the consumer's own weak-point catalogue and adapter.
+A thread register classifies every operator message (one-shot, charter,
+steer follow-up or delegated side-quest) so the monitor keeps its main
+analysis thread and closes threads only on their exit criteria.
 Its separately granted dormant correction mode fixes an inactive owner's
 persisted charter (effort plan, workspace title/summary, agenda cursor or,
 only through a verified record-only supersede, a pending baton) through each
@@ -128,6 +131,7 @@ references where available, and a private writable report home.
 | `skills/monitor-agent-fleet/references/fabric-readers.md` | Optional existing reader adapters |
 | `skills/monitor-agent-fleet/references/dormant-correction.md` | Separately granted record correction for inactive owners |
 | `skills/monitor-agent-fleet/references/self-improvement.md` | Improve-the-fleet and improve-the-monitor loops; capture, fold and route learnings |
+| `skills/monitor-agent-fleet/references/thread-register.md` | Durable thread register: classify operator messages, delegate side-quests, close threads only on their exit criterion |
 | `skills/review-pull-requests/SKILL.md` | Sustained PR reviewer runbook |
 | `skills/review-pull-requests/assets/` | Reviewer charter and synthetic ledger example |
 | `skills/review-pull-requests/references/` | Setup/adapters, coordination/recovery and communication |
