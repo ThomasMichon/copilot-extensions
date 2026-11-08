@@ -204,7 +204,14 @@ def _apply_session_register_locked(args: dict) -> dict:
                     and (latest is None or latest.source_identity != source_identity)
                     for item in existing.activations
                 )
-                if source_identity is None or stale_source:
+                # A qualified retained writer runs outside the native's process
+                # ancestry, so it can only attach to the still-open activation.
+                retained_attach = (
+                    source_identity is None and retained_record_writer.active()
+                    and latest is not None and latest.source_identity is not None
+                    and latest.ended_at is None
+                )
+                if (source_identity is None and not retained_attach) or stale_source:
                     message = "Registration source is unavailable or superseded"
                     logging.getLogger(__name__).warning("%s for %s", message, session_id)
                     return {"error": "lifecycle", "message": message}

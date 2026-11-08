@@ -19,7 +19,7 @@ The effort remains **Active**. Passing one source phase or PR is not completion.
 Current source credit: first-proposal guarded submission merged in #10608;
 same-owner rejected-proposal lineage merged in #10674. The ordinary protected
 completion consumer merged in #11162 and integrates those shared queue owners;
-installed whole-stack submission and the full lifecycle remain unqualified.
+the full installed lifecycle remains unqualified.
 Resident-only inspection and coherent delegated lineage selection are available
 at their source boundaries. Executing-build and delegated-selection observation
 source subsequently merged in #10782. Actual running selections and the complete
@@ -90,10 +90,14 @@ expectation on retry. No complete-cohort admission policy is supplied.
 Generation-aware independent admission of actual owners remains a prerequisite
 to ordinary activation. Fresh isolated qualification exposed a preparation
 HTTP read timeout before native creation: the coordinator later binds the
-original relationship. The bounded correction carries the startup owner's
-existing observation budget through that request; review and running retest
-remain pending. Then qualify guarded completion, post-stop same-native recovery
-and the complete lifecycle. No deployment or cleanup permission is implied.
+original relationship. The bounded correction merged in #11179 and carries
+the startup owner's existing observation budget through that request.
+The fresh isolated whole-stack synthetic review loop now passes: three guarded
+submissions, two independent rejections and confirmation retain the same task,
+native and protected relationship. This qualifies the bounded live-process
+simulation, not real-model/forge use or production cohort admission.
+Next qualify post-stop same-native rejection/recovery and the remaining lifecycle.
+No deployment or cleanup permission is implied.
 
 ## Context
 
