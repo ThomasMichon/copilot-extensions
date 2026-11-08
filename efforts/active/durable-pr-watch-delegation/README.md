@@ -1289,6 +1289,52 @@ callback an implicit credential store.
   All-publisher, provider/installed, full retention/CLI/Dispatch and
   shadow/pane acceptance remain open. No live host was activated or updated.
 
+### 2026-11-08 - Correct canonical legacy install-root negotiation
+
+- Implement the narrow #11565 source correction: capture only an absolute,
+  normalized canonical legacy home install root as intrinsic routing.
+  Namespaced receipt validation and every other caller override remain
+  unchanged; this is not a new credential-context capability.
+- The canonical contained CLI/context selection passes all 70 cases without
+  skips, including default-root negotiation and foreign, relative and
+  default-plus-token refusal. An actual source-bound Python `-I` process
+  confirms those routing decisions without mocks or service effects.
+  Ruff `F,E9`, install-contract and documentation-consistency checks pass.
+- The equivalent-root spelling control also passes: retain the original
+  environment value after proving normalized equivalence, because the
+  credential guard compares that original value exactly. The expanded
+  focused selection passes all 71 cases without skips.
+- These are unit/simple-process results, not full deployed-consumer evidence.
+  Preserve the still-open installed consumer, configured-credential,
+  live-service/fleet and retained-resource gates. No additional hosted run,
+  shared-service mutation or local adoption occurred in this correction.
+
+### 2026-11-08 - Merge the finite prerequisite record and continue deployed-consumer validation
+
+- #11555 merged at `6fb38bc450431e806fdc4b525d5f49dde5c77001`.
+  Exact-head Copilot review `5817296462` approves the documentation-only
+  prerequisite record with no open issues; required CI `42465432427` passes.
+  No runtime, dependency or CI behavior changed, and no additional native run
+  or local rollout was performed.
+- The complete parent remains Active. Current main Plan/Validation has 84
+  unchecked items; the per-origin annex retains 73 unchecked checks. The
+  finite installed-cell/lifecycle exit is qualified, not the broader
+  configured-credential, live-consumer, service/fleet or resource disposition.
+- Next, exercise the installed Dispatch/PR-owner consumer contract in isolated
+  state against an existing authorized PR target. Preserve shared coordinators,
+  subscriptions and peers; distinguish real provider/credential observations
+  from synthetic controls and do not enable production delegation.
+- The next-path preflight finds #11565: the generated native Dispatch command
+  assigns its canonical default install root, but legacy context capture gives
+  negotiation no intrinsic environment. The actual deployed `0.18.306-dev1`
+  guard accepts a clean caller and rejects that assignment alone, before any
+  owner capability probe. Current source has the same logic.
+- Correct only canonical absolute default-root routing, retaining credential,
+  nondefault-root and relative-root fallback and all namespaced ownership
+  checks. The existing source integration fixture's synthetic runtime markers
+  and source-path injection are not deployed acceptance; validate complete
+  installed bits and real intrinsic routing after the source correction.
+
 ### 2026-11-08 - Clear the finite installed-owner prerequisite with exact-release native evidence
 
 - The single authorized native run `42461516789` completes successfully at
