@@ -2493,7 +2493,13 @@ from inventing a conversation, while preserving a real selected conversation.
 The optional Worktrees `tests/native/test_native_seed_application.py` constructs
 and installs the real wheel application through the canonical build/profile
 owners in a private home, removes its disposable source inputs, and checks
-current-runtime native admission. It also builds the real installed CLI's launch
+current-runtime native admission. Disposable build inputs retain application
+Python source, operational scripts, top-level build metadata and dependency
+sources, not unrelated plugin surfaces or non-shipped test trees. Runtime
+assets and notices remain in the real wheel.
+Existing local `libs` are preserved on materialized release checkouts; a focused
+copy/materializer/resolver regression covers that layout without building wheels.
+It also builds the real installed CLI's launch
 command and invokes the packaged finite native provider after removing source
 inputs. Both scripts must belong to the installed nested environment, and the
 completion marker must remain unchanged. Its private project registry is empty and
@@ -2509,10 +2515,28 @@ command builder, wrapper and default setup. It reuses the startup/history
 control's literal two-turn fresh/resume assertions and synthetic local provider.
 Setup recovery suppresses host reconciliation; this does not qualify Manager,
 headed-broker admission, setup hooks or survival across caller cleanup Jobs.
-The single case builds the application only once, whether or not native checks
+The admission case builds the application only once, whether or not native checks
 are explicitly enabled; construction and consumers share its existing
 300-second case budget. Without that prerequisite it qualifies only admission,
 asset selection and the finite provider, not native Copilot history.
+
+With the same native executable, existing PSMux/PowerShell prerequisites and
+`COPILOT_DRIVER_HEADED_MUX_E2E=1`, select the separate installed broker case:
+`python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_native_seed_application.py --allow-explicit-tiers -k owns_native_broker --timeout 480 --plugin-timeout 600 --test-timeout 480`.
+It builds and installs once, deletes source inputs, and runs the Worktrees
+execution owner from that actual installed interpreter/root without adding
+the managed test environment's site-packages or copying source launch assets.
+Both Worktrees and Driver Core imports must belong to the installed environment.
+The real native fresh/resume flow checks one conversation, literal startup input,
+broker prompts, PID/birth and terminal exit receipts, seed non-replay and exact
+fixture retirement. Construction, install, source removal and packaged admission
+must finish within 300 seconds; the complete native consumer runs in a separate
+caller-owned child with the existing 180-second ceiling. The composed case has
+a 480-second bound, not a claimed combined 300-second pass. The original
+admission case retains its 300-second bound and the plugin aggregate stays 600.
+This is installed execution-owner evidence, not the public Worktrees command,
+Manager integration, desktop attachment or survival across caller cleanup Jobs.
+The existing managed-environment controls remain separate and unchanged.
 
 The adjacent `tests/native/test_manager_application_launch.py` builds and
 installs the real Manager wheel application through the canonical standalone
