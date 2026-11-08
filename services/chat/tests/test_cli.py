@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 from types import SimpleNamespace
-from typing import Any, IO, TYPE_CHECKING, cast
+from typing import Any, IO, cast
 from unittest.mock import patch
 
 import pytest
@@ -16,6 +16,7 @@ from agent_chat_service import Client, ClientError
 from agent_chat_service.cli import SCAN_CAPABILITY, main
 from agent_chat_service.transport import GatewayTransport
 from agent_procutil.owned_process import run_caller_owned
+from conftest import CallerObserver
 
 
 def configuration(root: Path, endpoint: str, *, codename: str = "agent-a") -> Path:
@@ -185,10 +186,8 @@ def test_offline_status_and_capability_never_execute_provider_or_network(tmp_pat
 
 def test_actual_installed_cli_death_releases_reader_lock_before_outer_cleanup(
     rpc_endpoint: SimpleNamespace, tmp_path: Path, installed_chat: SimpleNamespace,
-    fixed_rpc_provider: list[str], caller_observer: object,
+    fixed_rpc_provider: list[str], caller_observer: CallerObserver,
 ) -> None:
-    if TYPE_CHECKING:
-        import test_caller_owned_native as caller_observer
     from agent_procutil import direct_python, no_window_kwargs, spawn_sync_in_kill_on_close_job
 
     path = configuration(tmp_path, rpc_endpoint.endpoint)

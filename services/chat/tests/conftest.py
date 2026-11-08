@@ -13,7 +13,63 @@ import sys
 import threading
 import time
 from types import SimpleNamespace
-from typing import Any, Callable, Generator, Iterator, Sequence
+from typing import Any, Callable, Generator, Iterator, Protocol, Sequence, TypeVar, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from qualification import FailureReport
+
+T = TypeVar("T")
+
+
+class PinnedChild(Protocol):
+    def gone(self) -> bool: ...
+
+    def kill(self, signum: int | None = None) -> None: ...
+
+    def close(self) -> None: ...
+
+
+class ProcessView(Protocol):
+    @property
+    def pid(self) -> int: ...
+
+    def children(self, recursive: bool = False) -> Sequence["ProcessView"]: ...
+
+    def parents(self) -> Sequence["ProcessView"]: ...
+
+    def name(self) -> str: ...
+
+    def ppid(self) -> int: ...
+
+    def cmdline(self) -> list[str]: ...
+
+
+class ProcessProvider(Protocol):
+    def Process(self, pid: int) -> ProcessView: ...
+
+
+class BirthFixture(Protocol):
+    @property
+    def __file__(self) -> str: ...
+
+    def identity(self, pid: int | None = None) -> dict[str, Any]: ...
+
+
+class CallerObserver(Protocol):
+    @property
+    def fixture(self) -> BirthFixture: ...
+
+    @property
+    def psutil(self) -> ProcessProvider: ...
+
+    @property
+    def PinnedProcess(self) -> Callable[[dict[str, Any]], PinnedChild]: ...
+
+    def _read(self, path: Path) -> Any: ...
+
+    def _wait(
+        self, predicate: Callable[[], T | None], seconds: float, message: str,
+    ) -> T: ...
 
 import pytest
 
@@ -101,7 +157,7 @@ def pytest_terminal_summary(terminalreporter: Any) -> None:
         )
 
 
-def pytest_runtest_logreport(report: pytest.TestReport) -> None:
+def pytest_runtest_logreport(report: "FailureReport") -> None:
     if os.environ.get("AGENT_CHAT_TEST_SUITE") and report.failed:
         print(
             f"\nChat failure: {report.nodeid} [{report.when}]\n{report.longreprtext}",
@@ -110,7 +166,7 @@ def pytest_runtest_logreport(report: pytest.TestReport) -> None:
 
 
 @pytest.fixture
-def caller_observer(monkeypatch: pytest.MonkeyPatch) -> Iterator[object]:
+def caller_observer(monkeypatch: pytest.MonkeyPatch) -> Iterator[CallerObserver]:
     support = Path(__file__).resolve().parents[3] / "libs" / "agent-procutil" / "tests"
     monkeypatch.syspath_prepend(str(support))
     import test_caller_owned_native as observer
@@ -118,7 +174,7 @@ def caller_observer(monkeypatch: pytest.MonkeyPatch) -> Iterator[object]:
     if os.name != "nt":
         observe: Callable[[], AbstractContextManager[None]] = observer._linux_observer
     with nullcontext() if os.name == "nt" else observe():
-        yield observer
+        yield cast(CallerObserver, observer)
 
 
 def run_artifact(

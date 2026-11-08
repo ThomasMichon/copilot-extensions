@@ -114,7 +114,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def setup(self) -> None:
         super().setup()
-        self.rfile = _BoundedReader(self.rfile)
+        # Stdlib's nominal annotation exceeds this handler's read/readline/close contract.
+        self.rfile = _BoundedReader(self.rfile)  # type: ignore[assignment]
         self._timer: threading.Timer | None = None
 
     def log_message(self, *_: object) -> None:

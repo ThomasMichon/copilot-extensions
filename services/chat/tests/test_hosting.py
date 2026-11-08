@@ -7,17 +7,39 @@ from pathlib import Path
 import socket
 import threading
 import time
-from typing import Any, Iterator, NoReturn
+from typing import Any, Iterator, NoReturn, Protocol, TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from endpoint_rendezvous import Endpoint
 
 import pytest
 
 from agent_chat_service import hosting
-from agent_chat_service import ChatError
+from agent_chat_service import ChatError, ChatStore
 from agent_chat_service import json_bytes
 
 
 TOKEN = "synthetic-local-key-" + "x" * 32
 SCHEME = "Bear" + "er "
+
+
+class OpenHost(Protocol):
+    @property
+    def server(self) -> hosting._Server: ...
+
+    @property
+    def store(self) -> ChatStore: ...
+
+    @property
+    def transport(self) -> str: ...
+
+    @property
+    def endpoint(self) -> str: ...
+
+    @property
+    def run_dir(self) -> Path: ...
+
+    def drain(self) -> dict[str, Any]: ...
 
 
 def configuration(tmp_path: Path) -> dict[str, Any]:
@@ -31,14 +53,14 @@ def configuration(tmp_path: Path) -> dict[str, Any]:
     }
 
 
-def connection(host: hosting.HostedChat) -> http.client.HTTPConnection:
+def connection(host: hosting.HostedChat | OpenHost) -> http.client.HTTPConnection:
     if host.transport == "tcp":
         name, port = host.endpoint.rsplit(":", 1)
         return http.client.HTTPConnection(name, int(port), timeout=10)
 
     class UnixConnection(http.client.HTTPConnection):
         def connect(self) -> None:
-            self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self.sock = socket.socket(getattr(socket, "AF_UNIX"), socket.SOCK_STREAM)
             self.sock.settimeout(self.timeout)
             self.sock.connect(host.endpoint)
 
@@ -46,7 +68,7 @@ def connection(host: hosting.HostedChat) -> http.client.HTTPConnection:
 
 
 def rpc(
-    host: hosting.HostedChat, request: object, *, token: str = TOKEN,
+    host: hosting.HostedChat | OpenHost, request: object, *, token: str = TOKEN,
     path: str = "/api/v1/chat",
 ) -> tuple[int, Any]:
     client = connection(host)
@@ -61,15 +83,16 @@ def rpc(
 
 
 @contextmanager
-def running(config: object) -> Iterator[hosting.HostedChat]:
+def running(config: object) -> Iterator[OpenHost]:
     with hosting.HostedChat(config) as host:
         # Only idle fixture shutdown polling; production I/O bounds are unchanged.
-        host.server.timeout = .01
+        cast(hosting._Server, host.server).timeout = .01
         stop = threading.Event()
         thread = threading.Thread(target=host.serve, args=(stop,))
         thread.start()
         try:
-            yield host
+            # This view lasts only until this fixture stops serving and exits the host context.
+            yield cast(OpenHost, host)
         finally:
             stop.set()
             thread.join(10)
@@ -84,7 +107,7 @@ def test_two_participants_auth_read_progress_and_restart(tmp_path: Path) -> None
             assert host.endpoint.startswith("127.0.0.1:")
             assert int(host.endpoint.rsplit(":", 1)[1]) > 0
         from endpoint_rendezvous import read_endpoint
-        advertised = read_endpoint(host.run_dir)
+        advertised = cast("Endpoint", read_endpoint(host.run_dir))
         assert advertised.transport == host.transport
         assert advertised.address == host.endpoint
         request = {"op": "join", "channel": "room", "actor": {"codename": "agent-a"}}
@@ -462,7 +485,7 @@ def test_close_retains_custody_until_held_transaction_and_workers_retire(
         serving.start()
         assert rpc(host, {"op": "join", "channel": "room",
                           "actor": {"codename": "agent-a"}})[0] == 200
-        original = host.store._post
+        original = cast(ChatStore, host.store)._post
 
         def held_post(request: dict[str, Any]) -> dict[str, Any]:
             entered.set()

@@ -5,9 +5,32 @@ import json
 import os
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
-from typing import Any
+from typing import Any, Protocol
 
-from pytest import TestReport
+
+class ExecutionReport(Protocol):
+    @property
+    def nodeid(self) -> str: ...
+
+    @property
+    def when(self) -> str: ...
+
+    @property
+    def outcome(self) -> str: ...
+
+
+class FailureReport(Protocol):
+    @property
+    def failed(self) -> bool: ...
+
+    @property
+    def nodeid(self) -> str: ...
+
+    @property
+    def when(self) -> str: ...
+
+    @property
+    def longreprtext(self) -> str: ...
 
 
 FAMILIES = {
@@ -307,7 +330,7 @@ def membership_digest(mapping: Mapping[str, str]) -> str:
 
 
 def execution_summary(
-    mapping: Mapping[str, str], profile: str, reports: Iterable[TestReport],
+    mapping: Mapping[str, str], profile: str, reports: Iterable[ExecutionReport],
 ) -> dict[str, Any]:
     if profile not in {"acceptance", "full"}:
         raise ValueError("unknown Chat qualification lane")

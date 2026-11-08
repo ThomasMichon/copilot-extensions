@@ -3,11 +3,19 @@ import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Protocol, cast
 
 import pytest
 
 from conftest import pytest_runtest_logreport, run_artifact
-from qualification import PARAMETER_COUNTS, execution_summary, membership, membership_digest
+from qualification import (
+    PARAMETER_COUNTS, ExecutionReport, execution_summary, membership, membership_digest,
+)
+
+
+class TemporaryConfig(Protocol):
+    @property
+    def _tmp_path_factory(self) -> pytest.TempPathFactory: ...
 
 
 def original_nodes() -> list[str]:
@@ -24,7 +32,7 @@ def test_membership_is_exact_and_full_retains_every_parameter(
     report = getattr(request.config, "_chat_membership", None)
     if os.environ.get("AGENT_CHAT_TEST_SUITE"):
         assert report is not None
-        path = request.config._tmp_path_factory.getbasetemp() / "chat-membership.json"
+        path = cast(TemporaryConfig, request.config)._tmp_path_factory.getbasetemp() / "chat-membership.json"
         assert json.loads(path.read_text("utf-8")) == report
         assert not path.with_suffix(".tmp").exists()
     else:
@@ -54,11 +62,12 @@ def test_membership_is_exact_and_full_retains_every_parameter(
         selected = {
             node for node, lane in mapping.items() if profile == "full" or lane == "acceptance"
         }
-        reports = [
+        reports: list[ExecutionReport] = [
             SimpleNamespace(nodeid="tests/" + node, when="call", outcome="passed")
             for node in sorted(selected)
         ]
         assert execution_summary(mapping, profile, reports)["status"] == "complete"
+        incomplete: list[ExecutionReport]
         for incomplete in (
             [], reports[:-1], [*reports, reports[0]],
             [*reports, SimpleNamespace(nodeid="foreign", when="call", outcome="passed")],
@@ -75,7 +84,7 @@ def test_membership_is_exact_and_full_retains_every_parameter(
             "test_client.py::test_posix_uncertain_post_is_private_under_umask_022_without_changing_test_process",
             "test_local_endpoint.py::test_local_endpoint_real_unix_client_uses_the_published_host",
         ):
-            platform_reports = [
+            platform_reports: list[ExecutionReport] = [
                 SimpleNamespace(nodeid=report.nodeid, when="setup", outcome="skipped")
                 if report.nodeid == "tests/" + family else report
                 for report in reports
