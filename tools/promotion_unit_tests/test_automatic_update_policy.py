@@ -408,12 +408,12 @@ def test_suite_authority_classifies_reconciliation_and_independent_backends() ->
         node for node in tree.body
         if isinstance(node, ast.ImportFrom) and node.module == "__future__"
         or isinstance(node, ast.Assign) and any(
-            isinstance(target, ast.Name) and target.id == "_SUITE_BACKENDS"
+            isinstance(target, ast.Name) and target.id in {"_DIRECT_WRITER_BACKENDS", "_SUITE_BACKENDS"}
             for target in node.targets
         )
         or isinstance(node, ast.FunctionDef) and node.name == "suite_request"
     ]
-    assert len(selected) == 3
+    assert len(selected) == 4
     namespace = {}
     exec(compile(ast.Module(body=selected, type_ignores=[]), str(source), "exec"), namespace)
     classify = namespace["suite_request"]
@@ -425,6 +425,11 @@ def test_suite_authority_classifies_reconciliation_and_independent_backends() ->
     ))
     assert classify(SimpleNamespace(backend="manager-self-install", argv=()))
     assert classify(SimpleNamespace(backend="engine-dev-release", argv=()))
+    for backend in (
+        "engine-native-install", "plugin-native-install", "manager-bootstrap",
+        "manager-uninstall", "owning-plugin-provision",
+    ):
+        assert classify(SimpleNamespace(backend=backend, argv=()))
     assert not classify(SimpleNamespace(backend="other-product", argv=()))
 
 

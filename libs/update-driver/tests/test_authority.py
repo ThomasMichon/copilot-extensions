@@ -264,10 +264,104 @@ def test_configured_standalone_fences_legacy_queue_protocol(area):
     root = area / "state"
     change_authority("standalone", root=root, timeout=1, verify_capabilities=lambda _deadline: True)
     with sqlite3.connect(root / "queue.sqlite3") as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 6
     with pytest.raises(StateError, match="authority"):
         _submit(area)
     assert _submit(area, authority="standalone").state == "pending"
+    native = _submit(area, backend="plugin-native-install")
+    assert native.state == "pending" and native.spec.authority == "standalone"
+
+
+def test_existing_project_selection_requires_verified_protocol_upgrade(area):
+    root = area / "state"
+    change_authority("project", project="example", root=root, timeout=1,
+                     verify_capabilities=lambda _deadline: True)
+    with sqlite3.connect(root / "queue.sqlite3") as db:
+        db.execute("PRAGMA user_version=5")
+    with pytest.raises(StateError, match="protocol upgrade"):
+        current_authority(root=root)
+    calls = []
+    selected = change_authority(
+        "project", project="example", root=root, timeout=1,
+        verify_capabilities=lambda deadline: calls.append(deadline) or True,
+    )
+    assert selected.mode == "project" and len(calls) == 1
+    with sqlite3.connect(root / "queue.sqlite3") as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 6
+    assert current_authority(root=root) == selected
+
+
+@pytest.mark.parametrize("previous", ["standalone", "project"])
+def test_interrupted_v5_upgrade_preserves_the_previous_selection(area, monkeypatch, previous):
+    from update_driver import authority
+
+    root = area / "state"
+    change_authority(previous, project="example" if previous == "project" else "",
+                     root=root, timeout=1, verify_capabilities=lambda _deadline: True)
+    with sqlite3.connect(root / "queue.sqlite3") as db:
+        db.execute("PRAGMA user_version=5")
+    write = authority.write
+
+    def interrupt(*args):
+        write(*args)
+        raise RuntimeError("interrupted during upgrade")
+
+    with monkeypatch.context() as change:
+        change.setattr(authority, "write", interrupt)
+        with pytest.raises(RuntimeError, match="interrupted"):
+            change_authority("project", project="example", root=root, timeout=1,
+                             verify_capabilities=lambda _deadline: True)
+    with sqlite3.connect(root / "queue.sqlite3") as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert db.execute("SELECT mode FROM suite_authority WHERE scope=''").fetchone()[0] == previous
+    if previous == "project":
+        with pytest.raises(StateError, match="protocol upgrade"):
+            current_authority(root=root)
+    else:
+        assert current_authority(root=root).mode == "standalone"
+    assert change_authority(
+        "project", project="example", root=root, timeout=1,
+        verify_capabilities=lambda _deadline: True,
+    ).mode == "project"
+
+
+def test_protocol_upgrade_waits_for_pending_standalone_native_writer(area):
+    root = area / "state"
+    change_authority("standalone", root=root, timeout=1, verify_capabilities=lambda _deadline: True)
+    with sqlite3.connect(root / "queue.sqlite3") as db:
+        db.execute("PRAGMA user_version=5")
+    request = _submit(area, backend="plugin-native-install")
+    with pytest.raises(StateError, match="pending"):
+        change_authority("project", project="example", root=root, timeout=.1,
+                         verify_capabilities=lambda _deadline: True)
+    assert status(request.id, root=root).state == "pending"
+    assert drain(root=root, executor=lambda _transaction: 0) == 0
+    assert status(request.id, root=root).exit_code == 0
+    assert change_authority(
+        "project", project="example", root=root, timeout=1,
+        verify_capabilities=lambda _deadline: True,
+    ).mode == "project"
+
+
+def test_v5_project_upgrade_preserves_independent_cell_work(area):
+    root = area / "state"
+    selected = _receipt(area, "first--0123456789abcdef", "agent-worktrees")
+    other = _receipt(area, "second--0123456789abcdef", "agent-worktrees")
+    change_authority("project", project="example", context=str(selected), root=root, timeout=1,
+                     verify_capabilities=lambda _deadline: True)
+    with sqlite3.connect(root / "queue.sqlite3") as db:
+        db.execute("PRAGMA user_version=5")
+    request = _submit(area, backend="plugin-native-install", project=str(other.parent))
+    with pytest.raises(StateError, match="pending"):
+        change_authority("project", project="example", context=str(selected), root=root, timeout=.1,
+                         verify_capabilities=lambda _deadline: True)
+    assert status(request.id, root=root).state == "pending"
+    assert drain(root=root, executor=lambda _transaction: 0) == 0
+    assert status(request.id, root=root).exit_code == 0
+    assert change_authority(
+        "project", project="example", context=str(selected), root=root, timeout=1,
+        verify_capabilities=lambda _deadline: True,
+    ).mode == "project"
 
 
 def test_capability_probe_receives_deadline_and_cannot_publish_late(area):
@@ -297,6 +391,164 @@ def test_project_authority_fences_direct_suite_owner_changes(area, backend):
     assert _submit(area, backend="other-product").state == "pending"
 
 
+@pytest.mark.parametrize(
+    "backend",
+    ["engine-native-install", "plugin-native-install", "manager-bootstrap",
+     "manager-uninstall", "owning-plugin-provision"],
+)
+def test_project_authority_fences_direct_native_writers(area, backend):
+    root = area / "state"
+    change_authority("project", project="example", root=root, timeout=1,
+                     verify_capabilities=lambda _deadline: True)
+    with pytest.raises(StateError, match="authority"):
+        _submit(area, backend=backend)
+    with pytest.raises(StateError, match="authority"):
+        _submit(area, backend=backend, authority="project", project="example")
+    assert _submit(area, backend="other-product").state == "pending"
+
+
+def test_direct_native_writer_is_restored_after_return_to_standalone(area):
+    root = area / "state"
+    change_authority("project", project="example", root=root, timeout=1,
+                     verify_capabilities=lambda _deadline: True)
+    with pytest.raises(StateError, match="authority"):
+        _submit(area, backend="plugin-native-install")
+    change_authority("standalone", root=root, timeout=1, verify_capabilities=lambda _deadline: True)
+    request = _submit(area, backend="plugin-native-install")
+    assert request.spec.authority == "standalone"
+    assert drain(root=root, executor=lambda _transaction: 0) == 0
+    assert status(request.id, root=root).exit_code == 0
+
+
+def test_cell_authority_fences_direct_writers_only_in_that_cell(area):
+    root = area / "state"
+    selected = _receipt(area, "first--0123456789abcdef", "agent-worktrees")
+    other = _receipt(area, "second--0123456789abcdef", "agent-worktrees")
+    change_authority("project", project="example", context=str(selected), root=root, timeout=1,
+                     verify_capabilities=lambda _deadline: True)
+    with pytest.raises(StateError, match="authority"):
+        _submit(area, backend="engine-native-install",
+                context=(("COPILOT_EXTENSIONS_CONTEXT", str(selected)),))
+    assert _submit(area, backend="engine-native-install",
+                   context=(("COPILOT_EXTENSIONS_CONTEXT", str(other)),)).state == "pending"
+
+
+def test_global_project_authority_preserves_independent_cell_native_writer(area):
+    root = area / "state"
+    cell = _receipt(area, "first--0123456789abcdef", "agent-worktrees")
+    change_authority("project", project="example", root=root, timeout=1,
+                     verify_capabilities=lambda _deadline: True)
+    request = _submit(area, backend="plugin-native-install", project=str(cell.parent),
+                      context=(("COPILOT_EXTENSIONS_CONTEXT", str(cell)),))
+    assert request.state == "pending"
+
+
+def test_global_switch_waits_for_shared_writer_with_cell_context(area):
+    root = area / "state"
+    cell = _receipt(area, "first--0123456789abcdef", "agent-worktrees")
+    change_authority("standalone", root=root, timeout=1, verify_capabilities=lambda _deadline: True)
+    request = _submit(area, backend="manager-bootstrap", project=str(area / "legacy"),
+                      context=(("COPILOT_EXTENSIONS_CONTEXT", str(cell)),))
+    assert request.spec.authority == "standalone"
+    with pytest.raises(StateError, match="pending"):
+        change_authority("project", project="example", root=root, timeout=.1,
+                         verify_capabilities=lambda _deadline: True)
+    assert status(request.id, root=root).state == "pending"
+    assert drain(root=root, executor=lambda _transaction: 0) == 0
+    assert change_authority("project", project="example", root=root, timeout=1,
+                            verify_capabilities=lambda _deadline: True).mode == "project"
+
+
+def test_native_writer_cell_root_cannot_bypass_authority_by_omitting_context(area):
+    root = area / "state"
+    selected = _receipt(area, "first--0123456789abcdef", "agent-worktrees")
+    other = _receipt(area, "second--0123456789abcdef", "agent-worktrees")
+    change_authority("project", project="example", context=str(selected), root=root, timeout=1,
+                     verify_capabilities=lambda _deadline: True)
+    with pytest.raises(StateError, match="authority"):
+        _submit(area, backend="engine-native-install", project=str(selected.parent))
+    with pytest.raises(StateError, match="authority"):
+        _submit(area, backend="engine-native-install", project=str(selected.parent),
+                context=(("COPILOT_EXTENSIONS_CONTEXT", str(other)),))
+    with pytest.raises(StateError, match="authority"):
+        _submit(area, backend="engine-native-install", project=str(selected.parent.parent / "missing"))
+    assert _submit(area, backend="engine-native-install", project=str(other.parent)).state == "pending"
+
+
+def test_native_writer_rechecks_inferred_cell_receipt_before_execution(area):
+    root = area / "state"
+    receipt = _receipt(area, "first--0123456789abcdef", "agent-worktrees")
+    change_authority("standalone", context=str(receipt), root=root, timeout=1,
+                     verify_capabilities=lambda _deadline: True)
+    request = _submit(area, backend="engine-native-install", project=str(receipt.parent))
+    assert request.spec.authority == "standalone"
+    receipt.unlink()
+    assert drain(root=root, executor=lambda _transaction: pytest.fail("stale cell ran")) == 0
+    result = status(request.id, root=root)
+    assert result.exit_code == 3 and result.started_at is None
+
+
+@pytest.mark.parametrize(
+    "backend",
+    ["engine-native-install", "plugin-native-install", "manager-bootstrap",
+     "manager-uninstall", "manager-self-install", "owning-plugin-provision"],
+)
+def test_legacy_direct_writer_cannot_bypass_global_authority_with_cell_context(area, backend):
+    root = area / "state"
+    other = _receipt(area, "second--0123456789abcdef", "agent-worktrees")
+    legacy = area / "legacy-runtime"
+    legacy.mkdir()
+    change_authority("project", project="example", root=root, timeout=1,
+                     verify_capabilities=lambda _deadline: True)
+    with pytest.raises(StateError, match="authority"):
+        _submit(area, backend=backend, project=str(legacy),
+                context=(("COPILOT_EXTENSIONS_CONTEXT", str(other)),))
+
+
+def test_legacy_direct_writer_also_honors_its_cell_authority(area):
+    root = area / "state"
+    cell = _receipt(area, "first--0123456789abcdef", "agent-worktrees")
+    legacy = area / "legacy-runtime"
+    legacy.mkdir()
+    change_authority("project", project="example", context=str(cell), root=root, timeout=1,
+                     verify_capabilities=lambda _deadline: True)
+    with pytest.raises(StateError, match="authority"):
+        _submit(area, backend="plugin-native-install", project=str(legacy),
+                context=(("COPILOT_EXTENSIONS_CONTEXT", str(cell)),))
+
+
+def test_native_writer_cell_alias_cannot_select_global_authority(area):
+    root = area / "state"
+    selected = _receipt(area, "first--0123456789abcdef", "agent-worktrees")
+    alias = area / "cell-alias"
+    try:
+        alias.symlink_to(selected.parent, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks are unavailable")
+    change_authority("project", project="example", context=str(selected), root=root, timeout=1,
+                     verify_capabilities=lambda _deadline: True)
+    with pytest.raises(StateError, match="authority"):
+        _submit(area, backend="plugin-native-install", project=str(alias))
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows short-name aliases")
+def test_native_writer_short_cell_path_uses_cell_authority(area):
+    import ctypes
+
+    root = area / "state"
+    selected = _receipt(area, "first--0123456789abcdef", "agent-worktrees")
+    buffer = ctypes.create_unicode_buffer(32768)
+    if not ctypes.windll.kernel32.GetShortPathNameW(str(selected.parent), buffer, len(buffer)):
+        pytest.skip("volume does not provide short-name aliases")
+    alias = Path(buffer.value)
+    if alias == selected.parent:
+        pytest.skip("volume did not create an alternate short name")
+    change_authority("project", project="example", context=str(selected), root=root, timeout=1,
+                     verify_capabilities=lambda _deadline: True)
+    with pytest.raises(StateError, match="authority"):
+        _submit(area, backend="plugin-native-install", project=str(alias))
+
+
 def test_project_authority_fences_reconcile_even_when_launch_update_is_disabled(area):
     root = area / "state"
     change_authority("project", project="example", root=root, timeout=1,
@@ -313,14 +565,17 @@ def test_project_authority_fences_reconcile_even_when_launch_update_is_disabled(
     assert request.state == "pending"
 
 
-def test_prevalidated_legacy_writer_racing_switch_cannot_execute(area):
+@pytest.mark.parametrize("mode", ["standalone", "project"])
+@pytest.mark.parametrize("backend", ["engine", "engine-native-install", "plugin-native-install"])
+def test_prevalidated_legacy_writer_racing_switch_cannot_execute(area, backend, mode):
     from update_driver import core
 
     root = area / "state"
     _submit(area)
     assert drain(root=root, executor=lambda _transaction: 0) == 0
-    change_authority("standalone", root=root, timeout=1, verify_capabilities=lambda _deadline: True)
-    spec = core._spec_document(core._spec(RequestSpec("engine", project="example")))
+    change_authority(mode, project="example" if mode == "project" else "", root=root, timeout=1,
+                     verify_capabilities=lambda _deadline: True)
+    spec = core._spec_document(core._spec(RequestSpec(backend, project="example")))
     runner = asdict(core._runner(_runner(area)))
     spec_json, runner_json = core._json(spec), core._json(runner)
     identity = hashlib.sha256((spec_json + "\n" + runner_json).encode()).hexdigest()
@@ -358,10 +613,10 @@ def test_interrupted_authority_switch_fails_closed_and_can_be_retried(area, monk
     assert result.mode == "project" and result.project == "example"
 
 
-def _prevalidated_legacy_submission(area, identifier, backend):
+def _prevalidated_legacy_submission(area, identifier, backend, *, authority=""):
     from update_driver import core
 
-    spec = core._spec_document(core._spec(RequestSpec(backend, project="example")))
+    spec = core._spec_document(core._spec(RequestSpec(backend, project="example", authority=authority)))
     runner = asdict(core._runner(_runner(area)))
     spec_json, runner_json = core._json(spec), core._json(runner)
     identity = hashlib.sha256((spec_json + "\n" + runner_json).encode()).hexdigest()
@@ -374,6 +629,188 @@ def _commit_legacy_submission(root, request):
             "INSERT INTO requests(id,identity,spec,runner,state,created_at) VALUES(?,?,?,?,'pending',?)",
             request,
         )
+
+
+def test_v5_project_upgrade_refuses_late_native_writer_but_preserves_unrelated_work(area):
+    root = area / "state"
+    change_authority("project", project="example", root=root, timeout=1,
+                     verify_capabilities=lambda _deadline: True)
+    with sqlite3.connect(root / "queue.sqlite3") as db:
+        db.execute("PRAGMA user_version=5")
+    late = _prevalidated_legacy_submission(area, "a" * 32, "plugin-native-install")
+    unrelated = _prevalidated_legacy_submission(area, "b" * 32, "other-product")
+    _commit_legacy_submission(root, late)
+    _commit_legacy_submission(root, unrelated)
+    with pytest.raises(StateError, match="pending"):
+        change_authority("project", project="example", root=root, timeout=.1,
+                         verify_capabilities=lambda _deadline: True)
+    refused = status(late[0], root=root)
+    assert refused.state == "completed" and refused.exit_code == 3 and refused.started_at is None
+    assert "authority upgrade" in refused.error
+    assert status(unrelated[0], root=root).state == "pending"
+    assert drain(root=root, executor=lambda _transaction: 0) == 0
+    assert change_authority(
+        "project", project="example", root=root, timeout=1,
+        verify_capabilities=lambda _deadline: True,
+    ).mode == "project"
+
+
+@pytest.mark.parametrize("reason", ["capability", "execution-evidence"])
+def test_v5_upgrade_never_discards_unqualified_native_work(area, reason):
+    root = area / "state"
+    change_authority("project", project="example", root=root, timeout=1,
+                     verify_capabilities=lambda _deadline: True)
+    with sqlite3.connect(root / "queue.sqlite3") as db:
+        db.execute("PRAGMA user_version=5")
+    late = _prevalidated_legacy_submission(area, "d" * 32, "plugin-native-install")
+    _commit_legacy_submission(root, late)
+    if reason == "execution-evidence":
+        with sqlite3.connect(root / "queue.sqlite3") as db:
+            db.execute("UPDATE requests SET started_at=1 WHERE id=?", (late[0],))
+    with pytest.raises(StateError if reason == "capability" else InterruptedError):
+        change_authority("project", project="example", root=root, timeout=1,
+                         verify_capabilities=lambda _deadline: reason != "capability")
+    assert status(late[0], root=root).state == "pending"
+    if reason == "execution-evidence":
+        with pytest.raises(InterruptedError):
+            drain(root=root, executor=lambda _transaction: pytest.fail("uncertain request ran"))
+        assert status(late[0], root=root).state == "pending"
+        with pytest.raises(InterruptedError):
+            change_authority("project", project="example", root=root, timeout=1,
+                             verify_capabilities=lambda _deadline: True)
+    with sqlite3.connect(root / "queue.sqlite3") as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 5
+
+
+@pytest.mark.parametrize("backend", [
+    "plugin-native-install", "manager-bootstrap", "owning-plugin-provision",
+])
+def test_v5_standalone_executes_previously_accepted_unstamped_native_work(area, backend):
+    root = area / "state"
+    change_authority("standalone", root=root, timeout=1, verify_capabilities=lambda _deadline: True)
+    with sqlite3.connect(root / "queue.sqlite3") as db:
+        db.execute("PRAGMA user_version=5")
+    accepted = _prevalidated_legacy_submission(area, "e" * 32, backend)
+    _commit_legacy_submission(root, accepted)
+    ran = []
+    assert drain(root=root, executor=lambda transaction: ran.append(transaction.request.id) or 0) == 0
+    assert ran == [accepted[0]] and status(accepted[0], root=root).exit_code == 0
+    assert change_authority("project", project="example", root=root, timeout=1,
+                            verify_capabilities=lambda _deadline: True).mode == "project"
+
+
+@pytest.mark.parametrize("field,value", [
+    ("started_at", 1), ("finished_at", 1), ("boot_id", "uncertain"),
+])
+def test_pending_execution_evidence_fences_worker_and_authority_change(area, field, value):
+    from update_driver import recover_for_repair
+
+    root = area / "state"
+    change_authority("project", project="example", root=root, timeout=1,
+                     verify_capabilities=lambda _deadline: True)
+    request = _submit(area, backend="other-product")
+    with sqlite3.connect(root / "queue.sqlite3") as db:
+        db.execute(f"UPDATE requests SET {field}=? WHERE id=?", (value, request.id))
+    with pytest.raises(InterruptedError):
+        drain(root=root, executor=lambda _transaction: pytest.fail("uncertain request ran"))
+    with pytest.raises(InterruptedError):
+        change_authority("standalone", root=root, timeout=1,
+                         verify_capabilities=lambda _deadline: True)
+    preserved = status(request.id, root=root)
+    assert preserved.state == "pending" and getattr(preserved, field) == value
+    assert preserved.unresolved
+    released, = recover_for_repair(authorized=True, root=root)
+    assert released.id == request.id and released.state == "interrupted"
+    assert getattr(released, field) == value and released.exit_code is None
+    assert released.recovery_authority == "operator_repair" and not released.unresolved
+    assert change_authority("standalone", root=root, timeout=1,
+                            verify_capabilities=lambda _deadline: True).mode == "standalone"
+
+
+def test_v5_project_read_requires_matching_live_custody_and_scope(area, monkeypatch):
+    from update_driver import borrowed_custody
+    from update_driver.participant import ENVIRONMENT_KEY
+
+    root = area / "state"
+    first = _receipt(area, "first--0123456789abcdef", "agent-worktrees")
+    second = _receipt(area, "second--0123456789abcdef", "agent-worktrees")
+    for receipt in (first, second):
+        change_authority("project", project="example", context=str(receipt), root=root, timeout=1,
+                         verify_capabilities=lambda _deadline: True)
+    request = _submit(area, authority="project", project="example",
+                      context=(("COPILOT_EXTENSIONS_CONTEXT", str(first)),))
+    with sqlite3.connect(root / "queue.sqlite3") as db:
+        db.execute("PRAGMA user_version=5")
+    with pytest.raises(StateError, match="protocol upgrade"):
+        current_authority(root=root, context=str(first))
+    witnesses = []
+
+    def execute(transaction):
+        environment = transaction.participant_env()
+        witnesses.append(environment[ENVIRONMENT_KEY])
+        with borrowed_custody(root=root, environ=environment) as custody:
+            custody.assert_owned()
+            assert current_authority(root=root, context=str(first)).project == "example"
+            with pytest.raises(StateError, match="protocol upgrade"):
+                current_authority(root=root, context=str(second))
+            with pytest.raises(StateError, match="protocol upgrade"):
+                _submit(area, authority="project", project="example",
+                        context=(("COPILOT_EXTENSIONS_CONTEXT", str(first)),))
+        forged = json.loads(witnesses[0])
+        forged["key"] = "00" * 32
+        with monkeypatch.context() as change:
+            change.setenv(ENVIRONMENT_KEY, json.dumps(forged))
+            with pytest.raises(StateError, match="custody"):
+                current_authority(root=root, context=str(first))
+        return 0
+
+    assert drain(root=root, executor=execute) == 0
+    assert status(request.id, root=root).exit_code == 0
+    with monkeypatch.context() as change:
+        change.setenv(ENVIRONMENT_KEY, witnesses[0])
+        with pytest.raises(StateError, match="custody"):
+            current_authority(root=root, context=str(first))
+
+
+def test_v5_project_read_rejects_unrelated_running_custody(area):
+    from update_driver import borrowed_custody
+
+    root = area / "state"
+    change_authority("project", project="example", root=root, timeout=1,
+                     verify_capabilities=lambda _deadline: True)
+    request = _submit(area, backend="other-product", authority="project", project="example")
+    with sqlite3.connect(root / "queue.sqlite3") as db:
+        db.execute("PRAGMA user_version=5")
+
+    def execute(transaction):
+        with borrowed_custody(root=root, environ=transaction.participant_env()):
+            with pytest.raises(StateError, match="protocol upgrade"):
+                current_authority(root=root)
+        return 0
+
+    assert drain(root=root, executor=execute) == 0
+    assert status(request.id, root=root).exit_code == 0
+
+
+def test_v5_project_upgrade_preserves_accepted_project_request(area):
+    root = area / "state"
+    change_authority("project", project="example", root=root, timeout=1,
+                     verify_capabilities=lambda _deadline: True)
+    with sqlite3.connect(root / "queue.sqlite3") as db:
+        db.execute("PRAGMA user_version=5")
+    accepted = _prevalidated_legacy_submission(area, "c" * 32, "engine", authority="project")
+    _commit_legacy_submission(root, accepted)
+    with pytest.raises(StateError, match="pending"):
+        change_authority("project", project="example", root=root, timeout=.1,
+                         verify_capabilities=lambda _deadline: True)
+    assert status(accepted[0], root=root).state == "pending"
+    ran = []
+    assert drain(root=root, executor=lambda transaction: ran.append(transaction.request.id) or 0) == 0
+    assert ran == [accepted[0]] and status(accepted[0], root=root).exit_code == 0
+    assert change_authority(
+        "project", project="example", root=root, timeout=1,
+        verify_capabilities=lambda _deadline: True,
+    ).mode == "project"
 
 
 def _interrupt_first_authority_switch(root, monkeypatch):

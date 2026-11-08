@@ -120,13 +120,17 @@ def _operations(*, engine_source=None):
         )
         if expected_source is None or request.spec.source != expected_source:
             continue
-        state = request.state
+        state, error = request.state, request.error
         if state == "completed":
             state = "succeeded" if request.exit_code == 0 else "failed"
         elif state == "pending":
-            state = "queued"
+            if getattr(request, "unresolved", False):
+                state = "blocked"
+                error = error or "pending execution evidence requires recovery"
+            else:
+                state = "queued"
         operations[target] = {
-            "state": state, "request_id": request.id, "error": request.error,
+            "state": state, "request_id": request.id, "error": error,
             "exit_code": request.exit_code, "log": str(request.log_path),
         }
         if request.log_path.is_file():
