@@ -23,6 +23,11 @@ named vault/group resolution, unlock providers and installation-local service
 discovery remain owned by agent-vault. An existing valid pinned context remains
 authoritative. No command discovers, creates or relocates a database.
 
+Both preparation and installation report `database_unavailable` when the selected
+database is missing, inaccessible or not a file, before contacting a service or
+publishing key files. Restore access or synchronization, then resume with the
+same database and entry; do not initialize a replacement.
+
 For a genuinely new identity, separately authorize initialization on the
 designated authoritative database, then use both flags:
 

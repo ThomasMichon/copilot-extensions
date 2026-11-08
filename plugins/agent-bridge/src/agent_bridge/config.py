@@ -155,6 +155,10 @@ def load_config(*, strict: bool = False) -> ServiceConfig:
         except Exception as exc:
             if strict:
                 raise ValueError("Invalid service configuration; refusing preference fallback") from exc
+            if isinstance(data, dict) and "windows_scheduled_task" in data:
+                raise ValueError(
+                    "Invalid Windows scheduling configuration; refusing configuration fallback"
+                ) from exc
             if isinstance(data, dict) and "session_modes" in data:
                 raise ValueError(
                     "Invalid session_modes configuration; refusing preference fallback"

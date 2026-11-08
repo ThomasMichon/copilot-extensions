@@ -337,3 +337,46 @@ def test_self_improvement_loop_routes_learnings_by_owner() -> None:
         "## Reader discovery log",
     ):
         assert section in template, section
+
+
+def test_thread_register_organizes_operator_messages() -> None:
+    skill = " ".join(_read(SKILL / "SKILL.md").split())
+    register = " ".join(_read(SKILL / "references" / "thread-register.md").split())
+    charter = " ".join(_read(SKILL / "assets" / "CHARTER.md").split())
+    assert "(references/thread-register.md)" in skill
+    assert "Thread register:" in charter
+    for column in (
+        "| ID |",
+        "| Kind |",
+        "| Origin |",
+        "| Owner |",
+        "| Status |",
+        "| Next check |",
+        "| Exit criterion |",
+    ):
+        assert column in register, column
+    for requirement in (
+        "| One-shot |",
+        "| Charter |",
+        "| Steer-followup |",
+        "| Side-quest |",
+        "the monitor does not do the side-quest itself",
+        "**Walk due threads first.**",
+        "**Name the threads that moved.**",
+        "A thread closes only when its recorded exit criterion is observed",
+        "**Weak points go to the self-improvement thread.**",
+        "It grants no authority",
+    ):
+        assert requirement in register, requirement
+
+
+def test_failure_does_not_finish_the_turn_and_probes_name_credentials() -> None:
+    patterns = " ".join(
+        _read(SKILL / "references" / "misdirection-patterns.md").split()
+    )
+    checks = " ".join(_read(SKILL / "references" / "watchdog-checks.md").split())
+    loop = " ".join(_read(SKILL / "references" / "self-improvement.md").split())
+    assert "| Reported failure ends the turn |" in patterns
+    assert "a reported failure does not finish the turn" in checks
+    assert "| Turn end after failure |" in checks
+    assert "names the exact credential reference" in loop

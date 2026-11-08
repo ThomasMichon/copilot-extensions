@@ -52,7 +52,13 @@ def test_foreground_serves_real_authenticated_routes_only_after_fenced_commit(
                 with pytest.raises(PrivateIPCError):
                     controls.execute(channel, request(controls, endpoint, Operation.ACTIVATE_SERVING))
                 controls.execute(channel, request(controls, endpoint, Operation.ACTIVATE_RESOURCES))
+                from agent_bridge.mux_questions import MuxQuestions
+                stale_owner = MuxQuestions()
+                stale_token = "00000000-0000-0000-0000-000000000000"
+                stale_owner.inspections[stale_token] = object()
+                app.state.mux_questions = stale_owner
                 pending.prepare_serving(app, Deadline(2))
+                assert app.state.mux_questions is not stale_owner
                 writer = app.state.db._writer_thread
                 assert writer.is_alive() and not app.state.ready and app.state.passive
                 async with httpx.AsyncClient(
@@ -73,6 +79,40 @@ def test_foreground_serves_real_authenticated_routes_only_after_fenced_commit(
                     assert headers["Authorization"][7:] == pending.runtime.auth_token
                     response = await client.get("/api/v1/sessions", headers=headers)
                     assert response.status_code == 200
+                    from test_mux_questions import FixtureBackend
+                    import time
+                    app.state.db.register_live_session(
+                        "native-1", machine=None, cwd=None, worktree_id="fixture-worktree",
+                        repo=None, branch=None, pid=123, process_started_at=1.0,
+                        role=None, now=time.time(),
+                    )
+                    log = app.state.live_event_store.get_or_create(
+                        "native-1", worktree_id="fixture-worktree",
+                    )
+                    log.append("ask_user_request", {
+                        "tool_call_id": "fixture-question", "message": "Choose a fixture color",
+                        "requested_schema": {"properties": {"color": {
+                            "type": "string", "enum": ["Blue", "Green"],
+                        }}},
+                        "read_only": True,
+                    })
+                    app.state.mux_questions.backend = FixtureBackend()
+                    mux_base = "/api/v1/live-sessions/native-1/questions/mux"
+                    stale = await client.post(mux_base, headers=headers, json={
+                        "inspection_id": stale_token, "sender": "controller", "option": 1,
+                    })
+                    assert stale.status_code == 409
+                    inspection = await client.get(mux_base, headers=headers)
+                    assert inspection.status_code == 200, inspection.text
+                    token = inspection.json()["inspection_id"]
+                    answered = await client.post(mux_base, headers=headers, json={
+                        "inspection_id": token, "sender": "controller", "option": 2,
+                    })
+                    assert answered.status_code == 200, answered.text
+                    assert answered.json()["state"] == "answered"
+                    audit = await client.get(mux_base + "/answers/" + token, headers=headers)
+                    assert audit.json()["state"] == "answered"
+                    assert audit.json()["answer"] == "Green"
                     roster = await client.get("/api/v1/agents?require_complete=true", headers=headers)
                     assert roster.status_code == 200 and roster.json()["agents"][0]["name"] == "actual"
                     forced = await client.get(

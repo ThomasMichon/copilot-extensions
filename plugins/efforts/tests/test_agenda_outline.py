@@ -217,6 +217,37 @@ def test_backfill_reconstructs_requests_todos_and_carried_work(tmp_path: Path) -
     assert "Deduplicating rows" in actions
 
 
+def _bridged(at: str, body: str, attrs: str = 'from="operator" msg-id="7"', *, guidance: str = "") -> dict:
+    envelope = f"<current_datetime>x</current_datetime>\n\n<agent-message {attrs}>\r\n{body}{guidance}\r\n</agent-message>"
+    return {"type": "user.message", "timestamp": at,
+            "data": {"content": "Message from sender (via agent-bridge)", "source": "agent-bridge",
+                     "transformedContent": envelope}}
+
+
+def test_backfill_includes_bridged_requests_from_their_envelope(tmp_path: Path) -> None:
+    folder = _session(tmp_path / "s", [("2026-01-01T01:00:00Z", "Start the migration", None)], [], ended=True)
+    reply = ("\n\n(To reply, use the exact argv[0] from the agent-bridge session command catalog with "
+             "`send <reply-to> \"...\"` -- `from` is a display label, not necessarily a valid send target.)")
+    turns = [
+        _bridged("2026-01-01T02:00:00Z", "Fix handling of </agent-message> in the parser",
+                 'from="a&amp;b" reply-to="peer" msg-id="7"', guidance=reply),
+        _bridged("2026-01-01T02:10:00Z", "Heads up: deploy finished", 'from="peer" kind="notify"'),
+        _bridged("2026-01-01T02:20:00Z", "Where are you at?", 'from="peer" kind="status-check"'),
+        _bridged("2026-01-01T02:30:00Z", "ok, thanks!", 'from="peer" reply-to="peer"', guidance=reply),
+        {"type": "user.message", "timestamp": "2026-01-01T03:00:00Z",
+         "data": {"content": "Message from peer (via agent-bridge)", "source": "agent-bridge"}}]
+    events = folder / "events.jsonl"
+    events.write_text(events.read_text() + "".join(json.dumps(turn) + "\n" for turn in turns))
+
+    facts = BACKFILL.digest(folder)
+    items = BACKFILL.outline(folder)["items"]
+
+    assert [item["action"] for item in items] == ["Start the migration", "Fix handling of </agent-message> in the parser"]
+    assert items[1]["evidence"] == "bridged request from a&b at 2026-01-01T02:00:00Z"
+    assert items[0]["evidence"].startswith("operator request at")
+    assert [(r["content"], r["acknowledgement"]) for r in facts["requests"]][-1] == ("ok, thanks!", True)
+
+
 @pytest.mark.parametrize("content", ["修复解析器", "Исправь парсер", "ok 修复解析器"])
 def test_non_english_requests_are_not_acknowledgements(content: str) -> None:
     assert not BACKFILL.acknowledgement(content)

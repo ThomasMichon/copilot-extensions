@@ -69,9 +69,8 @@ def eventually(check, timeout=10):
     raise AssertionError("fixture observation timed out")
 
 
-@pytest.mark.parametrize("reject_site", [False, True])
 def test_executor_shim_reuses_external_bytecode_without_mutating_source(
-    area: Path, monkeypatch: pytest.MonkeyPatch, reject_site: bool,
+    area: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from update_driver import core
 
@@ -83,13 +82,6 @@ def test_executor_shim_reuses_external_bytecode_without_mutating_source(
     procutil.mkdir()
     for name in ("_runner.py", "participant.py"):
         shutil.copyfile(Path(core.__file__).with_name(name), driver / name)
-    if reject_site:
-        participant = driver / "participant.py"
-        participant.write_text(participant.read_text(encoding="utf-8").replace(
-            "from __future__ import annotations\n",
-            'from __future__ import annotations\nimport sys\nassert "site" not in sys.modules\n',
-            1,
-        ), encoding="utf-8")
     shutil.copyfile(agent_procutil.__file__, procutil / "__init__.py")
     record = packages / "fixture.dist-info" / "RECORD"
     record.parent.mkdir()

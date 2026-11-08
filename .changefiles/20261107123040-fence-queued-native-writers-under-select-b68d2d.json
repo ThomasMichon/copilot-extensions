@@ -1,5 +1,5 @@
 {
-  "comment": "Skip unnecessary site initialization in the explicitly bound private update executor shim; preserve product invocation, native custody and external bytecode reuse.",
+  "comment": "Fence queued native writers under selected suite update authority",
   "changes": [
     {
       "plugin": "libs/update-driver",

@@ -29,7 +29,7 @@ def test_bootstrap_has_one_installation_owner(suffix):
     ):
         assert removed not in text
     if suffix == "ps1":
-        assert "$env:AGENT_BRIDGE_NONINTERACTIVE = '1'" in text
+        assert "$env:AGENT_BRIDGE_NONINTERACTIVE =" not in text
 
 
 def test_deadlines_and_guidance_remain_independent():
@@ -38,6 +38,101 @@ def test_deadlines_and_guidance_remain_independent():
     for shell, suffix in (("powershell", "ps1"), ("bash", "sh")):
         assert f"bootstrap-check.{suffix}" in hooks[0][shell]
         assert f"write-session-guidance.{suffix}" in hooks[1][shell]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows bootstrap and selected installer")
+@pytest.mark.parametrize("phase", ["drift", "incomplete"])
+@pytest.mark.parametrize("opt_in", ["default", "operator-env"])
+def test_automatic_bootstrap_keeps_scheduling_explicit(tmp_path, phase, opt_in):
+    from update_driver.first_use import BRIDGE_CONTEXT_KEYS, _run_installer
+
+    home, project = tmp_path / "home", tmp_path / "project"
+    home.mkdir()
+    project.mkdir()
+    payload = home / ".copilot" / "installed-plugins" / "fixture-market" / "agent-bridge"
+    scripts = payload / "scripts"
+    scripts.mkdir(parents=True)
+    hook = scripts / "bootstrap-check.ps1"
+    shutil.copyfile(PLUGIN / "scripts" / hook.name, hook)
+    (payload / "plugin.json").write_text('{"name":"agent-bridge"}')
+    (payload / "pyproject.toml").write_text('version = "1.0.0"\n')
+    runtime = home / ".agent-bridge"
+    runtime.mkdir()
+    (runtime / "deploy-manifest.json").write_text(json.dumps({
+        "source": {"version": "0.0.0" if phase == "drift" else "1.0.0"},
+    }))
+    (runtime / "current-version").write_text("1.0.0")
+    (runtime / "config.yaml").write_text("windows_scheduled_task: preserve\n")
+    if phase == "drift":
+        slot = runtime / "versions" / "1.0.0"
+        slot.mkdir(parents=True)
+        (slot / ".install-complete.json").write_text('{"version":"1.0.0"}')
+    first_use = payload / "libs" / "update-driver" / "scripts" / "first-use.ps1"
+    first_use.parent.mkdir(parents=True)
+    first_use.write_text(
+        "# Installation driver lifecycle contract: bridge-install-v1\n"
+        "param($Root,$Payload,$RuntimeRoot,$Project,$InstallerAction)\n"
+        "[IO.File]::WriteAllText((Join-Path $Project 'handoff.json'),"
+        "(@{mode=$env:AGENT_BRIDGE_NONINTERACTIVE; action=$InstallerAction} | ConvertTo-Json))\n"
+        "[Console]::WriteLine((@{launched=$true;pid=123;created=1;"
+        "log=(Join-Path $Root 'first-use-00000000000000000000000000000000.log')} | ConvertTo-Json -Compress))\n",
+    )
+    source = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8-sig")
+
+    def function(name):
+        start = source.index(f"function {name} ")
+        return source[start:source.index("\nfunction ", start + 1)]
+
+    (scripts / "install.ps1").write_text(
+        "param([Parameter(Position=0)]$Action,$InstallDir,[switch]$NonInteractive)\n"
+        "$ErrorActionPreference='Stop'\n"
+        f"$LinkPython='{sys.executable}'\n"
+        "$TaskName='fixture-only'; $taskFlag=Join-Path $InstallDir 'registered'\n"
+        "function Get-ScheduledTask { param($TaskName,$ErrorAction) "
+        "if (Test-Path -LiteralPath $taskFlag) { "
+        "[pscustomobject]@{Principal=[pscustomobject]@{LogonType='S4U'}} } }\n"
+        "function Register-ScheduledTask_ { [IO.File]::AppendAllText($taskFlag,\"registered`n\") }\n"
+        "function Write-Ok { param($m) }; function Write-Skip { param($m) }\n"
+        + function("Get-WindowsScheduledTaskPolicy")
+        + function("Get-SchedulingPolicyTask")
+        + function("Ensure-ScheduledTask")
+        + "\nEnsure-ScheduledTask\n",
+        encoding="utf-8-sig",
+    )
+    environment = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith(("AGENT_BRIDGE_", "AGENT_RT_", "COPILOT_EXTENSIONS_", "UPDATE_DRIVER_"))
+    }
+    environment.update(HOME=str(home), USERPROFILE=str(home))
+    if opt_in == "operator-env":
+        environment["AGENT_BRIDGE_NONINTERACTIVE"] = "1"
+    shell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+    result = subprocess.run(
+        [str(shell), "-NoProfile", "-NonInteractive", "-File", str(hook)],
+        cwd=project, env=environment, capture_output=True, text=True, timeout=15,
+        **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    handoff = json.loads((project / "handoff.json").read_text(encoding="utf-8-sig"))
+    assert handoff["action"] == "install"
+    # The driver retains this selector in BRIDGE_CONTEXT_KEYS and forwards it
+    # to its actual stock-PowerShell native installer invocation.
+    assert "AGENT_BRIDGE_NONINTERACTIVE" in BRIDGE_CONTEXT_KEYS
+    retained = {key: value for key, value in environment.items() if key in BRIDGE_CONTEXT_KEYS}
+    if handoff["mode"]:
+        retained["AGENT_BRIDGE_NONINTERACTIVE"] = handoff["mode"]
+    else:
+        retained.pop("AGENT_BRIDGE_NONINTERACTIVE", None)
+    selected_environment = {**environment, **retained}
+    for _ in range(2):
+        assert _run_installer(
+            payload, runtime, str(project), selected_environment, handoff["action"],
+            plugin_id="agent-bridge",
+        ) == 0
+    flag = runtime / "registered"
+    assert (flag.read_text().splitlines() if flag.exists() else []) == (
+        ["registered"] if opt_in == "operator-env" else []
+    )
 
 
 @pytest.mark.skipif(
@@ -187,6 +282,6 @@ def test_native_handoff_preserves_project_history_and_unattended_mode(tmp_path, 
             str(installation), str(project), "stamp" if phase == "cold" else "install",
         ]
         if os.name == "nt":
-            expected.append("" if phase == "cold" else "1")
+            expected.append("")
         assert handoff.read_text(encoding="utf-8-sig").splitlines() == expected
     assert {p.relative_to(home): p.read_bytes() for p in home.rglob("*") if p.is_file()} == before

@@ -1,0 +1,9 @@
+{
+  "comment": "Keep prepared Windows mixed post-tool batches shell-only with capability-bound send-only invalidation",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

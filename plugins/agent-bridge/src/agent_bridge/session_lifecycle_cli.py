@@ -433,7 +433,16 @@ def _cmd_questions(args: argparse.Namespace) -> None:
 
     core = _core()
     try:
-        result = core._get_client(ensure=False).live_questions(args.session_id)
+        client = core._get_client(ensure=False)
+        audit = getattr(args, "inspection_id", None)
+        if audit and getattr(args, "via", "native") != "mux":
+            print("[FAIL] --inspection-id requires --via mux.", file=sys.stderr)
+            raise SystemExit(2)
+        result = (
+            (client.mux_question_answer(args.session_id, audit) if audit else client.mux_questions(args.session_id))
+            if getattr(args, "via", "native") == "mux"
+            else client.live_questions(args.session_id)
+        )
     except BridgeClientError as exc:
         print(f"[FAIL] {exc.detail}", file=sys.stderr)
         raise SystemExit(1) from exc
@@ -443,6 +452,13 @@ def _cmd_questions(args: argparse.Namespace) -> None:
 def _cmd_answer(args: argparse.Namespace) -> None:
     from .client import BridgeClientError
 
+    if getattr(args, "via", "native") == "mux":
+        from .mux_question_cli import answer
+
+        return answer(args)
+    if any(getattr(args, name, None) is not None for name in ("inspection_id", "option", "text")):
+        print("[FAIL] mux answer selectors require --via mux.", file=sys.stderr)
+        raise SystemExit(2)
     core = _core()
     generation = getattr(args, "generation", None)
     client = core._get_client(**({"ensure": False} if generation is not None else {}))
@@ -645,10 +661,16 @@ def register_session_lifecycle_commands(sub: argparse._SubParsersAction) -> None
 
     questions_p = sub.add_parser("questions", help="Inspect fresh native questions in an exact live interactive session (JSON)")
     questions_p.add_argument("session_id", help="Exact native session ID, not a worktree/alias")
+    questions_p.add_argument("--via", choices=["native", "mux"], default="native", help="Explicit degraded mux inspection when native answering is unavailable")
+    questions_p.add_argument("--inspection-id", help="Read the original mux audit instead of inspecting a new form")
     questions_p.set_defaults(func=_cmd_questions)
 
     answer_p = sub.add_parser("answer", help="Answer an owned ask_user or an exact live interactive question")
     answer_p.add_argument("session_id", help="Session ID")
+    answer_p.add_argument("--via", choices=["native", "mux"], default="native")
+    answer_p.add_argument("--inspection-id", help="One-use exact inspected mux form token from questions --via mux")
+    answer_p.add_argument("--option", type=int, help="One-based inspected mux choice; requires --via mux")
+    answer_p.add_argument("--text", help="Printable single-line answer through inspected Other; requires --via mux")
     answer_p.add_argument("--field", dest="fields", action="append", default=[], metavar="KEY=VALUE", help="A form field answer (repeatable). Values are strings; use --json for numbers/booleans/complex values.")
     answer_p.add_argument("--json", dest="content_json", default=None, help="Full answer content as a JSON object (overrides --field).")
     answer_p.add_argument("--tool-call-id", dest="tool_call_id", default=None, help="Which parked question to answer (defaults to the sole pending one; required when more than one is outstanding -- see `status`).")

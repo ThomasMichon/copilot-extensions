@@ -50,6 +50,45 @@ Connection Owner, borrow a venue, authenticate or issue credentials.
 
 ## YAML fields
 
+### Windows scheduling
+
+The installation's own `<runtime>/config.yaml` has an installer-only
+`windows_scheduled_task` field, outside layered repository preferences:
+
+| Value | Windows install/update behavior |
+|---|---|
+| `preserve` (unset default) | Missing tasks stay absent; retain existing/custom registration and enablement. |
+| `enabled` | Explicit opt-in to the supported login task; preserve disabled-task holds. |
+| `absent` | Validate and retire only this installation's supported task registration, then continue independent capability/selected-Owner reconciliation. |
+
+`connection_owner.enabled: true` remains capability activation, not scheduling
+consent. On-demand Owner/relay operation is retained. The default does not
+require ScheduledTasks, local-account setup or administrator rights. Without the
+module, installer startup defers to on-demand use; with it, an observed disabled
+task holds direct installer startup. Scheduling policy does not clear other
+maintenance or automatic-operation holds.
+On normal install/update, `absent` does not disable the Owner: enabled capability
+still ensures the selected Owner generation through its existing direct launcher,
+never through Task Scheduler. Disabled capability starts nothing. Unknown
+capability status fails explicitly rather than reporting complete readiness.
+
+For registration-only retirement without selecting an incoming source runtime:
+
+```powershell
+pwsh -File plugins\agent-codespaces\scripts\install.ps1 task-retire -InstallDir <runtime>
+```
+
+This `task-retire` command never queries capability activation or starts/stops an
+Owner; it is deliberately narrower than normal install/update with `absent`.
+`-DryRun` previews retirement. The exact root-folder task name, installation
+working directory and supported owner launcher must match. Foreign, ambiguous,
+multi-action or unsupported tasks are refused. Disabled tasks are retained with
+an explicit hold because removing the registration would lose disabled intent.
+Failed queries/removals are errors; a genuinely missing task is idempotent.
+Retirement never stops the daemon, closes channels, revokes credentials or removes
+leases, runtime generations, configuration, logs or other state. Full `uninstall`
+is separate. Custom external scheduling remains operator-owned.
+
 Fields are optional unless stated. Unknown keys retain native ignored-key
 behavior; provider structural validators still apply. Wrong native structure
 does not become valid merely because composition accepts JSON mappings.

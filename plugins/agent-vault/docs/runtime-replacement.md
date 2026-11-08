@@ -28,6 +28,11 @@ idempotent without mistaking another build's healthy ping for currentness.
 Replacement compares immutable build identities, not numerical version order.
 The installer's separate explicit-downgrade policy is unchanged.
 
+Generation detection supports both direct `versions/<slot>` environments and
+wheel-application `versions/<slot>/.venv` environments. Both read the same slot's
+build-generation marker and obey its current-version selection; a nested
+environment is not a development invocation.
+
 CLI service launches, the Windows task launcher and the existing POSIX service
 unit keep enabled Python bytecode in the owning home's `cache/python`, outside
 immutable slots. Late private-handoff imports follow that same policy; Python

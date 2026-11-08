@@ -207,7 +207,7 @@ def check_under_custody(root: Path, payload_root: Path, plugin_id: str) -> None:
     """Protect reconnect closures without treating persistent leases as busy."""
     if plugin_id != PLUGIN or payload_root.resolve() != Path(__file__).resolve().parents[1]:
         raise RuntimeError("Foreign uninstall guard ownership")
-    for transport_root in (root, Path.home() / ".agent-codespaces"):
+    for transport_root in dict.fromkeys((root, Path.home() / ".agent-codespaces")):
         if not os.path.lexists(transport_root):
             continue
         real_path(transport_root)
