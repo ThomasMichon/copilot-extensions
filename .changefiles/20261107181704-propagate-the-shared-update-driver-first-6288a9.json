@@ -1,0 +1,41 @@
+{
+  "comment": "Propagate the shared update-driver first-queue-publication read-only authority correction to every vendored consumer",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-codespaces",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-index",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-logger",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-mcp",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-pull-requests",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-ssh",
+      "type": "dev"
+    },
+    {
+      "plugin": "agent-vault",
+      "type": "dev"
+    }
+  ]
+}
