@@ -169,6 +169,26 @@ successful read, from `.default` in the acquisition request, or from the
 requested action list. Broader native grants may remain behind the finite
 request restrictions; those restrictions are not token downscoping.
 
+For the existing `AzLoginSource`, this is an actual acquisition-format gap,
+not an unfinished token decoder. Microsoft's
+[access-token guidance](https://learn.microsoft.com/en-us/entra/identity-platform/access-tokens)
+requires clients to treat Microsoft API access tokens as opaque and use token
+response metadata for granted scopes and expiry. Azure CLI's public
+[`get_access_token`](https://github.com/Azure/azure-cli/blob/dev/src/azure-cli/azure/cli/command_modules/profile/custom.py)
+returns token type, access token, expiry, tenant and optional subscription.
+Its underlying
+[`Profile.get_raw_token`](https://github.com/Azure/azure-cli/blob/dev/src/azure-cli-core/azure/cli/core/_profile.py)
+already discards granted-scope metadata from the MSAL acquisition result.
+Neither calling that method directly nor parsing the relay's key/value
+response recovers the missing evidence. The relay's existing supported source
+contract returns that response, not an authoritative acquisition record.
+Keep this raw source unsupported for protected-review verification. Do not
+decode an API token or reach into an account's private cache as a substitute,
+label requested scopes as granted scopes, add an alternative issuer, or probe
+real credentials to conceal the gap. A future acquisition-owner expansion
+must preserve authoritative response metadata and actual account/material
+custody through a reviewed supported boundary before enabling this writer.
+
 Use the native provider's read-only permission evaluation for effective
 principal permission, with the same pinned material and finite IO owner.
 For ADO, the documented
@@ -240,6 +260,57 @@ adopts, downgrades or discards existing state. A new host option cannot migrate
 a read-only volume or erase unresolved native outcomes.
 
 ## Serial delivery and qualification
+
+### Preparation without writer enrollment
+
+This **agent-recommended, review-first refinement** separates the existing
+no-effect preview from the unavailable protected writer. It does not relax
+the writer prerequisites above. The current receiver requires a writer even
+for `allocate`; that is an implementation coupling, not evidence that
+preparing a retained preview needs native write credentials.
+
+First qualify an explicitly selected preparation-only embedding at the
+existing workspace owner. It must use the actual source/profile resolver,
+existing exact source/generation/target checks, prepared-selection storage
+adoption and immutable original-operation recovery. Retain the current
+`allocate` payload, exact v2 prepared intent and explicit-approval requirement
+where their meanings suffice. Advertise only operations the selected owner
+can execute: preparation support never implies `submit` or a writer. Preserve
+the existing strict capability shapes; if a consumer currently conflates
+preparation and submission, expand its owning discovery contract first rather
+than fabricate a writer or advertise an unsupported baseline.
+
+Capabilities, allocation, original-preview recovery and receipt inspection
+must acquire no protected credential. Do not introduce a success-returning
+writer callback to pass the constructor, a new preview ledger, automatic disk
+adoption, arbitrary import/command execution or a fallback to remote identity
+labels. Defaults and prior writer-enabled embeddings keep their behavior.
+Withdrawal of preparation prevents new allocation; already retained content
+keeps its original bytes under the current access and recovery rules.
+Submission remains unavailable without its real independently selected writer.
+
+Then expand the strict standalone host configuration explicitly before its
+consumer. Bind one trusted producer to an existing admitted caller/target and
+actual managed source, through the supported source/profile owners. Their
+test-only import paths are not installed support. Qualify actual packaging and
+executing provider discovery before advertising normal-host preparation.
+Old configurations remain read-only, strict old parsers reject the new
+selection, and rollback refuses only the unsupported optional route without
+rewriting storage. No host configuration may load an arbitrary Python factory,
+borrow the service checkout's identity or turn an observe credential into a
+writer. Host activation, credentials and installed/live-provider acceptance
+remain separate.
+
+Focused source controls must exercise the real CLI/client/Gateway receiver:
+zero protected acquisitions or sends across allocation and restart/recovery;
+actual source/profile composition outside the replay lock; wrong or withdrawn
+producer and source/target binding; capacity and uncertain-retention recovery;
+unchanged writer-enabled and default read-only behavior; current/prior
+capability selection and provider rollback; and refusal of submission even
+when a valid prepared preview exists. Preparation-only proof closes only that
+finite source leaf, not normal protected submission or all-publisher adoption.
+
+### Remaining writer and host qualification
 
 1. Review this enrollment contract before changing normal-host behavior.
 2. Deliver an actual source/profile resolver through the existing preparation
