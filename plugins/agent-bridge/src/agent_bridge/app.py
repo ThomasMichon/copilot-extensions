@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
-from .app_routes import configure_serving_app
 
 from . import telemetry
 from .app_agent_roster import start_agent_roster_cache, stop_agent_roster_cache
@@ -1068,6 +1067,8 @@ def create_app(
         if config is not None or token is not None:
             raise PrivateIPCError(Refusal.AUTHORITY)
         return create_restored_app(restored_runtime)
+    from .app_routes import configure_serving_app
+
     cfg = config or load_config()
     auth_token = token or load_or_create_auth_token()
 

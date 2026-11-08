@@ -121,8 +121,9 @@ There is no per-event process/network launch. Insertion checks at most 128
 bounded selections; stale remote progress is not turned into liveness.
 
 Ordinary and restored/candidate serving paths use the same task and stop it
-before database close. Candidate construction loads static route definitions
-before the timed serving-preparation grant. Preparation starts an idle task
+before database close. The explicit runtime-transfer path loads static route
+definitions before its timed grants; ordinary client/lineage imports remain lazy.
+Preparation starts an idle task
 outside the routing fence; activation only wakes it. Passive candidates do
 not start subscriptions or notices. Existing runtime/inbox admission still
 fences retained effects across drain/cutover; schema preparation remains the

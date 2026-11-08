@@ -60,7 +60,7 @@ AFFECTED = (
         "status_notices.py", "status_runtime.py", "status_remote.py",
         "status_carrier.py", "routes/status.py", "client_status.py",
         "events.py", "live_message_receipts.py", "remote_operations.py",
-        "restored_app.py", "app.py",
+        "restored_app.py", "app.py", "runtime_transfer.py",
     )),
     *("plugins/agent-worktrees/src/agent_worktrees/" + name for name in (
         "retained_record_writer.py", "resource_relationship_cli.py", "tracking_write.py",
