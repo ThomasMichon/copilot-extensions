@@ -7,7 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
-from pathlib import Path, PureWindowsPath
+from pathlib import Path, PurePath, PureWindowsPath
 from types import ModuleType
 from typing import NoReturn
 
@@ -104,13 +104,37 @@ def test_native_fragment_preserves_windows_path_identity(
     assert str(context_module._native_fragment(Path(source))) == expected
 
 
+def _deep_fragment_directory(directory: PurePath) -> PurePath:
+    while len(str(directory)) < 215:
+        directory /= "d" * max(1, min(60, 215 - len(str(directory)) - 1))
+    return directory
+
+
+@pytest.mark.parametrize("initial_length", (92, 153, 214))
+def test_deep_fragment_directory_progress_is_bounded(initial_length: int) -> None:
+    class BoundedWindowsPath(PureWindowsPath):
+        joins = 0
+
+        def __truediv__(self, value: str | os.PathLike[str]) -> BoundedWindowsPath:
+            type(self).joins += 1
+            assert type(self).joins <= 4, "path construction did not make bounded progress"
+            assert os.fspath(value), "path construction attempted an empty component"
+            return super().__truediv__(value)
+
+    start = BoundedWindowsPath("C:\\" + "d" * (initial_length - 3))
+    assert len(str(start)) == initial_length
+    directory = PureWindowsPath(_deep_fragment_directory(start))
+    assert 215 <= len(str(directory)) <= 216
+    entry = directory / "installation_context.py"
+    longest = directory / "_installation_context_runtime_slot_ownership.py"
+    assert len(str(entry)) < 260 <= len(str(longest))
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows native paths")
 def test_fragment_loader_reads_deep_ordinary_windows_path(
     context_module: ModuleType, tmp_path: Path,
 ) -> None:
-    directory = tmp_path.resolve()
-    while len(str(directory)) < 215:
-        directory /= "d" * min(60, 215 - len(str(directory)) - 1)
+    directory = Path(_deep_fragment_directory(tmp_path.resolve()))
     entry = directory / "installation_context.py"
     longest = directory / "_installation_context_runtime_slot_ownership.py"
     assert len(str(entry)) < 260 <= len(str(longest))
@@ -128,7 +152,8 @@ def test_fragment_loader_reads_deep_ordinary_windows_path(
         )
         result = subprocess.run(
             [sys.executable, "-I", "-B", "-c", code, str(entry)],
-            capture_output=True, text=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW,
+            capture_output=True, text=True, timeout=30,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW"),
         )
         assert result.returncode == 0, result.stderr
         assert result.stdout.strip() == "loaded"
