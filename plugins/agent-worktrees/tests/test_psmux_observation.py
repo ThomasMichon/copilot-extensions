@@ -183,6 +183,7 @@ def test_deadline_and_registration_byte_limit_preserve_uncertainty(registered, m
     b"OK\nwt-fixture:2:101\n", b"OK\r\nwt-fixture:2:101\r\n",
     b"ERROR: Invalid session key\n", b"OK\n", b"wt-fixture:2:101\n",
     b"OK\nwt-fixture:x:101\n", b"OK\nwt-fixture:2:101\nextra\n", b"x" * 4097,
+    b"OK\n\xff:2:101\n",
 ])
 def test_fixed_read_only_wire_contract_requires_auth_and_complete_reply(reply):
     listener = socket.socket()

@@ -12,6 +12,8 @@ from .mux_list_result import MuxObservationUnavailable
 _IMAGES = {"psmux.exe", "pmux.exe", "tmux.exe"}
 _COMMAND = re.compile(r'^(?:"[^"]+"|[^\s"]+)\s+([^\s"]+)(?:\s|$)')
 _CLIENTS = {"attach-session", "attach", "at", "a"}
+_TH32CS_SNAPPROCESS = 2
+_ERROR_NO_MORE_FILES = 18
 
 
 def _processes() -> list[tuple[int, str]]:
@@ -33,7 +35,7 @@ def _processes() -> list[tuple[int, str]]:
         function.restype = wintypes.BOOL
     kernel.CloseHandle.argtypes = [wintypes.HANDLE]
     kernel.CloseHandle.restype = wintypes.BOOL
-    handle = kernel.CreateToolhelp32Snapshot(2, 0)
+    handle = kernel.CreateToolhelp32Snapshot(_TH32CS_SNAPPROCESS, 0)
     if not handle or handle == ctypes.c_void_p(-1).value:
         raise MuxObservationUnavailable("Native mux process enumeration is unavailable")
     try:
@@ -48,7 +50,7 @@ def _processes() -> list[tuple[int, str]]:
                 if len(result) > 256:
                     raise MuxObservationUnavailable("Native mux process budget exceeded")
             if not kernel.Process32NextW(handle, ctypes.byref(entry)):
-                if ctypes.get_last_error() != 18:  # ERROR_NO_MORE_FILES
+                if ctypes.get_last_error() != _ERROR_NO_MORE_FILES:
                     raise MuxObservationUnavailable("Native mux process enumeration is incomplete")
                 return result
     finally:

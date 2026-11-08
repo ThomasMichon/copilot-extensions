@@ -1468,11 +1468,10 @@ def mux_status_many(worktree_ids: list[str], *, strict: bool = False) -> dict[st
     if strict and platform.system() == "Windows":
         from .psmux_observation import observe
         observed = observe()
-        return {
-            wt_id: MuxInfo(exists=mux_session_name(wt_id) in observed,
-                           clients=observed.get(mux_session_name(wt_id), 0))
-            for wt_id in worktree_ids
-        }
+        for wt_id in worktree_ids:
+            name = mux_session_name(wt_id)
+            result[wt_id] = MuxInfo(exists=name in observed, clients=observed.get(name, 0))
+        return result
     all_sessions = _list_mux_sessions(strict=True) if strict else _list_mux_sessions()
     if all_sessions is not None:
         for wt_id in worktree_ids:

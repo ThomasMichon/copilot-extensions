@@ -598,12 +598,12 @@ def test_cold_resume_plan_obeys_native_evidence_at_powershell_boundary(
         site = runtime / f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
     (site / "fixture.pth").write_text(
         "\n".join(str(Path(path).resolve()) for path in sys.path if path) + "\n", encoding="utf-8")
+    # Windows is the unknown-evidence control, independent of host PSMux.
+    probe_kwargs = "probes_ok=False, mux_probe_ok=False" if os.name == "nt" else ""
     (site / "sitecustomize.py").write_text(
         "from agent_worktrees import sessions\n"
-        # Windows is the unknown-evidence control, independent of host PSMux.
-        "sessions.verify_worktree_active = lambda *a: sessions.LiveVerdict("
-        + ("probes_ok=False, mux_probe_ok=False" if os.name == "nt" else "")
-        + ")\n", encoding="utf-8")
+        f"sessions.verify_worktree_active = lambda *a: sessions.LiveVerdict({probe_kwargs})\n",
+        encoding="utf-8")
     try:
         proc = run_caller_owned(
             [str(python), *plan["cmd"][1:]],

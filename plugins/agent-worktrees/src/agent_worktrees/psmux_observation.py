@@ -83,7 +83,10 @@ def _query(port: int, key: str, deadline: float) -> tuple[str, int, int]:
             output.extend(block)
             if len(output) > _LIMIT:
                 raise MuxObservationUnavailable("Native mux reply exceeds its byte budget")
-    lines = output.decode("utf-8").splitlines()
+    try:
+        lines = output.decode("utf-8").splitlines()
+    except UnicodeDecodeError as exc:
+        raise MuxObservationUnavailable("Native mux reply is not UTF-8") from exc
     if len(lines) != 2 or lines[0] != "OK":
         raise MuxObservationUnavailable("Native mux authentication or reply is unconfirmed")
     name, separator, identity = lines[1].rpartition(":")
