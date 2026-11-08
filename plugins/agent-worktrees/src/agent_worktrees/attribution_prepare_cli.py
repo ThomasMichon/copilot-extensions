@@ -164,7 +164,19 @@ def cmd_attribution_prepare(args: argparse.Namespace) -> int:
             config_path = Path(args.config) if args.config else None
             if config_path is None or not config_path.is_absolute() or not config_path.is_file():
                 raise ValueError("explicit comment origin requires an existing absolute config")
-            config = cfg.load_config(config_path)
+            settings = cfg._load_yaml_safe(config_path)
+            project = settings.get("repo_name")
+            if project in (None, ""):
+                repositories = settings.get("repos")
+                if (
+                    not isinstance(repositories, dict) or len(repositories) != 1
+                    or not isinstance(next(iter(repositories.values())), dict)
+                ):
+                    raise ValueError("explicit comment origin requires one configured project")
+                project = next(iter(repositories))
+            if not isinstance(project, str) or not project.strip():
+                raise ValueError("explicit comment origin requires a configured project name")
+            config = cfg.load_config(config_path, project=project)
             result = resolve_comment_origin(
                 source_root, config, visibility=visibility or "public",
             )

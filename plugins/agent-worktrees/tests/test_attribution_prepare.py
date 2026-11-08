@@ -467,13 +467,15 @@ def test_explicit_origin_parser_uses_exact_owner_not_cwd(
             **record, "worktree_id": "other", "branch": "worktree/other",
         }), encoding="utf-8")
     config_path = state / "config.yaml"
-    config_path.write_text("fixture", encoding="utf-8")
+    config_path.write_text('{"repo_name":"fixture"}', encoding="utf-8")
     if registration == "withdrawn":
         path.unlink()
     _, config = fixture()
     config.repo_name = "fixture"
     configs = []
-    monkeypatch.setattr(cli.cfg, "load_config", lambda path: configs.append(path) or config)
+    monkeypatch.setattr(
+        cli.cfg, "load_config", lambda path, *, project: configs.append((path, project)) or config,
+    )
     monkeypatch.setattr(cli.cfg, "project_dir", lambda name=None: state)
     monkeypatch.chdir(tmp_path)
 
@@ -504,7 +506,7 @@ def test_explicit_origin_parser_uses_exact_owner_not_cwd(
         assert "error" in result and "origin" not in result
     else:
         assert result["origin"] == {"codename": "bolted-circuit"}
-    assert configs == [config_path]
+    assert configs == [(config_path, "fixture")]
     if registration == "withdrawn":
         assert not path.exists()
     else:
@@ -535,9 +537,10 @@ def test_new_origin_modes_reject_ambiguous_or_ambient_inputs_before_resolution(
 
 
 @pytest.mark.parametrize("repositories", [1, 2])
+@pytest.mark.parametrize("ambient", ["none", "global", "active"])
 def test_explicit_origin_uses_real_unnamed_config_without_ambient_project(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
-    capfd: pytest.CaptureFixture[str], repositories: int,
+    capfd: pytest.CaptureFixture[str], repositories: int, ambient: str,
 ) -> None:
     root = tmp_path / "source"
     root.mkdir()
@@ -560,8 +563,12 @@ def test_explicit_origin_uses_real_unnamed_config_without_ambient_project(
         },
     }), encoding="utf-8")
     monkeypatch.setenv("AGENT_HOME", str(home))
-    monkeypatch.setattr(cli.cfg, "_ACTIVE_PROJECT", None)
-    monkeypatch.setattr(cli.cfg, "global_config_path", lambda: home / "absent-global.yaml")
+    active = "unrelated" if ambient == "active" else None
+    monkeypatch.setattr(cli.cfg, "_ACTIVE_PROJECT", active)
+    global_config = home / "global.yaml"
+    if ambient == "global":
+        global_config.write_text('{"repo_name":"unrelated"}', encoding="utf-8")
+    monkeypatch.setattr(cli.cfg, "global_config_path", lambda: global_config)
     projects = []
     monkeypatch.setattr(cli.cfg, "project_dir", lambda name=None: projects.append(name) or state)
     monkeypatch.chdir(tmp_path)
@@ -574,3 +581,4 @@ def test_explicit_origin_uses_real_unnamed_config_without_ambient_project(
         assert "fixture" in projects
     else:
         assert "error" in result and "origin" not in result
+    assert cli.cfg.active_project() == active
