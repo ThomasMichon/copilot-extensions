@@ -414,7 +414,7 @@ function Send-PostToolReadDemand {
             $request.payload = $Mutation
         }
         $bytes = ([Text.UTF8Encoding]::new($false)).GetBytes(
-            (ConvertTo-Json -InputObject $request -Depth 100 -Compress) + "`n"
+            (ConvertTo-PreparedWorktreesJson -InputObject $request -Depth 100) + "`n"
         )
         $limit = if ($null -ne $Mutation) { 65536 } else { 2048 }
         if ($bytes.Length -gt $limit) { return }
@@ -588,7 +588,7 @@ function Update-PostToolAgendaWindow {
     else { @{ count = $calls; window_start = [double]$data['window_start'] } }
     try {
         [void][IO.Directory]::CreateDirectory($StateHome)
-        [IO.File]::WriteAllText($sidecar, (ConvertTo-Json -InputObject $next -Compress))
+        [IO.File]::WriteAllText($sidecar, (ConvertTo-PreparedWorktreesJson -InputObject $next))
     } catch { return $false }
     return $due
 }
@@ -732,7 +732,7 @@ function Invoke-PreparedPostToolReminders {
                         } else { $data['count'] = $calls }
                         try {
                             [void][IO.Directory]::CreateDirectory($stateHome)
-                            [IO.File]::WriteAllText($sidecar, (ConvertTo-Json -InputObject $data -Compress))
+                            [IO.File]::WriteAllText($sidecar, (ConvertTo-PreparedWorktreesJson -InputObject $data))
                         } catch {}
                     }
                 }

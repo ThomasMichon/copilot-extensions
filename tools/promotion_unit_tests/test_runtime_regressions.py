@@ -318,6 +318,18 @@ def test_native_execution_check_is_project_independent():
     assert argv == ["reconcile-plugins", "--check-update"]
 
 
+def test_comment_origin_routing_does_not_borrow_ambient_project():
+    for options, allowed in [
+        (["--comment-origin", "--capabilities"], True),
+        (["--comment-origin", "--source-root", "/source", "--config", "/config"], True),
+        (["--comment-origin", "--source-root=/source", "--config=/config"], True),
+        (["--comment-origin"], False),
+        (["--comment-origin", "--source-root", "/source"], False),
+        (["--source-root", "/source", "--config", "/config"], False),
+    ]:
+        assert routing._is_no_project_invocation(["attribution-prepare", *options]) is allowed
+
+
 @pytest.mark.parametrize(
     "argv,allowed",
     [

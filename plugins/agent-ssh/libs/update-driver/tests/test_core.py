@@ -195,6 +195,31 @@ def test_explicit_foreground_never_replays_foreign_pending_work(area, monkeypatc
     assert status(peer.id, root=area / "state").state == "pending"
 
 
+def test_explicit_foreground_distinguishes_live_and_abandoned_running_work(area, monkeypatch):
+    from update_driver import core
+
+    peer = sample(area, source="peer")
+    root = area / "state"
+    with closing(sqlite3.connect(root / "queue.sqlite3")) as db, db:
+        db.execute("UPDATE requests SET state='running',started_at=1 WHERE id=?", (peer.id,))
+    before = status(root=root)
+    monkeypatch.setattr(core, "_reconcile_foundation", lambda *args: pytest.fail("no queue repair"))
+
+    def attempt():
+        return run_explicit(
+            RequestSpec("source-recovery"),
+            runner=TrustedRunner((sys.executable, "-c", "pass"), str(area)),
+            root=root, executor=lambda tx: pytest.fail("no peer execution"),
+        )
+
+    with core.OperationLock(root / "execution.lock"):
+        with pytest.raises(StateError, match="busy"):
+            attempt()
+    with pytest.raises(InterruptedError, match="unsettled"):
+        attempt()
+    assert status(root=root) == before
+
+
 def test_explicit_foreground_stops_before_a_later_peer(area):
     later = []
 

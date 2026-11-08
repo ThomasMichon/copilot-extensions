@@ -58,32 +58,42 @@ class LocalMux:
         if not binary:
             raise MuxQuestionError("supported local mux is unavailable")
         value["binary"] = binary
-        identity = self.run([
-            binary, "display-message", "-p", "-t", value["pane_id"],
-            "#{session_name}|#{pane_id}|#{pane_pid}|#{session_id}:#{session_created}",
-        ]).strip().split("|")
+        panes = self.run([
+            binary, "list-panes", "-s", "-t", value["mux_session"], "-F",
+            "#{session_name}|#{window_id}|#{pane_index}|#{pane_id}|#{pane_pid}|#{session_id}:#{session_created}",
+        ])
+        matches = [
+            parts for line in panes.splitlines()
+            if len(parts := line.split("|")) == 6 and parts[0] == value["mux_session"]
+            and parts[3:5] == [value["pane_id"], str(value["pane_pid"])]
+        ]
         if (
-            len(identity) != 4 or identity[:3] != [
-                value["mux_session"], value["pane_id"], str(value["pane_pid"]),
-            ] or re.fullmatch(r"\$[0-9]+:[0-9]+", identity[3]) is None
+            len(matches) != 1
+            or re.fullmatch(r"@[0-9]+", matches[0][1]) is None
+            or re.fullmatch(r"[0-9]+", matches[0][2]) is None
+            or re.fullmatch(r"\$[0-9]+:[0-9]+", matches[0][5]) is None
         ):
             raise MuxQuestionError("mux pane identity changed or is ambiguous")
+        identity = matches[0]
         return {key: value[key] for key in (
             "binary", "session_id", "worktree_id", "mux_session", "pane_id",
             "pane_pid", "pane_start_time", "copilot_pid", "copilot_start_time",
-        )} | {"incarnation": identity[3]}
+        )} | {
+            "incarnation": identity[5], "target": f"{identity[0]}:{identity[1]}.{identity[2]}",
+        }
 
     def capture(self, binding: dict[str, Any]) -> str:
         """Capture the current viewport, never scrollback containing stale forms."""
         return self.run([
-            binding["binary"], "capture-pane", "-p", "-t", binding["pane_id"],
+            binding["binary"], "capture-pane", "-p", "-t",
+            binding["target"],
         ])
 
     def key(self, binding: dict[str, Any], value: str, *, literal: bool = False) -> None:
         """Send a single validated navigation key or one literal answer line."""
         if not literal and value not in {"Up", "Down", "Enter"}:
             raise MuxQuestionError("unsupported mux answer key")
-        args = ["send-keys", "-t", binding["pane_id"]]
+        args = ["send-keys", "-t", binding["target"]]
         if literal:
             args.extend(["-l", "--"])
         self.run([binding["binary"], *args, value])

@@ -3169,6 +3169,17 @@ the whole wait exits **75** (reported by `update` as `blocked_by_lock`, never as
 success), and a lock fault exits 1.
 It is distinct from the binstub's `.provision.lock`, which only single-flights
 first-use provisioning around the installer call in unadopted wrappers.
+Windows Worktrees `stamp` is a native driver request before publishing its
+snapshot pointer or global binstub, and binds the files its selected snapshot
+copier can retain. Its payload dispatcher and global binstub use request-local,
+nonblocking driver admission while holding their respective first-use locks;
+they release the lock before retrying a busy driver, recheck selection on each
+attempt, and never replay pending work. An unsettled queue fails rather than
+being retried as ordinary contention. A selected installer lacking the
+nonblocking first-use contract is refused until explicit install or repair
+through the selected authority; standalone installation cannot override
+project authority.
+The contract marker is a compatibility check, not execution authority.
 The canonical version-1 payload shim and Bridge/Dispatch retained command gates
 serialize stale PID-link revalidation with `.provision.reap.mutex` when `flock`
 is unavailable. They install cleanup before acquisition, release only a mutex

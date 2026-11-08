@@ -20,6 +20,10 @@ def test_backend_uses_selected_owner_and_exact_confirmed_native_pane(monkeypatch
         "mux_session": "wt-worktree", "pane_id": "%7", "pane_pid": 123,
         "pane_start_time": "1", "copilot_pid": 456, "copilot_start_time": "2",
     }
+    pane_rows = [
+        "wt-worktree|@2|0|%8|999|$4:1234",
+        "wt-worktree|@3|1|%7|123|$4:1234",
+    ]
     def owner(**kwargs):
         assert kwargs == {"allow_path_fallback": False}
         return ["selected-python", "-m", "agent_worktrees"]
@@ -29,8 +33,10 @@ def test_backend_uses_selected_owner_and_exact_confirmed_native_pane(monkeypatch
         if argv[0] == "selected-python":
             assert argv[-4:] == ["session-binding", "--session-id", "native", "--json"]
             return CompletedProcess(argv, 0, json.dumps(binding), "")
-        if argv[1] == "display-message":
-            return CompletedProcess(argv, 0, "wt-worktree|%7|123|$4:1234\n", "")
+        if argv[1] == "list-panes":
+            assert argv[2] == "-s" and argv[argv.index("-t") + 1] == "wt-worktree"
+            return CompletedProcess(argv, 0, "\n".join(pane_rows), "")
+        assert argv[argv.index("-t") + 1] == "wt-worktree:@3.1"
         return CompletedProcess(argv, 0, "pane", "")
     monkeypatch.setattr(backend, "_agent_worktrees_launch_prefix", owner)
     monkeypatch.setattr(backend.shutil, "which", lambda _: "selected-mux")
@@ -40,7 +46,22 @@ def test_backend_uses_selected_owner_and_exact_confirmed_native_pane(monkeypatch
     assert observed["incarnation"] == "$4:1234"
     assert mux.capture(observed) == "pane"
     mux.key(observed, "-literal ; answer", literal=True)
-    assert calls[-1][0] == ["selected-mux", "send-keys", "-t", "%7", "-l", "--", "-literal ; answer"]
+    assert calls[-1][0] == [
+        "selected-mux", "send-keys", "-t", "wt-worktree:@3.1", "-l", "--", "-literal ; answer",
+    ]
+    valid = pane_rows[1]
+    pane_rows.append(valid)
+    with pytest.raises(MuxQuestionError):
+        mux.binding("native", {"worktree_id": "worktree"})
+    pane_rows.pop()
+    for changed in (
+        valid.replace("|123|", "|999|"), valid.replace("@3", "unknown"),
+        valid.replace("|1|", "|unknown|"), valid.replace("$4:1234", "unknown"),
+    ):
+        pane_rows[1] = changed
+        with pytest.raises(MuxQuestionError):
+            mux.binding("native", {"worktree_id": "worktree"})
+    pane_rows[1] = valid
     binding["copilot_start_time"] = ""
     with pytest.raises(MuxQuestionError):
         mux.binding("native", {"worktree_id": "worktree"})

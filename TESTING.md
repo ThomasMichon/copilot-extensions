@@ -182,7 +182,11 @@ set to a full lowercase commit ID and `AGENT_WORKTREES_PROFILE_BASELINE_REPO`
 to its readable source checkout. Only private fixture copies are swapped;
 the baseline checkout is read through `git show`, never modified. Both shells
 retain real receiver/count assertions and the ordinary test deadlines.
-Stage spans are inclusive; neither these diagnostics nor their finite timings
+Stage mode reports each library dot-load and per-call samples for conversion,
+membership, bounded reads, reminders and sending. Nested function spans are
+inclusive; do not sum them. Select `prepared_json_engine_retains_shell_semantics`
+for JSON value parity and the older-engine command fallback without enabling
+profiling. Neither these diagnostics nor their finite timings
 establish installed or whole-roster throughput.
 
 `python-selection-native.yml` supplies real Python 3.9 and supported Python
@@ -9205,6 +9209,21 @@ construction fails. The 60-second installer deadline stays inside the
 The stalled descendant/captured-pipe case lives separately in
 `test_first_install_bootstrap_watchdog.py` and runs only in the full suite,
 not the required guard lane.
+
+The opt-in Windows first-use test exercises both payload and global entries in
+disposable homes. The payload entry stamps before queued provision; the global
+entry provisions directly and uses a private test mutex. Both check the
+completed runtime and command. Each uses a fresh cache and an explicitly
+supplied anonymous HTTPS index, not the offline seed or the live installation.
+Select an approved feed before running:
+
+```powershell
+$env:AGENT_WORKTREES_FIRST_USE_NATIVE = '1'
+$env:UV_DEFAULT_INDEX = '<approved-https-index>'
+<prepared-test-python> -B -m pytest -q plugins\agent-worktrees\tests\test_first_install_bootstrap.py -k test_windows_payload_first_use_stamps_and_provisions_under_driver
+```
+
+This is first-use evidence, not a two-generation update or service-cutover test.
 
 Worktree Manager's native viewport regression uses 1,100 live synthetic
 worktrees, with 40 visible by default, both without workers and with 1,100
