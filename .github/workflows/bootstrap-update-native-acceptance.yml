@@ -175,6 +175,11 @@ jobs:
                   ["git", "clone", "--quiet", "--shared", "--no-checkout", str(root), str(repository)],
                   check=True, timeout=30,
               )
+              for name, value in (("user.name", "Test"), ("user.email", "test@example.com")):
+                  subprocess.run(
+                      ["git", "config", "--local", name, value],
+                      cwd=repository, check=True, timeout=30,
+                  )
               frozen = work / "frozen"
               report = promote_release.promote(
                   repo=repository, dev_ref=source, main_ref=main,
