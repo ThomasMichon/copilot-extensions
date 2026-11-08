@@ -308,6 +308,11 @@ new preparation and produce a generic warning; no alternative command or
 identity is tried. Discovery reads no source, profile, credentials or forge.
 Native provider delivery precedes this optional host consumer. Older strict
 host parsers refuse the new object; existing configurations remain unchanged.
+Withdrawal handlers are installed before discovery, which runs off the asyncio
+loop under an owned worker. A stop request prevents serving; cancellation,
+including repeated cancellation, retains that worker until actual native-child
+cleanup finishes. The same ReplayStore instance remains the owner throughout
+discovery and Gateway construction.
 
 Only explicit **fresh** provisioning adopts the existing prepared-intent and
 selection extensions, while holding the same host-local writer lease used by

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import copy
+import asyncio
 import json
+import signal
 import sys
 import time
 from dataclasses import replace
@@ -17,6 +19,7 @@ from agent_pull_requests.review_workspace import _digest, build_generation
 from agent_pull_requests.owner_read import OwnerReadBudgetExceeded, OwnerReadUnavailable
 from agent_pull_requests.workspace_operations import WorkspaceUnavailable
 from agent_pull_requests_service.config import HostConfig, load_config
+from agent_pull_requests_service import hosting
 from agent_pull_requests_service.preparation import NativePreparation
 if TYPE_CHECKING:
     from services.pr.tests.test_host import Configuration, configuration as configuration, workspace_config
@@ -53,6 +56,9 @@ assert args[:2] == ['attribution-prepare', '--comment-origin']
 if args[2:] == ['--capabilities']:
     if not state['supported']:
         raise SystemExit(2)
+    if 'discovery_delay' in state:
+        control.with_suffix('.entered').write_text('entered')
+        time.sleep(state['discovery_delay'])
     result = state.get('capabilities', {
         'schema': 'agent-worktrees.comment-origin-capabilities', 'version': 1,
         'origin_protocol': 'agent-worktrees.comment-origin/v1',
@@ -66,6 +72,8 @@ else:
         'protocol': 'agent-worktrees.comment-origin/v1', 'privacy': 'public',
         'origin': {'codename': 'selected-producer'}, 'effects': 'none'})
 print(json.dumps(result))
+if 'discovery_delay' in state:
+    control.with_suffix('.finished').write_text('finished')
 """)
     control.write_text(json.dumps({
         "supported": True, "origin": True,
@@ -263,6 +271,53 @@ def test_slow_native_origin_uses_remaining_allocation_budget_not_host_limit(
         _execute(operations, "allocate", request)
     assert time.monotonic() - started < 3
     assert config.store().path.read_bytes() == before
+
+
+@pytest.mark.parametrize("ending", ["stop", "cancel", "repeated-cancel"])
+def test_slow_startup_discovery_keeps_loop_responsive_and_owns_cleanup(
+    prepared_host: tuple[HostConfig, Path, Path], monkeypatch: pytest.MonkeyPatch, ending: str,
+) -> None:
+    config, control, _ = prepared_host
+    state = json.loads(control.read_text())
+    control.write_text(json.dumps({**state, "discovery_delay": 0.5}))
+    prior_handler = signal.getsignal(signal.SIGTERM)
+    monkeypatch.setattr(
+        hosting, "load_service_credentials", lambda **kw: pytest.fail("withdrawn startup read credentials"),
+    )
+    monkeypatch.setattr(hosting, "WatchService", lambda *a, **kw: pytest.fail("withdrawn startup served"))
+
+    async def scenario() -> None:
+        stop = asyncio.Event()
+        task = asyncio.create_task(hosting.run(config, stop=stop))
+        try:
+            async def entered() -> None:
+                while not control.with_suffix(".entered").exists():
+                    await asyncio.sleep(0.005)
+
+            await asyncio.wait_for(entered(), 3)
+            assert signal.getsignal(signal.SIGTERM) is not prior_handler
+            assert not control.with_suffix(".finished").exists()
+            if ending == "stop":
+                stop.set()
+            else:
+                task.cancel()
+            await asyncio.sleep(0.02)
+            assert not task.done()
+            if ending == "repeated-cancel":
+                for _ in range(3):
+                    task.cancel()
+                    await asyncio.sleep(0.01)
+                    assert not task.done()
+            result = (await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), 3))[0]
+            assert isinstance(result, asyncio.CancelledError) if ending != "stop" else result is None
+            assert control.with_suffix(".finished").exists()
+            assert signal.getsignal(signal.SIGTERM) is prior_handler
+            assert not config.root.exists()
+        finally:
+            stop.set()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(scenario())
 
 
 def test_fresh_preparation_provision_never_adopts_an_existing_or_competing_volume(
