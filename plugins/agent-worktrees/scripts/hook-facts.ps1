@@ -543,6 +543,88 @@ function Invoke-PreparedPostToolRead {
     }
 }
 
+function Update-PostToolAgendaWindow {
+    # Mirrors nudge_status._agenda_tick: an independent window, same thresholds.
+    param([string]$StateHome, [string]$Worktree, [double]$Now)
+    if (([string]$env:AGENT_WORKTREES_AGENDA_NUDGE).Trim().ToLowerInvariant() -in @('0', 'off', 'false', 'no')) {
+        return $false
+    }
+    $sidecar = [IO.Path]::Combine($StateHome, $Worktree + '.agenda.json')
+    $data = Read-PostToolBoundedJson $sidecar 4096
+    if ($null -eq $data -or -not $data.ContainsKey('window_start') -or
+        ($data['count'] -isnot [int] -and $data['count'] -isnot [long]) -or
+        $data['count'] -lt 0 -or $data['count'] -eq [long]::MaxValue -or
+        ($data['window_start'] -isnot [double] -and $data['window_start'] -isnot [decimal] -and
+         $data['window_start'] -isnot [int] -and $data['window_start'] -isnot [long])) {
+        $data = @{ count = 0; window_start = $Now }
+    }
+    $calls = [long]$data['count'] + 1
+    $elapsed = ($Now - [double]$data['window_start']) / 60.0
+    $due = $calls -ge (Get-PostToolPositiveInt $env:AGENT_WORKTREES_NUDGE_CALLS 25) -or
+        $elapsed -ge (Get-PostToolPositiveInt $env:AGENT_WORKTREES_NUDGE_MINUTES 20)
+    $next = if ($due) { @{ count = 0; window_start = $Now } }
+    else { @{ count = $calls; window_start = [double]$data['window_start'] } }
+    try {
+        [void][IO.Directory]::CreateDirectory($StateHome)
+        [IO.File]::WriteAllText($sidecar, (ConvertTo-Json -InputObject $next -Compress))
+    } catch { return $false }
+    return $due
+}
+
+function Get-PostToolAgendaLaneState {
+    # Mirrors nudge_status.agenda_lane_state with local, read-only evidence.
+    param([string]$ProjectRoot, [string]$Worktree, [string]$Workspace)
+    try {
+        $descriptor = [IO.Path]::Combine($ProjectRoot, 'worktree-state', $Worktree, 'descriptor.json')
+        if ([IO.File]::Exists($descriptor)) {
+            $value = Read-PostToolBoundedJson $descriptor 1048576
+            if ($null -eq $value) { return 'unknown' }
+            $json = $PSVersionTable.PSVersion.Major -ge 6
+            $placements = $value['placements']
+            if ($json) {
+                if ($placements -isnot [Newtonsoft.Json.Linq.JArray]) { return 'unknown' }
+            } elseif ($placements -isnot [array]) { return 'unknown' }
+            foreach ($placement in $placements) {
+                $domain = $null
+                if ($json -and $placement -is [Newtonsoft.Json.Linq.JObject]) {
+                    $domain = $placement['domain']
+                    if ($domain -is [Newtonsoft.Json.Linq.JValue]) { $domain = $domain.Value }
+                } elseif ($placement -is [Collections.IDictionary]) {
+                    $domain = $placement['domain']
+                }
+                if ($domain -is [string] -and $domain -ceq 'agendas') { return 'present' }
+            }
+        }
+        $agendaHome = [IO.Path]::Combine($Workspace, '.effort-agenda')
+        if ([IO.Directory]::Exists($agendaHome)) {
+            foreach ($child in [IO.Directory]::EnumerateDirectories($agendaHome)) { return 'present' }
+        }
+        return 'absent'
+    } catch {
+        return 'unknown'
+    }
+}
+
+function Get-PostToolAgendaReminder {
+    # The owner publishes the policy at session start; no config/Python/RPC here.
+    param([string]$StateHome, [string]$Worktree, [string]$ProjectRoot, [string]$Workspace)
+    $record = Read-PostToolBoundedJson ([IO.Path]::Combine($StateHome, $Worktree + '.agenda-policy.json')) 4096
+    if ($null -eq $record -or
+        ($record['version'] -isnot [int] -and $record['version'] -isnot [long]) -or
+        $record['version'] -ne 1 -or $record['policy'] -isnot [string] -or
+        $record['policy'] -cne 'expected') { return $null }
+    if ((Get-PostToolAgendaLaneState $ProjectRoot $Worktree $Workspace) -cne 'absent') { return $null }
+    return (
+        '[agent-worktrees] This project expects an agenda for this session ' +
+        '(agendas.default: expected), but no agenda lane was found for this ' +
+        'worktree. Adopt one via the `driving-effort-agendas` skill: ' +
+        '`agenda_outline.py from-effort <effort README.md>` (or ' +
+        '`agenda_backfill.py preview <session-folder>` to rebuild from this ' +
+        'session), then `preview` and `adopt`. You own and edit the agenda; ' +
+        'nothing is adopted automatically.'
+    )
+}
+
 function Invoke-PreparedPostToolReminders {
     param(
         [string]$SessionHome, [string]$Session, [string]$Cwd, [switch]$SkipCounter,
@@ -578,6 +660,7 @@ function Invoke-PreparedPostToolReminders {
         $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000.0
         $messages = [Collections.Generic.List[string]]::new()
         $counterLock = $null
+        $agendaDue = $false
         try {
             $null = Get-PreparedWorktreesPath $sidecar
             if (-not $SkipCounter -and
@@ -588,6 +671,7 @@ function Invoke-PreparedPostToolReminders {
                 } elseif ($facts['status'] -in @('completed', 'finalized', 'removed', 'pruned')) {
                     try { [IO.File]::Delete($sidecar) } catch {}
                 } else {
+                    try { $agendaDue = Update-PostToolAgendaWindow $stateHome $worktree $now } catch {}
                     $data = Read-PostToolBoundedJson $sidecar 4096
                     $note = Get-PostToolNoteIdentity $facts['status_note_at']
                     if ($null -eq $data -or
@@ -630,6 +714,12 @@ function Invoke-PreparedPostToolReminders {
             }
         } catch {} finally {
             if ($null -ne $counterLock) { $counterLock.Dispose() }
+        }
+        if ($agendaDue) {
+            try {
+                $agenda = Get-PostToolAgendaReminder $stateHome $worktree $locator['projectRoot'] $locator['workspace']
+                if ($agenda) { $messages.Add($agenda) }
+            } catch {}
         }
         try {
             if (-not $facts['record_head_session']) {

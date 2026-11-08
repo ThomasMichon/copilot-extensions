@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from agent_worktrees import related
 from agent_worktrees import session_context
 from agent_worktrees import state_root
@@ -446,6 +448,8 @@ def _agenda_setup(monkeypatch, tmp_path: Path, policy: str, placements=()):
     monkeypatch.setattr(
         worktree_data_store, "read_worktree_data", lambda project, wid: inventory,
     )
+    roots = [tmp_path / "runtime", tmp_path / "legacy"]
+    monkeypatch.setattr(session_context, "_agenda_policy_roots", lambda: roots)
     return SimpleNamespace(agenda_default=policy), _record(tmp_path)
 
 
@@ -492,3 +496,35 @@ def test_agenda_guidance_unknown_on_inventory_failure(monkeypatch, tmp_path: Pat
 
     assert "lane=unknown" in text
     assert "worktree-data-read --inventory --json" in text
+
+
+@pytest.mark.parametrize("policy", ["off", "expected", "bogus"])
+def test_session_start_publishes_agenda_policy_for_hooks(monkeypatch, tmp_path: Path, policy):
+    import importlib.util
+    import json
+
+    config, record = _agenda_setup(monkeypatch, tmp_path, policy)
+    spec = importlib.util.spec_from_file_location(
+        "nudge_status_reader", Path(__file__).resolve().parents[1] / "scripts" / "nudge_status.py",
+    )
+    nudge = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(nudge)
+
+    session_context.with_agenda_guidance("msg", config, record)
+
+    expected = "expected" if policy == "expected" else "off"
+    for root in (tmp_path / "runtime", tmp_path / "legacy"):
+        path = root / "nudge-state" / f"{record.worktree_id}{nudge.AGENDA_POLICY_SUFFIX}"
+        assert json.loads(path.read_text("utf-8"))["policy"] == expected
+        assert nudge.read_agenda_policy(root, record.worktree_id) == expected
+        assert not list(path.parent.glob("*.tmp"))
+
+
+def test_agenda_policy_publication_rejects_unsafe_worktree_ids(monkeypatch, tmp_path: Path):
+    config, _ = _agenda_setup(monkeypatch, tmp_path, "expected")
+
+    for unsafe in ("..", "a/b", ""):
+        session_context.publish_agenda_policy(config, SimpleNamespace(worktree_id=unsafe))
+
+    assert not (tmp_path / "runtime").exists()
+    assert not (tmp_path / "legacy").exists()

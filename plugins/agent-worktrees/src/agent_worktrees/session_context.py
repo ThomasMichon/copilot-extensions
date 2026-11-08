@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import socket
+import time
+import uuid
 from typing import Any
 
 import yaml
@@ -260,10 +263,66 @@ def render_agenda_guidance(
     return "\n".join(lines)
 
 
+AGENDA_POLICY_SUFFIX = ".agenda-policy.json"
+
+
+def _agenda_policy_roots() -> list[Any]:
+    from pathlib import Path
+
+    roots: list[Any] = []
+    for factory in (cfg.install_dir, lambda: Path.home() / ".agent-worktrees"):
+        try:
+            root = Path(os.path.abspath(factory()))
+        except Exception:
+            continue
+        if root not in roots:
+            roots.append(root)
+    return roots
+
+
+def publish_agenda_policy(config: Any, record: Any, *, now: float | None = None) -> None:
+    """Publish this worktree's effective ``agendas.default`` for post-tool hooks.
+
+    Writes ``<runtime>/nudge-state/<worktree>.agenda-policy.json`` (``off`` is
+    published explicitly) under the selected runtime root and the per-user
+    legacy root the Python hook reads, so the stdlib/PowerShell reminder paths
+    never load configuration themselves. Refreshed on every session start or
+    resume; best-effort and never raises into session start.
+    """
+    worktree_id = str(getattr(record, "worktree_id", "") or "")
+    if not worktree_id or os.sep in worktree_id or "/" in worktree_id or worktree_id in {".", ".."}:
+        return
+    policy = (
+        cfg.AGENDA_DEFAULT_EXPECTED
+        if getattr(config, "agenda_default", None) == cfg.AGENDA_DEFAULT_EXPECTED
+        else cfg.AGENDA_DEFAULT_OFF
+    )
+    body = json.dumps({
+        "version": 1, "policy": policy,
+        "written_at": time.time() if now is None else now,
+    })
+    for root in _agenda_policy_roots():
+        target = root / "nudge-state" / f"{worktree_id}{AGENDA_POLICY_SUFFIX}"
+        temporary = target.with_name(f".{target.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            temporary.write_text(body, encoding="utf-8")
+            os.replace(temporary, target)
+        except OSError:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
 def with_agenda_guidance(
     message: str, config: Any, record: Any, *, session_id: str | None = None,
 ) -> str:
     """Append :func:`render_agenda_guidance`; never raises into session start."""
+    try:
+        publish_agenda_policy(config, record)
+    except Exception:
+        pass
     try:
         agenda = render_agenda_guidance(config, record, session_id=session_id)
     except Exception:

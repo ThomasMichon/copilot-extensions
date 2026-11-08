@@ -206,6 +206,20 @@ from the `driving-effort-agendas` skill: derive from an effort
 detected. Lane detection is local and read-only: a managed `agendas` placement
 in the worktree-data inventory or a non-empty worktree `.effort-agenda/` home.
 
+The post-tool reminder never resolves configuration. Session start (and every
+resume), which already runs in the selected runtime, publishes the effective
+value to `<runtime>/nudge-state/<worktree>.agenda-policy.json` as
+`{"version":1,"policy":"off"|"expected","written_at":<epoch>}`, written
+atomically and explicitly even when `off`. The record is written under both the
+selected runtime root and the per-user `~/.agent-worktrees` root. The resident
+monitor, the standard-library fallback hook and the prepared Windows PowerShell
+read path each read only this small record and the local lane evidence, with
+their own `<worktree>.agenda.json` window independent of the disposition
+counter. They do not load configuration, run git, start Python or make a
+synchronous call. A missing, malformed or unknown-version record means no
+reminder, so a changed preference reaches a running session at its next start
+or resume.
+
 The policy is guidance, not automation or a lock. Agent-worktrees never adopts,
 creates or edits an agenda; the agent decides whether to adopt, owns its edits,
 and may deviate when the work calls for it. `off` (the default) changes nothing.

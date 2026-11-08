@@ -1595,6 +1595,7 @@ print(json.dumps({"consumed": nudge._consume_late_watch(
     "accounting", "note-reset", "bind-reminder", "quoted-bind", "distinct-home", "malformed-counter", "disabled", "terminal",
     "mixed-note", "missing-membership", "changed-input", "missing-locator", "wrong-incarnation",
     "wrong-workspace", "missing-discovery", "legacy-facts", "malformed-facts",
+    "agenda-expected", "agenda-off", "agenda-present", "agenda-disabled",
 ])
 def test_registered_read_event_needs_no_python_or_resident(prepared_read_event, shell, case):
     from agent_procutil import no_window_kwargs
@@ -1706,6 +1707,27 @@ def test_registered_read_event_needs_no_python_or_resident(prepared_read_event, 
             assert json.loads(sidecar.read_text())["count"] == 0
             assert sidecar.parent == fixture["home"] / ".agent-worktrees" / "nudge-state"
             assert not (registry / "nudge-state").exists()
+        return
+    if case.startswith("agenda-"):
+        from test_nudge_status import nudge
+
+        sidecar.parent.mkdir(parents=True, exist_ok=True)
+        policy = "off" if case == "agenda-off" else "expected"
+        (sidecar.parent / "worktree.agenda-policy.json").write_text(
+            json.dumps({"version": 1, "policy": policy, "written_at": 1}),
+        )
+        if case == "agenda-present":
+            (Path(payload["cwd"]) / ".effort-agenda" / "lane").mkdir(parents=True)
+        if case == "agenda-disabled":
+            env["AGENT_WORKTREES_AGENDA_NUDGE"] = " Off "
+        assert invoke() == {}
+        agenda_sidecar = sidecar.parent / "worktree.agenda.json"
+        assert agenda_sidecar.exists() is (case != "agenda-disabled")
+        second = invoke()["additionalContext"]
+        assert "2 tool call(s)" in second
+        assert (nudge._agenda_nudge_text() in second) is (case == "agenda-expected")
+        if case != "agenda-disabled":
+            assert json.loads(agenda_sidecar.read_text())["count"] == 0
         return
     if case == "disabled":
         env["AGENT_WORKTREES_NUDGE"] = " OFF "
@@ -2157,3 +2179,74 @@ def test_real_shell_rejects_invalid_or_unbounded_responses(tmp_path, admitted_pr
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+def test_prepared_agenda_helpers_mirror_python_policy_lane_and_window(tmp_path):
+    from agent_procutil import no_window_kwargs
+    from test_nudge_status import nudge
+
+    shell = shutil.which("pwsh") or shutil.which("powershell")
+    if shell is None:
+        pytest.skip("PowerShell is unavailable")
+    state, project, workspace = tmp_path / "state", tmp_path / "project", tmp_path / "workspace"
+    for path in (state, project, workspace):
+        path.mkdir()
+    script = """
+$ErrorActionPreference = 'Stop'
+. $env:TEST_FACTS_SCRIPT
+function Get-PreparedWorktreesPath { param($Path) return $Path }
+$results = [Collections.Generic.List[object]]::new()
+function Probe { param([string]$Name)
+    $results.Add(@{ name = $Name; reminder = (Get-PostToolAgendaReminder $env:TEST_STATE 'wt' $env:TEST_PROJECT $env:TEST_WORKSPACE) })
+}
+Probe 'missing-record'
+[IO.File]::WriteAllText([IO.Path]::Combine($env:TEST_STATE, 'wt.agenda-policy.json'), '{"version":1,"policy":"off","written_at":1}')
+Probe 'off'
+[IO.File]::WriteAllText([IO.Path]::Combine($env:TEST_STATE, 'wt.agenda-policy.json'), '{"version":2,"policy":"expected","written_at":1}')
+Probe 'wrong-version'
+[IO.File]::WriteAllText([IO.Path]::Combine($env:TEST_STATE, 'wt.agenda-policy.json'), '{"version":1,"policy":"expected","written_at":1}')
+Probe 'expected'
+$descriptor = [IO.Path]::Combine($env:TEST_PROJECT, 'worktree-state', 'wt')
+[void][IO.Directory]::CreateDirectory($descriptor)
+[IO.File]::WriteAllText([IO.Path]::Combine($descriptor, 'descriptor.json'), '{"placements":[{"domain":"other"},{"domain":"agendas"}]}')
+Probe 'managed-placement'
+[IO.File]::WriteAllText([IO.Path]::Combine($descriptor, 'descriptor.json'), '{"placements":"agendas"}')
+Probe 'malformed-descriptor'
+[IO.File]::Delete([IO.Path]::Combine($descriptor, 'descriptor.json'))
+[void][IO.Directory]::CreateDirectory([IO.Path]::Combine($env:TEST_WORKSPACE, '.effort-agenda'))
+Probe 'empty-home'
+[void][IO.Directory]::CreateDirectory([IO.Path]::Combine($env:TEST_WORKSPACE, '.effort-agenda', 'lane'))
+Probe 'local-lane'
+$env:AGENT_WORKTREES_NUDGE_CALLS = '3'
+$env:AGENT_WORKTREES_NUDGE_MINUTES = '999'
+$ticks = @((Update-PostToolAgendaWindow $env:TEST_STATE 'wt' 100.0), (Update-PostToolAgendaWindow $env:TEST_STATE 'wt' 101.0),
+    (Update-PostToolAgendaWindow $env:TEST_STATE 'wt' 102.0), (Update-PostToolAgendaWindow $env:TEST_STATE 'wt' 103.0))
+$env:AGENT_WORKTREES_NUDGE_MINUTES = '1'
+$ticks += Update-PostToolAgendaWindow $env:TEST_STATE 'wt' 200.0
+$env:AGENT_WORKTREES_AGENDA_NUDGE = ' OFF '
+$ticks += Update-PostToolAgendaWindow $env:TEST_STATE 'wt' 300.0
+[Console]::Write((ConvertTo-Json -InputObject @{ results = $results; ticks = $ticks } -Compress -Depth 4))
+"""
+    env = dict(
+        os.environ, TEST_FACTS_SCRIPT=str(PLUGIN / "scripts" / "hook-facts.ps1"),
+        TEST_STATE=str(state), TEST_PROJECT=str(project), TEST_WORKSPACE=str(workspace),
+    )
+    env.pop("AGENT_WORKTREES_AGENDA_NUDGE", None)
+    response = subprocess.run(
+        [shell, "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, text=True, timeout=60, env=env, **no_window_kwargs(),
+    )
+    assert response.returncode == 0, response.stderr
+    output = json.loads(response.stdout)
+    reminders = {item["name"]: item["reminder"] for item in output["results"]}
+    text = nudge._agenda_nudge_text()
+    assert reminders == {
+        "missing-record": None, "off": None, "wrong-version": None, "expected": text,
+        "managed-placement": None, "malformed-descriptor": None, "empty-home": text,
+        "local-lane": None,
+    }
+    assert output["ticks"] == [False, False, True, False, True, False]
+    assert json.loads((state / "wt.agenda.json").read_text()) == {"count": 0, "window_start": 200.0}
