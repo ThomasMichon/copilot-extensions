@@ -228,6 +228,14 @@ def test_actual_preparation_only_cli_keeps_original_preview_without_a_writer(
     operations.selection_preparer = None
     code, _ = invoke_cli(host, "allocate", request, monkeypatch, capsys)
     assert code != 0 and store.path.read_bytes() == before
+    inspect_request = {"number": 42, "operation_id": chosen["operation_id"]}
+    code, retained = invoke_cli(host, "inspect", inspect_request, monkeypatch, capsys)
+    assert code == 0 and retained["result"]["intent"] == chosen
+    assert retained["result"]["selection"]["stage"] == "prepared"
+    operations.prepared_reviews = False
+    code, _ = invoke_cli(host, "inspect", inspect_request, monkeypatch, capsys)
+    assert code != 0 and store.path.read_bytes() == before
+    operations.prepared_reviews = True
     operations.selection_preparer = selected
     code, retry = invoke_cli(host, "allocate", request, monkeypatch, capsys)
     assert code == 0 and retry == preview

@@ -72,11 +72,39 @@ async def main():
 asyncio.run(main())
 """
 
+_PREPARATION_NATIVE = """
+import json,pathlib,sys
+path=pathlib.Path(sys.argv[1])
+state=json.loads(path.read_text())
+args=sys.argv[2:]
+assert args[:2]==['attribution-prepare','--comment-origin']
+with path.with_suffix('.calls').open('a') as calls:
+    calls.write(json.dumps(args)+'\\n')
+if args[2:]==['--capabilities']:
+    if not state['supported']:
+        raise SystemExit(2)
+    print(json.dumps({
+        'schema':'agent-worktrees.comment-origin-capabilities','version':1,
+        'origin_protocol':'agent-worktrees.comment-origin/v1',
+        'capabilities':['explicit_source_root'],'effects':'none',
+    }))
+else:
+    assert args[2:]==state['expected']
+    if not state['origin']:
+        raise SystemExit(1)
+    print(json.dumps({
+        'protocol':'agent-worktrees.comment-origin/v1','privacy':'public',
+        'origin':{'codename':'foreground-producer'},'effects':'none',
+    }))
+"""
 
-@pytest.mark.parametrize("workspace_enabled", [False, True])
+
+@pytest.mark.parametrize("workspace_enabled,preparation_enabled", [
+    (False, False), (True, False), (True, True),
+])
 def test_installed_host_process_register_observe_reconnect_restart_and_ack(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
-    workspace_enabled: bool,
+    workspace_enabled: bool, preparation_enabled: bool,
 ) -> None:
     # The existing Fleet fixture owns issuer, policy and TLS; do not add a fake Gateway.
     root = Path(__file__).resolve().parents[3]
@@ -96,6 +124,10 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
         workspace_calls = ""
         evidence: dict[str, Any] = {}
         scope: dict[str, Any] = {}
+        preparation_state = tmp_path / "preparation-state.json"
+        preparation_profile = tmp_path / "producer/.github/ai-attribution.json"
+        allocation: dict[str, Any] = {}
+        prepared_preview: dict[str, Any] = {}
         snapshot = {
             "schema": "agent-worktrees.pr-snapshot", "version": 1,
             "repo": "example/project", "pr": 1, "provider": "github",
@@ -211,6 +243,28 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                     }],
                     "cache_bytes": 4 * 1024 * 1024, "cache_generations": 20,
                 }
+                if preparation_enabled:
+                    preparation_profile.parent.mkdir(parents=True)
+                    preparation_profile.write_text(json.dumps({
+                        "version": 1, "rules": [{"header": "[Foreground producer] "}],
+                    }))
+                    home = tmp_path / "producer-home"
+                    home.mkdir()
+                    source_config = tmp_path / "producer-config.json"
+                    source_config.write_text("{}")
+                    origin_script = tmp_path / "origin-native.py"
+                    origin_script.write_text(_PREPARATION_NATIVE)
+                    producer_root = preparation_profile.parent.parent
+                    preparation_state.write_text(json.dumps({
+                        "supported": True, "origin": True,
+                        "expected": ["--source-root", str(producer_root),
+                                     "--config", str(source_config), "--visibility", "public"],
+                    }))
+                    config["workspaces"]["bindings"][0]["preparation"] = {
+                        "command": [sys.executable, "-I", str(origin_script), str(preparation_state)],
+                        "source_root": str(producer_root), "source_config": str(source_config),
+                        "profile_home": str(home), "visibility": "public", "allow_anonymous": False,
+                    }
 
             def save_evidence(offset: int) -> None:
                 for section in evidence["sections"].values():
@@ -325,6 +379,38 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                         "number": 42, "generation_id": generation_id,
                     })
                     assert materialized["sections"]["pull_request"]["data"]["title"] == "Synthetic example"
+                    if preparation_enabled:
+                        from agent_pull_requests.review_workspace import _digest
+
+                        source = {
+                            "schema": "agent-pull-requests.local-source", "version": 1,
+                            "scope": materialized["scope"], "revision": materialized["revision"],
+                            "complete": True, "errors": [], "files": [], "workspace_id": "selected-source",
+                        }
+                        source["id"] = _digest(source)
+                        allocation = {
+                            "number": 42, "budget_seconds": 10,
+                            "source_attachment": {
+                                "state": "ready", "scope": materialized["scope"],
+                                "generation_id": generation_id, "source": source,
+                            },
+                            "intent": {
+                                "schema": "agent-pull-requests.review-intent", "version": 1,
+                                "operation_id": "foreground-selection", "scope": materialized["scope"],
+                                "generation_id": generation_id, "source_id": source["id"],
+                                "revision": {key: materialized["revision"][key]
+                                             for key in ("head_sha", "common_sha", "iteration")},
+                                "actions": [{"id": "finding", "kind": "comment", "body": "Selected note."}],
+                            },
+                        }
+                        prepared_preview = (await workspace("allocate", allocation))["result"]
+                        assert prepared_preview["intent"]["actions"][0]["body"].startswith(
+                            "[Foreground producer] Selected note."
+                        )
+                        preparation_profile.write_text("invalid-profile")
+                        native_state = json.loads(preparation_state.read_text())
+                        preparation_state.write_text(json.dumps({**native_state, "origin": False}))
+                        assert (await workspace("allocate", allocation))["result"] == prepared_preview
                     before_read = (state / "watch-replay.json").read_bytes()
                     page = (await workspace("events", {
                         "number": 42, "after": None, "limit": 16,
@@ -383,6 +469,9 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                 assert (state / "watch-replay.json").read_bytes() == retained
                 assert calls.read_text() == settled_reads
             path.write_text(json.dumps(config))
+            if preparation_enabled:
+                native_state = json.loads(preparation_state.read_text())
+                preparation_state.write_text(json.dumps({**native_state, "supported": False}))
             successor = await launch()
             try:
                 await eventually(lambda: ready(status), timeout=10)
@@ -390,6 +479,20 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                 await eventually(lambda: "service-a" in rig.state.channels, timeout=10)
                 assert await send("pending") == pending
                 if workspace_enabled:
+                    if preparation_enabled:
+                        capabilities = await workspace("capabilities", {})
+                        assert "allocate" not in capabilities["operations"]
+                        assert "submit" not in capabilities["operations"]
+                        inspected = (await workspace("inspect", {
+                            "number": 42, "operation_id": "foreground-selection",
+                        }))["result"]
+                        assert inspected["intent"] == prepared_preview["intent"]
+                        assert inspected["selection"]["stage"] == "prepared"
+                        origin_calls = [
+                            json.loads(line) for line in
+                            preparation_state.with_suffix(".calls").read_text().splitlines()
+                        ]
+                        assert len([call for call in origin_calls if "--source-root" in call]) == 1
                     retained = (await workspace("events", {
                         "number": 42, "after": cursor, "limit": 16,
                     }))["result"]

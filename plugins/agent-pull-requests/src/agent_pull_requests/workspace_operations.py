@@ -346,7 +346,14 @@ class WorkspaceOperations:
                     raise ValueError("invalid immutable chunk offset")
                 result.update(offset=offset, data=base64.b64encode(data[offset:offset + CHUNK_BYTES]).decode("ascii"))
         elif operation == "inspect":
-            result = self.store.inspect_review(payload["operation_id"], scope, expires_at=expires_at, checkpoint=check)
+            from .review_selection_store import ReviewSelectionStore
+            owner = (
+                ReviewSelectionStore(self.store).inspect
+                if self.prepared_reviews and ReviewSelectionStore(self.store).supported(
+                    expires_at=expires_at, checkpoint=check,
+                ) else self.store.inspect_review
+            )
+            result = owner(payload["operation_id"], scope, expires_at=expires_at, checkpoint=check)
         elif operation == "receipt":
             if self.prepared_reviews is not True:
                 raise WorkspaceUnavailable("prepared review receiver unavailable")
