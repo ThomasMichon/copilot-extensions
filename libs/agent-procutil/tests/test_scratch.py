@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import subprocess
@@ -159,9 +160,34 @@ def test_final_rmdir_failure_restores_breadcrumb(tmp_path, monkeypatch):
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFOs are POSIX-only")
 def test_report_does_not_block_on_fifo_breadcrumb(tmp_path):
     (tmp_path / "odd-x1").mkdir()
-    os.mkfifo(tmp_path / "odd-x1" / scratch.BREADCRUMB)
+    try:
+        os.mkfifo(tmp_path / "odd-x1" / scratch.BREADCRUMB)
+    except OSError as exc:
+        if exc.errno in (errno.ENOTSUP, errno.ENOSYS):
+            pytest.skip("fixture filesystem does not support FIFOs")
+        raise
     groups = {(g["prefix"], g["kind"]): g for g in scratch.scratch_report(tmp_path)}
     assert groups[("odd-*", "dir")]["unlabeled"] == 1
+
+
+def test_breadcrumb_read_remains_bounded_when_file_grows(tmp_path, monkeypatch):
+    crumb = tmp_path / scratch.BREADCRUMB
+    crumb.write_bytes(b"{}")
+    monkeypatch.setattr(scratch, "_BREADCRUMB_LIMIT", 8)
+    real_read = os.read
+    reads = 0
+
+    def growing_read(fd, count):
+        nonlocal reads
+        reads += 1
+        assert reads <= 4, "breadcrumb growth bypassed the cumulative read limit"
+        with crumb.open("ab") as stream:
+            stream.write(b"more")
+        return real_read(fd, count)
+
+    monkeypatch.setattr(scratch.os, "read", growing_read)
+    assert scratch._read_regular(str(crumb)) is None
+    assert crumb.stat().st_size <= 16
 
 
 def test_prefix_normalization_groups_random_suffixes():

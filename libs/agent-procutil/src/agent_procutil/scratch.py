@@ -245,7 +245,11 @@ def _read_regular(target: str, dir_fd: int | None = None) -> bytes | None:
         if not stat.S_ISREG(st.st_mode) or st.st_size > _BREADCRUMB_LIMIT:
             return None
         chunks = []
-        while chunk := os.read(fd, 65536):
+        size = 0
+        while chunk := os.read(fd, min(65536, _BREADCRUMB_LIMIT + 1 - size)):
+            size += len(chunk)
+            if size > _BREADCRUMB_LIMIT:
+                return None
             chunks.append(chunk)
         return b"".join(chunks)
     except OSError:
