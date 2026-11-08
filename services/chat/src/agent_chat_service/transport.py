@@ -138,7 +138,7 @@ class _UnixConnection(http.client.HTTPConnection):
         self.address = address
 
     def connect(self) -> None:
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock = socket.socket(getattr(socket, "AF_UNIX"), socket.SOCK_STREAM)
         self.sock.settimeout(self.timeout)
         self.sock.connect(self.address)
 

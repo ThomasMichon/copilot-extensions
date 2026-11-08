@@ -11,6 +11,7 @@ import sys
 import threading
 import time
 from types import SimpleNamespace
+from typing import Any, Generator, Iterator, Sequence
 
 import pytest
 
@@ -19,7 +20,9 @@ from agent_procutil.owned_process import run_caller_owned
 
 
 @pytest.hookimpl(wrapper=True, tryfirst=True)
-def pytest_collection_modifyitems(config, items):
+def pytest_collection_modifyitems(
+    config: Any, items: list[pytest.Item],
+) -> Generator[None, object, object]:
     from qualification import membership, membership_digest
 
     profile = os.environ.get("AGENT_CHAT_TEST_SUITE")
@@ -57,7 +60,7 @@ def pytest_collection_modifyitems(config, items):
     return result
 
 
-def persist_membership(config):
+def persist_membership(config: Any) -> None:
     path = config._tmp_path_factory.getbasetemp() / "chat-membership.json"
     temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps(config._chat_membership, sort_keys=True), encoding="utf-8")
@@ -65,7 +68,7 @@ def persist_membership(config):
 
 
 @pytest.hookimpl(trylast=True)
-def pytest_sessionfinish(session, exitstatus):
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     from qualification import execution_summary
 
     report = getattr(session.config, "_chat_membership", None)
@@ -83,7 +86,7 @@ def pytest_sessionfinish(session, exitstatus):
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
 
-def pytest_terminal_summary(terminalreporter):
+def pytest_terminal_summary(terminalreporter: Any) -> None:
     report = getattr(terminalreporter.config, "_chat_membership", None)
     if report is not None:
         path = terminalreporter.config._tmp_path_factory.getbasetemp() / "chat-membership.json"
@@ -94,7 +97,7 @@ def pytest_terminal_summary(terminalreporter):
         )
 
 
-def pytest_runtest_logreport(report):
+def pytest_runtest_logreport(report: pytest.TestReport) -> None:
     if os.environ.get("AGENT_CHAT_TEST_SUITE") and report.failed:
         print(
             f"\nChat failure: {report.nodeid} [{report.when}]\n{report.longreprtext}",
@@ -112,7 +115,10 @@ def caller_observer(monkeypatch):
         yield observer
 
 
-def run_artifact(argv, *, cwd=None, input_text=None, timeout=30):
+def run_artifact(
+    argv: Sequence[str | Path], *, cwd: Path | None = None,
+    input_text: str | None = None, timeout: float = 30,
+) -> str:
     environment = dict(os.environ)
     environment.pop("PYTHONPATH", None)
     result = run_caller_owned(
@@ -127,7 +133,9 @@ def run_artifact(argv, *, cwd=None, input_text=None, timeout=30):
 LIBRARIES = ("agent-procutil", "single-instance-lease", "endpoint-rendezvous")
 
 
-def build_artifact(original, source, output, hook, pattern):
+def build_artifact(
+    original: Path, source: Path, output: Path, hook: str, pattern: str,
+) -> Path:
     shutil.copytree(
         original, source,
         ignore=shutil.ignore_patterns("build", "dist", "tests", "*.egg-info", "__pycache__",
@@ -144,7 +152,7 @@ def build_artifact(original, source, output, hook, pattern):
 
 
 @pytest.fixture(scope="session")
-def chat_artifacts(tmp_path_factory):
+def chat_artifacts(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
     root = tmp_path_factory.mktemp("chat-artifacts")
     project = Path(__file__).resolve().parents[1]
     sources = root / "source"
@@ -154,7 +162,7 @@ def chat_artifacts(tmp_path_factory):
             ignore=shutil.ignore_patterns("__pycache__", "tests", ".pytest_cache", ".ruff_cache"),
         )
 
-    def build(name):
+    def build(name: str) -> tuple[str, Path]:
         relative, hook, pattern = (
             (Path("services") / "chat", "build_sdist", "*.tar.gz") if name == "chat"
             else (Path("libs") / name, "build_wheel", "*.whl")
@@ -172,11 +180,11 @@ def chat_artifacts(tmp_path_factory):
 
 
 @pytest.fixture(scope="session")
-def chat_library_sdists(tmp_path_factory):
+def chat_library_sdists(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
     root = tmp_path_factory.mktemp("chat-library-sdists")
     project = Path(__file__).resolve().parents[1]
 
-    def build(name):
+    def build(name: str) -> tuple[str, Path]:
         return name, build_artifact(
             project.parents[1] / "libs" / name, root / "source" / name,
             root / "artifacts" / name, "build_sdist", "*.tar.gz",
@@ -189,13 +197,16 @@ def chat_library_sdists(tmp_path_factory):
 
 
 @pytest.fixture(scope="session")
-def chat_installations():
+def chat_installations() -> dict[str | None, SimpleNamespace]:
     return {}
 
 
 @pytest.fixture(scope="session")
-def installed_chat(tmp_path_factory, request, chat_artifacts, chat_installations):
-    version = getattr(request, "param", None)
+def installed_chat(
+    tmp_path_factory: pytest.TempPathFactory, request: pytest.FixtureRequest,
+    chat_artifacts: dict[str, Path], chat_installations: dict[str | None, SimpleNamespace],
+) -> SimpleNamespace:
+    version: str | None = getattr(request, "param", None)
     if version in chat_installations:
         return chat_installations[version]
     root = tmp_path_factory.mktemp("chat-wheels")
@@ -228,7 +239,7 @@ def installed_chat(tmp_path_factory, request, chat_artifacts, chat_installations
     ))
     uv = shutil.which("uv")
     assert uv is not None, "Artifact qualification requires the repository's uv tool"
-    def install(item):
+    def install(item: tuple[str, str | None]) -> tuple[str, tuple[Path, Path, Path]]:
         name, role = item
         target = root / name
         run_artifact([uv, "venv", "--python", sys.executable, "--no-python-downloads", str(target)])
@@ -276,7 +287,9 @@ def installed_chat(tmp_path_factory, request, chat_artifacts, chat_installations
 
 
 @pytest.fixture
-def fixed_rpc_provider(tmp_path, installed_chat, rpc_endpoint):
+def fixed_rpc_provider(
+    tmp_path: Path, installed_chat: SimpleNamespace, rpc_endpoint: SimpleNamespace,
+) -> list[str]:
     script = tmp_path / "fixed-rpc.py"
     script.write_text("""
 import sys
@@ -300,7 +313,7 @@ sys.stdout.buffer.flush()
 
 
 @pytest.fixture
-def rpc_endpoint(tmp_path):
+def rpc_endpoint(tmp_path: Path) -> Iterator[SimpleNamespace]:
     store = ChatStore(tmp_path / "backend", "example-installation")
     state = SimpleNamespace(
         mode="normal", requests=[], authenticated=0,
@@ -312,10 +325,10 @@ def rpc_endpoint(tmp_path):
     expected = expected_prefix + "synthetic-credential"
 
     class Handler(http.server.BaseHTTPRequestHandler):
-        def log_message(self, *_):
+        def log_message(self, *_: object) -> None:
             pass
 
-        def do_POST(self):
+        def do_POST(self) -> None:
             raw = self.rfile.read(min(int(self.headers.get("Content-Length", "0")), 65537))
             status = 200
             if self.path != "/api/v1/chat" or self.headers.get("Authorization") != expected:
@@ -368,7 +381,7 @@ def rpc_endpoint(tmp_path):
             except (BrokenPipeError, ConnectionResetError):
                 self.close_connection = True
 
-        def trickle(self, data):
+        def trickle(self, data: bytes) -> None:
             try:
                 for index, value in enumerate(data):
                     self.wfile.write(bytes([value]))

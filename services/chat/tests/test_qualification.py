@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -9,14 +10,17 @@ from conftest import pytest_runtest_logreport, run_artifact
 from qualification import PARAMETER_COUNTS, execution_summary, membership, membership_digest
 
 
-def original_nodes():
+def original_nodes() -> list[str]:
     return [
         family + (f"[case-{index}]" if count > 1 else "")
         for family, count in PARAMETER_COUNTS.items() for index in range(count)
     ]
 
 
-def test_membership_is_exact_and_full_retains_every_parameter(request, monkeypatch, capsys):
+def test_membership_is_exact_and_full_retains_every_parameter(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     report = getattr(request.config, "_chat_membership", None)
     if os.environ.get("AGENT_CHAT_TEST_SUITE"):
         assert report is not None
@@ -86,7 +90,7 @@ def test_membership_is_exact_and_full_retains_every_parameter(request, monkeypat
 
 
 @pytest.mark.parametrize("change", ["missing", "new", "duplicate", "parameter"])
-def test_membership_refuses_missing_unassigned_or_duplicate_nodes(change):
+def test_membership_refuses_missing_unassigned_or_duplicate_nodes(change: str) -> None:
     nodes = original_nodes()
     if change == "missing":
         nodes.pop()
@@ -100,7 +104,9 @@ def test_membership_refuses_missing_unassigned_or_duplicate_nodes(change):
         membership(nodes)
 
 
-def test_artifact_helper_preserves_cwd_stdin_and_environment(tmp_path, monkeypatch):
+def test_artifact_helper_preserves_cwd_stdin_and_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("PYTHONPATH", str(tmp_path / "unselected-source"))
     result = json.loads(run_artifact([
         sys.executable, "-I", "-c",

@@ -8,6 +8,10 @@ import os
 from pathlib import Path
 import sys
 from types import SimpleNamespace
+from typing import Any, Iterator, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from versioned_runtime_publication import CopyPublication, PhysicalState
 
 import pytest
 
@@ -16,7 +20,7 @@ from agent_chat_service.client import ClientError
 
 
 @pytest.fixture
-def installation(tmp_path, monkeypatch):
+def installation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     source = Path(__file__).resolve().parents[3] / "libs" / "versioned-runtime"
     spec = importlib.util.spec_from_file_location(
         "chat_setup_test_publication", source / "versioned_runtime_publication.py",
@@ -33,7 +37,7 @@ def installation(tmp_path, monkeypatch):
     calls = []
 
     @contextmanager
-    def candidate(root, version, **kwargs):
+    def candidate(root: Path, version: str, **kwargs: Any) -> Iterator[SimpleNamespace]:
         calls.append(version)
         slot = root / "versions" / version
         slot.mkdir(parents=True, exist_ok=True)
@@ -56,7 +60,7 @@ def installation(tmp_path, monkeypatch):
     return SimpleNamespace(root=root, arguments=arguments, publication=publication, calls=calls)
 
 
-def tree(root):
+def tree(root: Path) -> dict[str, tuple[bytes, int, int]]:
     return {
         str(path.relative_to(root)): (
             path.read_bytes(), path.stat().st_ino, path.stat().st_mtime_ns,
@@ -65,7 +69,7 @@ def tree(root):
     }
 
 
-def test_fresh_repeat_update_and_preserving_uninstall(installation):
+def test_fresh_repeat_update_and_preserving_uninstall(installation: SimpleNamespace) -> None:
     case = installation
     root, arguments = case.root, case.arguments
     assert setup.status(root, "example")["state"] == "absent"
@@ -94,7 +98,7 @@ def test_fresh_repeat_update_and_preserving_uninstall(installation):
 
 
 @pytest.mark.parametrize("target", setup._TARGETS)
-def test_same_bytes_foreign_replacement_is_never_withdrawn(installation, target):
+def test_same_bytes_foreign_replacement_is_never_withdrawn(installation: SimpleNamespace, target: str) -> None:
     case = installation
     setup.install(case.root, "example", **case.arguments)
     path = case.root / target
@@ -112,7 +116,7 @@ def test_same_bytes_foreign_replacement_is_never_withdrawn(installation, target)
         assert tree(case.root) == before
 
 
-def test_existing_root_and_foreign_identity_are_not_adopted(installation):
+def test_existing_root_and_foreign_identity_are_not_adopted(installation: SimpleNamespace) -> None:
     case = installation
     case.root.mkdir()
     with pytest.raises(ClientError, match="legacy roots"):
@@ -126,7 +130,7 @@ def test_existing_root_and_foreign_identity_are_not_adopted(installation):
     assert tree(case.root) == before
 
 
-def test_configuration_drift_never_rewrites_or_reconstructs(installation):
+def test_configuration_drift_never_rewrites_or_reconstructs(installation: SimpleNamespace) -> None:
     case = installation
     setup.install(case.root, "example", **case.arguments)
     path = case.arguments["config"]
@@ -146,14 +150,14 @@ def test_configuration_drift_never_rewrites_or_reconstructs(installation):
 
 @pytest.mark.parametrize("failure", ["candidate", "publication"])
 def test_failure_retains_old_selection_and_explicitly_settles_recovery(
-    installation, monkeypatch, failure,
-):
+    installation: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
     case = installation
     setup.install(case.root, "example", **case.arguments)
     previous = {name: (case.root / name).read_bytes() for name in setup._TARGETS}
     if failure == "candidate":
         @contextmanager
-        def refuse(*args, **kwargs):
+        def refuse(*args: object, **kwargs: object) -> Iterator[None]:
             raise RuntimeError("candidate refused")
             yield
 
@@ -162,7 +166,7 @@ def test_failure_retains_old_selection_and_explicitly_settles_recovery(
         original = os.replace
         fired = False
 
-        def fail(source, target):
+        def fail(source: Path, target: Path) -> None:
             nonlocal fired
             original(source, target)
             if Path(target) == case.root / "current-version" and not fired:
@@ -182,7 +186,7 @@ def test_failure_retains_old_selection_and_explicitly_settles_recovery(
     setup.uninstall(case.root, "example")
 
 
-def test_config_and_state_must_be_outside_runtime_root(installation):
+def test_config_and_state_must_be_outside_runtime_root(installation: SimpleNamespace) -> None:
     case = installation
     config = json.loads(case.arguments["config"].read_text())
     config["state_dir"] = str(case.root / "state")
@@ -193,7 +197,7 @@ def test_config_and_state_must_be_outside_runtime_root(installation):
 
 
 @pytest.mark.parametrize("damage", ["missing-backup", "wrong-backup", "backup-state"])
-def test_persisted_context_must_match_the_journaled_baseline(installation, damage):
+def test_persisted_context_must_match_the_journaled_baseline(installation: SimpleNamespace, damage: str) -> None:
     case = installation
     setup.install(case.root, "example", **case.arguments)
     setup.install(case.root, "example", **{**case.arguments, "version": "2.0.0"})
@@ -216,14 +220,17 @@ def test_persisted_context_must_match_the_journaled_baseline(installation, damag
     assert tree(case.root) == before
 
 
-def test_unsafe_root_ancestor_is_refused_before_directory_creation(installation, monkeypatch):
+def test_unsafe_root_ancestor_is_refused_before_directory_creation(
+    installation: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     case = installation
     original = case.publication.state_path
 
-    def refuse(path, **kwargs):
+    def refuse(path: Path, **kwargs: Any) -> "PhysicalState | None":
         if path == case.root:
             raise case.publication.PublicationProofError("unsafe parent")
-        return original(path, **kwargs)
+        result: PhysicalState | None = original(path, **kwargs)
+        return result
 
     monkeypatch.setattr(case.publication, "state_path", refuse)
     with pytest.raises(ValueError, match="unsafe parent"):
@@ -233,19 +240,19 @@ def test_unsafe_root_ancestor_is_refused_before_directory_creation(installation,
 
 @pytest.mark.parametrize("fresh", [False, True])
 def test_foreign_replacement_between_validation_and_capture_is_preserved(
-    installation, monkeypatch, fresh,
-):
+    installation: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, fresh: bool,
+) -> None:
     case = installation
     if not fresh:
         setup.install(case.root, "example", **case.arguments)
     original = case.publication.CopyPublication.publish
     captured = {}
 
-    def publish(transaction):
+    def publish(transaction: "CopyPublication") -> "CopyPublication":
         validate = transaction.validate_inputs
         first = True
 
-        def replace_after_validation():
+        def replace_after_validation() -> None:
             nonlocal first
             validate()
             if first:
@@ -257,7 +264,8 @@ def test_foreign_replacement_between_validation_and_capture_is_preserved(
                 captured["state"] = case.publication.state_path(target)
 
         transaction.validate_inputs = replace_after_validation
-        return original(transaction)
+        result: CopyPublication = original(transaction)
+        return result
 
     monkeypatch.setattr(case.publication.CopyPublication, "publish", publish)
     with pytest.raises(ClientError, match="physically replaced|Foreign selectors appeared"):
@@ -268,14 +276,14 @@ def test_foreign_replacement_between_validation_and_capture_is_preserved(
 @pytest.mark.parametrize("version", [
     "", "a" * 129, "dev", "../outside", "white space", "non-ascii-\N{SNOWMAN}", None,
 ])
-def test_unmanageable_slot_names_refuse_before_installation(installation, version):
+def test_unmanageable_slot_names_refuse_before_installation(installation: SimpleNamespace, version: str) -> None:
     case = installation
     with pytest.raises(ClientError, match="1-128 ordinary ASCII"):
         setup.install(case.root, "example", **{**case.arguments, "version": version})
     assert not case.root.exists() and not case.calls
 
 
-def test_maximum_slot_name_remains_manageable(installation):
+def test_maximum_slot_name_remains_manageable(installation: SimpleNamespace) -> None:
     case = installation
     version = "a" * 128
     result = setup.install(case.root, "example", **{**case.arguments, "version": version})

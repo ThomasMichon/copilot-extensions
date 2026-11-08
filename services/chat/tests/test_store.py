@@ -3,7 +3,7 @@ import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Callable, Iterator, ParamSpec, TypeVar
+from typing import Any, Callable, Iterator, NoReturn, ParamSpec, TypeVar
 
 import pytest
 
@@ -256,12 +256,12 @@ def test_held_scan_observes_membership_or_store_end(
     result = []
     original = store._scan_page
 
-    def capture(request):
+    def capture(request: dict[str, Any]) -> dict[str, Any]:
         page = original(request)
         started.set()
         return page
 
-    def wait():
+    def wait() -> None:
         try:
             rpc(store, "scan", codename="agent-a", epoch=None,
                 after=[{"channel": "room", "event_id": 0}], timeout=2)
@@ -302,13 +302,13 @@ def test_held_membership_generation_is_independent_of_clock(
     errors, pages = [], []
     original_wait = store._changed.wait
 
-    def held_wait(timeout):
+    def held_wait(timeout: float | None) -> bool:
         started.set()
         return original_wait(timeout)
 
-    def wait():
+    def wait() -> None:
         try:
-            fields = {"channel": "room"} if op == "wait" else {
+            fields: dict[str, Any] = {"channel": "room"} if op == "wait" else {
                 "epoch": None, "after": [{"channel": "room", "event_id": 0}],
             }
             pages.append(rpc(store, op, codename="agent-a", timeout=2, batch_ms=0, **fields))
@@ -409,13 +409,13 @@ def test_drain_fences_held_waits_even_after_immediate_undrain(
     original_wait = store._changed.wait
     errors, pages = [], []
 
-    def waiting(timeout):
+    def waiting(timeout: float | None) -> bool:
         entered.set()
         return original_wait(timeout)
 
-    def request():
+    def request() -> None:
         try:
-            fields = {"channel": "room"} if op == "wait" else {
+            fields: dict[str, Any] = {"channel": "room"} if op == "wait" else {
                 "epoch": None, "after": [{"channel": "room", "event_id": 0}],
             }
             pages.append(rpc(store, op, codename="agent-a", timeout=3, **fields))
@@ -430,7 +430,7 @@ def test_drain_fences_held_waits_even_after_immediate_undrain(
         with store._changed:
             state = store.drain()
             assert state["state"] == "draining" and state["active_waiters"] == 1
-            fields = {"channel": "room"} if op == "wait" else {
+            fields: dict[str, Any] = {"channel": "room"} if op == "wait" else {
                 "epoch": None, "after": [{"channel": "room", "event_id": 0}],
             }
             expect("draining", rpc, store, op, codename="agent-a", timeout=0, **fields)
@@ -460,13 +460,13 @@ def test_drain_waits_for_existing_write_commit_and_restart_preserves_it(
     prepared, release, draining, drained = (threading.Event() for _ in range(4))
     original_post = store._post
 
-    def held_post(request):
+    def held_post(request: dict[str, Any]) -> dict[str, Any]:
         result = original_post(request)
         prepared.set()
         assert release.wait(3), "test write was not released"
         return result
 
-    def drain():
+    def drain() -> dict[str, Any]:
         draining.set()
         result = store.drain()
         drained.set()
@@ -501,11 +501,11 @@ def test_waiter_failure_releases_lifecycle_count_and_capacity(
 ) -> None:
     join(store)
 
-    def fail(*args):
+    def fail(*args: object) -> NoReturn:
         raise RuntimeError("synthetic waiter failure")
 
     monkeypatch.setattr(store, "_unread" if op == "wait" else "_scan_page", fail)
-    fields = {"channel": "room"} if op == "wait" else {
+    fields: dict[str, Any] = {"channel": "room"} if op == "wait" else {
         "epoch": None, "after": [{"channel": "room", "event_id": 0}],
     }
     with pytest.raises(RuntimeError, match="synthetic waiter failure"):
@@ -626,12 +626,12 @@ def test_quiet_wait_and_plural_post_batch_do_not_consume_reading(
     result = []
     original = store._unread
 
-    def capture(channel, codename):
+    def capture(channel: str, codename: str) -> dict[str, Any]:
         value = original(channel, codename)
         observed.set()
         return value
 
-    def wait():
+    def wait() -> None:
         result.append(rpc(store, "wait", channel="room", codename="agent-a",
                           timeout=1, batch_ms=40))
 
