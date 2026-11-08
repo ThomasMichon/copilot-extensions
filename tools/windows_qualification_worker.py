@@ -112,12 +112,27 @@ def native_prerequisites(owned) -> dict:
 
 def redact_feed(text: str) -> str:
     """Actions masking does not protect uploaded log or JUnit file contents."""
+    text = re.sub(r"https?://[^\s<>\"']+", "[redacted-url]", text, flags=re.IGNORECASE)
     index = os.environ.get("UV_DEFAULT_INDEX", "")
     if index:
         host = urllib.parse.urlsplit(index).hostname
         for value in sorted({index, host or ""} - {""}, key=len, reverse=True):
             text = re.sub(re.escape(value), "[configured-feed]", text, flags=re.IGNORECASE)
     return text
+
+
+def sanitize_native_files(output: Path) -> bool:
+    """Sanitize retained text even when the execution worker was interrupted."""
+    omitted = False
+    for path in output.rglob("*"):
+        if path.suffix not in {".xml", ".json", ".log"}:
+            continue
+        if path.is_symlink() or (path.is_file() and path.stat().st_size > 16 * 1024 * 1024):
+            path.unlink()
+            omitted = True
+        elif path.is_file():
+            path.write_text(redact_feed(path.read_text("utf-8", errors="replace")), encoding="utf-8")
+    return omitted
 
 
 def tool_tests(root: Path, selected: dict, output: Path) -> int:
@@ -309,13 +324,9 @@ def execute(root: Path, value: dict, output: Path) -> dict:
         if native:
             if "error" in result:
                 result["error"] = redact_feed(result["error"])
-            for path in (output / "junit").rglob("*.xml"):
-                if path.stat().st_size > 16 * 1024 * 1024:
-                    path.unlink()
-                    result["outcome"] = "failed"
-                    result["error"] = "JUnit exceeds evidence bound"
-                else:
-                    path.write_text(redact_feed(path.read_text("utf-8")), encoding="utf-8")
+            if sanitize_native_files(output):
+                result["outcome"] = "failed"
+                result["error"] = "Unsafe or oversized evidence omitted"
             result["tests"] = [
                 {key: redact_feed(item) if isinstance(item, str) else item for key, item in case.items()}
                 for case in result["tests"]
@@ -328,7 +339,7 @@ def execute(root: Path, value: dict, output: Path) -> dict:
 def main() -> int:
     """Admit before candidate checkout, or run one already-admitted request."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=("admit", "execute", "tools"))
+    parser.add_argument("operation", choices=("admit", "execute", "tools", "sanitize"))
     parser.add_argument("--candidate", type=Path)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
@@ -350,6 +361,17 @@ def main() -> int:
         if value["selection"]["kind"] != "tools":
             raise ValueError("tool worker requires a tools request")
         return tool_tests(candidate, value["selection"], args.output.resolve())
+    if args.operation == "sanitize":
+        if value["selection"] != {"kind": "packet", "name": "native-worktrees-embody"}:
+            raise ValueError("native sanitization requires its named packet")
+        output = args.output.resolve()
+        omitted = sanitize_native_files(output)
+        manifest = output / "result.json"
+        if omitted and manifest.is_file():
+            result = json.loads(manifest.read_text("utf-8"))
+            result.update(outcome="failed", error="Unsafe or oversized evidence omitted")
+            manifest.write_text(canonical(result) + "\n", encoding="utf-8")
+        return 0
     result = execute(args.candidate.resolve(), value, args.output.resolve())
     return 0 if result["outcome"] == "qualified" else 1
 

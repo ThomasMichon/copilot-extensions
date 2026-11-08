@@ -316,6 +316,7 @@ def test_native_execution_gates_consumer_and_sanitizes_uploaded_files(
         (output / "junit/actual.xml").write_text(
             '<testsuite><testcase classname="native.test_native_seed_application" '
             'name="test_public_embody"><system-out>https://feed.example.invalid/pypi/simple/'
+            ' https://download.example.invalid/wheel?fixture=example'
             '</system-out></testcase></testsuite>', encoding="utf-8",
         )
         return SimpleNamespace(returncode=0, stdout="selected feed.example.invalid", stderr="")
@@ -335,6 +336,19 @@ def test_native_execution_gates_consumer_and_sanitizes_uploaded_files(
     for path in output.rglob("*"):
         if path.is_file():
             assert "feed.example.invalid" not in path.read_text("utf-8")
+            assert "download.example.invalid" not in path.read_text("utf-8")
+
+
+def test_native_sanitization_handles_interrupted_workers_and_oversized_evidence(tmp_path, monkeypatch):
+    monkeypatch.setenv("UV_DEFAULT_INDEX", "https://feed.example.invalid/simple/")
+    log = tmp_path / "phase-3.stderr.log"
+    log.write_bytes(b"feed.example.invalid https://download.example.invalid/wheel \xc3")
+    oversized = tmp_path / "oversized.xml"
+    oversized.write_bytes(b"x" * (16 * 1024 * 1024 + 1))
+    assert worker.sanitize_native_files(tmp_path) is True
+    assert not oversized.exists()
+    assert log.read_text("utf-8") == "[configured-feed] [redacted-url] \ufffd"
+    assert worker.sanitize_native_files(tmp_path) is False
 
 
 def fake_client(tmp_path, monkeypatch):
@@ -626,6 +640,11 @@ def test_manual_workflow_never_adds_required_ci_or_candidate_write_credentials()
     assert set(value.get("on", value.get(True))) == {"workflow_dispatch"}
     assert "concurrency" not in value and value["permissions"] == {}
     assert value["jobs"]["windows"]["needs"] == "admit"
+    upload = value["jobs"]["windows"]["steps"][-1]
+    assert upload["if"] == (
+        "${{ always() && (needs.admit.outputs.packet != 'native-worktrees-embody' || "
+        "steps.sanitize.outcome == 'success') }}"
+    )
     for job in value["jobs"].values():
         assert job["permissions"] == {"contents": "read"}
         assert "matrix" not in job.get("strategy", {})
@@ -633,9 +652,16 @@ def test_manual_workflow_never_adds_required_ci_or_candidate_write_credentials()
             if step.get("uses", "").startswith("actions/checkout@"):
                 assert step["with"]["persist-credentials"] is False
             if "secrets." in json.dumps(step):
-                assert step["name"] == "Execute typed selection through canonical bounded owners"
+                assert step["name"] in {
+                    "Execute typed selection through canonical bounded owners",
+                    "Sanitize native evidence independently after worker interruption",
+                }
                 assert set(step["env"]) == {"UV_DEFAULT_INDEX"}
                 assert step["env"]["UV_DEFAULT_INDEX"] == (
                     "${{ needs.admit.outputs.packet == 'native-worktrees-embody' && "
                     "secrets.WINDOWS_QUALIFICATION_INDEX_URL || '' }}"
                 )
+                if step["name"].startswith("Sanitize"):
+                    assert step["if"] == (
+                        "always() && needs.admit.outputs.packet == 'native-worktrees-embody'"
+                    )

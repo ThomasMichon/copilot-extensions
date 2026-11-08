@@ -119,11 +119,21 @@ jobs:
         run: >-
           python control/tools/windows_qualification_worker.py execute
           --candidate candidate --output evidence
+      - name: Sanitize native evidence independently after worker interruption
+        id: sanitize
+        if: always() && needs.admit.outputs.packet == 'native-worktrees-embody'
+        env:
+          UV_DEFAULT_INDEX: ${{ needs.admit.outputs.packet == 'native-worktrees-embody' && secrets.WINDOWS_QUALIFICATION_INDEX_URL || '' }}
+        run: python control/tools/windows_qualification_worker.py sanitize --output evidence
       - name: Retain request-bound evidence even after failure
-        if: ${{ always() }}
+        if: ${{ always() && (needs.admit.outputs.packet != 'native-worktrees-embody' || steps.sanitize.outcome == 'success') }}
         uses: actions/upload-artifact@v4
         with:
           name: winqual-${{ inputs.request_id }}-${{ github.run_attempt }}
-          path: evidence
+          path: |
+            evidence/result.json
+            evidence/phase-*.log
+            evidence/junit/**/*.xml
+            evidence/packet/
           if-no-files-found: warn
           retention-days: 7
