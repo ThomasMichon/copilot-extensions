@@ -35,6 +35,7 @@ import { metadataRefresher, processIdentity, registrationMetadata, resolveMetada
 import { createRetainedInbox, retainedDeliverySelected } from "./retained-delivery.mjs";
 import { createHeadedDriverSession, createRemoteDriverSession, isRemoteDriverSource } from "./remote-driver.mjs";
 import { PendingQuestions, QUESTION_TYPES, pollQuestions } from "./questions.mjs";
+import { DeliveryAttention, publishDeliveryAttention } from "./delivery-state.mjs";
 
 // --- Constants ---
 const HEARTBEAT_MS = 30_000; // refresh liveness (updated_at) every 30s
@@ -103,6 +104,8 @@ const state = {
   readinessTasks: new Map(),
   questions: new PendingQuestions(),
   questioning: false,
+  deliveryAttention: new DeliveryAttention(),
+  observingDelivery: false,
 };
 
 function extLog(msg) {
@@ -463,6 +466,7 @@ session.on((event) => {
       setTimeout(() => register().catch(() => {}), 0);
     }
     state.questions.observe(event, state.nativeSessionId);
+    state.deliveryAttention.observe(event, state.nativeSessionId);
     // Represent (Phase 5): enqueue whitelisted events for the flusher. This is
     // pure in-memory bookkeeping -- NO I/O, NO await, NO translation (the bridge
     // translates) -- so the hot-potato rule holds. The bounded queue drops the
@@ -546,6 +550,15 @@ try {
       pollInbox().catch(() => {});
       pollControls().catch(() => {});
       pollQuestionAnswers().catch(() => {});
+      if (!state.observingDelivery && state.registered) {
+        state.observingDelivery = true;
+        const sid = state.sessionId;
+        publishDeliveryAttention({
+          sid, attention: state.deliveryAttention, identity: processIdentity(),
+          muted: !state.deliveryEnabled, request: retainedBridgeRequest,
+          isCurrent: () => state.registered && state.sessionId === sid && state.nativeSessionId === sid,
+        }).catch(() => {}).finally(() => { state.observingDelivery = false; });
+      }
     }, INBOX_POLL_MS);
     if (state.inboxPoll.unref) state.inboxPoll.unref();
   }

@@ -424,6 +424,13 @@ _Operator-required outcome; agent-recommended slices and validation._
   cleared review in #11450. It separates actual source/native/custodian
   verification and binds one factory per execution before strict host
   configuration expands.
+- [ ] Review the finite [acquired comment observation refinement](comment-observation-correlation.md)
+  before joining original prepared receipts to acquired native objects.
+  Keep the independently unavailable protected credential source unsupported.
+- [ ] Deliver its finite existing-owner read-only projection, then separately
+  qualify negotiated workspace/CLI/client/Gateway consumers. Preserve original
+  receipt/unknown states and observation age; a current content match is not
+  original-version proof, persisted DB mapping or full C3/provider acceptance.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -972,6 +979,12 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
+- [ ] Qualify the acquired comment observation projection through actual
+  preparation, original native attempt/receipt and acquired generations:
+  exact scoped native IDs/actor/content, restart, later edits/deletion,
+  copied tags, partial/unknown evidence and zero mutation/acquisition/send.
+  Qualify old/current/rolled-back workspace peers separately; neither cached
+  matches nor today's object digest establish original-version feedback.
 - [x] Qualify preparation-only CLI/client/Gateway allocation and original
   recovery with the actual preparer, zero protected acquisitions/sends,
   independent submission refusal, unchanged writer/default behavior and

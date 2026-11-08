@@ -49,6 +49,7 @@ class CandidateServing:
             else self._target.state.live_event_store
         )
         app.state.live_questions = self._target.state.live_questions
+        app.state.live_delivery_state = self._target.state.live_delivery_state
         app.state.mux_questions = self._target.state.mux_questions
         self._target.state = app.state
         self._target.middleware_stack = self._target.build_middleware_stack()
