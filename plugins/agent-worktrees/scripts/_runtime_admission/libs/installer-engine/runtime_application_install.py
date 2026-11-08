@@ -418,7 +418,8 @@ def _qualified(slot: Path, record: dict, *, verify_on_exit: bool = True):
                 health_callable=health_callable, run=run,
             )
             unchanged()
-            runtime.mark_complete(root, slot.name, payload_hash=inputs["payload_hash"])
+            if not complete:
+                runtime.mark_complete(root, slot.name, payload_hash=inputs["payload_hash"])
             retention.enter_context(runtime.retention_lease(
                 root, slot.name, payload_hash=inputs["payload_hash"], timeout=180,
             ))
@@ -457,6 +458,37 @@ def _run(record: dict, command: list[str], root: Path, slot: Path) -> None:
         raise RuntimeError(f"application command failed with exit code {result.returncode}")
 
 
+def _global_replacements(slot: Path, record: dict, global_bin: Path | None) -> dict[Path, bytes]:
+    root = slot.parent.parent
+    launchers = _load(slot / "runtime_application_binstubs.py", "_application_binstubs")
+    globals_text = {}
+    for name in record["commands"]:
+        globals_text.update(launchers.global_binstubs(
+            name, record["root_environment"], record["default_directory"], root=root,
+        ))
+    directory = global_bin or Path.home() / ".local" / "bin"
+    return {directory / name: text.encode("utf-8") for name, text in globals_text.items()}
+
+
+def _publication_current(slot: Path, record: dict, *, global_bin: Path | None = None) -> bool:
+    """Verify publication only; the caller retains and health-gates the candidate."""
+    root = slot.parent.parent
+    runtime, _engine = _resources(slot)
+    replacements = _global_replacements(slot, record, global_bin)
+    publication = runtime._runtime_component("versioned_runtime_publication")
+    selectors = tuple((slot.name + ending).encode("utf-8") for ending in ("\n", "\r\n"))
+    success = json.dumps({
+        "state": "installed", "version": slot.name,
+    }, sort_keys=True).encode("utf-8") + b"\n"
+    with runtime._publication_lease(root), publication.target_leases(root, list(replacements)):
+        return (
+            all(_read(root / name) in selectors for name in ("current-version", "last-known-good"))
+            and _read(slot / "install-success.json") == success
+            and runtime.is_complete(root, slot.name, expect_hash=record["construction"]["payload_hash"])
+            and all(_read(path) == content for path, content in replacements.items())
+        )
+
+
 def install(
     slot: Path, *, stage: bool, global_bin: Path | None = None,
     arguments: tuple[str, ...] = (),
@@ -486,14 +518,8 @@ def install(
             raise ValueError("Manager installation requires its owned global command directory")
         _run(record, ["self-install", "--apply"], root, slot)
         return {"state": "installed", "slot": str(slot)}
-    launchers = _load(slot / "runtime_application_binstubs.py", "_application_binstubs")
-    globals_text = {}
-    for name in record["commands"]:
-        globals_text.update(launchers.global_binstubs(
-            name, record["root_environment"], record["default_directory"], root=root,
-        ))
     global_bin = global_bin or Path.home() / ".local" / "bin"
-    replacements = {global_bin / name: text.encode("utf-8") for name, text in globals_text.items()}
+    replacements = _global_replacements(slot, record, global_bin)
     previous = {path: _read(path) for path in replacements}
     selectors = (root / "current-version", root / "last-known-good")
     if arguments and not (record["setup"] or record["start"]):
@@ -503,6 +529,12 @@ def install(
     with _qualified(
         slot, record, verify_on_exit=False,
     ) as (runtime, unchanged):
+        if (
+            not arguments and not setup and not start
+            and _publication_current(slot, record, global_bin=global_bin)
+        ):
+            unchanged()
+            return {"state": "installed", "slot": str(slot)}
         _run(record, setup, root, slot)
         unchanged()
         if not runtime.is_complete(root, slot.name, expect_hash=record["construction"]["payload_hash"]):

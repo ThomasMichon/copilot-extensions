@@ -1277,6 +1277,7 @@ def test_reused_prepared_wheels_reach_native_sdk_without_reconstruction(
 ):
     import local_install_profile as native
     from packaging.markers import default_environment
+    from packaging.tags import sys_tags
 
     uv = shutil.which("uv") or pytest.skip("a real uv executable is required")
     monkeypatch.setenv("UV_OFFLINE", "1")
@@ -1295,7 +1296,10 @@ def test_reused_prepared_wheels_reach_native_sdk_without_reconstruction(
         max_snapshot_bytes=2 << 20, deadline=deadline,
     ) as retained:
         profile = native.complete_profile(
-            selected, {"device": "cpu", "environment": default_environment(), "tags": ["py3-none-any"]},
+            selected, {
+                "device": "cpu", "environment": default_environment(),
+                "tags": [str(tag) for tag in sys_tags()],
+            },
             ["demo==1.0.0"], retained, policy_id="fixture-policy", acquisition_id="fixture-acquisition",
             deadline=deadline,
         )
@@ -1528,6 +1532,7 @@ def test_native_profile_accepts_embedded_libraries_without_separate_distribution
 ):
     import local_install_profile as native
     from packaging.markers import default_environment
+    from packaging.tags import sys_tags
 
     deadline = time.monotonic() + 30
     selected, wheels = native.first_party(
@@ -1548,7 +1553,10 @@ def test_native_profile_accepts_embedded_libraries_without_separate_distribution
         max_snapshot_bytes=2 << 20, deadline=deadline,
     ) as retained:
         profile = native.complete_profile(
-            selected, {"device": "cpu", "environment": default_environment(), "tags": ["py3-none-any"]},
+            selected, {
+                "device": "cpu", "environment": default_environment(),
+                "tags": [str(tag) for tag in sys_tags()],
+            },
             ["copilot-extensions-worktree-manager==1.0.0"], retained,
             policy_id="fixture-policy", acquisition_id="fixture-acquisition", deadline=deadline,
         )
@@ -2077,6 +2085,7 @@ def prepare_native_source_inputs(tmp_path, request):
 
 def complete_native_source(tmp_path, inputs):
     from packaging.markers import default_environment
+    from packaging.tags import sys_tags
 
     native, selected = inputs.native, inputs.selected
     deadline = time.monotonic() + 120
@@ -2086,7 +2095,10 @@ def complete_native_source(tmp_path, inputs):
         max_snapshot_bytes=2 << 20, deadline=deadline,
     ) as retained:
         profile = native.complete_profile(
-            selected, {"device": "cpu", "environment": default_environment(), "tags": ["py3-none-any"]},
+            selected, {
+                "device": "cpu", "environment": default_environment(),
+                "tags": [str(tag) for tag in sys_tags()],
+            },
             ["demo-app==1.0.0"], retained, policy_id="fixture-policy", acquisition_id="fixture-acquisition",
             deadline=deadline,
         )
@@ -2769,12 +2781,23 @@ def test_application_cli_refuses_invalid_modes_before_source_access(monkeypatch,
 
 @pytest.fixture
 def application_adapter(tmp_path, monkeypatch):
-    import local_install_profile
-    source = local_install_profile.source_inputs
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "_application_adapter_source",
+        Path(local.__file__).resolve().parents[1] / "libs" / "installer-engine" / "install_source.py",
+    )
+    assert spec is not None and spec.loader is not None
+    source = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, source)
+    spec.loader.exec_module(source)
     snapshot, payload, root = (tmp_path / name for name in ("snapshot", "payload", "runtime"))
     application = snapshot / "application"
     application.mkdir(parents=True)
-    declaration = {"name": "demo-app", "construction": {"fixture": True}}
+    declaration = {
+        "name": "demo-app", "construction": {"fixture": True},
+        "setup": ["--setup"], "start": ["--start"],
+    }
     (application / "application.json").write_text(json.dumps(declaration))
     version = "1.0.profile.fixture"
     old = root / "versions" / version
@@ -2807,13 +2830,14 @@ def application_adapter(tmp_path, monkeypatch):
         if fixture.failures:
             raise fixture.failures.pop(0)
         slot = home / "versions" / generation
+        reused = slot.exists()
         if not slot.exists():
             slot.mkdir(parents=True)
             (slot / "application.json").write_text(json.dumps(declaration))
         options["validate_candidate"](slot)
         yield SimpleNamespace(
             slot=slot, payload_hash=selection["payload_hash"],
-            frozen_plugin=payload, descriptor=7,
+            frozen_plugin=payload, descriptor=7, reused=reused,
         )
         if fixture.exit_error:
             raise fixture.exit_error
@@ -2840,6 +2864,28 @@ def application_adapter(tmp_path, monkeypatch):
         expected_version=version, expected_hash=selection["payload_hash"], **options,
     )
     return fixture
+
+
+@pytest.mark.parametrize("repair,arguments", [
+    (False, ()), (False, ("--config", "fixture")), (True, ()),
+])
+def test_application_adapter_callback_paths_reenter_owner_on_reuse_or_repair(
+    application_adapter, repair, arguments,
+):
+    fixture = application_adapter
+    initial = fixture.install()
+    result = fixture.install(repair=repair, arguments=arguments)
+    selected = Path(result["slot"])
+    assert fixture.children == [Path(initial["slot"]).name, selected.name]
+    assert fixture.versions == fixture.children
+    if repair:
+        assert selected != fixture.old and selected.name.startswith(fixture.old.name + ".repair.")
+    else:
+        assert result == initial and selected == fixture.old
+    assert (fixture.old / "preserved").read_bytes() == b"incumbent bytes"
+    assert json.loads((selected / "install-success.json").read_text()) == {
+        "state": "installed", "version": selected.name,
+    }
 
 
 @pytest.mark.parametrize("component", ["demo-app", "agent-worktrees"])
@@ -3057,9 +3103,14 @@ def test_application_adapter_runs_real_install_repeat_and_retains_failed_start(
     assert json.loads((root / "started.json").read_text()) == ["--start"]
     assert Path((root / "callback-cwd").read_text()).samefile(slot)
     marker = source.engine.runtime.marker_path(root, slot.name).read_bytes()
+    installed_declaration = (slot / "application.json").read_bytes()
     assert source.install_application(snapshot, "demo-app", selected.payload, root, **options) == result
     assert source.engine.runtime.marker_path(root, slot.name).read_bytes() == marker
-    installed_declaration = (slot / "application.json").read_bytes()
+    assert {name: (root / name).read_bytes() for name in before} == before
+    assert (slot / "application.json").read_bytes() == installed_declaration
+    assert json.loads((root / "setup.json").read_text()) == ["--setup"]
+    assert json.loads((root / "started.json").read_text()) == ["--start"]
+    assert Path((root / "callback-cwd").read_text()).samefile(slot)
     record.update(setup=["--setup", "--new-setup"], start=["--start", "--new-start"])
     path.write_text(json.dumps(record))
     automatic = source.install_application(snapshot, "demo-app", selected.payload, root, **options)
@@ -3067,9 +3118,18 @@ def test_application_adapter_runs_real_install_repeat_and_retains_failed_start(
     assert automatic_slot != slot and ".repair." in automatic_slot.name
     assert json.loads((root / "setup.json").read_text()) == ["--setup", "--new-setup"]
     assert json.loads((root / "started.json").read_text()) == ["--start", "--new-start"]
+    automatic_selectors = {name: (root / name).read_bytes() for name in before}
+    automatic_declaration = (automatic_slot / "application.json").read_bytes()
+    automatic_marker = source.engine.runtime.marker_path(root, automatic_slot.name).read_bytes()
     assert source.install_application(
         snapshot, "demo-app", selected.payload, root, **options,
     ) == automatic
+    assert {name: (root / name).read_bytes() for name in before} == automatic_selectors
+    assert (automatic_slot / "application.json").read_bytes() == automatic_declaration
+    assert source.engine.runtime.marker_path(root, automatic_slot.name).read_bytes() == automatic_marker
+    assert json.loads((root / "setup.json").read_text()) == ["--setup", "--new-setup"]
+    assert json.loads((root / "started.json").read_text()) == ["--start", "--new-start"]
+    assert Path((root / "callback-cwd").read_text()).samefile(automatic_slot)
     before = {name: (root / name).read_bytes() for name in before}
     assert (slot / "application.json").read_bytes() == installed_declaration
     with pytest.raises(subprocess.CalledProcessError):
@@ -3105,7 +3165,26 @@ def test_application_adapter_runs_real_install_repeat_and_retains_failed_start(
     )
     assert probe.returncode == 0, probe.stdout + probe.stderr
     assert probe.stdout.strip() == "prepared application ready"
-    assert len(activation_calls) == 4
+    sequence = []
+    for argv in activation_calls:
+        scripts = [(index, Path(argument)) for index, argument in enumerate(argv)
+                   if Path(argument).name == "install.py"]
+        assert len(scripts) == 1, (
+            f"owner_checks={len(activation_calls)} install_script_arguments={len(scripts)}"
+        )
+        index, script = scripts[0]
+        sequence.append((script.parent.name, tuple(argv[index + 1:])))
+    diagnostic = (
+        f"owner_checks={len(activation_calls)} "
+        f"sequence={[(name[-80:], args[:4]) for name, args in sequence[:8]]!r}"
+    )
+    assert sequence == [
+        (slot.name, ("--",)), (slot.name, ("--",)),
+        (automatic_slot.name, ("--",)), (automatic_slot.name, ("--",)),
+        (failed[0].name, ("--", "--fail-start")), (repaired_slot.name, ("--",)),
+    ], diagnostic
+    assert len(activation_calls) == 6, diagnostic
+    assert len({name for name, _arguments in sequence}) == 4, diagnostic
 
 
 @pytest.mark.parametrize("repair", [False, True])

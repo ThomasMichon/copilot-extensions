@@ -392,6 +392,16 @@ def install_application(
             if _read(application / "application.json") != declaration:
                 raise ValueError("prepared application declaration changed during construction")
             validate(candidate.slot)
+            if (
+                candidate.reused and not repair and not arguments
+                and not declaration.get("setup") and not declaration.get("start")
+            ):
+                from runtime_application_install import _publication_current
+
+                if _publication_current(candidate.slot, declaration):
+                    inputs.verify()
+                    validate(candidate.slot)
+                    return {"state": "installed", "slot": str(candidate.slot)}
             frozen = engine.FrozenInputs(
                 candidate.frozen_plugin, engine._package_roots(candidate.frozen_plugin),
                 candidate.payload_hash, wheel_inputs=inputs,

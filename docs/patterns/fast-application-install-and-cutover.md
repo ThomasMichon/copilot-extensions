@@ -74,6 +74,18 @@ environment: `.venv/bin/python` on POSIX or `.venv\Scripts\python.exe` on
 Windows, with ordinary `pyvenv.cfg` and environment-prefix behavior.
 Installation, configuration/data and cache roots remain separate.
 
+Windows projects select a version/OS/architecture-qualified interpreter through
+their relocatable `.python-version` request, with architecture derived from the
+admitted interpreter ABI tags rather than the host machine label. A synthetic
+UV target-platform override must not rewrite dependency-marker values: the
+profile and lock retain their exact admitted marker environment. Missing or
+ambiguous Windows ABI inputs still refuse preparation.
+
+Stored completion and command bytes do not establish current configuration or
+live service readiness. An application with setup or startup callbacks still
+enters its owner's idempotent configuration/readiness path on repeat; a generic
+publication-only no-op is limited to applications without either callback.
+
 Copy the application inputs, then construct the environment in its addressed
 slot; do not treat an already-created virtual environment as a relocatable
 artifact. Keep source and dependency synchronization with the installation
