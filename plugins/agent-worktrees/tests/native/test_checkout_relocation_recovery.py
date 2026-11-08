@@ -88,7 +88,7 @@ def test_literal_recorded_path_alias_refuses_before_custody(checkout, spelling):
     tracking.save_record(record)
     before = record.yaml_path.read_bytes()
     with pytest.raises(ValueError, match="noncanonical"):
-        relocation.plan(record.worktree_id, str(checkout.destination), checkout.config)
+        relocation._action_plan(record.worktree_id, str(checkout.destination), checkout.config)
     assert record.yaml_path.read_bytes() == before
     assert not state.journal_path(record.yaml_path).exists()
     assert checkout.source.exists() and not checkout.destination.exists()
@@ -169,7 +169,7 @@ def test_retained_destination_reference_refuses_before_custody(checkout, kind):
             connection.close()
     before, ledger = path.read_bytes(), checkout.record.yaml_path.read_bytes()
     with pytest.raises(ValueError, match="retained Copilot"):
-        relocation.plan(checkout.record.worktree_id, str(checkout.destination), checkout.config)
+        relocation._action_plan(checkout.record.worktree_id, str(checkout.destination), checkout.config)
     assert checkout.record.yaml_path.read_bytes() == ledger and path.read_bytes() == before
     assert not state.journal_path(checkout.record.yaml_path).exists()
     assert checkout.source.exists() and not checkout.destination.exists()
@@ -490,7 +490,7 @@ def test_incomplete_operational_directory_inventory_refuses_before_custody(check
     with monkeypatch.context() as injection:
         injection.setattr(os, "scandir", unreadable)
         with pytest.raises(PermissionError, match="incomplete operational"):
-            relocation.plan(checkout.record.worktree_id, str(checkout.destination), checkout.config)
+            relocation._action_plan(checkout.record.worktree_id, str(checkout.destination), checkout.config)
     assert checkout.record.yaml_path.read_bytes() == before
     assert not state.journal_path(checkout.record.yaml_path).exists()
     assert checkout.source.exists() and not checkout.destination.exists()

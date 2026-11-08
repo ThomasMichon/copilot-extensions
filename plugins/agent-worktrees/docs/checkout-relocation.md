@@ -25,9 +25,20 @@ running sibling's readiness. A published resident must also advertise
 refuses without starting or replacing a service. No resident is required for
 standalone operation.
 
-Without `--apply` or `--abort`, the command is read-only. It never backfills
-missing receiving receipts, prepares a journal, recovers databases, or creates
-launch/record sidecars. Unknown owner proof is an explicit refusal.
+Without `--apply` or `--abort`, the command is read-only. It parses a bounded,
+identity-stable original ledger, checks existing ordinary-shape and launch
+evidence, and refuses missing original receiving proof or lifecycle markers
+without recovering or acquiring their owners. It never backfills receiving
+receipts, prepares a journal, recovers databases, creates launch/record
+sidecars, or issues strict action-time mux/Copilot/process probes.
+
+The current Windows provider has no qualified passive native-owner coverage
+contract. An otherwise ordinary record therefore receives an explicit
+unconfirmed-owner refusal, not a positive plan. Empty registered sessions,
+cached mux negatives and readable CWD holders are not substitutes. Original
+proof inspection and complete CWD coverage remain separate prerequisites.
+`--apply` retains its existing serialized strict mutation preflight and
+recovery behavior; a passive refusal is not authorization to invoke it.
 Operational and checkout inventories propagate directory-enumeration failures;
 an unreadable subtree is never treated as proof that no references/data exist.
 

@@ -286,6 +286,13 @@ def _target(record, destination: str, config) -> Path:
 
 
 def plan(worktree_id: str, destination: str, config) -> dict:
+    """Inspect without action probes or recovery; unknown native owners refuse."""
+    from .checkout_relocation_plan import inspect
+
+    return inspect(worktree_id, destination, config)
+
+
+def _action_plan(worktree_id: str, destination: str, config) -> dict:
     _require_native_support()
     state.require_writer_generation()
     if Path(worktree_id).name != worktree_id or "/" in worktree_id or "\\" in worktree_id:
@@ -390,7 +397,7 @@ def move(worktree_id: str, destination: str, config) -> dict:
     ), (
         worktree_lifecycle.guard(ledger, relocation=True)
     ), launch_admission.guard(ledger), state.owner(ledger):
-        report = plan(worktree_id, destination, config)
+        report = _action_plan(worktree_id, destination, config)
         if report["phase"] == "complete":
             return {**report, "apply": True}
         record = tracking.load_record(ledger)

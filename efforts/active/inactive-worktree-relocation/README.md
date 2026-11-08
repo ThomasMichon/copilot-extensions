@@ -116,6 +116,10 @@ request, not a new migration or runtime-effect grant.
 
 - [ ] Obtain a qualified non-mutating native mux-ownership observation through
   its existing owner; unavailable evidence remains a hold, not inactive proof.
+- [ ] Complete the independent pure planning/refusal boundary without action
+  probes, original-proof recovery or mutation leases. Its local qualification
+  is not native inactivity proof; required source review/publication remains
+  separate from a producer-dependent release lane.
 - [ ] Qualify explicit source-owned receiving-proof inspection/reconciliation
   separately from read-only planning, preserving the original operation.
 - [ ] Support the first clean, sessionless, unpaired concluded receiving
