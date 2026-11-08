@@ -54,24 +54,13 @@ Unregistered? Fix the registry or ask the operator.
 
 ## Keep anchor checkouts clean
 
-An anchor is shared infrastructure: worktree creation, opportunistic
-fast-forward and local marketplace sources all read it. Only a clean anchor
-on its default branch is fast-forwarded; a dirty, detached, off-default or
-ahead anchor silently goes stale. Read it freely, but never edit, generate,
-build, stage or leave files there -- work in
-`agent-worktrees -p <name> create --json` instead.
-
-If you find an anchor that is not clean and current:
-
-1. Diagnose read-only: `git status --short --branch`,
-   `git log --oneline origin/<default>..HEAD`, and
-   `git diff --ignore-cr-at-eol --stat` (empty means line-ending-only noise).
-2. Preserve real work in a managed worktree (branch, commit or cherry-pick)
-   before touching the anchor. Ask the operator when ownership is unclear;
-   discarding unpreserved work always needs their approval.
-3. Restore it: switch to the default branch and
-   `git merge --ff-only origin/<default>`. Where an anchor write guard
-   blocks this, use its time-bounded allowance for this single repair.
+An anchor is shared infrastructure: creation starts from it and fast-forwards
+it only when clean on its default branch. Read it freely; never edit,
+generate, build, stage or leave files there -- use
+`agent-worktrees -p <name> create --json`. To recover a dirty, ahead,
+diverged or off-default anchor, follow the `worktree` skill's
+`references/anchor-recovery.md`; never discard unpreserved work without
+operator approval.
 
 ## Diagnosing across entities (worktree, session, task, bridge, ...)
 
