@@ -10,8 +10,13 @@ from . import mux_process_identity as locks, mux_process_identity as windows_pro
 from .mux_observation_types import ObservationUnavailable as MuxObservationUnavailable
 
 _IMAGES = {"psmux.exe", "pmux.exe", "tmux.exe"}
-_COMMAND = re.compile(r'^(?:"[^"]+"|[^\s"]+)\s+([^\s"]+)(?:\s|$)')
-_CLIENTS = {"attach-session", "attach", "at", "a"}
+_COMMAND = re.compile(
+    r'^(?:"[^"]+"|[^\s"]+)\s+(?:(-L)\s+(?:"[^"]+"|[^\s"]+)\s+)?([^\s"]+)(?:\s|$)',
+)
+_CLIENTS = {
+    "attach-session", "attach", "at", "a", "new-session", "new",
+    "set-option", "set", "display-message", "display", "has-session", "has",
+}
 _TH32CS_SNAPPROCESS = 2
 _ERROR_NO_MORE_FILES = 18
 
@@ -65,8 +70,8 @@ def servers() -> dict[int, str]:
         if before is None or command is None or locks.process_start_time(pid) != before:
             raise MuxObservationUnavailable("Native mux process identity is unavailable")
         match = _COMMAND.match(command)
-        mode = match[1] if match else None
-        if mode == "server":
+        mode = match[2] if match else None
+        if mode == "server" and not match[1]:
             result[pid] = before
         elif mode not in _CLIENTS:
             # Unknown/global-option forms might be servers; never omit them.

@@ -12,9 +12,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent_worktrees import launch_seed_exec, psmux_observation as reader, reclaim, resume_seed, sessions
+from agent_worktrees import launch_seed_exec, reclaim, resume_seed, sessions
 from agent_worktrees import windows_mux_processes as native
-from agent_worktrees.mux_list_result import MuxObservationUnavailable
+from agent_remote_driver import mux_inventory as reader
+from agent_remote_driver.mux_observation_types import ObservationUnavailable as MuxObservationUnavailable
 
 
 @pytest.fixture
@@ -149,7 +150,12 @@ def test_relative_data_directory_refuses_before_native_observation(monkeypatch):
         reader.observe()
 
 
-@pytest.mark.parametrize("mode,expected", [("server -s fixture", {101: "123"}), ("attach-session -t fixture", {})])
+@pytest.mark.parametrize("mode,expected", [
+    ("server -s fixture", {101: "123"}), ("attach-session -t fixture", {}),
+    ("-L example attach-session -t fixture", {}),
+    ("-L example new-session -d -s fixture", {}),
+    ("-L example set-option -t fixture status on", {}),
+])
 def test_native_census_distinguishes_clients_without_executing_them(monkeypatch, mode, expected):
     monkeypatch.setattr(native, "_processes", lambda: [(101, "psmux.exe")])
     monkeypatch.setattr(native.locks, "process_start_time", lambda pid: "123")

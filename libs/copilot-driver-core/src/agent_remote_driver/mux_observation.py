@@ -146,13 +146,6 @@ def observe_psmux(
         try:
             port_raw = _read(paths["port"])
         except FileNotFoundError:
-            # stat rather than exists: access failures must not become absence.
-            for path in paths.values():
-                try:
-                    path.stat()
-                except FileNotFoundError:
-                    continue
-                return Observation("unknown", "incomplete-rendezvous")
             from agent_remote_driver import mux_inventory
 
             inventory = (
@@ -214,6 +207,7 @@ def observe_psmux_many(sessions: list[str], *, timeout: float = 1.0) -> dict[str
 
 def list_psmux() -> dict[str, Observation] | None:
     """Observe the default native namespace; partial enumeration stays unknown."""
+    deadline = time.monotonic() + 1
     try:
         root = _data_dir()
         namespace = _namespace()
@@ -231,9 +225,12 @@ def list_psmux() -> dict[str, Observation] | None:
                 elif not prefix and "__" not in name:
                     names.add(name)
         except FileNotFoundError:
-            return {}
-        return observe_psmux_many(sorted(names))
-    except (OSError, ValueError):
+            pass
+        from agent_remote_driver import mux_inventory
+
+        mux_inventory.observe(timeout=_remaining(deadline), data_dir=root)
+        return observe_psmux_many(sorted(names), timeout=_remaining(deadline))
+    except (OSError, ValueError, ObservationUnavailable):
         return None
 
 

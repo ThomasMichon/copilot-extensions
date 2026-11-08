@@ -118,9 +118,11 @@ def test_invalid_or_unconfirmed_wire_never_means_absence(tmp_path, response):
         observed.presence()
 
 
-def test_missing_and_partial_rendezvous_are_distinct(tmp_path):
+def test_missing_and_partial_rendezvous_need_complete_coverage(tmp_path, monkeypatch):
     assert mux.observe_psmux("wt-fixture", data_dir=tmp_path).status == "absent"
     (tmp_path / "wt-fixture.pid").write_text("123", encoding="ascii")
+    assert mux.observe_psmux("wt-fixture", data_dir=tmp_path).status == "absent"
+    monkeypatch.setattr(mux_inventory, "observe", lambda **kw: {"wt-fixture": 1})
     assert mux.observe_psmux("wt-fixture", data_dir=tmp_path).status == "unknown"
     assert (tmp_path / "wt-fixture.pid").read_text() == "123"
 
