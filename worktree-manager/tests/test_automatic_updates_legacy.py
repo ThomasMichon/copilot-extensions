@@ -226,15 +226,20 @@ def test_unverifiable_unit_job_blocks_adoption(native_inventory, job: str | None
     assert calls == list(replies)[:2]
 
 
-def test_queued_legacy_start_refuses_before_enrollment(
-    native_inventory, tmp_path: Path, monkeypatch, capsys,
+@pytest.mark.parametrize("inventory", ["queued", "unavailable"])
+def test_unsettled_legacy_inventory_refuses_before_enrollment(
+    native_inventory, tmp_path: Path, monkeypatch, capsys, inventory: str,
 ) -> None:
     from worktree_manager import automatic_updates_autostart as startup
     from worktree_manager import automatic_updates_cli as cli, automatic_updates_process as process
     from worktree_manager.automatic_updates_policy import POLICY_NAME
 
     calls, replies = native_inventory
-    replies[f"{legacy.LEGACY_NAME}.service"].stdout = "LoadState=loaded\nActiveState=inactive\nJob=42\n"
+    unit = f"{legacy.LEGACY_NAME}.service"
+    if inventory == "queued":
+        replies[unit].stdout = "LoadState=loaded\nActiveState=inactive\nJob=42\n"
+    else:
+        replies[unit] = FileNotFoundError("systemctl")
     monkeypatch.setattr(cli, "require_legacy_root_binding", lambda root: None)
     monkeypatch.setattr(cli, "require_registered_project", lambda name: None)
     monkeypatch.setattr(process, "selected_slot", lambda root: tmp_path / "slot")
@@ -247,9 +252,10 @@ def test_queued_legacy_start_refuses_before_enrollment(
     root = tmp_path / "manager"
     assert cli.main(["enable", "--project", "example", "--root", str(root), "--apply", "--json"]) == 1
     result = json.loads(capsys.readouterr().out)
-    assert result["state"] == "blocked" and "pending job 42" in result["reason"]
+    assert result["state"] == "blocked"
+    assert ("pending job 42" if inventory == "queued" else "inventory failed") in result["reason"]
     assert not (root / POLICY_NAME).exists()
-    assert calls == list(replies)
+    assert calls == (list(replies) if inventory == "queued" else list(replies)[:2])
 
 
 @pytest.mark.parametrize("failure", [
@@ -265,18 +271,19 @@ def test_timer_inspection_failure_blocks_adoption(native_inventory, failure) -> 
     assert calls == [timer]
 
 
-def test_missing_systemctl_preserves_optional_absence(native_inventory) -> None:
+def test_missing_systemctl_is_unverifiable_not_optional_absence(native_inventory) -> None:
     calls, replies = native_inventory
     replies[f"{legacy.LEGACY_NAME}.timer"] = FileNotFoundError("systemctl")
-    legacy.require_legacy_retired()
+    with pytest.raises(PolicyError, match="legacy user-unit inventory failed"):
+        legacy.require_legacy_retired()
     assert calls == [f"{legacy.LEGACY_NAME}.timer"]
 
 
-def test_missing_systemctl_does_not_discard_observed_timer(native_inventory) -> None:
+def test_disappearing_systemctl_still_blocks_after_an_observed_timer(native_inventory) -> None:
     _calls, replies = native_inventory
     replies[f"{legacy.LEGACY_NAME}.timer"].stdout = "LoadState=loaded\nActiveState=active\nJob=0\n"
     replies[f"{legacy.LEGACY_NAME}.service"] = FileNotFoundError("systemctl")
-    with pytest.raises(PolicyError, match="timer"):
+    with pytest.raises(PolicyError, match="legacy user-unit inventory failed"):
         legacy.require_legacy_retired()
 
 

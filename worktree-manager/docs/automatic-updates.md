@@ -120,6 +120,8 @@ Without an installed Agent Machines inventory, the read-only user-unit fallback
 also checks pending jobs on the legacy fleet timer, fleet service and self
 service, even if unit files have disappeared. Pending or unverifiable job state
 blocks enrollment; it is not evidence that an inactive service has finished.
+An unavailable unit-inventory client is likewise unverified, not optional
+absence. This enrollment check does not block explicit manual updates.
 
 ## Startup and platform lifetime
 

@@ -127,8 +127,6 @@ def legacy_triggers() -> list[str]:
                  "--property=LoadState,ActiveState,Job", "--no-pager"],
                 capture_output=True, text=True, timeout=10, check=False,
             )
-        except FileNotFoundError:
-            return installed
         except (OSError, subprocess.SubprocessError) as error:
             raise PolicyError(f"legacy user-unit inventory failed for {unit}: {error}") from error
         if result.returncode != 0:
