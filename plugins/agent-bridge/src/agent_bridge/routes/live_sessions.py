@@ -588,6 +588,8 @@ async def ingest_live_events(
     if replay:  # an older history, replayed: it never re-derives the session's current state
         return IngestLiveEventsResult(session_id=session_id, ingested=ingested,
                                       last_id=_backfill.latest_id(store, session_id))
+    from ..status_producers import represented
+    represented(db, session_id, raw)
     # Phase 7 Channel A: fold the raw batch into a coarse turn_state so the
     # tracker sees running/idle/stalled -- objective and token-free.
     prior = (db.get_live_session(session_id) or {}).get("turn_state")

@@ -103,7 +103,8 @@ def test_mux_storage_requires_writable_preparation_before_passive_adoption(tmp_p
         with sqlite3.connect(path) as conn:
             conn.execute("DROP TABLE mux_question_answers")
             if storage == "previous":
-                conn.execute("UPDATE schema_version SET version=?", (SCHEMA_VERSION - 1,))
+                # Mux storage was introduced at 43, independently of later additions.
+                conn.execute("UPDATE schema_version SET version=?", (42,))
             elif storage == "malformed":
                 conn.execute("CREATE TABLE mux_question_answers (inspection_id TEXT PRIMARY KEY)")
         before = path.read_bytes()

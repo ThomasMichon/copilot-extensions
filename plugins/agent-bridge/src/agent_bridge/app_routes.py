@@ -18,7 +18,7 @@ from .models import ServiceConfig
 from .routes import (
     acquisitions, acp_ws, admin, agents, dispatch_tasks, health, live_delivery_state,
     live_inbox, live_questions, live_sessions,
-    mux_questions, owner_membership, remote, session_observations, sessions, ui, worktrees,
+    mux_questions, owner_membership, remote, session_observations, sessions, status, ui, worktrees,
 )
 
 
@@ -48,6 +48,8 @@ def configure_serving_app(
     app.state.live_questions = LiveQuestions()
     app.state.live_delivery_state = LiveDeliveryState()
     app.state.mux_questions = MuxQuestions()
+    from .status_runtime import StatusRuntime
+    app.state.status_runtime = StatusRuntime(app)
     app.add_middleware(BearerAuthMiddleware, token=auth_token)
     app.add_middleware(AuthCustodyMiddleware, custody=app.state.auth_custody)
     for router in (
@@ -59,4 +61,7 @@ def configure_serving_app(
         worktrees.router, admin.router, dispatch_tasks.router,
     ):
         app.include_router(router)
+    # Status has no app-specific dependencies. Reuse its compiled routes rather
+    # than rebuilding their validation graph inside candidate preparation.
+    app.router.routes.extend(status.router.routes)
     return app

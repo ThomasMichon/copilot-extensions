@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI
+from .app_routes import configure_serving_app
 
 from . import telemetry
 from .app_agent_roster import start_agent_roster_cache, stop_agent_roster_cache
@@ -921,7 +922,11 @@ async def _lifespan(app: FastAPI):
             _sr_confirmations, _sr_poll,
         )
 
-    yield
+    app.state.status_runtime.start()
+    try:
+        yield
+    finally:
+        await app.state.status_runtime.close()
 
     app.state.shutting_down = True
     # Shutdown: retract our routing-table claim so clients fall back (or follow
@@ -1063,8 +1068,6 @@ def create_app(
         if config is not None or token is not None:
             raise PrivateIPCError(Refusal.AUTHORITY)
         return create_restored_app(restored_runtime)
-    from .app_routes import configure_serving_app
-
     cfg = config or load_config()
     auth_token = token or load_or_create_auth_token()
 
