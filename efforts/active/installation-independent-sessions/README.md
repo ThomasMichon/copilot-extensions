@@ -387,6 +387,11 @@ retains the operator's wording.
   - [ ] Review each actual registration owner and add only missing native
     scheduling/absence controls. Preserve existing explicit custom scheduling
     unless the adopter deliberately selects absence.
+    - [x] Land the Logger/Codespaces source slice (#11202), including exact-head
+      native fixture qualification and corrected GUI-interpreter ownership.
+      Bridge/Vault, Index, Dispatch, driver integration and installed acceptance
+      remain separate open work; see the
+      [source journal](<journal/2026/11.08 scheduling-source-qualification.md>).
   - [ ] Prove fresh default absence, repeat-update absence, explicit scheduling
     compatibility and task-only retirement without stopping protected services
     or deleting their state. Missing scheduling support is not permission to
@@ -972,6 +977,13 @@ and does not delay final Copilot exit indefinitely merely to deliver a lifecycle
 notice; the existing bounded/quiet absent-handler contract remains intact.
 
 ## Journal
+
+### 2026-11-08 - Logger/Codespaces scheduling source merged
+
+[Detailed journal](<journal/2026/11.08 scheduling-source-qualification.md>).
+Exact-head review, required CI and hosted native fixture qualification passed.
+Containing release, driver integration, fresh non-admin activation and the
+parent's actual same-process installation cycles remain open.
 
 ### 2026-11-06 - Containing release and test preparation verified
 
