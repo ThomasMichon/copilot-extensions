@@ -525,11 +525,16 @@ class WorktreesRuntime:
         with self._lock:
             if not self._admitting:
                 return
-            if path is None or len(self._changed_paths) >= _CHANGED_PATH_LIMIT:
+            key = None if path is None else str(path)
+            # Only a new distinct path past capacity overflows; duplicates are no-ops.
+            if key is None or (
+                key not in self._changed_paths
+                and len(self._changed_paths) >= _CHANGED_PATH_LIMIT
+            ):
                 self._changed_all = True
                 self._changed_paths.clear()
             elif not self._changed_all:
-                self._changed_paths.add(str(path))
+                self._changed_paths.add(key)
         if self._wake is not None:
             self._wake.set()
 

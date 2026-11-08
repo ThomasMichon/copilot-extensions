@@ -325,6 +325,15 @@ def test_change_events_select_projects_to_republish_without_recording_demand(dem
     assert owner.take_changed_projects({"/wt/a": "a"}.get) == set()
 
 
+def test_duplicate_change_at_capacity_does_not_republish_everything(demand_owner):
+    owner, _clock, _wakes = demand_owner
+    owner.publish("a", [], observed_at=1)
+    for index in range(runtime._CHANGED_PATH_LIMIT):
+        owner.note_changed(f"/wt/{index}")
+    owner.note_changed("/wt/0")
+    assert owner.take_changed_projects(lambda _p: "c") == {"c"}
+
+
 def test_change_event_survives_sweeps_that_fail_before_publishing(demand_owner):
     owner, _clock, _wakes = demand_owner
     resolve = {"/wt/a": "a"}.get
