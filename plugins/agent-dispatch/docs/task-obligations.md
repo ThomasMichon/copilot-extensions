@@ -283,6 +283,10 @@ relationship through the existing reconcile route before releasing its
 reservation. A failure or a non-closed answer retains both the reservation and
 the claim and retries next cycle, so dispatch-attempt workspace conclusion never
 runs against a still-live task claim. Submitted tasks are not settled here.
+Bodies whose reservation is already releasing settle the same way before
+attempt conclusion. A retired attempt whose workspace cleanup was held only for
+outstanding obligations is re-armed to pending, with a fresh attempt budget,
+once its task is `COMPLETED` and the relationship closes; other holds stay held.
 When cancellation finds no claim, reconciliation replays the original reserve
 and closes it, retaining its tombstone. Absence alone cannot fence a delayed
 in-flight reserve.

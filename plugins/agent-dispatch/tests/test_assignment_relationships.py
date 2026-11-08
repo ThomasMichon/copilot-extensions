@@ -574,6 +574,60 @@ def test_supervisor_settles_exact_relationship_only_after_independent_completion
     assert len(owner.claims) == 1
 
 
+def test_claim_held_retired_cleanup_rearms_only_after_confirmation(
+    assignment, independent_readiness,
+):
+    from agent_dispatch.supervisor import Supervisor
+    from agent_dispatch.supervisor_relationship_settlement import rearm_claim_held_cleanup
+
+    queue, owner, workspace, task = assignment
+    start_managed(queue, workspace, task)
+    (reservation,) = queue.list_reservations(task_id=task.id)
+    queue.complete(task.id, workspace.worker_id, result={"answer": "proposed"})
+    queue.request_spawn_release(
+        reservation.key, disposition="settled",
+        finished_startup_revision=queue.get_reservation(reservation.key).startup_revision,
+    )
+    queue.retire_spawn(
+        reservation.key, exact_absence=True, conclusion_state="held",
+        conclusion_detail=json.dumps({
+            "action": "preserved",
+            "reason": "retired-body-cleanup",
+            "worktree_cleanup": {
+                "state": "held", "attempts": 1,
+                "outcome": {"action": "preserved", "reason": "outstanding-obligations"},
+            },
+        }),
+    )
+    supervisor = SimpleNamespace(
+        client=SimpleNamespace(
+            get=lambda task_id: asdict(queue.get(task_id)),
+            reconcile_task_relationship=queue.reconcile_task_relationship,
+        ),
+        _pool_reservations=lambda **filters: [
+            asdict(r) for r in queue.list_reservations(task_id=task.id)
+            if r.conclusion_state == filters["conclusion_state"]
+        ],
+        _conclusion_retry_payload=Supervisor._conclusion_retry_payload,
+        _conclusion_client=queue,
+        _matches_pool=lambda _task: True,
+    )
+
+    assert rearm_claim_held_cleanup(supervisor) == 0
+    assert queue.get_reservation(reservation.key).conclusion_state == "held"
+    assert queue.task_relationship(task.id)["state"] == "bound"
+
+    queue.confirm(task.id)
+    assert rearm_claim_held_cleanup(supervisor) == 1
+    assert queue.task_relationship(task.id)["state"] == "closed"
+    rearmed = queue.get_reservation(reservation.key)
+    cleanup = json.loads(rearmed.conclusion_detail)["worktree_cleanup"]
+    assert rearmed.conclusion_state == "pending"
+    assert (cleanup["state"], cleanup["attempts"], cleanup["next_attempt_at"]) == ("pending", 0, 0)
+    assert rearm_claim_held_cleanup(supervisor) == 0
+    assert len(owner.claims) == 1
+
+
 def test_legacy_or_forged_writer_answer_never_admits_execution(assignment):
     queue, owner, workspace, task = assignment
 

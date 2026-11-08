@@ -128,7 +128,10 @@ from .supervisor_conclusion import (  # noqa: F401 -- re-exported for existing c
     _retired_cleanup_plan,
 )
 from .supervisor_identity import RestrictedStartupMixin
-from .supervisor_relationship_settlement import settle_completed_relationship
+from .supervisor_relationship_settlement import (
+    rearm_claim_held_cleanup,
+    settle_completed_relationship,
+)
 from .supervisor_startup_fence import TerminalStartupMixin
 
 log = logging.getLogger("agent-dispatch.supervisor")
@@ -1434,6 +1437,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         """Retire proven-absent bodies and preserve cleanup obligations."""
         now = time.time() if now is None else now
         released = 0
+        rearm_claim_held_cleanup(self)
         reservations = self._pool_reservations(
             state=(
                 f"{SpawnState.RESERVING},{SpawnState.SPAWNED},"
@@ -1859,6 +1863,8 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 }
                 conclusion_state = _CONCLUSION_HELD
             else:
+                if not settle_completed_relationship(self, res, task):
+                    continue
                 if body_already_released:
                     try:
                         self._conclusion_client.validate_spawn_conclusion_claim(
