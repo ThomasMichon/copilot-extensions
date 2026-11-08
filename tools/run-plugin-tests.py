@@ -357,7 +357,7 @@ def _prepare_venv(name: str, uv: str, *, reinstall: bool, environment: dict[str,
             cmd = [uv, "pip", "install", "--python", str(py)]
             # Manager embeds first-party imports that must outlive retained build inputs.
             cmd.extend([spec] if name == "worktree-manager" else ["-e", spec])
-            if name == "agent-index":
+            if name in ("agent-index", "agent-worktrees"):
                 cmd.extend(["-e", str(REPO / "fleet-manager") + "[auth]"])
             if name == "agent-dispatch":
                 cmd.extend(["-e", str(REPO / "plugins" / "agent-pull-requests") + "[fleet]"])
@@ -382,7 +382,8 @@ def _prepare_venv(name: str, uv: str, *, reinstall: bool, environment: dict[str,
                 **({"non_editable": True} if name == "worktree-manager" else {}),
                 retained_resource_roots=(
                     standalone_build_resources("fleet-manager", source_root=REPO)
-                    if name in {"agent-index", "agent-pull-requests", "agent-dispatch", "agent-ssh"} else ()
+                    if name in {"agent-index", "agent-pull-requests", "agent-dispatch", "agent-ssh",
+                                "agent-worktrees"} else ()
                 ),
             )
             if name == "worktree-manager":

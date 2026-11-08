@@ -62,13 +62,12 @@ and recipient checks preserve `CredentialMaterial.review: ReviewScope` with
 expiry. Wrong/missing/substituted binding refuses before ACK or token return.
 The token remains excluded from representations and never enters a receipt log.
 
-This finite delivery extension does not pin material into `AdoReviewContext`
-or make its factory real. The separate native transport must still enforce
-the same private material generation through identity/candidate reads and
-dispatch, current action-relevant policy, request/drain bounds and original
-unknown-effect recovery. Live permissions, installed controller/worker
-support, native effects and normal-host adoption require separate qualification
-and authorization.
+The separately selected [native ADO factory](../../plugins/agent-worktrees/docs/azure-review-transport.md)
+pins one delivered material generation through `AdoReviewContext`, current
+owner/policy checks and finite requests. Credential delivery alone does not
+select it. Live permissions, installed controller/worker support, complete
+unknown-effect integration, native effects and normal-host adoption still
+require separate qualification and authorization.
 
 The contained synthetic TLS tests in
 `tests/test_gateway_review_credentials.py` cover current/prior support,

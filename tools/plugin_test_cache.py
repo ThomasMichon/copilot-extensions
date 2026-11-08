@@ -27,7 +27,7 @@ from installer_engine import _package_roots, _source_files  # noqa: E402
 from versioned_runtime import fingerprint_source  # noqa: E402
 
 FLEET_TEST_CONSUMERS = frozenset({
-    "agent-index", "agent-pull-requests", "agent-dispatch", "agent-ssh",
+    "agent-index", "agent-pull-requests", "agent-dispatch", "agent-ssh", "agent-worktrees",
 })
 
 
@@ -70,7 +70,7 @@ def _dependency_entries(name: str, plugin: Path, repo: Path) -> list[tuple[Path,
     if name in FLEET_TEST_CONSUMERS:
         extra = {
             "agent-index": ("auth",), "agent-pull-requests": ("service-gateway",),
-            "agent-dispatch": ("service-gateway",), "agent-ssh": (),
+            "agent-dispatch": ("service-gateway",), "agent-ssh": (), "agent-worktrees": ("auth",),
         }[name]
         entries.append((repo / "fleet-manager", extra))
     if name == "agent-dispatch":
