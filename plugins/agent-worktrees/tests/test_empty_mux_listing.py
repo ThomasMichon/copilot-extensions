@@ -119,13 +119,10 @@ def test_strict_presence_keeps_unavailable_probes_unknown(
 def test_strict_psmux_presence_keeps_silent_failure_unknown(
     monkeypatch: pytest.MonkeyPatch, code: int, message: bytes,
 ) -> None:
-    monkeypatch.setattr(sessions.platform, "system", lambda: "Windows")
-    monkeypatch.setattr(
-        subprocess, "run",
-        lambda command, **kwargs: subprocess.CompletedProcess(command, code, b"", message),
-    )
     with pytest.raises(RuntimeError, match="unavailable"):
-        sessions.has_mux_session("fixture", strict=True, timeout=0.25)
+        confirmed_has_session(
+            "wt-fixture", subprocess.CompletedProcess(["psmux"], code, b"", message), binary="psmux",
+        )
 
 
 @pytest.mark.parametrize(
@@ -278,26 +275,31 @@ def test_passive_psmux_observation_never_executes(monkeypatch: pytest.MonkeyPatc
 
 def test_unconfirmed_psmux_cannot_admit_a_cold_seed(monkeypatch: pytest.MonkeyPatch) -> None:
     from types import SimpleNamespace
-    from agent_worktrees import launch_seed_exec, reclaim
+    from agent_worktrees import launch_seed_exec, psmux_observation, reclaim
 
     monkeypatch.setattr(sessions.platform, "system", lambda: "Windows")
     monkeypatch.setattr(reclaim, "resolve_bound_copilots", lambda **kw: [])
-    monkeypatch.setattr(
-        subprocess, "run",
-        lambda command, **kw: subprocess.CompletedProcess(command, 1, b"", b""),
-    )
+
+    def unavailable(**kwargs):
+        raise MuxObservationUnavailable("native server coverage unavailable")
+
+    monkeypatch.setattr(psmux_observation, "observe", unavailable)
     error = launch_seed_exec._final_cold_error(SimpleNamespace(worktree_id="fixture", sessions=[]))
     assert error is not None and "seed remains staged" in error
 
 
-def test_explicit_strict_presence_can_still_confirm_a_live_psmux(monkeypatch) -> None:
+def test_explicit_strict_presence_uses_native_psmux_evidence(monkeypatch) -> None:
+    from agent_worktrees import psmux_observation
+
     monkeypatch.setattr(sessions.platform, "system", lambda: "Windows")
     monkeypatch.setattr(
-        subprocess, "run",
-        lambda command, **kw: subprocess.CompletedProcess(command, 0, b"", b""),
+        subprocess, "run", lambda *a, **kw: pytest.fail("strict PSMux CLI execution"),
     )
+    monkeypatch.setattr(psmux_observation, "observe", lambda **kw: {"wt-fixture": 2})
     info = sessions.mux_status_many(["fixture"], strict=True)["fixture"]
-    assert info.exists is True and info.clients is None
+    assert info.exists is True and info.clients == 2
+    assert sessions.has_mux_session("fixture", strict=True)
+    assert not sessions.has_mux_session("missing", strict=True)
 
 def test_real_missing_socket_probe_does_not_start_a_server(tmp_path: Path) -> None:
     if sys.platform == "win32":
