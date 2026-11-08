@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import sqlite3
 import subprocess
 import threading
@@ -457,9 +458,23 @@ class WorktreesRuntime:
             | self.observations.projects()
         )
 
-    def publish(self, project: str, rows, *, observed_at: float, record_heads=None) -> None:
+    def clock(self) -> float:
+        """This runtime's monotonic clock, for a producer to mark when it
+        starts collecting the facts it will :meth:`publish`."""
+        return self._now()
+
+    def publish(
+        self, project: str, rows, *, observed_at: float, record_heads=None,
+        collected_from: float | None = None,
+    ) -> None:
         project = _identity(project, name="project")
         started = self._now()
+        if collected_from is not None:
+            # Freshness ages from when collection began (a :meth:`clock`
+            # reading), so a stalled collection cannot publish at age zero.
+            if type(collected_from) not in (int, float) or not math.isfinite(collected_from):
+                raise ValueError("collected_from must be a finite clock reading")
+            started = min(started, collected_from)
         with self._activation_lock:
             with self._lock:
                 if not self._admitting:

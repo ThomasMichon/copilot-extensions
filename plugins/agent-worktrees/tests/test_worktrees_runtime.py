@@ -265,6 +265,22 @@ def test_passive_read_goes_stale_after_the_bound_when_the_producer_hangs(tmp_pat
         owner.shutdown()
 
 
+def test_freshness_ages_from_when_the_published_facts_were_collected(tmp_path):
+    clock = [0.0]
+    owner = _freshness_owner(tmp_path, clock)
+    try:
+        collected = owner.clock()
+        clock[0] = 50.0  # collection stalled past the 45s bound before publishing
+        owner.publish("project", [], observed_at=1, collected_from=collected)
+        result = owner.handle(request(passive=True))
+        assert result["projection"]["freshness"]["refreshed_age_s"] == 50.0
+        assert result["availability"]["status"] == "stale"
+        with pytest.raises(ValueError):
+            owner.publish("project", [], observed_at=1, collected_from=float("nan"))
+    finally:
+        owner.shutdown()
+
+
 def test_reactivated_resident_proves_freshness_only_by_its_own_publication(tmp_path):
     clock = [0.0]
     owner = _freshness_owner(tmp_path, clock)

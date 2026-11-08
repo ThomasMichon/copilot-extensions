@@ -35,6 +35,7 @@ from .worktree_naming import parse_session_worktree_id, session_worktree_prefix
 
 _HOST_TERMINAL_STATUSES = frozenset({"complete", "completed", "finalized"})
 _ROSTER_ADVISORY_REASON = "host-roster-advisory"
+_UNPROVEN_ROSTER_REASON = "roster not proven current within its freshness bound when evaluated"
 
 
 def _parse_json_object(raw: str) -> dict[str, Any] | None:
@@ -300,7 +301,10 @@ def annotate_fleet_hosts(
 
     Only hosts whose roster is current at ``now`` (default: the monotonic
     clock) are authoritative: elsewhere a missing caller is ``unknown`` and a
-    resolved caller cannot authorize finalization."""
+    resolved caller cannot authorize finalization. A reachable roster that is
+    not current and carries no ``availability`` label (unproven, or expired
+    while later hosts were probed) is labeled stale here, so serialized rows
+    -- which drop the local probe clock -- never pass it off as current."""
     now = time.monotonic() if now is None else now
     reachable_hosts: dict[tuple[str, str], bool] = {}
     authoritative_hosts: set[tuple[str, str]] = set()
@@ -312,6 +316,8 @@ def annotate_fleet_hosts(
         current = host_roster_is_current(host, now=now)
         if current:
             authoritative_hosts.add(key)
+        elif host.get("reachable") is True and host.get("availability") is None:
+            host["availability"] = {"status": "stale", "reason": _UNPROVEN_ROSTER_REASON}
         copies = [dict(row) for row in host.get("worktrees") or [] if isinstance(row, dict)]
         if not current:
             advisory_rows.update(id(row) for row in copies)

@@ -180,10 +180,14 @@ Coverage is explicit, never inferred:
   proves a delegate's caller gone or terminal: a caller missing from it is
   `unknown`, and the delegate is not finalizable (`host-roster-advisory`). A
   resident roster's proof also expires while the fleet probes later hosts:
-  local time elapsed since its own probe started counts against `bound_s`. The
+  local time elapsed since its own probe started counts against `bound_s`.
+  Any reachable roster the fleet cannot prove current when it evaluates the
+  hosts -- an older resident's unlabeled reply, or a fresh one that expired
+  while later hosts were probed -- is labeled `availability.status: "stale"`
+  in the JSON row (an existing `advisory` or `stale` label is kept), so a
+  consumer never reads it as current. The
   human view never prints a plain count for a roster it cannot prove current:
-  a saved roster is suffixed `(saved roster)`, and any other unproven one --
-  stale, or an older resident's reply without `projection.freshness` -- is
+  a saved roster is suffixed `(saved roster)`, and any other unproven one is
   suffixed `(stale roster)`. Every child
   also runs with stdin closed and `AGENT_WORKTREES_NO_SELFPROVISION=1`, so a
   host without a usable runtime reports a gap instead of provisioning one.
@@ -1246,7 +1250,9 @@ resident's last successful publication of the project (`refreshed_age_s`,
 `null` if it has not published it since election) and its bound (`bound_s`,
 the larger of 45 seconds and three monitor intervals). The age is measured
 when the read is served, so a stalled sweep loop ages out rather than vouching
-for an old roster; an unpublished-since-election or overdue roster is labeled
+for an old roster, and it counts from when the resident began collecting that
+publication's facts, so a stalled collection cannot publish an old roster at
+age zero; an unpublished-since-election or overdue roster is labeled
 `availability.status: "stale"`. Worktree state-change notifications (every
 tracking-record save, such as create, resume, status and finalize, and every
 retirement removal) and mux lifecycle changes (a managed-mux session's live or

@@ -575,6 +575,12 @@ def test_slow_later_probe_expires_an_earlier_fresh_caller_roster(
     assert row["caller_state"]["state"] == state
     assert row["delegate_finalizable"] is finalizable
     assert all(list_views_cli.PROBE_STARTED_KEY not in host for host in payload["hosts"])
+    # Serialized rows drop the probe clock, so an expired roster must say so itself.
+    caller_host = payload["hosts"][0]
+    if finalizable:
+        assert "availability" not in caller_host
+    else:
+        assert caller_host["availability"]["status"] == "stale"
 
 
 def test_execute_rechecks_caller_roster_freshness_before_each_finalize(monkeypatch):
