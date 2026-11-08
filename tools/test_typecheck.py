@@ -1334,9 +1334,11 @@ def test_changed_selection_conservatively_checks_all_admitted_consumers(
 
 
 def test_missing_preparation_is_actionable_and_does_not_create_environment(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A check is not an implicit installer."""
+    scratch = tmp_path.parent / "unallocated-scratch"
+    monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(scratch))
     (tmp_path / "requirements.txt").write_text("mypy==1.18.2\n", encoding="utf-8")
     with pytest.raises(typecheck.TypecheckError, match="sample --prepare"):
         typecheck.check_project(
@@ -1344,6 +1346,22 @@ def test_missing_preparation_is_actionable_and_does_not_create_environment(
         )
     assert not typecheck.environment_path(tmp_path, project())[0].exists()
     assert not (tmp_path / ".test-venvs").exists()
+    assert not scratch.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX fallback ownership contract")
+def test_nonallocating_lookup_still_refuses_unsafe_existing_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    monkeypatch.delenv("AGENT_SCRATCH_ROOT", raising=False)
+    monkeypatch.setattr(plugin_test_resources.tempfile, "gettempdir", lambda: str(tmp_path))
+    scratch = tmp_path / f"ce-{os.getuid()}"
+    scratch.mkdir()
+    scratch.chmod(0o755)
+    with pytest.raises(ValueError, match="private and owned"):
+        plugin_test_resources.resource_path(source)
 
 
 def test_pending_probe_never_certifies_admission(

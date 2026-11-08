@@ -8350,7 +8350,8 @@ the runner no longer writes them. Reclaiming them is guided, never a sweep:
    tree needs a matching `--discard`, the owner's decision to drop its
    unclassified files. The plan binds each tree's identity and
    metadata fingerprint.
-3. `--apply-plan plan.json` re-verifies each target, renames it aside,
+3. Stop test/capture writers for the selected set, then run
+   `--apply-plan plan.json --confirm-writers-stopped`. It re-verifies each target, renames it aside,
    re-verifies again and only then deletes it. Any change since review, a live
    or unverifiable process user, or an inspection error restores the tree and
    reports the refusal; partial outcomes are reported per target.

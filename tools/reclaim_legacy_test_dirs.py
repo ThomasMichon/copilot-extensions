@@ -23,7 +23,8 @@ deletes anything a person did not explicitly select from a reviewed inventory:
    A ``needs-decision`` target is accepted only with a matching ``--discard
    PATH`` decision to discard its unclassified content.
 
-3. **Apply**. ``--apply-plan FILE`` deletes only the planned targets. Each
+3. **Apply**. ``--apply-plan FILE --confirm-writers-stopped`` deletes only the
+   planned targets after the operator confirms test/capture writers are stopped. Each
    target is revalidated at the mutation boundary: it must still be an
    ignored, untracked, link-free directory at a registered worktree's root,
    older than ``--min-age-hours``. It is then renamed aside; the renamed tree
@@ -48,7 +49,7 @@ when possible, otherwise left at the reported ``.reclaiming-*`` path.
 Run:
   python tools/reclaim_legacy_test_dirs.py [--checkout DIR ...] [--json]
   python tools/reclaim_legacy_test_dirs.py --select PATH [--discard PATH] --plan-out plan.json
-  python tools/reclaim_legacy_test_dirs.py --apply-plan plan.json
+  python tools/reclaim_legacy_test_dirs.py --apply-plan plan.json --confirm-writers-stopped
 """
 from __future__ import annotations
 
@@ -201,7 +202,7 @@ def survey(path: Path) -> Survey:
                 parts = local.lower().split("/")
                 disposable = env_root is not None and (
                     parts[0] in _ENV_DIRS or local.lower() in _ENV_FILES
-                ) and not _EVIDENCE_DIRS.intersection(parts[:-1])
+                ) and not _EVIDENCE_DIRS.intersection(child.lower().split("/")[:-1])
                 if not disposable:
                     result.unclassified.append((child, info.st_size))
     for row in sorted(rows):
@@ -521,6 +522,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="selected target whose unclassified content may be discarded (repeatable)")
     ap.add_argument("--plan-out", type=Path, help="write the selected targets to this plan file")
     ap.add_argument("--apply-plan", type=Path, help="delete the targets recorded in this plan")
+    ap.add_argument("--confirm-writers-stopped", action="store_true",
+                    help="confirm test/capture writers for the planned set are stopped; not a lock")
     ap.add_argument("--min-age-hours", type=float, default=24.0,
                     help="refuse trees modified more recently (default: 24)")
     ap.add_argument("--accept-uninspectable", action="append", default=[], metavar="NAME",
@@ -533,6 +536,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.apply_plan and (args.select or args.discard or args.plan_out or args.checkout
                             or args.accept_uninspectable):
         ap.error("--apply-plan cannot be combined with inventory or selection options")
+    if args.apply_plan and not args.confirm_writers_stopped:
+        ap.error("stop test/capture writers for the planned set, then add --confirm-writers-stopped")
+    if args.confirm_writers_stopped and not args.apply_plan:
+        ap.error("--confirm-writers-stopped requires --apply-plan")
     if bool(args.select) != bool(args.plan_out):
         ap.error("--select and --plan-out must be used together")
     if args.discard and not args.select:

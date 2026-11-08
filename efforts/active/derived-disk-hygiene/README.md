@@ -1,5 +1,11 @@
 # Derived Disk Hygiene
 
+## Goal
+
+Implement and validate tracks A-D of #10968, including reviewed delivery and
+explicit ownership of regenerable outputs. Reclamation is guided and bounded;
+finalization never automatically deletes derived data.
+
 - **Slug:** `derived-disk-hygiene`
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-track PRs against `dev`
@@ -24,6 +30,30 @@ files. Known use or an unaccepted inspection failure refuses reclamation.
 Writers must be quiesced first; process scans and rename probes are not an
 exclusive mutation lock.
 
+## Participants
+
+| Participant | Role in this effort | Reached via |
+|-------------|---------------------|-------------|
+| Coordinating maintainer | Owns the overall plan, journal and remaining integration | #10968 |
+| Track A PR driver | Legacy inventory/plans, typecheck cache placement and checker prerequisites | #11126 |
+| Track B PR driver | Bytecode namespace reuse and explicit cache pruning | #11122 |
+| Track C claim-engine driver | Derived claim engine; producer integration remains separate | #11103, #10967 |
+| Track D PR driver | Scratch ownership, cleanup and lock compatibility | #11125 |
+
+## Coordination
+
+- **Topology:** independent per-track PRs against `dev`; no shared feature branch.
+- **Host (owns PRs):** the coordinating maintainer retains the overall objective;
+  each track's PR driver stewards its existing PR through review, CI and merge.
+- **Delegates:** A, B and D own their named implementation slices. C's engine
+  has merged; its producer-integration work remains on #10967.
+- **Handoff:** drivers retain their PR identity and communicate source, tests
+  and unresolved gates on that PR. The coordinator reconciles merged slices
+  into this effort's Plan, Validation Plan and Journal.
+- The source-bound cache placement and checkout-contained derived-claim
+  contract must be reconciled before wiring producers. No completion or
+  disposal authority is inferred from a finished sibling PR.
+
 ## Context
 
 Measurements from one machine (sanitized):
@@ -47,6 +77,13 @@ architectural changes before implementation.
 In scope: tracks A–D below. Out of scope: track E (#2567 executor
 unification evaluation), which stays on the tracker.
 
+## Scope Approvals
+
+The kickoff journal records the approved source-work scope. Disposable-fixture
+validation does not authorize reclaiming real data or rolling out installed
+runtimes. Those effects require their own bounded approval. Automatic deletion
+during finalize is excluded.
+
 ## Plan
 
 ### Track A — Reclaim legacy `.test-venvs` (#10965)
@@ -54,7 +91,7 @@ unification evaluation), which stays on the tracker.
       `.test-venvs/`/`.test-runs/` across registered worktrees, optionally
       narrowed with `--checkout`; record reviewed `--select` targets with
       `--plan-out`, requiring `--discard` for unclassified content; apply
-      only that plan with `--apply-plan`. Revalidate identity, metadata,
+      only that plan with `--apply-plan --confirm-writers-stopped`. Revalidate identity, metadata,
       ignored/untracked/link-free status, age and known use before removal.
       Report refusals and partial outcomes rather than claiming atomicity.
       The earlier 158-tree / 11.2 GiB inventory was not a discard decision.
@@ -119,6 +156,13 @@ claims the worktree's agent must close out before finalize.
 - [ ] Simple end-to-end: run each dry-run against this machine and compare
       to measured inventory; apply on a bounded subset.
 - [ ] Observe unsealed creation rate for 24 h after Track B lands.
+
+## Proposal
+
+Keep allocation, ownership and reclamation separate. Producers label retained
+state; guided tools inventory and select explicit targets; derived claims make
+unfinished ownership visible without turning finalize into a deletion sweep.
+The per-track Plan and Validation Plan define implementation and acceptance.
 
 ## Journal
 

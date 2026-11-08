@@ -86,11 +86,22 @@ def test_inventory_classifies_without_deleting(repo, capsys):
     assert venvs.is_dir() and runs.is_dir()
 
 
+def test_apply_requires_explicit_writer_quiescence_confirmation(repo, tmp_path, capsys):
+    target = _legacy(repo)
+    code, plan = _plan(repo, tmp_path, target, capsys=capsys)
+    assert code == 0
+    with pytest.raises(SystemExit) as failure:
+        reclaim.main(["--apply-plan", str(plan)])
+    assert failure.value.code == 2
+    assert "--confirm-writers-stopped" in capsys.readouterr().err
+    assert target.is_dir()
+
+
 def test_environment_only_tree_is_ready_and_reclaimed_from_plan(repo, tmp_path, capsys):
     target = _legacy(repo)
     code, plan = _plan(repo, tmp_path, target, capsys=capsys)
     assert code == 0 and target.is_dir()
-    code, report = _run("--apply-plan", plan, capsys=capsys)
+    code, report = _run("--apply-plan", plan, "--confirm-writers-stopped", capsys=capsys)
     assert code == 0
     assert report["candidates"][0]["status"] == "reclaimed"
     assert not os.path.lexists(target)
@@ -112,6 +123,22 @@ def test_evidence_inside_environment_still_requires_discard(repo, tmp_path, caps
     assert code == 2 and not plan.exists() and evidence.is_file()
 
 
+def test_environment_beneath_evidence_directory_requires_discard(repo, tmp_path, capsys):
+    target = _legacy(repo)
+    environment = target / "reports" / "analysis-env"
+    (environment / "lib").mkdir(parents=True)
+    (environment / "pyvenv.cfg").write_text("home = x\n", encoding="utf-8")
+    evidence = environment / "lib" / "result.json"
+    evidence.write_text("retained evidence", encoding="utf-8")
+    _age(target)
+    code, report = _run("--repo", repo, capsys=capsys)
+    assert code == 0
+    assert report["candidates"][0]["status"] == "needs-decision"
+    assert "reports/analysis-env/lib/result.json" in report["candidates"][0]["unclassified_sample"]
+    code, plan = _plan(repo, tmp_path, target, capsys=capsys)
+    assert code == 2 and not plan.exists() and evidence.is_file()
+
+
 def test_non_ascii_worktree_is_discovered_without_git_path_quoting(repo, tmp_path, capsys):
     sibling = tmp_path / "worktree-\u00e9"
     _git(repo, "worktree", "add", "-q", str(sibling))
@@ -128,7 +155,7 @@ def test_unclassified_content_requires_target_specific_discard(repo, tmp_path, c
     code, plan = _plan(repo, tmp_path, target, "--discard", target, capsys=capsys)
     assert code == 0
     assert json.loads(plan.read_text(encoding="utf-8"))["targets"][0]["discard_unclassified"]
-    code, report = _run("--apply-plan", plan, capsys=capsys)
+    code, report = _run("--apply-plan", plan, "--confirm-writers-stopped", capsys=capsys)
     assert code == 0 and report["candidates"][0]["status"] == "reclaimed"
 
 
@@ -139,7 +166,7 @@ def test_discard_decision_cannot_be_dropped_from_plan(repo, tmp_path, capsys):
     data = json.loads(plan.read_text(encoding="utf-8"))
     data["targets"][0]["discard_unclassified"] = False
     plan.write_text(json.dumps(data), encoding="utf-8")
-    code, report = _run("--apply-plan", plan, capsys=capsys)
+    code, report = _run("--apply-plan", plan, "--confirm-writers-stopped", capsys=capsys)
     assert code == 1
     assert report["candidates"][0]["reason"] == "unclassified content without a discard decision"
     assert (target / "capture-probes" / "report.json").is_file()
@@ -151,7 +178,7 @@ def test_new_content_after_review_refuses(repo, tmp_path, capsys):
     assert code == 0
     (target / "new-evidence.json").write_text("{}", encoding="utf-8")
     _age(target)
-    code, report = _run("--apply-plan", plan, capsys=capsys)
+    code, report = _run("--apply-plan", plan, "--confirm-writers-stopped", capsys=capsys)
     assert code == 1
     assert report["candidates"][0]["reason"] == "changed since the plan was reviewed"
     assert (target / "new-evidence.json").is_file()
@@ -164,7 +191,7 @@ def test_only_selected_checkout_is_deleted(repo, tmp_path, capsys):
     code, report = _run("--repo", repo, "--checkout", sibling, capsys=capsys)
     assert [c["path"] for c in report["candidates"]] == [str(theirs)]
     code, plan = _plan(repo, tmp_path, mine, capsys=capsys)
-    code, _report = _run("--apply-plan", plan, capsys=capsys)
+    code, _report = _run("--apply-plan", plan, "--confirm-writers-stopped", capsys=capsys)
     assert code == 0 and not mine.exists() and theirs.is_dir()
 
 
@@ -178,7 +205,7 @@ def test_change_after_review_refuses_at_mutation(repo, tmp_path, capsys):
     code, plan = _plan(repo, tmp_path, target, capsys=capsys)
     (target / "linux" / "plugin" / "python").write_bytes(b"y" * 2048)
     _age(target)
-    code, report = _run("--apply-plan", plan, capsys=capsys)
+    code, report = _run("--apply-plan", plan, "--confirm-writers-stopped", capsys=capsys)
     assert code == 1
     assert report["candidates"][0]["reason"] == "changed since the plan was reviewed"
     assert target.is_dir()
@@ -190,7 +217,7 @@ def test_replaced_directory_refuses_at_mutation(repo, tmp_path, capsys):
     os.rename(target, repo / "moved")
     os.rename(repo / "moved", tmp_path / "moved")
     _legacy(repo)
-    code, report = _run("--apply-plan", plan, capsys=capsys)
+    code, report = _run("--apply-plan", plan, "--confirm-writers-stopped", capsys=capsys)
     assert report["candidates"][0]["reason"] == "changed since the plan was reviewed"
     assert target.is_dir()
 
@@ -206,7 +233,7 @@ def test_write_between_rename_and_removal_restores_tree(repo, tmp_path, capsys, 
         return real(path)
 
     monkeypatch.setattr(reclaim, "survey", racing_survey)
-    code, report = _run("--apply-plan", plan, capsys=capsys)
+    code, report = _run("--apply-plan", plan, "--confirm-writers-stopped", capsys=capsys)
     assert report["candidates"][0]["reason"] == "changed since the plan was reviewed"
     assert (target / "linux" / "late.txt").is_file()
     assert not list(repo.glob(".test-venvs.reclaiming-*"))
@@ -216,7 +243,7 @@ def test_live_user_detected_after_rename_restores_tree(repo, tmp_path, capsys, m
     target = _legacy(repo)
     code, plan = _plan(repo, tmp_path, target, capsys=capsys)
     monkeypatch.setattr(reclaim, "in_use", lambda path, _accepted=frozenset(): (True, "in use by a live process") if ".reclaiming-" in path.name else (False, ""))
-    code, report = _run("--apply-plan", plan, capsys=capsys)
+    code, report = _run("--apply-plan", plan, "--confirm-writers-stopped", capsys=capsys)
     assert report["candidates"][0]["reason"] == "in use by a live process"
     assert target.is_dir()
 
@@ -225,7 +252,7 @@ def test_recent_tree_is_refused_at_plan_and_apply(repo, tmp_path, capsys):
     target = _legacy(repo)
     code, plan = _plan(repo, tmp_path, target, capsys=capsys)
     _age(target, hours=1)
-    code, report = _run("--apply-plan", plan, capsys=capsys)
+    code, report = _run("--apply-plan", plan, "--confirm-writers-stopped", capsys=capsys)
     assert report["candidates"][0]["reason"] == "recently modified"
     code, _plan_path = _plan(repo, tmp_path, target, capsys=capsys)
     assert code == 2 and target.is_dir()
@@ -285,7 +312,7 @@ def test_plan_paths_must_stay_registered_legacy_directories(repo, tmp_path, caps
     victim.mkdir()
     data["targets"][0]["path"] = str(victim)
     plan.write_text(json.dumps(data), encoding="utf-8")
-    code, report = _run("--apply-plan", plan, capsys=capsys)
+    code, report = _run("--apply-plan", plan, "--confirm-writers-stopped", capsys=capsys)
     assert report["candidates"][0]["reason"] == "not a legacy directory of a registered worktree"
     assert victim.is_dir()
 
@@ -299,7 +326,7 @@ def test_partial_removal_is_reported_and_remainder_restored(repo, tmp_path, caps
         errors.append("simulated failure")
 
     monkeypatch.setattr(reclaim, "_remove", failing_remove)
-    code, report = _run("--apply-plan", plan, capsys=capsys)
+    code, report = _run("--apply-plan", plan, "--confirm-writers-stopped", capsys=capsys)
     [result] = report["candidates"]
     assert code == 1 and result["status"] == "partial"
     assert "removed entries are gone" in result["reason"]
@@ -312,7 +339,7 @@ def test_open_handle_blocks_reclaim_on_windows(repo, tmp_path, capsys):
     target = _legacy(repo)
     code, plan = _plan(repo, tmp_path, target, capsys=capsys)
     with open(target / "linux" / "plugin" / "python", "rb"):
-        _code, report = _run("--apply-plan", plan, capsys=capsys)
+        _code, report = _run("--apply-plan", plan, "--confirm-writers-stopped", capsys=capsys)
     assert report["candidates"][0]["reason"] == "in use by a live process"
     assert target.is_dir()
 
