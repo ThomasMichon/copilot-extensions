@@ -125,6 +125,53 @@ def test_plugin_adapter_preserves_typed_argv_and_default_budget(tmp_path):
     assert "--all" not in argv and "--allow-host-state" not in argv
 
 
+def test_native_packet_preserves_public_caller_selection_and_functional_bounds(tmp_path):
+    argv = worker.native_command(tmp_path, tmp_path / "out")
+    assert argv[argv.index("--test-file") + 1] == "tests/native/test_native_seed_application.py"
+    assert argv[argv.index("-k") + 1] == "public_embody"
+    assert [argv[argv.index(flag) + 1] for flag in (
+        "--timeout", "--plugin-timeout", "--test-timeout",
+    )] == ["900", "1200", "900"]
+    assert "--allow-host-state" not in argv
+
+
+@pytest.mark.parametrize("mismatch", [False, True])
+def test_native_prerequisites_check_disposable_binaries_and_actual_version(tmp_path, monkeypatch, mismatch):
+    runner = tmp_path / "runner"
+    runner.mkdir()
+    copilot, mux = runner / "copilot.exe", runner / "psmux.exe"
+    copilot.write_bytes(b"fixture")
+    mux.write_bytes(b"fixture")
+    environment = {
+        "GITHUB_ACTIONS": "true", "COPILOT_DRIVER_HEADED_MUX_E2E": "1",
+        "RUNNER_TEMP": str(runner), "UV_DEFAULT_INDEX": "https://feed.example.invalid/simple/",
+        "COPILOT_NATIVE_TEST_EXECUTABLE": str(copilot), "PSMUX_TEST_BIN": str(mux),
+    }
+    monkeypatch.setattr(worker, "os", SimpleNamespace(name="nt", environ=environment))
+    monkeypatch.setattr(worker.urllib.request, "urlopen", lambda *args, **kwargs: nullcontext(
+        SimpleNamespace(status=200, read=lambda count: b"package index"),
+    ))
+    calls = []
+
+    def owned(argv, timeout):
+        calls.append((argv, timeout))
+        return SimpleNamespace(stdout=(
+            "GitHub Copilot CLI 1.0.105-1." if mismatch else "GitHub Copilot CLI 1.0.105."
+        ) if argv[0] == str(copilot) else "psmux 3.3.8")
+    if mismatch:
+        with pytest.raises(ValueError, match="version mismatch"):
+            worker.native_prerequisites(owned)
+        assert len(calls) == 1
+    else:
+        assert worker.native_prerequisites(owned) == contract.NATIVE_VERSIONS
+        assert calls == [([str(copilot), "--version"], 30), ([str(mux), "-V"], 30)]
+    foreign = tmp_path / "foreign.exe"
+    foreign.write_bytes(b"fixture")
+    environment["PSMUX_TEST_BIN"] = str(foreign)
+    with pytest.raises(ValueError):
+        worker.native_prerequisites(owned)
+
+
 def test_junit_retains_skips_failures_and_exact_case_identities(tmp_path):
     (tmp_path / "result.xml").write_text(
         '<testsuite><testcase classname="mod" name="pass[a]" time="1"/>'
@@ -219,6 +266,75 @@ def test_foreign_partial_empty_and_skipped_results_never_qualify(mutation):
     value.update(mutation)
     with pytest.raises(ValueError):
         contract.validate_result(value, request(), run_id=42, control_sha="c" * 40, run_attempt=1)
+
+
+@pytest.mark.parametrize("mutation", [
+    {}, {"tests": []}, {"tests": [{"name": "test_public_embody", "outcome": "skipped"}]},
+    {"tests": [{"class": "foreign", "name": "test_public_embody", "outcome": "passed"}]},
+    {"native_prerequisites": {"copilot": "1.0.106", "psmux": "3.3.8"}},
+    {"phases": []},
+])
+def test_native_result_requires_actual_caller_and_pinned_prerequisites(mutation):
+    value = result()
+    expected = request()
+    expected["selection"] = {"kind": "packet", "name": "native-worktrees-embody"}
+    value.update(
+        request=expected, native_prerequisites=contract.NATIVE_VERSIONS,
+        tests=[{"class": "native.test_native_seed_application", "name": "test_public_embody",
+                "outcome": "passed"}],
+        phases=[{"name": name, "status": "passed"} for name in (
+            "source-and-selection", "native-prerequisites",
+            "native-worktrees-public-caller", "test-runtime",
+        )],
+    )
+    value.update(mutation)
+    if mutation:
+        with pytest.raises(ValueError):
+            contract.validate_result(value, expected, run_id=42, control_sha="c" * 40, run_attempt=1)
+    else:
+        contract.validate_result(value, expected, run_id=42, control_sha="c" * 40, run_attempt=1)
+
+
+@pytest.mark.parametrize("prerequisites", [True, False])
+def test_native_execution_gates_consumer_and_sanitizes_uploaded_files(
+    tmp_path, monkeypatch, prerequisites,
+):
+    root, output = tmp_path / "candidate", tmp_path / "evidence"
+    root.mkdir()
+    monkeypatch.setenv("UV_DEFAULT_INDEX", "https://feed.example.invalid/pypi/simple/")
+    monkeypatch.setattr(worker.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(worker, "Transport", lambda *args: SimpleNamespace(
+        git=lambda *args: SimpleNamespace(stdout="b" * 40),
+    ))
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        if "-c" in argv:
+            return SimpleNamespace(returncode=0, stdout='{"python":"3.12","system":"Windows"}', stderr="")
+        (output / "junit").mkdir()
+        (output / "junit/actual.xml").write_text(
+            '<testsuite><testcase classname="native.test_native_seed_application" '
+            'name="test_public_embody"><system-out>https://feed.example.invalid/pypi/simple/'
+            '</system-out></testcase></testsuite>', encoding="utf-8",
+        )
+        return SimpleNamespace(returncode=0, stdout="selected feed.example.invalid", stderr="")
+
+    def prepare(owned):
+        if not prerequisites:
+            raise ValueError("unavailable feed.example.invalid")
+        return dict(contract.NATIVE_VERSIONS)
+
+    monkeypatch.setitem(sys.modules, "agent_procutil.owned_process", SimpleNamespace(run_caller_owned=run))
+    monkeypatch.setattr(worker, "native_prerequisites", prepare)
+    value = request()
+    value["selection"] = {"kind": "packet", "name": "native-worktrees-embody"}
+    actual = worker.execute(root, value, output)
+    assert actual["outcome"] == ("qualified" if prerequisites else "failed")
+    assert bool(calls) is prerequisites
+    for path in output.rglob("*"):
+        if path.is_file():
+            assert "feed.example.invalid" not in path.read_text("utf-8")
 
 
 def fake_client(tmp_path, monkeypatch):
@@ -516,4 +632,10 @@ def test_manual_workflow_never_adds_required_ci_or_candidate_write_credentials()
         for step in job["steps"]:
             if step.get("uses", "").startswith("actions/checkout@"):
                 assert step["with"]["persist-credentials"] is False
-            assert "secrets." not in json.dumps(step)
+            if "secrets." in json.dumps(step):
+                assert step["name"] == "Execute typed selection through canonical bounded owners"
+                assert set(step["env"]) == {"UV_DEFAULT_INDEX"}
+                assert step["env"]["UV_DEFAULT_INDEX"] == (
+                    "${{ needs.admit.outputs.packet == 'native-worktrees-embody' && "
+                    "secrets.WINDOWS_QUALIFICATION_INDEX_URL || '' }}"
+                )
