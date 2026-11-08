@@ -3062,10 +3062,11 @@ sources, transferring owners or turning partial/planning gains into completion.
 The [worker-witness and safe Resume study](<journal/2026/11.08 worker-witness-and-safe-resume.md>)
 distinguishes complete prebody provenance qualification, static witness
 definitions and a verified public research comment from execution or native
-acceptance. Its follow-through records seven acquisitions against a six-object
-scope for each of two repeated originals rather than resetting their exhausted
-scopes or claiming fresh coverage. Whole-source refusals remain intact; no
-campaign or technical completion checkbox changes.
+acceptance. Its follow-through records seven acquisitions against each issue's
+six-object scope for #11210 and #11211, including one repeated original
+acquisition per issue. It does not reset those exhausted scopes or claim fresh
+coverage. Whole-source refusals remain intact; no campaign or technical
+completion checkbox changes.
 
 The [serving-owner and attribution-event study](<journal/2026/11.07 serving-owner-and-attribution-events.md>)
 distinguishes guarded source inspection, attributed native witness results,
