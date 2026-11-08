@@ -236,6 +236,8 @@ def test_hook_client_forwards_exactly_the_nudge_switches():
     spec.loader.exec_module(client)
 
     assert client._POST_TOOL_ENV_KEYS == nudge.NUDGE_ENV_KEYS
+    resident_ps = _SCRIPT.with_name("post-tool-hook.ps1").read_text(encoding="utf-8")
+    assert all(f"'{key}'" in resident_ps for key in nudge.NUDGE_ENV_KEYS)
 
 
 def test_agenda_nudge_silent_when_worktree_lane_exists(tmp_path):
