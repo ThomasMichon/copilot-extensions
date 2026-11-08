@@ -84,7 +84,11 @@ class ReplayStore:
     def __init__(
         self, root: Path, namespace: str, *, clock: Callable[[], float] = time.time,
         service_identity: ReplayServiceIdentity | None = None,
+        terminal_retention: bool = False,
     ) -> None:
+        if type(terminal_retention) is not bool:
+            raise ValueError("explicit terminal reader selection required")
+        self.terminal_retention = terminal_retention
         if service_identity is not None and not isinstance(service_identity, ReplayServiceIdentity):
             raise ValueError("typed replay service identity required")
         self.root = Path(root)
@@ -165,6 +169,11 @@ class ReplayStore:
         prepared = "review_intent_version" in document
         selections = "review_selection_version" in document
         mappings = "review_comment_mapping_version" in document
+        terminal = "terminal_retention_version" in document
+        if terminal:
+            if not self.terminal_retention or version not in (3, 4, 5, 6):
+                raise ReplayStoreInvalid("terminal retention reader unavailable for adopted owner")
+            names.update(("terminal_retention_version", "terminal_retention"))
         if mappings:
             names.add("review_comment_mapping_version")
             if (
@@ -199,6 +208,8 @@ class ReplayStore:
             raise ReplayStoreInvalid("review owner storage binding mismatch")
         capacities = document["capacities"]
         capacity_names = {"replay_bytes", "review_bytes", "receipt_bytes"}
+        if terminal:
+            capacity_names.add("terminal_retention_bytes")
         if version in (3, 4, 5, 6):
             capacity_names.add("conversation_bytes")
         if version in (4, 5, 6):
@@ -214,10 +225,17 @@ class ReplayStore:
             + capacities.get("conversation_bytes", 0)
             + capacities.get("attention_bytes", 0)
             + capacities.get("feedback_capture_bytes", 0)
-            + capacities.get("feedback_readback_bytes", 0) > MAX_OWNER_BYTES - 4096
+            + capacities.get("feedback_readback_bytes", 0)
+            + capacities.get("terminal_retention_bytes", 0) > MAX_OWNER_BYTES - 4096
             or capacities["receipt_bytes"] < 4096
         ):
             raise ReplayStoreInvalid("invalid owner capacity limits")
+        if terminal:
+            from .terminal_retention import validate
+            try:
+                validate(document, self.namespace)
+            except (KeyError, TypeError, ValueError):
+                raise ReplayStoreInvalid("invalid persisted terminal retention") from None
         WatchReplay(self.namespace, state=document["replay"], commit=lambda _state: None, clock=self.clock)
         if self._replay_reservation(document["replay"]) > capacities["replay_bytes"]:
             raise ReplayStoreInvalid("replay state exceeds its reserved capacity")
@@ -356,6 +374,11 @@ class ReplayStore:
         digest = _digest(selected)
 
         def admit(document):
+            from .terminal_retention import require_live
+            require_live(
+                document, selected["scope"], operation_id=selected["operation_id"],
+                generation_id=selected["generation_id"],
+            )
             if selected["version"] == 2 and document.get("review_intent_version") != 2:
                 raise ReplayStoreInvalid("prepared review requires explicit storage adoption")
             previous = next((row for row in document["reviews"]
@@ -377,8 +400,13 @@ class ReplayStore:
         return self._review_transaction(admit, expires_at=expires_at, checkpoint=checkpoint)
 
     def inspect_review(self, operation_id, scope, *, expires_at: int, checkpoint=None) -> dict:
+        def inspect(document):
+            from .terminal_retention import require_live
+            require_live(document, scope, operation_id=operation_id)
+            return self._review_operation(document, operation_id, scope)
+
         return self._review_transaction(
-            lambda document: self._review_operation(document, operation_id, scope),
+            inspect,
             expires_at=expires_at, checkpoint=checkpoint, persist=False,
         )
 
@@ -432,6 +460,11 @@ class ReplayStore:
         """Durably fence one admitted action before an existing protected sender may run."""
         def begin(document):
             operation = self._review_operation(document, operation_id, scope)
+            from .terminal_retention import require_live
+            require_live(
+                document, scope, operation_id=operation_id,
+                generation_id=operation["intent"]["generation_id"],
+            )
             state = next((row for row in operation["actions"] if row["id"] == action_id), None)
             if state is None:
                 raise ValueError("selected review action missing")
@@ -531,6 +564,7 @@ class ReplayStore:
     def _transaction(
         self, operation: Callable[[WatchReplay], _T], *, expires_at: int,
         checkpoint: Callable[[], None] | None = None,
+        prepare: Callable[[dict], None] | None = None,
     ) -> _T:
         if checkpoint is not None and not callable(checkpoint):
             raise ValueError("invalid request checkpoint")
@@ -547,6 +581,11 @@ class ReplayStore:
             if self.path.is_symlink():
                 raise ReplayStoreInvalid("linked replay state")
             document = self._read_document()  # Missing state is not first provisioning.
+            if prepare is not None:
+                # This callback only selects data from the same complete owner
+                # envelope; core commits still use that envelope and custody.
+                self._decode(document)
+                prepare(document)
             try:
                 core = WatchReplay(
                     self.namespace, state=self._decode(document),
@@ -571,11 +610,17 @@ class ReplayStore:
         checkpoint: Callable[[], None] | None = None,
     ) -> dict:
         """Trusted owner-only input, never a serving operation."""
+        def prepare(document: dict) -> None:
+            nonlocal snapshot
+            from .terminal_retention import terminal_snapshot
+            snapshot = terminal_snapshot(document, target) or snapshot
+
         return self._transaction(
             lambda core: core.observe(
                 target.account, target.repo, target.number, snapshot,
                 registration_ids=target.registration_ids,
             ), expires_at=expires_at, checkpoint=checkpoint,
+            prepare=prepare if self.terminal_retention else None,
         )
 
     def waiting_target(

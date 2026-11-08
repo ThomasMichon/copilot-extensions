@@ -55,10 +55,12 @@ abandonment from disappearance. An explicit complete reopen creates a new
 epoch and retains one compact previous terminal summary. Old cursors require
 resynchronization.
 
-**This is not global terminal compaction.** Existing body-bearing review
+**The baseline journal is not global terminal compaction.** Existing body-bearing review
 generations, materializations, submission intents, unknown receipts and pending
 watch delivery are untouched. Coordinated cache/outbox/payload retention and
-terminal notification transactions remain open work. No secure-erasure,
+terminal notification transactions require the explicit
+[terminal-intent embedding](terminal-retention.md); physical compaction remains
+open work. No secure-erasure,
 zero-fill or TRIM operation is introduced.
 
 ## Explicit storage and serving adoption

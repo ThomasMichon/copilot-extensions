@@ -34,6 +34,10 @@ Every replay transaction preserves review data; every review transaction
 preserves current replay data. Source restart reads both from this same file.
 There is no automatic downgrade or receipt deletion.
 
+The optional [terminal-retention embedding](terminal-retention.md) expands this
+same owner with terminal intent and epoch-aware admission fencing. It is
+explicitly selected/adopted, not enabled by these baseline review operations.
+
 ## Selected intent and data transitions
 
 `admit_review(selected, expires_at=..., checkpoint=...)` accepts a version-1

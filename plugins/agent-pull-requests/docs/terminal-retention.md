@@ -1,0 +1,97 @@
+# Terminal intent and workspace admission
+
+This internal source embedding implements the first part of the reviewed
+[terminal-retention sequence](../../../efforts/active/durable-pr-watch-delegation/terminal-retention.md).
+It adds no service, discovery operation, automatic adoption or physical
+compactor. The existing [conversation journal](conversation-journal.md),
+[review owner](review-owner-store.md) and
+[workspace](workspace-integration.md) retain their baseline behavior by default.
+
+## Reader and storage selection
+
+An embedding explicitly constructs `ReplayStore(..., terminal_retention=True)`
+to select a capable file reader. This does not adopt state.
+`TerminalRetentionStore(owner).adopt(lifecycle_checkpoint=..., expires_at=...,
+checkpoint=..., retention_bytes=...)` expands an already conversation-capable
+owner-v3/v4/v5/v6 envelope through its existing complete-file transaction.
+The actual lifecycle owner must first exclude or transition incompatible
+readers. Neither a callback label nor the source API proves that transition.
+
+The orthogonal `terminal_retention_version: 1` contract stores its records,
+generation/epoch bindings and capacity in `watch-replay.json`. Its protocol is
+`agent-pull-requests.terminal-retention/v1`, independent of package version.
+The reservation defaults to 8 MiB, with at most 1024 retirement records and
+1024 generation bindings. Full capacity refuses without eviction, borrowing
+another reservation or rebuilding the cache. Pending deliveries and original
+operation/attempt/receipt records are never discarded.
+
+Older strict readers, including a new reader not explicitly selected for this
+extension, refuse the expanded envelope without rewriting it. A capable reader
+still preserves non-adopted layouts. No downgrade or automatic rollback is
+provided. There is no terminal-retention HTTP/CLI capability: an installed or
+independently updated service must not adopt this source embedding until its
+actual reader/lifecycle/consumer boundary is separately qualified.
+
+## One terminal decision
+
+The trusted acquisition owner supplies a full normalized generation and the
+actual `ObservationTarget` captured before acquisition. The target's existing
+account/repository/PR binding must correspond to the generation's full
+provider/endpoint/project/repository/principal/namespace scope. Ambiguous
+reuse of one watch binding across different full scopes refuses.
+
+Only an accepted, complete authoritative terminal observation stages retirement.
+Missing/partial evidence, stale observations and selector departure are not
+retirement. In one envelope replacement, `ConversationStore.observe_workspace`
+commits the journal tombstone, terminal scope/epoch fence, original operation
+identities and notification progress. Plain `observe` cannot bypass this path
+on an adopted owner. Interrupted replacement leaves the old complete envelope
+or the same terminal decision and frozen event identities; reconcile the exact
+scope/cursor rather than inventing another event.
+
+The existing replay core projects only minimal terminal facts for captured
+registrations, retaining each registration's criteria, request identity and
+original deadline. It does not rewrite a previously frozen event. A matching
+active legacy delivery with no finite deadline refuses terminal admission;
+the existing owner needs an explicit bounded recovery policy, not a collector-
+invented timeout. A later native replay poll also uses the retained terminal
+facts instead of reintroducing a native snapshot body. Only exact ACK/cancel
+continues to settle a delivery; terminal observation and drain do neither.
+
+## Admission, drain and reopen
+
+On the adopted owner, selection allocation/retention, execution admission,
+begin-action and feedback capture check the live epoch inside replay custody.
+Historical operation IDs remain fenced after reopen. Original senders can
+still retain their admitted attempt's receipt; a fence is not rollback or
+proof that an already admitted effect did not happen.
+
+The existing workspace accounts for admitted acquisition/read/send work.
+Its explicit `retention_target` callback supplies the actual pre-acquisition
+watch selection. A terminal generation is observed without publishing another
+body-bearing cache object or returning its descriptor. An accepted complete
+live acquisition binds its generation to the current epoch before cache
+publication. Late observations and old-epoch generations cannot republish or
+serve a buffered body after reopen.
+
+Lock order is the short workspace lifecycle condition, replay transaction,
+materialization lock, then cache transaction. Request accounting releases the
+condition before IO. Bounded cache publication/materialization holds replay
+custody; native acquisition/sending and drain waits do not hold disk locks.
+Existing nonblocking lock contention remains a busy failure, not an implicit
+retry or evidence of absent state.
+
+The lifecycle owner calls `operations.retention.drain(scope, cursor,
+expires_at=..., checkpoint=..., lifecycle_checkpoint=..., deadline=...)`.
+Its actual exclusive-reader checkpoint must cover this workspace and exclude
+foreign/incompatible readers. The method joins admitted local work under the
+existing finite deadline, then rechecks the exact terminal epoch before
+recording `drained`. Timeout or lost custody preserves `pending`. A prior drain
+record is not a permanent guarantee against later acquisition or permission
+to compact; subsequent physical stages must rejoin/fence their actual owner.
+
+This source does **not** remove stored bodies, cache pointers/objects, server
+buffers or generation/cursor bindings, and it does not compact intents into
+recovery-only records. Protected minimal readback, scoped physical retirement,
+consumer negotiation and installed/restart/rollback qualification remain
+separate gates. No delete, secure erase, zero-fill or TRIM operation is added.
