@@ -146,6 +146,63 @@ def test_conclude_dispatch_attempt_requests_exact_managed_removal(monkeypatch):
     assert result["action"] == "removed"
 
 
+def _conclusion_retry_cli(monkeypatch, rows):
+    calls = []
+
+    def run(cmd, **_kwargs):
+        calls.append(cmd)
+        if "list" in cmd:
+            return _completed(json.dumps({"worktrees": rows}))
+        if "record" in cmd:
+            return _completed('{"ok": false}', returncode=1)
+        return _completed('{"action":"already-primed","managed_gc_eligible":false}')
+
+    monkeypatch.setattr(
+        embody, "_agent_worktrees_launch_prefix", lambda: ["/usr/bin/agent-worktrees"]
+    )
+    monkeypatch.setattr(embody.subprocess, "run", run)
+    monkeypatch.setattr(embody.worktree_record.subprocess, "run", run)
+    return calls
+
+
+@pytest.mark.parametrize("rows", [
+    [{"id": "wt-review", "repo": "widgets", "path": "/fixture/wt-review", "status": "complete"}],
+    [],
+], ids=["primed-terminal", "absent"])
+def test_conclude_dispatch_attempt_retry_reaches_idempotent_conclusion(monkeypatch, rows):
+    calls = _conclusion_retry_cli(monkeypatch, rows)
+
+    result = embody.conclude_dispatch_attempt(
+        "wt-review", "session-review", "dispatch-task:task-1:1",
+        project="widgets", worktree_path="/fixture/wt-review",
+    )
+
+    assert "conclude-disposable" in calls[-1]
+    assert result["action"] == "already-primed"
+
+
+def test_conclude_dispatch_attempt_terminal_row_still_checks_identity(monkeypatch):
+    calls = _conclusion_retry_cli(monkeypatch, [
+        {"id": "wt-review", "repo": "widgets", "path": "/elsewhere", "status": "complete"},
+    ])
+
+    with pytest.raises(embody.DisposableConclusionError, match="identity changed"):
+        embody.conclude_dispatch_attempt(
+            "wt-review", "session-review", "dispatch-task:task-1:1",
+            project="widgets", worktree_path="/fixture/wt-review",
+        )
+    assert not any("conclude-disposable" in cmd for cmd in calls)
+
+
+def test_resolve_worktree_still_rejects_terminal_rows_for_reuse(monkeypatch):
+    _conclusion_retry_cli(monkeypatch, [
+        {"id": "wt-review", "repo": "widgets", "path": "/fixture/wt-review", "status": "complete"},
+    ])
+
+    with pytest.raises(embody.WorktreeNotFound, match="terminal"):
+        embody.resolve_worktree("wt-review", project="widgets")
+
+
 def test_conclude_disposable_worker_preservation_skip_is_returned(monkeypatch):
     monkeypatch.setattr(
         embody, "_agent_worktrees_launch_prefix", lambda: ["/usr/bin/agent-worktrees"]
