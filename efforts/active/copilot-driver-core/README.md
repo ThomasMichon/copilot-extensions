@@ -2497,3 +2497,126 @@ pane argument/startup controls pass 82 cases with three platform skips in
 used an unnecessarily short 120-second group budget and was terminated after
 57 passes; the successful capture uses the normal 300-second group budget,
 without changing any per-test or native application deadline.
+
+### 2026-11-07 - Constructed mux mapping and nested exit checkpoint merged
+
+#11367 merged at 20:41:02 UTC as
+`9ea3b8958e990950626cb5c6638f81b6d48fab67`. The final published head received
+a genuine Copilot approval with no findings, and required CI passed. The
+managed publication rebase preserved the qualified pane-reader and live
+mapping paths; the incoming observation change concerns closed historical
+routes, not those consumer paths.
+
+Re-read the parent Plan and Validation Plan after merge; #10765 remains open.
+This closes the constructed Manager mux mapping/exit checkpoint, not the
+complete caller or lifetime gates. Keep the source workspace active. Continue
+caller convergence through the actual installed Worktrees application rather
+than treating the managed test resolver as installed-client evidence. Then
+retain the distinct attachment, cleanup-Job, receiving/skew and native
+pending-work obligations. No shared runtime rollout occurred.
+
+### 2026-11-07 - Installed Worktrees execution-owner qualification
+
+Extend the existing first-touch application fixture with an independently
+selected native broker case. Build/install through the same wheel/profile
+owners, remove disposable source inputs, and invoke the execution owner from
+the installed interpreter/root. Do not copy launch assets or inject the test
+runner's site-packages on that path. Preserve the existing admission control
+and 300-second construction/consumer budget.
+
+The initial capture hits the group wall without retained phase output. A
+same-budget diagnostic with pytest tee output builds by 153.00 seconds,
+prepares the profile by 246.03 and installs by 274.59, then fails native
+admission because the sanitized application environment dropped the runner's
+daemon lifecycle declaration. It does not qualify the installed broker.
+Supply an explicit renewable fixture lifecycle and require settled exact
+cleanup, as the adjacent constructed Manager control does; this is test
+custody, not a production fallback or relaxed startup budget. Construction
+cost and complete fresh/resume qualification remain distinct unresolved
+observations until the corrected consumer finishes.
+
+Further same-budget captures hit the construction/install wall. A traceback
+sample finds interpreter discovery active at 60 seconds, but an isolated
+comparison completes that lookup in 0.42 seconds with the runner's bytecode
+prefix and 0.08 without; this does not establish a cache or interpreter bug.
+Remove that temporary diagnostic rather than changing the provider.
+
+Timing the unmodified build operations measures a 4.75-second toolchain,
+48.27-second Worktrees wheel, 18 total real wheels and completed construction
+at 155.58 seconds; profile preparation reaches 254.61 and install 280.78.
+The remaining pre-build interval includes hashing copied non-shipped tests.
+Omit test trees from the disposable plugin/dependency inputs, not runtime
+code, scripts, metadata or notices. This reduces fixture work without caching
+an installed application, bypassing construction owners or changing the
+300-second acceptance budget. The corrected native consumer still needs its
+complete passing capture.
+
+One explicitly diagnostic 420-second capture completes the installed consumer
+in 347.07 seconds (444.69 including runner preparation/cleanup), with settled
+native lifecycle cleanup. Fresh binds in 13.34 seconds and retires by 15.58;
+resume binds in 7.88 and retires by 10.72, preserving the original native
+identity/history, literal seed, broker prompts, process births and exact exit
+receipts. Installation itself takes 306.47 seconds in that capture. This
+separates working installed execution from the unmet original 300-second
+construction/consumer budget; it is not qualification at that original bound.
+
+Restore the 300-second marker/deadline and remove temporary per-wheel timing
+wrappers. Further narrow fixture inputs to the application's Python source,
+operational scripts, top-level build metadata and dependency source closure,
+not unrelated plugin surfaces. Keep actual wheel construction, fresh install,
+source-input removal, packaged imports, both native legs and exact cleanup.
+This tests the application, not plugin activation, without changing production
+hashing, installer behavior, native startup limits or the parent acceptance gate.
+
+The narrowed-input capture installs at 245.62 seconds and completes fresh in
+16.25 seconds, then reaches the combined group wall during resume. An isolated
+two-worker deletion change measures source removal at only 1.83 seconds:
+construction/install reaches 245.36, removal 247.19 and packaged admission
+253.77. Fresh completes in 18.03; the same combined wall still interrupts
+resume. Source disposal is not established as the remaining bottleneck.
+
+Correct the newly introduced test's budget composition rather than repeatedly
+rerunning or raising its number. The pre-existing admission case remains
+300 seconds. Require application construction/install, source removal and
+packaged admission within that same 300-second phase; run the unchanged
+complete native consumer in a separately caller-owned child with its existing
+180-second ceiling. Bound the composed case at 480 seconds and retain the
+600-second plugin aggregate, native startup limits and exact lifecycle cleanup.
+This is an explicit test-design correction based on measured phases, not a
+combined 300-second qualification or a relaxed production requirement. Keep
+functional and readiness/performance evidence separate in the parent.
+
+The composed capture passes in 250.29 seconds (324.80 including runner
+preparation/cleanup). Packaged admission finishes at 213.89 seconds, inside
+its 300-second construction boundary. The separately contained consumer
+completes fresh in 18.89 seconds and resume in 12.44, inside its unchanged
+180-second ceiling, with all admitted lifecycle instances settled.
+This proves the actual installed execution owner and embedded core, not the
+public Worktrees command, Manager application pairing, desktop attachment or
+survival after all caller cleanup Jobs. Those parent items remain open.
+
+Remove the experimental parallel source deletion: its measured cost did not
+establish it as the bottleneck, and the simpler exact serial removal retains
+the source-independence assertion. Keep phase/leg timing and run the original
+admission control against that final fixture. No production code, runtime
+deadline, service installation or shared settings changed.
+
+The original admission control passes against the final serial-removal
+fixture in 250.34 seconds (322.83 including runner preparation/cleanup);
+source removal takes 1.51 seconds and packaged admission finishes at 250.30.
+This covers the last cleanup-only fixture simplification without repeating
+the unchanged native consumer. Focused Python lint and the 13-plugin
+install-contract gate pass. Both application cases remain explicitly selected,
+outside required unit-only CI. The native installed flow is the real consumer
+and clean first-touch tier; no productive desktop or external venue is used,
+and those broader adoption/lifetime obligations remain in the parent plan.
+
+Review identifies a release-layout omission in the fixture copy: an already
+materialized checkout has local `libs` references that the escaping-reference
+materializer cannot recreate. Preserve that existing directory in the same
+copy helper. A focused regression constructs that layout, copies it, invokes
+the real materializer/resolver and reads the resolved module bytes; it passes
+in 0.72 seconds (77.19 including runner preparation/cleanup). The development
+checkout has no pre-existing local `libs`, so this addition leaves its already
+qualified construction/native path unchanged. Refresh final-head review and
+CI rather than treating the earlier High finding as advisory.

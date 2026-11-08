@@ -199,6 +199,36 @@ def test_source_bound_bind_is_idempotent_but_new_source_opens_interval(record_pa
     assert record_path.read_bytes() == before
 
 
+def test_retained_writer_attaches_only_to_the_open_identified_activation(
+    record_path, monkeypatch,
+):
+    from agent_worktrees import retained_record_writer, tracking_session_deregistration_write
+
+    args = {
+        "worktree_id": "wt-reg", "yaml_path": str(record_path),
+        "session_id": "sess-1", "source": "bind", "started_at": "first",
+        "source_identity": "native:first",
+    }
+    assert tracking_session_registration_write.apply_session_register(args)["ok"]
+    retained = {**args, "source_identity": None, "started_at": "resume", "pid": 4242}
+    assert tracking_session_registration_write.apply_session_register(retained)["error"] == "lifecycle"
+
+    monkeypatch.setattr(retained_record_writer, "active", lambda: True)
+    assert tracking_session_registration_write.apply_session_register(retained)["ok"]
+    entry = tracking.load_record(record_path).session_entry("sess-1")
+    assert [(item.source_identity, item.ended_at) for item in entry.activations] == [
+        ("native:first", None),
+    ]
+    assert entry.pid == 4242
+
+    assert tracking_session_deregistration_write.apply_session_deregister({
+        **args, "ended_at": "exit", "end_reason": "user_exit",
+    })["lifecycle"] == "ended"
+    before = record_path.read_bytes()
+    assert tracking_session_registration_write.apply_session_register(retained)["error"] == "lifecycle"
+    assert record_path.read_bytes() == before
+
+
 def test_source_registration_reactivates_claim_after_old_end(record_path):
     from agent_worktrees import obligations, tracking_session_deregistration_write
 
