@@ -127,6 +127,8 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
   without provisioning, activation or projected-task authority bypass.
 - [x] Prove capability-selected telemetry adoption with accepted-input
   revalidation at the producer's write boundary, preserving custom sinks.
+- [x] Prove configured local-replica preference exchange through the normal
+  CLI and existing transaction, without claiming selected-provider delivery.
 - [ ] Extend the existing Agent Machines configuration owner to publish and
   receive explicitly supported nonsecret core preferences through the selected
   carrier, not through the health-record parser.
@@ -788,3 +790,21 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   open; this is a source slice, not completion of Phase 4 or the parent effort.
 - Documentation, Ruff, installation contracts and whitespace passed.
   Required exact-source CI, review and source merge still gate this slice.
+
+### 2026-11-07 - Local carrier source merged; qualification remains open
+- #11438 merged as `515275f8507609fd48a27dcaae5bf7dcffa36fdb`
+  after actual current-head Copilot approval with no findings and green
+  required checks. The published description preserved source attribution
+  and contained no closing reference to #10928 or the parent #10873.
+- Completed only the new local-replica source checkpoint. The selected
+  provider's actual publication, synchronization and peer receipt remain
+  unqualified. Receiving preferences still does not apply them; native
+  maintenance/venue adoption, other domain observations, diagnosis, scheduling
+  and platform/installed validation remain open.
+- The earlier source and adopter PR claims are terminal. The retained source
+  and controller worktrees still own the active parent effort and its
+  configuration-only scope. No updater, carrier write, schedule enrollment
+  or service activation occurred.
+- Next source work is native maintenance-preference preview, using the existing
+  resource/authority owner without turning `automatic` data into execution
+  consent. The existing independent live-carrier and activation holds remain.
