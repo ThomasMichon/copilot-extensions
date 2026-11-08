@@ -38,6 +38,7 @@ observation. For each agent record:
 | Open questions | Each pending question's age, recommended default, revisit time and concurrent activity | A question has no default or no revisit time, outlives its revisit time, or the agent has no tool activity while it is open |
 | Open obligations | Approved-but-unmerged PRs, unanswered change requests, unconsumed handoffs, unpushed commits | An obligation has no recorded owner action for longer than the charter allows |
 | Repeated state | Diagnosis, command, verdict and head across observations | The same diagnosis, command or verdict recurs on unchanged input |
+| Turn end after failure | The last result before the agent went idle | The turn ended on a reported failure with no diagnosis, next step, recorded default or handoff; a reported failure does not finish the turn |
 | Prerequisite growth | New prerequisites, child PRs and detours against the parent criterion | A new prerequisite names no failed parent boundary, or depth exceeds the charter's limit |
 | Budget changes | Timeouts, caps, retry and visit limits | The agent raised its own limit, or asks to raise one without a measurement |
 | Validation weight | Validation time and selection against change size and risk | Validation time exceeds the charter's proportionality budget for a small, low-risk change |
@@ -77,6 +78,10 @@ one changed next action, one observable exit.
   larger limit. The original acceptance deadline stays the bar.
 - **Heavy validation of trivial work.** Steer: run the smallest affected
   selection once per code state; keep any genuinely required gate.
+- **Reported failure ends the turn.** Steer: a reported failure does not
+  finish the turn; diagnose the literal failure within scope, take the next
+  discriminating step or a recorded default, or hand off with the failure
+  named.
 - **Superseded agent never told.** Steer the successor or scope owner to tell
   the predecessor and release its overlapping task, claims and watches through
   their owners, following the review role's
