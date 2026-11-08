@@ -424,7 +424,8 @@ jobs:
           $root = Join-Path $env:RUNNER_TEMP 'resume-psmux'
           $null = New-Item -ItemType Directory -Path $root
           $archive = Join-Path $root 'psmux.zip'
-          Invoke-WebRequest -Uri 'https://github.com/psmux/psmux/releases/download/v3.3.8/psmux-v3.3.8-windows-x64.zip' -OutFile $archive
+          curl.exe --fail --location --retry 2 --retry-delay 2 --max-time 30 --retry-max-time 90 --output "$archive" 'https://github.com/psmux/psmux/releases/download/v3.3.8/psmux-v3.3.8-windows-x64.zip'
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned PSMux download failed' }
           if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne '1ad127ba937194a890b933a73d9b023e297bd73dc742abd841bf159984c2effe') {
             throw 'Pinned PSMux archive digest mismatch'
           }

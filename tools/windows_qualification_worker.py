@@ -264,8 +264,14 @@ def execute(root: Path, value: dict, output: Path) -> dict:
                 "--candidate", str(root), "--output", str(output),
             ], 720, allow_empty=True))
         elif native:
+            def prepare_native():
+                preparation = os.environ.get("WINDOWS_QUALIFICATION_NATIVE_PREPARATION", "success")
+                if preparation != "success":
+                    status = preparation if preparation in {"failure", "cancelled", "skipped"} else "unknown"
+                    raise ValueError(f"Pinned native prerequisite acquisition did not succeed ({status})")
+                return native_prerequisites(owned)
             result["native_prerequisites"] = phase(
-                "native-prerequisites", lambda: native_prerequisites(owned),
+                "native-prerequisites", prepare_native,
             )
             phase("native-worktrees-public-caller", lambda: owned(native_command(root, output), 1800))
         else:
