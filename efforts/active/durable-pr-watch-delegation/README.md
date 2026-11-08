@@ -993,6 +993,29 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-11-08 - Qualify the paired-read candidate through the focused Windows lane
+
+- #11231 retains bounded concurrent fresh target/predecessor reads only after
+  the private journal matches its guarded current document. Both reads finish
+  before the action, including on failure. Existing nested SDK validation
+  scopes remain serial to preserve their shared changed-file observations.
+  Thirteen focused boundary cases pass across the original and residual
+  selections; no cached authority or expanded deadline was introduced.
+- The original local lifecycle remains unqualified. Phase output now preserves
+  its first failure before cleanup can obscure it; the latest run exceeded
+  120 seconds during committed-owner health at first startup, then completed
+  governed cleanup. Earlier successful startup runs do not establish reliable
+  whole-lifecycle acceptance.
+- The operator approved a progress-based source fix/retest loop through the
+  existing owner-only `windows-qualification.yml`, selecting the original
+  normal-payload lifecycle case and stopping when it passes. Preserve the
+  original test/cutover/cleanup clocks, committed source identity, request/run
+  evidence and the lane's protected-controller and append-only transport rules.
+  Unchanged or unobserved attempts are not progress.
+- Hosted source evidence does not replace local installed-owner acceptance.
+  Source review, CI, promotion, authorized rollout and all parent delegation,
+  provider and retained-resource gates remain outstanding.
+
 ### 2026-11-07 - Pass first startup and isolate the remaining upgrade race
 
 - #11231 now composes freshly validated journal target/instance evidence within

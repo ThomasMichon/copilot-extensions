@@ -599,8 +599,12 @@ instances, prior marker/manifest/route bytes and the completed target separately
 from ZDD's breadcrumb. Journal writes require custody of the installation's
 canonical guard, including inside borrowed orchestrator callbacks.
 Journal reads return their freshly validated target and instances for that
-action, without retaining them as authority for a later read. Manifest
-publication revalidates before and after the write while its metadata locks
+action, without retaining them as authority for a later read. An owned journal
+must still match its guarded document before two distinct runtime reads may
+overlap; both finish, including on failure, before the action proceeds.
+An existing canonical validation scope keeps serial reads and its shared
+changed-file observations. Manifest publication revalidates before and after
+the write while its metadata locks
 remain held; archive validation follows the actual archive read.
 Recorded drain/release/read-ready phases authorize bounded control intent; they are not
 proof that control or native writer transfer succeeded. Commit requires coherent

@@ -22,7 +22,7 @@ from .watch_installation import PLUGIN_ID, WatchInstallation
 from .watch_custody import endpoint_tuple, endpoint_value, read_launch, require_absent
 from .watch_exit import observe_cleanup_exit, observe_exit, record_exit
 from .watch_private import confirm_private, require_private, write_private
-from .watch_runtime import WatchInstance, WatchRuntime, native_start_time
+from .watch_runtime import WatchInstance, WatchRuntime, capture_completed_pair, native_start_time
 from .watch_rollback import require_rollback_selection, restore_route, validate_restoration
 
 _FILE = "watch-owner-transaction.json"
@@ -218,6 +218,7 @@ def _read_identity(
 
 def _read_evidence(
     installation: WatchInstallation, *, environment: Mapping[str, str] | None,
+    expected_document: dict | None = None,
 ) -> tuple[dict, WatchRuntime, dict[str, WatchInstance]]:
     installation.read_identity(environment=environment)
     raw = _private_bytes(installation.run_root / _FILE)
@@ -226,11 +227,17 @@ def _read_evidence(
     document = _json_object(raw)
     if document.get("installation") != installation.evidence():
         raise PermissionError("watch owner transaction binding or phase is invalid")
-    return _validate_document(installation, document, environment=environment)
+    if expected_document is not None and document != expected_document:
+        raise PermissionError("watch owner journal changed; reconcile before continuing")
+    return _validate_document(
+        installation, document, environment=environment,
+        concurrent_runtimes=expected_document is not None,
+    )
 
 
 def _validate_document(
     installation: WatchInstallation, document: dict, *, environment: Mapping[str, str] | None,
+    concurrent_runtimes: bool = False,
 ) -> tuple[dict, WatchRuntime, dict[str, WatchInstance]]:
     if set(document) != {
         "schema", "transactionId", "authorization", "installation", "phase", "revision",
@@ -267,9 +274,15 @@ def _validate_document(
         or any(char not in "0123456789abcdef" for char in authorization)
     ):
         raise ValueError("watch owner transaction authorization is invalid")
-    target = WatchRuntime.from_identity_evidence(
-        document["target"], installation, environment=environment,
-    )
+    predecessor = None
+    if concurrent_runtimes:
+        target, predecessor = capture_completed_pair(
+            document["target"], document["predecessor"], installation, environment=environment,
+        )
+    else:
+        target = WatchRuntime.from_identity_evidence(
+            document["target"], installation, environment=environment,
+        )
     _manifest(bytes.fromhex(document["targetManifest"]), target)
     instances = {}
     for role in ("predecessor", "successor"):
@@ -289,7 +302,7 @@ def _validate_document(
                 if instance.evidence() != value:
                     raise PermissionError("watch successor does not match the completed target")
             else:
-                instance = WatchInstance.from_identity_evidence(
+                instance = predecessor or WatchInstance.from_identity_evidence(
                     document[role], installation, environment=environment,
                 )
             instances[role] = instance
@@ -608,7 +621,9 @@ class WatchJournal:
     def _current_evidence(self) -> tuple[dict, WatchRuntime, dict[str, WatchInstance]]:
         self.installation.require_current(environment=self.environment)
         self._guard()
-        evidence = _read_evidence(self.installation, environment=self.environment)
+        evidence = _read_evidence(
+            self.installation, environment=self.environment, expected_document=self._document,
+        )
         if evidence[0] != self._document:
             raise PermissionError("watch owner journal changed; reconcile before continuing")
         return evidence

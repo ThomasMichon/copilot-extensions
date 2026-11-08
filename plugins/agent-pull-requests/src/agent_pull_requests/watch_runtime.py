@@ -187,6 +187,38 @@ def native_start_time(pid: int) -> str | None:
     return token
 
 
+def capture_completed_pair(
+    target: object, predecessor: object, installation: WatchInstallation, *,
+    environment: Mapping[str, str] | None = None,
+) -> tuple[WatchRuntime, WatchInstance | None]:
+    """Join independent fresh build reads; neither result grants control."""
+    from concurrent.futures import ThreadPoolExecutor
+    from contextvars import copy_context
+
+    prior_runtime = (
+        {key: value for key, value in predecessor.items()
+         if key not in {"pid", "startTime", "instanceId"}}
+        if isinstance(predecessor, dict) else None
+    )
+    if (
+        prior_runtime is None or prior_runtime == target
+        or api._VALIDATION_SCOPE_DEPTH.get()
+    ):
+        return WatchRuntime.from_identity_evidence(
+            target, installation, environment=environment,
+        ), None
+    with ThreadPoolExecutor(max_workers=2) as readers:
+        target_read = readers.submit(
+            copy_context().run, WatchRuntime.from_identity_evidence,
+            target, installation, environment=environment,
+        )
+        predecessor_read = readers.submit(
+            copy_context().run, WatchInstance.from_identity_evidence,
+            predecessor, installation, environment=environment,
+        )
+        return target_read.result(), predecessor_read.result()
+
+
 @dataclass(frozen=True)
 class WatchInstance:
     """Expected identity obtained from an attributable launch or owner journal.
