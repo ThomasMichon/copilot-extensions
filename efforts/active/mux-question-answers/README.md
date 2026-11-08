@@ -340,3 +340,15 @@ runtime remediation, elevated operation or destructive cleanup is authorized.
 - Return #11467 to normal review and required CI, then continue release and
   the authorized adopter proofs. Existing sessions and lossy older mux
   servers were neither restarted nor upgraded for qualification.
+
+### 2026-11-07 - Required unit admission correction
+
+- The final qualified head received approval, but required unit CI refused
+  before execution: two admitted parser/test source hashes still described
+  the earlier bytes.
+- Updated only those two hashes for the reviewed actor-free module and tests.
+  Node inventory, coverage targets and budgets are unchanged. The unit
+  manifest is outside the canonical capture's input closure; no production
+  behavior or qualified capture input changed.
+- Require the corrected current head's actual unit execution and normal review
+  before merge. An earlier approval or the unchanged capture is not a CI waiver.
