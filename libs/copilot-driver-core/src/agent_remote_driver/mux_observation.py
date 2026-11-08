@@ -18,12 +18,12 @@ from agent_remote_driver.mux_observation_types import Observation, ObservationUn
 CONTRACT = "copilot-driver.mux-observation"
 VERSION = 1
 _LIMIT = 256 * 1024
-_QUERY = (
+_QUERIES = tuple(query.encode("ascii") for query in (
     'list-panes -s -F "P\t#{session_name}\t#{session_id}:#{session_created}'
-    '\t#{pane_id}\t#{pane_dead}\t#{pane_active}\t#{pane_current_path}" ; '
-    'list-clients -F "C\t#{session_name}" ; '
-    'display-message -p "I\t#{session_name}\t#{session_id}:#{session_created}"\n'
-).encode("ascii")
+    '\t#{pane_id}\t#{pane_dead}\t#{pane_active}\t#{pane_current_path}"\n',
+    'list-clients -F "C\t#{session_name}"\n',
+    'display-message -p "I\t#{session_name}\t#{session_id}:#{session_created}"\n',
+))
 
 
 def _data_dir() -> Path:
@@ -73,24 +73,27 @@ def _remaining(deadline: float) -> float:
 
 def _exchange(port: int, key: str, deadline: float) -> str:
     scheme = "AU" + "TH "
-    request = (scheme + key + "\n").encode("utf-8") + _QUERY
-    with socket.create_connection(("127.0.0.1", port), timeout=_remaining(deadline)) as stream:
-        stream.settimeout(_remaining(deadline))
-        stream.sendall(request)
-        chunks = bytearray()
-        while True:
+    output = bytearray()
+    # Older providers accept only one command on each authenticated connection.
+    for query in _QUERIES:
+        request = (scheme + key + "\n").encode("utf-8") + query
+        with socket.create_connection(("127.0.0.1", port), timeout=_remaining(deadline)) as stream:
             stream.settimeout(_remaining(deadline))
-            block = stream.recv(min(16384, _LIMIT + 1 - len(chunks)))
-            if not block:
-                break
-            chunks.extend(block)
-            if len(chunks) > _LIMIT:
-                raise ValueError("Oversized native observation")
-    text = chunks.decode("utf-8").replace("\r\n", "\n")
-    ack, separator, body = text.partition("\n")
-    if not separator or ack != "OK":
-        raise ValueError("Native authentication was not confirmed")
-    return body
+            stream.sendall(request)
+            chunks = bytearray()
+            while True:
+                stream.settimeout(_remaining(deadline))
+                block = stream.recv(min(16384, _LIMIT + 1 - len(output) - len(chunks)))
+                if not block:
+                    break
+                chunks.extend(block)
+                if len(output) + len(chunks) > _LIMIT:
+                    raise ValueError("Oversized native observation")
+        ack, separator, body = chunks.partition(b"\n")
+        if not separator or ack.removesuffix(b"\r") != b"OK":
+            raise ValueError("Native authentication was not confirmed")
+        output.extend(body)
+    return output.decode("utf-8").replace("\r\n", "\n")
 
 
 def _parse(body: str, session: str) -> Observation:

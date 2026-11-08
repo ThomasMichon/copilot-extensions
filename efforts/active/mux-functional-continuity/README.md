@@ -151,6 +151,22 @@ implementation proof obligations, not claims that native qualification passed.
 
 ## Journal
 
+### 2026-11-08 - Resume existing PR and resolve legacy framing
+
+- Resumed existing-PR stewardship. Exact candidate `d3ba7acc2c` again passed
+  PSMux 3.4.0; PSMux 3.3.8 consistently returned only pane rows across the
+  existing first-client wait. Failure diagnostics rejected the transient-read
+  hypothesis: its compound request did not return client or final identity
+  replies.
+- Split the three fixed read-only queries across separate authenticated
+  connections, retaining one deadline, aggregate byte cap, final incarnation
+  fence and unchanged rendezvous checks. This corrects the observed framing
+  mismatch rather than weakening unknown or extending the acceptance budget.
+- Focused contained wire checks passed 24 cases, including a one-command
+  endpoint, shared deadline and authentication refusal on a later reply.
+  The shipped Manager finite-consumer checks passed five cases. Exact-source
+  native qualification and review remain required before merge.
+
 ### 2026-11-08 - Current-provider flow qualified; older-provider gate retained
 
 - Candidate `942592ce88` passed all eight native PSMux 3.4.0 consumer cases

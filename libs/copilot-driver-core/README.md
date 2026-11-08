@@ -53,14 +53,18 @@ admission. This finite operation does not wait for Copilot to exit.
 `agent_remote_driver.mux_observation` owns native PSMux reads for Driver
 creation, Worktrees presence/listing and Manager discovery/client counts.
 It reads the provider's port/key rendezvous and sends only bounded,
-authenticated `list-panes`/`list-clients` queries over loopback. It never
-executes PSMux, repairs registrations or starts a background observer.
-Fresh responses must identify the requested session and one incarnation.
+authenticated `list-panes`/`list-clients` queries and a final read-only
+`display-message` identity fence over loopback. Each command uses its own
+authenticated connection for providers that accept only one command per
+connection; all three share one deadline and aggregate response-byte cap.
+It never executes PSMux, repairs registrations or starts a background observer.
+Pane and final identity responses must identify the requested session and
+one incarnation; port/key hints must remain unchanged across the reads.
 Missing port/key/session-ID/PID hints alone never establish absence: Driver
 retains the complete native server/PID-birth coverage reader introduced for
 prompted Resume. A missing live-server registration, unsupported process mode
 or changing inventory remains unknown. Listings share one absence-coverage
-snapshot within their finite budget; live positive rows use their own socket.
+snapshot within their finite budget; live positive rows use their own reads.
 Stale, partial, unreadable, changed, malformed or timed-out observations remain unknown.
 Client counts come from client rows, not PSMux's boolean `session_attached`.
 

@@ -28,32 +28,43 @@ def private_native_inventory(monkeypatch):
 
 @contextmanager
 def native_endpoint(root, response, *, delay=0, mutate=None, namespace=""):
+    responses = response if isinstance(response, tuple) else (response, b"OK\n", b"OK\n")
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         listener.listen()
-        listener.settimeout(3)
+        listener.settimeout(.05)
         base = namespace + "__wt-fixture" if namespace else "wt-fixture"
         (root / (base + ".port")).write_text(str(listener.getsockname()[1]), encoding="ascii")
         (root / (base + ".key")).write_text("synthetic-key", encoding="ascii")
         captured = []
         failures = []
+        stop = threading.Event()
 
         def serve():
             try:
-                with listener.accept()[0] as stream:
-                    stream.settimeout(3)
-                    reader = stream.makefile("rb")
-                    captured.append(reader.readline())
-                    captured.append(reader.readline())
-                    if delay:
-                        time.sleep(delay)
-                    try:
-                        stream.sendall(response)
-                    except (BrokenPipeError, ConnectionResetError):
-                        pass
-                    if mutate:
-                        mutate()
-                    reader.close()
+                for index, value in enumerate(responses):
+                    while not stop.is_set():
+                        try:
+                            connection = listener.accept()[0]
+                            break
+                        except TimeoutError:
+                            continue
+                    else:
+                        return
+                    with connection as stream:
+                        stream.settimeout(3)
+                        reader = stream.makefile("rb")
+                        captured.append(reader.readline())
+                        captured.append(reader.readline())
+                        if delay:
+                            time.sleep(delay)
+                        try:
+                            stream.sendall(value)
+                        except (BrokenPipeError, ConnectionResetError):
+                            pass
+                        if mutate and index == len(responses) - 1:
+                            mutate()
+                        reader.close()
             except Exception as exc:
                 failures.append(exc)
 
@@ -62,6 +73,7 @@ def native_endpoint(root, response, *, delay=0, mutate=None, namespace=""):
         try:
             yield captured
         finally:
+            stop.set()
             worker.join(timeout=4)
             assert not worker.is_alive()
             assert not failures
@@ -70,24 +82,23 @@ def native_endpoint(root, response, *, delay=0, mutate=None, namespace=""):
 def test_fresh_authenticated_presence_and_real_client_count_without_cli(tmp_path, monkeypatch):
     monkeypatch.setattr(mux_creation.subprocess, "run", lambda *a, **k: pytest.fail("passive CLI"))
     monkeypatch.setenv("PSMUX_DATA_DIR", str(tmp_path))
-    with native_endpoint(tmp_path, b"OK\n" + _PANE + _CLIENT * 3 + _IDENTITY) as captured:
+    with native_endpoint(
+        tmp_path, (b"OK\n" + _PANE, b"OK\n" + _CLIENT * 3, b"OK\n" + _IDENTITY),
+    ) as captured:
         observed = mux.observe_psmux("wt-fixture")
     assert observed.presence() and observed.clients == 3
     assert observed.incarnation == "$7:100"
     assert observed.panes == (mux.Pane("%2", False, True, "C:\\fixture with spaces"),)
     scheme = b"AU" + b"TH "
-    assert captured[0] == scheme + b"synthetic-key\n"
-    assert captured[1].startswith(b"list-panes ") and b"list-clients " in captured[1]
-    client_query = captured[1].split(b"list-clients ", 1)[1].split(b" ; ", 1)[0]
-    assert client_query == b'-F "C\t#{session_name}"'
-    assert captured[1].endswith(
-        b'display-message -p "I\t#{session_name}\t#{session_id}:#{session_created}"\n'
-    )
+    assert captured[::2] == [scheme + b"synthetic-key\n"] * 3
+    assert captured[1].startswith(b"list-panes ") and b" ; " not in captured[1]
+    assert captured[3] == b'list-clients -F "C\t#{session_name}"\n'
+    assert captured[5] == b'display-message -p "I\t#{session_name}\t#{session_id}:#{session_created}"\n'
     assert (tmp_path / "wt-fixture.key").read_text() == "synthetic-key"
 
 
 def test_zero_clients_is_live_not_absent(tmp_path):
-    with native_endpoint(tmp_path, b"OK\r\n" + _PANE + _IDENTITY):
+    with native_endpoint(tmp_path, (b"OK\r\n" + _PANE, b"OK\n", b"OK\n" + _IDENTITY)):
         observed = mux.observe_psmux("wt-fixture", data_dir=tmp_path)
     assert observed.presence() and observed.clients == 0
 
@@ -187,6 +198,23 @@ def test_timeout_and_changed_rendezvous_preserve_unknown(tmp_path):
     ):
         observed = mux.observe_psmux("wt-fixture", data_dir=tmp_path)
     assert observed.status == "unknown"
+
+
+def test_separate_native_queries_share_one_deadline_and_authenticate_every_reply(tmp_path):
+    replies = (b"OK\n" + _PANE, b"OK\n" + _CLIENT, b"OK\n" + _IDENTITY)
+    started = time.monotonic()
+    with native_endpoint(tmp_path, replies, delay=.04):
+        observed = mux.observe_psmux("wt-fixture", data_dir=tmp_path, timeout=.06)
+    assert observed.status == "unknown" and time.monotonic() - started < 1
+    with native_endpoint(tmp_path, (replies[0], b"ERROR: refused\n", replies[2])):
+        assert mux.observe_psmux("wt-fixture", data_dir=tmp_path).status == "unknown"
+
+
+def test_separate_native_replies_share_one_response_byte_cap(tmp_path, monkeypatch):
+    monkeypatch.setattr(mux, "_LIMIT", 128)
+    replies = (b"OK\n" + _PANE, b"OK\n" + _CLIENT * 6, b"OK\n" + _IDENTITY)
+    with native_endpoint(tmp_path, replies):
+        assert mux.observe_psmux("wt-fixture", data_dir=tmp_path).status == "unknown"
 
 
 def test_creation_check_joins_from_wire_without_native_subprocess(tmp_path, monkeypatch):
