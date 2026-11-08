@@ -151,6 +151,24 @@ implementation proof obligations, not claims that native qualification passed.
 
 ## Journal
 
+### 2026-11-08 - Current-provider flow qualified; older-provider gate retained
+
+- Candidate `942592ce88` passed all eight native PSMux 3.4.0 consumer cases
+  in 77.86 seconds, including cold Open/reattach/listings and both concurrent
+  launch modes. Its required CI passed.
+- PSMux 3.3.8 passed seven cases; cold Open reached pane acknowledgment, then
+  the first immediate socket observation returned unknown. The fixture now
+  waits for the required first client within its existing 40-second bound,
+  retaining the same count/identity assertions and failure diagnostics.
+  This correction has not yet passed native qualification; unknown is not
+  treated as presence.
+- Focused local wire checks passed 23 cases, Manager finite-consumer checks
+  passed five, and the complete daemon census/module-size checks passed.
+- Preserve the draft implementation PR and this active effort. During the
+  operator-directed pause, do not start a completion stretch or another manual
+  native dispatch. Resume with exact-candidate older-provider qualification;
+  required review and merge remain outstanding. No rollout occurred.
+
 ### 2026-11-08 - Native boundary diagnosis
 
 - Disposable PSMux 3.4.0 proved cold Open, same-pane reattach, two independent

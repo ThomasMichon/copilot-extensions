@@ -549,15 +549,15 @@ def test_cold_open_reattach_and_fresh_listings_preserve_other_attachment(
             record_property("cold_open_seconds", time.monotonic() - started)
             original = launch["capture"].read_bytes()
             child = first.pin(json.loads(original.decode("utf-8-sig"))["pid"])
-            observed = observe_psmux(name)
-            assert observed.status == "present", observed
-            incarnation, panes = observed.incarnation, observed.panes
-
             def clients(count):
+                nonlocal observed
                 result = observe_psmux(name)
+                observed = result
                 return result.status == "present" and result.clients == count
 
+            observed = None
             _wait_for(lambda: clients(1), "First attachment was not observed", consoles, [launch])
+            incarnation, panes = observed.incarnation, observed.panes
             started = time.monotonic()
             second = stack.enter_context(Console(
                 launch["argv"], env=launch["env"], cwd=launch["target"],
