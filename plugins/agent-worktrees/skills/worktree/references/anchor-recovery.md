@@ -35,36 +35,46 @@ the index.
 Before changing the anchor, move anything that is not line-ending-only noise
 into a managed worktree:
 
-- **Local commits** (ahead, diverged, or on a detached HEAD): create a managed
+- **Local commits** (ahead, diverged, or on a detached HEAD): first retain the
+  originals under a recovery branch (`git branch recover/<anchor>-<date> HEAD`)
+  so they stay reachable regardless of later steps. Then create a managed
   worktree and `git cherry-pick` them there; worktrees of one clone share the
-  object store. Confirm each commit is now reachable from a branch other than
-  the anchor's default branch (`git branch --contains <sha>`).
-- **Uncommitted content**: write `git diff --binary HEAD` (staged and unstaged)
-  to a scratch patch, copy untracked files, apply both in the new worktree and
-  commit there. Never use `git stash`: the stash is shared by every worktree of
-  the clone.
+  object store. Cherry-picking onto a newer base creates new commit IDs, so
+  verify two things separately: the originals are reachable from the recovery
+  branch (`git branch --contains <original-sha>`), and the managed worktree's
+  replayed commits carry the same content (`git range-diff` or a per-commit
+  `git show --stat` comparison).
+- **Uncommitted content**: export staged and unstaged changes as separate
+  patches -- `git diff --cached --binary` (index vs HEAD) and `git diff --binary`
+  (working tree vs index) -- because a single `git diff HEAD` hides index-only
+  edits that the working tree has undone. Copy untracked files too. In the
+  managed worktree, apply and commit the staged patch first, then apply and
+  commit the unstaged patch, so both versions survive in history. Never use
+  `git stash`: the stash is shared by every worktree of the clone.
 - **A non-default branch** checked out in the anchor is already a named ref;
   switching away loses nothing, but report it so its owner can adopt it.
 
 If another live session may own the anchor's changes, or their purpose is
 unclear, ask the operator before moving anything. Discarding unpreserved work
-always requires operator approval.
+always requires operator approval. When an anchor write guard blocks a step
+here or in step 3, acquire its time-bounded allowance for this single repair
+(for example
+`agent-worktrees repos allow-edits <name> --reason "<why>" --minutes 10`).
 
 ## 3. Restore
 
-When an anchor write guard blocks these commands, acquire its time-bounded
-allowance for this single repair (for example
-`agent-worktrees repos allow-edits <name> --reason "<why>" --minutes 10`).
-
-- **Line-ending-only noise:** restore the affected paths
-  (`git restore -- <paths>`) and record that no content was discarded.
+- **Line-ending-only noise:** restore both the index and working tree of the
+  confirmed paths from HEAD (`git restore --staged --worktree -- <paths>`; a
+  plain `git restore` leaves staged noise in place, as described in
+  `cleanup-details.md`) and record that no content was discarded.
 - **Detached or off-default, now clean:** `git switch <default>`.
 - **Behind only:** `git merge --ff-only <upstream>`.
 - **Ahead or diverged:** a fast-forward cannot fix this -- it reports "Already
-  up to date" or refuses. After step 2 has verified every local commit is
-  preserved elsewhere, realigning the default branch to `<upstream>`
-  (`git reset --hard <upstream>` while on it) removes the anchor's copy of
-  those commits and requires operator approval.
+  up to date" or refuses. After step 2 has retained the originals on a
+  recovery branch and verified the replayed content, realigning the default
+  branch to `<upstream>` (`git reset --hard <upstream>` while on it) requires
+  operator approval. Report the recovery branch so its owner can delete it once
+  the replayed work lands.
 
 Finish by confirming `git status --short --branch` reports
 `## <default>...<upstream>` with no ahead/behind counts and no entries.
