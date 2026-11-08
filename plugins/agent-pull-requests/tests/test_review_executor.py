@@ -237,6 +237,16 @@ def writes(backend):
     return [call for call in backend.calls if call[0] != "GET"]
 
 
+def test_legacy_protected_context_without_native_policy_extension_keeps_original_callback(environment, monkeypatch):
+    from agent_worktrees.providers.azure_owned_review import AdoReviewContext
+
+    monkeypatch.delattr(AdoReviewContext, "check_review")
+    backend = environment[4]
+    assert run(environment)["status"] == "complete"
+    assert backend.policy_calls == ["finding", "finding", "verdict", "verdict"]
+    assert len(writes(backend)) == 2
+
+
 @pytest.mark.parametrize("outcome", ["complete", "policy_refusal", "unknown", "candidate_changed"])
 def test_reused_context_restores_original_policy_after_each_action(environment, outcome):
     store, selected, generation, attachment, backend, _ = environment
