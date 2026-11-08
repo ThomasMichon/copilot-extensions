@@ -469,9 +469,9 @@ An optional Boolean `passive: true` marks a demand-free read: the resident
 answers from its publication but neither renews project scan demand nor wakes
 its producer for an unpublished project, and the feed refuses it. Its
 `projection` adds `freshness: {"refreshed_age_s", "bound_s"}`: the monotonic
-age, measured when the read is served, of this resident's last successful
-publication of the project (`null` before its first publish since election)
-and the bound `max(45s, 3 × monitor interval)`. A missing or overdue refresh
+age, measured when the read is served, of the fact collection behind this
+resident's last successful publication of the project (`null` before its first
+publish since election) and the bound `max(45s, 3 × monitor interval)`. A missing or overdue refresh
 adds `availability.status: stale` unless a publication-failure label is
 already present. Consumers treat a passive roster as current only with a
 proven in-bound freshness; a reply without it (older resident) remains
