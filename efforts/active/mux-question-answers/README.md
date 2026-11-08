@@ -123,6 +123,6 @@ runtime remediation, elevated operation or destructive cleanup is authorized.
 
 ## Journal
 
-- [2026-11-08 - Source qualification and release](journal/2026/11.08%20source-and-release.md):
+- [2026-11-07/08 - Source qualification and release](journal/2026/11.08%20source-and-release.md):
   original 2026-11-07/08 entries, reviewed source and release evidence, and
   the POSIX prerequisite; both installed acceptance gates remain open.
