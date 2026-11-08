@@ -471,7 +471,7 @@ _Agent-recommended design and validation, explicitly selected for review._
 - [x] Adopt canonical graceful-cutover primitives with installer-driven activation, passive health, exact-instance promotion and retirement, and crash-consistent marker/manifest/route recovery (source landed in #7160).
 - [x] Define and enforce one installation-scoped watch-state writer across predecessor drain and successor subscription/delivery adoption; preserve event and registration identities without overlapping live-generation delivery (source landed in #7160).
 - [x] Prove rollback, commit-forward, governance refusal, crash recovery, callback drain, and refusal of lease-only owners without verifiable same-cell ownership on Windows and Linux before landing the cutover prerequisite (exact-head native acceptance `39226209682`).
-- [ ] Land and deploy the governed lifecycle prerequisite as part of PR-owner adoption before enabling installation-cell dispatch delegation. Source landed in #7160 and is released in #7291; complete installed-contract acceptance remains pending.
+- [x] Land and deploy the governed lifecycle prerequisite as part of PR-owner adoption before enabling installation-cell dispatch delegation. Source/release credit remains #7160/#7291. Authorized unified rollout now selects PR-owner `0.3.249-dev1`; four installed-profile cases and exact-source native acceptance `42461516789` pass. macOS retains its tested fail-closed disposition with positive support tracked in #11545. Live delegation activation remains separately authorized.
 
 ### Installation-cell prerequisite
 
@@ -481,7 +481,7 @@ _Agent-recommended prerequisite, explicitly selected by the operator._
 - [x] Adopt the canonical installation-context payload, installer/runtime-resolution and state-root contract in `agent-pull-requests`, preserving supported legacy installs without silent cell-to-legacy fallback (source landed in #7160).
 - [x] Include the PR owner in the generated same-cell peer-launch contract and declare release impact for every generated consumer (source landed in #7160).
 - [x] Prove first installation, upgrade, invalid/foreign receipt refusal, state isolation, actual two-cell PR-owner invocation, and pending watch-subscription recovery using the shipped payload rather than a fabricated sibling contract (exact-head native acceptance `39226209682`).
-- [ ] Land and deploy the adoption prerequisite before enabling installation-cell dispatch delegation. Source landed in #7160 and is released in #7291; keep dispatch delegation inactive until complete installed-contract acceptance clears.
+- [x] Land and deploy the adoption prerequisite before enabling installation-cell dispatch delegation. Source/release credit remains #7160/#7291. Release #11489, authorized unified rollout, installed-profile lifecycle/isolation/refusal and native-account acceptance `42461516789` clear this finite prerequisite. This does not enable live dispatch delegation or complete the broader service/fleet effort.
 
 ### Phase 1 - Review the recovery contract
 
@@ -699,7 +699,7 @@ _Operator-required usage; agent-recommended design, sequencing and validation._
 
 ### Phase 4 - Deploy and close _(agent-recommended)_
 
-- [ ] Confirm promotion of the changed source to the release branch by content, then deploy through the unified update surface. Prerequisite promotion and content are confirmed in #7291. An operator-authorized local unified update installs the PR-owner runtime but exits nonzero on independent construction/profile failures. The dispatch integration source landed in #7714 and is content-confirmed in release #7751 (Dispatch `0.18.41-dev1`, PR-owner `0.3.36-dev1`); authorized rollout and complete isolated installed-contract proof remain open. No new deployed-runtime changes are authorized by the source merge or release.
+- [x] Confirm promotion of the changed source to the release branch by content, then deploy through the unified update surface. Earlier #7291/#7751 and #7714 credit remains intact. Release #11489 is content-verified; the authorized unified updater completes successfully with selected/running Dispatch `0.18.306-dev1` and selected PR-owner `0.3.249-dev1`. All 410 Dispatch production Python files match that release, and installed-profile/native-account PR-owner acceptance passes. Live consumer/delegation activation is not implied by runtime installation or this checkbox.
 - [ ] Exercise the deployed contract in isolated state without interrupting shared coordinators, watch subscriptions, or peer sessions.
 - [ ] Complete the fleet service acceptance in the linked plan on explicitly
   approved capacity, including persistent registration/delivery and the actual
@@ -1186,7 +1186,7 @@ All items below are **agent-recommended** acceptance checks.
   (#7915; synthetic issuer and isolated real TLS/disk, not provider/deployment proof).
 - [x] Integration: real isolated watch owner and coordinator exercise subscribe/prepare/arm/finish, coordinator outage then recovery, duplicate delivery, stale-generation callback, and registration failure without a duplicate wait owner (#7714).
 - [x] Fresh state: the supported first-touch path establishes only the owning plugin's state; two independent subscribers share one PR observation stream and need no per-task waiter process (#7714; installed adoption acceptance remains a separate prerequisite).
-- [x] Platform: bounded callback launch and shutdown/restart behavior pass on Windows and Linux, using existing contained test tooling (exact-head source acceptance `39716960139`; installed native-account proof remains open).
+- [x] Platform: bounded callback launch and shutdown/restart behavior pass on Windows and Linux, using existing contained test tooling (prior source acceptance `39716960139`; current PR-owner installed-profile and exact-release native-account acceptance `42461516789`). macOS has native fail-closed evidence with positive governed support tracked in #11545, not a positive lifecycle claim.
 - [x] Source gates: touched-plugin tests, fatal Python lint, module-size, headless-launch, install-contract, and required CI pass; add a changefile for each runtime plugin changed (#7714; current unit-only required policy, not a claim that the whole periodic portfolio passed).
 - [ ] Live deployment: exercise an existing, authorized PR target with isolated subscriber/coordinator state when available; otherwise record the exact unavailable lane and a named follow-up before closure.
 - [x] Documentation: review the final diff's impact on plugin behavior, failure/retry semantics, fallback, configuration, CLI help, and source-of-truth docs (#7714).
@@ -1227,6 +1227,119 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-08 - Clear the finite installed-owner prerequisite with exact-release native evidence
+
+- The single authorized native run `42461516789` completes successfully at
+  `c310f4b4c2d09b8cf352d4ab29477904a8f2582b`, whose tree is identical to
+  release #11489 and the locally tested PR-owner `0.3.249-dev1` payload.
+  All 15 selected jobs pass; 68 unrelated workflow entries are skipped.
+- Retained logs account for 116 passing tests. Linux's seven skips are five
+  unavailable Windows PowerShell wrapper cases and two Windows window/focus
+  controls, all of which pass on Windows. Core native-account upgrade,
+  two shipped cells, peer roundtrip and both lease-only refusals pass on both
+  OSes with native home/profile equality and fresh-state checks.
+- Controller-death boundaries pass 17 cases per OS and concurrent upgrade
+  passes one per OS. Original case, cleanup, containment and job budgets
+  remain unchanged. Together with four passing installed-profile cases and
+  independent local exact-exit readbacks, this closes the finite #6286
+  installation/lifecycle prerequisite, not the whole #6007/#7188 objective.
+- Native macOS startup refuses unsupported owner birth evidence before
+  control, signal, spawn or state publication; absent-owner stop is bounded.
+  Positive governed macOS identity, cleanup and recovery remain explicitly
+  tracked in #11545. This is the declared fail-closed disposition, not a
+  positive macOS operation or an unverified-signaling exemption.
+- Authorized runtime readback confirms Dispatch `0.18.306-dev1` selected and
+  running, with all 410 production Python files matching the same release.
+  PR-owner selection remains `0.3.249-dev1`. Next, exercise the deployed
+  consumer contract in isolated state while preserving credentials and every
+  shared-service, fleet, resource and live-activation authority boundary.
+
+### 2026-11-08 - Qualify installed lease-only refusal before native-account acceptance
+
+- Both installed `0.3.249-dev1` normal-payload lease-only variants pass:
+  reachable and unreachable endpoint cases, zero skips, 266.25 seconds,
+  within unchanged 600-second case and 1200-second containment bounds.
+  The original owner receives no installer control, no successor starts,
+  and selected metadata, routes and pending state remain unchanged.
+- Each test then gracefully stops only its exact original owner. Independent
+  non-signaling native readback confirms both originals exited.
+- Together with the original upgrade/restart scenario and two-cell isolation,
+  all four selected installed-profile cases pass. These are not fresh native
+  OS-account or shared-consumer results; both installed prerequisite gates
+  remain open for complete acceptance.
+- The existing native-account workflow can exercise Linux/Windows owner
+  scenarios and boundary cases plus macOS fail-closed behavior on disposable
+  hosted runners. Its existing release branch still names the exact qualified
+  candidate whose tree matches the locally installed release. No current
+  native run covers that release, and the earlier focused hosted grant has
+  completed. A new hosted dispatch requires separate operator authorization;
+  no new dispatch, deployment, source publication or resource release occurred.
+
+### 2026-11-08 - Qualify two independently installed PR-owner cells
+
+- The installed `0.3.249-dev1` payload's original two-normal-cell scenario
+  passes: one test, zero skips, 683.00 seconds, within its unchanged
+  1140-second test and 1200-second containment bounds.
+- Both cells use normal payload installation and invocation. State,
+  registration identities and endpoints remain separate. Foreign-context
+  reads, stop/restart/install requests and cross-cell owner-control requests
+  refuse without changing journals, routes, subscriptions or the other owner.
+  Stopping the first cell leaves the second healthy.
+- Governed cleanup passes; independent non-signaling native readback confirms
+  both exact owners exited. This is installed-payload isolated-profile
+  evidence, not native-account, shared-service, fleet or delegation activation.
+- The installed normal-payload lease-only refusal variants are qualified
+  above. Native-account acceptance remains distinct; the complete parent
+  remains active.
+
+### 2026-11-08 - Verify the released validation improvement before installed adoption
+
+- Normal promotion `42441823658` passed its frozen-candidate, source-unit,
+  Windows Resume, artifact, attestation, publication and exact-candidate merge
+  gates. Release #11489 merged at
+  `d4d48c0ea6bef6c283b221a05311058cd9956749`. All 64 production Python files
+  changed by #11472 match the admitted source byte-for-byte in that release.
+- The release stamps PR-owner `0.3.249-dev1`, Bridge `0.9.364-dev1` and
+  Worktrees `1.25.26-dev1`. The separate #11153 acquisition migration repair
+  remains present alongside the later schema migration.
+- The authorized local unified update completed successfully through its
+  existing serialized execution owner. Current payload/selection readback
+  confirms the versions above; Bridge and Worktrees also report those running
+  versions. All 16 changed PR-owner production/test files match release bytes.
+- The installed payload's original normal lifecycle scenario passes: one test,
+  zero skips, 707.63 seconds including governed cleanup. First owner startup
+  completes in 108.04 seconds. Live upgrade, same-version restart, pending
+  subscriptions, immutable history/completion and obsolete-process exits pass
+  within the original scenario, owner, cleanup and containment limits.
+  Independent non-signaling readback confirms both final transaction processes
+  exited. #11231 is closed with that finite installed-profile evidence.
+- The first fixture failed before owner startup because a 272-character build
+  working directory exceeds native Windows process-launch support. A
+  launch-only control reproduces that refusal; the accepted fresh fixture
+  uses 243 characters without changing the shipped test or payload.
+- The separate two-normal-cell contract is qualified above. This is not
+  native-account, shared-service or delegation activation proof. #6007 and the
+  broader installed, provider, fleet and retained-resource outcomes remain open.
+
+### 2026-11-08 - Repair Source workflow context and resume release qualification
+
+- The normal Dev push exposed a workflow compilation failure before execution:
+  the installed Manager job used `runner.temp` in job-level environment,
+  where that context is unavailable. #11484 moves the unchanged acceptance
+  directory into an early runner step and retains the native gate, receipt
+  requirements, permissions and budgets. All 37 focused workflow controls,
+  actual PowerShell environment handoff, fatal lint and required CI pass.
+- #11484 merged at `5e0fe365335305d51c87b3b3b5b668a83db9251f`
+  after exact-head Copilot approval `5816295430` with no open issues and
+  required CI `42441608996` passed. This is Source repair, not independently
+  governed Main controller activation or a new native qualification claim.
+- The normal promotion run `42441823658` admits source
+  `57952d35f1d98800bf8b4980d29a3d7007dbd741`, including #11472. Its
+  frozen-candidate, unit, Windows Resume and artifact validation must finish
+  before release content and authorized local adoption can be qualified.
+  The parent installed, service, provider and retained-resource outcomes remain
+  open; no operational hold or custody boundary is released.
 
 ### 2026-11-08 - Merge the qualified fresh-validation source improvement
 
