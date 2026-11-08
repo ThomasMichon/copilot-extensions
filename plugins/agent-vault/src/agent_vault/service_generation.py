@@ -17,6 +17,7 @@ from typing import Any
 
 from single_instance_lease import AlreadyRunningError, SingleInstance
 from single_instance_lease.supersession import pid_alive as _pid_exists
+from agent_procutil._daemon_instance_identity import runtime_slot_paths
 
 from . import __version__
 from .config import home_dir, installation_id
@@ -57,7 +58,8 @@ def slot_generation(slot: Path) -> str:
     return value if re.fullmatch(r"[0-9a-f]{32}", value) else slot.name
 
 
-PROCESS_SLOT = Path(sys.prefix).resolve()
+_PROCESS_LAYOUT = runtime_slot_paths(Path(sys.prefix).resolve())
+PROCESS_SLOT = Path(_PROCESS_LAYOUT[1]) if _PROCESS_LAYOUT else Path(sys.prefix).resolve()
 PROCESS_GENERATION = (
     slot_generation(PROCESS_SLOT) if PROCESS_SLOT.parent.name == "versions" else __version__
 )
