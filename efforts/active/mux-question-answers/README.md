@@ -325,3 +325,18 @@ runtime remediation, elevated operation or destructive cleanup is authorized.
   on its own Git invocations. No shared temporary directory or global
   configuration was changed. Finish fresh canonical qualification before
   treating this as a resolved release gate.
+
+### 2026-11-07 - Final native correction qualified
+
+- Source-pinned run 42444640526 passed all 319 current cases, independent
+  no-write verification, every historical guard, canonical validation and
+  export on its first attempt. The historical deadline was not increased.
+- The native publication owner materialized all 157 current outputs.
+  Independent local validation passed two contracts and 1,068 fixtures.
+- Delayed real Windows option/Other answers and same-conversation continuation
+  passed. Read-only checks on both platforms also matched the actual selected
+  Worktrees native-process binding to canonical mux targets and captures.
+  These are source/transport checks, not installed answer claims.
+- Return #11467 to normal review and required CI, then continue release and
+  the authorized adopter proofs. Existing sessions and lossy older mux
+  servers were neither restarted nor upgraded for qualification.
