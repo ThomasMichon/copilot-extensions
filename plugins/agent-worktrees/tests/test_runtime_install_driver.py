@@ -136,6 +136,31 @@ def test_first_use_does_not_drain_an_existing_pending_request(adapter, tmp_path,
     assert [(item.id, item.state) for item in core.status(root=root)] == [(request.id, "pending")]
 
 
+def test_first_use_retries_a_concurrent_enqueue_without_replaying_it(adapter, tmp_path, monkeypatch, capsys):
+    root = tmp_path / "driver"
+    original_enqueue = core.enqueue
+    peer = []
+
+    def enqueue(spec, *, runner, root=None, **options):
+        if options.get("_exclusive_custody") is not None:
+            peer.append(original_enqueue(
+                core.RequestSpec("fixture", cwd=str(tmp_path)),
+                runner=core.TrustedRunner((sys.executable, "-c", "raise SystemExit(4)"), str(tmp_path)),
+                root=root,
+            ))
+        return original_enqueue(spec, runner=runner, root=root, **options)
+
+    monkeypatch.setattr(core, "enqueue", enqueue)
+    monkeypatch.setattr(adapter, "_admission_digest", lambda _args: "a" * 64)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", raising=False)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_RUNTIME_PUBLICATION", raising=False)
+    result = adapter._foreground(_arguments(tmp_path, action="stamp", fail_if_busy=True), core)
+    assert result == 75
+    assert "::agent-worktrees-driver-busy::" in capsys.readouterr().err
+    assert len(peer) == 1
+    assert [(item.id, item.state) for item in core.status(root=root)] == [(peer[0].id, "pending")]
+
+
 def test_first_use_reports_an_unsettled_queue_without_retrying(adapter, tmp_path, monkeypatch):
     import sqlite3
     from contextlib import closing

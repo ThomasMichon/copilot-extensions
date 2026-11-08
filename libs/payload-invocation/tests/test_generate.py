@@ -1188,8 +1188,9 @@ def test_worktrees_composed_status_revalidates_changed_receipt(tmp_path: Path, h
 @pytest.mark.skipif(os.name != "nt", reason="Windows provision file-lock sharing")
 @pytest.mark.parametrize("host", NATIVE_POWERSHELL_HOSTS or [None])
 @pytest.mark.parametrize("branch", ["locked-fast", "provisioned"])
+@pytest.mark.parametrize("prior_flags", [False, True])
 def test_worktrees_releases_provision_lock_before_runtime_dispatch(
-    tmp_path: Path, host: str, branch: str,
+    tmp_path: Path, host: str, branch: str, prior_flags: bool,
 ) -> None:
     if host is None:
         pytest.skip("PowerShell is unavailable")
@@ -1228,9 +1229,12 @@ def test_worktrees_releases_provision_lock_before_runtime_dispatch(
     package.mkdir(parents=True)
     (package / "__init__.py").write_text("", encoding="utf-8")
     (package / "__main__.py").write_text(
-        "import os\nfrom pathlib import Path\n"
+        "import json, os\nfrom pathlib import Path\n"
         "with (Path(os.environ['AGENT_RT_ROOT']) / '.provision.lock').open('r+b'):\n"
-        "    print('lock-released')\n", encoding="utf-8",
+        "    print(json.dumps({'lock': 'released', 'flags': ["
+        "os.environ.get('AGENT_WORKTREES_FIRST_USE_NO_WAIT'), "
+        "os.environ.get('AGENT_WORKTREES_FIRST_USE_EXPECTED_SNAPSHOT')]}))\n",
+        encoding="utf-8",
     )
     environment = _agent_worktrees_test_environment(home, payload)
     environment.update({
@@ -1238,6 +1242,13 @@ def test_worktrees_releases_provision_lock_before_runtime_dispatch(
         "COPILOT_EXTENSIONS_BOOT_TRACE": "1",
         "TEST_STATUS_CALLERS": str(status_callers),
     })
+    for key in ("AGENT_WORKTREES_FIRST_USE_NO_WAIT", "AGENT_WORKTREES_FIRST_USE_EXPECTED_SNAPSHOT"):
+        environment.pop(key, None)
+    if prior_flags:
+        environment.update({
+            "AGENT_WORKTREES_FIRST_USE_NO_WAIT": "prior-mode",
+            "AGENT_WORKTREES_FIRST_USE_EXPECTED_SNAPSHOT": "prior-snapshot",
+        })
     result = subprocess.run(
         [host, "-NoProfile", "-File", str(payload / "bin" / "payload" / "agent-worktrees.ps1"),
          "--version"],
@@ -1245,7 +1256,9 @@ def test_worktrees_releases_provision_lock_before_runtime_dispatch(
         creationflags=cast(Any, subprocess).CREATE_NO_WINDOW,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "lock-released"
+    assert json.loads(result.stdout.strip()) == {
+        "lock": "released", "flags": ["prior-mode", "prior-snapshot"] if prior_flags else [None, None],
+    }
     dispatch = [
         event for event in _read_jsonl(plugin_root / "logs" / "activity.jsonl")
         if event["phase"] == "dispatch"

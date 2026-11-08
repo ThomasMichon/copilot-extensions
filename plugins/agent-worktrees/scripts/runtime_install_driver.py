@@ -394,6 +394,7 @@ def _foreground(args, driver) -> int:
             reason = str(error)
             if reason not in {
                 "request-local execution is busy; no request admitted",
+                "request-local execution requires an idle queue; nothing replayed",
                 "request-local execution requires an idle, unfenced queue; nothing replayed",
             }:
                 raise

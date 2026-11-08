@@ -603,6 +603,19 @@ function Invoke-FirstUseInstaller {
         $ErrorActionPreference = $previousEap
     }
 }
+function Restore-FirstUseEnvironment {
+    param($NoWait, $Snapshot)
+    if ($null -eq $NoWait) {
+        Remove-Item Env:AGENT_WORKTREES_FIRST_USE_NO_WAIT -ErrorAction SilentlyContinue
+    } else {
+        $env:AGENT_WORKTREES_FIRST_USE_NO_WAIT = $NoWait
+    }
+    if ($null -eq $Snapshot) {
+        Remove-Item Env:AGENT_WORKTREES_FIRST_USE_EXPECTED_SNAPSHOT -ErrorAction SilentlyContinue
+    } else {
+        $env:AGENT_WORKTREES_FIRST_USE_EXPECTED_SNAPSHOT = $Snapshot
+    }
+}
 $retryDeadline = [DateTime]::UtcNow.AddSeconds(120)
 $reportedBusy = $false
 while ($true) {
@@ -707,6 +720,7 @@ while ($true) {
             $python = Resolve-AgentWorktreesRuntime
             Write-BootTrace 'resolver-loaded'
             if ($python) {
+                Restore-FirstUseEnvironment $previousNoWait $previousSnapshot
                 $lock.Dispose()
                 $lock = $null
                 Write-BootTrace 'dispatch' 'provisioned'
@@ -714,16 +728,7 @@ while ($true) {
             }
         }
     } finally {
-        if ($null -eq $previousNoWait) {
-            Remove-Item Env:AGENT_WORKTREES_FIRST_USE_NO_WAIT -ErrorAction SilentlyContinue
-        } else {
-            $env:AGENT_WORKTREES_FIRST_USE_NO_WAIT = $previousNoWait
-        }
-        if ($null -eq $previousSnapshot) {
-            Remove-Item Env:AGENT_WORKTREES_FIRST_USE_EXPECTED_SNAPSHOT -ErrorAction SilentlyContinue
-        } else {
-            $env:AGENT_WORKTREES_FIRST_USE_EXPECTED_SNAPSHOT = $previousSnapshot
-        }
+        Restore-FirstUseEnvironment $previousNoWait $previousSnapshot
         if ($lock) { $lock.Dispose() }
     }
     if (-not $retry) { break }
