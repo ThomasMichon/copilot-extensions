@@ -22,8 +22,7 @@ def test_committed_provenance_is_not_locale_decoded(
 
     def git(*arguments: str) -> subprocess.CompletedProcess[bytes]:
         return run(
-            ["git", "-c", "core.longpaths=true", "-C", str(tmp_path), *arguments],
-            capture_output=True, check=True,
+            ["git", "-C", str(tmp_path), *arguments], capture_output=True, check=True,
             timeout=10, env=evidence.clean_git_environment(),
             creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
         )

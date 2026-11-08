@@ -43,50 +43,6 @@ def fake_repo(tmp_path):
     return repo
 
 
-@pytest.fixture()
-def offline_session_mode_command(tmp_path, config_home):
-    import os
-    import subprocess
-    import sys
-    import time
-
-    from agent_procutil import no_window_kwargs
-
-    def command(*args):
-        started = time.monotonic()
-        print(f"offline CLI begin: {args!r}", flush=True)
-        result = subprocess.run(
-            [sys.executable, "-m", "agent_bridge", "config", "session-mode", *args, "--json"],
-            cwd=tmp_path, env=os.environ.copy(), capture_output=True, text=True,
-            timeout=30, **no_window_kwargs(),
-        )
-        print(
-            f"offline CLI finished: {args!r}, exit={result.returncode}, "
-            f"elapsed={time.monotonic() - started:.3f}s",
-            flush=True,
-        )
-        return result
-
-    return command
-
-
-@pytest.mark.parametrize("policy", ["preserve", "enabled", "absent"])
-def test_native_scheduling_selection_survives_config_rewrites(config_home, policy):
-    (config_home / "config.yaml").write_text(
-        yaml.safe_dump({"windows_scheduled_task": policy}), encoding="utf-8",
-    )
-    cfg = load_config(strict=True)
-    save_config(cfg)
-    assert load_config(strict=True).windows_scheduled_task == policy
-
-
-@pytest.mark.parametrize("strict", [False, True])
-def test_invalid_native_scheduling_selection_refuses_fallback(config_home, strict):
-    (config_home / "config.yaml").write_text("windows_scheduled_task: false\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="Invalid .*configuration"):
-        load_config(strict=strict)
-
-
 class TestSessionModes:
     @staticmethod
     def policy(root, modes, *, legacy=False, **extra):
@@ -382,49 +338,43 @@ else:
             write_session_mode(**args)
         assert not (config_home / "config.yaml").exists()
 
-    def test_actual_offline_command_fresh_default(self, offline_session_mode_command):
-        fresh = offline_session_mode_command()
+    def test_actual_offline_command_fresh_set_read_and_error(self, tmp_path, config_home):
+        import os
+        import subprocess
+        import sys
+
+        from agent_procutil import no_window_kwargs
+
+        def command(*args):
+            return subprocess.run(
+                [sys.executable, "-m", "agent_bridge", "config", "session-mode", *args, "--json"],
+                cwd=tmp_path, env=os.environ.copy(), capture_output=True, text=True,
+                timeout=30, **no_window_kwargs(),
+            )
+
+        fresh = command()
         assert fresh.returncode == 0, fresh.stderr
         assert json.loads(fresh.stdout) == {"mode": "acp", "source": "default"}
-
-    def test_actual_offline_command_help(self, offline_session_mode_command):
-        help_result = offline_session_mode_command("--help")
+        help_result = command("--help")
         assert help_result.returncode == 0, help_result.stderr
         assert "agent-bridge.session-mode/v1" in help_result.stdout
-
-    def test_actual_offline_command_machine_local_set(self, offline_session_mode_command):
         save_config(ServiceConfig())
-        local = offline_session_mode_command("--machine-local", "--set", "cli")
+        local = command("--machine-local", "--set", "cli")
         assert local.returncode == 0, local.stderr
         assert json.loads(local.stdout)["mode"] == "cli"
-
-    def test_actual_offline_command_requires_write_destination(self, offline_session_mode_command):
-        denied = offline_session_mode_command("--set", "cli")
+        operator = tmp_path / "operator"
+        operator.mkdir()
+        denied = command("--set", "cli")
         assert denied.returncode == 1
         assert "exactly one" in denied.stderr
-
-    def test_actual_offline_command_operator_set_and_read(self, tmp_path, offline_session_mode_command):
-        operator = tmp_path / "operator"
-        operator.mkdir()
-        save_config(ServiceConfig())
-        set_result = offline_session_mode_command(
-            "--operator-repo", str(operator), "--venue", "container", "--set", "cli",
-        )
+        set_result = command("--operator-repo", str(operator), "--venue", "container", "--set", "cli")
         assert set_result.returncode == 0, set_result.stderr
         assert json.loads(set_result.stdout)["written"]["source"].endswith("session_modes.venues.container")
-        read_result = offline_session_mode_command(
-            "--operator-repo", str(operator), "--repo", "example", "--venue", "container",
-        )
+        read_result = command("--operator-repo", str(operator), "--repo", "example", "--venue", "container")
         assert read_result.returncode == 0, read_result.stderr
         assert json.loads(read_result.stdout)["mode"] == "cli"
-
-    def test_actual_offline_command_invalid_operator_refuses_fallback(
-        self, tmp_path, offline_session_mode_command,
-    ):
-        operator = tmp_path / "operator"
-        operator.mkdir()
         self.policy(operator, {"default": "invalid"})
-        invalid = offline_session_mode_command("--operator-repo", str(operator))
+        invalid = command("--operator-repo", str(operator))
         assert invalid.returncode == 1
         assert "refusing authority fallback" in invalid.stderr
 

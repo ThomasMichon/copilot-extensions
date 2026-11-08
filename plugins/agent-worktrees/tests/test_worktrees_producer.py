@@ -10,7 +10,7 @@ import pytest
 from agent_worktrees import __main__ as core
 from agent_worktrees import git_ops, mux_link, reclaim, sessions, tracking
 from agent_worktrees import worktrees_producer as producer
-from agent_worktrees.worktrees_runtime import CONTRACT_VERSION, WorktreesRuntime
+from agent_worktrees.worktrees_runtime import WorktreesRuntime
 from agent_worktrees.hook_facts_publication import HookFactsPublisher
 
 
@@ -61,40 +61,6 @@ def test_unavailable_windows_mux_does_not_hide_real_git_facts(tmp_path, monkeypa
         assert row["state"] != git_ops.WorktreeState.ACTIVE.value
         assert row["dirty"] == 1 and row["ahead"] == 1 and row["behind"] == 0
         assert row["fact_provenance"]["mux"]["quality"] == "unavailable"
-    finally:
-        owner.shutdown()
-
-
-def test_slow_fact_collection_counts_against_the_published_roster_age(tmp_path, monkeypatch):
-    """Facts collected before a stall are already that old when published: a
-    stalled collection must not publish an empty roster as freshly current."""
-    clock = [100.0]
-    monkeypatch.setattr(producer.cfg, "project_name", lambda: "project")
-    config_path = producer.cfg.project_dir("project") / "config.yaml"
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    config_path.write_text(json.dumps({
-        "repos": {"project": {"anchor": str(tmp_path), "default_branch": "main"}},
-    }))
-
-    def _stalled_records(*_args, **_kwargs):
-        clock[0] += 120.0
-        return []
-
-    monkeypatch.setattr(tracking, "list_records", _stalled_records)
-    monkeypatch.setattr(sessions, "scan_sessions_fast", lambda _: sessions.SessionContext())
-    monkeypatch.setattr(sessions, "mux_status_many", lambda _ids: {})
-    monkeypatch.setattr(reclaim, "bare_orphan_worktree_ids", lambda: set())
-    monkeypatch.setattr(reclaim, "live_bridge_worktrees", lambda: set())
-    owner = WorktreesRuntime(
-        tmp_path / "current.sqlite3", now=lambda: clock[0], freshness_bound=90.0,
-    )
-    owner.activate()
-    try:
-        assert producer.publish_active_project(owner) == 0
-        reply = owner.handle({"contract_version": CONTRACT_VERSION, "project": "project", "passive": True})
-        assert reply["worktrees"] == []
-        assert reply["projection"]["freshness"]["refreshed_age_s"] == 120.0
-        assert reply["availability"]["status"] == "stale"
     finally:
         owner.shutdown()
 

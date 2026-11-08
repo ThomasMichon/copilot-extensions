@@ -166,10 +166,9 @@ Acceptance is not completion: return to the list and refresh to see queued,
 running, succeeded, failed, blocked or interrupted owner state, attributable
 progress and the actual resulting versions. Closing the result or Manager
 does not cancel service-owned work. A failed worker launch may leave an
-accepted request; inspect its receipt before retrying. A pending request with
-unconfirmed execution evidence appears blocked and requires recovery, not
-replay. The same queue retains exclusive execution, deduplication and recovery;
-the page adds no queue or scheduler. A busy owner queues through that same driver.
+accepted request; inspect its receipt before retrying. The same queue retains
+exclusive execution, deduplication and recovery; the page adds no queue or
+scheduler. A busy owner queues through that same driver.
 
 Plugin requests enter the selected engine's backend and retain its installation
 identity, even through the Manager CLI; Manager self-update uses the separate

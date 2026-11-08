@@ -22,7 +22,6 @@ _RESOURCE_PACKAGES = {
     "fleet-manager": "fleet_manager",
     "chat-service": "agent_chat_service",
     "index-service": "agent_index_service",
-    "pr-service": "agent_pull_requests_service",
 }
 
 
@@ -101,15 +100,10 @@ def injected_resources(component: str, root: Path) -> dict[str, Path]:
         raise ArtifactBuildError("invalid trusted runtime resource declaration")
     mapping = ast.literal_eval(declarations[0])
     package = _RESOURCE_PACKAGES[component] + "/"
-    result = {} if component == "pr-service" else {
+    result = {
         package + destination: helper.parent / name for name, destination in mapping.items()
     }
-    if component == "pr-service":
-        result.update({
-            package + "_attribution/" + name: root / "plugins" / "ai-attribution" / "scripts" / name
-            for name in ("attribution_profile.py", "comment_preparation.py")
-        })
-    elif component == "fleet-manager":
+    if component == "fleet-manager":
         result.update({
             package + "_runtime_launcher.py": root / "libs" / "installer-engine" / "runtime_launcher.py",
             package + "_installer_process.py": root / "libs" / "installer-engine" / "installer_engine_process.py",
@@ -164,12 +158,12 @@ def validate_build(source: Path, *, component: str, root: Path) -> dict:
 
     try:
         injected_resources(component, root)
-        if component in {"index-service", "pr-service"} and (
+        if component == "index-service" and (
             source / "_build_runtime_resource.py"
         ).read_bytes() != (
             TRUSTED_ROOT / COMPONENTS[component] / "_build_runtime_resource.py"
         ).read_bytes():
-            raise ArtifactBuildError("standalone runtime build selector differs from canonical source")
+            raise ArtifactBuildError("Index runtime build selector differs from canonical source")
         trusted_setup = (
             (TRUSTED_ROOT / COMPONENTS[component] / "setup.py").read_bytes()
             if component in _RESOURCE_PACKAGES else None

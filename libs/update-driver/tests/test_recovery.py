@@ -131,29 +131,6 @@ def test_crashed_running_row_settles_as_interrupted_after_restart(area, monkeypa
     assert settled.finished_at is not None and settled.settled_at is not None
 
 
-def test_pending_execution_evidence_recovers_after_restart_without_replay(area, monkeypatch):
-    root = area / "state"
-    runner = TrustedRunner((sys.executable,), str(area))
-    uncertain = enqueue(RequestSpec("fixture"), runner=runner, root=root)
-    pending = enqueue(RequestSpec("fixture", argv=("next",)), runner=runner, root=root)
-    with closing(sqlite3.connect(root / "queue.sqlite3")) as db, db:
-        db.execute(
-            "UPDATE requests SET started_at=1,boot_id=? WHERE id=?", (OLD, uncertain.id),
-        )
-    assert status(uncertain.id, root=root).unresolved
-    with pytest.raises(InterruptedError):
-        drain(root=root, executor=lambda _transaction: pytest.fail("uncertain request ran"))
-    monkeypatch.setattr(boot, "kernel_boot_identity", lambda: NEW)
-    assert recovery_status(root=root).eligible_ids == (uncertain.id,)
-    settled, = recover_after_restart(root=root)
-    assert settled.state == "interrupted" and settled.exit_code is None
-    assert settled.boot_id == OLD and settled.settled_boot_id == NEW
-    assert not settled.unresolved and status(pending.id, root=root).state == "pending"
-    ran = []
-    assert drain(root=root, executor=lambda transaction: ran.append(transaction.request.id) or 0) == 0
-    assert ran == [pending.id]
-
-
 @pytest.mark.parametrize("evidence", [None, "", "old", "windows:not-a-guid"])
 def test_missing_malformed_admission_evidence_refuses(area, monkeypatch, evidence):
     root, request = interrupted(area, monkeypatch)

@@ -184,25 +184,6 @@ named tracked objective before the whole effort is Done.
 - [ ] Report incoming completion, outgoing cleanup and per-session handover
   independently. Completing this slice does not complete the handover feature
   or the effort.
-- [x] **Corrective source merged:** #11407 restores native-proven dead-handle
-  startup and batches installer dependency preparation. Final-head automated
-  approval and required CI passed.
-- [x] **Corrective release verified:** Main
-  `06aac8c5f6e596652a4a497c4af25a39f44e3e66` promotes qualified Dev
-  `fe117fd8609ffa22bc5e787be3fbdf39903c9a12`, containing #11407 and #11153.
-  MCP was released as `0.2.207-dev1`; the later `0.2.208-dev1` release retains
-  the checked acceptance paths.
-- [x] **Bounded literal installed call:** one configured read-only status call
-  through the installed MCP208 command succeeded in 8.37 seconds, with a live
-  current control/data listener observed afterward and measured legacy
-  native incarnations preserved. This is not full constructor, reattachment or
-  whole-host qualification.
-- [ ] **Constructor correction #11455:** publish and release native readiness
-  validation independent of caller repository preferences, then verify actual
-  installed constructor publication and a clean measured update.
-- [ ] **Clean measured sweep:** resolve actual incoming completion and update
-  performance; a selected runtime or a successful isolated tool call does not
-  make a failed full update successful.
 
 ### Resident configuration-context correction
 
@@ -1413,49 +1394,3 @@ migration already works.
 - Current review/CI, promotion, owned installed repair and a clean measured
   sweep remain the corrective slice's completion gates. Cold-update performance
   is not declared qualified merely because source regression controls passed.
-
-### 2026-11-07: Corrective source and release; bounded literal acceptance
-
-- #11407 merged after final-head automated approval and all required CI.
-  Its coupled bytecode guard now expects five dependency-policy command sites
-  after batching removed one redundant preinstall site; all bytecode-disable
-  assertions remain enforced. Only that test's admitted digest changed.
-- Promotion run 42426784779 passed coverage, real Windows Resume, artifact
-  attestation, immutable candidate reuse, publication readback and normal merge.
-  Qualified Dev `fe117fd8609ffa22bc5e787be3fbdf39903c9a12` and released Main
-  `06aac8c5f6e596652a4a497c4af25a39f44e3e66` include the correction. The checked
-  MCP and Machines paths and Dispatch supervisor match reviewed source;
-  Dispatch's installer differs only by the expected payload-library path rewrite.
-- A later installed MCP208 command completed one real read-only status call
-  in 8.37 seconds without replay. Its current native owner held both listeners
-  afterward; all measured pre-existing MCP incarnations retained their
-  births. The later host absence is consistent with the documented idle-exiting
-  accelerator, but this evidence does not establish that particular exit cause.
-- A separate normal Windows update still failed incoming construction and took
-  more than five minutes. Its native bridge-readiness adapter required caller
-  repository context from an installer payload directory. Selected MCP208
-  code and older deployment-source metadata remain distinct; no metadata was
-  manually rewritten. Constructor acceptance and the measured sweep stay open.
-
-### 2026-11-07: Native constructor readiness correction under #11455
-
-- Three focused controls reproduced a valid native declaration being rejected
-  by repository-context discovery and genuine native declaration/overlay errors
-  being masked by that same refusal.
-- Installation readiness now reads, merges and validates native declarations
-  and machine-local overlays without selecting caller repository preferences.
-  Actual bridge/tool configuration still uses the strict repository-qualified
-  composer; no native validation, authentication, source or publication guard
-  is bypassed.
-- Readiness, configuration and application-callback qualification passed
-  109 tests with two existing platform skips and verified bounded cleanup.
-  This includes the actual installed-callback readiness entry, not just a mock
-  successful result. Install contracts and F/E9 lint passed.
-- Canonical producer refresh retains footprint revision 36. The unchanged
-  4,660-node, 659-source unit admission and 300-second budget verify; none of
-  the changed source paths belongs to that packet, so no unrelated digest,
-  membership or coverage target was changed.
-- Review, required CI, promotion and actual installed constructor/sweep
-  acceptance remain open. The effort remains Active; full adopted-wrapper
-  reattachment, historical warm-reuse uncertainty and prepared qualification
-  are not closed by these corrective slices.

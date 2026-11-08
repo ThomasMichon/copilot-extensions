@@ -168,10 +168,6 @@ existing session registration/succession handler directly under its normal
 sidecar lock. That handler rechecks the executing identity and fresh record's
 project, path, worktree ID and nonce before mutation. It never sends the write
 to a resident whose ordinary verb version alone cannot prove this serializer.
-Because a qualified writer runs outside the native's process ancestry, it
-cannot present a registration source identity. A registration without one is
-accepted only as an idempotent attach to the session's still-open identified
-activation; ended or unidentified histories still refuse it as superseded.
 The opted-in command does not boot a monitor or status updater. This is a
 bounded session-write route, not a global daemon-disable setting, a replacement
 serializer, or permission to write a remote/frozen record.

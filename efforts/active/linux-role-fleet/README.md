@@ -226,7 +226,7 @@ coordination store for a distinct permanent service-custody record, rather than
 another store or an extended task lease. The
 [custody realization proposal](runner-service-custody.md) preserves provider
 admission, exact accepted transfer and incumbent-safe reconciliation. Its
-protocol details cleared source review in #8931; live adoption
+protocol details are agent-recommended and await source review; live adoption
 and temporary-obligation discharge remain separately gated.
 
 The [runner-loadout realization plan](runner-loadouts.md) extends this
@@ -823,17 +823,5 @@ See the [preserved source history and unresolved acceptance boundaries](journal/
 - [2026-11-04 - Incoming client selection qualification](journal/2026/11.04-client-incoming-selection.md)
 - [2026-10-23 - Forward client generations](journal/2026/10.23-forward-generations.md)
 - [2026-10-22 through 2026-10-23 - Client retained recovery](journal/2026/10.22-client-recovery.md)
-- #8931 merged the permanent service-custody protocol proposal after actual
-  current-head Copilot approval, complete conversation inspection and required
-  source checks. The managed provider confirmed merge using the authorized
-  exception to an additional code-owner vote, without a CI bypass.
-  Re-read this full Request, Plan and Validation Plan and the custody sub-plan.
-  The next stretch implements distinct canonical custody records and provider
-  admission interlocks in the existing resource owner, then binds the existing
-  Gateway and incumbent-preserving ARC owner. No permanent record or live
-  transition exists yet; all provider, installed, native and adoption acceptance
-  remains open. Temporary protection and the parent's active responsibility
-  are retained. Controller deployment, credentials, capacity and routing did
-  not change.
 - [2026-10-22 - Client lifecycle](journal/2026/10.22-client-lifecycle.md)
 - [2026-10-10 through 2026-10-21 - Foundation and client admission](journal/2026/10.10-foundation.md)

@@ -71,6 +71,28 @@ Each capture retains its own existing aggregate clock, including managed test
 environment preparation; the workflow timeout does not enlarge it.
 Returned files are data: the client never applies the generated outputs.
 
+`submit --packet native-worktrees-embody` selects only the installed public
+Worktrees detached caller. The candidate must supply `test_public_embody` in
+`tests/native/test_native_seed_application.py`; controller support does not
+provide or qualify that source fixture. The protected controller prepares hash-pinned,
+disposable Copilot 1.0.105 and PSMux 3.3.8 binaries, checks their actual versions,
+and requires anonymous access to the configured non-public HTTPS package feed
+from that hosted runner. The repository owner explicitly configures
+`WINDOWS_QUALIFICATION_INDEX_URL` as an Actions secret containing only the feed
+URL, without credentials, query or fragment. No endpoint is committed here.
+It is injected only for this named packet, not generic tests. Captured logs,
+JUnit and result files redact URLs and the configured feed hostname before
+upload; a separate protected post-execution step repeats this sanitization
+after worker interruption. Unsafe or oversized text is omitted and cannot
+qualify. Console masking alone does not sanitize artifact contents.
+The packet retains the public caller's 900-second functional case,
+1200-second plugin aggregate, separate 420/300/180-second preparation/native
+bounds, startup limits and exact cleanup. Missing prerequisites, empty or
+skipped tests and a different actual caller never qualify. This is evidence
+for the recorded native versions, not the operator's installed build, attached
+or new-window use, or survival across caller cleanup Jobs. New packet support
+must be reviewed and promoted to the protected controller before submission.
+
 Before any staging or dispatch, the client reads the selected protected
 controller's `tools/windows-qualification-support.json`. Missing/unsupported
 request, result or selection support refuses without publishing source.
@@ -174,36 +196,6 @@ must not substitute for bounded tests and timely CI feedback.
 
 ## Focused packet catalog
 
-For contained Windows post-tool entry diagnosis, set
-`AGENT_WORKTREES_PROFILE_ENTRY=1` and select `prepared_post_entry_stage_profile`
-in `tests/test_post_tool_shell.py`. For a fixed-fixture A/B/A comparison, select
-`prepared_post_entry_baseline_comparison` with `AGENT_WORKTREES_PROFILE_BASELINE`
-set to a full lowercase commit ID and `AGENT_WORKTREES_PROFILE_BASELINE_REPO`
-to its readable source checkout. Only private fixture copies are swapped;
-the baseline checkout is read through `git show`, never modified. Both shells
-retain real receiver/count assertions and the ordinary test deadlines.
-Stage mode reports each library dot-load and per-call samples for conversion,
-membership, bounded reads, reminders and sending. Nested function spans are
-inclusive; do not sum them. Select `prepared_json_engine_retains_shell_semantics`
-for JSON value parity and the older-engine command fallback without enabling
-profiling. Neither these diagnostics nor their finite timings
-establish installed or whole-roster throughput.
-The stage profile, baseline comparison and prepared cold-process tests emit
-their reports with ordinary pytest capture enabled; no `-s` or `-rP` is needed.
-
-The Windows pre-tool packet selects `native_entry or json_engine_parity` in
-`tests/test_pre_tool_native_entry.py`, with `COPILOT_TEST_HOOK_PRE_PYTHON`
-naming the contained runner's dependency-ready interpreter. Its admitted
-policy fixtures retain the complete managed JSON module but isolate membership;
-`registered_pre_tool_entry` in `tests/test_managed_session.py` separately
-exercises the unchanged registered command and actual prepared membership,
-raw-input forwarding and revocation. The PS7 decoder comparison reports
-cmdlet/native/cmdlet first-use samples after assembly-only admission preparation,
-without utility-cmdlet preloading. It also rejects JSON cmdlet use by the
-production decoder and verifies structured-value and malformed-input parity.
-Child/item/group limits remain 10/30/300 seconds. These finite synthetic
-measurements are not installed, composed-hook or productive-throughput proof.
-
 `python-selection-native.yml` supplies real Python 3.9 and supported Python
 side by side on a disposable hosted Windows runner. Its `TEST_PYTHON39` input
 names the existing 3.9 executable explicitly and is version-checked before
@@ -247,7 +239,7 @@ database, thread and transport controls remain outside required unit-only CI.
 
 Worktrees' opt-in `--test-file tests/test_post_tool_shell.py --test-file
 tests/test_hook_ipc.py --test-file tests/test_status_monitor.py
---allow-explicit-tiers -k "native_mutation or mixed_batch or
+--allow-explicit-tiers -k "native_mutation or
 registered_post_hook_reuses_original_prepared_membership or
 registered_read_demand_is_send_only or handoff_wake_kind_actually_wakes"`
 packet exercises real registered Windows PowerShell 5.1/7 entries with original
@@ -271,34 +263,16 @@ demand does not trigger a mutation sweep and unadmitted events have no effect.
 The portable unit packet additionally exercises the original send-only handler
 and mutation-only parser with synthetic inputs; it is not native evidence.
 
-The same packet's `mixed_batch` controls prove complete validation before
-classification or invalidation, original native/shell semantics, aggregate
-target overflow, read-only no-wake and live managed admission. The registered
-consumer's `mixed-` cases cover targeted writes beside shell reads,
-conservative shell writes/unknown arguments, separate capability rollback,
-wrong-generation/closed/missing discovery, wire overflow and a non-replying
-peer. Unit-only CI adds twelve in-memory mixed-notification boundary cases and two
-original-normalizer aggregation/refusal cases;
-real shell/IPC/monitor execution stays in the explicit packet.
-
 The separately path-gated `prepared-membership-native.yml` lane also selects
 `tests/test_post_tool_shell.py -k registered_prepared_cell` on Windows.
 Actual stamped cells, original membership/binding/current-row publishers and
-the registered PowerShell 5.1/7 entry compose read/native/batch/single-shell/mixed
+the registered PowerShell 5.1/7 entry compose read/native/batch/single-shell
 notifications. It checks installation-scoped discovery, changed-byte refusal,
 old membership routing, missing rows, live reminder opt-out, late guidance
 and non-replying peers. Warm interpreter/client and synchronous requests are
 trapped; incompatible membership explicitly retains its original admission
-lookup. Original 30-second item, 10-second child and 300-second group limits
-remain unchanged. The Windows production sender shares a 100-ms allocation/
-connect/write ceiling, subtracting elapsed time from both waits. Controlled-clock
-and transport-adapter tests execute the real sender/encoder to prove the
-remaining connection/write allowances and refusal after budget exhaustion;
-these are deadline arithmetic controls, not native delivery/performance samples.
-The uninstrumented cold-process tail cases run three separate shell processes
-per group across four fresh fixtures per shell, retain every real receiver/
-accounting assertion, and report entry and complete-process durations.
-These 24 observations are not a p99 or worst-case distribution. These are isolated source consumers,
+lookup. Original 30-second item, 10-second child, 300-second group and 50-ms
+production-send limits remain unchanged. These are isolated source consumers,
 not installed, cold/directory/POSIX/recovery, composed or throughput acceptance.
 
 The path-gated, manually dispatchable legacy-monitor native lane also runs
@@ -384,27 +358,6 @@ native consumer qualification, not warm-server adoption, a reproduction of every
 installed-runtime or authentication/inference acceptance. The source release
 controller requires it for every frozen candidate, separately from unit coverage;
 live enforcement depends on the independently governed Main controller.
-
-Installed Manager TTY qualification is a separate, positively selected native
-contract, not part of unit coverage:
-
-```powershell
-python tools\run-manager-runtime-acceptance.py --contract installed-tty --root <fresh-private-root> --candidate-commit <candidate-sha> --candidate-tree <candidate-tree> --source-commit <dev-source-sha> --main-before <pinned-main-sha> --run-id <run-id> --run-attempt <attempt> --output <result-json>
-```
-
-The candidate must actually be installed with a representative generic adopted
-project. Its generated project binstub traverses the installed engine, registered
-Manager and real terminal admission in native cmd and PowerShell ConPTY sessions.
-The witness requires rendered TUI output, a visible keyboard-driven response and
-clean owned exit, plus an install-success/launch-failure negative control.
-Version output, process existence and synthetic ready files are insufficient.
-The result binds the frozen candidate and execution attempt, with declared
-source provenance kept distinct from transformed candidate bytes. Missing,
-skipped, failed, timed-out, incomplete or stale results refuse promotion.
-Fixture diagnostics and cleanup remain privately owned and bounded; no operator
-installation, credentials, sessions or service registrations are borrowed.
-Source workflow wiring alone is not activation: the preserved Main controller
-requires its own reviewed adoption and exact-candidate native run.
 
 Worktrees' opt-in `--test-file tests/native/test_uninstall_windows_owner.py
 --allow-explicit-tiers` packet exercises the emitted Windows census script in
@@ -2606,6 +2559,28 @@ admission case retains its 300-second bound and the plugin aggregate stays 600.
 This is installed execution-owner evidence, not the public Worktrees command,
 Manager integration, desktop attachment or survival across caller cleanup Jobs.
 The existing managed-environment controls remain separate and unchanged.
+
+Select `-k public_embody` with the same installed-broker prerequisites and
+900/1200/900 runner bounds for the public detached caller. That case builds and
+installs both real applications, deletes their disposable source inputs, and invokes
+the installed `agent-worktrees.exe --project <fixture> embody` against a private
+project configuration and worktree record. Worktrees must discover the installed
+current Manager's native pane wrapper; a Worktrees-only fixture does not
+qualify this public Windows launch path. The packaged default setup selects
+the native executable; recovery mode suppresses unrelated host reconciliation.
+Fresh launch uses a literal explicit seed, cold resume selects the existing
+conversation without a supplied resume argument, and live reuse must preserve
+the mux incarnation without creating another attempt or replaying a seed.
+The same broker, history, process-birth and exact retirement checks remain.
+This checks the public detached-command boundary, not attached `copilot`, desktop
+new-window behavior, setup-hook adoption or survival across caller cleanup Jobs.
+The functional public-caller case has separate 420-second Worktrees preparation,
+300-second Manager preparation and 180-second caller-owned native bounds.
+Measured wheel/profile preparation can consume most of the original admission
+case's clock before this distinct consumer even starts; this case is not a
+300-second Worktrees construction-performance check. The existing 300-second
+admission case and 300+180 installed execution-owner case remain unchanged,
+as do the native startup and cleanup limits.
 
 The adjacent `tests/native/test_manager_application_launch.py` builds and
 installs the real Manager wheel application through the canonical standalone
@@ -9197,14 +9172,6 @@ $env:AGENT_WORKTREES_LIST_WARM_NATIVE = '1'
 python tools\run-plugin-tests.py agent-worktrees --allow-explicit-tiers -k test_native_resident_warm_two_cycle_git_budget
 ```
 
-The Windows deep-build control in `tools/test_standalone_python_artifacts.py`
-builds the real Worktrees wheel from a source root whose wheel staging paths
-exceed the native path limit, then compares every packaged runtime resource
-against its source bytes. The ordinary Worktrees and Manager wheel/sdist
-round trips separately cover the shared build helper's existing consumers.
-The metadata-only control simulates the public distutils missing-wheel
-exception; a real no-wheel toolchain check remains a separate validation.
-
 The agent-worktrees native lean-provision and namespace-package health-gate
 regressions materialize the real release payload and install it through UV and
 the canonical seasoning adapter. Preparation retains registry metadata, wheels,
@@ -9224,21 +9191,6 @@ construction fails. The 60-second installer deadline stays inside the
 The stalled descendant/captured-pipe case lives separately in
 `test_first_install_bootstrap_watchdog.py` and runs only in the full suite,
 not the required guard lane.
-
-The opt-in Windows first-use test exercises both payload and global entries in
-disposable homes. The payload entry stamps before queued provision; the global
-entry provisions directly and uses a private test mutex. Both check the
-completed runtime and command. Each uses a fresh cache and an explicitly
-supplied anonymous HTTPS index, not the offline seed or the live installation.
-Select an approved feed before running:
-
-```powershell
-$env:AGENT_WORKTREES_FIRST_USE_NATIVE = '1'
-$env:UV_DEFAULT_INDEX = '<approved-https-index>'
-<prepared-test-python> -B -m pytest -q plugins\agent-worktrees\tests\test_first_install_bootstrap.py -k test_windows_payload_first_use_stamps_and_provisions_under_driver
-```
-
-This is first-use evidence, not a two-generation update or service-cutover test.
 
 Worktree Manager's native viewport regression uses 1,100 live synthetic
 worktrees, with 40 visible by default, both without workers and with 1,100

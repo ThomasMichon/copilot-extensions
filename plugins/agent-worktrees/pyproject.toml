@@ -125,9 +125,7 @@ agent-worktrees = "agent_worktrees.current_roster_entry:console_entry"
 
 [project.optional-dependencies]
 fleet-ssh = ["fleet-manager[service-gateway,ssh-client]"]
-fleet-review = ["fleet-manager[auth]"]
 dev = [
-    "fleet-manager[auth]",
     "pytest>=9.1.1",
     "pytest-xdist>=3.8,<4",
     "psutil>=6",

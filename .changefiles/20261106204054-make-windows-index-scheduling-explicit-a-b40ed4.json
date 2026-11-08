@@ -1,9 +1,0 @@
-{
-  "comment": "Make Windows Index scheduling explicit and preserve independent activation holds",
-  "changes": [
-    {
-      "plugin": "agent-index",
-      "type": "patch"
-    }
-  ]
-}

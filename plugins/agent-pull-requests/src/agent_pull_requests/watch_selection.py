@@ -51,8 +51,10 @@ class WatchSelection:
         self.installation = journal.installation
 
     def _read(self) -> tuple[dict, WatchRuntime, dict]:
-        document, target, _ = self.journal._current_evidence()
-        self.installation.require_current(environment=self.journal.environment)
+        document = self.journal._current()
+        target = WatchRuntime.from_evidence(
+            document["target"], self.installation, environment=self.journal.environment,
+        )
         selected = _selection(self.installation)
         for key in ("current", "lastKnownGood", "manifest"):
             actual = selected[key]
@@ -83,11 +85,11 @@ class WatchSelection:
             timeout_seconds=api.RUNTIME_SLOT_LOCK_TIMEOUT_SECONDS,
         )
         with genesis, install:
-            current = self._read()
+            self.journal._current()
             if installation.evidence() != signature:
                 raise PermissionError("watch installation changed while acquiring selection locks")
-            yield current
-            self._read()
+            yield
+            self.journal._current()
 
     def publish(self) -> None:
         document, target, selected = self._read()
@@ -118,7 +120,8 @@ class WatchSelection:
             or result.get("lastKnownGoodVersion") != target.runtime_version
         ):
             raise PermissionError("watch canonical runtime selection requires revalidation")
-        with self._metadata_locks() as (confirmed, _, selected):
+        with self._metadata_locks():
+            confirmed, _, selected = self._read()
             if confirmed != document:
                 raise PermissionError("watch transaction changed before manifest publication")
             _replace_metadata(
@@ -126,6 +129,7 @@ class WatchSelection:
                 bytes.fromhex(document["targetManifest"]),
                 expected=None if selected["manifest"] is None else bytes.fromhex(selected["manifest"]),
             )
+        self._read()
 
     def rollback(self) -> None:
         document, _, _ = self._read()

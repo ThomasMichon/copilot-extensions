@@ -2501,15 +2501,6 @@ def _cmd_status_write(
     # flagged in review: `create` acquires them allocation-lock-then-record-
     # lock via `create_new_record`'s own `save_record`).
     peek = tracking.load_record(yaml_path)
-    # Republish the effective agenda policy for the post-tool reminder hooks,
-    # so a running session picks up an `agendas.default` change on its next
-    # disposition write rather than only at session start/resume.
-    try:
-        from . import session_context as _session_context
-
-        _session_context.publish_agenda_policy(config, peek)
-    except Exception:
-        pass
     if not peek.codename:
         try:
             codename_tracking.ensure_codename(
@@ -3066,7 +3057,7 @@ def _monitor_sweep(
     roster_failure=None,
 ) -> int:
     """One coalescing pass over the Step 4 served-session union."""
-    from . import config_cache as _config_cache, list_cli as _list_cli, mux_status_link as _mux_status_link, resident_push as _resident_push, status_bar_cli as _status_bar_cli, status_monitor_runtime as _smr, status_updater_cli as _status_updater_cli
+    from . import config_cache as _config_cache, list_cli as _list_cli, mux_status_link as _mux_status_link, status_bar_cli as _status_bar_cli, status_monitor_runtime as _smr, status_updater_cli as _status_updater_cli
     from .worktrees_producer import publish_project_rosters
 
     _monitor_list_sessions = _self_override("_monitor_list_sessions", _smr._monitor_list_sessions)
@@ -3123,7 +3114,6 @@ def _monitor_sweep(
         observed_sessions |= unmanaged_live_wt
     if stale_sessions:
         _status_monitor_recheck(governance, "pre-mutation:prune-registry")
-        _resident_push.notify_ended(registry, stale_sessions, live)
         _monitor_prune_registry_sessions(reg_dir, registry, stale_sessions, ctx_done, incarnations, published)
     if mux_bin:
         served = [(s, p) for s, p in registry.items() if s in unmanaged_live_wt and p]
@@ -4097,23 +4087,20 @@ class _ResidentHookPolicy:
         except Exception:
             pass
         try:
-            forwarded = getattr(module, "forwarded_env", None)
             text = module.decide(
-                payload, env=forwarded(payload) if callable(forwarded) else None,
-                home=Path.home(), tracking_record=found, deadline=deadline
+                payload, home=Path.home(), tracking_record=found, deadline=deadline
             )
         except Exception:
             return {}
         return {"additionalContext": text} if text else {}
 
-    def native_batch_targets(self, payload: dict, *, include_shell: bool = False) -> list[str] | None:
+    def native_batch_targets(self, payload: dict) -> list[str] | None:
         from .hook_ipc import HookUnavailable
 
-        if (forms := self._module("tool_call_forms.py")) is None:
+        forms = self._module("tool_call_forms.py")
+        if forms is None:
             raise HookUnavailable
         try:
-            if include_shell:
-                return forms.mixed_mutation_targets(payload, allowed_tools=_HOOK_WRITE_TOOLS | _HOOK_SHELL_TOOLS | {"view", "rg", "glob"}, classify=self.mutation_targets)
             return forms.native_mutation_targets(payload, write_tools=_HOOK_WRITE_TOOLS, cwd=_hook_payload_cwd(payload))
         except ValueError as exc:
             raise HookUnavailable from exc
@@ -4159,11 +4146,10 @@ def _resident_hook_decision(
     if kind == "preToolUse":
         return policy.pre(payload)
 
-    if kind in {"nativeToolMutation", "nativeToolBatchMutation", "shellToolMutation", "mixedToolBatchMutation"}:
+    if kind in {"nativeToolMutation", "nativeToolBatchMutation", "shellToolMutation"}:
         tool = payload.get("toolName") or payload.get("tool_name")
-        batch = kind in {"nativeToolBatchMutation", "mixedToolBatchMutation"}
-        if (batch and "toolCalls" not in payload) or (
-            not batch and (
+        if (kind == "nativeToolBatchMutation" and "toolCalls" not in payload) or (
+            kind != "nativeToolBatchMutation" and (
                 not isinstance(tool, str) or tool.lower() not in (
                     _HOOK_SHELL_TOOLS if kind == "shellToolMutation" else _HOOK_WRITE_TOOLS
                 )
@@ -4173,7 +4159,7 @@ def _resident_hook_decision(
             from .hook_ipc import HookUnavailable
 
             raise HookUnavailable
-        targets = policy.native_batch_targets(payload, include_shell=kind == "mixedToolBatchMutation") if batch else policy.mutation_targets(payload)
+        targets = policy.native_batch_targets(payload) if kind == "nativeToolBatchMutation" else policy.mutation_targets(payload)
         if targets is None:
             segment_cache.invalidate_all()
         else:

@@ -15,7 +15,7 @@ import uuid
 from pathlib import Path
 
 from windows_qualification_contract import (
-    SUPPORT_PATH, TRANSPORT_MARKER, TRANSPORT_REF, VERSION, WORKFLOW,
+    PACKETS, SUPPORT_PATH, TRANSPORT_MARKER, TRANSPORT_REF, VERSION, WORKFLOW,
     canonical, request, selection, sha, validate_result,
 )
 from windows_qualification_transport import Transport, command
@@ -124,6 +124,10 @@ class Client:
         files = [base + file for file in selected.get("files", [])]
         if selected["kind"] == "packet":
             files = [
+                "plugins/agent-worktrees/tests/native/test_native_seed_application.py",
+                "plugins/agent-worktrees/tests/native/test_manager_application_launch.py",
+                "plugins/agent-worktrees/tests/native/test_headed_worktrees_copilot.py",
+            ] if selected["name"] == "native-worktrees-embody" else [
                 "tools/capture_bridge_http52.py", "tools/check-agent-bridge-contracts.py",
                 "tools/bridge_http52_artifact.py",
             ]
@@ -331,7 +335,7 @@ def main(argv=None) -> int:
     target = submit.add_mutually_exclusive_group(required=True)
     target.add_argument("--plugin")
     target.add_argument("--tools", action="store_true")
-    target.add_argument("--packet", choices=["bridge-http52"])
+    target.add_argument("--packet", choices=PACKETS)
     submit.add_argument("--test-file", action="append", default=[])
     submit.add_argument("-k", default="")
     submit.add_argument("--full-suite", action="store_true")

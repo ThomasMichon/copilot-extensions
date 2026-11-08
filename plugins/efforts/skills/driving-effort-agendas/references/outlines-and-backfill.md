@@ -77,10 +77,6 @@ step before adopting it.
 checkpoint index:
 
 - operator requests are user messages without a relay/automation source;
-- requests delivered through agent-bridge are also kept: the request text is
-  read from the `<agent-message>` envelope, the item's evidence names the
-  sender, and generated reply-routing guidance is dropped. Bridge `notify`
-  and `status-check` deliveries are skipped because they ask for no new work;
   harness continuity turns (context-handoff notices, fresh-window recovery
   prompts) and acknowledgements made only of conversational filler ("ok",
   "thanks, go ahead") are skipped; short instructions such as "Fix the
@@ -92,5 +88,4 @@ checkpoint index:
 
 The result is a reconstruction, not a record of intent. Use `digest` when the
 first pass is too coarse, then author a cleaner outline yourself. Sessions
-with no operator or bridged requests (for example headless automation) exit
-with status 2.
+with no operator requests (for example headless automation) exit with status 2.

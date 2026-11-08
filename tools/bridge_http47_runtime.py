@@ -22,7 +22,6 @@ ROLES = {
     "cold_recovery_worker.py": "worker",
     "cold_drain_peer.py": "peer",
     "agent_bridge/session_host/__main__.py": "host",
-    "agent_bridge/__main__.py": "cli",
     "fixtures/worktree_record_owner.py": "record-writer",
 }
 
@@ -114,10 +113,8 @@ def launch_role(argv: list | str) -> str | None:
         finally:
             kernel.LocalFree(parsed)
     values = [os.fsdecode(value) for value in argv]
-    if "-m" in values:
-        module = values[values.index("-m") + 1]
-        if module in {"agent_bridge.session_host", "agent_bridge"}:
-            return "host" if module == "agent_bridge.session_host" else "cli"
+    if "-m" in values and values[values.index("-m") + 1] == "agent_bridge.session_host":
+        return "host"
     return next(
         (entry_role(value) for value in values[1:] if entry_role(value) is not None),
         None,
@@ -343,17 +340,12 @@ def verify_interpreters(
                     raise ValueError("HTTP-47 executed source outside committed closure")
                 sources.add(event["source"])
     if launched != started or {role for _, role in started} != expected_roles:
-        raise ValueError(
-            "HTTP-47 contributing interpreter launch/entrypoint coverage mismatch "
-            f"(expected={sorted(expected_roles)}, observed={sorted({role for _, role in started})}, "
-            f"launches={sum(launched.values())}, entries={sum(started.values())}, "
-            f"parent_role_links_match={launched == started})"
-        )
+        raise ValueError("HTTP-47 contributing interpreter launch/entrypoint coverage mismatch")
     if not required_sources <= sources:
         raise ValueError("Capture required runtime source execution is incomplete")
     return {
         "policy": "every-owned-interpreter-source-and-entrypoint-v1",
-        "roles": ["observer", *(role for role in ("worker", "host", "peer", "cli", "record-writer") if role in expected_roles)],
+        "roles": ["observer", *(role for role in ("worker", "host", "peer", "record-writer") if role in expected_roles)],
         "verified_sources": sorted(sources),
         "scope": "contained Python fixtures; not native Copilot or Windows qualification",
     }

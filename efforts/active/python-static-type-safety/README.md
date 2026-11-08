@@ -8,7 +8,7 @@
 - **Vision:** Verification improvement below runtime-architecture altitude; preserves `visions/test-portfolio/README.md`'s cheapest faithful tier, bounded feedback and containment.
 - **Umbrella issue:** #9807
 - **Coverage:** [Portfolio tracker and merged lockdown records](coverage.md)
-- **Current slice:** Continue canonical Payload Invocation (#10371), Efforts (#10955) and Installer Engine (#10931) source/qualification closure. The independent Agent Roles Python project is strictly admitted by merged #11485. Payload Invocation's reviewed source/copy/catalog preparation has merged in #11165; its project, executed-program, consumer and native admission gates remain distinct. Versioned Runtime (#10331) and full-composed-consumer qualification (#10362) stay open. Completed admissions remain recorded in the coverage tracker and Journal; a completed preparation does not complete this campaign.
+- **Current slice:** Continue canonical Payload Invocation (#10371), Efforts (#10955) and Installer Engine (#10931) source/qualification closure. Payload Invocation's reviewed source/copy/catalog preparation has merged in #11165; its project, executed-program, consumer and native admission gates remain distinct. Versioned Runtime (#10331) and full-composed-consumer qualification (#10362) stay open. Completed admissions remain recorded in the coverage tracker and Journal; a completed preparation does not complete this campaign.
 - **Checker-only follow-up:** #10638 is delivered by merged #10866; #10938 delivers emitted-program visibility/binding completeness. Both are prerequisites, not Harness, Versioned Runtime or Payload Invocation admission. Preserve full-composed-consumer qualification under #10362 independently while progressing the other assigned slices.
 - **Sub-issues:** #9831 (P1 checker foundation, complete); #9853 (P2 required source CI, complete); #9862 (P3 exact-candidate qualification, complete); #9916 (P4a canonical Installation Context source view, complete); #9924 (L1 Config Migrate strict admission, complete); #9930 (L1 Dropin Registry strict admission, complete); #9933 (L1 Endpoint Rendezvous strict admission, complete); #9941 (L1 initial leaf-library test/helper completion, complete); #9951 (L1 Lazy CLI Dispatch strict admission, complete); #9964 (L1 Bootstrap Killswitch strict admission, complete); #9967 (L1 Peer Launch strict admission, complete); #9971 (P2a Installation Context native typing preparation, complete); #9975 (P2b validation-decorator signature preservation, complete); #9980 (P2c production result and flow contracts, complete); #9983 (P2d native platform API contracts, complete); #9986 (P2e cleanup and worker contracts, complete); #9993 (P2f shared receipt-fixture typing, complete); #9996 (P2g slot-release test contracts); #10400 (shared real-import-root/additional-version checker prerequisite, merged #10553); #10331, #10362 and #10371 (independent consumer admissions, open). Create/reuse later scoped issues as selected. #9177 remains separately owned.
 
@@ -204,7 +204,6 @@ rewrite.
 - [x] Strictly admit all three devcontainer helper/test files on their existing Python 3.11 minimum (#10183 / merged #10193).
 - [x] Strictly admit all nine Harness Knowledge binding/overlay helper and test files, preserving Python 3.10 copied-helper compatibility (#10185 / merged #10201).
 - [x] Strictly admit all five retained effort-helper source/test files on their existing Python 3.11 minimum, preserving native measurement and refusal controls (#10215 / merged #10360).
-- [x] Strictly admit all three Agent Roles Python contract-test files on both existing 3.10 analysis targets, preserving every assertion and the non-authoritative JSON fixture boundary (#11473 / merged #11485).
 - [ ] Strictly admit the Copilot Extensions Harness plugin's complete Python helper/test scope, preserving its actual helper minimums and payload ownership (#10362).
 - [ ] Strictly admit the Efforts plugin's complete source/test and executed-program scope, retaining actual producer, namespace and selected-provider boundaries (#10955).
 - [ ] Admit repository tools and CI helpers with unambiguous module identities and strict local/CI behavior.
@@ -224,8 +223,8 @@ rewrite.
 - [ ] Unit controls cover manifest validity, complete file classification, additions/renames, safe selection, monotonic activation and dependency impact.
 - [ ] Reconcile tracker rows and file totals with the authoritative manifest
   and inventory; local proposals and canonical-library locks must not imply
-  complete consumer/copy enforcement. The 2026-11-08 UTC merged snapshot reconciles
-  all 73 declared projects and 8,681 physical files at `b2b52122`, including the
+  complete consumer/copy enforcement. The 2026-11-07 merged snapshot reconciles
+  all 73 declared projects and 8,566 physical files at `5c4dde11`, including the
   zero-physical-file pending vendored-library project. Remeasure against the
   current merged tree rather than treating a historical denominator as fixed.
   This recurring and final portfolio gate remains open.
@@ -251,7 +250,6 @@ rewrite.
 - [x] PR service preserves all 81 original functions and 114 assertion expressions across both strict targets, actual Python 3.10 installed/native tests and fresh exact-input source CI (#10332).
 - [x] SSH service preserves all 254 original function contracts, 299 assertion expressions and four embedded literals across both strict targets, actual Python 3.10 Linux/Windows qualification and fresh exact-input source CI (#10348).
 - [x] Retained effort helpers preserve all 39 original function contracts and 31 assertion expressions across both strict targets, actual Python 3.11 Linux/Windows controls, composed-source qualification and fresh exact-input source CI (#10360).
-- [x] Agent Roles preserves all 46 functions, 191 assertions and parameterizations; both strict targets, all 61 original tests and normal-checker regression rejection pass, followed by exact-head approval and required source CI (#11485). This does not qualify live role/provider behavior.
 - [x] Payload Invocation preparation preserves its canonical and authorized copied-source contracts, rejects real catalog/type/data drift and passes complete ordinary Linux unit execution (#11165). The verified synthetic merge contains every current-head admitted test/source binding; this is not canonical-library, consumer, native or global strict admission.
 - [x] Shared checker controls preserve default qualification and ordinary import-root/source-frozen custody semantics, including native separator rejection (#10400 / #10553).
 - [x] Persistent dual-version checker controls reject a type error confined to the 3.11 TOML branch on both analysis platforms through local/source/frozen-candidate entry points (#10400 / #10553); four exact-head cases complete 28 actual MyPy analyses. Preserving Versioned Runtime's actual 3.10 behavior and native/copy qualification remains separately open under #10331.

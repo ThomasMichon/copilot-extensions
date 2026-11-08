@@ -79,13 +79,6 @@ def _is_no_project_invocation(args_list: list[str]) -> bool:
         return True
     if args_list[:2] == ["worktree-allocation-receive", "capabilities"]:
         return True
-    if command == "attribution-prepare" and "--comment-origin" in args_list[1:] and (
-        "--capabilities" in args_list[1:] or all(
-            any(arg == flag or arg.startswith(flag + "=") for arg in args_list[1:])
-            for flag in ("--source-root", "--config")
-        )
-    ):
-        return True
     if command == "pr-watch" and len(args_list) > 1 and args_list[1] in (
         "snapshot", "status", "threads", "deliver",
     ):

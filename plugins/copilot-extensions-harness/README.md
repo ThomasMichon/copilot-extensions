@@ -94,9 +94,9 @@ wrapper to report that diagnostic while the host-facing hook still exits
 successfully; direct legacy callers retain a zero exit code. Deliberate mention/uninspectable-body denials in an adopted,
 matching repository remain policy decisions, not execution failures.
 
-The Python evaluator first classifies publication syntax locally, using the same tokenizer
-and write predicates as the body scanner. Its ordinary reads and unrelated shell
-commands perform no repository/manifest/body discovery and start no additional child
+The guard first classifies publication syntax locally, using the same tokenizer
+and write predicates as the body scanner. Ordinary reads and unrelated shell
+commands perform no repository/manifest/body discovery and start no child
 processes. This is not a mention-substring filter: body files, stdin, implicit
 create bodies, command prefixes and compound statements still reach the scoped
 policy check.
@@ -128,29 +128,10 @@ repeated command/filter/select pipelines; it preserves `python3`, `python`,
 then `py` priority and excludes WindowsApps aliases. Fixture tests compare
 selection with the prior resolver, and native timing includes that resolver
 as a separate baseline. Shell and interpreter startup remain real costs.
-Windows path construction and output forwarding use in-process framework
-operations rather than path/output cmdlets. The wrapper still invokes the
-original Python evaluator, forwards its input, retains the live kill switch
-and policy/diagnostic decisions, and discards partial output from failed
-children. Bash behavior is unchanged.
-
-For a fixed-fixture Windows A/B/A comparison, select
-`windows_wrapper_module_attribution` with `COPILOT_MENTION_PROFILE_BASELINE`
-set to a full lowercase commit ID and `COPILOT_MENTION_PROFILE_BASELINE_REPO`
-to its readable source checkout. Both shells run fresh processes against
-the original evaluator; only the wrapper command changes. Git reads the
-baseline without modifying it. The comparison requires the selected child
-to complete and preserves the 10-second child, 30-second item and 300-second
-group limits. Finite samples do not qualify installed composition or tails.
-`windows_wrapper_preserves_policy_and_failure_contract` checks actual
-denials, live-stop behavior, missing/failed helpers and input/output forwarding
-while trapping path/output cmdlets. These explicit native cases can also use
-the [owner-only hosted Windows lane](../../TESTING.md#owner-only-hosted-windows-escape-hatch).
-
 It never executes a proposed `gh` publication or performs a network request:
 
 ```text
-python tools/run-plugin-tests.py copilot-extensions-harness --test-file tests/test_copilot_mention_guard.py --test-timeout 30 --timeout 300 --plugin-timeout 300
+python tools/run-plugin-tests.py copilot-extensions-harness --test-file tests/test_copilot_mention_guard.py
 ```
 
 | Sub-agent | Covers |

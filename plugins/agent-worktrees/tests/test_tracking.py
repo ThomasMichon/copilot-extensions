@@ -2937,60 +2937,6 @@ class TestRetireRecord:
         assert retire_record(knowledge, knowledge_dir) is True
         assert not (knowledge_dir / "wt-k.yaml").exists()
 
-    def test_record_removals_announce_each_removed_worktree_to_the_resident(
-        self, tmp_path: Path, monkeypatch,
-    ):
-        """A hard delete or a failed-tombstone unlink must reach the resident
-        as a change event for every removed record, after the file is gone,
-        so the roster republishes without waiting for a sweep."""
-        from agent_worktrees import tracking
-
-        harness_dir = tmp_path / ".citadel-harness" / "worktrees"
-        knowledge_dir = tmp_path / ".citadel-knowledge" / "worktrees"
-        monkeypatch.setattr(
-            "agent_worktrees.config.project_dir",
-            lambda name=None: tmp_path / f".{name}",
-        )
-        now = "2026-06-01T12:00:00"
-        harness = self._rec(
-            "wt-harness", repo="citadel-harness", pair_id="p1", pair_role="harness",
-            pair_ref="test/citadel-knowledge/wt-k", pair_kind="worktree",
-            status="finalized", completed_at=now, reaped_at=now,
-        )
-        knowledge = self._rec(
-            "wt-k", repo="citadel-knowledge", pair_id="p1", pair_role="knowledge",
-            pair_ref="test/citadel-harness/wt-harness", pair_kind="worktree",
-            status="finalized", completed_at=now, reaped_at=now,
-        )
-        solo = self._rec("wt-solo")
-        save_record(harness, harness_dir / "wt-harness.yaml")
-        save_record(knowledge, knowledge_dir / "wt-k.yaml")
-        save_record(solo, harness_dir / "wt-solo.yaml")
-        files = {
-            harness.worktree_path: harness_dir / "wt-harness.yaml",
-            knowledge.worktree_path: knowledge_dir / "wt-k.yaml",
-            solo.worktree_path: harness_dir / "wt-solo.yaml",
-        }
-        announced: list[tuple[str, bool]] = []
-        monkeypatch.setattr(
-            tracking.save_notifications, "worktree_changed",
-            lambda path: announced.append((path, files[path].exists())),
-        )
-
-        assert retire_record(harness, harness_dir) is True
-        assert announced[-2:] == [
-            (harness.worktree_path, False), (knowledge.worktree_path, False),
-        ]
-
-        announced.clear()
-
-        def _refuse_save(*_args, **_kwargs):
-            raise OSError("tombstone write refused")
-
-        monkeypatch.setattr(tracking, "save_record", _refuse_save)
-        assert retire_record(solo, harness_dir) is True
-        assert announced == [(solo.worktree_path, False)]
-
     def test_live_finalized_sibling_is_not_mistaken_for_reaped(
         self, tmp_path: Path, monkeypatch
     ):

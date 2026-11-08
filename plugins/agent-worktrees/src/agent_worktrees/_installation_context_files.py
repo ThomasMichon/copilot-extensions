@@ -181,7 +181,6 @@ def _snapshot_content_sha256(
     records: list[tuple[bytes, str]] = []
     entry_count = 0
     total_content_bytes = 0
-    reparse_point = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
 
     if max_entries < 0 or max_path_bytes < 0 or max_content_bytes < 0:
         _fail("Snapshot content limits must be non-negative integers.")
@@ -226,10 +225,7 @@ def _snapshot_content_sha256(
             )
 
     def entry_kind(entry_stat: os.stat_result, relative_text: str) -> str:
-        if (
-            stat.S_ISLNK(entry_stat.st_mode)
-            or getattr(entry_stat, "st_file_attributes", 0) & reparse_point
-        ):
+        if stat.S_ISLNK(entry_stat.st_mode):
             _fail(
                 "Snapshot content may not contain symbolic links or reparse "
                 f"points: '{relative_text}'."
@@ -544,9 +540,6 @@ def _snapshot_content_sha256(
         except OSError as error:
             _fail(f"Cannot enumerate snapshot content '{snapshot_root}': {error}")
     else:
-        from concurrent.futures import ThreadPoolExecutor
-        from contextvars import copy_context
-
         def directory_path(relative_parts: tuple[str, ...]) -> Path:
             return snapshot_root.joinpath(*relative_parts)
 
@@ -561,7 +554,7 @@ def _snapshot_content_sha256(
                 _fail(f"Cannot inspect snapshot content '{directory}': {error}")
             if (
                 not stat.S_ISDIR(initial_stat.st_mode)
-                or getattr(initial_stat, "st_file_attributes", 0) & reparse_point
+                or _is_link_or_junction(directory)
             ):
                 _fail(
                     "Snapshot content may not traverse symbolic links or reparse "
@@ -579,6 +572,11 @@ def _snapshot_content_sha256(
                     for entry in iterator:
                         path = Path(entry.path)
                         relative_text = "/".join((*relative_parts, entry.name))
+                        if _is_link_or_junction(path):
+                            _fail(
+                                "Snapshot content may not contain symbolic links "
+                                f"or reparse points: '{relative_text}'."
+                            )
                         try:
                             # Windows DirEntry.stat may report zero device/inode.
                             entry_stat = os.lstat(path)
@@ -612,7 +610,7 @@ def _snapshot_content_sha256(
         def hash_path_file(
             frame: _SnapshotWalkFrame,
             entry: tuple[str, str, bytes, os.stat_result, str],
-        ) -> tuple[bytes, str] | None:
+        ) -> None:
             name, relative_text, encoded, entry_stat, _kind = entry
             path = directory_path((*frame.relative_parts, name))
             flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
@@ -646,15 +644,14 @@ def _snapshot_content_sha256(
             except OSError as error:
                 _fail(f"Cannot inspect snapshot content '{relative_text}': {error}")
             if (
-                getattr(current_stat, "st_file_attributes", 0) & reparse_point
+                _is_link_or_junction(path)
                 or not stat.S_ISREG(current_stat.st_mode)
                 or _stat_identity(current_stat) != _stat_identity(entry_stat)
                 or _stat_metadata(current_stat) != _stat_metadata(entry_stat)
             ):
                 _fail(f"Snapshot content changed during hashing: '{relative_text}'.")
             if frame.relative_parts or name != SNAPSHOT_PROVENANCE_FILE:
-                return encoded, file_digest
-            return None
+                records.append((encoded, file_digest))
 
         def leave_path_directory(frame: _SnapshotWalkFrame) -> None:
             directory = directory_path(frame.relative_parts)
@@ -663,7 +660,7 @@ def _snapshot_content_sha256(
             except OSError as error:
                 _fail(f"Cannot inspect snapshot content '{directory}': {error}")
             if (
-                getattr(current_directory_stat, "st_file_attributes", 0) & reparse_point
+                _is_link_or_junction(directory)
                 or not stat.S_ISDIR(current_directory_stat.st_mode)
                 or _stat_identity(current_directory_stat)
                 != _stat_identity(frame.initial_stat)
@@ -677,9 +674,15 @@ def _snapshot_content_sha256(
                     for entry in iterator:
                         if len(final_manifest) >= len(frame.manifest):
                             _fail("Snapshot content tree changed during hashing.")
+                        path = Path(entry.path)
                         relative_text = "/".join(
                             (*frame.relative_parts, entry.name)
                         )
+                        if _is_link_or_junction(path):
+                            _fail(
+                                "Snapshot content may not contain symbolic links "
+                                f"or reparse points: '{relative_text}'."
+                            )
                         entry_stat = os.lstat(entry.path)
                         final_manifest.append(
                             (
@@ -692,7 +695,7 @@ def _snapshot_content_sha256(
                 _fail(f"Cannot enumerate snapshot content '{directory}': {error}")
             final_manifest.sort()
             if (
-                getattr(final_directory_stat, "st_file_attributes", 0) & reparse_point
+                _is_link_or_junction(directory)
                 or not stat.S_ISDIR(final_directory_stat.st_mode)
                 or frame.manifest != final_manifest
                 or _stat_identity(final_directory_stat)
@@ -702,38 +705,25 @@ def _snapshot_content_sha256(
             ):
                 _fail("Snapshot content tree changed during hashing.")
 
-        with ThreadPoolExecutor(max_workers=8) as files:
-            stack = [enter_path_directory((), None)]
-            while stack:
-                frame = stack[-1]
-                if frame.next_entry < len(frame.entries):
-                    entry = frame.entries[frame.next_entry]
-                    frame.next_entry += 1
-                    name, _relative_text, _encoded, entry_stat, kind = entry
-                    if kind == "D":
-                        stack.append(
-                            enter_path_directory(
-                                (*frame.relative_parts, name),
-                                entry_stat,
-                            )
+        stack = [enter_path_directory((), None)]
+        while stack:
+            frame = stack[-1]
+            if frame.next_entry < len(frame.entries):
+                entry = frame.entries[frame.next_entry]
+                frame.next_entry += 1
+                name, _relative_text, _encoded, entry_stat, kind = entry
+                if kind == "D":
+                    stack.append(
+                        enter_path_directory(
+                            (*frame.relative_parts, name),
+                            entry_stat,
                         )
-                    else:
-                        batch = [entry]
-                        while (
-                            len(batch) < 8 and frame.next_entry < len(frame.entries)
-                            and frame.entries[frame.next_entry][4] != "D"
-                        ):
-                            batch.append(frame.entries[frame.next_entry])
-                            frame.next_entry += 1
-                        pending = [(copy_context(), item) for item in batch]
-                        for record in files.map(
-                            lambda item: item[0].run(hash_path_file, frame, item[1]), pending,
-                        ):
-                            if record is not None:
-                                records.append(record)
-                    continue
-                leave_path_directory(frame)
-                stack.pop()
+                    )
+                else:
+                    hash_path_file(frame, entry)
+                continue
+            leave_path_directory(frame)
+            stack.pop()
     digest = hashlib.sha256()
     for relative_path_bytes, file_sha256 in sorted(records, key=lambda item: item[0]):
         digest.update(b"F\0")

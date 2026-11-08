@@ -467,27 +467,9 @@ The existing authenticated monitor control endpoint advertises
 optional status/platform/ID/codename selection and Boolean `include_missing`.
 An optional Boolean `passive: true` marks a demand-free read: the resident
 answers from its publication but neither renews project scan demand nor wakes
-its producer for an unpublished project, and the feed refuses it. Its
-`projection` adds `freshness: {"refreshed_age_s", "bound_s"}`: the monotonic
-age, measured when the read is served, of the fact collection behind this
-resident's last successful publication of the project (`null` before its first
-publish since election) and the bound `max(45s, 3 × monitor interval)`. A missing or overdue refresh
-adds `availability.status: stale` unless a publication-failure label is
-already present. Consumers treat a passive roster as current only with a
-proven in-bound freshness; a reply without it (older resident) remains
-non-authoritative. Residents
+its producer for an unpublished project, and the feed refuses it. Residents
 that predate the field reject it as `invalid-request`; a passive client then
 returns the labeled advisory saved roster, never a demand read.
-Worktree state-change notifications (`worktreeChanged`) queue the changed
-path and wake the resident; the next sweep republishes the resolved project
-(or every published project when unresolved) without recording demand. The
-project stays queued until a publication succeeds, for at most three sweeps,
-so a sweep that fails or defers before publishing does not drop the event. Mux
-lifecycle feeds the same queue: a managed-mux observation whose committed
-facts change (for example `live` or attached clients) notifies its worktree
-path, and a sweep that prunes a registered direct-lane session missing from the
-mux listing notifies that session's path. A newly listed direct-lane session is
-served and published by the sweep that discovers it.
 Results carry `ok`, `contract_version`, `worktrees` and `projection`:
 schema version, generation, revision, observation timestamp, complete-roster
 and selected-row counts, and quality. Current rows are independently bounded to 64 KiB and omit

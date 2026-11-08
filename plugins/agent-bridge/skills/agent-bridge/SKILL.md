@@ -939,9 +939,7 @@ PR number) to get there — this route is the one shared primitive; see
   `<agent-bridge catalog argv[0]> status`. Normal
   daemon-touching commands self-heal a down service. If that fails, capture the
   routing/log evidence from the guidebook and file a bug; do not manually
-  restart the shared daemon unless the operator directs it. A passive observer
-  that must not start or recover the service sets `AGENT_BRIDGE_NO_ENSURE=1`;
-  those commands then only probe for a running service.
+  restart the shared daemon unless the operator directs it.
 - **"Agent not found"** -- check `<agent-bridge catalog argv[0]> agents` for available names.
   Use `<agent-bridge catalog argv[0]> agents --all-projects` if the target belongs to another
   topology profile.

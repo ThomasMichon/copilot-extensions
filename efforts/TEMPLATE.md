@@ -1,11 +1,5 @@
 # <Effort Name>
 
-## Goal
-
-<The operator's current goal/mission/objective, verbatim where public-safe.
-Update immediately when amended; retain prior intent and authority evidence
-in Request or a linked sidecar. A phase or PR is not the whole objective.>
-
 - **Slug:** `<kebab-case-slug>`
 - **Repo:** copilot-extensions
 - **Branch(es):** `<working-branch-or-per-phase-model>`

@@ -180,9 +180,8 @@ def test_task_elevation_parent_does_not_hold_child_transaction(
         " [IO.File]::AppendAllText($env:INDEX_TEST_EVENTS, \"$PID`n\")\n"
         "}\n"
         "function Remove-LogonAutostart { param($Name);Record-TaskStep }\n"
-        "function Invoke-IndexTaskScheduling { Record-TaskStep }\n"
-        "function Initialize-IndexSchedulingPolicy { $script:IndexTaskPolicy='preserve' }\n"
-        "$NoService=$false\n"
+        "function Register-EngineDaemon { Record-TaskStep }\n"
+        "function Install-Service { Record-TaskStep }\n"
         "function Invoke-ScopedElevation {\n"
         " param($ElevAction)\n"
         " if ($ElevAction -ne 'register-tasks') { throw 'Wrong elevated action' }\n"
@@ -225,7 +224,7 @@ def test_task_elevation_parent_does_not_hold_child_transaction(
     assert result.returncode == 0, result.stdout + result.stderr
     parent = Path(env["INDEX_TEST_PARENT"]).read_text()
     mutations = Path(env["INDEX_TEST_EVENTS"]).read_text().splitlines()
-    assert len(mutations) == 1
+    assert len(mutations) == 4
     if mode in ("switch", "environment"):
         assert Path(env["INDEX_TEST_HANDOFF"]).read_text() == parent
         assert set(mutations) != {parent}

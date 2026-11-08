@@ -26,9 +26,6 @@ Paths below are relative to the repository root.
 This is the bounded inventory of the current Worktrees/PR-owner source paths,
 not a census of independently installed tools or external forge clients.
 Unqualified and unsupported entries remain open C2/C4 obligations.
-The [tracked-consumer refinement](tracked-comment-consumers.md) records the
-confirmed error-string/no-selection gap and proposes composition through the
-existing selected-operation owner before changing those legacy commands.
 
 ## Explicit preapproved-body composition
 

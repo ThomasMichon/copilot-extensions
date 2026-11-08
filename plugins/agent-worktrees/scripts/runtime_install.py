@@ -197,7 +197,7 @@ def _publish_helpers(
                 "-RuntimeSourceDescriptor" if frontend["shell"] == "ps1" else "--runtime-source-descriptor",
                 json.dumps(governance.source_descriptor, sort_keys=True),
             ])
-        environment = governance.publication_environment()
+        environment = dict(os.environ)
         environment["COPILOT_PLUGIN_STAGED_FROM"] = str(governance.payload)
         environment["COPILOT_PLUGIN_INSTALL_STAGED"] = (
             "context-install" if governance.context else "1"

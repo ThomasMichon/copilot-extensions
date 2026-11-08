@@ -319,7 +319,7 @@ def _read_json_document(
     try:
         content, validated_stat = _read_regular_file(
             canonical,
-            label=f"JSON document '{canonical}'",
+            label="JSON document",
             require_stable_identity=True,
         )
         try:

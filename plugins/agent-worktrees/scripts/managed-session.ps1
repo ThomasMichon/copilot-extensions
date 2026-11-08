@@ -49,20 +49,14 @@ function Get-ManagedWorktreesPython {
 function ConvertFrom-ManagedWorktreesJson {
     param([string]$Text)
     if (-not $Text.TrimStart().StartsWith('{')) { throw 'Expected a JSON object' }
-    if (-not $script:managedWorktreesUtilityAssembly) {
-        $script:managedWorktreesUtilityAssembly = [Reflection.Assembly]::Load(
-            'Microsoft.PowerShell.Commands.Utility, Version=3.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35')
-    }
     if ($PSVersionTable.PSVersion.Major -ge 6) {
-        $jsonError = $null
-        $decoded = [Microsoft.PowerShell.Commands.JsonObject]::ConvertFromJson($Text, $true, [ref]$jsonError)
-        if ($null -ne $jsonError) { throw $jsonError.Exception }
-        return ,$decoded
+        return ConvertFrom-Json -InputObject $Text -AsHashtable -ErrorAction Stop
     }
     if (-not $script:managedWorktreesJson) {
+        $null = ConvertFrom-Json -InputObject '{}' -ErrorAction Stop
         [void][Reflection.Assembly]::Load('System.Web.Extensions, Version=4.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35')
         # Retain the shell's metadata semantics without projecting keys onto PSObject.
-        $resolverType = $script:managedWorktreesUtilityAssembly.GetType(
+        $resolverType = [Microsoft.PowerShell.Commands.JsonObject].Assembly.GetType(
             'Microsoft.PowerShell.Commands.JsonObjectTypeResolver', $true)
         $resolver = [Activator]::CreateInstance($resolverType, $true)
         $script:managedWorktreesJson = [System.Web.Script.Serialization.JavaScriptSerializer]::new($resolver)
@@ -70,24 +64,6 @@ function ConvertFrom-ManagedWorktreesJson {
         $script:managedWorktreesJson.RecursionLimit = 100
     }
     return ,($script:managedWorktreesJson.DeserializeObject($Text))
-}
-
-function ConvertTo-PreparedWorktreesJson {
-    param([object]$InputObject, [int]$Depth = 2)
-    if (-not $script:managedWorktreesUtilityAssembly) {
-        $null = ConvertFrom-ManagedWorktreesJson '{}'
-    }
-    if ($PSVersionTable.PSVersion.Major -ge 6) {
-        $contextType = $script:managedWorktreesUtilityAssembly.GetType(
-            'Microsoft.PowerShell.Commands.JsonObject+ConvertToJsonContext')
-        if ($null -eq $contextType) {
-            # The public serialization context is absent on older PowerShell releases.
-            return ConvertTo-Json -InputObject $InputObject -Depth $Depth -Compress
-        }
-        $context = [Microsoft.PowerShell.Commands.JsonObject+ConvertToJsonContext]::new($Depth, $false, $true)
-        return [Microsoft.PowerShell.Commands.JsonObject]::ConvertToJson($InputObject, [ref]$context)
-    }
-    return $script:managedWorktreesJson.Serialize($InputObject)
 }
 
 function Get-PreparedWorktreesPath {
@@ -341,8 +317,8 @@ function Test-PreparedManagedWorktreesSession {
                     [IO.Path]::Combine($registry, 'repos.yaml')
                 )) { return $false }
             $expectedSources[$canonical] = $true
-            $source = ConvertTo-PreparedWorktreesJson -InputObject $sources[$path]
-            $inputStamp = ConvertTo-PreparedWorktreesJson -InputObject $inputs[$path]
+            $source = ConvertTo-Json -InputObject $sources[$path] -Compress
+            $inputStamp = ConvertTo-Json -InputObject $inputs[$path] -Compress
             if (-not [string]::Equals($source, $inputStamp, [StringComparison]::Ordinal)) { return $false }
         }
         $hasGitMarker = $false

@@ -387,18 +387,6 @@ retains the operator's wording.
   - [ ] Review each actual registration owner and add only missing native
     scheduling/absence controls. Preserve existing explicit custom scheduling
     unless the adopter deliberately selects absence.
-    - [x] Land the Logger/Codespaces source slice (#11202), including exact-head
-      native fixture qualification and corrected GUI-interpreter ownership.
-      Dispatch, driver integration and installed acceptance
-      remain separate open work; see the
-      [source journal](<journal/2026/11.08 scheduling-source-qualification.md>).
-    - [x] Land the Index source slice (#11430), including refreshed activation
-      holds, strict engine-health readiness and UTF-8 policy controls.
-      Actual driver-selector integration and installed non-admin/lifetime
-      acceptance remain open.
-    - [x] Land the Bridge/Vault source slice (#11174), including strict scoped
-      repair ownership, retained configuration, current canonical contract
-      capture and all review/CI corrections. Installed acceptance remains open.
   - [ ] Prove fresh default absence, repeat-update absence, explicit scheduling
     compatibility and task-only retirement without stopping protected services
     or deleting their state. Missing scheduling support is not permission to
@@ -407,14 +395,6 @@ retains the operator's wording.
     explicitly selected adopter profiles through those owners and record
     real non-admin consumer proof. Private machine exceptions remain private.
 - [ ] Verify containing normal Main release and exact released behavior.
-  - [x] Verify Index #11430 availability through normal promotion #11465:
-    Main `078c9994cc25f92c091ff1ea4de78cfa8de44988`, admitted Dev
-    `8aa318fae6951584dc045cf9c02a219e3be80ac0`, candidate
-    `183f4649334d20966a0866ed361b8ed3eaf69880`, Index 0.10.248-dev1.
-    Ten of twelve effective source files match the reviewed source exactly;
-    the other two contain only the normal packaged installer-engine import
-    and its regenerated digest. Driver integration and installed acceptance
-    are not claimed.
   - [x] Verify the containing #11008 release through normal promotion #11033:
     Main `cd7e8658ff0bc7334a807880de2c688f7c220f01`, admitted Dev
     `101e0713c081f4100e6a5a8c7fac446b6bb0556a`, immutable candidate
@@ -992,13 +972,6 @@ and does not delay final Copilot exit indefinitely merely to deliver a lifecycle
 notice; the existing bounded/quiet absent-handler contract remains intact.
 
 ## Journal
-
-### 2026-11-08 - Logger/Codespaces scheduling source merged
-
-[Detailed journal](<journal/2026/11.08 scheduling-source-qualification.md>).
-Exact-head review, required CI and hosted native fixture qualification passed.
-Containing release, driver integration, fresh non-admin activation and the
-parent's actual same-process installation cycles remain open.
 
 ### 2026-11-06 - Containing release and test preparation verified
 

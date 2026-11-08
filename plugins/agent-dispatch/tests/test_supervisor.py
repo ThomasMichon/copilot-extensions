@@ -6395,45 +6395,6 @@ def test_retired_worktree_cleanup_failure_backs_off_and_becomes_held(q, client):
         assert sup.release_requested_bodies(now=now) == 0
 
 
-@pytest.mark.parametrize("settled", [False, True])
-def test_released_attempt_concludes_only_after_relationship_settlement(
-    q, client, monkeypatch, settled,
-):
-    client.attachments = lambda _task: [{
-        "session_id": "session-gone", "worktree_id": "wt-created", "machine": "host-a",
-    }]
-    task = q.create("work")
-    reservation, _ = q.reserve_spawn(task.id)
-    q.record_spawn_worktree(
-        reservation.key, "wt-created", ownership="created",
-        creating_host="host-a", driver="agent-dispatch",
-    )
-    q.record_spawn(reservation.key, session_handle="session-gone", worktree="wt-created")
-    q.request_spawn_release(
-        reservation.key, disposition="settled",
-        finished_startup_revision=q.get_reservation(reservation.key).startup_revision,
-    )
-    settlements = []
-    monkeypatch.setattr(
-        supervisor_module, "settle_completed_relationship",
-        lambda _sup, res, _task: settlements.append(res["key"]) or settled,
-    )
-    conclusions = []
-    sup = Supervisor(
-        client, spawn_fn=_ok_spawn(), repo=TEST_REPO, machine="host-a",
-        verdict_fn=lambda *_args: tracking.GONE,
-        attempt_conclusion_fn=lambda *args: conclusions.append(args) or {
-            "action": "removed", "reason": "concluded",
-        },
-        nudge=False,
-    )
-
-    sup.release_requested_bodies(now=2000.0)
-
-    assert settlements and set(settlements) == {reservation.key}
-    assert bool(conclusions) is settled
-
-
 def test_gone_body_retires_before_session_cleanup_uses_capacity(q, client):
     task = q.create("work", exclusive_key="stable:resource")
     reservation, _ = q.reserve_spawn(task.id)

@@ -170,25 +170,11 @@ Coverage is explicit, never inferred:
   published the project, or predates the demand-free read and rejects it, the
   host returns its saved roster and the row carries `availability`
   (`status: "advisory"`) and
-  `projection.observed_at`: saved rows that may be stale. A resident answer
-  carries `projection.freshness` (`refreshed_age_s`, `bound_s`); when the
-  resident has not republished the project within that bound (for example its
-  demand lapsed, or its sweep loop stalled), the row is labeled
-  `availability.status: "stale"`. A host with no saved
+  `projection.observed_at`: saved rows that may be stale. A host with no saved
   roster, or an older runtime that rejects `--passive` as an unrecognized
-  argument, becomes a `reachable: false` gap. A saved or stale roster never
-  proves a delegate's caller gone or terminal: a caller missing from it is
-  `unknown`, and the delegate is not finalizable (`host-roster-advisory`). A
-  resident roster's proof also expires while the fleet probes later hosts:
-  local time elapsed since its own probe started counts against `bound_s`.
-  Any reachable roster the fleet cannot prove current when it evaluates the
-  hosts -- an older resident's unlabeled reply, or a fresh one that expired
-  while later hosts were probed -- is labeled `availability.status: "stale"`
-  in the JSON row (an existing `advisory` or `stale` label is kept), so a
-  consumer never reads it as current. The
-  human view never prints a plain count for a roster it cannot prove current:
-  a saved roster is suffixed `(saved roster)`, and any other unproven one is
-  suffixed `(stale roster)`. Every child
+  argument, becomes a `reachable: false` gap. A saved roster never proves a
+  delegate's caller gone or terminal: a caller missing from it is `unknown`,
+  and the delegate is not finalizable (`host-roster-advisory`). Every child
   also runs with stdin closed and `AGENT_WORKTREES_NO_SELFPROVISION=1`, so a
   host without a usable runtime reports a gap instead of provisioning one.
 - **Local deadline only.** `--timeout` bounds the SSH connect and the local
@@ -642,7 +628,7 @@ continue to work unchanged.
 | `worktree-lineage` | Project-agnostic, bounded graph of one authoritative worktree's sessions, transitions, handoffs, controllers, normalized reciprocal presentation, projection health, and explicit terminal/fork/cycle/missing-session findings (JSON) |
 | `fleet` | Aggregate one project's `list --json` across every reachable machine × environment -- one SSH/local process per target, never per-worktree. `--json` returns host rows (`machine` / `env` / `reachable` / `worktrees`) and annotates delegate edges with `caller_state`, `delegate_finalizable`, and reverse `delegates` lists. Covers the selected project only; see [Fleet worktree inventory](#fleet-worktree-inventory) for liveness and coverage rules. |
 | `reconcile` | Force-refresh PR state for every tracked worktree (including `finalized`) out of band, so `list` stays a pure file read |
-| `delegates` | Focused cross-machine delegate/caller query built on the fleet snapshot, read passively like `fleet` (`list --passive --all` per host). Dry-run by default: reports every `caller_worktree` delegate plus whether its host is `resolved`, `gone`, `unreachable`, `ambiguous`, or `unknown`, and whether the delegate became finalizable because the host is `finalized` / `complete(d)` / gone. Only a host's current roster can prove that; a saved, stale, or unlabeled one leaves the delegate blocked (`host-roster-advisory`). `--execute` finalizes every currently eligible delegate through the owning host, re-checking the caller roster's freshness immediately before each one. |
+| `delegates` | Focused cross-machine delegate/caller query built on the fleet snapshot. Dry-run by default: reports every `caller_worktree` delegate plus whether its host is `resolved`, `gone`, `unreachable`, `ambiguous`, or `unknown`, and whether the delegate became finalizable because the host is `finalized` / `complete(d)` / gone. Only a host's current roster can prove that; a saved, stale, or unlabeled one leaves the delegate blocked (`host-roster-advisory`). `--execute` finalizes every currently eligible delegate through the owning host. |
 | `conclude-session` / `link-succession` | Project-agnostic write primitives for explicit session conclusion and exact-token handoff succession links (JSON) |
 | `resolve-handoff-successor` | Sanctioned repair for a terminal (`kind` managed, status finalized/complete/completed) worktree whose real handoff successor session ran to completion but was never `register-session`'d (a crash/race in that step), leaving `pending_handoffs`/`resolved_head_session` permanently wedged. `--token` names the still-`pending` handoff and `--successor` the NOT-yet-tracked session id; refuses unless the successor is a real, non-live, non-detached local session (`sessions.validate_session_id`) whose recorded cwd matches the worktree's `worktree_path` and whose transcript's first turn is itself a handoff-seed prompt with real turns beyond it (the same class-G evidence bar `repairing-worktrees` documents). On success it retroactively registers the successor, links the handoff, and immediately concludes it so the worktree lands back in the terminal shape gc already expects -- the sanctioned alternative to hand-editing tracking YAML |
 | `conclude-disposable` | Project-agnostic, exact-id terminal conclusion for an explicitly disposable worker, regardless of CLI/ACP tracking metadata. Requires `--policy disposable-cli` (historical wire spelling) and `--owner`; preserves live sessions, all dirty work (including generated local overlays), local commits, follow-ups, claims, pairs, and open PRs. A clean branch with zero commits ahead of upstream may remain behind without being rewritten, then the command marks the record managed/final without changing its effective interface. `--remove` immediately runs the conservative managed-GC verdict for only that exact id, with fresh lifecycle/liveness checks; an already-removed id is idempotent success. |
@@ -872,10 +858,21 @@ On Windows, the session-start hook selects the first non-WindowsApps `python`
 on PATH that reports Python 3.10 or newer, falling back to the first such
 `python` when none does; the floor then reports `unsupported-interpreter`.
 
-The session-start compatibility bootstrap does not stamp or provision a missing
-runtime. Explicit setup or the first tool invocation owns installation instead;
-the Windows first-use dispatcher reports its provisioning progress on stderr and
-respects the selected update authority.
+On Windows, the cold hook checks the shared bootstrap killswitch before entering
+the canonical ownership lifecycle with its existing Python interpreter and one
+native installer child. It passes that interpreter to the installer, avoiding
+redundant bootstrap-shell startup and interpreter discovery while keeping both
+installer ownership checks. Explicit installation contexts never enter this
+legacy path. The standalone bootstrap script remains the no-Python/deployed-copy
+fallback; it forwards the supplied interpreter through both ownership admission
+and the staged installer, including paths containing spaces. Stamp diagnostics
+use UTF-8 and stay on stderr, not in session guidance. The lifecycle owner
+enforces the cold stamp's ten-second child deadline, stopping the installer
+tree before releasing its ownership lease rather than killing the owner from
+the hook.
+The stamp copies the same source tree
+through native filesystem APIs; runtime provisioning remains deferred to first
+tool use.
 
 ### Terminal identity
 
@@ -1081,7 +1078,7 @@ Repos without `pr.roles` and non-GitHub providers keep their prior behavior.
 | `pr-comment` | Post a general (non-verdict) comment on the active tracked PR: `pr-comment <body>` |
 | `pr-review` | Publish a review verdict on the active tracked PR: `--approve` / `--request-changes` / `--comment`, with an optional `--body` |
 | `attribution-audit` | Config-only check: flags this repo's `pr.head_pattern` for the branch-name leak class (embeds `{machine}` while `pr.source_attribution` isn't `true`; `{worktree_id}` is never flagged -- it isn't part of `pr_head_name`'s rendering contract, so it can't actually leak). Plain mode prints findings and exits 1 if any are found (0 if none); `--json` exits 0 whenever it can report findings (empty or not). A configuration-load failure exits 1 in both modes |
-| `attribution-prepare` | Emit a source marker, or prepare a UTF-8 `--body-file`, for an external PR tool without provider access. Optional `--tag` supplies an adopter-owned label; `--omit-source` honors anonymous publication. Ordinary `--json` retains `version`, `marker`, `body`, `attributed`. Separate `--comment-origin` emits compact origin data; its optional `--capabilities` discovery and exact `--source-root` plus absolute `--config` support independent consumers without borrowing their CWD. Existing calls keep their CWD-based behavior. No comment composition or publication occurs. See [compact comment-origin](../skills/worktree/references/pr-attribution.md#compact-comment-origin-producer) for the actual contracts, privacy and rollback rules. |
+| `attribution-prepare` | Emit a source marker, or prepare a UTF-8 `--body-file`, for an external PR tool without provider access. Optional `--tag` supplies an adopter-owned label; `--omit-source` honors anonymous publication. Ordinary `--json` retains `version`, `marker`, `body`, `attributed`. The separate `--comment-origin` mode emits compact `agent-worktrees.comment-origin/v1` data, with `--visibility public` (default) or `internal`; it does not compose or publish a comment. Runs from a managed source worktree; leaves files and remote objects unchanged. See the worktree skill's `pr-attribution.md` reference. |
 | `identity-vault status/setup/verify` | Local optional shared-key setup for an already configured agent-vault database and independently running service; no project is required. `--vault-argv` supplies exact vault catalog argv as JSON; optional `--vault-context` supplies its owning validated receipt, not worktrees' context. Setup requires a running service and persists non-secret installation-scoped source selection after population and a fresh cache-loader/encryption probe. Status is read-only; verify exercises the persisted normal reader. `--prompt` is explicit; first-owner creation requires both `--initialize-owner --confirm-first-owner`. See [identity-vault](identity-vault.md). |
 | `pr` | Namespace grouping the `pr-*` verbs |
 
@@ -1234,34 +1231,6 @@ demand (the request carries `passive: true`, which the resident honors by
 neither renewing scan demand nor waking its producer for an unpublished
 project); otherwise the saved roster labeled `availability.status: "advisory"`
 with its `projection.observed_at`, or a JSON error (exit 1) when none is saved.
-A resident's passive answer adds `projection.freshness`: the age of that
-resident's last successful publication of the project (`refreshed_age_s`,
-`null` if it has not published it since election) and its bound (`bound_s`,
-the larger of 45 seconds and three monitor intervals). The age is measured
-when the read is served, so a stalled sweep loop ages out rather than vouching
-for an old roster, and it counts from when the resident began collecting that
-publication's facts, so a stalled collection cannot publish an old roster at
-age zero; an unpublished-since-election or overdue roster is labeled
-`availability.status: "stale"`. Worktree state-change notifications (every
-tracking-record save, such as create, resume, status and finalize, and every
-retirement removal) and mux lifecycle changes (a managed-mux session's live or
-attached-client change, or a registered session vanishing from the mux listing)
-wake the resident and republish the affected project on the next sweep without
-renewing its demand.
-These events reuse the existing push wake, whose single flag coalesces a burst
-into at most one immediate follow-up sweep. Changed paths are deduplicated, up
-to 256 per sweep; an overflow or an unresolvable path republishes every project
-the resident has published rather than growing a queue. A changed project stays
-queued until a publication succeeds, for at most three sweeps, so a transient
-mux-listing failure or deferral does not lose the event; after that it ages to
-stale like any other unrefreshed roster. Resolving a path uses
-only in-memory caches and the projects registry (no Git or subprocess). Each
-affected project is then published at most once per sweep through the same
-sequential, project-locked path as a demand-driven publication, with the same
-cost and governance re-check before each project. While the resident drains or
-is superseded, it drops events and refuses publications; a successor vouches
-only for its own publications, so a project whose event was dropped at cutover
-reads stale until it is republished.
 A resident that predates the marker rejects it as an invalid request; the
 passive read then also returns the labeled saved roster, never a demand read. It
 cannot be combined with `--follow`, `--glance` or `--refresh`, and the feed
@@ -1301,18 +1270,10 @@ explicit legacy/detail host rows as `delegates` (the delegate worktree ids plus
 their own finalizable/not-finalizable verdicts); current rows omit that graph.
 `fleet` and `delegates` accept a host's roster as proof that a caller is gone
 or terminal only when it is a current publication (`projection.quality:
-"current"` with no `availability` label) whose `projection.freshness` proves a
-republish within its bound: finite, non-negative `refreshed_age_s` plus the
-local time elapsed since that host's probe started no greater than `bound_s`.
-The resident measures its age when it answers, and the fleet probes hosts one
-after another, so a slow later host can expire an earlier host's proof before
-the delegates are judged. A saved, stale, unproven, or unlabeled roster
+"current"` with no `availability` label). A saved, stale, or unlabeled roster
 (for example from an older runtime) leaves a missing caller `unknown` and never
 authorizes finalization (`delegate_finalizable: false`, reason
-`host-roster-advisory`). `delegates --execute` repeats that check immediately
-before each finalization, so a caller roster that has outlived its bound since
-the snapshot leaves the remaining delegates unfinalized (an `errors` entry with
-reason `host-roster-advisory`).
+`host-roster-advisory`).
 
 When a worktree record carries profile-assignment history, the ordinary
 `list --json` row includes `current_profile_assignment`: the bound assignment

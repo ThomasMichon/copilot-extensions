@@ -257,29 +257,6 @@ def test_foundation_admission_refuses_unsettled_queue_owner_loss(space, state):
     assert status(queued.id, root=space).state == state
 
 
-@pytest.mark.parametrize("field,value", [
-    ("started_at", 1), ("finished_at", 1), ("boot_id", "uncertain"),
-])
-@pytest.mark.parametrize("existing", [False, True])
-def test_foundation_admission_preserves_pending_execution_evidence(space, field, value, existing):
-    if existing:
-        with custody(space) as owned:
-            previous = fs.begin(space, DIGEST, owned)
-            fs.finish(space, previous, owned, exit_code=0)
-    queued = request(space)
-    with sqlite3.connect(space / "queue.sqlite3") as db:
-        db.execute(f"UPDATE requests SET {field}=? WHERE id=?", (value, queued.id))
-    queue_before = (space / "queue.sqlite3").read_bytes()
-    foundation = space / fs.FILENAME
-    before = foundation.read_bytes() if existing else None
-    with custody(space) as owned:
-        with pytest.raises(fs.FoundationStateError, match="unsettled queue"):
-            fs.begin(space, DIGEST, owned)
-    assert (space / "queue.sqlite3").read_bytes() == queue_before
-    assert (foundation.read_bytes() if foundation.exists() else None) == before
-    assert status(queued.id, root=space).unresolved
-
-
 def test_only_executing_transaction_can_enclose_foundation_construction(space):
     queued = request(space)
 

@@ -88,9 +88,19 @@ def test_fresh_application_owns_native_broker_fresh_and_resume(tmp_path, monkeyp
     _qualify_native_application(tmp_path, monkeypatch, broker=True)
 
 
+@pytest.mark.timeout(900)
+@pytest.mark.skipif(
+    os.name != "nt" or os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1",
+    reason="Explicitly select the installed public Windows Worktrees embodiment lane",
+)
+def test_public_embody(tmp_path, monkeypatch):
+    _qualify_native_application(tmp_path, monkeypatch, broker="embody")
+
+
 def _qualify_native_application(tmp_path, monkeypatch, *, broker=False):
     started = time.monotonic()
-    deadline = started + 300
+    construction_budget = 420 if broker == "embody" else 300
+    deadline = started + construction_budget
     print("Application construction starting", flush=True)
     sys.path.insert(0, str(ROOT / "tools"))
     import build_python_artifacts as builder
@@ -226,7 +236,17 @@ def _qualify_native_application(tmp_path, monkeypatch, *, broker=False):
         ], cwd=caller, env=environment, deadline=deadline)
     assert json.loads(described.stdout)["contract"] == "agent-worktrees.native-seed"
     print(f"Application packaged admission checked: {time.monotonic() - started:.2f}s", flush=True)
-    if broker:
+    if broker == "embody":
+        assert time.monotonic() < deadline, "Public caller preparation exceeded 420 seconds"
+        from test_manager_application_launch import _qualify_manager_application
+
+        manager = tmp_path / "manager"
+        manager.mkdir()
+        _qualify_manager_application(
+            manager, monkeypatch, "embody", worktrees_python=python,
+            worktrees_root=root, worktrees_environment=environment,
+        )
+    elif broker:
         assert time.monotonic() < deadline, "Application construction exceeded 300 seconds"
         native_root = tmp_path / "native-flow"
         native_root.mkdir()
@@ -242,11 +262,12 @@ def _qualify_native_application(tmp_path, monkeypatch, *, broker=False):
                      "import os,sys;from pathlib import Path;"
                      "sys.path[:0]=sys.argv[1:3];"
                      "from test_headed_worktrees_copilot import _qualify_native_worktrees;"
-                     "_qualify_native_worktrees(Path(sys.argv[3]),'broker',"
+                     "_qualify_native_worktrees(Path(sys.argv[3]),sys.argv[6],"
                      "worktrees_python=Path(sys.argv[4]),worktrees_root=Path(sys.argv[5]),"
                      "worktrees_environment=dict(os.environ))",
                      str(Path(__file__).parent), str(ROOT / "tools"),
-                     str(native_root), str(python), str(root)],
+                     str(native_root), str(python), str(root),
+                     "broker"],
                     env={
                         **environment, **lifecycle,
                         "COPILOT_EXTENSIONS_TEST_SANDBOX": os.environ["COPILOT_EXTENSIONS_TEST_SANDBOX"],

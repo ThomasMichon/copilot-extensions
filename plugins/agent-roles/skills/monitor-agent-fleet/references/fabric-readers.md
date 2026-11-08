@@ -68,10 +68,7 @@ they include idle rows and dead or retained sessions. Keep each row's
 `live_rest`, `fact_provenance` and `observed_at`, and each read's
 `availability` and `projection.observed_at`, so busy, live-idle,
 awaiting-operator and saved work stay distinct. Count a paired sibling (shared
-`pair_id`) or a session that appears in several rows once. Record an identity
-conflict, such as two rows naming one native session or a worktree's last
-session differing from its live-session registration, as a finding; it never
-selects an alternate steering recipient.
+`pair_id`) or a session that appears in several rows once.
 
 Keep coverage honest. Report unreachable hosts, saved, stale or partial
 rosters, projects that are unregistered, unadopted or unavailable on a host,
@@ -109,13 +106,6 @@ session command catalog: invoke its installed owner command `agent-worktrees`
 with an explicit `--project`, not a project binstub, which a host need not
 have.
 
-If the topology reader loses its state-root binding, read the bound topology
-manifest by its explicit path rather than guessing machines, and record that
-fallback in the cycle log. A previously observed host that becomes unreachable,
-for example on an SSH key-exchange or banner failure, keeps its last observed
-owners as unobserved coverage gaps, not stopped or complete. Read it again next
-cycle; do not retry it in a loop or repair it.
-
 When an ad hoc remote read is still necessary, keep it bounded and headless:
 
 - Run `ssh -o BatchMode=yes -o ConnectTimeout=<seconds>` with stdin closed, so
@@ -146,12 +136,9 @@ When the selected Bridge client/service has a documented no-wake read path:
 
 Do not assume a status-like command is passive: some clients ensure or repair a
 service before querying it. When the client offers a documented no-ensure
-switch, set it for every read, including remote ones. For `agent-bridge` it is
-`AGENT_BRIDGE_NO_ENSURE=1` in the process environment: a command that would
-otherwise ensure the service then only probes for a running one, so a down
-service fails the read instead of being started. A reader run without the
-switch is not read-only. If no no-wake path is available, use already
-available source snapshots or report that reader unavailable.
+switch, set it for every read, including remote ones. If no no-wake path is
+available, use already available source snapshots or report that reader
+unavailable.
 
 A live-session registry can be per host: one host's roster may omit sessions
 on another host or in a guest environment on the same machine. Read each host

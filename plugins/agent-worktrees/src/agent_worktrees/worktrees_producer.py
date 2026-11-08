@@ -80,8 +80,6 @@ def _publish_active_project(
 ) -> int:
     from . import __main__ as core
 
-    # The roster is only as fresh as the first fact read for it.
-    collected_from = runtime.clock()
     records = tracking.list_records(cfg.tracking_dir(project))
     if observe_records is not None:
         observe_records(project, records)
@@ -134,7 +132,7 @@ def _publish_active_project(
 
         delegate_cli.annotate_delegate_graph(rows, current_only=True)
         runtime.publish(
-            project, rows, observed_at=observed_at, collected_from=collected_from,
+            project, rows, observed_at=observed_at,
             record_heads={
                 record.worktree_id: {
                     "creation_nonce": record.creation_nonce,

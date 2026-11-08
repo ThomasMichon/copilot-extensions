@@ -181,21 +181,7 @@ def embedded_members(project):
     return members
 
 
-def _native_build_path(project, path):
-    if os.name != "nt":
-        return path
-    absolute = os.path.normpath(os.path.abspath(os.path.join(project, path)))
-    if absolute.startswith("\\\\?\\"):
-        return absolute
-    if absolute.startswith("\\\\"):
-        return "\\\\?\\UNC\\" + absolute[2:]
-    return "\\\\?\\" + absolute
-
-
-def commands(
-    project, package, canonical_directory=None, *, companion_resources=None,
-    runtime_resources=None,
-):
+def commands(project, package, canonical_directory=None, *, companion_resources=None):
     """Bind one package's hooks; generated sdist resources are not source mirrors."""
     from setuptools.command.build_py import build_py
     from setuptools.command.sdist import sdist
@@ -207,9 +193,7 @@ def commands(
         from setuptools import find_packages
     resources = {
         name: Path("src") / package / destination
-        for name, destination in (
-            RUNTIME_RESOURCES if runtime_resources is None else runtime_resources
-        ).items()
+        for name, destination in RUNTIME_RESOURCES.items()
     }
     canonical_directory = Path(canonical_directory) if canonical_directory else None
 
@@ -265,7 +249,6 @@ def commands(
                 distribution.package_dir = mapping
                 distribution.package_data = package_data
             super().finalize_options()
-            self.build_lib = _native_build_path(project, self.build_lib)
 
         def build_packages(self):
             if not embedded:
@@ -356,33 +339,8 @@ def commands(
                     ignore=ignore,
                 )
 
-    classes = {"build_py": BuildPy, "sdist": BuildSdist}
-    if os.name == "nt":
-        from setuptools.command.install_lib import install_lib
-
-        class WindowsInstallLib(install_lib):
-            def finalize_options(self):
-                super().finalize_options()
-                self.build_dir = _native_build_path(project, self.build_dir)
-                self.install_dir = _native_build_path(project, self.install_dir)
-
-        classes["install_lib"] = WindowsInstallLib
-        from setuptools import Distribution
-        from distutils.errors import DistutilsModuleError
-
-        try:
-            bdist_wheel = Distribution().get_command_class("bdist_wheel")
-        except (ImportError, DistutilsModuleError):
-            bdist_wheel = None
-        if bdist_wheel is not None:
-            class BdistWheel(bdist_wheel):
-                def finalize_options(self):
-                    super().finalize_options()
-                    self.bdist_dir = _native_build_path(project, self.bdist_dir)
-
-            classes["bdist_wheel"] = BdistWheel
     if not embedded:
-        return classes
+        return {"build_py": BuildPy, "sdist": BuildSdist}
 
     from setuptools.command.egg_info import egg_info
     from setuptools.command.install_lib import install_lib
@@ -393,7 +351,7 @@ def commands(
                 self.get_finalized_command("build_py")
             super().run()
 
-    class InstallLib(classes.get("install_lib", install_lib)):
+    class InstallLib(install_lib):
         def install(self):
             if not embedded or self.dry_run or self.get_exclusions() or not os.path.isdir(self.build_dir):
                 return super().install()
@@ -417,5 +375,6 @@ def commands(
             with ThreadPoolExecutor(max_workers=min(4, len(files))) as pool:
                 return list(pool.map(copy_member, files))
 
-    classes.update({"egg_info": EggInfo, "install_lib": InstallLib})
-    return classes
+    return {
+        "build_py": BuildPy, "sdist": BuildSdist, "egg_info": EggInfo, "install_lib": InstallLib,
+    }

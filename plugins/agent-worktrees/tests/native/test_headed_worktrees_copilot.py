@@ -63,10 +63,12 @@ def _qualify_native_worktrees(
     assert executable and Path(executable).is_absolute() and Path(executable).is_file()
     assert binary and shell, "Select existing native Copilot, PSMux and PowerShell"
     installed = worktrees_python is not None
+    public_embody = control == "embody"
     if installed:
-        assert control == "broker" and worktrees_root is not None
+        assert control in {"broker", "embody"} and worktrees_root is not None
         assert Path(worktrees_python).is_file()
         assert worktrees_environment is not None
+    assert not public_embody or installed
     owner_python = str(worktrees_python) if installed else physical_executable(
         getattr(sys, "_base_executable", sys.executable),
     )
@@ -222,7 +224,7 @@ class Mux {
     if control == "native-input":
         prompts.insert(2, "ISOLATED native keyboard input")
     outer_target = "headed-fixture-" + uuid4().hex
-    target = manager_target if control == "manager-mux" else outer_target
+    target = manager_target if control == "manager-mux" or public_embody else outer_target
 
     def query(action, *arguments):
         assert action in {
@@ -340,11 +342,11 @@ class Mux {
             "project.mkdir(parents=True,exist_ok=True);"
             "(project/'config.yaml').write_text(json.dumps({'repo_name':'native-copilot','machine':'fixture',"
             "'repos':{'native-copilot':{'anchor':str(checkout),'default_branch':'dev'}}}),encoding='utf-8');"
-            "manager=sys.argv[3].startswith('manager-');"
-            "tracking_path=project/'worktrees' if manager else checkout;"
+            "managed=sys.argv[3].startswith('manager-') or sys.argv[3]=='embody';"
+            "tracking_path=project/'worktrees' if managed else checkout;"
             "tracking_path.mkdir(parents=True,exist_ok=True);"
             "record=tracking.create_new_record(sys.argv[2],'worktree/native-copilot',str(checkout),"
-            "'native-copilot','fixture',cfg.detect_platform() if manager else 'win32',"
+            "'native-copilot','fixture',cfg.detect_platform() if managed else 'win32',"
             "tracking_path);print(json.dumps(str(record.yaml_path)))",
             checkout, worktree_id, control,
         )
@@ -383,7 +385,7 @@ class Mux {
             namespace = private_mux_args(tmp_path)
             namespace_file.write_text(namespace[1], encoding="utf-8")
             outer_target = "headed-fixture-" + uuid4().hex
-            target = manager_target if control == "manager-mux" else outer_target
+            target = manager_target if control == "manager-mux" or public_embody else outer_target
             identities = {}
             plan = runtime(
                 "import json,sys;from pathlib import Path;from uuid import uuid4;"
@@ -430,6 +432,40 @@ class Mux {
                     f"    code=subprocess.call({manager_command!r})\n"
                 )
                 previous_attempts = set(record.parent.glob("launch-attempts/*"))
+            if public_embody:
+                console = Path(worktrees_python).with_name("agent-worktrees.exe")
+                assert console.is_file(), "The installed console entrypoint is required"
+                assert len(str(console)) < 260, "Keep this consumer fixture below MAX_PATH"
+                configured = native_args[:]
+                if leg == "fresh":
+                    configured = configured[:-2]
+                else:
+                    configured = configured[2:]
+                runtime(
+                    "import json,sys;from agent_worktrees import config;"
+                    "path=config.project_dir('native-copilot')/'config.yaml';"
+                    "value=json.loads(path.read_text(encoding='utf-8'));"
+                    "value['repos']['native-copilot']['copilot_path']={'windows':sys.argv[1]};"
+                    "path.write_text(json.dumps(value),encoding='utf-8');print('true')",
+                    executable,
+                )
+                public_command = [
+                    str(console), "--project", "native-copilot", "embody",
+                    "--worktree-id", worktree_id, "--recovery",
+                    *["--copilot-arg=" + argument for argument in configured],
+                ]
+                if leg == "fresh":
+                    public_command += ["--fresh", "--seed", prompts[0]]
+                previous_attempts = set(record.parent.glob("launch-attempts/*"))
+                public_result = tmp_path / (leg + "-embody.json")
+                invocation = (
+                    "    import subprocess\n"
+                    f"    reply=subprocess.run({public_command!r},capture_output=True,text=True,"
+                    "encoding='utf-8',timeout=30,creationflags=subprocess.CREATE_NO_WINDOW)\n"
+                    "    log.write(reply.stderr+reply.stdout);log.flush()\n"
+                    f"    Path({str(public_result)!r}).write_text(reply.stdout,encoding='utf-8')\n"
+                    "    code=reply.returncode\n"
+                )
             driver = tmp_path / (leg + ".py")
             result_file = tmp_path / (leg + "-result.txt")
             owner_log = tmp_path / (leg + "-owner.log")
@@ -484,7 +520,7 @@ class Mux {
                 for argument in ("-e", f"{name}={environment[name]}")
             ]
             assert query("has-session", "-t", outer_target).returncode == 1
-            if control == "manager-mux":
+            if control == "manager-mux" or public_embody:
                 assert query("has-session", "-t", target).returncode == 1
             launched = query(
                 "new-session", "-d", "-s", outer_target, "-c", str(checkout),
@@ -504,7 +540,7 @@ class Mux {
 
             def bound():
                 nonlocal attempt, startup_seen, startup_diagnostic
-                if control == "manager-mux" and target not in identities:
+                if (control == "manager-mux" or public_embody) and target not in identities:
                     observed = query(
                         "display-message", "-p", "-t", target,
                         "#{session_id}:#{session_created}|#{pane_id}",
@@ -513,10 +549,10 @@ class Mux {
                         identities[target] = observed.stdout.strip()
                         startup_seen = time.monotonic()
                 if result_file.exists():
-                    assert control == "manager-mux" and result_file.read_text(encoding="utf-8") == "0", (
+                    assert (control == "manager-mux" or public_embody) and result_file.read_text(encoding="utf-8") == "0", (
                         owner_log.read_text(encoding="utf-8")
                     )
-                if manager:
+                if manager or public_embody:
                     candidates = set(record.parent.glob("launch-attempts/*")) - previous_attempts
                     paths = [path for candidate in candidates for path in candidate.glob("*/headed.json")]
                 else:
@@ -537,7 +573,7 @@ class Mux {
                     except (FileNotFoundError, PermissionError):
                         return None
                     if value["state"] == "running":
-                        if control == "manager-mux" and target not in identities:
+                        if (control == "manager-mux" or public_embody) and target not in identities:
                             return None
                         return value
 
@@ -597,7 +633,7 @@ class Mux {
                   flush=True)
             assert state["session_id"] == native and state["restoration"] == "unqualified"
             assert pid_alive(state["pid"]) and pid_alive(state["child_pid"])
-            if control == "manager-mux":
+            if control == "manager-mux" or public_embody:
                 assert target in identities
                 _until(
                     result_file.exists, f"{leg}: nested Manager caller did not return",
@@ -609,7 +645,13 @@ class Mux {
                     f"{leg}: original Manager caller pane did not close",
                 )
                 assert pid_alive(state["pid"]) and pid_alive(state["child_pid"])
-                if manager_python is not None:
+                if public_embody:
+                    reply = json.loads(public_result.read_text(encoding="utf-8"))
+                    assert reply["ok"] and reply["created"]
+                    assert reply["launch_action"] == ("create" if leg == "fresh" else "resume")
+                    assert reply["resume_session"] == (None if leg == "fresh" else native)
+                    assert reply["session"] == target and reply["worktree_id"] == worktree_id
+                if control == "manager-mux" and manager_python is not None:
                     live_mapping = _until(
                         lambda: (value if (value := manager_mapping()) and value["live"] else None),
                         f"{leg}: installed Manager did not register its live CLI pane",
@@ -642,6 +684,25 @@ class Mux {
                 lambda: sum(event["type"] == "assistant.turn_end" for event in messages()) >= expected_before,
                 f"{leg}: native history did not restore or finish its original seed",
             )
+            if public_embody:
+                launched_attempts = set(record.parent.glob("launch-attempts/*"))
+                reused = run_caller_owned(
+                    [str(console), "--project", "native-copilot", "embody",
+                     "--worktree-id", worktree_id, "--recovery",
+                     "--seed", "MUST NOT REPLAY LIVE SEED"],
+                    env=environment, cwd=checkout, timeout=30,
+                    max_stdout_bytes=65536, max_stderr_bytes=65536,
+                )
+                assert reused.returncode == 0, reused.stdout + reused.stderr
+                reply = json.loads(reused.stdout)
+                assert reply["ok"] and reply["created"] is False and reply["launch_action"] == "reuse"
+                assert reply["session"] == target and not reply["seeded"]
+                assert set(record.parent.glob("launch-attempts/*")) == launched_attempts
+                observed = query(
+                    "display-message", "-p", "-t", target,
+                    "#{session_id}:#{session_created}|#{pane_id}",
+                )
+                assert observed.returncode == 0 and observed.stdout.strip() == identities[target]
             if control == "manager-mux" and verify_reuse:
                 identities.pop(outer_target)
                 outer_target = "headed-fixture-" + uuid4().hex
@@ -743,7 +804,7 @@ class Mux {
                 "exit_code": exit_code, "process_exit_code": exit_code, "receipt_uncertain": False,
             }
             assert int(result_file.read_text(encoding="utf-8")) == (
-                0 if control == "manager-mux" else exit_code
+                0 if control == "manager-mux" or public_embody else exit_code
             )
             pane_output = []
 
@@ -780,10 +841,11 @@ class Mux {
             home / "session-state" / native / "events.jsonl",
         ]
         assert not (home / "permissions-config.json").exists()
-        if control == "manager-mux":
+        if control == "manager-mux" or public_embody:
             commands = (tmp_path / "mux-commands.txt").read_text(encoding="utf-8").splitlines()
             assert commands.count("new-session") == 2
-            assert "set-option" in commands and "source-file" in commands
+            if control == "manager-mux":
+                assert "set-option" in commands and "source-file" in commands
     finally:
         try:
             if state is not None and pid_alive(state["pid"]):

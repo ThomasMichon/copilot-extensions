@@ -1188,9 +1188,8 @@ def test_worktrees_composed_status_revalidates_changed_receipt(tmp_path: Path, h
 @pytest.mark.skipif(os.name != "nt", reason="Windows provision file-lock sharing")
 @pytest.mark.parametrize("host", NATIVE_POWERSHELL_HOSTS or [None])
 @pytest.mark.parametrize("branch", ["locked-fast", "provisioned"])
-@pytest.mark.parametrize("prior_flags", [False, True])
 def test_worktrees_releases_provision_lock_before_runtime_dispatch(
-    tmp_path: Path, host: str, branch: str, prior_flags: bool,
+    tmp_path: Path, host: str, branch: str,
 ) -> None:
     if host is None:
         pytest.skip("PowerShell is unavailable")
@@ -1221,7 +1220,6 @@ def test_worktrees_releases_provision_lock_before_runtime_dispatch(
         resolver.write_text("$AgentRtPy = $null\n", encoding="utf-8")
         (payload / "scripts" / "install.ps1").write_text(
             "param([Parameter(Position=0)][string]$Action, [string]$InstallDir)\n"
-            "# agent-worktrees:first-use-driver-nonblocking-v1\n"
             "[IO.File]::WriteAllText((Join-Path $PSScriptRoot 'resolve-runtime.ps1'), "
             "'$AgentRtPy = $env:TEST_PYTHON')\n", encoding="utf-8",
         )
@@ -1229,12 +1227,9 @@ def test_worktrees_releases_provision_lock_before_runtime_dispatch(
     package.mkdir(parents=True)
     (package / "__init__.py").write_text("", encoding="utf-8")
     (package / "__main__.py").write_text(
-        "import json, os\nfrom pathlib import Path\n"
+        "import os\nfrom pathlib import Path\n"
         "with (Path(os.environ['AGENT_RT_ROOT']) / '.provision.lock').open('r+b'):\n"
-        "    print(json.dumps({'lock': 'released', 'flags': ["
-        "os.environ.get('AGENT_WORKTREES_FIRST_USE_NO_WAIT'), "
-        "os.environ.get('AGENT_WORKTREES_FIRST_USE_EXPECTED_SNAPSHOT')]}))\n",
-        encoding="utf-8",
+        "    print('lock-released')\n", encoding="utf-8",
     )
     environment = _agent_worktrees_test_environment(home, payload)
     environment.update({
@@ -1242,13 +1237,6 @@ def test_worktrees_releases_provision_lock_before_runtime_dispatch(
         "COPILOT_EXTENSIONS_BOOT_TRACE": "1",
         "TEST_STATUS_CALLERS": str(status_callers),
     })
-    for key in ("AGENT_WORKTREES_FIRST_USE_NO_WAIT", "AGENT_WORKTREES_FIRST_USE_EXPECTED_SNAPSHOT"):
-        environment.pop(key, None)
-    if prior_flags:
-        environment.update({
-            "AGENT_WORKTREES_FIRST_USE_NO_WAIT": "prior-mode",
-            "AGENT_WORKTREES_FIRST_USE_EXPECTED_SNAPSHOT": "prior-snapshot",
-        })
     result = subprocess.run(
         [host, "-NoProfile", "-File", str(payload / "bin" / "payload" / "agent-worktrees.ps1"),
          "--version"],
@@ -1256,9 +1244,7 @@ def test_worktrees_releases_provision_lock_before_runtime_dispatch(
         creationflags=cast(Any, subprocess).CREATE_NO_WINDOW,
     )
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout.strip()) == {
-        "lock": "released", "flags": ["prior-mode", "prior-snapshot"] if prior_flags else [None, None],
-    }
+    assert result.stdout.strip() == "lock-released"
     dispatch = [
         event for event in _read_jsonl(plugin_root / "logs" / "activity.jsonl")
         if event["phase"] == "dispatch"
@@ -1267,45 +1253,6 @@ def test_worktrees_releases_provision_lock_before_runtime_dispatch(
     callers = status_callers.read_text(encoding="utf-8").splitlines()
     assert len(callers) == (3 if branch == "locked-fast" else 5)
     assert set(callers) == {str(dispatch[0]["pid"])}
-
-
-@pytest.mark.skipif(os.name != "nt", reason="Windows native first-use admission")
-@pytest.mark.parametrize("host", NATIVE_POWERSHELL_HOSTS or [None])
-@pytest.mark.parametrize("supported", [False, True])
-def test_worktrees_first_use_refuses_old_installers_and_preserves_native_failures(
-    tmp_path: Path, host: str, supported: bool,
-) -> None:
-    if host is None:
-        pytest.skip("PowerShell is unavailable")
-    payload = _copied_agent_worktrees_payload(tmp_path, dispatch_only=True)
-    context = _stamp_agent_worktrees_context(tmp_path, payload)
-    home = tmp_path / "home"
-    home.mkdir()
-    _activate_agent_worktrees_context(tmp_path, home, context)
-    (payload / "scripts" / "resolve-runtime.ps1").write_text("$AgentRtPy = $null\n", encoding="utf-8")
-    marker = "# agent-worktrees:first-use-driver-nonblocking-v1\n" if supported else ""
-    (payload / "scripts" / "install.ps1").write_text(
-        "param([Parameter(Position=0)][string]$Action, [string]$InstallDir)\n"
-        + marker
-        + "[IO.File]::AppendAllText($env:TEST_CALLS, 'called' + [Environment]::NewLine)\n"
-        + "[Console]::Error.WriteLine('native installer failure')\nexit 75\n",
-        encoding="utf-8",
-    )
-    calls = tmp_path / "installer-calls.txt"
-    environment = _agent_worktrees_test_environment(home, payload)
-    environment.update({"COPILOT_EXTENSIONS_CONTEXT": str(context), "TEST_CALLS": str(calls)})
-    result = subprocess.run(
-        [host, "-NoProfile", "-File", str(payload / "bin" / "payload" / "agent-worktrees.ps1"), "--version"],
-        env=environment, capture_output=True, text=True, timeout=30,
-        creationflags=cast(Any, subprocess).CREATE_NO_WINDOW,
-    )
-    assert result.returncode == (75 if supported else 126), result.stderr
-    if supported:
-        assert calls.read_text(encoding="utf-8").splitlines() == ["called"]
-        assert "native installer failure" in result.stderr
-    else:
-        assert not calls.exists()
-        assert "lacks safe first-use admission" in result.stderr
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows governance revalidation")
@@ -1333,7 +1280,6 @@ def test_worktrees_in_process_checks_refuse_changed_policy(
     install_record = tmp_path / "installed.txt"
     (payload / "scripts" / "install.ps1").write_text(
         "param([Parameter(Position=0)][string]$Action, [string]$InstallDir)\n"
-        "# agent-worktrees:first-use-driver-nonblocking-v1\n"
         "[IO.File]::WriteAllText($env:TEST_INSTALL_RECORD, 'installed')\n" + change_policy,
         encoding="utf-8",
     )
@@ -1576,7 +1522,6 @@ def test_agent_worktrees_active_context_provisions_only_its_cell_root(
     )
     (payload / "scripts" / "install.ps1").write_text(
         "param([Parameter(Position=0)][string]$Action, [string]$InstallDir)\n"
-        "# agent-worktrees:first-use-driver-nonblocking-v1\n"
         "[IO.File]::WriteAllText(\n"
         "  $env:TEST_INSTALL_RECORD,\n"
         "  ($Action + '|' + $InstallDir + '|' + $env:COPILOT_EXTENSIONS_CONTEXT)\n"
@@ -1637,7 +1582,6 @@ def test_agent_worktrees_namespaced_first_use_is_single_flight(
     )
     (payload / "scripts" / "install.ps1").write_text(
         "param([Parameter(Position=0)][string]$Action, [string]$InstallDir)\n"
-        "# agent-worktrees:first-use-driver-nonblocking-v1\n"
         "Add-Content -LiteralPath $env:TEST_INSTALL_RECORD -Value $PID\n"
         "Start-Sleep -Seconds 1\n"
         "$resolver = Join-Path $PSScriptRoot 'resolve-runtime.ps1'\n"

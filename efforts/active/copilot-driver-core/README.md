@@ -2620,3 +2620,117 @@ in 0.72 seconds (77.19 including runner preparation/cleanup). The development
 checkout has no pre-existing local `libs`, so this addition leaves its already
 qualified construction/native path unchanged. Refresh final-head review and
 CI rather than treating the earlier High finding as advisory.
+
+### 2026-11-08 - Installed execution-owner checkpoint merged
+
+#11426 merged at 00:39:45 UTC as
+`f7185af6aaa353d1e71f34124a1d549ed4d011d7`. Copilot approved the final
+`06a9e83bc8a0f34fac58f047738dd9556c691bb8` head with no active findings;
+the materialized-layout thread is resolved and the latest required CI run
+passed. Publication leaves the qualified launch path unchanged; the incoming
+Worktrees main-module change only adds unrelated command help text.
+
+Re-read the parent Plan and Validation Plan after merge; #10765 remains open.
+Keep this workspace active. The installed execution-owner flow is qualified,
+not the public Worktrees command or complete Manager/Worktrees caller matrix.
+Continue through the installed public caller next, then the separate
+attachment, all-caller-Job, receiving/skew and native pending-work gates.
+No shared runtime rollout or production-session mutation occurred.
+
+### 2026-11-08 - Public Worktrees caller prerequisites and measured failures
+
+The public detached caller must execute the installed console entrypoint,
+project configuration, record admission and native session selection, not
+call the execution owner directly. The first Worktrees-only fixture completed
+its application admission in 291.20 seconds, then failed before process
+creation because its test-generated console path exceeded Windows MAX_PATH.
+A shorter test directory and explicit path preflight correct that fixture
+input; they do not claim general long-path support.
+
+The next attempt exhausted the original construction deadline during install
+after profile preparation reached 270.28 seconds. One explicitly diagnostic
+construction allowance reached admission in 397.62 seconds, with the main
+Worktrees wheel taking 107.17 seconds and profile snapshot writing 64.80
+seconds. That attempt returned public creation but observed no headed broker.
+It is not a 300-second admission or public-launch pass. Temporary timing
+wrappers and the diagnostic allowance have been removed.
+
+The source trace identifies a missing fixture prerequisite: normalized native
+Windows setup selects the current Manager pane wrapper, while the
+Worktrees-only fixture provides none. Correct the consumer fixture with both
+real installed applications and selected-runtime launcher discovery; do not
+substitute copied source wrappers or infer a production regression from the
+incomplete pair. The initial composed public case retained separate 300-second
+construction/admission limits for each application and a caller-owned
+180-second native flow. Existing single-application cases remain unchanged.
+
+The first corrected pair attempt exhausted Worktrees snapshot inspection
+before Manager or the public native caller started: wheels completed at
+233.45 seconds and the original 300-second preparation limit expired during
+profile retention. The public-caller test now separates functional consumer
+acceptance from the existing admission-performance case, with a measured
+420-second Worktrees preparation allowance, the Manager preparation's
+300-second allowance and the native consumer's unchanged 180 seconds.
+The composed functional case is 900 seconds; it does not claim the separate
+300-second Worktrees construction-performance gate. The original admission
+and installed execution-owner budgets and behavior remain unchanged.
+
+The functional-pair attempt also expired during Worktrees preparation:
+inputs took 25.66 seconds and wheels completed at 375.86 seconds, leaving
+too little of the 420-second preparation allowance for snapshot freezing.
+Manager and the native public caller did not execute. Stop repeating local
+construction or enlarging allowances; the measured preparation cost is
+increasing and no common source-regression cause has been established.
+The existing hosted controller admits generic focused selections and the
+`bridge-http52` packet, not this native public caller's prerequisites or
+explicit runner bounds. Resolve a supported hosted path rather than treating
+skipped tests, arbitrary environment injection or unit-only evidence as native
+qualification. No public detached-command pass is claimed.
+
+A registry PATH drift detected during the diagnostic was confirmed by the
+operator as an authorized concurrent installation/update. No rollback or
+shared machine-state repair was attempted. The corrected installed-pair
+fresh/resume/reuse flow is now under qualification. Public attachment,
+all-caller-Job persistence, receiving and pending-work remain separate open
+parent gates; no Plan or Validation Plan item is closed by these attempts.
+
+### 2026-11-08 - Provider-first hosted native qualification prerequisite
+
+The operator approved configuring the existing anonymous governed feed for an
+owner-only hosted native packet, with pinned disposable Copilot and PSMux,
+unchanged native deadlines and cleanup, and no new runner, host installation
+or per-request branch. Only the feed URL is held in the repository's Actions
+secret; no endpoint or credentials are committed or exported as evidence.
+Local reachability is established; hosted access remains unproven.
+
+The controller-only source slice passes 69 focused controls, including exact
+native caller/version/phase acceptance and uploaded-file redaction. Lint,
+headless launch, feed neutrality, module size and documentation guards pass.
+These are controller contracts and real contained pytest-consumer checks,
+not a native public caller pass. The controller must clear normal review, CI
+and promotion before it can admit the new packet.
+
+A source-only dependency workspace carries that controller slice so it can
+be promoted before the parent fixture is published. The refactor owner and
+original caller checkout retain the unqualified fixture and all parent gates;
+no source, stage or ownership is discarded, and no second agent is launched.
+After controller acceptance, resume the actual public caller packet rather
+than another local construction retry. Copilot 1.0.105 is the seasoned hosted
+pin; it does not establish qualification of a different installed CLI build.
+
+#11546 merged at 08:45:55 UTC as
+`7830a21ae8a5cd229dead31c17371b0c3dc693d8`, after exact-head Copilot approval
+with no active findings and green required CI. Normal Maintainer completion
+used the provider-confirmed review-rule exception, not a CI bypass. Re-read
+this parent effort immediately after merge. Controller source is merged;
+protected-default support and the actual native packet remain pending.
+Continue with immutable fixture preparation and observed promotion. No parent
+Plan or Validation item closes on this infrastructure slice.
+
+Prepared the tracked caller-fixture input with its Agent Worktrees changefile.
+The focused materialized-input layout regression passes in 1.20 seconds
+(22.89 seconds including runner preparation and cleanup); the three native
+cases were deselected, not qualified. A real offline UV compile also accepts
+the controller's empty default-index variable for generic selections without
+installing anything. Keep the immutable candidate local until actual
+protected-controller support admits the named native packet.

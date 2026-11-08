@@ -5,38 +5,12 @@ an actual existing host binding, with a separate existing-owner retained source
 reader. It adds no installed owner, service, credentials or acquisition fallback.
 
 `WorkspaceOperations` composes the existing `OwnerReadHandler`,
-`GenerationCache`, `ReplayStore` and protected `execute_review`. Construction
-performs no provisioning/adoption, source fetching, installation or credential
-acquisition.
+`GenerationCache`, `ReplayStore` and protected `execute_review`. It performs no
+provisioning/adoption, source fetching, installation or credential acquisition.
 Construct it only inside the current owner pipeline with an authorized fixed
 native repository/principal scope, read binding and actual write-context factory.
 The factory accepts the selected PR number and returns the normal pinned context;
 it is not reconstructed from caller JSON, cached data or a claimed role.
-
-Alternatively, explicitly supply the optional in-process `write_context_factory`
-instead of `write_context`. Both at once refuse. This synchronous resolver
-receives `(scope, checkpoint=..., deadline=...)`, with the full selected PR
-scope and enclosing monotonic deadline, and returns a synchronous no-argument
-context factory. It is called lazily at most once per submission execution,
-only when the executor or feedback actually requests a protected context.
-All action and feedback contexts then use that same returned factory. A failed
-resolution is not retried during feedback; a later request has its own resolver
-selection, not a host-lifetime cached material reference.
-
-The resolver must compose the actual credential/transport owner, for example
-the optional [pinned native ADO factory](../../agent-worktrees/docs/azure-review-transport.md),
-honor the supplied finite budget/checkpoint and retain current native
-admission, permission and material-generation checks. The supplied checkpoint
-also rejects withdrawal/replacement of the selected workspace writer. This
-embedding does not implement native permission verification or host enrollment.
-The existing per-context `write_context(number)` path keeps its prior calling
-semantics; the request-local path never falls back to it.
-
-Capabilities, allocation/preview, retained selection/receipt lookup and a
-confirmed replay needing no protected readback do not resolve this factory.
-Unknown actions may use a later execution's pinned context for reconciliation,
-never automatic resend or replacement of their original durable identity.
-Default and standalone read-only hosts still supply neither writer.
 
 Pass optional `workspaces={(caller_principal, target): operations}` to the existing
 `WatchService` or `WatchGateway`. Each key must already have a watch scope and the
@@ -71,7 +45,6 @@ back to ordinary watches or another provider.
 | `chunk` | `number`, exact `generation_id`, `offset` |
 | `inspect` | `number`, original `operation_id` |
 | `receipt` (optional prepared contract) | `number`, original `operation_id`, `action_id` |
-| `observe-comment` (optional observation contract) | `number`, original `operation_id`, `action_id`, retained `generation_id` |
 | `submit` | `number`, immutable `intent`, separate `source_attachment`, `budget_seconds` |
 | `allocate` (optional selection contract) | `number`, original v1 `intent`, `source_attachment`, `budget_seconds` |
 
@@ -187,53 +160,12 @@ second transport or per-comment forge query. Older clients may ignore the
 additive metadata and keep using v1; older receivers do not acquire new fields
 or operations from a package-version assumption.
 
-### Optional acquired comment observation
-
-A current receiver with `prepared_reviews=True` and already adopted v2 intent
-storage additionally advertises `observe-comment` and this exact
-`comment_observation_contract`:
-
-```json
-{
-  "protocol": "agent-pull-requests.comment-observation/v1",
-  "result_protocol": "agent-pull-requests.prepared-comment-observation/v1",
-  "generation_versions": [1],
-  "effects": "none",
-  "original_version_proof": false
-}
-```
-
-The request selects `number`, original `operation_id`/`action_id` and an exact
-retained `generation_id`. The receiver delegates to the existing-owner
-[body-free library projection](review-owner-store.md#acquired-comment-observation).
-It acquires no native evidence and does not require a protected writer.
-The result preserves the original state/receipt and the selected generation's
-actual observation interval; current content correlation is neither original
-version proof nor feedback/handled progress.
-
-Native/Fleet clients and CLI/tools select the operation only after the actual
-receiver advertises both the prepared and observation contracts. Missing,
-malformed or prior support refuses locally before sending this strict request.
-The receiver rechecks its selected prepared mode and actual adopted storage
-when invoked; cached capabilities cannot bypass withdrawal. The authenticated
-Gateway keeps its existing binding, checkpoint and drain owners, including for
-this hyphenated operation. Remote responses must match the selected original
-operation/action, scope and generation and preserve the no-effects/no-proof
-boundary. Old clients ignore the additive capability and keep their prior
-operations; rollback refuses this read without rewriting state, discovering
-a replacement by tags or falling back to another owner.
-
 ## Optional pre-approval selection receiver
 
 After explicit prepared-intent and
 [selection storage adoption](review-owner-store.md#optional-pre-approval-selection-retention),
 the existing host may supply `selection_preparer` alongside `prepared_reviews=True`
-independently of `write_context` or `write_context_factory`. A preparation-only
-embedding advertises `allocate` and prepared receipt support, not `submit`;
-the existing strict capability shapes and allocation payload are unchanged.
-An approved preview cannot substitute for the missing protected writer.
-This trusted
-synchronous preparation resolver receives the
+and its normal `write_context`. This trusted synchronous resolver receives the
 selected cached generation and `checkpoint` keyword; it resolves actual current
 destination policy, AI profile and producer origin outside the replay lock,
 then returns bounded pure synchronous composition with the existing
@@ -320,8 +252,7 @@ protected synthetic native owner, not a live provider or installed host.
 ### Optional selected edits
 
 A trusted embedding may additionally select `selection_owned_edits=True`,
-default false, with its existing prepared mode and resolver. As with baseline
-allocation, an optional writer is required for submission, not preparation.
+default false, with its existing prepared mode, resolver and write context.
 The exact baseline capability above remains unchanged. Only a currently
 supported opted-in receiver adds `owned_edit_selection_contract`:
 

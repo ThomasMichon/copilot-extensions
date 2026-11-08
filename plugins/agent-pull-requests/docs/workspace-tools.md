@@ -169,7 +169,6 @@ Original host cancellation/authority and retained unknown effects remain separat
 | submit | number, intent, source_attachment, budget_seconds |
 | inspect | number, operation_id |
 | receipt (optional prepared contract) | number, operation_id, action_id |
-| observe-comment (optional observation contract) | number, operation_id, action_id, generation_id |
 | events (optional) | number, after (null or epoch/sequence), limit (1-16) |
 
 `allocate` selects only the executing receiver's optional
@@ -203,14 +202,6 @@ owner advertises its supported contract. Default/prior bindings keep v1;
 missing or malformed support refuses before sending v2, not through a legacy
 fallback. Submission never prepares text, allocates GUIDs, adopts storage or
 turns receipt correlation into fresh native readback or handled/echo progress.
-
-`observe-comment` and `pr_workspace_observe_comment` use the separately
-[negotiated observation contract](workspace-integration.md#optional-acquired-comment-observation).
-They join one original action to an exact cached generation without acquisition
-or a writer. Preserve the result's original state/receipt and observation age;
-an unavailable/conflicting result is not a request to discover equal text,
-resend a comment or advance feedback. Prior/withdrawn support refuses without
-state downgrade or fallback.
 
 The optional [conversation event reader](conversation-journal.md) needs explicit
 owner-v3 storage and serving adoption. It is read-only and capability-selected;

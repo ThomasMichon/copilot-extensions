@@ -5,13 +5,12 @@
 .DESCRIPTION
     Canonical installer for the agent-vault runtime. Creates the runtime at
     ~/.agent-vault/ (.venv + state), deploys ~/.local/bin/agent-vault.ps1 and
-    agent-vault.cmd binstubs. Scheduling is opt-in through the native global
-    configuration's windows_scheduled_task policy; on-demand startup remains
-    available without Task Scheduler.
+    agent-vault.cmd binstubs, and registers a windowless Scheduled Task named
+    AgentVault that runs the persistent daemon at logon unless -NoService is
+    specified.
 
 .PARAMETER Action
-    install (default) | update | status | start | stop | uninstall | schedule.
-    schedule reconciles native task policy; absent removes only the owned task.
+    install (default) | update | status | start | stop | uninstall.
 
 .PARAMETER InstallDir
     Override the runtime install directory (default: ~/.agent-vault).
@@ -30,7 +29,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('install', 'update', 'status', 'start', 'stop', 'uninstall', 'stamp', 'provision', 'schedule')]
+    [ValidateSet('install', 'update', 'status', 'start', 'stop', 'uninstall', 'stamp', 'provision')]
     [string]$Action = 'install',
 
     [Alias('install-dir')]
@@ -57,45 +56,17 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
 
-# Retain the native selector before activation, driver handoff or self-staging
-# can move the filesystem cwd. This also applies to task-only schedule actions.
-if ($env:AGENT_VAULT_CONFIG) {
-    $vaultConfigLocation = Get-Location
-    if ($vaultConfigLocation.Provider.Name -cne 'FileSystem') {
-        throw 'Vault configuration requires a filesystem invocation directory'
-    }
-    $vaultConfigProvider = $null
-    $vaultConfigDrive = $null
-    $vaultConfigPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath(
-        $env:AGENT_VAULT_CONFIG, [ref]$vaultConfigProvider, [ref]$vaultConfigDrive
-    )
-    if ($vaultConfigProvider.Name -cne 'FileSystem') {
-        throw 'Vault configuration selector must name a filesystem path'
-    }
-    $env:AGENT_VAULT_CONFIG = $vaultConfigPath
-}
-
-if ($Action -in @('install', 'update', 'stamp', 'provision', 'start', 'schedule')) {
-    if ((Get-Location).Provider.Name -cne 'FileSystem') {
-        throw 'Vault project selection requires a filesystem invocation directory'
-    }
+if ($Action -in @('install', 'update', 'stamp', 'provision', 'start')) {
+    . (Join-Path $PSScriptRoot 'runtime-activation.ps1')
     $activationProject = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) {
         $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT
     } else { (Get-Location).ProviderPath }
-    $activationProject = (Resolve-Path -LiteralPath $activationProject -ErrorAction Stop).ProviderPath
-    if (-not (Test-Path -LiteralPath $activationProject -PathType Container)) {
-        throw 'Vault project selection must name an available directory'
-    }
-    $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT = $activationProject
-}
-
-if ($Action -in @('install', 'update', 'stamp', 'provision', 'start')) {
-    . (Join-Path $PSScriptRoot 'runtime-activation.ps1')
     $activation = Get-VaultRuntimeActivation -Project $activationProject
     if ($activation.state -ceq 'configuration-empty') {
         Write-Output "[SKIP] $($activation.detail)"
         exit 0
     }
+    $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT = $activationProject
 }
 
 # === install-contract:v4 payload-copy -- keep byte-identical across plugins ===
@@ -1037,121 +1008,18 @@ function Install-Runtime {
     }
 }
 
-function Get-WindowsScheduledTaskPolicy {
-    # Scheduling is machine deployment policy, not portable vault selection.
-    $path = if ($env:AGENT_VAULT_CONFIG) { $env:AGENT_VAULT_CONFIG } else {
-        $appData = if ($env:APPDATA) { $env:APPDATA } else { Join-Path $env:USERPROFILE 'AppData\Roaming' }
-        Join-Path $appData 'agent-vault\config.json'
-    }
-    $policy = 'preserve'
-    if (Test-Path -LiteralPath $path) {
-        $data = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json -ErrorAction Stop
-        if ($data -isnot [pscustomobject]) { throw 'Vault configuration must be an object' }
-        if ($data.PSObject.Properties['windows_scheduled_task']) {
-            $policy = $data.windows_scheduled_task
-        }
-    }
-    if ($policy -isnot [string] -or $policy -cnotin @('preserve', 'enabled', 'absent')) {
-        throw 'windows_scheduled_task must be preserve, enabled or absent'
-    }
-    return $policy
-}
-
-function Assert-OwnedVaultTask {
-    param($Task)
-    if (@($Task.Actions).Count -ne 1) { throw 'Refusing ambiguous Vault task actions' }
-    $taskAction = @($Task.Actions)[0]
-    $launcher = [regex]::Escape((Join-Path $InstallDir 'service.ps1'))
-    $executor = [string]$taskAction.Execute
-    $arguments = [string]$taskAction.Arguments
-    # -File terminates shell options; later -File tokens are only script input.
-    $shell = '(?:"(?:[^"]*\\)?(?:pwsh|powershell)\.exe"|(?:[^\s"]*\\)?(?:pwsh|powershell)\.exe)'
-    if ((Split-Path -Leaf $executor) -ieq 'conhost.exe') {
-        if ($arguments -notmatch "^\s*--headless\s+$shell\s+(?<shellArguments>.*)$") {
-            throw 'Refusing foreign Vault scheduled task'
-        }
-        $arguments = $Matches.shellArguments
-    } elseif ((Split-Path -Leaf $executor) -notin @('pwsh.exe', 'powershell.exe')) {
-        throw 'Refusing foreign Vault scheduled task'
-    }
-    $options = '(?:(?:-NoProfile|-NonInteractive|-NoLogo)\s+|-ExecutionPolicy\s+Bypass\s+|-WindowStyle\s+Hidden\s+)*'
-    $operand = "`"$launcher`""
-    if ((Join-Path $InstallDir 'service.ps1') -notmatch '\s') { $operand += "|$launcher" }
-    if ($arguments -notmatch "^\s*$options-File\s+(?:$operand)\s*$") {
-        throw 'Refusing foreign Vault scheduled task'
-    }
-}
-
-function Get-SchedulingPolicyTask {
-    param([string]$Policy)
-    if (-not (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)) {
-        if ($Policy -eq 'preserve') { return $null }
-        throw 'Cannot reconcile Vault scheduling: ScheduledTasks module unavailable'
-    }
-    try {
-        return (Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop)
-    } catch {
-        if (($_.FullyQualifiedErrorId -split ',')[0] -ceq 'CmdletizationQuery_NotFound_TaskName') {
-            return $null
-        }
-        throw
-    }
-}
-
 function Register-AgentVaultTask {
-    if ($NoService -and $Action -ne 'schedule') {
+    if ($NoService) {
         Write-Skip 'agent-vault service skipped (-NoService): this host is a client only'
         return
     }
-    $policy = Get-WindowsScheduledTaskPolicy
-    $existing = Get-SchedulingPolicyTask -Policy $policy
-    if ($policy -eq 'absent') {
-        if ($existing) {
-            Assert-OwnedVaultTask -Task $existing
-            if ($existing.State -eq 'Disabled') {
-                throw 'Disabled Vault task retains a startup hold; clear that intent explicitly before task retirement'
-            }
-            Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Stop
-        }
-        Write-Ok 'Vault scheduling absent; service and state preserved'
-        if ($Action -eq 'schedule') { return }
-    }
-    if ($existing) {
-        if ($policy -eq 'enabled') { Assert-OwnedVaultTask -Task $existing }
-        if ($existing.State -eq 'Disabled') {
-            Write-Skip 'Vault scheduled task is disabled; startup hold preserved'
-            return
-        }
-    }
-    if ($Action -eq 'schedule' -and $policy -eq 'preserve') { return }
-    if ($Action -eq 'schedule' -and $policy -eq 'enabled') {
-        if ($NoService) { throw 'Client-only NoService intent excludes scheduling opt-in' }
-        . (Join-Path $PSScriptRoot 'runtime-activation.ps1')
-        $project = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) {
-            $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT
-        } else { (Get-Location).ProviderPath }
-        $activation = Get-VaultRuntimeActivation -Project $project
-        if ($activation.state -ceq 'configuration-empty') {
-            throw 'Vault runtime is inactive; scheduling does not enable the service'
-        }
-        $resolver = Join-Path $InstallDir 'bin\resolve-runtime.ps1'
-        if (-not (Test-Path -LiteralPath $resolver)) { throw 'Vault runtime resolver is unavailable' }
-        $previousRoot = $env:AGENT_RT_ROOT
-        try {
-            $env:AGENT_RT_ROOT = $InstallDir
-            $AgentRtPy = $null
-            . $resolver
-            if (-not $AgentRtPy) { throw 'Vault selected runtime is unavailable' }
-            $LinkPython = $AgentRtPy
-        } finally { $env:AGENT_RT_ROOT = $previousRoot }
-    }
-    if (-not (Test-Path $LinkPython)) {
-        if ($Action -eq 'schedule') { throw 'Vault selected runtime is unavailable' }
-        Write-Warn 'agent-vault venv not found -- skipping scheduled task'
+    if (-not (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue)) {
+        Write-Skip 'ScheduledTasks module unavailable -- skipping service'
         return
     }
-    if ($policy -eq 'enabled' -and -not (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue)) {
-        throw 'Vault scheduling explicitly enabled but ScheduledTasks module unavailable'
+    if (-not (Test-Path $LinkPython)) {
+        Write-Warn 'agent-vault venv not found -- skipping scheduled task'
+        return
     }
 
     # #1836: the launcher itself resolves the active slot via the canonical
@@ -1215,49 +1083,48 @@ if (([string]`$_supportsContext).Trim() -ceq '1') {
 & `$_py -X "pycache_prefix=`$_pythonCache" -m agent_vault.service @_serviceArguments @args
 exit `$LASTEXITCODE
 "@, [Text.UTF8Encoding]::new($true))
-    if ($policy -eq 'enabled') {
-        $desiredTaskAction = New-ScheduledTaskAction `
-            -Execute 'conhost.exe' `
-            -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$TaskLauncher`"" `
-            -WorkingDirectory $InstallDir
-        $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-        $trigger.Delay = 'PT15S'
-        $settings = New-ScheduledTaskSettingsSet `
-            -AllowStartIfOnBatteries `
-            -DontStopIfGoingOnBatteries `
-            -StartWhenAvailable `
-            -ExecutionTimeLimit ([TimeSpan]::Zero) `
-            -MultipleInstances IgnoreNew `
-            -RestartCount 3 `
-            -RestartInterval (New-TimeSpan -Minutes 1)
+    $action = New-ScheduledTaskAction `
+        -Execute 'conhost.exe' `
+        -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$TaskLauncher`"" `
+        -WorkingDirectory $InstallDir
+    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+    $trigger.Delay = 'PT15S'
+    $settings = New-ScheduledTaskSettingsSet `
+        -AllowStartIfOnBatteries `
+        -DontStopIfGoingOnBatteries `
+        -StartWhenAvailable `
+        -ExecutionTimeLimit ([TimeSpan]::Zero) `
+        -MultipleInstances IgnoreNew `
+        -RestartCount 3 `
+        -RestartInterval (New-TimeSpan -Minutes 1)
 
-        # Register-ONCE model (#1836): update the stable launcher above on every
-        # runtime cutover; change the task definition only on an explicit opt-in.
-        $existing = Get-SchedulingPolicyTask -Policy $policy
-        if ($existing) {
-            $existingAction = $existing.Actions | Select-Object -First 1
-            $matchesDesired = $existingAction -and
-                $existingAction.Execute -eq $desiredTaskAction.Execute -and
-                $existingAction.Arguments -eq $desiredTaskAction.Arguments -and
-                $existingAction.WorkingDirectory -eq $desiredTaskAction.WorkingDirectory
-            if ($matchesDesired) {
-                Write-Ok "Scheduled task already correct ($TaskName, at logon, 15s delay) -- left registered as-is"
-            } else {
-                Set-ScheduledTask -TaskName $TaskName -Action $desiredTaskAction -Trigger $trigger -Settings $settings | Out-Null
-                Write-Ok "Scheduled task updated ($TaskName, at logon, 15s delay)"
-            }
+    # Register-ONCE model (#1836), same as agent-bridge/agent-dispatch: the
+    # launcher path/working directory are stable across ordinary updates (the
+    # launcher body above is what resolves the active slot, dynamically, at
+    # every run), so a task whose Action already matches is already correct --
+    # re-registering (Set-ScheduledTask) is reserved for a genuine definition
+    # migration (e.g. an install-dir move), not every install/update.
+    $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if ($existing) {
+        $existingAction = $existing.Actions | Select-Object -First 1
+        $matchesDesired = $existingAction -and
+            $existingAction.Execute -eq $action.Execute -and
+            $existingAction.Arguments -eq $action.Arguments -and
+            $existingAction.WorkingDirectory -eq $action.WorkingDirectory
+        if ($matchesDesired) {
+            Write-Ok "Scheduled task already correct ($TaskName, at logon, 15s delay) -- left registered as-is"
         } else {
-            Register-ScheduledTask -TaskName $TaskName `
-                -Action $desiredTaskAction -Trigger $trigger -Settings $settings `
-                -Description 'agent-vault -- local KeePassXC-backed secret store.' | Out-Null
-            Write-Ok "Scheduled task registered ($TaskName, at logon, 15s delay)"
+            Set-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings | Out-Null
+            Write-Ok "Scheduled task updated ($TaskName, at logon, 15s delay)"
         }
-
-        if ($Action -ne 'schedule') {
-            Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-        }
+    } else {
+        Register-ScheduledTask -TaskName $TaskName `
+            -Action $action -Trigger $trigger -Settings $settings `
+            -Description 'agent-vault -- local KeePassXC-backed secret store.' | Out-Null
+        Write-Ok "Scheduled task registered ($TaskName, at logon, 15s delay)"
     }
-    if ($Action -eq 'schedule') { return }
+
+    Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 
     # IgnoreNew may leave the predecessor's task running. The selected owner
     # starts its successor independently and verifies its generation, not merely
@@ -1333,13 +1200,8 @@ function Invoke-Update {
 }
 
 function Invoke-Start {
-    $task = if (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) {
-        Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-    }
+    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     if ($task) {
-        if ($task.State -eq 'Disabled') {
-            throw 'Vault scheduled task is disabled; refusing direct-start fallback'
-        }
         Start-ScheduledTask -TaskName $TaskName
         Write-Ok 'agent-vault service started (Scheduled Task)'
         return
@@ -1519,7 +1381,13 @@ function Get-VaultUninstallProcesses {
     }
     $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     if ($task) {
-        Assert-OwnedVaultTask -Task $task
+        if (@($task.Actions).Count -ne 1) { throw 'Refusing ambiguous Vault task actions' }
+        foreach ($taskAction in $task.Actions) {
+            if ((Split-Path -Leaf ([string]$taskAction.Execute)) -notin @('conhost.exe', 'pwsh.exe', 'powershell.exe') -or
+                -not ([string]$taskAction.Arguments).Contains((Join-Path $root 'service.ps1'))) {
+                throw 'Refusing foreign Vault scheduled task'
+            }
+        }
     }
     $rows = @(Get-CimInstance Win32_Process -ErrorAction Stop)
     $owned = @()
@@ -1652,7 +1520,7 @@ $ScriptDir = $PSScriptRoot
 $PackageVersion = $SrcVersion
 $SourceRuntimeIdentity = $null
 if ($Action -in @('install', 'update', 'provision', 'stamp')) { Initialize-SourceRuntime }
-$needsInstallLock = ($Action -in @('install', 'update', 'stamp', 'provision', 'schedule')) -or
+$needsInstallLock = ($Action -in @('install', 'update', 'stamp', 'provision')) -or
     ($Action -eq 'uninstall' -and -not $DryRun)
 if ($needsInstallLock -and -not (Enter-InstallLock)) {
     Write-Fail "Could not acquire the install transaction lock ($(Join-Path $InstallDir '.install.lock')) within $(Get-InstallLockTimeoutSec)s -- another install is still running; refusing to proceed unlocked"
@@ -1674,7 +1542,6 @@ try {
         'uninstall' { Invoke-Uninstall }
         'stamp'     { Invoke-Stamp }
         'provision' { Invoke-Install }
-        'schedule'  { Register-AgentVaultTask }
     }
 } finally {
     try {

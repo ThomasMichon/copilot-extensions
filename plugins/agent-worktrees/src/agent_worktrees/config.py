@@ -82,52 +82,11 @@ MARKETPLACE_OVERLAYS_DIR = CANONICAL_INREPO_CONFIG_DIR / "marketplaces"
 # Global, machine-wide config: the user-owned BASE layer holding only
 # machine-wide settings -- top-level ``srcroot`` / ``machine`` / ``platform`` /
 # ``copilot_profiles`` / ``auto_fast_forward`` /
-# ``headless`` / ``agendas``. It never carries
+# ``headless``. It never carries
 # per-repo settings or a registry of repos/machines; the full merged config for
 # a target repo is computed on demand by ``load_config``. Lives at
 # ``~/.agent-worktrees/config.yaml`` (the shared runtime root).
 GLOBAL_CONFIG_FILENAME = "config.yaml"
-
-AGENDA_DEFAULT_OFF = "off"
-AGENDA_DEFAULT_EXPECTED = "expected"
-AGENDA_DEFAULT_VALUES: tuple[str, ...] = (AGENDA_DEFAULT_OFF, AGENDA_DEFAULT_EXPECTED)
-
-
-def agenda_policy_error(value: object) -> str | None:
-    """Return a validation message for an ``agendas`` mapping, else ``None``."""
-    if value is None:
-        return None
-    if not isinstance(value, dict):
-        return "agendas must be a mapping (for example 'agendas: {default: expected}')"
-    unknown = sorted(str(key) for key in value if key != "default")
-    if unknown:
-        return f"agendas has unknown key(s): {', '.join(unknown)} (supported: default)"
-    if "default" not in value:
-        return None
-    default = value["default"]
-    # YAML 1.1 reads a bare ``off`` as boolean false; accept that spelling.
-    if default is False:
-        return None
-    if isinstance(default, str) and default.strip().lower() in AGENDA_DEFAULT_VALUES:
-        return None
-    return (
-        f"agendas.default must be one of {', '.join(AGENDA_DEFAULT_VALUES)} "
-        f"(got {default!r})"
-    )
-
-
-def parse_agenda_default(value: object) -> str:
-    """Return the normalized ``agendas.default`` policy; raise on invalid input."""
-    error = agenda_policy_error(value)
-    if error:
-        raise ValueError(error)
-    if not isinstance(value, dict):
-        return AGENDA_DEFAULT_OFF
-    default = value.get("default", AGENDA_DEFAULT_OFF)
-    if default is False:
-        return AGENDA_DEFAULT_OFF
-    return str(default).strip().lower()
-
 
 class ProjectNotRegisteredError(ValueError):
     """No repository registration resolved for the requested local project."""
@@ -616,8 +575,6 @@ class Config:
     the session and setup script see an up-to-date tree.  Only ever a
     fast-forward (clean + no local commits ahead); dirty/ahead/diverged
     worktrees are left untouched.  Set false to opt out of auto-update."""
-    agenda_default: str = AGENDA_DEFAULT_OFF
-    """Portable ``agendas.default`` (``off``/``expected``); guidance only."""
     default_copilot_account: str = ""
     """This machine's default **Copilot CLI** login (distinct from ``gh``'s
     ``account_map``) for a repo with no explicit per-repo override.
@@ -902,7 +859,7 @@ def _load_config_uncached(
     1b. **Knowledge overlay (E1e, #947)** -- for a **stateless harness** bound to
        a knowledge repo, the knowledge repo's ``config.yaml`` contributes portable
        **operator-preference** keys (``copilot_profiles``/``headless``/
-       ``auto_fast_forward``/``agendas``) as a tier BETWEEN the in-repo base and
+       ``auto_fast_forward``) as a tier BETWEEN the in-repo base and
        machine-local, so those prefs can be versioned in the knowledge repo while
        machine-local stays minimal. Machine-specifics + the binding never graft;
        ``{}`` (no effect) for a normal repo.
@@ -915,7 +872,7 @@ def _load_config_uncached(
     3. ``~/.agent-worktrees/config.yaml`` (global; machine-wide defaults).
 
     Top-level fields (``srcroot``/``machine``/``platform``/``copilot_profiles``
-    /``headless``/``auto_fast_forward``/``agendas``) resolve machine-local > global >
+    /``headless``/``auto_fast_forward``) resolve machine-local > global >
     detected -- with the knowledge overlay inserted just under machine-local for
     the portable operator-preference keys only. Per-repo settings merge in-repo
     flat settings < machine-local ``repos.<name>`` block (the global tier carries
@@ -1135,7 +1092,6 @@ def _load_config_uncached(
         ),
         headless=bool(ordinary.get("headless", False)),
         auto_fast_forward=bool(ordinary.get("auto_fast_forward", True)),
-        agenda_default=parse_agenda_default(ordinary.get("agendas")),
         default_copilot_account=str(
             machine_raw.get(
                 "default_copilot_account",
@@ -1331,7 +1287,6 @@ def _resolve_anchor_from_registry(name: str, platform: str) -> str | None:
 # not dictate a machine's paths, its own binding, or another repo's settings).
 _KNOWLEDGE_OVERLAY_TOP_KEYS: tuple[str, ...] = (
     "copilot_profiles", "profile_assignment", "headless", "auto_fast_forward",
-    "agendas",
 )
 
 

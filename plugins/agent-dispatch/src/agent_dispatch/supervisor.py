@@ -128,10 +128,6 @@ from .supervisor_conclusion import (  # noqa: F401 -- re-exported for existing c
     _retired_cleanup_plan,
 )
 from .supervisor_identity import RestrictedStartupMixin
-from .supervisor_relationship_settlement import (
-    rearm_claim_held_cleanup,
-    settle_completed_relationship,
-)
 from .supervisor_startup_fence import TerminalStartupMixin
 
 log = logging.getLogger("agent-dispatch.supervisor")
@@ -1437,10 +1433,6 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         """Retire proven-absent bodies and preserve cleanup obligations."""
         now = time.time() if now is None else now
         released = 0
-        try:
-            rearm_claim_held_cleanup(self)
-        except (DispatchError, httpx.TransportError):
-            log.warning("claim-held cleanup sweep failed; retrying next cycle", exc_info=True)
         reservations = self._pool_reservations(
             state=(
                 f"{SpawnState.RESERVING},{SpawnState.SPAWNED},"
@@ -1866,8 +1858,6 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 }
                 conclusion_state = _CONCLUSION_HELD
             else:
-                if not settle_completed_relationship(self, res, task):
-                    continue
                 if body_already_released:
                     try:
                         self._conclusion_client.validate_spawn_conclusion_claim(
@@ -2375,8 +2365,6 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 ):
                     if not self._fence_terminal_startup(res, task):
                         continue
-                    if not settle_completed_relationship(self, res, task):
-                        continue
                     try:
                         if res.get("state") != SpawnState.RELEASING:
                             self.client.request_spawn_release(
@@ -2424,8 +2412,6 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 if res.get("state") in {SpawnState.SPAWNED, SpawnState.COLD} and not (
                     self._fence_terminal_startup(res, task)
                 ):
-                    continue
-                if not settle_completed_relationship(self, res, task):
                     continue
                 local_sid = _parse_local_body_handle(res.get("session_handle"))
                 if (

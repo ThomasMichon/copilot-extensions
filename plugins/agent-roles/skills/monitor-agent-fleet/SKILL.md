@@ -254,11 +254,6 @@ cadences, not per-agent minute pollers, and observe early on the
 watchdog checks' early triggers. Each cycle begins with the roster refresh
 above. Healthy agents get one log line, not a message. Preserve an explicit next observation and reason,
 batch unchanged waits, and stop the owned watch when its assignment ends.
-When the charter grants adaptive cadence, use the active cadence while any
-target needs help (stuck, an early trigger, or a steer awaiting its revisit)
-and the parked cadence while all run smoothly or wait on required events.
-Change cadence by replacing the one owned schedule, stopping it before
-creating its successor, and record the reason; never run two.
 No daemon, cron entry, automatic joining, or background service is supplied.
 
 Keep the supervisory note compact: targets, root pointers, coverage cursor,

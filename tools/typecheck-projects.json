@@ -478,7 +478,7 @@
         "plugins/agent-roles"
       ],
       "exclude": [],
-      "level": "strict"
+      "level": "pending"
     },
     {
       "name": "agent-ssh",
@@ -597,7 +597,6 @@
     },
     {
       "name": "service-pr",
-      "import_roots": ["plugins/ai-attribution/scripts"],
       "include": [
         "services/pr"
       ],

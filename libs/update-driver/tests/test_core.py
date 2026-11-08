@@ -195,31 +195,6 @@ def test_explicit_foreground_never_replays_foreign_pending_work(area, monkeypatc
     assert status(peer.id, root=area / "state").state == "pending"
 
 
-def test_explicit_foreground_distinguishes_live_and_abandoned_running_work(area, monkeypatch):
-    from update_driver import core
-
-    peer = sample(area, source="peer")
-    root = area / "state"
-    with closing(sqlite3.connect(root / "queue.sqlite3")) as db, db:
-        db.execute("UPDATE requests SET state='running',started_at=1 WHERE id=?", (peer.id,))
-    before = status(root=root)
-    monkeypatch.setattr(core, "_reconcile_foundation", lambda *args: pytest.fail("no queue repair"))
-
-    def attempt():
-        return run_explicit(
-            RequestSpec("source-recovery"),
-            runner=TrustedRunner((sys.executable, "-c", "pass"), str(area)),
-            root=root, executor=lambda tx: pytest.fail("no peer execution"),
-        )
-
-    with core.OperationLock(root / "execution.lock"):
-        with pytest.raises(StateError, match="busy"):
-            attempt()
-    with pytest.raises(InterruptedError, match="unsettled"):
-        attempt()
-    assert status(root=root) == before
-
-
 def test_explicit_foreground_stops_before_a_later_peer(area):
     later = []
 
@@ -725,22 +700,6 @@ def test_failed_spawn_is_visible_and_never_foreground(area, monkeypatch):
     assert "secret" not in status(request.id, root=area / "state").error
 
 
-def test_worker_admission_refuses_pending_execution_evidence(area, monkeypatch):
-    import agent_procutil
-
-    root = area / "state"
-    request = sample(area)
-    with closing(sqlite3.connect(root / "queue.sqlite3")) as db, db:
-        db.execute("UPDATE requests SET started_at=1 WHERE id=?", (request.id,))
-    monkeypatch.setattr(
-        agent_procutil, "spawn_daemon",
-        lambda *_args, **_kwargs: pytest.fail("fenced worker was started"),
-    )
-    with pytest.raises(InterruptedError):
-        ensure_worker((sys.executable, "-m", "update_driver", "worker"), root=root)
-    assert status(request.id, root=root).state == "pending"
-
-
 @pytest.mark.parametrize("retained", [False, True])
 def test_worker_preserves_native_handle_and_selected_python_bootstrap(area, monkeypatch, retained):
     from types import SimpleNamespace
@@ -818,24 +777,6 @@ def test_waiter_reports_fenced_pending_request(area):
     with pytest.raises(InterruptedError):
         wait(pending.id, root=root, timeout=1)
     assert status(request.id, root=root).state == "interrupted"
-
-
-@pytest.mark.parametrize("target", ["uncertain", "later"])
-def test_waiter_reports_pending_execution_evidence_without_worker_or_timeout(area, monkeypatch, target):
-    from update_driver import core
-
-    root = area / "state"
-    uncertain = sample(area)
-    later = sample(area, argv=("later",))
-    with closing(sqlite3.connect(root / "queue.sqlite3")) as db, db:
-        db.execute(
-            "UPDATE requests SET started_at=1,error='unconfirmed' WHERE id=?", (uncertain.id,),
-        )
-    monkeypatch.setattr(core.time, "sleep", lambda _seconds: pytest.fail("fenced waiter slept"))
-    with pytest.raises(InterruptedError):
-        wait(uncertain.id if target == "uncertain" else later.id, root=root)
-    assert status(uncertain.id, root=root).state == "pending"
-    assert status(later.id, root=root).state == "pending"
 
 
 def test_participant_live_forged_stale_and_missing(area):

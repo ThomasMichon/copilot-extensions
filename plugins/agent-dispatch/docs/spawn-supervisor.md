@@ -423,7 +423,6 @@ POST /spawn-reservations/{key}/settle   {detail, conclusion_state?, conclusion_d
 POST /spawn-reservations/{key}/conclusion {conclusion_state, conclusion_detail, claim_token?}
 POST /spawn-reservations/{key}/conclusion/claim
 POST /spawn-reservations/{key}/conclusion/validate {claim_token}
-POST /spawn-reservations/{key}/conclusion/rearm-claim-held {expected_detail}
 POST /spawn-reservations/tasks/{task_id}/rearm {permitted, reason, min_failures}
 GET  /spawn-reservations                ?task_id&state&limit
 GET  /spawn-reservations/{key}
@@ -1154,11 +1153,6 @@ reservations: process absence does not retire their native conversation. Ordinar
 started owners are suspended with their owner, native identity and reservation
 intact; unfinished claims remain held for reconciliation, including a claim
 before spawn publication or while the original reservation is releasing.
-An ordinary started owner whose current same-native wake is still pending or
-delivering stays started instead: that wake is how the Bridge resumes the
-stopped native, and suspending would fence it stale. A `gone` verdict is also
-ignored when the task's current wake changed while the probe ran, because the
-verdict predates that delivery; the next pass probes again.
 Restricted owners retain
 their existing immutable binding. Stranded-cold cleanup likewise does not release
 either driver's conversation to make a replacement. `live` bodies

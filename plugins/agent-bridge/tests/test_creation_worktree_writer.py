@@ -787,9 +787,6 @@ async def test_keyed_creation_uses_actual_retained_serializer_and_preserves_clai
         environment["PYTHONPATH"] = os.pathsep.join((
             str(root / "tools/http47_capture_bootstrap"), str(root / "tools"),
         ))
-        if os.name == "nt":
-            # Source-audited cold imports are not production lineage latency evidence.
-            monkeypatch.setattr(worktree_lineage, "_LINEAGE_TIMEOUT_S", 30.0)
         lineage_run = worktree_lineage._run
 
         def traced_lineage(command, *args, **kwargs):

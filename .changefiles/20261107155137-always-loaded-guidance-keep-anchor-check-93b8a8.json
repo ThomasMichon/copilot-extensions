@@ -1,9 +1,0 @@
-{
-  "comment": "Always-loaded guidance: keep anchor checkouts clean and safely recover dirty ones (#11415)",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

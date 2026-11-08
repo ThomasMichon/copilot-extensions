@@ -12,8 +12,6 @@ from pathlib import Path
 import sys
 from typing import Any, Callable
 
-from agenda_goal import root_goal
-
 
 class AgendaError(ValueError):
     """The snapshot needs explicit correction or reconciliation."""
@@ -77,7 +75,7 @@ def _read(path: Path) -> dict[str, Any]:
         if len(raw) > 131072:
             raise AgendaError(f"{path.name} exceeds 128 KiB")
         return decode(raw, path.name)
-    except (OSError, UnicodeError, ValueError, RecursionError) as exc:
+    except (OSError, UnicodeError, json.JSONDecodeError, RecursionError) as exc:
         raise AgendaError(f"cannot read {path.name}: {exc}") from exc
 
 
@@ -216,7 +214,7 @@ def _chain(
         source = board["source"]
         label = f"{source['kind']}:{source['ref']} @ {node_id}"
         if index == 0:
-            root = root_goal(source, home) if source["kind"] == "effort" else label
+            root = label
         stack.append(label)
         node = nodes[node_id]
         action = _text(frame.get("next_action"), "frame next action")
@@ -330,8 +328,6 @@ def inspect(
     *, now: datetime | None = None,
 ) -> Snapshot:
     """Validate a local snapshot, not its source's real-world completion."""
-    if "\x00" in str(home):
-        raise AgendaError("cannot resolve state home")
     try:
         home = home.resolve()
     except (OSError, ValueError, RuntimeError) as exc:

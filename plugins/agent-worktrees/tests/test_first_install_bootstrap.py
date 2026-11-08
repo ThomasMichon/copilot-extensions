@@ -11,7 +11,6 @@ import shutil
 import stat
 import subprocess
 import sys
-import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -719,96 +718,6 @@ def test_posix_lean_provision_installs_resolver_and_launchers_reenter_runtime(
         assert launched.returncode == 0, launched.stderr
         version = json.loads((payload / "plugin.json").read_text())["version"]
         assert launched.stdout.startswith(f"agent-worktrees {version} "), launched.stdout
-
-
-@pytest.mark.skipif(os.name != "nt", reason="Windows native first-use integration")
-@pytest.mark.skipif(
-    os.environ.get("AGENT_WORKTREES_FIRST_USE_NATIVE") != "1",
-    reason="explicit native first-use test with an approved package feed",
-)
-@pytest.mark.effect("network")
-@pytest.mark.effect("process")
-@pytest.mark.effect("filesystem")
-@pytest.mark.timeout(600)
-@pytest.mark.parametrize("entry", ["payload", "global"])
-def test_windows_payload_first_use_stamps_and_provisions_under_driver(tmp_path: Path, entry: str) -> None:
-    from urllib.parse import urlsplit
-    from agent_procutil.daemon_instances import daemon_test_lifecycle
-    from update_driver import core
-
-    shell = shutil.which("powershell.exe")
-    if not shell or not shutil.which("uv"):
-        pytest.skip("native PowerShell and uv are required")
-    index = os.environ.get("UV_DEFAULT_INDEX", "")
-    parsed = urlsplit(index)
-    assert parsed.scheme == "https" and parsed.hostname and not (
-        parsed.username or parsed.password or parsed.query or parsed.fragment
-    ), "an explicit anonymous HTTPS package index is required"
-    area = tmp_path.parent / uuid.uuid4().hex[:8]
-    area.mkdir()
-    home, payload = _materialized_payload(area)
-    if entry == "global":
-        stub = payload / "bin" / "agent-worktrees.ps1"
-        text = stub.read_text(encoding="utf-8")
-        mutex = "Local\\Copilot.AgentWorktrees.Provision"
-        assert text.count(mutex) == 1
-        stub.write_text(
-            text.replace(mutex, mutex + ".Test." + uuid.uuid4().hex),
-            encoding="utf-8",
-        )
-    environment = {
-        key: os.environ[key] for key in (
-            "PATH", "SystemRoot", "WINDIR", "COMSPEC", "PATHEXT", "ProgramFiles", "ProgramFiles(x86)",
-        ) if key in os.environ
-    }
-    environment.update(
-        HOME=str(home), USERPROFILE=str(home), APPDATA=str(area / "appdata"),
-        LOCALAPPDATA=str(area / "localappdata"), TEMP=str(area), TMP=str(area),
-        UV_CACHE_DIR=str(area / "uv-cache"), UV_DEFAULT_INDEX=index,
-        COPILOT_PLUGIN_ROOT=str(payload), COPILOT_EXTENSIONS_TEST_CONTAINED="0",
-        PYTEST_CURRENT_TEST="isolated-worktrees-first-use", PYTHONUTF8="1",
-        PYTHONDONTWRITEBYTECODE="1",
-    )
-    cleanup = []
-    with daemon_test_lifecycle(
-        owner="worktrees-first-use", registry_root=area / "instances", cleanup_results=cleanup,
-    ) as lifecycle:
-        result = subprocess.run(
-            [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-             "-File", str(payload / "bin" / ("payload" if entry == "payload" else "")
-                          / "agent-worktrees.ps1"), "--version"],
-            cwd=home, env={**environment, **lifecycle}, capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=540,
-            creationflags=subprocess.CREATE_NO_WINDOW,
-        )
-    assert not [item for item in cleanup if item.status == "held"]
-    requests = core.status(root=home / ".copilot-extensions" / "update-driver")
-    diagnostic = []
-    for item in requests:
-        if item.log_path.is_file():
-            lines = item.log_path.read_text(encoding="utf-8", errors="replace").splitlines()
-            diagnostic.extend(
-                line[:500] for line in lines[-120:]
-                if any(word in line.lower() for word in ("error", "failed", "traceback", "timed out"))
-                and not any(word in line.lower() for word in ("token", "secret", "witness", "authorization"))
-            )
-    assert result.returncode == 0, result.stdout + result.stderr + "\n" + "\n".join(diagnostic)
-    version = json.loads((payload / "plugin.json").read_text(encoding="utf-8"))["version"]
-    assert result.stdout.startswith(f"agent-worktrees {version} "), result.stdout
-    runtime = home / ".agent-worktrees"
-    if entry == "payload":
-        snapshot = Path((runtime / "payload-dir").read_text(encoding="utf-8").strip())
-        assert snapshot.is_relative_to(runtime / "snapshots")
-    else:
-        assert not (runtime / "payload-dir").exists()
-    selected = (runtime / "current-version").read_text(encoding="utf-8").strip()
-    assert (runtime / "versions" / selected / ".install-complete.json").is_file()
-    assert [
-        (item.spec.backend, item.spec.argv[1], item.state, item.exit_code)
-        for item in requests
-    ] == (
-        [("engine-native-install", "stamp", "completed", 0)] if entry == "payload" else []
-    ) + [("engine-native-install", "provision", "completed", 0)]
 
 
 def _offline_bootstrap_env(tmp_path: Path, home: Path) -> dict[str, str]:
