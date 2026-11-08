@@ -89,21 +89,28 @@ def rearm_claim_held_cleanup(supervisor: Any) -> int:
 
     Once the task is ``COMPLETED`` and its exact relationship closes, the
     preserved workspace becomes concludable; the ordinary cleanup retry then
-    concludes it. Other held reasons stay held. Returns the count re-armed.
+    concludes it. Other held reasons stay held. Each cycle revisits at most
+    ``_REARM_PER_CYCLE`` candidates, counting failures, starting after the
+    previous cycle's last candidate so a failing prefix cannot starve the rest.
+    Returns the count re-armed.
     """
-    rearmed = 0
     held = supervisor._pool_reservations(
         state=f"{SpawnState.FAILED},{SpawnState.SETTLED}",
         conclusion_state=_CONCLUSION_HELD,
     )
+    candidates = []
     for res in held:
-        if rearmed >= _REARM_PER_CYCLE:
-            break
         if type(res.get("task_relationship_event_id")) is not int:
             continue
         pending = _claim_blocked_rearm(supervisor._conclusion_retry_payload(res))
-        if pending is None:
-            continue
+        if pending is not None:
+            candidates.append((str(res["key"]), res, pending))
+    candidates.sort(key=lambda item: item[0])
+    cursor = getattr(supervisor, "_claim_held_rearm_cursor", "")
+    split = next((i for i, item in enumerate(candidates) if item[0] > cursor), 0)
+    rearmed = 0
+    for key, res, pending in (candidates[split:] + candidates[:split])[:_REARM_PER_CYCLE]:
+        supervisor._claim_held_rearm_cursor = key
         try:
             task = supervisor.client.get(res["task_id"])
         except DispatchError:
@@ -113,13 +120,13 @@ def rearm_claim_held_cleanup(supervisor: Any) -> int:
         if not settle_completed_relationship(supervisor, res, task):
             continue
         try:
-            supervisor._conclusion_client.record_spawn_conclusion(
-                res["key"],
-                conclusion_state=_CONCLUSION_PENDING,
+            supervisor._conclusion_client.rearm_claim_held_conclusion(
+                key,
+                expected_detail=res["conclusion_detail"],
                 conclusion_detail=json.dumps(pending, sort_keys=True, separators=(",", ":")),
             )
         except DispatchError:
-            log.exception("could not re-arm claim-held cleanup for %s", res["key"])
+            log.exception("could not re-arm claim-held cleanup for %s", key)
             continue
         rearmed += 1
     return rearmed

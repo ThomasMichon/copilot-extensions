@@ -574,8 +574,9 @@ def test_supervisor_settles_exact_relationship_only_after_independent_completion
     assert len(owner.claims) == 1
 
 
+@pytest.mark.parametrize("claimed", [False, True])
 def test_claim_held_retired_cleanup_rearms_only_after_confirmation(
-    assignment, independent_readiness,
+    assignment, independent_readiness, claimed,
 ):
     from agent_dispatch.supervisor import Supervisor
     from agent_dispatch.supervisor_relationship_settlement import rearm_claim_held_cleanup
@@ -588,17 +589,31 @@ def test_claim_held_retired_cleanup_rearms_only_after_confirmation(
         reservation.key, disposition="settled",
         finished_startup_revision=queue.get_reservation(reservation.key).startup_revision,
     )
-    queue.retire_spawn(
-        reservation.key, exact_absence=True, conclusion_state="held",
-        conclusion_detail=json.dumps({
-            "action": "preserved",
-            "reason": "retired-body-cleanup",
-            "worktree_cleanup": {
-                "state": "held", "attempts": 1,
-                "outcome": {"action": "preserved", "reason": "outstanding-obligations"},
-            },
-        }),
-    )
+    held_detail = json.dumps({
+        "action": "preserved",
+        "reason": "retired-body-cleanup",
+        "worktree_cleanup": {
+            "state": "held", "attempts": 1,
+            "outcome": {"action": "preserved", "reason": "outstanding-obligations"},
+        },
+    })
+    if claimed:
+        queue.retire_spawn(
+            reservation.key, exact_absence=True, conclusion_state="pending",
+            conclusion_detail=json.dumps({"action": "pending", "reason": "retired-body-cleanup"}),
+        )
+        _, granted, token = queue.claim_spawn_conclusion_retry(reservation.key)
+        assert granted and token
+        queue.record_spawn_conclusion(
+            reservation.key, conclusion_state="held", conclusion_detail=held_detail,
+            claim_token=token,
+        )
+        assert queue.get_reservation(reservation.key).cleanup_claim_token == token
+    else:
+        queue.retire_spawn(
+            reservation.key, exact_absence=True, conclusion_state="held",
+            conclusion_detail=held_detail,
+        )
     supervisor = SimpleNamespace(
         client=SimpleNamespace(
             get=lambda task_id: asdict(queue.get(task_id)),
@@ -624,8 +639,49 @@ def test_claim_held_retired_cleanup_rearms_only_after_confirmation(
     cleanup = json.loads(rearmed.conclusion_detail)["worktree_cleanup"]
     assert rearmed.conclusion_state == "pending"
     assert (cleanup["state"], cleanup["attempts"], cleanup["next_attempt_at"]) == ("pending", 0, 0)
+    assert not rearmed.cleanup_claim_token
+    _, granted, _ = queue.claim_spawn_conclusion_retry(reservation.key)
+    assert granted
     assert rearm_claim_held_cleanup(supervisor) == 0
     assert len(owner.claims) == 1
+
+
+def test_claim_held_rearm_bounds_attempts_and_rotates_past_failures():
+    from agent_dispatch.client import DispatchError
+    from agent_dispatch.supervisor import Supervisor
+    from agent_dispatch.supervisor_relationship_settlement import (
+        _REARM_PER_CYCLE, rearm_claim_held_cleanup,
+    )
+
+    detail = json.dumps({
+        "worktree_cleanup": {
+            "state": "held",
+            "outcome": {"action": "preserved", "reason": "outstanding-obligations"},
+        },
+    })
+    rows = [
+        {"key": f"r{i:02d}", "task_id": f"t{i:02d}", "task_relationship_event_id": i,
+         "conclusion_detail": detail}
+        for i in range(_REARM_PER_CYCLE + 3)
+    ]
+    reads = []
+
+    def failing_get(task_id):
+        reads.append(task_id)
+        raise DispatchError(503, "coordinator unavailable")
+
+    supervisor = SimpleNamespace(
+        client=SimpleNamespace(get=failing_get),
+        _pool_reservations=lambda **_filters: list(reversed(rows)),
+        _conclusion_retry_payload=Supervisor._conclusion_retry_payload,
+    )
+
+    assert rearm_claim_held_cleanup(supervisor) == 0
+    assert reads == [f"t{i:02d}" for i in range(_REARM_PER_CYCLE)]
+    reads.clear()
+    assert rearm_claim_held_cleanup(supervisor) == 0
+    assert reads[:3] == [f"t{i:02d}" for i in range(_REARM_PER_CYCLE, _REARM_PER_CYCLE + 3)]
+    assert len(reads) == _REARM_PER_CYCLE
 
 
 def test_legacy_or_forged_writer_answer_never_admits_execution(assignment):

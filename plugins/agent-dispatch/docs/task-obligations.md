@@ -287,6 +287,9 @@ Bodies whose reservation is already releasing settle the same way before
 attempt conclusion. A retired attempt whose workspace cleanup was held only for
 outstanding obligations is re-armed to pending, with a fresh attempt budget,
 once its task is `COMPLETED` and the relationship closes; other holds stay held.
+The re-arm is an atomic compare-and-swap on the exact held detail that refuses an
+unexpired cleanup lease and clears a spent one. Each cycle revisits a bounded
+number of candidates, counting failures, and resumes after the last one visited.
 When cancellation finds no claim, reconciliation replays the original reserve
 and closes it, retaining its tombstone. Absence alone cannot fence a delayed
 in-flight reserve.

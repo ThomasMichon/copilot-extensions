@@ -26,7 +26,7 @@ from __future__ import annotations
 import json
 import uuid
 
-from .queue_records import SpawnReservation, SpawnState, TaskError
+from .queue_records import SpawnReservation, SpawnState, Status, TaskError
 from .queue_spawn_reservations import _newer_worktree_reservation, _validate_conclusion_claim
 
 
@@ -119,6 +119,62 @@ class SpawnConclusionMixin:
             updated = conn.execute(
                 "SELECT * FROM spawn_reservations WHERE key = ?",
                 (key,),
+            ).fetchone()
+            conn.execute("COMMIT")
+        return SpawnReservation._from_row(updated)
+
+    def rearm_claim_held_conclusion(
+        self,
+        key: str,
+        *,
+        expected_detail: str,
+        conclusion_detail: str,
+        claimant_machine: str | None = None,
+        now: float | None = None,
+    ) -> SpawnReservation:
+        """Atomically re-pend retired cleanup held only for a now-settled task claim.
+
+        Compare-and-swap on the exact held detail; an unexpired cleanup lease
+        refuses, and a spent lease is cleared so the ordinary retry can claim it.
+        """
+        ts = self._now(now)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM spawn_reservations WHERE key = ?", (key,),
+            ).fetchone()
+            if row is None:
+                conn.execute("COMMIT")
+                raise TaskError(f"no such reservation: {key}")
+            if (
+                row["state"] not in {SpawnState.FAILED, SpawnState.SETTLED}
+                or row["conclusion_state"] != "held"
+                or row["conclusion_detail"] != expected_detail
+            ):
+                conn.execute("COMMIT")
+                raise TaskError(f"reservation {key} held cleanup changed")
+            if row["cleanup_claim_token"]:
+                try:
+                    expires_at = float(row["cleanup_claim_expires_at"] or 0)
+                except (TypeError, ValueError):
+                    expires_at = float("inf")
+                if expires_at > ts:
+                    conn.execute("COMMIT")
+                    raise TaskError("cleanup retry lease is still active")
+            task = self._fetch(conn, row["task_id"])
+            if task is None or task.status != Status.COMPLETED:
+                conn.execute("COMMIT")
+                raise TaskError(f"reservation {key} task is not completed")
+            from .cleanup_recovery import validate_recovery
+            validate_recovery(self, conn, row, check_allocation=False, claimant_machine=claimant_machine)
+            conn.execute(
+                "UPDATE spawn_reservations SET updated_at = ?, conclusion_state = 'pending', "
+                "conclusion_detail = ?, cleanup_claim_token = NULL, "
+                "cleanup_claim_expires_at = NULL WHERE key = ?",
+                (ts, conclusion_detail, key),
+            )
+            updated = conn.execute(
+                "SELECT * FROM spawn_reservations WHERE key = ?", (key,),
             ).fetchone()
             conn.execute("COMMIT")
         return SpawnReservation._from_row(updated)

@@ -177,6 +177,14 @@ class RecordConclusionBody(ReservationDetailBody):
     claimant_machine: str | None = None
 
 
+class RearmClaimHeldConclusionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_detail: str
+    conclusion_detail: str
+    claimant_machine: str | None = None
+
+
 class RearmSpawnBody(BaseModel):
     permitted: bool = False
     reason: str | None = None
@@ -686,6 +694,19 @@ def register_spawn_routes(
             "reservation": _reservation_dict(reservation),
         }
         bus.publish({"type": "spawn.conclusion_claimed", **result})
+        return result
+
+    @app.post("/spawn-reservations/{key}/conclusion/rearm-claim-held")
+    def rearm_claim_held_conclusion(key: str, body: RearmClaimHeldConclusionBody) -> dict:
+        result = _reservation_guard(
+            lambda: queue.rearm_claim_held_conclusion(
+                key,
+                expected_detail=body.expected_detail,
+                conclusion_detail=body.conclusion_detail,
+                claimant_machine=body.claimant_machine,
+            )
+        )
+        bus.publish({"type": "spawn.conclusion", "reservation": result})
         return result
 
     @app.post("/spawn-reservations/{key}/conclusion/validate")
