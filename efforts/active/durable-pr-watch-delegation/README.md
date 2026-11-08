@@ -439,14 +439,20 @@ _Operator-required outcome; agent-recommended slices and validation._
 - [x] Review the [persisted acquisition mapping refinement](comment-observation-correlation.md#persisted-acquisition-mapping-refinement)
   before changing strict owner or serving schemas. Reuse retained intent and
   receipt identity; add only bounded acquired evidence under the same owner
-  (#11538; storage/acquisition/read implementation remains open).
+  (#11538; finite storage and consumer delivery below).
 - [x] Deliver its finite explicitly adopted data-owner/library transaction and
   scoped retained-read leaves (#11542; final affected packet: 100 source cases).
   Preserve original confirmation, unknown outcomes and B3/B4 proof.
-- [ ] Complete actual workspace load/sync enrollment and negotiated serving
-  for that persisted acquisition mapping,
+- [x] Deliver actual explicitly selected workspace load/sync acquisition and
+  negotiated retained serving for that persisted mapping (#11556; final 56
+  actual-boundary source controls),
   preserving original confirmation, unknown outcomes and B3/B4 proof; keep
   all-publisher, provider and installed acceptance separate.
+- [ ] Select retained mappings through the existing standalone foreground
+  host's trusted per-route configuration and fresh-only storage adoption.
+  Preserve default-off hosting, read-only native scope and retained inspection
+  after optional preparation-provider withdrawal; this is source hosting,
+  not protected publication or production enrollment.
 - [x] Review the [tracked comment/review consumer refinement](tracked-comment-consumers.md)
   before changing legacy commands (#11525).
 - [x] Qualify one explicit tracked comment/review source binding
@@ -1007,11 +1013,18 @@ or silently expanding a bounded source claim.
   targets, explicit/capacity-refused adoption, old strict readers, receipt
   invalidation, uncertain replacement, cache-before-journal failure and
   normalization/digest reuse (#11542; final 100 affected source cases).
-  Actual load/sync and negotiated serving remain separate.
-- [ ] Qualify the [persisted acquisition mapping controls](comment-observation-correlation.md#provider-first-delivery-and-validation):
+  Actual load/sync source controls follow below.
+- [x] Qualify finite [persisted acquisition mapping source controls](comment-observation-correlation.md#provider-first-delivery-and-validation):
   same-owner native joins, real-file restart/contention, monotone evidence,
   capacity and uncertain replacement, no duplicate IO or false feedback,
-  strict old/new/rollback peers and unchanged default hosting.
+  strict old/new/rollback peers, additive discovery and unchanged default
+  hosting (#11542/#11556; final 56 consumer controls). Normal installed
+  enrollment and live provider acceptance remain with P3-P5, not this source leaf.
+- [ ] Qualify that standalone mapping selection through strict passive parsing,
+  fresh-only adoption, unsupported existing volumes, route isolation and the
+  real foreground/Gateway/native-exporter boundary with a synthetic prior
+  receipt. Separate retained current-content evidence from native-send,
+  original-version, feedback/handled and installed/provider acceptance.
 - [x] Qualify the explicit tracked comment/review consumer through its actual
   resolution and workspace CLI/tool/client boundary: exact scoped selection,
   final preview and separate submission, original-key restart/lost-result

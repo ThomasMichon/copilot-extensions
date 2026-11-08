@@ -382,3 +382,103 @@ def test_preparation_config_is_strict_without_executing_discovery(
     with pytest.raises(ValueError):
         load_config(path)
     assert not control.with_suffix(".calls").exists() and not config.root.exists()
+
+
+@pytest.mark.parametrize("selection", [None, False, True])
+def test_host_mapping_selection_is_fresh_only_and_independent_of_preparer_availability(
+    prepared_host: tuple[HostConfig, Path, Path], configuration: Configuration,
+    selection: bool | None,
+) -> None:
+    from agent_pull_requests.review_comment_mapping import CommentMappingStore
+
+    _, control, _ = prepared_host
+    path, _ = configuration
+    value = json.loads(path.read_text())
+    if selection is not None:
+        value["workspaces"]["bindings"][0]["comment_mappings"] = selection
+    path.write_text(json.dumps(value))
+    config = load_config(path)
+    assert not config.root.exists() and not control.with_suffix(".calls").exists()
+    config.provision()
+    store = config.store()
+    original = store.path.read_bytes()
+    supported = CommentMappingStore(store).supported(expires_at=int(time.time()) + 60)
+    assert supported is (selection is True)
+    state = json.loads(control.read_text())
+    control.write_text(json.dumps({**state, "supported": False}))
+    operations = _operations(config)
+    capabilities = _execute(operations, "capabilities", {})
+    assert ("retained-comment" in capabilities["operations"]) is (selection is True)
+    assert "allocate" not in capabilities["operations"] and "submit" not in capabilities["operations"]
+    assert not operations.write_available
+    assert store.path.read_bytes() == original
+    with pytest.raises(ValueError, match="fresh dedicated root"):
+        config.provision()
+    assert store.path.read_bytes() == original
+
+
+def test_host_mapping_selection_does_not_adopt_existing_prepared_storage(
+    prepared_host: tuple[HostConfig, Path, Path], configuration: Configuration,
+) -> None:
+    config, _, _ = prepared_host
+    config.provision()
+    original = config.store().path.read_bytes()
+    path, _ = configuration
+    value = json.loads(path.read_text())
+    value["workspaces"]["bindings"][0]["comment_mappings"] = True
+    path.write_text(json.dumps(value))
+    configured = load_config(path)
+    operations = _operations(configured)
+    operations.validate_storage(expires_at=int(time.time()) + 60, checkpoint=lambda: None)
+    assert "retained-comment" not in _execute(operations, "capabilities", {})["operations"]
+    assert "allocate" in _execute(operations, "capabilities", {})["operations"]
+    assert configured.store().path.read_bytes() == original
+
+
+@pytest.mark.parametrize("selection", [None, 0, 1, "true", {}, []])
+def test_mapping_config_rejects_nonboolean_selection_without_io(
+    prepared_host: tuple[HostConfig, Path, Path], configuration: Configuration, selection: object,
+) -> None:
+    config, control, _ = prepared_host
+    path, _ = configuration
+    value = json.loads(path.read_text())
+    value["workspaces"]["bindings"][0]["comment_mappings"] = selection
+    path.write_text(json.dumps(value))
+    with pytest.raises(ValueError, match="explicit preparation"):
+        load_config(path)
+    assert not config.root.exists() and not control.with_suffix(".calls").exists()
+
+
+def test_mapping_config_requires_existing_prepared_host(configuration: Configuration) -> None:
+    path, value = workspace_config(configuration)
+    value["workspaces"]["bindings"][0]["comment_mappings"] = True
+    path.write_text(json.dumps(value))
+    with pytest.raises(ValueError, match="explicit preparation"):
+        load_config(path)
+
+
+def test_host_mapping_selection_does_not_spread_to_other_admitted_routes(
+    prepared_host: tuple[HostConfig, Path, Path], configuration: Configuration,
+) -> None:
+    path, _ = configuration
+    value = json.loads(path.read_text())
+    value["bindings"].append({
+        **value["bindings"][0], "principal": "caller-b", "target": "repository-b",
+        "consumer": "dispatch-b",
+    })
+    first = value["workspaces"]["bindings"][0]
+    value["workspaces"]["bindings"].append({
+        **first, "principal": "caller-b", "target": "repository-b",
+    })
+    first["comment_mappings"] = True
+    path.write_text(json.dumps(value))
+    config = load_config(path)
+    config.provision()
+    assert config.workspaces is not None
+    operations = config.workspaces.operations(config.store(), lambda: None, 60)
+    assert "retained-comment" in _execute(
+        operations[("caller-a", "repository-a")], "capabilities", {},
+    )["operations"]
+    assert "retained-comment" not in _execute(
+        operations[("caller-b", "repository-b")], "capabilities", {},
+    )["operations"]

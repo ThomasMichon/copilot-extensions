@@ -12,6 +12,7 @@ import time
 from agent_pull_requests.watch_gateway import WatchScopeBinding
 from agent_pull_requests.generation_cache import GenerationCache
 from agent_pull_requests.native_read import NativeReadHandler
+from agent_pull_requests.review_comment_mapping import CommentMappingStore
 from agent_pull_requests.review_workspace import _scope
 from agent_pull_requests.review_selection_store import ReviewSelectionStore
 from agent_pull_requests.watch_observer import NativeObservationBinding
@@ -72,6 +73,7 @@ class WorkspaceConfig:
     cache_bytes: int
     cache_generations: int
     preparations: tuple[tuple[str, str, PreparationConfig], ...] = ()
+    comment_mappings: tuple[tuple[str, str], ...] = ()
 
     def cache(self, store: ReplayStore) -> GenerationCache:
         return GenerationCache(
@@ -96,6 +98,7 @@ class WorkspaceConfig:
                 binding_ref=reader.binding_ref, checkpoint=checkpoint,
                 max_work_seconds=seconds, conversations=True,
                 prepared_reviews=(principal, target) in preparations,
+                comment_mappings=(principal, target) in self.comment_mappings,
                 selection_preparer=preparations.get((principal, target)),
                 selection_preparer_deadline=preparations.get((principal, target)) is not None,
             )
@@ -159,6 +162,10 @@ class HostConfig:
                 ReviewSelectionStore(store).adopt(
                     lifecycle_checkpoint=lifecycle, expires_at=expires_at, checkpoint=lifecycle,
                 )
+                if self.workspaces.comment_mappings:
+                    CommentMappingStore(store).adopt(
+                        lifecycle_checkpoint=lifecycle, expires_at=expires_at, checkpoint=lifecycle,
+                    )
                 self.workspaces.cache(store).provision()
                 lifecycle()
             return
@@ -180,8 +187,14 @@ def _workspaces(value: object, bindings: list[WatchScopeBinding],
     native = {(b.account, b.repo): b for b in observations}
     readers: list[tuple[str, str, NativeReadHandler]] = []
     preparations: list[tuple[str, str, PreparationConfig]] = []
+    comment_mappings: list[tuple[str, str]] = []
     for raw in _collection(selected["bindings"]):
-        entry = _fields(raw, {"principal", "target", "command", "scope"}, {"preparation"})
+        entry = _fields(raw, {"principal", "target", "command", "scope"}, {
+            "preparation", "comment_mappings",
+        })
+        mapping = entry.get("comment_mappings", False)
+        if type(mapping) is not bool or mapping and "preparation" not in entry:
+            raise ValueError("comment mappings require explicit preparation hosting")
         key = (entry["principal"], entry["target"])
         if key not in scopes or any((p, t) == key for p, t, _ in readers):
             raise ValueError("workspace requires one existing admitted caller/target")
@@ -211,7 +224,11 @@ def _workspaces(value: object, bindings: list[WatchScopeBinding],
                 visibility=preparation["visibility"],
                 allow_anonymous=preparation["allow_anonymous"],
             )))
-    return WorkspaceConfig(tuple(readers), cache_bytes, cache_generations, tuple(preparations))
+        if mapping:
+            comment_mappings.append(key)
+    return WorkspaceConfig(
+        tuple(readers), cache_bytes, cache_generations, tuple(preparations), tuple(comment_mappings),
+    )
 
 
 def load_config(path: Path) -> HostConfig:
