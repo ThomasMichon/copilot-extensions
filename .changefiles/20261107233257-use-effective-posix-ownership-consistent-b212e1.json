@@ -1,0 +1,9 @@
+{
+  "comment": "Use effective POSIX ownership consistently for private SDK state and inert Komodo client validation.",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}
