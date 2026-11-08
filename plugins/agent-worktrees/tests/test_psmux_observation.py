@@ -103,6 +103,7 @@ def test_namespaced_registration_preserves_live_session_name(registered, monkeyp
         (registered / f"wt-other.{extension}").rename(registered / f"example__wt-fixture.{extension}")
     monkeypatch.setattr(reader, "_query", lambda *a: ("wt-fixture", 1, 101))
     monkeypatch.setattr(sessions.platform, "system", lambda: "Windows")
+    assert reader.observe_registrations() == {"example__wt-fixture": ("wt-fixture", 1)}
     assert reader.observe() == {"wt-fixture": 1}
     assert sessions.mux_status_many(["fixture"], strict=True)["fixture"].exists
 

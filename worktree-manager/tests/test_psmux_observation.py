@@ -66,23 +66,26 @@ def _helpers():
 
 
 @pytest.mark.skipif(not shutil.which("pwsh"), reason="PowerShell consumer required")
-@pytest.mark.parametrize("state", ["present", "unknown"])
-def test_shipped_open_check_uses_real_finite_provider_without_psmux(tmp_path, state):
+@pytest.mark.parametrize("state,session", [
+    ("present", "wt-fixture"), ("unknown", "wt-fixture"),
+    ("present", "wt-d\u00e8sktop-win"),
+])
+def test_shipped_open_check_uses_real_finite_provider_without_psmux(tmp_path, state, session):
     root = tmp_path / "native"
     root.mkdir()
     listener = None
     worker = None
     failures = []
     if state == "unknown":
-        (root / "wt-fixture.port").write_text("invalid", encoding="ascii")
-        (root / "wt-fixture.key").write_text("synthetic-key", encoding="ascii")
+        (root / (session + ".port")).write_text("invalid", encoding="ascii")
+        (root / (session + ".key")).write_text("synthetic-key", encoding="ascii")
     if state == "present":
         listener = socket.socket()
         listener.bind(("127.0.0.1", 0))
         listener.listen()
         listener.settimeout(15)
-        (root / "wt-fixture.port").write_text(str(listener.getsockname()[1]), encoding="ascii")
-        (root / "wt-fixture.key").write_text("synthetic-key", encoding="ascii")
+        (root / (session + ".port")).write_text(str(listener.getsockname()[1]), encoding="ascii")
+        (root / (session + ".key")).write_text("synthetic-key", encoding="ascii")
 
         def serve():
             try:
@@ -97,7 +100,7 @@ def test_shipped_open_check_uses_real_finite_provider_without_psmux(tmp_path, st
                             scheme = b"AU" + b"TH "
                             assert reader.readline() == scheme + b"synthetic-key\n"
                             assert reader.readline().startswith(command)
-                            stream.sendall(response)
+                            stream.sendall(response.replace(b"wt-fixture", session.encode("utf-8")))
             except Exception as exc:
                 failures.append(exc)
 
@@ -107,18 +110,19 @@ def test_shipped_open_check_uses_real_finite_provider_without_psmux(tmp_path, st
     script.write_text(
         "$ErrorActionPreference='Stop'\n"
         "$VenvPython=$args[0]\n"
+        "$sessionName=$args[1]\n"
         "$script:AwMuxObservationPython=$null\n"
         "$script:AwMuxObservationProvider=$null\n"
         "$script:AwPsmuxBin='forbidden-native-cli'\n"
         + _helpers()
-        + "\ntry { $present=Test-AwMuxCreationSession 'wt-fixture';"
+        + "\ntry { $present=Test-AwMuxCreationSession $sessionName;"
         "ConvertTo-Json -Compress @{present=$present;unknown=$false} }"
         " catch { ConvertTo-Json -Compress @{unknown=$true;error=$_.Exception.Message} }\n",
         encoding="utf-8",
     )
     try:
         result = subprocess.run(
-            [shutil.which("pwsh"), "-NoProfile", "-File", str(script), sys.executable],
+            [shutil.which("pwsh"), "-NoProfile", "-File", str(script), sys.executable, session],
             env=dict(os.environ, PSMUX_DATA_DIR=str(root)),
             capture_output=True, text=True, timeout=20, **no_window_kwargs(),
         )

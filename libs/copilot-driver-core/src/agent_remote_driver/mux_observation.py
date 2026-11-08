@@ -135,12 +135,12 @@ def _parse(body: str, session: str) -> Observation:
     )
 
 
-def _settled_inventory(root: Path, deadline: float) -> dict[str, int]:
+def _settled_inventory(root: Path, deadline: float) -> dict[str, tuple[str, int]]:
     from agent_remote_driver import mux_inventory
 
     while True:
         try:
-            return mux_inventory.observe(timeout=_remaining(deadline), data_dir=root, qualified=True)
+            return mux_inventory.observe_registrations(timeout=_remaining(deadline), data_dir=root)
         except ObservationUnavailable:
             # Warm/cold servers publish several rendezvous files before readiness.
             time.sleep(min(0.05, _remaining(deadline)))
@@ -158,7 +158,13 @@ def observe_psmux(
     """
     if (
         not isinstance(session, str)
-        or not re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9_.-]{0,199}", session)
+        or not session or len(session) > 200 or session.startswith(".")
+        or any(
+            not (char.isalnum() or char in "_-." or (
+                ord(char) > 127 and char.isprintable() and not char.isspace()
+            ))
+            for char in session
+        )
         or session.endswith(".") or not 0 < timeout <= 5
     ):
         return Observation("unsupported", "unsupported-target")
@@ -206,8 +212,8 @@ def observe_psmux_many(sessions: list[str], *, timeout: float = 1.0) -> dict[str
         with lock:
             if not snapshot:
                 try:
-                    snapshot.append(mux_inventory.observe(
-                        timeout=_remaining(deadline), data_dir=_data_dir(), qualified=True,
+                    snapshot.append(mux_inventory.observe_registrations(
+                        timeout=_remaining(deadline), data_dir=_data_dir(),
                     ))
                 except (OSError, ValueError, ObservationUnavailable):
                     snapshot.append(None)
@@ -247,16 +253,17 @@ def list_psmux() -> dict[str, Observation] | None:
             pass
         from agent_remote_driver import mux_inventory
 
-        names.update(mux_inventory.observe(
-            timeout=_remaining(deadline), data_dir=root, qualified=True,
-        ))
-        selected = []
-        for name in sorted(names):
+        inventory = mux_inventory.observe_registrations(timeout=_remaining(deadline), data_dir=root)
+        selected = set()
+        for name in names - inventory.keys():
             if prefix and name.startswith(prefix):
-                selected.append(name[len(prefix):])
+                selected.add(name[len(prefix):])
             elif not prefix and "__" not in name:
-                selected.append(name)
-        return observe_psmux_many(selected, timeout=_remaining(deadline))
+                selected.add(name)
+        for base, (name, _clients) in inventory.items():
+            if base == prefix + name:
+                selected.add(name)
+        return observe_psmux_many(sorted(selected), timeout=_remaining(deadline))
     except (OSError, ValueError, ObservationUnavailable):
         return None
 

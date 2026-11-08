@@ -151,6 +151,22 @@ implementation proof obligations, not claims that native qualification passed.
 
 ## Journal
 
+### 2026-11-08 - Preserve supported worktree identities
+
+- Candidate `41d59bc229` passed all eight native cases on PSMux 3.3.8
+  (62.80 seconds) and all eight on PSMux 3.4.0 (47.79 seconds), with required
+  CI green. The catalog publication race was confirmed resolved.
+- Native session validation now preserves Unicode identity components,
+  including combining characters, while retaining path/control restrictions.
+  Real finite CLI and shipped PowerShell consumer regressions cover Unicode.
+- Complete inventory retains each registration basename with its authenticated
+  logical name. Catalog namespace selection compares that pair instead of
+  treating every `__` inside a logical name as a namespace separator. The
+  legacy strict/count projections remain compatible.
+- Focused contained results: Driver wire 37 passed; Worktrees compatibility
+  113 passed with one POSIX-only skip; shipped Manager finite consumer six
+  passed. Fresh exact-source native/CI and a passing review remain merge gates.
+
 ### 2026-11-08 - Close the catalog publication race
 
 - Candidate `63d4fef294` passed all eight native cases on PSMux 3.3.8

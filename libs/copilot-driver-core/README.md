@@ -72,6 +72,10 @@ covering every native server. The legacy name-only inventory API retains its
 ambiguity refusal for duplicate logical names across namespaces.
 Catalog discovery unions confirmed inventory identities with directory hints
 before namespace filtering, including registrations published between the reads.
+Registration basenames retain their authenticated logical names, so `__`
+inside a default-namespace session is not mistaken for a namespace separator.
+Unicode worktree identity components remain intact; path separators and
+control characters are refused before reading rendezvous files.
 Stale, partial, unreadable, changed, malformed or timed-out observations remain unknown.
 Client counts come from client rows, not PSMux's boolean `session_attached`.
 

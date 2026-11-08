@@ -23,17 +23,17 @@ _IDENTITY = b"I\twt-fixture\t$7:100\t%2\n"
 
 @pytest.fixture(autouse=True)
 def private_native_inventory(monkeypatch):
-    monkeypatch.setattr(mux_inventory, "observe", lambda **kw: {})
+    monkeypatch.setattr(mux_inventory, "observe_registrations", lambda **kw: {})
 
 
 @contextmanager
-def native_endpoint(root, response, *, delay=0, mutate=None, namespace=""):
+def native_endpoint(root, response, *, delay=0, mutate=None, namespace="", session="wt-fixture"):
     responses = response if isinstance(response, tuple) else (response, b"OK\n", b"OK\n")
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         listener.listen()
         listener.settimeout(.05)
-        base = namespace + "__wt-fixture" if namespace else "wt-fixture"
+        base = namespace + "__" + session if namespace else session
         (root / (base + ".port")).write_text(str(listener.getsockname()[1]), encoding="ascii")
         (root / (base + ".key")).write_text("synthetic-key", encoding="ascii")
         captured = []
@@ -130,27 +130,52 @@ def test_explicit_namespace_scopes_listing_and_keeps_logical_identity(tmp_path, 
     assert mux.observe_psmux("wt-fixture").status == "unknown"
 
 
-@pytest.mark.parametrize("namespace", ["", "private-fixture"])
+@pytest.mark.parametrize("namespace,session", [
+    ("", "wt-fixture"), ("private-fixture", "wt-fixture"),
+    ("", "wt-fixture__one"), ("private-fixture", "wt-fixture__one"),
+])
 def test_catalog_includes_live_inventory_published_after_the_directory_scan(
-    tmp_path, monkeypatch, namespace,
+    tmp_path, monkeypatch, namespace, session,
 ):
     monkeypatch.setenv("PSMUX_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("COPILOT_DRIVER_PSMUX_NAMESPACE", namespace)
-    base = namespace + "__wt-fixture" if namespace else "wt-fixture"
+    base = namespace + "__" + session if namespace else session
+    wire_name = session.encode("utf-8")
     with ExitStack() as endpoints:
         def publish(**kwargs):
-            assert kwargs["qualified"] is True
             assert not (tmp_path / (base + ".port")).exists()
             endpoints.enter_context(native_endpoint(
-                tmp_path, (b"OK\n" + _PANE, b"OK\n" + _CLIENT, b"OK\n" + _IDENTITY),
-                namespace=namespace,
+                tmp_path, tuple(
+                    b"OK\n" + row.replace(b"wt-fixture", wire_name)
+                    for row in (_PANE, _CLIENT, _IDENTITY)
+                ), namespace=namespace, session=session,
             ))
-            return {base: 1, "unrelated__wt-other": 2}
+            return {base: (session, 1), "unrelated__wt-other": ("wt-other", 2)}
 
-        monkeypatch.setattr(mux_inventory, "observe", publish)
+        monkeypatch.setattr(mux_inventory, "observe_registrations", publish)
         observed = mux.list_psmux()
-    assert set(observed) == {"wt-fixture"}
-    assert observed["wt-fixture"].presence() and observed["wt-fixture"].clients == 1
+    assert set(observed) == {session}
+    assert observed[session].presence() and observed[session].clients == 1
+
+
+@pytest.mark.parametrize("session", ["wt-d\u00e8sktop-win", "wt-de\u0300sktop-win"])
+def test_unicode_worktree_identity_reaches_the_finite_wire_consumer(
+    tmp_path, monkeypatch, capsys, session,
+):
+    monkeypatch.setenv("PSMUX_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"version": 1, "session": session})))
+    with native_endpoint(tmp_path, tuple(
+        b"OK\n" + row.replace(b"wt-fixture", session.encode("utf-8"))
+        for row in (_PANE, _CLIENT, _IDENTITY)
+    ), session=session):
+        assert mux.main(["--observe"]) == 0
+    observed = json.loads(capsys.readouterr().out)
+    assert observed["status"] == "present" and observed["clients"] == 1
+
+
+@pytest.mark.parametrize("session", ["wt-a/b", "wt-a\\b", "wt-a\nb", "wt-a\0b"])
+def test_native_identity_still_refuses_path_separators_and_controls(tmp_path, session):
+    assert mux.observe_psmux(session, data_dir=tmp_path).status == "unsupported"
 
 
 @pytest.mark.parametrize("response", [
@@ -184,19 +209,19 @@ def test_missing_and_partial_rendezvous_need_complete_coverage(tmp_path, monkeyp
     assert mux.observe_psmux("wt-fixture", data_dir=tmp_path).status == "absent"
     (tmp_path / "wt-fixture.pid").write_text("123", encoding="ascii")
     assert mux.observe_psmux("wt-fixture", data_dir=tmp_path).status == "absent"
-    monkeypatch.setattr(mux_inventory, "observe", lambda **kw: {"wt-fixture": 1})
+    monkeypatch.setattr(mux_inventory, "observe_registrations", lambda **kw: {"wt-fixture": ("wt-fixture", 1)})
     assert mux.observe_psmux("wt-fixture", data_dir=tmp_path).status == "unknown"
     assert (tmp_path / "wt-fixture.pid").read_text() == "123"
 
 
 def test_missing_registration_does_not_hide_a_surviving_server(tmp_path, monkeypatch):
-    monkeypatch.setattr(mux_inventory, "observe", lambda **kw: {"wt-fixture": 1})
+    monkeypatch.setattr(mux_inventory, "observe_registrations", lambda **kw: {"wt-fixture": ("wt-fixture", 1)})
     assert mux.observe_psmux("wt-fixture", data_dir=tmp_path).status == "unknown"
 
     def incomplete(**kwargs):
         raise mux.ObservationUnavailable("A live mux server is missing its registration")
 
-    monkeypatch.setattr(mux_inventory, "observe", incomplete)
+    monkeypatch.setattr(mux_inventory, "observe_registrations", incomplete)
     assert mux.observe_psmux("wt-fixture", data_dir=tmp_path).status == "unknown"
 
 
@@ -209,7 +234,7 @@ def test_missing_target_waits_for_another_servers_partial_publication_within_bud
             raise mux.ObservationUnavailable("A warm server is publishing")
         return {}
 
-    monkeypatch.setattr(mux_inventory, "observe", publishing)
+    monkeypatch.setattr(mux_inventory, "observe_registrations", publishing)
     monkeypatch.setattr(mux.time, "sleep", lambda delay: None)
     assert mux.observe_psmux("wt-fixture", data_dir=tmp_path).status == "absent"
     assert len(calls) == 2 and 0 < calls[1] <= calls[0] <= 1
@@ -285,7 +310,7 @@ from agent_remote_driver import mux_inventory
 from agent_remote_driver.mux_observation_types import ObservationUnavailable
 def unavailable(**kwargs):
     raise ObservationUnavailable("synthetic incomplete native coverage")
-mux_inventory.observe = unavailable
+mux_inventory.observe_registrations = unavailable
 sys.argv = [sys.argv[1], "--observe"]
 runpy.run_path(sys.argv[0], run_name="__main__")
 """
