@@ -198,7 +198,7 @@ def test_real_interactive_question_resumes_without_prompt_or_abort(tmp_path, tmp
                     def run(self, argv):
                         validate_private_mux_args(mux.mux_args, sandbox=mux.sandbox, cwd=mux.root)
                         assert argv[1] in {"capture-pane", "send-keys"}
-                        assert argv[argv.index("-t") + 1] == self.pane
+                        assert argv[argv.index("-t") + 1] == f"{mux.target}:{self.pane}"
                         completed = subprocess.run(
                             [mux.binary, *mux.mux_args, *argv[1:]], env=mux.environment,
                             cwd=mux.root, capture_output=True, text=True, encoding="utf-8",
@@ -216,7 +216,8 @@ def test_real_interactive_question_resumes_without_prompt_or_abort(tmp_path, tmp
                         )
                         assert identity.returncode == 0, identity.stderr
                         self.pane, pid, incarnation = identity.stdout.strip().split("|")
-                        return {"binary": mux.binary, "pane_id": self.pane, "pid": pid,
+                        return {"binary": mux.binary, "mux_session": mux.target,
+                                "pane_id": self.pane, "pid": pid,
                                 "incarnation": incarnation, "session_id": session_id}
 
                 app.state.mux_questions.backend = PrivateBackend()

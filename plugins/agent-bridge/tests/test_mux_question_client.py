@@ -30,7 +30,9 @@ def test_backend_uses_selected_owner_and_exact_confirmed_native_pane(monkeypatch
             assert argv[-4:] == ["session-binding", "--session-id", "native", "--json"]
             return CompletedProcess(argv, 0, json.dumps(binding), "")
         if argv[1] == "display-message":
+            assert argv[argv.index("-t") + 1] == "wt-worktree:%7"
             return CompletedProcess(argv, 0, "wt-worktree|%7|123|$4:1234\n", "")
+        assert argv[argv.index("-t") + 1] == "wt-worktree:%7"
         return CompletedProcess(argv, 0, "pane", "")
     monkeypatch.setattr(backend, "_agent_worktrees_launch_prefix", owner)
     monkeypatch.setattr(backend.shutil, "which", lambda _: "selected-mux")
@@ -40,7 +42,9 @@ def test_backend_uses_selected_owner_and_exact_confirmed_native_pane(monkeypatch
     assert observed["incarnation"] == "$4:1234"
     assert mux.capture(observed) == "pane"
     mux.key(observed, "-literal ; answer", literal=True)
-    assert calls[-1][0] == ["selected-mux", "send-keys", "-t", "%7", "-l", "--", "-literal ; answer"]
+    assert calls[-1][0] == [
+        "selected-mux", "send-keys", "-t", "wt-worktree:%7", "-l", "--", "-literal ; answer",
+    ]
     binding["copilot_start_time"] = ""
     with pytest.raises(MuxQuestionError):
         mux.binding("native", {"worktree_id": "worktree"})

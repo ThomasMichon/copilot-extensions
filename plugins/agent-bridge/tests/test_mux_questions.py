@@ -289,3 +289,15 @@ def test_completion_requires_a_new_exact_answer_echo_not_old_history():
     assert completion_echo("", old.replace("Asked user", "● Asked user"), form, "Blue")
     assert completion_echo(old, old + old, form, "Blue")
     assert answer_text("-literal option-looking text") == "-literal option-looking text"
+
+
+def test_completion_accepts_only_right_aligned_native_duration_annotations():
+    form = parse_form(panel())
+    old = "● Asked user Choose a fixture color\n  └ Color: Blue\n"
+    for suffix in ("     5s", "     1m 34s"):
+        completed = old.replace("color\n", "color" + suffix + "\n")
+        assert completion_echo("", completed, form, "Blue")
+        assert not completion_echo(old, completed, form, "Blue")
+        assert not completion_echo("", completed, form, "Green")
+    for suffix in (" 5s", "     unrelated", " for another deployment     5s", "     5s extra"):
+        assert not completion_echo("", old.replace("color\n", "color" + suffix + "\n"), form, "Blue")

@@ -59,7 +59,7 @@ class LocalMux:
             raise MuxQuestionError("supported local mux is unavailable")
         value["binary"] = binary
         identity = self.run([
-            binary, "display-message", "-p", "-t", value["pane_id"],
+            binary, "display-message", "-p", "-t", f'{value["mux_session"]}:{value["pane_id"]}',
             "#{session_name}|#{pane_id}|#{pane_pid}|#{session_id}:#{session_created}",
         ]).strip().split("|")
         if (
@@ -76,14 +76,15 @@ class LocalMux:
     def capture(self, binding: dict[str, Any]) -> str:
         """Capture the current viewport, never scrollback containing stale forms."""
         return self.run([
-            binding["binary"], "capture-pane", "-p", "-t", binding["pane_id"],
+            binding["binary"], "capture-pane", "-p", "-t",
+            f'{binding["mux_session"]}:{binding["pane_id"]}',
         ])
 
     def key(self, binding: dict[str, Any], value: str, *, literal: bool = False) -> None:
         """Send a single validated navigation key or one literal answer line."""
         if not literal and value not in {"Up", "Down", "Enter"}:
             raise MuxQuestionError("unsupported mux answer key")
-        args = ["send-keys", "-t", binding["pane_id"]]
+        args = ["send-keys", "-t", f'{binding["mux_session"]}:{binding["pane_id"]}']
         if literal:
             args.extend(["-l", "--"])
         self.run([binding["binary"], *args, value])

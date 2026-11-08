@@ -139,6 +139,7 @@ PROBES = {
     "test_native_answering_and_multifield_or_permission_evidence_prevent_fallback": 1,
     "test_ambiguous_rendering_never_parses_as_an_answerable_form": 7,
     "test_completion_requires_a_new_exact_answer_echo_not_old_history": 1,
+    "test_completion_accepts_only_right_aligned_native_duration_annotations": 1,
     "test_backend_uses_selected_owner_and_exact_confirmed_native_pane": 1,
     "test_old_provider_never_receives_mux_mutation_and_writes_are_not_retried": 1,
     "test_cli_mux_does_not_start_a_daemon_or_touch_native_or_permission_paths": 1,

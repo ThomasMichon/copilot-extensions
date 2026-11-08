@@ -37,6 +37,8 @@ are not answer payloads. Normal punctuation inside a literal answer is retained.
 The existing local Worktrees owner resolves the native lock/process ancestry
 and exact pane. Bridge confirms mux session/pane/process identity and native
 incarnation, and recaptures the current viewport rather than stale scrollback.
+Every mux target includes both session and pane, since PSMux can reuse pane
+IDs across sessions. A bare pane ID is not a globally unique target.
 Only TMux on POSIX and PSMux on Windows are supported. Each effect rechecks the
 same native pending request, form and live binding. Selecting Other may expand
 the native text box and scroll unrelated history; that is not a new request.
@@ -63,8 +65,11 @@ degraded transport; use the native path when that exclusion is required:
 | `unverified`, `accepted: null` | Input may have happened but completion was not established. Inspect the original audit and terminal; do not resend. |
 
 The CLI returns nonzero unless the outcome is `answered`. A lost HTTP response
-or successful `send-keys` is not proof of completion. Admission is durably
-recorded before keys; the exact inspected screen can be admitted only once.
+or successful `send-keys` is not proof of completion.
+Completion requires the full question and its adjacent exact field/value;
+only a separate right-aligned native seconds/minutes duration is optional.
+Admission is durably recorded before keys; the exact inspected screen can be
+admitted only once.
 An in-flight or uncertain attempt blocks another mux inspection for that native
 session. A daemon restart revokes all unsubmitted inspection tokens and retains
 the original audit, including unfinished admission. Use the terminal to resolve

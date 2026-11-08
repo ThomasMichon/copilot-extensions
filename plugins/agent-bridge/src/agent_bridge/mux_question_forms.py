@@ -111,12 +111,13 @@ def completion_echo(before: str, after: str, form: Form, answer: str) -> bool:
     """Require a newly rendered matching answer, never an old success echo."""
     marker = "Asked user " + " ".join(form.question[:-1])
     expected = form.question[-1] + " " + answer
+    header = re.compile(re.escape(marker) + r"(?: {2,}(?:[0-9]+m )?[0-9]+s)?")
 
     def matching_echoes(screen: str) -> int:
         lines = screen.splitlines()
         count = 0
         for index, line in enumerate(lines[:-1]):
-            if line.strip().removeprefix("●").strip() != marker:
+            if not header.fullmatch(line.strip().removeprefix("●").strip()):
                 continue
             content = lines[index + 1].strip().removeprefix("└").strip()
             if content == expected:

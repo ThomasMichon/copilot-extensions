@@ -93,7 +93,7 @@ runtime remediation, elevated operation or destructive cleanup is authorized.
   human terminal; no atomic human-exclusion or SDK-acceptance claim is made.
 
 ### Phase 3 - Delivery and rollout
-- [ ] Land qualified implementation after whole-surface audit, review and CI.
+- [x] Land qualified implementation after whole-surface audit, review and CI.
 - [ ] Verify ordinary promotion to `main`; diagnose actual failing jobs and
   fix forward rather than bypassing a red release gate.
 - [ ] Complete the separately authorized adopter updates and synthetic proof
@@ -235,3 +235,29 @@ runtime remediation, elevated operation or destructive cleanup is authorized.
   Earlier source qualification is not substituted for this combined proof.
 - Request a fresh review of the qualified head, then require full PR CI and
   actual merge before following promotion and both authorized installed proofs.
+
+### 2026-11-07 - Reviewed implementation merged
+
+- #11390 merged as `c083955fc687b45db481b1935bc037abaa6a04af` after
+  exact-head approval, resolution of the fixed restored-serving thread and
+  successful current PR CI. The managed completion path retained required
+  check enforcement until the latest CI run finished.
+- The nonrequired review-request job rejected its requested reviewer login;
+  the subsequent review completed successfully. #11427 tracks this automation
+  failure separately from source qualification and required PR checks.
+- Continue ordinary release promotion, then both authorized adopter updates
+  and fresh owned synthetic proofs. No existing session or form is a fixture.
+
+### 2026-11-07 - Installed qualification corrections
+
+- Installed synthetic qualification reached a real native form. The answer
+  was accepted and the same conversation continued, but the terminal's
+  right-aligned elapsed duration caused a conservative `unverified` result.
+  Recognize only the native seconds/minutes annotation after the complete
+  exact question; retain exact adjacent field/value and stale-echo checks.
+- Native Windows qualification also demonstrated that PSMux can reuse pane
+  IDs between sessions. The existing identity guard refused a bare-pane
+  lookup before input. Qualify every identity, capture and key target with
+  its authoritative mux session, not just its pane ID.
+- These are source corrections, not installed success claims. Repeat affected
+  validation, review, promotion, authorized updates and both installed proofs.
