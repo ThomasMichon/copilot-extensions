@@ -209,6 +209,35 @@ def test_agenda_nudge_reads_policy_published_under_agent_home(tmp_path):
     assert not (real_home / ".agent-worktrees").exists()
 
 
+def test_forwarded_env_replaces_resident_switches_with_session_values():
+    base = {"AGENT_HOME": "/sandbox", "AGENT_WORKTREES_NUDGE": "off"}
+    payload = {"_agentWorktrees": {"environment": {"AGENT_WORKTREES_AGENDA_NUDGE": "off", "PATH": "x"}}}
+
+    env = nudge.forwarded_env(payload, base)
+
+    assert env == {"AGENT_HOME": "/sandbox", "AGENT_WORKTREES_AGENDA_NUDGE": "off"}
+    assert nudge.forwarded_env({}, base) is None
+
+
+def test_session_agenda_opt_out_reaches_resident_decision(tmp_path):
+    home, cwd = _make_home(tmp_path)
+    _publish_policy(home, "expected")
+    payload = {**_payload(cwd), "_agentWorktrees": {"environment": {"AGENT_WORKTREES_AGENDA_NUDGE": "off"}}}
+    env = nudge.forwarded_env(payload, dict(_AGENDA_ENV))
+
+    outs = [nudge.decide(payload, env=env, home=home, now=1000.0 + i) for i in range(6)]
+
+    assert not any(_has_agenda(o) for o in outs)
+
+
+def test_hook_client_forwards_exactly_the_nudge_switches():
+    spec = importlib.util.spec_from_file_location("hook_client_keys", _SCRIPT.with_name("hook_client.py"))
+    client = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(client)
+
+    assert client._POST_TOOL_ENV_KEYS == nudge.NUDGE_ENV_KEYS
+
+
 def test_agenda_nudge_silent_when_worktree_lane_exists(tmp_path):
     home, cwd = _make_home(tmp_path)
     wt = tmp_path / "wt"

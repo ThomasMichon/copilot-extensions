@@ -270,6 +270,29 @@ def agenda_lane_state(yaml_path: Path, worktree_id: str) -> str:
 
 
 AGENDA_POLICY_SUFFIX = ".agenda-policy.json"
+# Session-level switches the hook client forwards to the resident, whose own
+# process environment belongs to whichever session spawned it.
+NUDGE_ENV_KEYS = (
+    "AGENT_WORKTREES_NUDGE",
+    "AGENT_WORKTREES_AGENDA_NUDGE",
+    "AGENT_WORKTREES_NUDGE_CALLS",
+    "AGENT_WORKTREES_NUDGE_MINUTES",
+)
+
+
+def forwarded_env(payload: dict, base=None) -> dict | None:
+    """Return the session's forwarded nudge switches over ``base``, else None."""
+    metadata = payload.get("_agentWorktrees")
+    forwarded = metadata.get("environment") if isinstance(metadata, dict) else None
+    if not isinstance(forwarded, dict):
+        return None
+    base = os.environ if base is None else base
+    env = {key: value for key, value in base.items() if key not in NUDGE_ENV_KEYS}
+    env.update({
+        key: value for key, value in forwarded.items()
+        if key in NUDGE_ENV_KEYS and isinstance(value, str)
+    })
+    return env
 _AGENDA_POLICY_MAX_BYTES = 4096
 
 

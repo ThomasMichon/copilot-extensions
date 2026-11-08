@@ -4096,8 +4096,10 @@ class _ResidentHookPolicy:
         except Exception:
             pass
         try:
+            forwarded = getattr(module, "forwarded_env", None)
             text = module.decide(
-                payload, home=Path.home(), tracking_record=found, deadline=deadline
+                payload, env=forwarded(payload) if callable(forwarded) else None,
+                home=Path.home(), tracking_record=found, deadline=deadline
             )
         except Exception:
             return {}

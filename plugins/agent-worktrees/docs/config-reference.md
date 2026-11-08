@@ -436,7 +436,10 @@ as the disposition nudge (`AGENT_WORKTREES_NUDGE_CALLS` /
 a changed setting reaches a running session at its next start, resume or
 `agent-worktrees status` disposition write. The
 reminder is emitted only while no agenda lane is detected, and
-`AGENT_WORKTREES_AGENDA_NUDGE=off` silences it. See
+`AGENT_WORKTREES_AGENDA_NUDGE=off` silences it. These switches are read from
+the Copilot session's own environment and forwarded to the resident hook
+service, so a session-level opt-out applies even when the resident was started
+by another session. See
 [Worktree agendas](worktree-agendas.md#default-on-policy).
 
 ## Machine-local config — `~/.{project}/config.yaml`

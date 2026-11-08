@@ -539,3 +539,16 @@ def test_agenda_policy_roots_honor_agent_home(monkeypatch, tmp_path: Path):
 
     assert roots
     assert all(Path(root).is_relative_to(sandbox) for root in roots)
+
+
+def test_registry_agenda_guidance_uses_payload_session_not_process_env(monkeypatch, tmp_path: Path):
+    config, record = _agenda_setup(monkeypatch, tmp_path, "expected")
+    monkeypatch.setattr(session_context, "_render_registry_core", lambda *_a, **_k: "ctx")
+    monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "foreign")
+
+    bound = session_context.render_registry_context(config, record, cwd=str(tmp_path), session_id="mine")
+    unbound = session_context.render_registry_context(config, record, cwd=str(tmp_path))
+
+    assert "session-state/mine" in bound
+    assert "foreign" not in bound + unbound
+    assert "<session-folder>" in unbound

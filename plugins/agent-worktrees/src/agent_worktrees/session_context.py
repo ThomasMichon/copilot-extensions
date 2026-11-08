@@ -340,8 +340,13 @@ def render_registry_context(
     pane_id: str | None = None,
     mux_session: str | None = None,
     plugin_related_anchors: list[str] | None = None,
+    session_id: str | None = None,
 ) -> str:
-    """Render the bounded registry context followed by any agenda guidance line."""
+    """Render the bounded registry context followed by any agenda guidance line.
+
+    ``session_id`` comes from the hook payload, never the process environment,
+    which in the resident belongs to whichever session spawned it.
+    """
     context = _render_registry_core(
         config,
         record,
@@ -350,10 +355,7 @@ def render_registry_context(
         mux_session=mux_session,
         plugin_related_anchors=plugin_related_anchors,
     )
-    return with_agenda_guidance(
-        context, config, record,
-        session_id=os.environ.get("COPILOT_AGENT_SESSION_ID") or None,
-    )
+    return with_agenda_guidance(context, config, record, session_id=session_id or None)
 
 
 def _render_registry_core(
