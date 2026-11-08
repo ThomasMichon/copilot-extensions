@@ -421,7 +421,12 @@ class WorkspaceOperations:
                 prepared_intent=prepared,
             )
         check()
-        return {"protocol": PROTOCOL, "scope": scope, "result": copy.deepcopy(result)}
+        # Storage adoption alone does not negotiate new wire metadata.
+        result = copy.deepcopy(result)
+        result.pop("comment_observations", None)
+        if isinstance(result.get("operation"), dict):
+            result["operation"].pop("comment_observations", None)
+        return {"protocol": PROTOCOL, "scope": scope, "result": result}
 
     def _materialized(self, cache, scope, generation_id):
         from .generation_cache import _plain

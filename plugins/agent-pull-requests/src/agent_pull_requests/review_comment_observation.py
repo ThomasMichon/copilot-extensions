@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 from collections.abc import Callable
+from dataclasses import dataclass, field
 
 from . import review_intent
 from .generation_cache import GenerationCache
@@ -80,7 +81,45 @@ def observe_prepared_comment(
     return projected
 
 
-def _project(result: dict, selected: dict, version: int, generation: dict | None) -> dict:
+@dataclass
+class _Acquired:
+    observation: dict | None = None
+    threads: dict = field(default_factory=dict)
+    comments: dict = field(default_factory=dict)
+    error: str | None = None
+    object_ids: dict = field(default_factory=dict)
+
+
+def _acquired(generation: dict, scope: dict) -> _Acquired:
+    """Normalize once for all selected actions in one already-acquired generation."""
+    section = generation["sections"]["discussions"]
+    if section["data"] is None:
+        return _Acquired(error="discussions_unavailable")
+    acquired = _Acquired()
+    try:
+        for field in ("observed_from", "observed_to"):
+            review_intent.text(section[field], 128)
+        # Valid acquisition bounds survive unusable or duplicate native objects.
+        metadata = _section("discussions", {**section, "data": []}, scope)
+        acquired.observation = {
+            "observed_from": metadata["observed_from"], "observed_to": metadata["observed_to"],
+            "complete": metadata["complete"], "error_count": len(metadata["errors"]),
+        }
+        normalized = _section("discussions", section, scope)
+        acquired.threads = _threads(normalized["data"])
+    except (ValueError, TypeError):
+        acquired.error = "discussions_invalid"
+        return acquired
+    acquired.comments = {
+        (thread_id, comment["id"]): comment
+        for thread_id, thread in acquired.threads.items() for comment in thread["comments"]
+    }
+    return acquired
+
+
+def _project(
+    result: dict, selected: dict, version: int, generation: dict | None, *, acquired: _Acquired | None = None,
+) -> dict:
     def outcome(status: str, reason: str) -> dict:
         return {**result, "status": status, "reason": reason}
 
@@ -92,22 +131,14 @@ def _project(result: dict, selected: dict, version: int, generation: dict | None
     )
     if generation is None:
         return outcome("unavailable", "generation_missing")
-    section = generation["sections"]["discussions"]
-    if section["data"] is None:
-        return outcome("unavailable", "discussions_unavailable")
-    try:
-        for field in ("observed_from", "observed_to"):
-            review_intent.text(section[field], 128)
-        normalized = _section("discussions", section, result["scope"])
-        threads = _threads(normalized["data"])
-    except (ValueError, TypeError):
-        return outcome("unavailable", "discussions_invalid")
-    result["observation"] = {
-        "observed_from": normalized["observed_from"], "observed_to": normalized["observed_to"],
-        "complete": normalized["complete"], "error_count": len(normalized["errors"]),
-        "revision": copy.deepcopy(generation["revision"]), "freshness": "retained",
-    }
-    if not normalized["complete"]:
+    acquired = acquired if acquired is not None else _acquired(generation, result["scope"])
+    if acquired.observation is not None:
+        result["observation"] = {
+            **acquired.observation, "revision": copy.deepcopy(generation["revision"]), "freshness": "retained",
+        }
+    if acquired.error is not None:
+        return outcome("unavailable", acquired.error)
+    if not acquired.observation["complete"]:
         return outcome("unavailable", "discussions_incomplete")
     if result["action_state"] != "confirmed":
         return outcome("unavailable", "original_action_not_confirmed")
@@ -116,16 +147,19 @@ def _project(result: dict, selected: dict, version: int, generation: dict | None
         return outcome("unavailable", "original_native_target_missing")
     ids = receipt["platform_ids"]
     result["native_target"] = {name: ids[name] for name in ("thread_id", "comment_id")}
-    thread = threads.get(ids["thread_id"])
+    thread = acquired.threads.get(ids["thread_id"])
     if thread is None:
         return outcome("unavailable", "native_thread_missing")
-    comment = next((row for row in thread["comments"] if row["id"] == ids["comment_id"]), None)
+    target = (ids["thread_id"], ids["comment_id"])
+    comment = acquired.comments.get(target)
     if comment is None:
         return outcome("unavailable", "native_comment_missing")
-    result["current_object_id"] = _digest({
-        "thread": {key: value for key, value in thread.items() if key != "comments"},
-        "comment": comment,
-    })
+    if target not in acquired.object_ids:
+        acquired.object_ids[target] = _digest({
+            "thread": {key: value for key, value in thread.items() if key != "comments"},
+            "comment": comment,
+        })
+    result["current_object_id"] = acquired.object_ids[target]
     if thread.get("isDeleted") or comment.get("isDeleted"):
         return outcome("conflict", "native_target_deleted")
     actor = (comment.get("author") or {}).get("id")

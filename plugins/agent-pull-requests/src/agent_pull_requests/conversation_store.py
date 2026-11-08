@@ -135,15 +135,21 @@ class ConversationStore:
         expires_at: int,
         checkpoint: Callable[[], None] | None = None,
         attention: AttentionInputs | None = None,
+        comment_mappings: bool = False,
     ) -> dict:
         """Project trusted acquisition under the same journal transaction, not HTTP ingest."""
         from .workspace_conversation import conversation_key, observation_interval, project_generation
+
+        if type(comment_mappings) is not bool:
+            raise ValueError("explicit comment mapping selection required")
 
         def observe(document: dict) -> dict:
             if document["version"] not in (3, 4, 5, 6):
                 raise ReplayStoreInvalid("conversation journal requires explicit owner adoption")
             if attention is not None and document["version"] not in (4, 5, 6):
                 raise ReplayStoreInvalid("attention requires explicit owner adoption")
+            if comment_mappings and document.get("review_comment_mapping_version") != 1:
+                raise ReplayStoreInvalid("comment mapping requires explicit storage adoption")
             journal = ConversationJournal(document["conversations"])
             key = conversation_key(generation["scope"], self.owner.namespace)
             record = journal._find(key)
@@ -196,6 +202,9 @@ class ConversationStore:
                 )
                 document["attention"] = state.snapshot()
             document["conversations"] = journal.snapshot()
+            if comment_mappings and result["status"] in ("observed", "unchanged"):
+                from .review_comment_mapping import observe
+                observe(document, generation)
             return result
 
         return self.owner._review_transaction(

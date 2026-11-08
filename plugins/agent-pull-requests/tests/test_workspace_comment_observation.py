@@ -25,6 +25,24 @@ from test_workspace_tools import invoke_cli
 pytestmark = pytest.mark.parametrize("environment", [True], indirect=True)
 
 
+def test_storage_mapping_adoption_does_not_expand_baseline_inspection_wire(
+    environment: tuple, prepared_workspace: tuple,
+) -> None:
+    from agent_pull_requests.conversation_store import ConversationStore
+    from agent_pull_requests.review_comment_mapping import CommentMappingStore, FIELD
+
+    store, selected, _, _, backend, _ = environment
+    gateway, _, native, _, _, _ = prepared_workspace
+    store.admit_review(selected, expires_at=native.expires_at())
+    ConversationStore(store).adopt(lifecycle_checkpoint=lambda: None, expires_at=native.expires_at())
+    CommentMappingStore(store).adopt(lifecycle_checkpoint=lambda: None, expires_at=native.expires_at())
+    result = native.exchange("inspect", {"number": 42, "operation_id": selected["operation_id"]})
+    assert FIELD in store.inspect_review(selected["operation_id"], selected["scope"], expires_at=native.expires_at())
+    assert FIELD not in result["result"]
+    assert backend.calls == []
+    asyncio.run(gateway.drain(timeout=2))
+
+
 @pytest.mark.parametrize("transport", ["direct", "native", "gateway"])
 def test_receiver_rechecks_actual_prepared_storage_for_direct_and_stale_clients(
     environment: tuple, integration: tuple, transport: str,
