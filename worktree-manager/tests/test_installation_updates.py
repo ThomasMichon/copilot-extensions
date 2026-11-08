@@ -256,6 +256,10 @@ def test_durable_history_distinguishes_acceptance_running_failure_and_completion
         return ui._operations(engine_source="selected-source")
 
     assert read()["guide"]["state"] == "queued"
+    request.unresolved = True
+    assert read()["guide"]["state"] == "blocked"
+    assert "requires recovery" in read()["guide"]["error"]
+    request.unresolved = False
     request.state = "running"
     assert "Building selected" in read()["guide"]["progress"]
     spec.argv = ("--target=other", "--target=guide")

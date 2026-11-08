@@ -100,7 +100,12 @@ class Request:
     @property
     def unresolved(self) -> bool:
         return (
-            self.state in {"running", "interrupted", "blocked"}
+            (
+                self.state in {"running", "interrupted", "blocked"}
+                or (self.state == "pending" and any(
+                    value is not None for value in (self.started_at, self.finished_at, self.boot_id)
+                ))
+            )
             and self.settled_at is None and self.released_at is None
         )
 
@@ -250,7 +255,7 @@ def _json(value: object) -> str:
 
 def _validate_db(db: sqlite3.Connection) -> None:
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version not in {2, 3, SCHEMA, authority.SCHEMA_VERSION}:
+    if version not in {2, 3, SCHEMA, authority.LEGACY_SCHEMA_VERSION, authority.SCHEMA_VERSION}:
         raise StateError("unsupported update-driver schema")
     columns = {row[1] for row in db.execute("PRAGMA table_info(requests)")}
     expected = {
@@ -263,7 +268,7 @@ def _validate_db(db: sqlite3.Connection) -> None:
         expected.update({"recovery_authority", "released_at"})
     if columns != expected:
         raise StateError("malformed update-driver schema")
-    if version == authority.SCHEMA_VERSION:
+    if version in (authority.LEGACY_SCHEMA_VERSION, authority.SCHEMA_VERSION):
         try:
             authority.validate(db)
         except authority.AuthorityError as error:
@@ -277,7 +282,7 @@ def _upgrade_schema(db: sqlite3.Connection, root: Path, custody: OperationLock) 
     custody.assert_owned()
     _validate_db(db)
     version = db.execute("PRAGMA user_version").fetchone()[0]
-    if version in (SCHEMA, authority.SCHEMA_VERSION):
+    if version in (SCHEMA, authority.LEGACY_SCHEMA_VERSION, authority.SCHEMA_VERSION):
         return
     for row in db.execute("SELECT * FROM requests"):
         _request(row, root)
@@ -427,6 +432,7 @@ def _request(row: sqlite3.Row, root: Path) -> Request:
 
 
 UPDATE_AUTHORITY_CAPABILITY = authority.CAPABILITY
+QUEUED_NATIVE_WRITER_CAPABILITY = authority.QUEUED_NATIVE_WRITER_CAPABILITY
 current_authority = authority.current
 change_authority = authority.change
 
@@ -447,9 +453,9 @@ def enqueue(
         spec = _spec(replace(spec, killswitch_path=os.path.abspath(path)))
     if type(coalesce_running) is not bool:
         raise InvalidRequestError("active coalescing must be an explicit boolean")
-    spec_json, runner_json = _json(_spec_document(spec)), _json(asdict(runner))
-    identity = hashlib.sha256((spec_json + "\n" + runner_json).encode()).hexdigest()
-    with authority.submission(root, spec):
+    with authority.submission(root, spec) as spec:
+        spec_json, runner_json = _json(_spec_document(spec)), _json(asdict(runner))
+        identity = hashlib.sha256((spec_json + "\n" + runner_json).encode()).hexdigest()
         if _exclusive_custody is None:
             _reconcile_lost_owner(root)
         else:
@@ -517,14 +523,17 @@ def _outcome(
             )
 
 
+def _request_fenced(request: Request) -> bool:
+    return request.state in {"pending", "interrupted", "blocked"} and request.unresolved
+
+
 def _has_fence(db: sqlite3.Connection, root: Path) -> bool:
     requests = tuple(_request(row, root) for row in db.execute(
-        "SELECT * FROM requests WHERE state IN ('running','interrupted','blocked')",
+        """SELECT * FROM requests WHERE state IN ('running','interrupted','blocked')
+        OR (state='pending' AND
+            (started_at IS NOT NULL OR finished_at IS NOT NULL OR boot_id IS NOT NULL))""",
     ))
-    return any(
-        request.state in {"interrupted", "blocked"} and request.unresolved
-        for request in requests
-    )
+    return any(_request_fenced(request) for request in requests)
 
 
 def foundation_status(*, root: Path | None = None) -> foundation_state.FoundationOperation | None:
@@ -600,10 +609,7 @@ def ensure_worker(
     create_queue_directory(root)
     _reconcile_lost_owner(root)
     _assert_foundation_clear(root)
-    if any(
-        row.state in {"interrupted", "blocked"} and row.unresolved
-        for row in status(root=root)
-    ):
+    if any(_request_fenced(row) for row in status(root=root)):
         raise InterruptedError("installation queue fenced; explicit positive settlement required")
     token = uuid.uuid4().hex
     receipt = root / f".worker-started-{token}"
@@ -938,13 +944,10 @@ def wait(
         _assert_foundation_clear(_root(root))
         if status(request_id, root=root).state != request.state:
             continue
+        if request.state == "pending" and any(_request_fenced(item) for item in status(root=root)):
+            raise InterruptedError("installation queue fenced by unsettled prior transaction")
         if request.state == "pending" and request.error:
             raise SpawnError(request.error)
-        if request.state == "pending" and any(
-            item.state in {"interrupted", "blocked"} and item.unresolved
-            for item in status(root=root)
-        ):
-            raise InterruptedError("installation queue fenced by unsettled prior transaction")
         if request.state == "pending" and worker is not None:
             code = worker.poll()
             if code is not None:

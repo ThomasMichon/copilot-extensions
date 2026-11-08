@@ -999,7 +999,10 @@ def test_windows_update_rebinds_existing_sync_task_runtime() -> None:
     assert "-Action $action" in update_binding
     assert "no provisioned runtime" in update_binding
     assert "-Trigger" not in update_binding
-    assert "Update-SyncTaskBinding" in update_action
+    assert "Sync-LoggerScheduledTask -LifecycleAction update" in update_action
+    policy = (_INSTALL_PS1.parent / "windows-scheduled-task.ps1").read_text(encoding="utf-8")
+    assert "$task -and $LifecycleAction -eq 'update'" in policy
+    assert "Update-SyncTaskBinding" in policy
 
 
 def test_windows_sync_task_writes_wrap_both_register_and_update_branches() -> None:

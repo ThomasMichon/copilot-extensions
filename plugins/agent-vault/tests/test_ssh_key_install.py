@@ -356,3 +356,78 @@ def test_required_stopped_service_never_activates_or_creates(isolated, monkeypat
     ]) == 1
     assert json.loads(capsys.readouterr().out)["error"] == "service_unavailable"
     assert not destination.exists()
+
+
+@pytest.mark.parametrize("operation", ["prepare", "install"])
+@pytest.mark.parametrize("availability", ["missing", "inaccessible", "stat-inaccessible", "directory"])
+def test_unavailable_database_is_reported_before_service_or_key_effects(
+    isolated, monkeypatch, capsys, tmp_path, operation, availability,
+):
+    database = tmp_path / "sync space" / "selected.kdbx"
+    destination = tmp_path / "keys"
+    monkeypatch.setenv("KPDB", str(database))
+    if availability == "directory":
+        database.mkdir(parents=True)
+    elif availability == "inaccessible":
+        original_resolve = Path.resolve
+
+        def resolve(path, *args, **kwargs):
+            if path == database:
+                raise PermissionError("fixture database lookup refused")
+            return original_resolve(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "resolve", resolve)
+    elif availability == "stat-inaccessible":
+        database.parent.mkdir()
+        database.write_bytes(b"selected fixture")
+        original_is_file = Path.is_file
+
+        def is_file(path):
+            if path == database:
+                raise PermissionError("fixture database inspection refused")
+            return original_is_file(path)
+
+        monkeypatch.setattr(Path, "is_file", is_file)
+    activate = Mock(side_effect=AssertionError)
+    send = Mock(side_effect=AssertionError)
+    publish = Mock(side_effect=AssertionError)
+    monkeypatch.setattr(cli, "ensure_service", activate)
+    monkeypatch.setattr(cli, "send_command", send)
+    monkeypatch.setattr(ssh_key_files, "install", publish)
+    arguments = ["ssh-key", operation, "--entry", "SSH/node-a", "--require-running", "--json"]
+    if operation == "install":
+        arguments.extend(["--directory", str(destination)])
+    assert cli.main(arguments) == 1
+    output = capsys.readouterr()
+    result = json.loads(output.out)
+    assert result["error"] == "database_unavailable"
+    assert str(database) not in output.out + output.err
+    activate.assert_not_called()
+    send.assert_not_called()
+    publish.assert_not_called()
+    assert not destination.exists()
+    assert Path(isolated).read_bytes() == b"disposable fixture"
+
+
+@pytest.mark.parametrize("operation", ["prepare", "install"])
+def test_native_cli_reports_unsynchronized_database_without_creating_it(
+    isolated, monkeypatch, tmp_path, operation,
+):
+    database = tmp_path / "sync space" / "selected.kdbx"
+    destination = tmp_path / "keys"
+    monkeypatch.setenv("KPDB", str(database))
+    arguments = [
+        sys.executable, "-m", "agent_vault", "ssh-key", operation,
+        "--entry", "SSH/node-a", "--require-running", "--json",
+    ]
+    if operation == "install":
+        arguments.extend(["--directory", str(destination)])
+    result = subprocess.run(
+        arguments, stdin=subprocess.DEVNULL, capture_output=True,
+        timeout=10, **no_window_kwargs(),
+    )
+    assert result.returncode == 1
+    assert json.loads(result.stdout)["error"] == "database_unavailable"
+    assert str(database).encode() not in result.stdout + result.stderr
+    assert not database.parent.exists() and not destination.exists()
+    assert Path(isolated).read_bytes() == b"disposable fixture"

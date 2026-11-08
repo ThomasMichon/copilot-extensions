@@ -530,6 +530,46 @@ def test_project_controller_routes_borrowed_request_before_manager_source(
     assert calls == [("example", ["update", "--force"])]
 
 
+def test_legacy_project_request_reaches_manager_controller_under_real_custody(tmp_path, monkeypatch):
+    import sqlite3
+    import sys
+    import update_driver
+    from worktree_manager import engine_client
+
+    root = tmp_path.resolve() / "driver"
+    update_driver.change_authority(
+        "project", project="example", root=root, timeout=5,
+        verify_capabilities=lambda _deadline: True,
+    )
+    request = update_driver.enqueue(
+        update_driver.RequestSpec(
+            "manager", project="example", cwd=str(tmp_path.resolve()), authority="project",
+        ),
+        runner=update_driver.TrustedRunner((sys.executable, "-c", "pass"), str(tmp_path.resolve())),
+        root=root,
+    )
+    with sqlite3.connect(root / "queue.sqlite3") as db:
+        db.execute("PRAGMA user_version=5")
+    calls = []
+    monkeypatch.setattr(engine_client, "get_value", lambda *_args: "tools/update.py")
+    monkeypatch.setattr(
+        engine_client, "run_engine_passthrough",
+        lambda project, args, **_kwargs: calls.append((project, args)) or 0,
+    )
+    borrow = update_driver.borrowed_custody
+
+    def execute(transaction):
+        monkeypatch.setattr(
+            update_driver, "borrowed_custody",
+            lambda: borrow(root=root, environ=transaction.participant_env()),
+        )
+        return driver.cmd_update_request(["--project", "example", "--force"])
+
+    assert update_driver.drain(root=root, executor=execute) == 0
+    assert update_driver.status(request.id, root=root).exit_code == 0
+    assert calls == [("example", ["update", "--force"])]
+
+
 def test_borrowed_standalone_authority_stays_standalone(queued, monkeypatch, tmp_path):
     import update_driver
     from update_driver.authority import selection

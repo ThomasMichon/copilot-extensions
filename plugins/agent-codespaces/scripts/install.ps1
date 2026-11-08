@@ -14,7 +14,8 @@
       pwsh -File plugins\agent-codespaces\scripts\install.ps1 status
 
 .PARAMETER Action
-    Lifecycle action to perform.
+    Lifecycle action to perform. task-retire removes only the owned scheduling
+    registration, without selecting incoming runtime code.
 
 .PARAMETER Force
     Overwrite without confirmation.
@@ -22,14 +23,14 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('install', 'uninstall', 'status', 'update', 'stamp', 'provision', 'dev')]
+    [ValidateSet('install', 'uninstall', 'status', 'update', 'stamp', 'provision', 'dev', 'task-retire')]
     [string]$Action = 'status',
 
     [string]$InstallDir,
 
     [switch]$Force,
 
-    # Preview mode for the 'uninstall' action: print what WOULD be removed
+    # Preview mode for uninstall/task-retire: print what WOULD be removed
     # without touching the filesystem, scheduled task, or SSH connections.
     [switch]$DryRun
 )
@@ -324,6 +325,15 @@ $RepoRoot        = (Resolve-Path (Join-Path $PluginDir '..\..')).Path
 
 $VenvDir         = Join-Path $InstallDir '.venv'
 $VenvPython      = Join-Path $VenvDir 'Scripts\python.exe'
+
+$OwnerTaskName = 'agent-codespaces-owner'
+. (Join-Path $PSScriptRoot 'windows-scheduled-task.ps1')
+if ($Action -eq 'task-retire') {
+    $InstallDir = [IO.Path]::GetFullPath($InstallDir).TrimEnd('\', '/')
+    Remove-OwnerScheduledTaskOnly
+    Write-ServiceOk 'task-only retirement complete; owner process and state retained'
+    return
+}
 
 # === install-contract:v3 versioned-venv (agent-codespaces: .venv-as-junction) ===
 # Immutable per-version runtime (#581). Build the venv into versions/<version>
@@ -1236,25 +1246,15 @@ function Write-CodespacesDeployManifest {
 
 # -- Actions ---------------------------------------------------------------
 
-# -- Connection Owner service (config-gated; default on, on-demand) --------
-# The persistent per-machine Connection Owner relay daemon (dotfiles#1320/#1333)
-# is provisioned as a per-user scheduled task, but ONLY when connection_owner is
-# enabled in config -- default is now ON (the daemon + defer wiring finished
-# rolling out; this is the login-triggered convenience, not the only way it
-# starts: a tenant (ssh/dispatch) also spins it up itself on-demand if it isn't
-# already running, and the daemon exits on its own once idle -- see
-# connection_owner.idle_shutdown_after). An explicit opt-out does not create
-# or start an owner. Updates never stop or unregister a predecessor; explicit
-# lifecycle operations own shutdown. The task
-# launches through the stable self-provisioning binstub (agent-codespaces.ps1),
-# which resolves the active versioned slot at runtime, so it survives updates.
-$OwnerTaskName = 'agent-codespaces-owner'
-
+# -- Connection Owner service (capability-gated, on-demand) ---------------
+# Login scheduling is opt-in, separate from connection_owner capability.
+# Tenants also start the daemon on demand; idle_shutdown_after owns idle exit.
+# Task-only retirement never shuts down an Owner or changes durable state.
 function Get-ConnectionOwnerConfig {
     <# Ask the freshly-built runtime whether the Connection Owner is enabled.
        Returns @{ Known = <bool>; Enabled = <bool>; Interval = <double> }. A
-       query failure is UNKNOWN: do not create a new login service, but also do
-       not delete an existing one unless the runtime explicitly says disabled. #>
+       query failure is UNKNOWN: do not create a login service or start an
+       owner. Capability disablement never authorizes registration removal. #>
     $result = @{ Known = $false; Enabled = $false; Interval = 15.0 }
     $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
     try {
@@ -1282,17 +1282,37 @@ function Sync-ConnectionOwnerService {
     <# Register future login starts and independently ensure the selected runtime.
        Updating a task does not start a new instance while IgnoreNew holds V1.
        No predecessor shutdown is a prerequisite for installation or startup. #>
+    $policy = Get-WindowsScheduledTaskPolicy
+    if ($policy -eq 'absent') {
+        Remove-OwnerScheduledTaskOnly
+    } elseif ($policy -eq 'preserve') {
+        if (-not (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)) {
+            Write-ServiceOk 'Windows scheduling preserved; task module unavailable, installer owner startup deferred to on-demand use'
+            return
+        }
+        $task = Get-OwnerScheduledTask
+        if ($task -and ($task.State -eq 'Disabled' -or -not $task.Settings.Enabled)) {
+            Write-ServiceOk 'Connection Owner scheduled task disabled; installer startup held'
+            return
+        }
+    } else {
+        $task = Get-OwnerScheduledTask
+        if ($task) { Assert-OwnerScheduledTaskOwned $task }
+    }
     $co = Get-ConnectionOwnerConfig
     if (-not $co.Known) {
-        Write-ServiceWarn "Connection Owner config query failed; leaving any existing scheduled task unchanged"
-        return
+        throw 'Connection Owner config query failed; selected Owner readiness not confirmed'
     }
     if (-not $co.Enabled) {
-        Write-ServiceOk 'Connection Owner disabled -- not starting an owner; existing task left unchanged'
+        Write-ServiceOk 'Connection Owner disabled -- not starting an owner'
         return
     }
     $stub = Join-Path $LocalBin 'agent-codespaces.ps1'
-    if (-not (Test-Path $stub)) {
+    if ($policy -eq 'preserve') {
+        Write-ServiceOk 'Windows scheduling preserved; no task created or rewritten'
+    } elseif ($policy -eq 'absent') {
+        Write-ServiceOk 'Windows login task absent; reconciling selected Connection Owner independently'
+    } elseif (-not (Test-Path $stub)) {
         Write-ServiceWarn "Connection Owner enabled but binstub missing ($stub) -- skipping service provisioning"
     } else {
       try {
@@ -1321,7 +1341,7 @@ function Sync-ConnectionOwnerService {
         # requires the same elevation as any other Task Scheduler write, so a
         # routine, nothing-changed update would otherwise fail with the same
         # Access-Denied WARN every single run on a non-elevated host.
-        $existingTask = Get-ScheduledTask -TaskName $OwnerTaskName -ErrorAction SilentlyContinue
+        $existingTask = $task
         $existingAction = if ($existingTask) { @($existingTask.Actions) | Select-Object -First 1 } else { $null }
         $actionCurrent = $existingAction -and
             $existingAction.Execute -eq $action.Execute -and

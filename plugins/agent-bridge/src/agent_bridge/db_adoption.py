@@ -14,6 +14,7 @@ from .creation_custody_schema import validate_schema as validate_creation_schema
 from .creation_launch_schema import validate_schema as validate_creation_launch_schema
 from .provider_creation_launch_schema import validate_schema as validate_provider_launch_schema
 from .creation_writer_schema import validate_schema as validate_creation_writer_schema
+from .mux_question_schema import validate_schema as validate_mux_question_schema
 from .owner_membership import MembershipConnection
 
 
@@ -61,6 +62,7 @@ def open_existing_writable(source: Database) -> Database:
         validate_creation_launch_schema(conn)
         validate_provider_launch_schema(conn)
         validate_creation_writer_schema(conn)
+        validate_mux_question_schema(conn)
         if conn.execute("PRAGMA journal_mode").fetchone()[0].lower() != "wal":
             raise ValueError("Writable adoption requires an existing WAL database")
         conn.rollback()
