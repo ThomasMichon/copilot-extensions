@@ -142,7 +142,9 @@ def native_inventory(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     calls = []
     replies = {
-        unit: SimpleNamespace(returncode=0, stdout="LoadState=not-found\nActiveState=inactive\n", stderr="")
+        unit: SimpleNamespace(
+            returncode=0, stdout="LoadState=not-found\nActiveState=inactive\nJob=0\n", stderr="",
+        )
         for unit in (f"{legacy.LEGACY_NAME}.timer", f"{legacy.LEGACY_NAME}.service",
                      f"{legacy.SELF_NAME}.service")
     }
@@ -150,7 +152,7 @@ def native_inventory(tmp_path: Path, monkeypatch):
     def run(argv, **kwargs):
         unit = argv[3]
         assert argv == [
-            "systemctl", "--user", "show", unit, "--property=LoadState,ActiveState", "--no-pager",
+            "systemctl", "--user", "show", unit, "--property=LoadState,ActiveState,Job", "--no-pager",
         ]
         calls.append(unit)
         reply = replies[unit]
@@ -168,7 +170,7 @@ def test_cached_fleet_timer_blocks_even_with_inactive_services(
 ) -> None:
     calls, replies = native_inventory
     timer = f"{legacy.LEGACY_NAME}.timer"
-    replies[timer].stdout = f"LoadState=loaded\nActiveState={state}\n"
+    replies[timer].stdout = f"LoadState=loaded\nActiveState={state}\nJob=0\n"
     before = list(tmp_path.rglob("*"))
     with pytest.raises(PolicyError, match=rf"{timer} \({state}\)"):
         legacy.require_legacy_retired()
@@ -177,8 +179,8 @@ def test_cached_fleet_timer_blocks_even_with_inactive_services(
 
 
 @pytest.mark.parametrize("stdout", [
-    "", "LoadState=loaded\n", "LoadState=loaded\nActiveState=unknown\n",
-    "LoadState=unknown\nActiveState=inactive\n",
+    "", "LoadState=loaded\n", "LoadState=loaded\nActiveState=unknown\nJob=0\n",
+    "LoadState=unknown\nActiveState=inactive\nJob=0\n",
 ])
 def test_unverifiable_cached_timer_blocks_adoption(native_inventory, stdout: str) -> None:
     calls, replies = native_inventory
@@ -196,8 +198,57 @@ def test_known_inactive_cached_units_allow_adoption(
 ) -> None:
     calls, replies = native_inventory
     for reply in replies.values():
-        reply.stdout = f"LoadState={load_state}\nActiveState={active_state}\n"
+        reply.stdout = f"LoadState={load_state}\nActiveState={active_state}\nJob=0\n"
     legacy.require_legacy_retired()
+    assert calls == list(replies)
+
+
+@pytest.mark.parametrize("unit", [
+    f"{legacy.LEGACY_NAME}.timer", f"{legacy.LEGACY_NAME}.service", f"{legacy.SELF_NAME}.service",
+])
+def test_inactive_unit_with_queued_start_blocks_adoption(native_inventory, unit: str) -> None:
+    calls, replies = native_inventory
+    replies[unit].stdout = "LoadState=loaded\nActiveState=inactive\nJob=42\n"
+    with pytest.raises(PolicyError, match=rf"{unit} \(pending job 42\)"):
+        legacy.require_legacy_retired()
+    assert calls == list(replies)
+
+
+@pytest.mark.parametrize("job", [None, "", "unknown", "-1", "1 start", "42\nJob=0"])
+def test_unverifiable_unit_job_blocks_adoption(native_inventory, job: str | None) -> None:
+    calls, replies = native_inventory
+    unit = f"{legacy.LEGACY_NAME}.service"
+    replies[unit].stdout = "LoadState=loaded\nActiveState=inactive\n"
+    if job is not None:
+        replies[unit].stdout += f"Job={job}\n"
+    with pytest.raises(PolicyError, match="could not be verified"):
+        legacy.require_legacy_retired()
+    assert calls == list(replies)[:2]
+
+
+def test_queued_legacy_start_refuses_before_enrollment(
+    native_inventory, tmp_path: Path, monkeypatch, capsys,
+) -> None:
+    from worktree_manager import automatic_updates_autostart as startup
+    from worktree_manager import automatic_updates_cli as cli, automatic_updates_process as process
+    from worktree_manager.automatic_updates_policy import POLICY_NAME
+
+    calls, replies = native_inventory
+    replies[f"{legacy.LEGACY_NAME}.service"].stdout = "LoadState=loaded\nActiveState=inactive\nJob=42\n"
+    monkeypatch.setattr(cli, "require_legacy_root_binding", lambda root: None)
+    monkeypatch.setattr(cli, "require_registered_project", lambda name: None)
+    monkeypatch.setattr(process, "selected_slot", lambda root: tmp_path / "slot")
+    monkeypatch.setattr(
+        startup, "register_autostart", lambda root: pytest.fail("queued legacy job enrolled startup"),
+    )
+    monkeypatch.setattr(
+        process, "ensure_worker", lambda root: pytest.fail("queued legacy job launched a worker"),
+    )
+    root = tmp_path / "manager"
+    assert cli.main(["enable", "--project", "example", "--root", str(root), "--apply", "--json"]) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["state"] == "blocked" and "pending job 42" in result["reason"]
+    assert not (root / POLICY_NAME).exists()
     assert calls == list(replies)
 
 
@@ -223,7 +274,7 @@ def test_missing_systemctl_preserves_optional_absence(native_inventory) -> None:
 
 def test_missing_systemctl_does_not_discard_observed_timer(native_inventory) -> None:
     _calls, replies = native_inventory
-    replies[f"{legacy.LEGACY_NAME}.timer"].stdout = "LoadState=loaded\nActiveState=active\n"
+    replies[f"{legacy.LEGACY_NAME}.timer"].stdout = "LoadState=loaded\nActiveState=active\nJob=0\n"
     replies[f"{legacy.LEGACY_NAME}.service"] = FileNotFoundError("systemctl")
     with pytest.raises(PolicyError, match="timer"):
         legacy.require_legacy_retired()

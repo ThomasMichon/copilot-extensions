@@ -116,6 +116,10 @@ and refuses until they have been explicitly retired and their in-flight work
 checked. It does not stop or delete them. See
 [Agent Machines resources](../../plugins/agent-machines/docs/resources.md)
 for that owner's lifecycle.
+Without an installed Agent Machines inventory, the read-only user-unit fallback
+also checks pending jobs on the legacy fleet timer, fleet service and self
+service, even if unit files have disappeared. Pending or unverifiable job state
+blocks enrollment; it is not evidence that an inactive service has finished.
 
 ## Startup and platform lifetime
 

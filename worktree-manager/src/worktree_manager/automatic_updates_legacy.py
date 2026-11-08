@@ -119,12 +119,12 @@ def legacy_triggers() -> list[str]:
     installed = [str(path) for path in paths if path.exists() or path.is_symlink()]
     if installed:
         return installed
-    # Loaded timers and running services can outlive deleted unit files.
+    # Loaded units and queued jobs can outlive deleted unit files.
     for unit in (f"{LEGACY_NAME}.timer", f"{LEGACY_NAME}.service", f"{SELF_NAME}.service"):
         try:
             result = subprocess.run(
                 ["systemctl", "--user", "show", unit,
-                 "--property=LoadState,ActiveState", "--no-pager"],
+                 "--property=LoadState,ActiveState,Job", "--no-pager"],
                 capture_output=True, text=True, timeout=10, check=False,
             )
         except FileNotFoundError:
@@ -135,8 +135,20 @@ def legacy_triggers() -> list[str]:
             raise PolicyError(
                 f"legacy user-unit inventory is unavailable for {unit}: " + result.stderr.strip()
             )
-        properties = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
-        if properties.get("ActiveState") in ("active", "activating", "deactivating", "reloading"):
+        properties = {}
+        for line in result.stdout.splitlines():
+            key, separator, value = line.partition("=")
+            if not separator or key not in {"LoadState", "ActiveState", "Job"} or key in properties:
+                raise PolicyError(f"legacy unit activity could not be verified: {unit}")
+            properties[key] = value.strip()
+        if set(properties) != {"LoadState", "ActiveState", "Job"}:
+            raise PolicyError(f"legacy unit activity could not be verified: {unit}")
+        job = properties["Job"]
+        if not job or not job.isascii() or not job.isdigit():
+            raise PolicyError(f"legacy unit job could not be verified: {unit}")
+        if job.lstrip("0"):
+            installed.append(f"{unit} (pending job {job})")
+        elif properties.get("ActiveState") in ("active", "activating", "deactivating", "reloading"):
             installed.append(f"{unit} ({properties['ActiveState']})")
         elif (
             properties.get("ActiveState") not in ("inactive", "failed")
