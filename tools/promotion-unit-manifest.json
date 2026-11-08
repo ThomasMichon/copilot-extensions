@@ -4637,7 +4637,16 @@
         "tools/promotion_unit_tests/test_typecheck_catalog.py::test_catalog_frozen_inputs_do_not_follow_host_source",
         "tools/promotion_unit_tests/test_contract.py::test_catalog_data_is_hash_bound_but_never_executable_unit_source",
         "tools/promotion_unit_tests/test_live_question_answers.py::test_form_response_admission_preserves_fields_and_decline_semantics",
-        "tools/promotion_unit_tests/test_live_question_answers.py::test_text_input_requires_an_allowed_answer_and_never_uses_form_actions"
+        "tools/promotion_unit_tests/test_live_question_answers.py::test_text_input_requires_an_allowed_answer_and_never_uses_form_actions",
+        "tools/promotion_unit_tests/test_mux_question_forms.py::test_native_other_expansion_preserves_question_but_requires_exact_typed_input",
+        "tools/promotion_unit_tests/test_mux_question_forms.py::test_native_echo_is_exact_and_new",
+        "tools/promotion_unit_tests/test_mux_question_forms.py::test_mux_input_cannot_encode_terminal_controls[linefeed]",
+        "tools/promotion_unit_tests/test_mux_question_forms.py::test_mux_input_cannot_encode_terminal_controls[return]",
+        "tools/promotion_unit_tests/test_mux_question_forms.py::test_mux_input_cannot_encode_terminal_controls[escape]",
+        "tools/promotion_unit_tests/test_mux_question_forms.py::test_mux_input_cannot_encode_terminal_controls[nul]",
+        "tools/promotion_unit_tests/test_mux_question_forms.py::test_mux_input_cannot_encode_terminal_controls[unicode-separator]",
+        "tools/promotion_unit_tests/test_mux_question_forms.py::test_mux_input_cannot_encode_terminal_controls[empty]",
+        "tools/promotion_unit_tests/test_mux_question_forms.py::test_mux_input_cannot_encode_terminal_controls[command-separator]"
     ],
     "sources": {
         "tools/application_sources.py": "3dba45b18c2597044205a98c8bdf7cd43c7bb529c4b1a4bcb898d04af2dbe9b0",
@@ -4909,7 +4918,7 @@
         "plugins/agent-bridge/src/agent_bridge/agent_registry_namespace.py": "7db1a66a003e7a976c7d0b6d60c953b77a3b856e3e9cf02dddafb48c8bc74876",
         "plugins/agent-bridge/src/agent_bridge/caller_session.py": "18bf4f33a1742113d8d6c1a02986853a03a542d92e9c40eb3edbbea93301e698",
         "plugins/agent-bridge/src/agent_bridge/client.py": "ca4c2ad22a01ae705e3281fbdcbe9d328182543681abd4df07c7721e4e23187d",
-        "plugins/agent-bridge/src/agent_bridge/client_answers.py": "b36a95eca4fb2527ae0acece4bf9aaee9ab4e94868bdebe18f72c150f1efed83",
+        "plugins/agent-bridge/src/agent_bridge/client_answers.py": "16e6813233eadd52aea57dc9869775179e2c277611707528a3b24a5b59fd512a",
         "plugins/agent-bridge/src/agent_bridge/client_cli_mode.py": "70058bd55121a268307177aaa9b1e4ef1447b7b69334832e29da5eff4f37690d",
         "plugins/agent-bridge/src/agent_bridge/client_drain.py": "e390fd1720c7187caa4dfeabe1d46ea771e0292d53d038186021d7c7ac980723",
         "plugins/agent-bridge/src/agent_bridge/client_live_results.py": "fb28ef6fb81534f2dafdc2be24a8e94796201f73f5b604ccc7ea2a9be0a825f8",
@@ -4930,7 +4939,7 @@
         "plugins/agent-bridge/src/agent_bridge/resume_cli_contract.py": "e1e29b4cbb8fb9455f4375bb17588f8777bd328dee0736df021911d272df8574",
         "plugins/agent-bridge/src/agent_bridge/resume_handoff_cli.py": "999daf7d901a73c9e346828d85302e4185135d7b27171d755b9f08cbea56303c",
         "plugins/agent-bridge/src/agent_bridge/service_start_cli.py": "f1b2cf902e12f8568fa9be29afdcca52d4d030fab73a4256e511f72cc4499320",
-        "plugins/agent-bridge/src/agent_bridge/session_lifecycle_cli.py": "9ac595cf244e2b8efecc4a75f2d5cb63fb1d301d1e162d1737882955e06f9167",
+        "plugins/agent-bridge/src/agent_bridge/session_lifecycle_cli.py": "1b7f40de0a9ea21d6bc7e34ff0bc50c83dd9d2149b7eb1d348c07c7e5ae842d7",
         "plugins/agent-bridge/src/agent_bridge/acquisition_worktree_writer.py": "1e90bc1a25f4fc6c01d664ea76ef8204aedebce50419463ef8822f5a1cf4dba0",
         "plugins/agent-bridge/src/agent_bridge/creation_worktree_writer.py": "d20a75c52dbd42e2b0a59a7258e27346e0394d53430239fb46d4b45578acc7fe",
         "plugins/agent-bridge/src/agent_bridge/creation_writer_inspection.py": "cf2b352d63d93cfcae714fa747c78f8fc87aef93a7e7885ca0af07ecf57099be",
@@ -5296,7 +5305,9 @@
         "libs/payload-invocation/templates/catalog-python.tmpl": "c752063e0fa7c4ae6e344843055991498773870d78823e14a5d4f89edeaf93b6",
         "libs/payload-invocation/generate.py": "592ed4a2497f02f0b2110002db9b37015f8fc5db431129e25ef852b205f02e68",
         "tools/promotion_unit_tests/test_live_question_answers.py": "51b9c884787883d6fec7ce81db0075d0d13f54b32df71d3bff6c92227a9134bf",
-        "plugins/agent-bridge/src/agent_bridge/live_question_validation.py": "61900a7eb7acbdf924fabaabf1175ddfbe337672971a3ec4ac9016c4d720fdba"
+        "plugins/agent-bridge/src/agent_bridge/live_question_validation.py": "61900a7eb7acbdf924fabaabf1175ddfbe337672971a3ec4ac9016c4d720fdba",
+        "plugins/agent-bridge/src/agent_bridge/mux_question_forms.py": "6a0972f69234f84d9cea1c4c07f616c4f67a49d7743dbaf92f60c934c66bc1d2",
+        "tools/promotion_unit_tests/test_mux_question_forms.py": "5577dbff0b0b1d9dd2b262539dc967b068b3f5ba7325ba5b6dd9ca5c895b63d6"
     },
     "coverage_targets": [
         "plugins/agent-dispatch/src/agent_dispatch/queue_submission_consumer.py",
@@ -5574,7 +5585,8 @@
         "plugins/agent-worktrees/scripts/managed_session.py",
         "plugins/agent-worktrees/scripts/registry_root.py",
         "tools/typecheck_catalog_views.py",
-        "plugins/agent-bridge/src/agent_bridge/live_question_validation.py"
+        "plugins/agent-bridge/src/agent_bridge/live_question_validation.py",
+        "plugins/agent-bridge/src/agent_bridge/mux_question_forms.py"
     ],
     "max_seconds": 300
 }

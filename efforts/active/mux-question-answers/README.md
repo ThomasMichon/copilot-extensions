@@ -3,7 +3,7 @@
 - **Slug:** `mux-question-answers`
 - **Repo:** copilot-extensions
 - **Created:** 2026-11-07
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [interactive-session-representation](../../../visions/plugins/agent-bridge/README.md#interactive-session-representation)
 - **Umbrella issue:** #11371
 
@@ -71,25 +71,25 @@ runtime remediation, elevated operation or destructive cleanup is authorized.
 
 ### Phase 1 - Reviewed contract
 - [x] Claim #11371 and inspect native, session-binding and mux seams.
-- [ ] Land this plan before implementation.
+- [x] Land this plan before implementation.
 
 ### Phase 2 - Explicit degraded transport
-- [ ] Add independently negotiated mux-answer support and CLI inspection/
+- [x] Add independently negotiated mux-answer support and CLI inspection/
   answer selection without changing existing owned/native syntax.
-- [ ] Resolve the exact registered local native session through its configured
+- [x] Resolve the exact registered local native session through its configured
   worktree owner's authoritative live process-to-pane binding; never guess
   a pane, redirect to an alias, cross execution spaces or auto-start a daemon.
-- [ ] Parse only positively recognized single-question choice/freeform forms.
+- [x] Parse only positively recognized single-question choice/freeform forms.
   Refuse permissions, multi-field/multi-select, unsupported rendering, edited
   freeform state, absent or ambiguous cursor and oversized/control-bearing text.
-- [ ] Require an expiring one-use inspection token bound to the exact pane
+- [x] Require an expiring one-use inspection token bound to the exact pane
   incarnation, question and current screen. Prefer an available native path.
   Recheck identity and form before every key effect; stop on detected races.
-- [ ] Audit caller, answer, inspection and actual outcome in existing session
+- [x] Audit caller, answer, inspection and actual outcome in existing session
   observations. Consume admission before effects and never replay uncertain
   input. Verify a new matching answer echo and form disappearance, not merely
   successful key delivery. Report raced/unverified outcomes honestly.
-- [ ] Document that capture/send cannot form an atomic transaction with a
+- [x] Document that capture/send cannot form an atomic transaction with a
   human terminal; no atomic human-exclusion or SDK-acceptance claim is made.
 
 ### Phase 3 - Delivery and rollout
@@ -103,15 +103,15 @@ runtime remediation, elevated operation or destructive cleanup is authorized.
 
 ## Validation Plan
 
-- [ ] Focused parser and orchestration cases cover valid choice/freeform,
+- [x] Focused parser and orchestration cases cover valid choice/freeform,
   permissions, ambiguous/multiple questions, stale inspection, changed pane/
   process/screen, concurrent callers, terminal-first resolution, key failure,
   timeout, mismatched/stale echo and unknown outcomes without retry.
-- [ ] Actual authenticated HTTP/CLI and unsupported-provider controls preserve
+- [x] Actual authenticated HTTP/CLI and unsupported-provider controls preserve
   native preference and legacy syntax; audit admission precedes key effects.
 - [ ] Use fixture-owned mux namespaces for actual Windows and POSIX command
   qualification. Never target a pre-existing session or shared mux shutdown.
-- [ ] Run affected lint, unit/contract, install, type-admission and documentation
+- [x] Run affected lint, unit/contract, install, type-admission and documentation
   gates; keep exhaustive source capture outside required fast unit CI.
 - [ ] Verify source merge, release inclusion, selected installed generation,
   actual synthetic answer and same-session continuation on both authorized
@@ -129,3 +129,109 @@ runtime remediation, elevated operation or destructive cleanup is authorized.
   its own inspected-form identity and truthful audit, not permission authority.
 - The implementation and qualification plan above is an agent recommendation
   within the assigned fallback scope. No existing form has been touched.
+
+### 2026-11-07 - Reviewed plan and private native controls
+
+- #11383 merged after exact-head approval and required CI.
+- The authenticated provider uses expiring one-use inspections, current native
+  request corroboration and the selected local Worktrees process/pane binding.
+  Durable admission precedes any key; original audit survives registration loss.
+- Initial focused packet passed 35 cases. The actual private native form then
+  qualified native and mux option answers; Other conservatively stopped before
+  Enter because selecting it expands the text box and shifts viewport history.
+- Added exact native Other-field recognition without weakening request,
+  question, option, cursor or process checks. All 38 focused/native cases passed,
+  including actual text acceptance and same-conversation continuation.
+- Required contract capture, final whole-surface audit, review, promotion and
+  authorized installed qualification remain open.
+
+### 2026-11-07 - Whole-surface admission audit
+
+- The expanded 40-case focused packet passed, including original audit reads,
+  exact selected owner and strict CLI/unsupported-provider controls. Nine
+  actor-free parser and completion cases passed; all 40 currently admitted
+  strict typing projects passed both analysis targets, with Bridge still
+  pending independent type admission.
+- The final audit added mutation-boundary exclusion for another in-flight or
+  uncertain answer, including a stale pre-read in another serving generation.
+  A preissued inspection cannot turn an unknown sibling result into a retry.
+- The current HTTP-52 controlled portfolio expands to 310 cases. Qualification
+  must be captured and independently verified before publication readiness.
+
+### 2026-11-07 - Complete current source qualification
+
+- The explicit collector now executes all 310 declared cases; its newly linked
+  25 mux cases also passed separately through that same collector.
+- Source-pinned run 42420734839 passed full capture and independent no-write
+  verification. Its first historical-guard attempt hit the existing 30-second
+  reproducibility-test deadline; one same-source failed-job retry passed every
+  historical guard and canonical export without changing a timeout or limit.
+- The native publication owner materialized 155 verified current outputs.
+  The independent local contract guard passed with two contracts and 1,066
+  retained fixtures. No historical generation was rewritten.
+- The new backend also resolved an actual selected-owner Windows binding
+  read-only. This is not an installed answer claim: normal review/CI, source
+  merge, promotion, authorized updates and both installed live proofs remain.
+
+### 2026-11-07 - Completion-evidence review correction
+
+- Review of #11390 identified prefix question matching and arbitrary answer
+  suffix matching that could falsely classify an answer as accepted.
+- Completion now requires the full question message followed immediately by
+  its exact rendered field-label/value pair. Negative controls reject question
+  extensions, misleading value suffixes, other labels and detached answers;
+  stale echoes remain insufficient.
+- This changes source semantics. Repeat affected validation and canonical
+  source qualification before the next whole-surface audit and review round.
+
+### 2026-11-07 - Corrected source qualified
+
+- The corrected completion matcher passed 45 focused cases, including real
+  private native option/freeform completion and authenticated HTTP controls
+  retaining `unverified` outcomes for mismatched completion. Nine actor-free
+  parser/input/echo cases, affected lint, install and documentation guards passed.
+- Whole-surface audit covered all source wiring, exact local binding, parser,
+  mutation admission, client negotiation, native preference, audit and CLI
+  refusals. The completion fix does not weaken permission or replay boundaries.
+- Initial recapture refused stale semantic source registration before tests;
+  refreshed declarations through their existing preparation owner and expanded
+  the probe declaration to all 312 cases. No failure or timeout was waived.
+- Source-pinned run 42424290416 passed capture, independent no-write
+  verification, historical guards and canonical export. The publication owner
+  imported all 155 current outputs; the independent contract guard passed
+  two contracts and 1,066 retained fixtures. Historical generations are unchanged.
+- Return #11390 to review. Source merge, Main promotion, both authorized
+  adopter updates and installed same-conversation proofs remain unfinished.
+
+### 2026-11-07 - Restored-serving and storage review corrections
+
+- A further review found that retained candidate state discarded the new mux
+  owner, and migration-free adoption did not require the new audit table.
+- Retained serving now receives fresh native/mux question owners before
+  activation. Schema 43 requires the full answer table, including unique screen
+  admission, through writable preparation and both migration-free checks.
+- All 71 focused cases passed, including authenticated restored inspection,
+  submission and audit, stale-token refusal, malformed/missing storage,
+  previous-schema preparation and retained session preservation.
+- Rebasing the owned PR preserved concurrent schema-42 acquisition changes.
+  Only current derived evidence was reconciled; immutable generations and
+  upstream source content were retained. Fresh qualification must bind the
+  combined source, not either earlier capture.
+- The declared capture portfolio now includes these four additional controls,
+  for 316 cases. Requalify, audit the complete delivery graph and request review
+  before source merge; release and both installed proofs remain open.
+
+### 2026-11-07 - Combined delivery source qualified
+
+- The four new controls passed through the exact capture collector before the
+  complete run. Source-pinned run 42427151265 then passed all 316 cases,
+  independent no-write verification, immutable historical guards and export.
+- The native publication owner imported 157 verified current outputs.
+  Independent contract validation passed two contracts and 1,068 retained
+  fixtures against the rebased contribution base.
+- The whole-surface audit now follows ordinary and retained serving factories,
+  question-owner replacement, writable preparation, read-only admission and
+  writable adoption alongside all answer, audit and native-preference paths.
+  Earlier source qualification is not substituted for this combined proof.
+- Request a fresh review of the qualified head, then require full PR CI and
+  actual merge before following promotion and both authorized installed proofs.

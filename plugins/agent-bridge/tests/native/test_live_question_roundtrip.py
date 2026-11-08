@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import shutil
 import socket
+import subprocess
 import threading
 import time
 from types import SimpleNamespace
@@ -16,16 +17,18 @@ from uuid import uuid4
 import httpx
 import pytest
 import uvicorn
+from agent_procutil import no_window_kwargs
 
 from agent_bridge.app_routes import configure_serving_app
 from agent_bridge.models import ServiceConfig
 
 
-def test_real_interactive_question_resumes_without_prompt_or_abort(tmp_path, tmp_db, monkeypatch):
+@pytest.mark.parametrize("transport", ["native", "mux-option", "mux-text"])
+def test_real_interactive_question_resumes_without_prompt_or_abort(tmp_path, tmp_db, monkeypatch, transport):
     executable = os.environ.get("COPILOT_NATIVE_TEST_EXECUTABLE")
-    mux_binary = os.environ.get("PSMUX_TEST_BIN")
-    if os.name != "nt" or not executable or not mux_binary:
-        pytest.skip("Select native Copilot and PSMux explicitly for the private Windows fixture")
+    mux_binary = os.environ.get("PSMUX_TEST_BIN" if os.name == "nt" else "TMUX_TEST_BIN")
+    if not executable or not mux_binary:
+        pytest.skip("Select native Copilot and the platform mux explicitly for the private fixture")
     assert Path(executable).is_absolute() and Path(executable).is_file()
     assert Path(mux_binary).is_absolute() and Path(mux_binary).is_file()
     root = Path(__file__).resolve().parents[4]
@@ -53,7 +56,10 @@ def test_real_interactive_question_resumes_without_prompt_or_abort(tmp_path, tmp
                     "function": {"name": question_tool, "arguments": json.dumps({
                         "message": "Choose a fixture color",
                         "requestedSchema": {
-                            "type": "object", "properties": {"color": {"type": "string"}},
+                            "type": "object", "properties": {"color": {
+                                "type": "string",
+                                **({"enum": ["red", "blue"]} if transport != "native" else {}),
+                            }},
                         },
                     })},
                 }]}
@@ -178,13 +184,57 @@ def test_real_interactive_question_resumes_without_prompt_or_abort(tmp_path, tmp
             assert pending["family"] == "elicitation"
             # The real native UI is parked before any answer is admitted.
             assert "Choose a fixture color" in panel.stdout
-            result = client.post(base + "/answers", json={
-                "generation": question["generation"], "request_id": pending["request_id"],
-                "family": pending["family"], "sender": "isolated-operator",
-                "content": {"color": "blue"}, "wait_timeout": 5,
-            })
+            if transport == "native":
+                result = client.post(base + "/answers", json={
+                    "generation": question["generation"], "request_id": pending["request_id"],
+                    "family": pending["family"], "sender": "isolated-operator",
+                    "content": {"color": "blue"}, "wait_timeout": 5,
+                })
+            else:
+                from agent_bridge.mux_question_backend import LocalMux
+                from plugin_test_command_safety import validate_private_mux_args
+
+                class PrivateBackend(LocalMux):
+                    def run(self, argv):
+                        validate_private_mux_args(mux.mux_args, sandbox=mux.sandbox, cwd=mux.root)
+                        assert argv[1] in {"capture-pane", "send-keys"}
+                        assert argv[argv.index("-t") + 1] == self.pane
+                        completed = subprocess.run(
+                            [mux.binary, *mux.mux_args, *argv[1:]], env=mux.environment,
+                            cwd=mux.root, capture_output=True, text=True, encoding="utf-8",
+                            timeout=5, **no_window_kwargs(),
+                        )
+                        assert completed.returncode == 0, completed.stderr
+                        return completed.stdout
+
+                    def binding(self, session_id, row):
+                        # The native fixture owns the private IPC target; production
+                        # session-binding is separately exercised by backend controls.
+                        identity = mux.query(
+                            "display-message", "-p", "-t", mux.target,
+                            "#{pane_id}|#{pane_pid}|#{session_id}:#{session_created}",
+                        )
+                        assert identity.returncode == 0, identity.stderr
+                        self.pane, pid, incarnation = identity.stdout.strip().split("|")
+                        return {"binary": mux.binary, "pane_id": self.pane, "pid": pid,
+                                "incarnation": incarnation, "session_id": session_id}
+
+                app.state.mux_questions.backend = PrivateBackend()
+                monkeypatch.setattr(app.state.live_questions, "current", lambda *_: None)
+                inspection = client.get(base + "/mux")
+                assert inspection.status_code == 200, panel.stdout + "\n" + inspection.text
+                selected = inspection.json()
+                choice = next(
+                    item["number"] for item in selected["options"] if item["label"] == "blue"
+                )
+                result = client.post(base + "/mux", json={
+                    "inspection_id": selected["inspection_id"], "sender": "isolated-operator",
+                    **({"option": choice} if transport == "mux-option" else {"text": "blue"}),
+                })
             assert result.status_code == 200, result.text
-            assert result.json()["accepted"] is True, result.text
+            assert result.json()["accepted"] is True, (
+                result.text + "\n" + mux.query("capture-pane", "-p", "-t", mux.target).stdout
+            )
             while time.monotonic() < deadline:
                 path = cli_home / "session-state" / native_id / "events.jsonl"
                 events = [
@@ -211,7 +261,7 @@ def test_real_interactive_question_resumes_without_prompt_or_abort(tmp_path, tmp
                 message.get("role") == "tool" and "blue" in str(message.get("content"))
                 for call in calls for message in call.get("messages", [])
             )
-            while time.monotonic() < deadline:
+            while transport == "native" and time.monotonic() < deadline:
                 log = app.state.live_event_store.get(native_id)
                 represented = log.snapshot_history()[1] if log else []
                 if not client.get(base).json()["requests"] and any(
@@ -222,16 +272,18 @@ def test_real_interactive_question_resumes_without_prompt_or_abort(tmp_path, tmp
                     break
                 time.sleep(0.05)
             else:
-                pytest.fail("native completion did not clear represented question state")
+                if transport == "native":
+                    pytest.fail("native completion did not clear represented question state")
             panel = mux.query("capture-pane", "-p", "-t", mux.target)
             assert "FIXTURE_COMPLETE" in panel.stdout
             assert "Asked user Choose a fixture color" in panel.stdout
             assert "color: blue" in panel.stdout
-            assert client.post(base + "/answers", json={
-                "generation": question["generation"], "request_id": pending["request_id"],
-                "family": pending["family"], "sender": "isolated-operator",
-                "content": {"color": "blue"}, "wait_timeout": 0,
-            }).status_code == 409
+            if transport == "native":
+                assert client.post(base + "/answers", json={
+                    "generation": question["generation"], "request_id": pending["request_id"],
+                    "family": pending["family"], "sender": "isolated-operator",
+                    "content": {"color": "blue"}, "wait_timeout": 0,
+                }).status_code == 409
     finally:
         if started and mux.query("has-session", "-t", mux.target).returncode == 0:
             assert mux.query("kill-session", "-t", mux.target).returncode == 0
