@@ -270,18 +270,9 @@ def launch_session_host(
     authority read may still need it.
     """
     # Frontend-only helper; the compact host archive does not carry it.
-    from agent_procutil.scratch import create_labeled_scratch, remove_scratch
+    from .launcher_scratch import launch_state
 
-    if state_dir:
-        sd, fallback = Path(os.path.abspath(state_dir)), None
-    else:
-        sd = fallback = create_labeled_scratch(
-            "agbridge-host", "agent Session Host state and authority record",
-            owner_refs={"session_id": session_id} if session_id else None,
-            retention="retained while its host authority may be read; removed on failed launch",
-        )
-    phase = {"spawn_attempted": False, "creation_refused": False, "exited": False}
-    try:
+    with launch_state(state_dir, session_id, acquisition_launch) as (sd, phase):
         return _launch_in(
             sd, child_argv, cwd=cwd, env=env, ready_timeout=ready_timeout, nonce=nonce,
             session_id=session_id, host_version=host_version,
@@ -290,15 +281,6 @@ def launch_session_host(
             host_entrypoint=host_entrypoint, policy_context=policy_context,
             lifetime_policy=lifetime_policy, phase=phase,
         )
-    except BaseException:
-        # Only a proven pre-spawn failure or a confirmed host exit releases the
-        # records; any other post-spawn outcome may leave a live host behind.
-        # Custody owners always keep their evidence.
-        if fallback is not None and acquisition_launch is None and (
-            not phase["spawn_attempted"] or phase["creation_refused"] or phase["exited"]
-        ):
-            remove_scratch(fallback)
-        raise
 
 
 def _launch_in(
@@ -320,6 +302,7 @@ def _launch_in(
     phase: dict[str, bool],
 ) -> HostHandle:
     from agent_procutil._daemon_instance_store import _root
+    from .launcher_scratch import tracked_creation
 
     _root(sd, create=True)
     state_file = sd / f"host-{os.getpid()}-{int(time.time()*1000)}.json"
@@ -406,21 +389,12 @@ def _launch_in(
 
     spawn_options = host_spawn_kwargs()
 
-    def create_host(*args, **kwargs):
-        phase["spawn_attempted"] = True
-        try:
-            return subprocess.Popen(*args, **kwargs)
-        except OSError:
-            # Only the actual creation seam can prove no Host was started.
-            phase["creation_refused"] = True
-            raise
-
     try:
         if acquisition_launch is not None:
             acquisition_launch.begin_host()
         proc = spawn_instance(
             host_argv,
-            popen=create_host,
+            popen=tracked_creation(phase),
             instance=DaemonInstanceSpec(
                 "agent-bridge-session-host", sd, Path(__file__).resolve(),
             ),
