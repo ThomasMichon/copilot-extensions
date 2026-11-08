@@ -575,104 +575,172 @@ if (-not (Test-Path -LiteralPath $runtimeRoot)) {
     New-Item -ItemType Directory -Path $runtimeRoot -Force | Out-Null
 }
 $lockPath = Join-Path $runtimeRoot '.provision.lock'
-$lock = $null
-while (-not $lock) {
-    try {
-        $lock = [IO.File]::Open(
-            $lockPath,
-            [IO.FileMode]::OpenOrCreate,
-            [IO.FileAccess]::ReadWrite,
-            [IO.FileShare]::None
+function Invoke-FirstUseInstaller {
+    param([string]$Path, [string[]]$InstallerArgs)
+    $script:worktreesDriverBusy = $false
+    $script:worktreesDriverReselect = $false
+    if (-not ([IO.File]::ReadAllText($Path).Contains('# agent-worktrees:first-use-driver-nonblocking-v1'))) {
+        [Console]::Error.WriteLine(
+            '[agent-worktrees] selected installer lacks safe first-use admission; run an explicit install or repair.'
         )
-    } catch {
-        Start-Sleep -Milliseconds 200
+        return 126
+    }
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $hostExe -NoProfile -ExecutionPolicy Bypass -File $Path @InstallerArgs 2>&1 |
+            ForEach-Object {
+                if ([string]$_ -ceq '::agent-worktrees-driver-busy::') {
+                    $script:worktreesDriverBusy = $true
+                } elseif ([string]$_ -ceq '::agent-worktrees-driver-reselect::') {
+                    $script:worktreesDriverReselect = $true
+                } else {
+                    [Console]::Error.WriteLine($_)
+                }
+            }
+        return $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousEap
     }
 }
-
-try {
-    if (-not (Test-InstallationResolutionCurrent)) {
-        [Console]::Error.WriteLine(
-            '[agent-worktrees] installation governance changed while waiting; retry.'
-        )
-        exit 126
+function Restore-FirstUseEnvironment {
+    param($NoWait, $Snapshot)
+    if ($null -eq $NoWait) {
+        Remove-Item Env:AGENT_WORKTREES_FIRST_USE_NO_WAIT -ErrorAction SilentlyContinue
+    } else {
+        $env:AGENT_WORKTREES_FIRST_USE_NO_WAIT = $NoWait
     }
-    $python = Resolve-AgentWorktreesRuntime
-    if ($python) {
-        $lock.Dispose()
-        $lock = $null
-        Write-BootTrace 'resolver-loaded'
-        Write-BootTrace 'dispatch' 'locked-fast'
-        Invoke-AgentWorktreesRuntime $python
+    if ($null -eq $Snapshot) {
+        Remove-Item Env:AGENT_WORKTREES_FIRST_USE_EXPECTED_SNAPSHOT -ErrorAction SilentlyContinue
+    } else {
+        $env:AGENT_WORKTREES_FIRST_USE_EXPECTED_SNAPSHOT = $Snapshot
     }
-
-    Assert-PluginRuntimePublication
-    Write-BootTrace 'resolver-loaded'
-    if ($actualMode -ceq 'namespaced') {
-        if (
-            $resolutionStatus -cne 'ready' -or
-            $resolutionReason -cne 'namespaced-active'
-        ) {
+}
+$retryDeadline = [DateTime]::UtcNow.AddSeconds(120)
+$reportedBusy = $false
+while ($true) {
+    $lock = $null
+    while (-not $lock) {
+        try {
+            $lock = [IO.File]::Open(
+                $lockPath,
+                [IO.FileMode]::OpenOrCreate,
+                [IO.FileAccess]::ReadWrite,
+                [IO.FileShare]::None
+            )
+        } catch {
+            Start-Sleep -Milliseconds 200
+        }
+    }
+    $previousNoWait = [Environment]::GetEnvironmentVariable('AGENT_WORKTREES_FIRST_USE_NO_WAIT', 'Process')
+    $previousSnapshot = [Environment]::GetEnvironmentVariable('AGENT_WORKTREES_FIRST_USE_EXPECTED_SNAPSHOT', 'Process')
+    $retry = $false
+    try {
+        if (-not (Test-InstallationResolutionCurrent)) {
             [Console]::Error.WriteLine(
-                '[agent-worktrees] deactivation-pending installation cannot ' +
-                'provision a new runtime.'
+                '[agent-worktrees] installation governance changed while waiting; retry.'
             )
             exit 126
         }
-        $env:COPILOT_EXTENSIONS_CONTEXT = $context
-        & $hostExe -NoProfile -ExecutionPolicy Bypass -File $installer `
-            install -InstallDir $runtimeRoot 2>&1 |
-            ForEach-Object { [Console]::Error.WriteLine($_) }
-        $provisionStatus = $LASTEXITCODE
-        if ($provisionStatus -ne 0) { exit $provisionStatus }
-    } else {
-        & $hostExe -NoProfile -ExecutionPolicy Bypass -File $installer stamp 2>&1 |
-            ForEach-Object { [Console]::Error.WriteLine($_) }
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        $snapshot = ''
-        try {
-            $snapshot = ([IO.File]::ReadAllText(
-                (Join-Path $legacyRoot 'payload-dir')
-            )).Trim()
-        } catch {}
-        $snapshotInstaller = if ($snapshot) {
-            Join-Path $snapshot 'scripts\install.ps1'
-        } else {
-            ''
+        $python = Resolve-AgentWorktreesRuntime
+        if ($python) {
+            $lock.Dispose()
+            $lock = $null
+            Write-BootTrace 'resolver-loaded'
+            Write-BootTrace 'dispatch' 'locked-fast'
+            Invoke-AgentWorktreesRuntime $python
         }
-        if (
-            -not $snapshotInstaller -or
-            -not (Test-Path -LiteralPath $snapshotInstaller -PathType Leaf)
-        ) {
-            [Console]::Error.WriteLine(
-                "[agent-worktrees] stamped snapshot installer not found: " +
-                $snapshotInstaller
-            )
-            exit 127
-        }
-        & $hostExe -NoProfile -ExecutionPolicy Bypass -File $snapshotInstaller `
-            provision 2>&1 |
-            ForEach-Object { [Console]::Error.WriteLine($_) }
-        $provisionStatus = $LASTEXITCODE
-        if ($provisionStatus -ne 0) { exit $provisionStatus }
-    }
-    Write-BootTrace 'provision-end'
 
-    if (-not (Test-InstallationResolutionCurrent)) {
-        [Console]::Error.WriteLine(
-            '[agent-worktrees] installation governance changed during provisioning.'
-        )
-        exit 126
+        Assert-PluginRuntimePublication
+        Write-BootTrace 'resolver-loaded'
+        $env:AGENT_WORKTREES_FIRST_USE_NO_WAIT = '1'
+        Remove-Item Env:AGENT_WORKTREES_FIRST_USE_EXPECTED_SNAPSHOT -ErrorAction SilentlyContinue
+        if ($actualMode -ceq 'namespaced') {
+            if (
+                $resolutionStatus -cne 'ready' -or
+                $resolutionReason -cne 'namespaced-active'
+            ) {
+                [Console]::Error.WriteLine(
+                    '[agent-worktrees] deactivation-pending installation cannot ' +
+                    'provision a new runtime.'
+                )
+                exit 126
+            }
+            $env:COPILOT_EXTENSIONS_CONTEXT = $context
+            $provisionStatus = Invoke-FirstUseInstaller -Path $installer -InstallerArgs @(
+                'install', '-InstallDir', $runtimeRoot
+            )
+            $retry = $provisionStatus -eq 75 -and $script:worktreesDriverBusy
+            if (-not $retry -and $provisionStatus -ne 0) { exit $provisionStatus }
+        } else {
+            $stampStatus = Invoke-FirstUseInstaller -Path $installer -InstallerArgs @('stamp')
+            $retry = $stampStatus -eq 75 -and $script:worktreesDriverBusy
+            if (-not $retry -and $stampStatus -ne 0) { exit $stampStatus }
+            if (-not $retry) {
+                $snapshot = ''
+                try {
+                    $snapshot = ([IO.File]::ReadAllText(
+                        (Join-Path $legacyRoot 'payload-dir')
+                    )).Trim()
+                } catch {}
+                $snapshotInstaller = if ($snapshot) {
+                    Join-Path $snapshot 'scripts\install.ps1'
+                } else {
+                    ''
+                }
+                if (
+                    -not $snapshotInstaller -or
+                    -not (Test-Path -LiteralPath $snapshotInstaller -PathType Leaf)
+                ) {
+                    [Console]::Error.WriteLine(
+                        "[agent-worktrees] stamped snapshot installer not found: " +
+                        $snapshotInstaller
+                    )
+                    exit 127
+                }
+                $env:AGENT_WORKTREES_FIRST_USE_EXPECTED_SNAPSHOT = $snapshot
+                $provisionStatus = Invoke-FirstUseInstaller -Path $snapshotInstaller -InstallerArgs @('provision')
+                if ($provisionStatus -eq 75 -and $script:worktreesDriverReselect) {
+                    [Console]::Error.WriteLine('[agent-worktrees] selected snapshot changed during first use; retry.')
+                    exit 126
+                }
+                $retry = $provisionStatus -eq 75 -and $script:worktreesDriverBusy
+                if (-not $retry -and $provisionStatus -ne 0) { exit $provisionStatus }
+            }
+        }
+        if (-not $retry) {
+            Write-BootTrace 'provision-end'
+
+            if (-not (Test-InstallationResolutionCurrent)) {
+                [Console]::Error.WriteLine(
+                    '[agent-worktrees] installation governance changed during provisioning.'
+                )
+                exit 126
+            }
+            $python = Resolve-AgentWorktreesRuntime
+            Write-BootTrace 'resolver-loaded'
+            if ($python) {
+                Restore-FirstUseEnvironment $previousNoWait $previousSnapshot
+                $lock.Dispose()
+                $lock = $null
+                Write-BootTrace 'dispatch' 'provisioned'
+                Invoke-AgentWorktreesRuntime $python
+            }
+        }
+    } finally {
+        Restore-FirstUseEnvironment $previousNoWait $previousSnapshot
+        if ($lock) { $lock.Dispose() }
     }
-    $python = Resolve-AgentWorktreesRuntime
-    Write-BootTrace 'resolver-loaded'
-    if ($python) {
-        $lock.Dispose()
-        $lock = $null
-        Write-BootTrace 'dispatch' 'provisioned'
-        Invoke-AgentWorktreesRuntime $python
+    if (-not $retry) { break }
+    if (-not $reportedBusy) {
+        [Console]::Error.WriteLine('[agent-worktrees] update driver is busy; releasing the provision lock before retry.')
+        $reportedBusy = $true
     }
-} finally {
-    if ($lock) { $lock.Dispose() }
+    if ([DateTime]::UtcNow -ge $retryDeadline) {
+        [Console]::Error.WriteLine('[agent-worktrees] update driver remained busy; retry after the active update finishes.')
+        exit 75
+    }
+    Start-Sleep -Milliseconds 200
 }
 [Console]::Error.WriteLine(
     '[agent-worktrees] provisioning completed without a resolvable runtime.'

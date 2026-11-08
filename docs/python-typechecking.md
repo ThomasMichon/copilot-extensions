@@ -62,6 +62,7 @@ python tools/typecheck.py lib-single-instance-lease
 python tools/typecheck.py lib-update-telemetry
 python tools/typecheck.py lib-work-coalescing-singleton
 python tools/typecheck.py lib-worktree-identity-remaining
+python tools/typecheck.py agent-roles
 python tools/typecheck.py --inventory
 python tools/typecheck.py --inventory --json
 ```
@@ -83,6 +84,13 @@ same bytes for both the environment key and installation. Nested requirement
 includes are refused until a complete graph snapshot is qualified. The dependency
 install subprocess has a five-minute bound. Cache-path validation stays independent of Python
 3.11-only installer imports, preserving the checker's Python 3.10 bootstrap.
+
+Agent Roles checks all three Python skill-contract test files strictly on both
+analysis platforms with the existing Python 3.10 target and base checker lock.
+The synthetic JSON example retains explicit dynamic values; its assertions and
+negative cases are unchanged. This admits the static Python test scope, not
+live review, triage, fleet steering or provider behavior. It does not admit
+another project's copies or enlarge the required unit packet.
 
 Plugin Activation checks all twenty-one canonical source/test files strictly
 on both targets using the existing YAML checker lock. Dynamic JSON and YAML

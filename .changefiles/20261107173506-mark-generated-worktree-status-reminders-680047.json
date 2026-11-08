@@ -1,0 +1,9 @@
+{
+  "comment": "Mark generated worktree status reminders as system-origin context",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

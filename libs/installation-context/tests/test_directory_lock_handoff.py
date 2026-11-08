@@ -90,8 +90,9 @@ def test_changing_file_observation_is_distinct_from_invalid_evidence(
 
     monkeypatch.setattr(os, "read", read)
     monkeypatch.setattr(os, "close", close)
-    with pytest.raises(module._FileIdentityChanged, match="changed while it was being read"):
+    with pytest.raises(module._FileIdentityChanged, match="changed while it was being read") as failure:
         module.read_json(path)
+    assert str(path.resolve()) in str(failure.value)
 
 
 def test_lock_contender_retries_a_witnessed_owner_handoff(

@@ -387,6 +387,31 @@ _Operator-required outcome; agent-recommended slices and validation._
   final candidate/ownership/captured-target guards and durable unknown outcomes.
   This source prerequisite does not supply the actual credential verifier,
   normal-host route or installed/live-provider qualification.
+- [x] Deliver the finite optional request-local workspace factory (#11452)
+  after reviewed authority/lifetime design (#11450). Resolve once across
+  actions and feedback without credential acquisition for preparation or
+  storage-only recovery. Native verifier/source and host enrollment remain
+  separate; legacy per-context embedding is retained.
+- [x] Deliver the finite native effective-permission evaluator (#11462) through the
+  existing pinned ADO transport: resolve actual Git namespace/action semantics,
+  require repository and exact native target-branch read/review permission
+  before the attempt fence and at dispatch, and preserve unknown attempts on
+  later denial. Actual credential-source grant/audience verification, current
+  custodian admission and strict normal-host enrollment remain separate.
+- [x] Supply the finite [preparation-only receiver](comment-producer-enrollment.md#preparation-without-writer-enrollment)
+  through the existing allocation and trusted source/profile owners (#11471).
+  Retain exact selection contracts and original previews without a writer;
+  submission remains independently unavailable.
+- [x] Deliver the [canonical helper and native source-discovery prerequisites](comment-producer-enrollment.md#canonical-helper-delivery-and-native-source-discovery)
+  before expanding strict standalone configuration. Direct wheel/sdist/release
+  delivery and actual executing exact-root discovery are separate from
+  fixture imports or installed enrollment. Native discovery merged in #11488
+  and canonical helper packaging in #11500; this closes only the finite source
+  prerequisites, not normal-host or installed enrollment.
+- [x] Supply explicitly selected standalone preparation-only hosting using
+  those actual source/profile dependencies. Qualify the executing provider before
+  advertising support; no preview verifies protected-source grants or
+  closes writer enrollment (#11507; finite source qualification only).
 - [ ] Deliver the actual protected write-owner prerequisite through its
   existing owners, then bind one explicitly selected authenticated host route.
   Injected factories and observation credentials do not satisfy these exits;
@@ -395,6 +420,26 @@ _Operator-required outcome; agent-recommended slices and validation._
   cleared review in #11410 before credential/provider changes. The finite
   delivery leaf above does not close native rotation/unknown-effect or
   normal-host qualification.
+  The [current-authority and request-local material design](comment-producer-enrollment.md#current-authority-and-request-local-material)
+  cleared review in #11450. It separates actual source/native/custodian
+  verification and binds one factory per execution before strict host
+  configuration expands.
+- [x] Review the finite [acquired comment observation refinement](comment-observation-correlation.md)
+  before joining original prepared receipts to acquired native objects.
+  Keep the independently unavailable protected credential source unsupported
+  (#11511; broader provider/installed qualification remains open).
+- [x] Deliver its finite existing-owner read-only library projection (#11514;
+  212 coupled source cases). Preserve original native receipts, unknown
+  outcomes and acquired observation intervals without new IO or storage.
+- [x] Separately qualify negotiated workspace/CLI/client/Gateway source consumers
+  (#11517; 210 coupled and final 82 focused consumer/Gateway cases, overlapping).
+  Preserve original
+  receipt/unknown states and observation age; a current content match is not
+  original-version proof, persisted DB mapping or full C3/provider acceptance.
+- [ ] Review the [tracked comment/review consumer refinement](tracked-comment-consumers.md)
+  before changing legacy commands; then qualify one explicit source binding
+  through the existing workspace selection/receipt owner. Preserve distinct
+  ADO text/vote outcomes and keep unsupported native surfaces explicit.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -943,6 +988,51 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
+- [ ] Qualify the explicit tracked comment/review consumer through its actual
+  resolution and workspace CLI/tool/client boundary: exact scoped selection,
+  final preview and separate submission, original-key restart/lost-result
+  recovery, partial comment/vote outcomes, bodyless actions, and unsupported
+  or rolled-back receivers without legacy mutation fallback.
+- [x] Qualify the finite acquired comment observation library through actual
+  preparation, original native attempt/receipt and acquired generations:
+  exact scoped native IDs/actor/content, restart, later edits/deletion,
+  copied tags, partial/unknown evidence and zero mutation/acquisition/send
+  (#11514; 212 coupled source cases, including real owner-lock contention).
+- [x] Qualify old/current/rolled-back workspace source peers separately (#11517),
+  including actual adopted-storage rechecks at dispatch for direct and stale
+  native/Gateway clients. Neither cached matches nor today's object digest
+  establish original-version feedback; provider/installed acceptance remains open.
+- [x] Qualify preparation-only CLI/client/Gateway allocation and original
+  recovery with the actual preparer, zero protected acquisitions/sends,
+  independent submission refusal, unchanged writer/default behavior and
+  current/prior receiver rollback (#11471; 107 coupled source cases).
+- [x] Qualify the [canonical helper delivery and native discovery controls](comment-producer-enrollment.md#canonical-helper-delivery-and-native-source-discovery):
+  outside-checkout wheel consumption, sibling-free sdist rebuild, canonical
+  bytes/import isolation and actual exact-root current/prior parser/discovery
+  refusal, with no credential or forge effects (#11488/#11500; bounded source
+  and artifact controls, not installed enrollment).
+- [x] Verify actual executing source/profile packaging and the strict
+  current/prior standalone-host configuration/process seam before
+  preparation-only hosting is advertised. Preserve the separately open
+  credential-source, protected-writer and installed/provider acceptance
+  (#11507; 88 standalone and 119 coupled source cases).
+
+- [x] Qualify native effective-permission evaluation (#11462; 216 coupled
+  source cases) with contained namespace/
+  action/result parsing, nested/case/Unicode target refs, repository/branch
+  denial, incomplete responses, one pinned material generation and executor
+  denial before/after the durable fence. Preserve legacy embedding,
+  candidate/owned-target guards and unknown-effect no-resend semantics; source
+  controls do not establish live native grants or installed host adoption.
+
+- [x] Qualify the finite request-local workspace factory (#11452): 151 coupled
+  lifetime/workspace/selection/owned-edit/attention cases pass with verified
+  cleanup. Multiple action and feedback contexts share one resolution;
+  preparation and storage-only recovery acquire none. Concurrent requests,
+  failure, rotation/withdrawal and unknown reconciliation retain their
+  separate execution/no-resend semantics. This is not actual native grant
+  verification, normal-host or installed/provider qualification.
+
 - [x] Qualify optional selected-edit CLI/native/Fleet/Gateway source consumers:
   actual shared preparation and native receipts, prepared and genuine legacy
   edits, lost previews, cache-independent original-key recovery, confirmed
@@ -1119,6 +1209,224 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-08 - Merge the qualified fresh-validation source improvement
+
+- #11472 merged at `57952d35f1d98800bf8b4980d29a3d7007dbd741`
+  after final-head Copilot approval `5816236964` with no open issues and
+  required CI `42440720357` passed. The two changed canonical unit-source
+  admissions and two runtime-admission generated SDK copies are synchronized;
+  the unit inventory, coverage targets and budget are unchanged.
+- The integrated original normal-payload lifecycle passes locally within its
+  original limits, alongside the focused driver, native entry, guarded-journal
+  and real TCP controls recorded below. This closes the source correction
+  slice, not #11231's installed acceptance or any broader parent outcome.
+- #11153's separate Bridge migration prerequisite has also merged. Next,
+  confirm both fixes in a promoted release before the already-authorized
+  same-machine unified update and isolated installed-owner qualification.
+  Preserve the prior partial-update evidence, existing sessions and pending
+  state; no force, live delegation activation, fleet effect or retained-resource
+  release is implied. #6007 and its installed/service/provider/resource rows
+  remain open.
+
+- [2026-11-07 - Preparation-only producer sequencing](journal/2026/11.07%20preparation-only.md)
+
+### 2026-11-07 - Deliver native effective review-permission evaluation
+
+- #11462 actually merged as `ee2fc4f817681598a999b091b12806f033e536cd`
+  after corrected-head Copilot approval `5816104058` with no open issues and
+  latest required CI `42437653463` / `128601798356` passed. Managed completion
+  reconciled only the merged source and retained its backup.
+- The existing pinned provider resolves actual Git namespace/action semantics
+  and separately evaluates read and review permission for the repository and
+  exact native PR target branch. Both complete positive results are required
+  for each action bit, without an administrator shortcut, write probe,
+  credential reacquisition or undocumented combined-mask assumption.
+- The first review exposed rejection of native translator-backed Git
+  definitions. The regression failed before correction; both boolean native
+  forms now preserve the documented logical token. Primary contained TLS
+  exercises the translator-backed form. Final native parser/TLS tests pass
+  71 cases, with 145 executor/feedback/request-local lifetime cases; bounded
+  cleanup is verified. Ruff, docs, module size, installation contracts and
+  source pre-commit pass. Pending runtime type admission is not qualified.
+- Pre-fence denial leaves an unattempted action; later denial preserves its
+  original unknown attempt. Existing action/candidate/owned-target policy,
+  legacy context embedding and normal-host read-only defaults remain intact.
+  These finite source controls are not live permission or installed proof.
+- Re-read the complete current Plan/Validation and close only these finite
+  evaluator leaves. Continue the separate authoritative credential-source
+  grant/audience and current-custodian verifier before strict host enrollment.
+  All-forge publishers, acquisition/DB mapping, full attention, provider/
+  retention/CLI/Dispatch/installed/shadow acceptance and #11128 remain open.
+  No host/backend activation, deployment, production effects or resource
+  release occurred.
+
+### 2026-11-08 - Qualify the integrated source consumer before publication
+
+- Integrated #11231 with the current source dependencies without dropping
+  either journal history. Fresh static lint, generated-copy, module-size,
+  installation-contract and diff checks pass.
+- Fifteen focused driver, native entry, guarded-journal and real TCP controls
+  pass in 345.77 seconds, including cold start, rollover, durable-commit
+  admission, rollback and exact-instance retirement. The canonical runner
+  completed preparation and cleanup in 402.50 seconds overall.
+- The integrated original
+  `test_normal_payload_init_refreshes_receipt_and_upgrades_live_owner` passes
+  locally in 660.44 seconds, with 681.66 seconds overall including preparation
+  and cleanup. Its startup, upgrade, restart, state-preservation and cleanup
+  assertions ran with the existing 120-second cutover, 900-second test and
+  150-second cleanup limits. No native-account override was enabled.
+- This qualifies the composed source consumer, not the previously installed
+  owner or a general latency guarantee. The earlier hosted pass remains scoped
+  to its recorded source; its completed approval was not reused. Review, CI,
+  promotion, authorized installed adoption and all parent/resource gates remain.
+
+### 2026-11-08 - Pass the original focused hosted Windows lifecycle case
+
+- [Focused Windows run 42434040443](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42434040443)
+  qualified source `834856ee875cc9f7b2ed62bd59401d162327c365` under its protected
+  controller. The request-bound artifact identifies exactly the original
+  `test_normal_payload_init_refreshes_receipt_and_upgrades_live_owner`: passed
+  in 229.621 seconds, with no skipped or incomplete selection. Its original
+  startup, upgrade, restart, state-preservation and governed-cleanup assertions
+  completed without enlarging their clocks.
+- This is Windows Server 2025 source evidence with the reported outer test
+  runtime Python 3.12.10. It does not replace the failed local installed-profile
+  evidence or qualify every runtime/platform. The approved hosted loop's
+  stopping condition is satisfied; retain its source/request/run evidence and
+  append-only transport history rather than launching another attempt.
+- Complete dependent source regressions and normal review/CI/promotion before
+  treating the improvement as released. Local installed-owner acceptance,
+  authorized rollout and the larger parent/resource gates remain open.
+
+### 2026-11-08 - Qualify the paired-read candidate through the focused Windows lane
+
+- #11231 retains bounded concurrent fresh target/predecessor reads only after
+  the private journal matches its guarded current document. Both reads finish
+  before the action, including on failure. Existing nested SDK validation
+  scopes remain serial to preserve their shared changed-file observations.
+  Thirteen focused boundary cases pass across the original and residual
+  selections; no cached authority or expanded deadline was introduced.
+- The original local lifecycle remains unqualified. Phase output now preserves
+  its first failure before cleanup can obscure it; the latest run exceeded
+  120 seconds during committed-owner health at first startup, then completed
+  governed cleanup. Earlier successful startup runs do not establish reliable
+  whole-lifecycle acceptance.
+- The operator approved a progress-based source fix/retest loop through the
+  existing owner-only `windows-qualification.yml`, selecting the original
+  normal-payload lifecycle case and stopping when it passes. Preserve the
+  original test/cutover/cleanup clocks, committed source identity, request/run
+  evidence and the lane's protected-controller and append-only transport rules.
+  Unchanged or unobserved attempts are not progress.
+- Hosted source evidence does not replace local installed-owner acceptance.
+  Source review, CI, promotion, authorized rollout and all parent delegation,
+  provider and retained-resource gates remain outstanding.
+
+### 2026-11-07 - Pass first startup and isolate the remaining upgrade race
+
+- #11231 now composes freshly validated journal target/instance evidence within
+  each action instead of reconstructing it again. Actual health/control
+  exchanges keep fresh completion and native-birth checks on both sides;
+  selection publication checks before and after the write under its metadata
+  locks. No proof cache or cutover deadline change was introduced.
+- Nine focused journal/selection/archive controls pass. The original Windows
+  scenario then passed first startup: binding took about 36 seconds and native
+  publication about 68 seconds. The whole lifecycle still failed during upgrade,
+  after predecessor drain, on a changing JSON read; route rollback subsequently
+  exhausted its remaining deadline. This is progress, not lifecycle acceptance.
+- The canonical JSON reader now names the file in changing-read diagnostics
+  without altering its refusal or handoff semantics; all sixteen focused JSON
+  and lock-handoff controls pass. A narrowed normal-init/startup/upgrade
+  diagnostic retains named phases, the original 120-second cutover and governed
+  cleanup to identify the actual race rather than repeat a broad packet blindly.
+- Source work remains useful WIP. Required review, CI, promotion, authorized
+  installation and installed-owner acceptance remain outstanding, as do
+  Bridge #11153 and the parent delegation/provider/fleet/resource gates.
+
+### 2026-11-07 - Retain the unresolved native startup deadline separately from hashing work
+
+- #11231's bounded path-walker improvements preserve full snapshot traversal,
+  exact digests, native identity and metadata fences, reparse rejection and
+  joined descriptor cleanup. Ten focused controls and strict Linux/Windows
+  typing pass. These source results do not establish lifecycle acceptance.
+- The original normal-upgrade scenario still fails at first startup, before
+  upgrade, within its unchanged 120-second cutover budget. The successor
+  bound after about 75 seconds; rollback and exact-instance observations
+  remain explicit failure evidence, not successful activation.
+- Retain the tested source work without publishing a complete-fix claim.
+  Further direction must distinguish reducing validation work within the
+  existing budget from deliberately changing the bounded latency contract.
+  No deadline, verification rule, installed runtime, delegation activation
+  or retained-resource disposition has been changed by that distinction.
+
+### 2026-11-07 - Diagnose the actual installed first-owner startup failure
+
+- The released `0.3.227-dev1` payload's own normal-upgrade test was exercised
+  in an isolated Windows profile with canonical repository process containment.
+  Initial installation completed, but first owner startup exhausted its
+  original 120-second cutover budget before the upgrade step. Normal cleanup
+  also timed out during reconciliation; recorded test processes have exited.
+  This is failed installed-profile evidence, not native-account acceptance.
+- A read-only profile of running invocation capture took 14.811 seconds;
+  its two snapshot-content traversals consumed 11.238 seconds. This identifies
+  repeated completion validation as measurable cost, not the complete cause
+  of the transaction failure or a controlled speedup comparison.
+- #11231 owns bounded diagnosis and source correction. Preserve fresh
+  governance, completed-slot mutation/link/race refusals, one-writer custody,
+  pending subscriptions and exact process-exit evidence within existing
+  budgets. Do not retry the unchanged broad test, patch deployed copies or
+  treat larger limits as a fix. Bridge #11153 and all parent adoption,
+  delegation, provider and fleet requirements remain separate and open.
+
+### 2026-11-07 - Refine current authority and request-local writer design
+
+- #11450 actually merged as `fe70e2d4b898d3a835d8f452d9c51d72146738b4`
+  after current-head Copilot approval `5815965694` with no open issues and
+  latest required CI `42434797023` / `128591352150` passed. Managed completion
+  reconciled the source and retained its backup.
+- Trace the actual Fleet verifier, raw Azure relay source, standalone host,
+  workspace executor and pinned native factory. The raw relay's action/host
+  policy is not Fleet's mandatory material verifier, and local process
+  withdrawal is not native admission. Document source-grant, native effective
+  permission and current custodian checks as distinct prerequisites.
+- Choose lazy, per-execution factory resolution at the existing workspace
+  boundary. Reuse one actual material generation across action contexts and
+  feedback; leave the legacy embedding separate. Storage-only recovery must
+  not acquire credentials, and unknown actions retain read-only reconciliation
+  without resend. Strict host configuration remains unchanged.
+- This is review-first design, not an implemented verifier or host route.
+  Documentation consistency and whitespace checks pass; implementation,
+  contained lifetime controls, native source adoption and both parent effort
+  acceptance gates remain open.
+
+### 2026-11-07 - Qualify the finite request-local workspace factory source
+
+- #11452 actually merged as `6813f6e026a876b73304e8be06d954c35a9a69f6`
+  after current-head Copilot approval `5815992311` with no open issues and
+  latest required CI `42435506760` / `128594078737` passed. Managed completion
+  retained its source backup; #11128 stays open.
+- Implement the reviewed optional in-process resolver at `WorkspaceOperations`.
+  It resolves lazily once per submission execution, retaining the selected
+  factory across action and feedback contexts. Failed resolution, material
+  rotation or writer withdrawal cannot reacquire or switch to legacy
+  authentication. Existing per-context embeddings and read-only hosts remain.
+- The coupled lifetime/workspace/selection/owned-edit/attention packet passes
+  151 cases with verified cleanup. It includes actual pre-approval selection
+  and original receipts without acquisition, multiple action/feedback
+  contexts, concurrent request isolation, failed resolution, rotation,
+  withdrawal and unknown-action reconciliation without resend.
+  The first concurrency fixture incorrectly raced the cache's nonblocking
+  custody lock; it was corrected to overlap at the actual resolver boundary,
+  not by adding storage retries or weakening the lock.
+- Fatal Python lint, module size, documentation and installation-contract
+  checks pass. This finite source seam does not implement native source-grant
+  verification, normal-host enrollment, installed/provider acceptance or
+  representative native latency. Broader typing remains pending under #9807.
+  Both parent Plan/Validation gates remain open.
+- Re-read both complete parent Plans/Validation after merge and close only
+  this finite lifetime leaf. Continue the actual native permission/source
+  verifier under the existing credential/provider owners before strict
+  normal-host enrollment; no host activation or deployment occurred.
 
 ### 2026-11-07 - Deliver finite pinned native requests without host enrollment
 
@@ -1555,6 +1863,65 @@ callback an implicit credential store.
   open. Continue actual publication-owner inventory and contained opaque-body
   consumer qualification, retaining allocation, correlation and separately
   authorized adoption as unfinished work.
+
+### 2026-11-07 - Preserve the partial authorized Windows update
+
+- The operator separately authorized a normal unified update on one Windows
+  target followed by isolated installed PR-owner validation, preserving
+  updater serialization, configuration, credentials, sessions and subscriptions.
+  Other machines, fleet deployment, UAC, forced takeover, delegation activation
+  and retained-resource cleanup remain outside that grant.
+- Durable worker launch was refused by the caller's Windows Job. The supported
+  supervised mode then reused the same pending request and completed through
+  the canonical serialized executor, without weakening containment. The full
+  update returned exit 6; this is partial installation, not successful rollout.
+- PR-owner `0.3.227-dev1` is selected. Its actual installed version, root help
+  and watch help commands all pass. Those entry checks do not certify complete
+  installed-cell or deployed-delegation acceptance.
+- Bridge selected `0.9.348-dev1` but its successor failed startup on the missing
+  acquisition Worktrees writer trigger; the healthy `0.9.304.dev1` incumbent
+  remains undrained. Existing #11144 / contributor PR #11153 owns that repair.
+  Supplied actual upgrade evidence and the precise contract-registry CI
+  refusal to the author rather than opening a competing patch.
+- MCP rolled back because four attached sessions were busy; unconfirmed
+  retirement remains retained. Do not force those sessions or retire their
+  runtimes. Continue after the existing Bridge fix clears review, CI and
+  release, then reconcile the ordinary update and remaining installed proof.
+  Parent requirements and all retained-resource holds remain open.
+
+### 2026-11-07 - Confirm normal release of the qualified PR-owner repair
+
+- Normal promotion `42314791785` completed successfully, including candidate
+  freezing, eligible source coverage, first-party construction and attestation,
+  real Windows Resume startup, exact source-unit reuse, publication readback
+  and non-administrative candidate merge.
+- Published Main `2f10aac90cc7c1ee8e6a644eb3d626678a6adc8f` contains all four
+  PR-owner implementation files from #10953 byte-for-byte. The compact Efforts
+  template from #11167 is unchanged apart from its normal release-version
+  stamp and remains 4,049 bytes. #11160 closed on the earlier actual hosted
+  candidate-freezing proof; full promotion now supplies distinct release proof.
+- The parent digest still has eighty-three open Plan/Validation items.
+  Release does not establish installed adoption, configured credentials,
+  deployed delegation, image/provider/fleet operation or retained-resource
+  settlement. No local runtime, profile, policy or service was changed.
+- Continue with the remaining source and installed-adoption obligations under
+  their existing owners and effect bounds. The completed disposable hosted
+  qualification grant does not authorize another run or a local rollout.
+
+### 2026-11-06 - Land the bounded projection repair and retain release proof
+
+- #11167 merged as `3f29614f05a93fdd979a9e71b2735aab297aa768` after
+  exact-head Copilot approval with no findings and required CI `42312927520`
+  passed. The source worktree reconciled its merged PR and pulled forward
+  through the normal managed path.
+- Current parent digest and touched-section readback confirm all eighty-three
+  open Plan/Validation items remain; no parent requirement changed or closed.
+  The native/Dispatch journal outcomes now landed with this meaningful source
+  contribution, rather than a journal-only PR.
+- Keep #11160 open until normal hosted candidate composition confirms its
+  blocker cleared. Post-merge CI `42313550089` is in progress; release and
+  any separately authorized installed proof remain pending. No retry, runtime
+  rollout, resource release or custody override follows from this merge.
 
 ### 2026-11-06 - Repair the actual release-candidate projection blocker
 

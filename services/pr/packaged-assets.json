@@ -1,0 +1,10 @@
+{
+  "schema": "copilot-extensions.packaged-assets",
+  "version": 1,
+  "canonicalDir": "plugins/ai-attribution/scripts",
+  "payloadDir": "src/agent_pull_requests_service/_attribution",
+  "files": [
+    "attribution_profile.py",
+    "comment_preparation.py"
+  ]
+}

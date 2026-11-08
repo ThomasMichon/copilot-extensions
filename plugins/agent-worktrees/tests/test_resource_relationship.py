@@ -98,6 +98,23 @@ def test_unavailable_absence_or_wrong_retirement_proof_cannot_close(owner, monke
     assert tracking.load_record(path).resources[0].is_unsettled
 
 
+def test_close_refusal_reports_provider_detail(owner, monkeypatch):
+    path, _ = owner
+    pending = reserve(path)
+    proof = {
+        "available": False,
+        "reason": "agent-dispatch claim-status callback failed",
+        "callback_error": "task still has a bound agent",
+    }
+    monkeypatch.setattr(claim_providers, "resolve_claim_status", lambda ref: proof)
+    refused = call(path, "close", {"token": pending["token"]})
+    assert refused["error"] == "rejected"
+    assert refused["message"].endswith(
+        "(agent-dispatch claim-status callback failed; task still has a bound agent)"
+    )
+    assert tracking.load_record(path).resources[0].is_unsettled
+
+
 def test_exact_registered_retirement_closes_and_replay_is_read_only(owner, monkeypatch):
     path, _ = owner
     pending = reserve(path)

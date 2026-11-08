@@ -318,6 +318,12 @@ def _validate_repo_fragment(repo: object, *, location: str) -> str | None:
         error = _validate_codename(repo["codename"], location=f"{location}.codename")
         if error:
             return error
+    if "agendas" in repo:
+        from .config import agenda_policy_error
+
+        error = agenda_policy_error(repo["agendas"])
+        if error:
+            return f"{location}.{error}"
     return None
 
 
@@ -469,6 +475,12 @@ def _validate_config(raw: object) -> str | None:
     for name in ("headless", "auto_fast_forward"):
         if name in raw and not isinstance(raw[name], bool):
             return f"{name} must be a boolean"
+    if "agendas" in raw:
+        from .config import agenda_policy_error
+
+        error = agenda_policy_error(raw["agendas"])
+        if error:
+            return error
     return None
 
 

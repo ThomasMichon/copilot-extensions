@@ -220,7 +220,7 @@ class WatchGateway:
         is_attention = request.target.startswith("/v1/attention/")
         prefix = "/v1/attention/" if is_attention else "/v2/review/"
         operations = ("capabilities", "read") if is_attention else OPERATIONS
-        matched = re.fullmatch(prefix + r"([a-z0-9][a-z0-9-]{0,63})/([a-z]+)", request.target)
+        matched = re.fullmatch(prefix + r"([a-z0-9][a-z0-9-]{0,63})/([a-z]+(?:-[a-z]+)*)", request.target)
         if matched is None or matched[2] not in operations:
             return _response(404, {"error": "workspace_route_not_found"})
         target, operation = matched.groups()

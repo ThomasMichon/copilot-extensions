@@ -18,7 +18,7 @@ tests select the same checkout's PR and Fleet sources explicitly:
 python tools/run-standalone-tests.py services/pr --prepare --timeout 180
 ```
 
-All nine Python source/test files are admitted to strict MyPy on the Linux and
+All fourteen Python source/test files are admitted to strict MyPy on the Linux and
 Windows analysis targets at the declared Python 3.10 minimum:
 `python tools/typecheck.py service-pr --prepare`, then
 `python tools/typecheck.py service-pr --strict`. JSON documents, runtime
@@ -30,6 +30,22 @@ process, image or deployment.
 
 Distribution fixtures retain immutable snapshot inputs and make only their
 owned disposable build directories writable for backend-generated metadata.
+
+### Canonical attribution helpers
+
+The wheel includes the payload-only attribution plugin's canonical profile and
+compact-comment preparation helpers under
+`agent_pull_requests_service._attribution`. Direct checkout builds, archived
+sdist rebuilds, retained development snapshots and release materialization use
+the same bytes. The existing MIT notice ships with the distribution. No
+attribution runtime, Worktrees Python import or global import-path change is
+required; direct-script attribution callers retain their existing behavior.
+Missing canonical inputs or mismatched included helpers refuse construction.
+
+These are preparation-only package assets. The optional
+[preparation host](#optional-preparation-only-hosting) binds them to an explicitly
+selected native producer; their presence alone enables no route, credential
+authority or publication.
 
 ## Explicit host inputs
 
@@ -254,6 +270,78 @@ safe-update or cross-host fencing receipt. The host opens no additional
 unauthenticated HTTP listener. Its supervisor owns restart and escalation.
 CLI failures name the operation and exception class without echoing external
 references, provider error details or credential material.
+
+## Optional preparation-only hosting
+
+An existing workspace binding may additionally select this trusted
+`preparation` object (never remote request fields):
+
+```json
+{
+  "command": ["/usr/local/bin/agent-worktrees"],
+  "source_root": "/work/producer",
+  "source_config": "/run/config/producer-worktrees.yaml",
+  "profile_home": "/home/producer",
+  "visibility": "public",
+  "allow_anonymous": false
+}
+```
+
+All six fields are required. Paths are absolute, the command is an immutable
+explicit executable/interpreter prefix, visibility is `public` or `internal`,
+and anonymity is an explicit boolean. The source must have a unique exact-root
+managed mapping in the selected native Worktrees installation. Neither the
+service checkout, PR author nor remote labels can supply that identity.
+Profiles use only the selected source's repository defaults and explicit
+`profile_home` personal/config defaults; ambient instruction directories,
+`XDG_CONFIG_HOME`, `APPDATA` and the service account's home are not substituted.
+Passive command validation checks structure, not executable availability:
+a missing optional preparation executable is handled by discovery, without
+preventing ordinary watches or retained inspection from starting.
+
+After passive config loading, the host discovers
+`agent-worktrees.comment-origin-capabilities` version 1 once for that selected
+invocation before advertising allocation. It requires the
+`agent-worktrees.comment-origin/v1` protocol, `explicit_source_root` support and
+`effects: none`. Missing, old, failing or incompatible providers disable only
+new preparation and produce a generic warning; no alternative command or
+identity is tried. Discovery reads no source, profile, credentials or forge.
+Native provider delivery precedes this optional host consumer. Older strict
+host parsers refuse the new object; existing configurations remain unchanged.
+Withdrawal handlers are installed before discovery, which runs off the asyncio
+loop under an owned worker. A stop request prevents serving; cancellation,
+including repeated cancellation, retains that worker until actual native-child
+cleanup finishes. The same ReplayStore instance remains the owner throughout
+discovery and Gateway construction.
+
+Only explicit **fresh** provisioning adopts the existing prepared-intent and
+selection extensions, while holding the same host-local writer lease used by
+the watch service. It never migrates an existing volume or repairs interrupted
+provisioning. Serve validates retained storage; it does not adopt it.
+New allocation resolves native origin and the canonical profile before the
+replay transaction, then the existing selection owner allocates identities and
+retains pure composition. The budget-aware native preparer receives the
+enclosing allocation deadline; its subprocess timeout uses the remaining caller
+budget, capped by the host limit. Legacy checkpoint-only callbacks retain their
+existing call shape. Fresh comments and replies are supported, not
+automatic owned edits. No write context is installed: `submit` stays unavailable.
+
+The original allocation key recovers its exact retained preview before touching
+source, profile or cache. After a provider rollback disables allocation, the
+existing `inspect` operation on an opted-in receiver still reads the original
+prepared intent and its unadmitted selection stage. This is inspection, not
+execution admission; default receivers and protected mutation checks remain
+strict. Restoring provider support permits original-key allocation recovery
+without recomposition. Storage/identity retention does not authorize rollout,
+credentials, protected submission or any live forge effect.
+
+The installed foreground fixture crosses real Gateway TLS/PoP and the public
+workspace CLI for allocation, exact recovery after profile/origin withdrawal,
+and retained inspection after restart with an unsupported native provider.
+Native fixtures are synthetic no-effect providers, not live managed-source or
+forge enrollment. The standalone packet separately verifies strict passive
+configuration, actual helper composition outside the replay lock, fresh-only
+adoption, scope/privacy/profile refusal and independent submission refusal.
 
 ## Independently constructed container
 

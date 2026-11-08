@@ -38,6 +38,24 @@ disposition write reaches **>= AGENT_WORKTREES_NUDGE_CALLS** (25) tool calls OR
 resets, so the next one needs another full threshold (no per-call spam).
 
 Kill switch: ``AGENT_WORKTREES_NUDGE=off`` (or ``0``/``false``/``no``).
+
+**Agenda nudge.** When the effective ``agendas.default`` preference is
+``expected`` and this worktree has no detected agenda lane, a second, separately
+throttled reminder suggests adopting one via the ``driving-effort-agendas``
+skill. It shares the same lock and the same call/minute thresholds, but keeps
+its own window sidecar (a disposition write does not reset it). The policy is
+never resolved here: the owner (the sessionStart session-context path, running
+in the selected runtime) publishes a tiny record,
+``<runtime>/nudge-state/<worktree>.agenda-policy.json`` =
+``{"version": 1, "policy": "off"|"expected", "written_at": <epoch>}``, on every
+session start/resume and every ``agent-worktrees status`` write (which the
+disposition nudge above prompts), so a running session sees a changed setting
+at its next disposition write. This hook (and the Windows prepared PowerShell path)
+reads only that record and the local lane evidence on a due tick -- stdlib-only,
+no config loader, no git -- so it works under a bare fallback interpreter and
+cannot stall the resident. A missing/unreadable record or policy ``off`` is
+silent. Adoption is never automatic. Kill switch:
+``AGENT_WORKTREES_AGENDA_NUDGE=off``.
 """
 
 from __future__ import annotations
@@ -206,6 +224,105 @@ def _nudge_text(calls: int, minutes: int) -> str:
         "main theme genuinely changed. Keep `--follow-up`/`--resolved` "
         "accurate. If nothing consequential changed, ignore this."
     )
+
+
+_AGENDA_EXPECTED = "expected"
+_WORKTREE_PATH_RE = re.compile(r"^worktree_path:\s*(.+?)\s*$", re.MULTILINE)
+
+
+def _agenda_nudge_text() -> str:
+    return (
+        "[agent-worktrees] This project expects an agenda for this session "
+        "(agendas.default: expected), but no agenda lane was found for this "
+        "worktree. Adopt one via the `driving-effort-agendas` skill: "
+        "`agenda_outline.py from-effort <effort README.md>` (or "
+        "`agenda_backfill.py preview <session-folder>` to rebuild from this "
+        "session), then `preview` and `adopt`. You own and edit the agenda; "
+        "nothing is adopted automatically."
+    )
+
+
+def agenda_lane_state(yaml_path: Path, worktree_id: str) -> str:
+    """Return ``present``/``absent``/``unknown`` from cheap local evidence only.
+
+    Evidence: a managed ``agendas`` placement in the project's worktree-data
+    descriptor, or a non-empty worktree-local ``.effort-agenda/`` home.
+    """
+    try:
+        descriptor = (
+            Path(yaml_path).parent.parent / "worktree-state" / worktree_id / "descriptor.json"
+        )
+        if descriptor.is_file():
+            if descriptor.stat().st_size > 1_048_576:
+                return "unknown"
+            value = json.loads(descriptor.read_text("utf-8"))
+            placements = value.get("placements") if isinstance(value, dict) else None
+            if not isinstance(placements, list):
+                return "unknown"
+            if any(isinstance(p, dict) and p.get("domain") == "agendas" for p in placements):
+                return "present"
+        match = _WORKTREE_PATH_RE.search(Path(yaml_path).read_text("utf-8", errors="replace"))
+        if match:
+            home = Path(match.group(1).strip().strip("'\"")) / ".effort-agenda"
+            if home.is_dir() and any(child.is_dir() for child in home.iterdir()):
+                return "present"
+        return "absent"
+    except (OSError, ValueError, TypeError):
+        return "unknown"
+
+
+AGENDA_POLICY_SUFFIX = ".agenda-policy.json"
+# Session-level switches the hook client forwards to the resident, whose own
+# process environment belongs to whichever session spawned it.
+NUDGE_ENV_KEYS = (
+    "AGENT_WORKTREES_NUDGE",
+    "AGENT_WORKTREES_AGENDA_NUDGE",
+    "AGENT_WORKTREES_NUDGE_CALLS",
+    "AGENT_WORKTREES_NUDGE_MINUTES",
+)
+
+
+def forwarded_env(payload: dict, base=None) -> dict | None:
+    """Return the session's forwarded nudge switches over ``base``, else None."""
+    metadata = payload.get("_agentWorktrees")
+    forwarded = metadata.get("environment") if isinstance(metadata, dict) else None
+    if not isinstance(forwarded, dict):
+        return None
+    base = os.environ if base is None else base
+    env = {key: value for key, value in base.items() if key not in NUDGE_ENV_KEYS}
+    env.update({
+        key: value for key, value in forwarded.items()
+        if key in NUDGE_ENV_KEYS and isinstance(value, str)
+    })
+    return env
+_AGENDA_POLICY_MAX_BYTES = 4096
+
+
+def read_agenda_policy(aw: Path, worktree_id: str) -> str | None:
+    """Return the owner-published ``agendas.default`` record value, else None."""
+    path = Path(aw) / "nudge-state" / f"{worktree_id}{AGENDA_POLICY_SUFFIX}"
+    try:
+        with path.open("rb") as stream:
+            raw = stream.read(_AGENDA_POLICY_MAX_BYTES + 1)
+        if len(raw) > _AGENDA_POLICY_MAX_BYTES:
+            return None
+        value = json.loads(raw.decode("utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(value, dict) or value.get("version") != 1:
+        return None
+    policy = value.get("policy")
+    return policy if isinstance(policy, str) else None
+
+
+def _agenda_nudge(aw, yaml_path, worktree_id) -> str | None:
+    if _read_record_fields(yaml_path)[1] in _TERMINAL_STATES:
+        return None
+    if read_agenda_policy(aw, worktree_id) != _AGENDA_EXPECTED:
+        return None
+    if agenda_lane_state(yaml_path, worktree_id) != "absent":
+        return None
+    return _agenda_nudge_text()
 
 
 def _worker_definitely_gone(owner: object) -> bool:
@@ -381,7 +498,9 @@ def decide(
 
     Pure/injectable for tests: reads+writes the per-worktree sidecar under
     ``<home>/.agent-worktrees/nudge-state/`` and reads the worktree tracking yaml
-    (per-project) at ``<home>/.<project>/worktrees/<id>.yaml``.
+    (per-project) at ``<home>/.<project>/worktrees/<id>.yaml``, where ``<home>``
+    is ``AGENT_HOME`` when set. The agenda
+    policy comes only from the owner-published ``<id>.agenda-policy.json``.
     """
     env = env if env is not None else os.environ
     home = Path(home) if home is not None else Path.home()
@@ -395,9 +514,13 @@ def decide(
         return None
 
     cwd = str(payload.get("cwd") or "") or os.getcwd()
-    aw = home / ".agent-worktrees"
+    # The runtime tree (policy records, counters, tracking) lives under
+    # AGENT_HOME when set, matching the publisher; session-state stays on home.
+    agent_home = str(env.get("AGENT_HOME") or "").strip()
+    state_home = Path(agent_home) if agent_home else home
+    aw = state_home / ".agent-worktrees"
     found = (
-        (tracking_lookup or _find_tracking_yaml)(cwd, home)
+        (tracking_lookup or _find_tracking_yaml)(cwd, state_home)
         if tracking_record is _UNSET else tracking_record
     )
     if not found:
@@ -407,7 +530,46 @@ def decide(
     with _counter_lock(aw, worktree_id, deadline) as acquired:
         if not acquired:
             return None
-        return _update_counter(aw, worktree_id, yaml_path, env, now, deadline)
+        text = _update_counter(aw, worktree_id, yaml_path, env, now, deadline)
+        agenda_due = _agenda_tick(aw, worktree_id, env, now, deadline)
+    if agenda_due and not (deadline is not None and time.time() >= deadline):
+        agenda_text = _agenda_nudge(aw, yaml_path, worktree_id)
+        if agenda_text:
+            text = f"{text}\n\n{agenda_text}" if text else agenda_text
+    return text
+
+
+def _agenda_tick(aw, worktree_id, env, now, deadline) -> bool:
+    """Advance the agenda window; True when a policy/lane check is due."""
+    if _truthy_off(env.get("AGENT_WORKTREES_AGENDA_NUDGE")):
+        return False
+    sidecar = aw / "nudge-state" / f"{worktree_id}.agenda.json"
+    try:
+        data = json.loads(sidecar.read_text("utf-8")) if sidecar.is_file() else {}
+        if not isinstance(data, dict):
+            data = {}
+    except (OSError, ValueError):
+        data = {}
+    if "window_start" not in data:
+        data = {"count": 0, "window_start": now}
+    try:
+        count = int(data.get("count", 0)) + 1
+        elapsed_min = (now - float(data["window_start"])) / 60.0
+    except (TypeError, ValueError):
+        count, elapsed_min, data = 1, 0.0, {"window_start": now}
+    due = (
+        count >= _int_env(env, "AGENT_WORKTREES_NUDGE_CALLS", _DEFAULT_CALLS)
+        or elapsed_min >= _int_env(env, "AGENT_WORKTREES_NUDGE_MINUTES", _DEFAULT_MINUTES)
+    )
+    data = {"count": 0, "window_start": now} if due else {**data, "count": count}
+    if deadline is not None and time.time() >= deadline:
+        return False
+    try:
+        sidecar.parent.mkdir(parents=True, exist_ok=True)
+        sidecar.write_text(json.dumps(data), encoding="utf-8")
+    except OSError:
+        return False
+    return due
 
 
 def _update_counter(aw, worktree_id, yaml_path, env, now, deadline):
@@ -467,6 +629,7 @@ def _clear_sidecar(aw: Path, worktree_id: str) -> None:
         if acquired:
             try:
                 (aw / "nudge-state" / f"{worktree_id}.json").unlink(missing_ok=True)
+                (aw / "nudge-state" / f"{worktree_id}.agenda.json").unlink(missing_ok=True)
             except OSError:
                 pass
 

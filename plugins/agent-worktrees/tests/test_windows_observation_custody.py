@@ -807,7 +807,7 @@ def test_actual_monitor_shutdown_retains_custody_and_negative_control(
         assert settled[0], "early native custody release"
 
     monkeypatch.setattr(status_monitor_cutover, "clear_route_if_owner", clear_route)
-    monkeypatch.setattr(resident_push, "bind", lambda *a: None)
+    monkeypatch.setattr(resident_push, "bind", lambda *a, **k: None)
     monkeypatch.setattr(resident_push, "reset", lambda: None)
     monkeypatch.setattr(locks, "read_lock", lambda *a: None)
     monkeypatch.setattr(locks, "lock_is_live", lambda *a: False)

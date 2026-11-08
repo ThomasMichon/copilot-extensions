@@ -106,6 +106,25 @@ def verified_retirement(result: object, ref: str) -> bool:
     )
 
 
+def retirement_refusal(result: object) -> str:
+    """Bounded, non-authoritative summary of why a provider proof did not retire."""
+    if not isinstance(result, dict):
+        return ""
+    if result.get("available") is not True:
+        parts = [result.get("reason"), result.get("callback_error")]
+        text = "; ".join(part for part in parts if isinstance(part, str) and part)
+    else:
+        proof = result.get("relationship_verification")
+        if not isinstance(proof, dict):
+            text = f"no relationship verification (state {result.get('state')!r})"
+        else:
+            text = (
+                f"state {result.get('state')!r}, retired {proof.get('retired')!r}, "
+                f"quiescent {proof.get('quiescent')!r}"
+            )
+    return f" ({text[:512]})" if text else ""
+
+
 def valid_metadata(value: object) -> bool:
     """Unknown lifetimes/phases remain blocking, including unshipped transfer."""
     from . import claim_providers, tracking

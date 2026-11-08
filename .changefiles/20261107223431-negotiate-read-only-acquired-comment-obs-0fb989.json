@@ -1,0 +1,9 @@
+{
+  "comment": "Negotiate read-only acquired comment observation through existing workspace, CLI and Gateway clients.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

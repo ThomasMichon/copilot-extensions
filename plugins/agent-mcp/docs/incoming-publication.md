@@ -8,6 +8,13 @@ version retirement and slot collection are not steps in that incoming gate.
 Build, source admission, authentication, permission, I/O and incoming health
 failures remain failures; an unknown foreign installation is not taken over.
 
+Installation readiness validates native bridge declarations and machine-local
+overlays without selecting a caller's repository timing preferences. It can run
+from an installer payload directory without a repository context. Invalid native
+declarations and overlays still fail readiness. Actual bridge/tool requests retain
+the repository-qualified configuration composer and its strict context checks;
+this readiness boundary does not waive request-time preference validation.
+
 ## Current admission
 
 The default current handle is `$AGENT_MCP_HOME/current/serve.sock`. Both a

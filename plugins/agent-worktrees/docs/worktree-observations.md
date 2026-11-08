@@ -139,8 +139,8 @@ wait for publication. The existing bounded-file input is decoded in process. Pow
 bundled JSON reader with depth 4, duplicate-field rejection and date coercion
 disabled, preserving timestamp strings exactly; PowerShell 5 uses the existing
 framework JSON library with a separate depth-4, 16-KiB decoder. Missing parser support is unavailable, not
-permission to install one or invoke Python. The ordinary event decoder remains
-unchanged. No lifecycle operation follows from a returned advisory view.
+permission to install one or invoke Python. Ordinary event decoding retains
+its shell semantics. No lifecycle operation follows from a returned advisory view.
 
 Version support expands only this passive file contract. Old hook callers keep
 their existing behavior; new readers facing old/rolled-back discovery report
@@ -158,6 +158,21 @@ discovery or Python fallback. Read events do not need mutation invalidation.
 The native-write subset below shares this shell-safe evaluation. Other tools,
 unprepared installation cells and oversized events keep their original entry and
 behavior. This is not the complete shell-only transition.
+
+Prepared entry uses native file/path operations without loading PowerShell's
+Management module. Fully qualified source paths defer cwd repair until the
+original fallback is needed; relative, drive-relative and root-relative paths
+retain early repair. Runtime-root resolution preserves both normalized-path
+validation and literal ancestor/reparse checks, including ancestors hidden by
+dot segments. This changes neither prepared admission nor fallback policy.
+
+Prepared JSON conversion avoids initializing Utility cmdlets in a fresh shell.
+PowerShell 6+ uses its public object-to-hashtable decoding engine; serialization
+uses the public JSON context when available, retaining the cmdlet on older
+engines without that API. PowerShell 5 keeps the framework decoder and the
+shell's metadata type resolver, and serializes its JSON graph with the same
+framework library. Unicode, numeric/date-like values and metadata retain their
+shell representation. Generic post-tool fallback conversion is unchanged.
 
 The reader checks the original prepared membership and all its input witnesses.
 It then reads the binding owner's `worktree-binding.json`. Only the owner's

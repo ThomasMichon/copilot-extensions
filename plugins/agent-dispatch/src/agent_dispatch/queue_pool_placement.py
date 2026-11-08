@@ -59,6 +59,8 @@ def pool_placement_contract() -> dict[str, object]:
         "configured_cohort_reservation_fencing_versions": [1],
         "worker_decline_preparation_versions": [1],
         "worker_decline_local_closeout_versions": [1],
+        "worker_decline_readiness_closeout_versions": [1],
+        "worker_decline_binding_recovery_versions": [1],
         "worker_decline_closeout_complete": False,
         "worker_submission_readiness_versions": [1],
         "worker_submission_scope": "retained-workspace-assignments",

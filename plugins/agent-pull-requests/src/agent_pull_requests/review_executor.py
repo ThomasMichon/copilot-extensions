@@ -16,6 +16,14 @@ class ReviewCandidateChanged(RuntimeError):
     """Current source/discussion evidence no longer matches selected intent."""
 
 
+def _check_review(context, operation: dict, action: dict, current: dict) -> None:
+    check = getattr(context, "check_review", None)
+    if check is None:
+        context.review_check(operation, action, current, context=context)
+    else:
+        check(operation, action, current)
+
+
 def _threads(values):
     if not isinstance(values, list):
         raise ValueError("current discussions must be a complete list")
@@ -303,7 +311,7 @@ def execute_review(
 
                 context.review_check = checked_policy
                 try:
-                    context.review_check(copy.deepcopy(operation), copy.deepcopy(action), copy.deepcopy(current), context=context)
+                    _check_review(context, copy.deepcopy(operation), copy.deepcopy(action), copy.deepcopy(current))
                     context.check()
                     result["stage"] = "intent_fence"
                     begun = store.begin_review_action(
@@ -319,7 +327,7 @@ def execute_review(
                         tracking.check_target(current)
                     actual = _check_candidate(current, operation, baseline)
                     _check_selected_ownership(action, actual, scope["principal_id"])
-                    context.review_check(copy.deepcopy(operation), copy.deepcopy(action), copy.deepcopy(current), context=context)
+                    _check_review(context, copy.deepcopy(operation), copy.deepcopy(action), copy.deepcopy(current))
                     context.check()
                     result["stage"] = "effect"
                     result["entered_writes"] += 1

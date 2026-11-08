@@ -4,8 +4,10 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 import json
 import subprocess
+import time
 from dataclasses import asdict
 from threading import Barrier, Event
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -96,6 +98,34 @@ def test_old_coordinator_and_unknown_closeout_response_never_replay(q, api, read
                 client.close_pool_decline(task_id, original)
         assert sum(r.method == "POST" for r in requests) == (0 if mode == "old-provider" else 1)
     assert q.get(task_id).status == Status.QUEUED
+
+
+def test_owner_settling_requests_extend_only_their_read_timeout(q, api, ready):
+    from agent_dispatch.client_pool_decline import OWNER_SETTLEMENT_READ_SECONDS
+
+    task_id, _, _, _ = ready
+    original = asdict(q.pool_worker_decline(task_id))
+    requests = []
+
+    def rewrite(request, response):
+        if request.method == "POST":
+            return httpx.Response(200, json={"protocol": "pool_worker_decline/v1", "version": True})
+        return response
+
+    with controls.connected(api, requests, rewrite=rewrite) as client:
+        default = httpx.Timeout(client._http.timeout).as_dict()
+        for call in (client.close_pool_decline, client.settle_pool_decline):
+            with pytest.raises(DispatchError):
+                call(task_id, original)
+    posts = [r for r in requests if r.method == "POST"]
+    assert [r.url.path.rsplit("/", 1)[-1] for r in posts] == ["closeout", "settlement"]
+    for request in posts:
+        timeout = request.extensions["timeout"]
+        assert timeout["read"] == max(default["read"], OWNER_SETTLEMENT_READ_SECONDS)
+        assert {k: timeout[k] for k in ("connect", "write", "pool")} == {
+            k: default[k] for k in ("connect", "write", "pool")
+        }
+    assert all(r.extensions["timeout"] == default for r in requests if r.method == "GET")
 
 
 @pytest.fixture
@@ -542,6 +572,60 @@ def test_drain_waits_for_observation_and_closeout_commit(q, api, ready, monkeypa
     assert gate.claims == 0 and q.get(task_id).status == Status.QUEUED
 
 
+def test_draining_refuses_settlement_before_queue_reconciliation(q, api, ready, monkeypatch):
+    from tests.test_pool_placement import headers
+
+    task_id, binding, _, _ = ready
+    monkeypatch.setattr(q, "settle_pool_decline", lambda *a, **k: pytest.fail("settled while draining"))
+    assert api.post("/drain", headers=headers("data"), json={"timeout": 1, "poll": .05}).json()["drained"]
+    result = api.post(f"/tasks/{task_id}/pool-decline/settlement", headers=headers("data"),
+                      json={"version": 1, **binding})
+    assert result.status_code == 409 and "draining" in result.json()["detail"]
+    assert api.app.state.drain_gate.claims == 0
+
+
+def test_drain_waits_for_admitted_settlement(q, api, ready, monkeypatch):
+    from tests.test_pool_placement import headers
+
+    task_id, binding, _, _ = ready
+    closed = q.close_pool_decline(task_id, **binding)
+    entered, finish, draining = Event(), Event(), Event()
+    gate = api.app.state.drain_gate
+    set_draining, settle = gate.set_draining, q.settle_pool_decline
+
+    def settling(*args, **kwargs):
+        entered.set()
+        assert finish.wait(5)
+        assert gate.claims == 1
+        return settle(*args, **kwargs)
+
+    def observe_drain(value):
+        set_draining(value)
+        if value:
+            draining.set()
+
+    monkeypatch.setattr(q, "settle_pool_decline", settling)
+    monkeypatch.setattr(gate, "set_draining", observe_drain)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        settlement = executor.submit(
+            api.post, f"/tasks/{task_id}/pool-decline/settlement", headers=headers("data"),
+            json={"version": 1, **binding},
+        )
+        try:
+            assert entered.wait(5)
+            drain = executor.submit(
+                api.post, "/drain", headers=headers("data"), json={"timeout": 5, "poll": .05},
+            )
+            assert draining.wait(5)
+            assert gate.claims == 1 and not drain.done()
+        finally:
+            finish.set()
+        result = settlement.result(timeout=5)
+        assert result.status_code == 200 and result.json()["closeout"] == closed.receipt
+        assert drain.result(timeout=5).json()["drained"]
+    assert gate.claims == 0
+
+
 def test_historical_api_replay_does_not_announce_a_later_task_as_queued(q, api, ready, monkeypatch):
     from agent_dispatch.events import EventBus
     from tests.test_pool_placement import headers
@@ -558,3 +642,193 @@ def test_historical_api_replay_does_not_announce_a_later_task_as_queued(q, api, 
     replay = api.post(url, headers=headers(), json={"version": 1, **binding})
     assert replay.json() == first.json()
     assert not events and len(calls) == 1 and snapshot(q, task_id) == before
+
+
+@pytest.fixture
+def governed(tmp_path, monkeypatch, request):
+    """A Dispatch-allocated worker whose workspace retains its exact task claim."""
+    from agent_dispatch import submission_readiness_observation as readiness
+    from agent_dispatch.assignment_workspace import AssignmentWorkspace
+    from tests.test_assignment_relationships import GroundOwner
+    from tests.test_pool_placement import publish
+
+    owner = GroundOwner()
+    queue = TaskQueue(tmp_path / "queue.db", relationship_writer=owner, relationship_authority="local")
+    owner.queue = queue
+    monkeypatch.setattr(queue, "_now", lambda now=None: 100.0 if now is None else now)
+    workspace = AssignmentWorkspace("host-a", "example", "tree", str(tmp_path / "tree"), "created")
+    publish(queue, pool())
+    requested = task(queue, require_verification=True)
+    reservation, _ = place(queue, requested)
+    queue.record_spawn_worktree(
+        reservation.key, workspace.worktree, ownership="created", creating_host="host-a",
+        execution_machine="host-a", driver="cli", allocation_project=workspace.project,
+        worktree_path=workspace.path, creation_nonce=workspace.creation_nonce,
+    )
+    queue.record_spawn(reservation.key, session_handle="native", startup_complete=True, startup_revision=1)
+    assert queue.task_relationship(requested.id)["state"] == "bound"
+    binding = {
+        "worker_id": workspace.worker_id, "native_id": "native",
+        "generation": queue.get(requested.id).generation, "startup_revision": 1,
+        "reservation_key": reservation.key,
+    }
+    if getattr(request, "param", True):
+        queue.prepare_pool_decline(
+            requested.id, **binding, exclusions=["pool:worker", "worktree:tree"],
+            note="The pool lacks the required tool.",
+        )
+    allocation = {
+        "task_id": requested.id, "reservation_key": reservation.key, "attempt": reservation.attempt,
+        "driver": "cli", "supervisor": "allocator", "creator_machine": "host-a", "ownership": "created",
+    }
+    descriptor = {
+        "contract": readiness.CONTRACT, "version": 1, "operations": ["observe-ready"],
+        "platforms": ["linux", "wsl"], "native_proof": "inuse-hold-v1", "paired_readiness": False,
+        "finalized": False, "task_release": False, "process_retirement": False,
+    }
+    metadata = {"ok": True, "context": {
+        "schema": "agent-worktrees.workspace-context", "version": 1,
+        "project": workspace.project, "root": workspace.path,
+        "worktree": {
+            "id": workspace.worktree, "repo": workspace.project, "path": workspace.path,
+            "creation_nonce": workspace.creation_nonce, "status": "active",
+            "dispatch_attempt_opaque": False, "checkout_managed": True, "dispatch_attempt": allocation,
+            "head": {
+                "version": 1, "worktree_id": workspace.worktree, "tracked": True,
+                "head_session": "native", "active": True, "state": "active",
+                "head_revision": 7, "pending_handoffs": [],
+            },
+        },
+    }}
+    value = {
+        "ok": True, "contract": readiness.CONTRACT, "version": 1, "operation": "observe-ready",
+        "ready": True, "task_id": requested.id, "reservation_key": reservation.key,
+        "native_id": "native", "worktree_id": workspace.worktree,
+        "creation_nonce": workspace.creation_nonce, "head_revision": 7,
+        "task_claim_ref": queue.task_relationship(requested.id)["receipt"]["ref"],
+        "project": workspace.project, "path": workspace.path, "machine": "HOST-A",
+        "allocation": allocation, "checkout": {"head": "a" * 40, "branch": "worktree/tree"},
+        "landing": {"bases": ["origin/dev"], "prs": []}, "checkout_retained": True,
+        "finalized": False, "task_release": False, "process_retirement": False,
+    }
+    calls, refusal = [], {}
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        if "--describe-readiness-contract" in argv:
+            return subprocess.CompletedProcess(argv, 0, json.dumps(descriptor), "")
+        if "--cwd" in argv:
+            return subprocess.CompletedProcess(argv, 0, json.dumps(metadata), "")
+        if refusal:
+            return subprocess.CompletedProcess(argv, 1, json.dumps(refusal), "")
+        return subprocess.CompletedProcess(argv, 0, json.dumps(value), "")
+
+    monkeypatch.setattr(readiness.remote_dispatch, "local_machine", lambda: "host-a")
+    monkeypatch.setattr(readiness.procutil, "agent_worktrees_launch_prefix", lambda: ["selected-worktrees"])
+    monkeypatch.setattr(readiness.procutil, "agent_worktrees_environment", lambda: None)
+    monkeypatch.setattr(readiness.procutil, "run_background_capture", run)
+    monkeypatch.setattr(
+        observation.procutil, "run_agent_worktrees_capture",
+        lambda *a, **k: pytest.fail("A retained task claim must not require prior finalization"),
+    )
+    return SimpleNamespace(
+        q=queue, owner=owner, task_id=requested.id, binding=binding, calls=calls, refusal=refusal,
+    )
+
+
+def test_readiness_closeout_requeues_then_settles_only_the_exact_claim(governed):
+    g = governed
+    event_id = g.q.task_relationship(g.task_id)["request"]["event_id"]
+    closed = g.q.close_pool_decline(g.task_id, **g.binding, now=101)
+    assert closed.applied and closed.relationship == {"event_id": event_id, "state": "closed"}
+    assert closed.receipt["task_relationship_event_id"] == event_id
+    assert closed.receipt["observation"]["operation"] == "observe-ready"
+    current = g.q.get(g.task_id)
+    assert current.status == Status.QUEUED and current.generation == g.binding["generation"] + 1
+    assert current.owner is None and current.owner_session_id is None
+    assert current.excludes == ["pool:worker", "worktree:tree"]
+    assert g.q.task_relationship(g.task_id)["state"] == "closed"
+    assert g.q.get_reservation(g.binding["reservation_key"]).state == SpawnState.RELEASING
+    assert sum("observe-ready" in argv for argv in g.calls) == 1
+    retained = snapshot(g.q, g.task_id)
+    replay = g.q.close_pool_decline(g.task_id, **g.binding, now=9999)
+    assert replay.receipt == closed.receipt and not replay.applied
+    assert replay.relationship == closed.relationship
+    assert snapshot(g.q, g.task_id) == retained
+    assert sum("observe-ready" in argv for argv in g.calls) == 1
+
+
+def test_readiness_refusal_blocks_before_any_dispatch_mutation(governed):
+    g = governed
+    g.refusal.update(ok=False, error="unrelated outbound obligation remains unsettled")
+    before = snapshot(g.q, g.task_id)
+    with pytest.raises(TaskError, match="unrelated outbound obligation"):
+        g.q.close_pool_decline(g.task_id, **g.binding)
+    assert snapshot(g.q, g.task_id) == before
+    assert g.q.task_relationship(g.task_id)["state"] == "bound"
+    with pytest.raises(TaskError, match="unconfirmed"):
+        g.q.settle_pool_decline(g.task_id, **g.binding)
+    assert snapshot(g.q, g.task_id) == before
+
+
+@pytest.mark.parametrize("required", [False, True])
+def test_governed_decline_refuses_a_pinned_workspace_before_any_mutation(governed, required):
+    g = governed
+    with g.q._connect() as conn:
+        if required:
+            conn.execute("UPDATE tasks SET requires='[\"worktree:tree\"]' WHERE id=?", (g.task_id,))
+        else:
+            conn.execute("UPDATE tasks SET target_worktree='tree' WHERE id=?", (g.task_id,))
+    before = snapshot(g.q, g.task_id)
+    with pytest.raises(TaskError, match="pinned to a worktree"):
+        g.q.close_pool_decline(g.task_id, **g.binding)
+    assert snapshot(g.q, g.task_id) == before
+    assert g.q.task_relationship(g.task_id)["state"] == "bound"
+    assert not any("observe-ready" in argv for argv in g.calls)
+
+
+def test_lost_settlement_reply_retains_claim_then_converges_without_second_requeue(governed):
+    g = governed
+    g.owner.lose_reply = "close"
+    closed = g.q.close_pool_decline(g.task_id, **g.binding, now=101)
+    assert closed.applied and closed.relationship["state"] == "retained"
+    assert closed.relationship["error"]
+    requeued = g.q.get(g.task_id)
+    assert requeued.status == Status.QUEUED
+    events = len(g.q.events(g.task_id))
+    settled = g.q.settle_pool_decline(g.task_id, **g.binding)
+    assert not settled.applied and settled.receipt == closed.receipt
+    assert settled.relationship["state"] == "closed"
+    assert g.q.task_relationship(g.task_id)["state"] == "closed"
+    assert g.q.get(g.task_id) == requeued and len(g.q.events(g.task_id)) >= events
+    assert g.q.settle_pool_decline(g.task_id, **g.binding).relationship["state"] == "closed"
+    with pytest.raises(TaskError):
+        g.q.settle_pool_decline(g.task_id, **{**g.binding, "native_id": "foreign"})
+
+
+def test_concurrent_closeout_and_worker_settlement_reconcile_the_claim_once(governed, monkeypatch):
+    g = governed
+    event_id = g.q.task_relationship(g.task_id)["request"]["event_id"]
+    original, calls, entered = g.q.reconcile_task_relationship, [], Event()
+
+    def reconcile(task_id, **kwargs):
+        calls.append(kwargs)
+        entered.set()
+        time.sleep(0.2)
+        return original(task_id, **kwargs)
+
+    monkeypatch.setattr(g.q, "reconcile_task_relationship", reconcile)
+
+    def settle():
+        assert entered.wait(5)
+        return g.q.settle_pool_decline(g.task_id, **g.binding)
+
+    with ThreadPoolExecutor(2) as pool_:
+        closing = pool_.submit(g.q.close_pool_decline, g.task_id, **g.binding, now=101)
+        settling = pool_.submit(settle)
+        closed, settled = closing.result(10), settling.result(10)
+    expected = {"event_id": event_id, "state": "closed"}
+    assert closed.applied and closed.relationship == expected
+    assert not settled.applied and settled.relationship == expected
+    assert calls == [{"event_id": event_id}]
+    assert g.q.task_relationship(g.task_id)["state"] == "closed"

@@ -52,6 +52,18 @@ function Invoke-ResidentPostTool {
         ($payload -isnot [pscustomobject] -and $payload -isnot [Collections.IDictionary])) {
         $payload = @{}
     }
+    # Forward this session's nudge switches; the resident's environment is not ours.
+    $forwarded = @{}
+    foreach ($key in @('AGENT_WORKTREES_NUDGE', 'AGENT_WORKTREES_AGENDA_NUDGE',
+            'AGENT_WORKTREES_NUDGE_CALLS', 'AGENT_WORKTREES_NUDGE_MINUTES')) {
+        $value = [Environment]::GetEnvironmentVariable($key)
+        if ($null -ne $value) { $forwarded[$key] = $value }
+    }
+    if ($payload -is [Collections.IDictionary]) {
+        if (-not $payload.ContainsKey('_agentWorktrees')) { $payload['_agentWorktrees'] = @{ environment = $forwarded } }
+    } elseif ($null -eq $payload.PSObject.Properties['_agentWorktrees']) {
+        $payload | Add-Member -NotePropertyName '_agentWorktrees' -NotePropertyValue @{ environment = $forwarded }
+    }
     $request = @{
         version = 1
         token = $Endpoint.hook_token
@@ -104,19 +116,18 @@ function Invoke-ResidentPostTool {
 
 function Invoke-PostToolHook {
     param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Raw)
-    $admission = Join-Path $PSScriptRoot 'managed-session.ps1'
+    $admission = [IO.Path]::Combine($PSScriptRoot, 'managed-session.ps1')
     if (-not [IO.File]::Exists($admission)) { return }
     . $admission
-    $factsReader = Join-Path $PSScriptRoot 'hook-facts.ps1'
+    $factsReader = [IO.Path]::Combine($PSScriptRoot, 'hook-facts.ps1')
     if ([IO.File]::Exists($factsReader)) {
         . $factsReader
         $readResult = Invoke-PreparedPostToolRead -Raw $Raw
         if ($null -ne $readResult) {
-            if ($readResult.Count) { [Console]::Out.Write((ConvertTo-Json -InputObject $readResult -Compress)) }
+            if ($readResult.Count) { [Console]::Out.Write((ConvertTo-PreparedWorktreesJson -InputObject $readResult)) }
             return
         }
     }
-    if (-not (Test-ManagedWorktreesSession -Raw $Raw)) { return }
     $utf8 = [Text.UTF8Encoding]::new($false, $true)
     $OutputEncoding = $utf8
     [Console]::OutputEncoding = $utf8
@@ -126,6 +137,7 @@ function Invoke-PostToolHook {
         Set-Location -LiteralPath ([IO.Path]::GetPathRoot($PSScriptRoot)) -ErrorAction Stop
     }
     [IO.Directory]::SetCurrentDirectory((Get-Location).Path)
+    if (-not (Test-ManagedWorktreesSession -Raw $Raw)) { return }
     $contextual = -not [string]::IsNullOrWhiteSpace($env:COPILOT_EXTENSIONS_CONTEXT)
     if (-not $contextual) {
         try {

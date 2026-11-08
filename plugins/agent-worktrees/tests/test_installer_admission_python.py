@@ -88,7 +88,8 @@ def admission(tmp_path: Path):
 
 def _run(
     admission, host: str, candidates: dict, explicit: Path | None = None,
-    *, native_driver: bool = False, participant: bool = False,
+    *, native_driver: bool = False, participant: bool = False, first_use: bool = False,
+    selected_snapshot: Path | str | None = None,
 ):
     root, script, home, receipt, _ = admission
     environment = {
@@ -104,6 +105,10 @@ def _run(
     )
     if participant:
         environment["AGENT_WORKTREES_NATIVE_INSTALLATION"] = "1"
+    if first_use:
+        environment["AGENT_WORKTREES_FIRST_USE_NO_WAIT"] = "1"
+    if selected_snapshot:
+        environment["AGENT_WORKTREES_FIRST_USE_EXPECTED_SNAPSHOT"] = str(selected_snapshot)
     if native_driver:
         environment["COPILOT_PLUGIN_STAGED_FROM"] = str(root / "original-payload")
     result = subprocess.run(
@@ -145,6 +150,61 @@ def test_driver_precedes_legacy_or_contextual_publication(
     assert driver["arguments"][driver["arguments"].index("--action") + 1] == "update"
     assert (binding is not None) is (participant and not contextual)
     assert driver["staged"] == (str(admission[0] / "original-payload") if contextual else None)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native installer router")
+@pytest.mark.parametrize("host", HOSTS)
+@pytest.mark.parametrize("participant", [False, True])
+def test_first_use_uses_nonblocking_driver_only_before_custody(admission, host, participant):
+    _root, script, home, _receipt, _old = admission
+    (script.parent / "runtime_install_driver.py").write_text(
+        "import json,os,sys\nfrom pathlib import Path\n"
+        "Path(os.environ['TEST_DRIVER_RECEIPT']).write_text(json.dumps(sys.argv[1:]))\n",
+        encoding="utf-8",
+    )
+    script.write_text(
+        script.read_text(encoding="utf-8").replace("$Action='update'", "$Action='stamp'"),
+        encoding="utf-8",
+    )
+    result, _binding = _run(
+        admission, host, {}, explicit=Path(sys.executable),
+        native_driver=True, participant=participant, first_use=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    arguments = json.loads((home / "driver.json").read_text())
+    assert ("--fail-if-busy" in arguments) is (not participant)
+    assert ("--check-native" in arguments) is participant
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native installer router")
+@pytest.mark.parametrize("host", HOSTS)
+@pytest.mark.parametrize("first_use", [False, True])
+@pytest.mark.parametrize("absent", [False, True])
+def test_first_use_forwards_its_selected_snapshot(admission, host, first_use, absent):
+    root, script, home, _receipt, _old = admission
+    (script.parent / "runtime_install_driver.py").write_text(
+        "import json,os,sys\nfrom pathlib import Path\n"
+        "Path(os.environ['TEST_DRIVER_RECEIPT']).write_text(json.dumps(sys.argv[1:]))\n",
+        encoding="utf-8",
+    )
+    script.write_text(
+        script.read_text(encoding="utf-8").replace("$Action='update'", "$Action='provision'"),
+        encoding="utf-8",
+    )
+    selected = "::absent::" if absent else root / "selected"
+    result, _binding = _run(
+        admission, host, {}, explicit=Path(sys.executable), native_driver=True,
+        first_use=first_use, selected_snapshot=selected,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    arguments = json.loads((home / "driver.json").read_text())
+    if first_use and absent:
+        assert "--expect-no-snapshot" in arguments and "--selected-snapshot" not in arguments
+    elif first_use:
+        assert arguments[arguments.index("--selected-snapshot") + 1] == str(selected)
+        assert "--expect-no-snapshot" not in arguments
+    else:
+        assert "--selected-snapshot" not in arguments and "--expect-no-snapshot" not in arguments
 
 
 @pytest.mark.parametrize("host", HOSTS)
@@ -311,6 +371,33 @@ def test_exact_admission_floor_preserves_deferred_bootstrap(admission, host):
     assert result.returncode == 0, result.stdout + result.stderr
     assert receipt["python"] == str(supported)
     assert "--deferred-runtime" in receipt["arguments"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native installer router")
+@pytest.mark.parametrize("host", HOSTS)
+def test_native_stamp_uses_driver_with_the_python310_floor(admission, host):
+    root, script, home, _receipt, old = admission
+    supported = root / "supported-python.ps1"
+    supported.write_text(
+        old.read_text(encoding="utf-8").replace(
+            "sys.version_info=(3,9,5)", "sys.version_info=(3,10,0)",
+        ),
+        encoding="utf-8",
+    )
+    (script.parent / "runtime_install_driver.py").write_text(
+        "import json,os,sys\nfrom pathlib import Path\n"
+        "Path(os.environ['TEST_DRIVER_RECEIPT']).write_text(json.dumps(sys.argv[1:]))\n",
+        encoding="utf-8",
+    )
+    script.write_text(
+        script.read_text(encoding="utf-8").replace("$Action='update'", "$Action='stamp'"),
+        encoding="utf-8",
+    )
+    result, binding = _run(admission, host, {}, supported, native_driver=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    arguments = json.loads((home / "driver.json").read_text())
+    assert arguments[arguments.index("--action") + 1] == "stamp"
+    assert binding is None
 
 
 @pytest.mark.parametrize("host", HOSTS)

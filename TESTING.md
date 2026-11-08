@@ -174,6 +174,36 @@ must not substitute for bounded tests and timely CI feedback.
 
 ## Focused packet catalog
 
+For contained Windows post-tool entry diagnosis, set
+`AGENT_WORKTREES_PROFILE_ENTRY=1` and select `prepared_post_entry_stage_profile`
+in `tests/test_post_tool_shell.py`. For a fixed-fixture A/B/A comparison, select
+`prepared_post_entry_baseline_comparison` with `AGENT_WORKTREES_PROFILE_BASELINE`
+set to a full lowercase commit ID and `AGENT_WORKTREES_PROFILE_BASELINE_REPO`
+to its readable source checkout. Only private fixture copies are swapped;
+the baseline checkout is read through `git show`, never modified. Both shells
+retain real receiver/count assertions and the ordinary test deadlines.
+Stage mode reports each library dot-load and per-call samples for conversion,
+membership, bounded reads, reminders and sending. Nested function spans are
+inclusive; do not sum them. Select `prepared_json_engine_retains_shell_semantics`
+for JSON value parity and the older-engine command fallback without enabling
+profiling. Neither these diagnostics nor their finite timings
+establish installed or whole-roster throughput.
+The stage profile, baseline comparison and prepared cold-process tests emit
+their reports with ordinary pytest capture enabled; no `-s` or `-rP` is needed.
+
+The Windows pre-tool packet selects `native_entry or json_engine_parity` in
+`tests/test_pre_tool_native_entry.py`, with `COPILOT_TEST_HOOK_PRE_PYTHON`
+naming the contained runner's dependency-ready interpreter. Its admitted
+policy fixtures retain the complete managed JSON module but isolate membership;
+`registered_pre_tool_entry` in `tests/test_managed_session.py` separately
+exercises the unchanged registered command and actual prepared membership,
+raw-input forwarding and revocation. The PS7 decoder comparison reports
+cmdlet/native/cmdlet first-use samples after assembly-only admission preparation,
+without utility-cmdlet preloading. It also rejects JSON cmdlet use by the
+production decoder and verifies structured-value and malformed-input parity.
+Child/item/group limits remain 10/30/300 seconds. These finite synthetic
+measurements are not installed, composed-hook or productive-throughput proof.
+
 `python-selection-native.yml` supplies real Python 3.9 and supported Python
 side by side on a disposable hosted Windows runner. Its `TEST_PYTHON39` input
 names the existing 3.9 executable explicitly and is version-checked before
@@ -354,6 +384,27 @@ native consumer qualification, not warm-server adoption, a reproduction of every
 installed-runtime or authentication/inference acceptance. The source release
 controller requires it for every frozen candidate, separately from unit coverage;
 live enforcement depends on the independently governed Main controller.
+
+Installed Manager TTY qualification is a separate, positively selected native
+contract, not part of unit coverage:
+
+```powershell
+python tools\run-manager-runtime-acceptance.py --contract installed-tty --root <fresh-private-root> --candidate-commit <candidate-sha> --candidate-tree <candidate-tree> --source-commit <dev-source-sha> --main-before <pinned-main-sha> --run-id <run-id> --run-attempt <attempt> --output <result-json>
+```
+
+The candidate must actually be installed with a representative generic adopted
+project. Its generated project binstub traverses the installed engine, registered
+Manager and real terminal admission in native cmd and PowerShell ConPTY sessions.
+The witness requires rendered TUI output, a visible keyboard-driven response and
+clean owned exit, plus an install-success/launch-failure negative control.
+Version output, process existence and synthetic ready files are insufficient.
+The result binds the frozen candidate and execution attempt, with declared
+source provenance kept distinct from transformed candidate bytes. Missing,
+skipped, failed, timed-out, incomplete or stale results refuse promotion.
+Fixture diagnostics and cleanup remain privately owned and bounded; no operator
+installation, credentials, sessions or service registrations are borrowed.
+Source workflow wiring alone is not activation: the preserved Main controller
+requires its own reviewed adoption and exact-candidate native run.
 
 Worktrees' opt-in `--test-file tests/native/test_uninstall_windows_owner.py
 --allow-explicit-tiers` packet exercises the emitted Windows census script in
@@ -9146,6 +9197,14 @@ $env:AGENT_WORKTREES_LIST_WARM_NATIVE = '1'
 python tools\run-plugin-tests.py agent-worktrees --allow-explicit-tiers -k test_native_resident_warm_two_cycle_git_budget
 ```
 
+The Windows deep-build control in `tools/test_standalone_python_artifacts.py`
+builds the real Worktrees wheel from a source root whose wheel staging paths
+exceed the native path limit, then compares every packaged runtime resource
+against its source bytes. The ordinary Worktrees and Manager wheel/sdist
+round trips separately cover the shared build helper's existing consumers.
+The metadata-only control simulates the public distutils missing-wheel
+exception; a real no-wheel toolchain check remains a separate validation.
+
 The agent-worktrees native lean-provision and namespace-package health-gate
 regressions materialize the real release payload and install it through UV and
 the canonical seasoning adapter. Preparation retains registry metadata, wheels,
@@ -9165,6 +9224,21 @@ construction fails. The 60-second installer deadline stays inside the
 The stalled descendant/captured-pipe case lives separately in
 `test_first_install_bootstrap_watchdog.py` and runs only in the full suite,
 not the required guard lane.
+
+The opt-in Windows first-use test exercises both payload and global entries in
+disposable homes. The payload entry stamps before queued provision; the global
+entry provisions directly and uses a private test mutex. Both check the
+completed runtime and command. Each uses a fresh cache and an explicitly
+supplied anonymous HTTPS index, not the offline seed or the live installation.
+Select an approved feed before running:
+
+```powershell
+$env:AGENT_WORKTREES_FIRST_USE_NATIVE = '1'
+$env:UV_DEFAULT_INDEX = '<approved-https-index>'
+<prepared-test-python> -B -m pytest -q plugins\agent-worktrees\tests\test_first_install_bootstrap.py -k test_windows_payload_first_use_stamps_and_provisions_under_driver
+```
+
+This is first-use evidence, not a two-generation update or service-cutover test.
 
 Worktree Manager's native viewport regression uses 1,100 live synthetic
 worktrees, with 40 visible by default, both without workers and with 1,100

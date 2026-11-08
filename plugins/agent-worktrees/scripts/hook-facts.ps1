@@ -55,14 +55,14 @@ function Read-PostToolHookFacts {
         foreach ($root in @($RuntimeRoot, $ProjectRoot, $Workspace)) {
             if (-not [IO.Path]::IsPathRooted($root)) { return $null }
         }
-        $factsHome = Join-Path $ProjectRoot 'worktrees'
+        $factsHome = [IO.Path]::Combine($ProjectRoot, 'worktrees')
         foreach ($segment in @('', $WorktreeId, 'hook-facts')) {
-            if ($segment) { $factsHome = Join-Path $factsHome $segment }
+            if ($segment) { $factsHome = [IO.Path]::Combine($factsHome, $segment) }
             $attributes = [IO.File]::GetAttributes($factsHome)
             if (($attributes -band [IO.FileAttributes]::ReparsePoint) -or
                 -not ($attributes -band [IO.FileAttributes]::Directory)) { return $null }
         }
-        $path = Join-Path $factsHome ($Discovery.hook_facts_generation + '.json')
+        $path = [IO.Path]::Combine($factsHome, $Discovery.hook_facts_generation + '.json')
         $attributes = [IO.File]::GetAttributes($path)
         if ($attributes -band ([IO.FileAttributes]::ReparsePoint -bor [IO.FileAttributes]::Directory)) {
             return $null
@@ -414,7 +414,7 @@ function Send-PostToolReadDemand {
             $request.payload = $Mutation
         }
         $bytes = ([Text.UTF8Encoding]::new($false)).GetBytes(
-            (ConvertTo-Json -InputObject $request -Depth 100 -Compress) + "`n"
+            (ConvertTo-PreparedWorktreesJson -InputObject $request -Depth 100) + "`n"
         )
         $limit = if ($null -ne $Mutation) { 65536 } else { 2048 }
         if ($bytes.Length -gt $limit) { return }
@@ -434,7 +434,23 @@ function Send-PostToolReadDemand {
 
 function Get-PostToolRuntimeRoot {
     if ($env:COPILOT_EXTENSIONS_CONTEXT) {
-        $runtime = Get-ManagedWorktreesRuntimeRoot
+        $pointer = $env:COPILOT_EXTENSIONS_CONTEXT
+        $null = Get-PreparedWorktreesPath $pointer
+        if ([IO.Path]::GetFileName($pointer) -cne 'install.json') { throw 'Invalid context pointer' }
+        $runtime = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($pointer))
+        if ([IO.Path]::GetFileName($runtime) -cne 'agent-worktrees' -or
+            [IO.Path]::GetFileName([IO.Path]::GetDirectoryName($runtime)) -cne 'plugins') {
+            throw 'Invalid context layout'
+        }
+        # Normalization can erase an ancestor; retain the original literal-path checks.
+        $ancestor = $pointer
+        for ($depth = 0; $ancestor; $depth++) {
+            if ($depth -ge 128) { throw 'Prepared context path exceeds its bound' }
+            if ([IO.File]::GetAttributes($ancestor) -band [IO.FileAttributes]::ReparsePoint) {
+                throw 'Linked context path'
+            }
+            $ancestor = [IO.Path]::GetDirectoryName($ancestor)
+        }
     } else {
         $registryHome = if ($env:AGENT_HOME -and $env:AGENT_HOME.Trim()) {
             $env:AGENT_HOME.Trim()
@@ -549,6 +565,88 @@ function Invoke-PreparedPostToolRead {
     }
 }
 
+function Update-PostToolAgendaWindow {
+    # Mirrors nudge_status._agenda_tick: an independent window, same thresholds.
+    param([string]$StateHome, [string]$Worktree, [double]$Now)
+    if (([string]$env:AGENT_WORKTREES_AGENDA_NUDGE).Trim().ToLowerInvariant() -in @('0', 'off', 'false', 'no')) {
+        return $false
+    }
+    $sidecar = [IO.Path]::Combine($StateHome, $Worktree + '.agenda.json')
+    $data = Read-PostToolBoundedJson $sidecar 4096
+    if ($null -eq $data -or -not $data.ContainsKey('window_start') -or
+        ($data['count'] -isnot [int] -and $data['count'] -isnot [long]) -or
+        $data['count'] -lt 0 -or $data['count'] -eq [long]::MaxValue -or
+        ($data['window_start'] -isnot [double] -and $data['window_start'] -isnot [decimal] -and
+         $data['window_start'] -isnot [int] -and $data['window_start'] -isnot [long])) {
+        $data = @{ count = 0; window_start = $Now }
+    }
+    $calls = [long]$data['count'] + 1
+    $elapsed = ($Now - [double]$data['window_start']) / 60.0
+    $due = $calls -ge (Get-PostToolPositiveInt $env:AGENT_WORKTREES_NUDGE_CALLS 25) -or
+        $elapsed -ge (Get-PostToolPositiveInt $env:AGENT_WORKTREES_NUDGE_MINUTES 20)
+    $next = if ($due) { @{ count = 0; window_start = $Now } }
+    else { @{ count = $calls; window_start = [double]$data['window_start'] } }
+    try {
+        [void][IO.Directory]::CreateDirectory($StateHome)
+        [IO.File]::WriteAllText($sidecar, (ConvertTo-PreparedWorktreesJson -InputObject $next))
+    } catch { return $false }
+    return $due
+}
+
+function Get-PostToolAgendaLaneState {
+    # Mirrors nudge_status.agenda_lane_state with local, read-only evidence.
+    param([string]$ProjectRoot, [string]$Worktree, [string]$Workspace)
+    try {
+        $descriptor = [IO.Path]::Combine($ProjectRoot, 'worktree-state', $Worktree, 'descriptor.json')
+        if ([IO.File]::Exists($descriptor)) {
+            $value = Read-PostToolBoundedJson $descriptor 1048576
+            if ($null -eq $value) { return 'unknown' }
+            $json = $PSVersionTable.PSVersion.Major -ge 6
+            $placements = $value['placements']
+            if ($json) {
+                if ($placements -isnot [Newtonsoft.Json.Linq.JArray]) { return 'unknown' }
+            } elseif ($placements -isnot [array]) { return 'unknown' }
+            foreach ($placement in $placements) {
+                $domain = $null
+                if ($json -and $placement -is [Newtonsoft.Json.Linq.JObject]) {
+                    $domain = $placement['domain']
+                    if ($domain -is [Newtonsoft.Json.Linq.JValue]) { $domain = $domain.Value }
+                } elseif ($placement -is [Collections.IDictionary]) {
+                    $domain = $placement['domain']
+                }
+                if ($domain -is [string] -and $domain -ceq 'agendas') { return 'present' }
+            }
+        }
+        $agendaHome = [IO.Path]::Combine($Workspace, '.effort-agenda')
+        if ([IO.Directory]::Exists($agendaHome)) {
+            foreach ($child in [IO.Directory]::EnumerateDirectories($agendaHome)) { return 'present' }
+        }
+        return 'absent'
+    } catch {
+        return 'unknown'
+    }
+}
+
+function Get-PostToolAgendaReminder {
+    # The owner publishes the policy at session start; no config/Python/RPC here.
+    param([string]$StateHome, [string]$Worktree, [string]$ProjectRoot, [string]$Workspace)
+    $record = Read-PostToolBoundedJson ([IO.Path]::Combine($StateHome, $Worktree + '.agenda-policy.json')) 4096
+    if ($null -eq $record -or
+        ($record['version'] -isnot [int] -and $record['version'] -isnot [long]) -or
+        $record['version'] -ne 1 -or $record['policy'] -isnot [string] -or
+        $record['policy'] -cne 'expected') { return $null }
+    if ((Get-PostToolAgendaLaneState $ProjectRoot $Worktree $Workspace) -cne 'absent') { return $null }
+    return (
+        '[agent-worktrees] This project expects an agenda for this session ' +
+        '(agendas.default: expected), but no agenda lane was found for this ' +
+        'worktree. Adopt one via the `driving-effort-agendas` skill: ' +
+        '`agenda_outline.py from-effort <effort README.md>` (or ' +
+        '`agenda_backfill.py preview <session-folder>` to rebuild from this ' +
+        'session), then `preview` and `adopt`. You own and edit the agenda; ' +
+        'nothing is adopted automatically.'
+    )
+}
+
 function Invoke-PreparedPostToolReminders {
     param(
         [string]$SessionHome, [string]$Session, [string]$Cwd, [switch]$SkipCounter,
@@ -579,11 +677,15 @@ function Invoke-PreparedPostToolReminders {
         if ($null -eq $view -or $view['version'] -ne 2) { return ,@{} }
         $facts = $view['facts']
         $worktree = $binding['worktreeId']
-        $stateHome = [IO.Path]::Combine((Get-ManagedWorktreesRuntimeRoot), 'nudge-state')
+        $stateRuntime = if ($env:COPILOT_EXTENSIONS_CONTEXT) { $runtime } else {
+            [IO.Path]::Combine($env:USERPROFILE, '.agent-worktrees')
+        }
+        $stateHome = [IO.Path]::Combine($stateRuntime, 'nudge-state')
         $sidecar = [IO.Path]::Combine($stateHome, $worktree + '.json')
         $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000.0
         $messages = [Collections.Generic.List[string]]::new()
         $counterLock = $null
+        $agendaDue = $false
         try {
             $null = Get-PreparedWorktreesPath $sidecar
             if (-not $SkipCounter -and
@@ -594,6 +696,7 @@ function Invoke-PreparedPostToolReminders {
                 } elseif ($facts['status'] -in @('completed', 'finalized', 'removed', 'pruned')) {
                     try { [IO.File]::Delete($sidecar) } catch {}
                 } else {
+                    try { $agendaDue = Update-PostToolAgendaWindow $stateHome $worktree $now } catch {}
                     $data = Read-PostToolBoundedJson $sidecar 4096
                     $note = Get-PostToolNoteIdentity $facts['status_note_at']
                     if ($null -eq $data -or
@@ -629,13 +732,19 @@ function Invoke-PreparedPostToolReminders {
                         } else { $data['count'] = $calls }
                         try {
                             [void][IO.Directory]::CreateDirectory($stateHome)
-                            [IO.File]::WriteAllText($sidecar, (ConvertTo-Json -InputObject $data -Compress))
+                            [IO.File]::WriteAllText($sidecar, (ConvertTo-PreparedWorktreesJson -InputObject $data))
                         } catch {}
                     }
                 }
             }
         } catch {} finally {
             if ($null -ne $counterLock) { $counterLock.Dispose() }
+        }
+        if ($agendaDue) {
+            try {
+                $agenda = Get-PostToolAgendaReminder $stateHome $worktree $locator['projectRoot'] $locator['workspace']
+                if ($agenda) { $messages.Add($agenda) }
+            } catch {}
         }
         try {
             if (-not $facts['record_head_session']) {

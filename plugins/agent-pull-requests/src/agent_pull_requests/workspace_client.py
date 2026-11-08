@@ -12,6 +12,7 @@ from .watch_replay_binding import ReplayBinding
 from .watch_replay_client import ReplayClient, ReplayClientError
 from .watch_replay_store import json_object
 from .workspace_selection import needs_owned_edits, selection_contract, supports_owned_edits, supports_selection
+from .review_comment_observation import contract as comment_observation_contract, supports as supports_comment_observation
 from .workspace_operations import (
     CHUNK_BYTES, MAX_GENERATION_BYTES, PROTOCOL, NativeWorkspaceClient, encoded, materialize,
     needs_prepared_review, prepared_review_contract, supports_prepared_review,
@@ -125,6 +126,16 @@ class WorkspaceClient:
                 **(unavailable if isinstance(unavailable, dict) else {}),
                 "allocate": "unsupported_selection_contract",
             }
+        if "observe-comment" in value["operations"] and (
+            not supports_comment_observation(value.get("comment_observation_contract"))
+            or not supports_prepared_review(value.get("prepared_review_contract"))
+        ):
+            value["operations"] = [name for name in value["operations"] if name != "observe-comment"]
+            unavailable = value.get("unavailable_operations")
+            value["unavailable_operations"] = {
+                **(unavailable if isinstance(unavailable, dict) else {}),
+                "observe-comment": "unsupported_comment_observation_contract",
+            }
         if epoch != self._discovery_epoch:
             raise WorkspaceClientError("workspace_discovery_superseded")
         self._capabilities = copy.deepcopy(value)
@@ -154,6 +165,10 @@ class WorkspaceClient:
                 checkpoint()
             if not supports_prepared_review(self._capabilities.get("prepared_review_contract")):
                 raise WorkspaceClientError("prepared_review_contract_required", outcome_unknown=False)
+        if operation == "observe-comment" and not supports_comment_observation(
+            self._capabilities.get("comment_observation_contract"),
+        ):
+            raise WorkspaceClientError("comment_observation_contract_required", outcome_unknown=False)
         if operation == "allocate" and not supports_selection(self._capabilities.get("selection_contract")):
             raise WorkspaceClientError("selection_contract_required", outcome_unknown=False)
         if needs_owned_edits(operation, payload) and not supports_owned_edits(
@@ -176,6 +191,17 @@ class WorkspaceClient:
             or value["result"].get("action_id") != payload.get("action_id")
         ):
             raise WorkspaceClientError("invalid_prepared_receipt_response", outcome_unknown=False)
+        if operation == "observe-comment" and (
+            value["result"].get("protocol") != comment_observation_contract()["result_protocol"]
+            or value["result"].get("scope") != value["scope"]
+            or any(value["result"].get(name) != payload.get(name)
+                   for name in ("operation_id", "action_id", "generation_id"))
+            or value["result"].get("effects") != "none"
+            or value["result"].get("original_version_proven") is not False
+            or value["result"].get("feedback_progress") is not False
+            or value["result"].get("fresh_native_read") is not False
+        ):
+            raise WorkspaceClientError("invalid_comment_observation_response", outcome_unknown=False)
         if operation == "allocate":
             from .review_selection_store import ReviewSelectionStore
             try:

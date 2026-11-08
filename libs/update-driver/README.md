@@ -46,7 +46,9 @@ of independently owned service daemons. There is no Task, COM or UAC fallback.
 
 The private executor shim places generated Python bytecode beneath the existing
 driver root's `cache/python`, outside the invoking runtime's immutable slot.
-Its pinned product invocation and installation custody remain unchanged.
+It skips `site` initialization: the shim uses only the standard library and
+explicitly located participant/procutil modules. The pinned product invocation,
+its normal interpreter behavior and installation custody remain unchanged.
 
 New Windows queue directories are created atomically with the actual process
 TokenUser as owner and protected, inheritable FullControl for that account,
@@ -130,6 +132,11 @@ creation, not an implicit permission migration or a read-only status side effect
   versions, or bound worker-launch fan-out. The opt-in changes no journal schema.
   Existing unsettled global fences refuse admission with `InterruptedError`;
   a detached caller cannot receive an apparently healthy receipt behind one.
+- `run_explicit(spec, *, runner, root=None)` takes execution custody without
+  waiting and runs only its own newly admitted request. An active custodian or
+  ordinary pending work is busy; a running row found under acquired custody is
+  unsettled and raises `InterruptedError`. It leaves that row unchanged for
+  explicit recovery and never replays another request.
 - `status(request_id=None, *, root=None)` reads one Request or a tuple.
   Missing state is empty; status does not mkdir, initialize, repair, or recover
   a database. Unknown schema and malformed records fail explicitly.

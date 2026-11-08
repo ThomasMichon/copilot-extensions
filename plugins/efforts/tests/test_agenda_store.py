@@ -231,8 +231,20 @@ def test_strict_requests_have_no_partial_effect(
     assert STORE.read(home) == before
 
 
+@pytest.fixture
+def symlink_capability(tmp_path: Path) -> None:
+    try:
+        (tmp_path / "capability-link").symlink_to(tmp_path / "capability-target")
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 1314:
+            pytest.skip("host cannot create symlinks; native refusal controls require that privilege")
+        raise
+
+
 @pytest.mark.parametrize("location", ["root", "ancestor", "database", "journal", "board"])
-def test_symlink_paths_refused(home: Path, tmp_path: Path, location: str) -> None:
+def test_symlink_paths_refused(
+    home: Path, tmp_path: Path, location: str, symlink_capability: None,
+) -> None:
     link = tmp_path / "alias"
     if location in ("root", "ancestor"):
         link.symlink_to(home, target_is_directory=True)
