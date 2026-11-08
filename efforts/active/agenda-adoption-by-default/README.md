@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions (`efforts`, `agent-worktrees` plugins)
 - **Branch(es):** per-slice PRs against `dev`
 - **Created:** 2026-11-07
-- **Status:** Active
+- **Status:** Done
 
 ## Guiding Intent
 
@@ -80,8 +80,8 @@ never a rigid lock or an automatic mutation.
       including already-running sessions.
 
 ### Phase 3 — Samples and rollout notes
-- [ ] Backfill and render several completed sessions for operator review.
-- [ ] Document enabling the switch from a knowledge repository.
+- [x] Backfill and render several completed sessions for operator review.
+- [x] Document enabling the switch from a knowledge repository.
 
 ## Validation Plan
 
@@ -90,7 +90,7 @@ never a rigid lock or an automatic mutation.
       fixtures; preview output is a valid graph.
 - [x] Unit tests: preference composition across tiers; guidance and nudge
       appear only when enabled.
-- [ ] Sample backfills of real completed sessions reviewed by the operator.
+- [x] Sample backfills of real completed sessions reviewed by the operator.
 
 ## Proposal
 
@@ -107,3 +107,19 @@ Pending: no separate proposal; the Plan is source-only and lands through reviewe
   preview and `adopt` landed with skill guidance and tests (#11396).
 - Phase 2 adds the `agendas.default` preference (`off` | `expected`),
   an "Agenda:" session-guidance line and a throttled adoption nudge.
+
+### 2026-11-07 — Phase 2 merged, Phase 3 complete; effort done
+- Phase 2 merged (#11414): `agendas.default` composes across the four config
+  tiers (settable in a knowledge repository), session start/resume adds the
+  "Agenda:" guidance, and the post-tool reminder reads an owner-published
+  policy record honoring `AGENT_HOME`.
+- Running sessions: `agent-worktrees status` writes republish the policy, so an
+  enabled default reaches an already-running session at its next disposition
+  write (prompted by the disposition nudge); covered end to end by
+  `test_running_session_sees_enabled_agenda_default_after_status_write`.
+- Phase 3: sample backfills of completed sessions were rendered and reviewed by
+  the operator; knowledge-repository enablement is documented in
+  `plugins/agent-worktrees/docs/config-reference.md#default-on-agendas` and
+  `docs/worktree-agendas.md#default-on-policy`.
+- Rollout to installed machines follows the normal release promotion; enabling
+  `agendas.default: expected` in a knowledge repository is an operator choice.
