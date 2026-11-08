@@ -478,36 +478,6 @@ def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config, request):
     scripts.mkdir(parents=True, exist_ok=True)
     for name in ("post-tool-hook.ps1", "hook-facts.ps1"):
         shutil.copyfile(PLUGIN / "scripts" / name, scripts / name)
-    if os.environ.get("AGENT_WORKTREES_CAPTURE_SEND_EXIT") == "1":
-        copied_sender = scripts / "hook-facts.ps1"
-        sender = copied_sender.read_text(encoding="utf-8")
-        original = """    } catch {} finally {
-        if ($null -ne $client) { $client.Dispose() }
-    }
-}
-
-function Get-PostToolRuntimeRoot"""
-        captured = """    } catch {
-        $sendError = $_.Exception.GetType().FullName + ': ' + $_.Exception.Message
-    } finally {
-        $exitMs = if ($null -ne $clock) { $clock.Elapsed.TotalMilliseconds } else { $null }
-        try {
-            [IO.File]::WriteAllText(
-                (Join-Path $PSScriptRoot 'send-exit.json'),
-                (ConvertTo-Json -Compress -InputObject @{
-                    elapsed_ms = $exitMs; remaining_ms = $remaining
-                    error = $sendError; connected = ($null -ne $client -and $client.Connected)
-                })
-            )
-        } finally {
-            if ($null -ne $client) { $client.Dispose() }
-        }
-    }
-}
-
-function Get-PostToolRuntimeRoot"""
-        assert sender.count(original) == 1
-        copied_sender.write_text(sender.replace(original, captured), encoding="utf-8")
     with (scripts / "post-tool-hook.ps1").open("a", encoding="utf-8") as stream:
         stream.write("\nfunction Invoke-ResidentPostTool { throw 'synchronous resident call' }\n")
     original = str(PLUGIN / "scripts" / "managed-session.ps1").replace("'", "''")
@@ -566,12 +536,7 @@ function Get-PostToolRuntimeRoot"""
         )
         yield fixture
     finally:
-        try:
-            observation = scripts / "send-exit.json"
-            if observation.exists():
-                print("send_exit=" + observation.read_text(encoding="utf-8"))
-        finally:
-            runtime.shutdown()
+        runtime.shutdown()
 
 
 @pytest.mark.portfolio_tier("T2")
@@ -780,6 +745,159 @@ def test_registered_prepared_cell_post_tool_uses_selected_original_owners(
             stalled.server_close()
             stalled_thread.join(timeout=2)
             assert not stalled_thread.is_alive()
+        server.close()
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows sender deadline arithmetic")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("allocation_ms", [60, 110])
+def test_post_tool_send_debits_allocation_and_connect_from_one_budget(tmp_path, shell, allocation_ms):
+    from agent_procutil import no_window_kwargs
+
+    executable = shutil.which(shell)
+    if not executable:
+        if os.environ.get("AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP") == "1":
+            pytest.fail(f"Required native membership shell {shell} is unavailable")
+        pytest.skip(f"{shell} is unavailable")
+    source = (PLUGIN / "scripts" / "hook-facts.ps1").read_text(encoding="utf-8")
+    start = source.index("function Send-PostToolReadDemand")
+    end = source.index("function Get-PostToolRuntimeRoot", start)
+    sender = source[start:end]
+    for original, replacement in (
+        ("$clock = [Diagnostics.Stopwatch]::StartNew()", "$clock = $script:clock"),
+        (
+            "$client = [Net.Sockets.TcpClient]::new([Net.Sockets.AddressFamily]::InterNetwork)",
+            "$client = $script:client",
+        ),
+    ):
+        assert sender.count(original) == 1
+        sender = sender.replace(original, replacement)
+    source = source[:start] + sender + source[end:]
+    script = tmp_path / "sender-budget.ps1"
+    script.write_text(source + r"""
+$ErrorActionPreference = 'Stop'
+$script:clock = [pscustomobject]@{ ElapsedMilliseconds = [int]$env:ALLOCATION_MS }
+$script:connectWaits = [Collections.Generic.List[int]]::new()
+$script:writeWaits = [Collections.Generic.List[int]]::new()
+$script:wire = $null; $script:disposed = 0
+$script:connectTask = [pscustomobject]@{}
+$script:connectTask | Add-Member ScriptMethod Wait {
+    param($remaining)
+    $script:connectWaits.Add($remaining)
+    $script:clock.ElapsedMilliseconds = 75
+    return $true
+}
+$script:writeTask = [pscustomobject]@{}
+$script:writeTask | Add-Member ScriptMethod Wait {
+    param($remaining)
+    $script:writeWaits.Add($remaining)
+    return $true
+}
+$script:stream = [pscustomobject]@{}
+$script:stream | Add-Member ScriptMethod WriteAsync {
+    param($bytes, $offset, $count)
+    $script:wire = [Text.Encoding]::UTF8.GetString($bytes, $offset, $count)
+    return $script:writeTask
+}
+$script:client = [pscustomobject]@{}
+$script:client | Add-Member ScriptMethod ConnectAsync {
+    param($address, $port)
+    return $script:connectTask
+}
+$script:client | Add-Member ScriptMethod GetStream { return $script:stream }
+$script:client | Add-Member ScriptMethod Dispose { $script:disposed++ }
+Send-PostToolReadDemand -Discovery @{
+    hook_capabilities = @('read-hook-demand-v1'); hook_transport = 'tcp'
+    hook_generation = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    hook_endpoint = '127.0.0.1:12345'; hook_token = 'example'
+}
+ConvertTo-Json -Compress -InputObject @{
+    connect = @($script:connectWaits); write = @($script:writeWaits)
+    wire = $script:wire; disposed = $script:disposed
+}
+""", encoding="utf-8")
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-File", str(script)],
+        text=True, capture_output=True, timeout=10,
+        env={**os.environ, "ALLOCATION_MS": str(allocation_ms)}, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    value = json.loads(result.stdout)
+    assert value["disposed"] == 1
+    if allocation_ms == 60:
+        assert value["connect"] == [40]
+        assert value["write"] == [25]
+        assert json.loads(value["wire"])["kind"] == "readHookDemand"
+    else:
+        assert value["connect"] == value["write"] == []
+        assert value["wire"] is None
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("network")
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows prepared consumer cold-process tail")
+@pytest.mark.parametrize("prepared_read_event", ["cell"], indirect=True)
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("sample_group", range(4))
+def test_registered_prepared_cell_post_tool_cold_process_tail(
+    prepared_read_event, shell, sample_group,
+):
+    from agent_procutil import no_window_kwargs
+    from agent_worktrees.hook_ipc import HookIpcServer
+
+    executable = shutil.which(shell)
+    if not executable:
+        if os.environ.get("AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP") == "1":
+            pytest.fail(f"Required native membership shell {shell} is unavailable")
+        pytest.skip(f"{shell} is unavailable")
+    fixture = prepared_read_event
+    fixture["env"]["AGENT_WORKTREES_NUDGE_CALLS"] = "1000"
+    notices, samples = [], []
+    received = threading.Event()
+
+    class Server(HookIpcServer):
+        def _on_read_demand(self, request):
+            super()._on_read_demand(request)
+            notices.append(request)
+            received.set()
+
+    server = Server(
+        lambda *args: pytest.fail("prepared reads must not request synchronous policy or advice"),
+        read_demand_admitted=lambda: True,
+    )
+    server.start()
+    try:
+        path = fixture["registry"] / "status-monitor.lock"
+        path.write_text(json.dumps({**json.loads(path.read_text()), **server.rendezvous()}), encoding="utf-8")
+        for index in range(3):
+            received.clear()
+            started = time.perf_counter()
+            result = subprocess.run(
+                [executable, "-NoProfile", "-NonInteractive", "-File", str(fixture["harness"])],
+                input=json.dumps(fixture["payload"]), text=True, capture_output=True, timeout=10,
+                env=fixture["env"], **no_window_kwargs(),
+            )
+            elapsed = time.perf_counter() - started
+            assert result.returncode == 0, result.stderr
+            assert result.stdout == ""
+            assert result.stderr.startswith("entry_seconds="), result.stderr
+            samples.append({
+                "process_seconds": elapsed,
+                "entry_seconds": float(result.stderr.removeprefix("entry_seconds=")),
+            })
+            assert received.wait(2), "selected original IPC owner received no notification"
+            assert len(notices) == index + 1
+            assert notices[-1]["kind"] == "readHookDemand"
+            assert "payload" not in notices[-1]
+            assert server.has_recent_hook_demand()
+            assert json.loads(fixture["sidecar"].read_text())["count"] == index + 1
+        print(f"{shell}/cell/cold-tail-{sample_group}: {json.dumps(samples)}")
+    finally:
         server.close()
 
 

@@ -420,8 +420,10 @@ function Send-PostToolReadDemand {
         if ($bytes.Length -gt $limit) { return }
         $clock = [Diagnostics.Stopwatch]::StartNew()
         $client = [Net.Sockets.TcpClient]::new([Net.Sockets.AddressFamily]::InterNetwork)
-        if (-not $client.ConnectAsync([Net.IPAddress]::Loopback, $port).Wait(50)) { return }
-        $remaining = 50 - [int]$clock.ElapsedMilliseconds
+        $remaining = 100 - [int]$clock.ElapsedMilliseconds
+        if ($remaining -le 0) { return }
+        if (-not $client.ConnectAsync([Net.IPAddress]::Loopback, $port).Wait($remaining)) { return }
+        $remaining = 100 - [int]$clock.ElapsedMilliseconds
         if ($remaining -le 0) { return }
         $null = $client.GetStream().WriteAsync($bytes, 0, $bytes.Length).Wait($remaining)
         # A completed write is not receiver acceptance; never read, retry or replay.

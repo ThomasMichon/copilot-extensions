@@ -282,7 +282,7 @@ evaluation. The existing IPC owner advertises `read-hook-demand-v1` and its own
 process generation before a prepared Windows reader sends a notification.
 That compact message renews only the original recent-tool idle grace; it
 cannot classify mutations, run policy/advice, wake recomputation or start a
-resident. The shell reads no reply and shares a 50 ms connect/write wait;
+resident. The shell reads no reply and shares a 100 ms allocation/connect/write wait;
 unsupported discovery skips it, and uncertain delivery never causes replay.
 The [optional read-demand contract](../../../plugins/agent-worktrees/docs/worktree-observations.md#optional-read-demand)
 defines wire bounds, source selection, live admission and upgrade/rollback.

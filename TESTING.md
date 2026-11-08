@@ -259,8 +259,16 @@ notifications. It checks installation-scoped discovery, changed-byte refusal,
 old membership routing, missing rows, live reminder opt-out, late guidance
 and non-replying peers. Warm interpreter/client and synchronous requests are
 trapped; incompatible membership explicitly retains its original admission
-lookup. Original 30-second item, 10-second child, 300-second group and 50-ms
-production-send limits remain unchanged. These are isolated source consumers,
+lookup. Original 30-second item, 10-second child and 300-second group limits
+remain unchanged. The Windows production sender shares a 100-ms allocation/
+connect/write ceiling, subtracting elapsed time from both waits. Controlled-clock
+and transport-adapter tests execute the real sender/encoder to prove the
+remaining connection/write allowances and refusal after budget exhaustion;
+these are deadline arithmetic controls, not native delivery/performance samples.
+The uninstrumented cold-process tail cases run three separate shell processes
+per group across four fresh fixtures per shell, retain every real receiver/
+accounting assertion, and report entry and complete-process durations.
+These 24 observations are not a p99 or worst-case distribution. These are isolated source consumers,
 not installed, cold/directory/POSIX/recovery, composed or throughput acceptance.
 
 The path-gated, manually dispatchable legacy-monitor native lane also runs

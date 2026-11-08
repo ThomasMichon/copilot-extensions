@@ -37,14 +37,13 @@ jobs:
       - name: Require actual Windows PowerShell and PowerShell 7 membership and post-tool controls
         env:
           AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP: "1"
-          AGENT_WORKTREES_CAPTURE_SEND_EXIT: "1"
           PYTHONUTF8: "0"
           PYTEST_ADDOPTS: "-vv -rP --tb=short --durations=10"
         run: >-
           python tools/run-plugin-tests.py agent-worktrees
           --test-file tests/test_managed_session.py
           --test-file tests/test_post_tool_shell.py
-          -k "prepared_cell_membership or registered_prepared_cell"
+          -k "prepared_cell_membership or registered_prepared_cell or send_debits_allocation"
           --allow-explicit-tiers --test-timeout 30 --timeout 300
       - name: Qualify mixed-batch registered entries and original receiver
         env:
