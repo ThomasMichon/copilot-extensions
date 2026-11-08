@@ -102,7 +102,7 @@ jobs:
           )
           foreach ($pin in $pins) {
             $archive = Join-Path $root "$($pin.Name).zip"
-            curl.exe --fail --location --retry 2 --retry-delay 2 --max-time 30 --retry-max-time 90 --output $archive $pin.Url
+            curl.exe --fail --location --retry 2 --retry-delay 2 --max-time 30 --retry-max-time 90 --output "$archive" "$($pin.Url)"
             if ($LASTEXITCODE -ne 0) { throw 'Pinned native prerequisite download failed' }
             if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $pin.Hash) {
               throw 'Pinned native prerequisite archive digest mismatch'

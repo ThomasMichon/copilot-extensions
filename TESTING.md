@@ -76,8 +76,10 @@ Worktrees detached caller. The candidate must supply `test_public_embody` in
 `tests/native/test_native_seed_application.py`; controller support does not
 provide or qualify that source fixture. The protected controller prepares hash-pinned,
 disposable Copilot 1.0.105 and PSMux 3.3.8 binaries, checks their actual versions,
-and allows at most two transient download retries within a 120-second
-per-archive acquisition bound. Failed acquisition retains a request-bound
+and allows at most two transient download retries. Each transfer has a
+30-second deadline; a 90-second retry window includes retry delays, and a
+final transfer started within that window may extend acquisition to 120
+seconds per archive. Failed acquisition retains a request-bound
 failed prerequisite result without executing the candidate's native caller.
 The promotion Resume lane uses the same bounded pinned-download policy.
 The controller requires anonymous access to the configured non-public HTTPS package feed

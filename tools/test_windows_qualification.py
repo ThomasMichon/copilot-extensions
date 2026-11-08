@@ -8,6 +8,7 @@ from contextlib import nullcontext
 import importlib.util
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -300,7 +301,7 @@ def test_native_result_requires_actual_caller_and_pinned_prerequisites(mutation)
 
 
 @pytest.mark.parametrize("prerequisites", [True, False])
-@pytest.mark.parametrize("preparation", ["success", "failure", "cancelled"])
+@pytest.mark.parametrize("preparation", ["success", "failure", "cancelled", "skipped", "unrecognized"])
 def test_native_execution_gates_consumer_and_sanitizes_uploaded_files(
     tmp_path, monkeypatch, prerequisites, preparation,
 ):
@@ -344,6 +345,8 @@ def test_native_execution_gates_consumer_and_sanitizes_uploaded_files(
         assert actual["phases"][-1]["name"] == "native-prerequisites"
         assert actual["phases"][-1]["status"] == "failed"
         assert actual["tests"] == []
+        status = preparation if preparation != "unrecognized" else "unknown"
+        assert actual["error"].endswith(f"({status})")
         contract.validate_result(
             actual, value, run_id=actual["run_id"], control_sha=actual["control_sha"],
             run_attempt=actual["run_attempt"],
@@ -694,9 +697,15 @@ def test_pinned_native_download_retries_only_transient_failures(tmp_path, workfl
     if curl is None:
         pytest.skip("curl is unavailable")
     source = Path(__file__).resolve().parents[1] / f".github/workflows/{workflow}.yml"
-    line = next(line.strip() for line in source.read_text("utf-8").splitlines()
-                if line.strip().startswith("curl.exe --fail"))
-    argv = shlex.split(line)
+    definition = yaml.safe_load(source.read_text("utf-8"))
+    job = "windows" if workflow == "windows-qualification" else "native-resume-windows"
+    step = next(step for step in definition["jobs"][job]["steps"]
+                if step.get("name", "").startswith("Prepare pinned"))
+    script = re.sub(r"`[ \t]*\r?\n", " ", step["run"])
+    line = next(line.strip() for line in script.splitlines()
+                if line.strip().startswith("curl.exe "))
+    argv = shlex.split(line, comments=True)
+    argv[argv.index("--output") + 1] = str(tmp_path / "native.zip")
     attempts = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -718,8 +727,8 @@ def test_pinned_native_download_retries_only_transient_failures(tmp_path, workfl
     archive = tmp_path / "native.zip"
     try:
         actual = command([
-            curl, *argv[1:argv.index("--output")], "--noproxy", "127.0.0.1",
-            "--output", str(archive), f"http://127.0.0.1:{server.server_port}/archive",
+            curl, *argv[1:-1], "--noproxy", "127.0.0.1",
+            f"http://127.0.0.1:{server.server_port}/archive",
         ], cwd=tmp_path, check=False)
     finally:
         server.shutdown()

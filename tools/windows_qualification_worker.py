@@ -265,8 +265,10 @@ def execute(root: Path, value: dict, output: Path) -> dict:
             ], 720, allow_empty=True))
         elif native:
             def prepare_native():
-                if os.environ.get("WINDOWS_QUALIFICATION_NATIVE_PREPARATION", "success") != "success":
-                    raise ValueError("Pinned native prerequisite acquisition did not succeed")
+                preparation = os.environ.get("WINDOWS_QUALIFICATION_NATIVE_PREPARATION", "success")
+                if preparation != "success":
+                    status = preparation if preparation in {"failure", "cancelled", "skipped"} else "unknown"
+                    raise ValueError(f"Pinned native prerequisite acquisition did not succeed ({status})")
                 return native_prerequisites(owned)
             result["native_prerequisites"] = phase(
                 "native-prerequisites", prepare_native,
