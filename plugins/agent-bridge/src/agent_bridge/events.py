@@ -197,6 +197,12 @@ class EventLog:
                     self._telemetry.log_epoch,
                     timestamp=ts,
                 )
+            from .status_producers import normalized
+            normalized(
+                self._db, self._session_id, event_type, data,
+                f"owned:{self._session_id}:{self._telemetry.log_epoch}:{event_id}",
+                timestamp=ts,
+            )
         # Generic telemetry seam: emit only the reducer's content-free
         # structural transitions (no-op unless a consumer registered a sink).
         for record in telemetry_records:

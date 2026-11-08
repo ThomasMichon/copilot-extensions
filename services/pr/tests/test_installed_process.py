@@ -13,12 +13,20 @@ import sys
 import time
 from pathlib import Path
 from importlib import import_module
-from typing import Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 import pytest
 from cryptography.hazmat.primitives import serialization
 
 from agent_pull_requests_service.hosting import ready
+
+# The strict service target analyzes canonical sources, not generated bundled copies.
+if TYPE_CHECKING:
+    from attribution_profile import load_profile
+    from comment_preparation import prepare
+else:
+    from agent_pull_requests_service._attribution.attribution_profile import load_profile
+    from agent_pull_requests_service._attribution.comment_preparation import prepare
 
 class ProcessFlags(TypedDict, total=False):
     creationflags: int
@@ -100,12 +108,62 @@ else:
 """
 
 
-@pytest.mark.parametrize("workspace_enabled,preparation_enabled,missing_preparer", [
-    (False, False, False), (True, False, False), (True, True, False), (True, True, True),
+def _seed_confirmed_comment(path: Path, evidence: dict[str, Any]) -> dict[str, Any]:
+    """Seed a synthetic original receipt before any foreground writer exists."""
+    from agent_pull_requests.review_workspace import build_generation
+    from agent_pull_requests_service.config import load_config
+
+    config = load_config(path)
+    assert config.workspaces is not None
+    preparation = config.workspaces.preparations[0][2]
+    profile, errors = load_profile(preparation.profile_home, preparation.source_root, env={})
+    assert not errors
+    prepared = prepare(
+        "Retained note.", profile, {"domain": "forge", "visibility": "public", "activity": "comment"},
+        {"protocol": "agent-worktrees.comment-origin/v1", "privacy": "public",
+         "origin": {"codename": "foreground-producer"}, "effects": "none"},
+        comment_id="11111111-1111-4111-8111-111111111111",
+        write_id="22222222-2222-4222-8222-222222222222",
+    )
+    generation = build_generation(evidence)["generation"]
+    selected = {
+        "schema": "agent-pull-requests.review-intent", "version": 2,
+        "operation_id": "original-confirmed-comment", "scope": generation["scope"],
+        "generation_id": generation["id"], "source_id": "a" * 64,
+        "revision": {name: generation["revision"][name] for name in ("head_sha", "common_sha", "iteration")},
+        "actions": [{
+            "id": "retained-finding", "kind": "comment", "body": prepared["body"],
+            "preparation": {"identity": prepared["identity"], "body_id": prepared["body_id"]},
+        }],
+    }
+    store = config.store()
+    expires_at = int(time.time()) + 60
+    store.admit_review(selected, expires_at=expires_at)
+    begun = store.begin_review_action(
+        selected["operation_id"], selected["scope"], "retained-finding", expires_at=expires_at,
+    )
+    store.record_review_receipt(
+        selected["operation_id"], selected["scope"], "retained-finding",
+        begun["action"]["attempt_id"],
+        {"origin": "response", "platform_ids": {"thread_id": 100, "comment_id": 1}, "proof": None},
+        expires_at=expires_at, confirm=True,
+    )
+    evidence["sections"]["discussions"]["data"] = [{
+        "id": 100, "status": "active", "comments": [{
+            "id": 1, "content": prepared["body"], "commentType": 1, "parentCommentId": 0,
+            "author": {"id": selected["scope"]["principal_id"]},
+        }],
+    }]
+    return {"number": 42, "operation_id": selected["operation_id"], "action_id": "retained-finding"}
+
+
+@pytest.mark.parametrize("workspace_enabled,preparation_enabled,missing_preparer,mapping_enabled", [
+    (False, False, False, False), (True, False, False, False),
+    (True, True, False, False), (True, True, True, True),
 ])
 def test_installed_host_process_register_observe_reconnect_restart_and_ack(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
-    workspace_enabled: bool, preparation_enabled: bool, missing_preparer: bool,
+    workspace_enabled: bool, preparation_enabled: bool, missing_preparer: bool, mapping_enabled: bool,
 ) -> None:
     # The existing Fleet fixture owns issuer, policy and TLS; do not add a fake Gateway.
     root = Path(__file__).resolve().parents[3]
@@ -142,6 +200,7 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
         preparation_profile = tmp_path / "producer/.github/ai-attribution.json"
         allocation: dict[str, Any] = {}
         prepared_preview: dict[str, Any] = {}
+        retained_request: dict[str, Any] = {}
         snapshot = {
             "schema": "agent-worktrees.pr-snapshot", "version": 1,
             "repo": "example/project", "pr": 1, "provider": "github",
@@ -279,6 +338,7 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                         "source_root": str(producer_root), "source_config": str(source_config),
                         "profile_home": str(home), "visibility": "public", "allow_anonymous": False,
                     }
+                    config["workspaces"]["bindings"][0]["comment_mappings"] = mapping_enabled
 
             def save_evidence(offset: int) -> None:
                 for section in evidence["sections"].values():
@@ -294,6 +354,9 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
             path.write_text(json.dumps(config))
             assert (await command("provision", "--config", str(path)))[0] == 0
             assert (await command("provision", "--config", str(path)))[0] == 1
+            if mapping_enabled:
+                retained_request = _seed_confirmed_comment(path, evidence)
+                save_evidence(0)
             owner = await launch()
             try:
                 await eventually(lambda: ready(status), timeout=10)
@@ -366,7 +429,7 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                         if code == 0:
                             return cast(dict[str, Any], json.loads(output.out))
                         if (
-                            operation in {"capabilities", "events", "inspect", "materialize"}
+                            operation in {"capabilities", "events", "inspect", "materialize", "retained-comment"}
                             and len(workspace_errors) > errors_before
                             and getattr(workspace_errors[-1], "http_status", None) == 503
                         ):
@@ -395,6 +458,7 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                 if workspace_enabled:
                     capabilities = await workspace("capabilities", {})
                     assert "submit" not in capabilities["operations"]
+                    assert ("retained-comment" in capabilities["operations"]) is mapping_enabled
                     assert capabilities["backend_contract"]["read_acquisition"] == PROFILE
                     initial = (await workspace("load", {
                         "number": 42, "expected_current": None, "budget_seconds": 10,
@@ -406,6 +470,15 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                         "number": 42, "generation_id": generation_id,
                     })
                     assert materialized["sections"]["pull_request"]["data"]["title"] == "Synthetic example"
+                    if mapping_enabled:
+                        mapping = (await workspace("retained-comment", retained_request))["result"]
+                        assert mapping["mapping"]["status"] == "correlated"
+                        assert mapping["mapping"]["generation_id"] == generation_id
+                        assert mapping["action_state"] == "confirmed"
+                        assert not any(mapping[name] for name in (
+                            "fresh_native_read", "original_version_proven", "feedback_progress",
+                        ))
+                        assert "Retained note." not in json.dumps(mapping)
                     if preparation_enabled:
                         from agent_pull_requests.review_workspace import _digest
 
@@ -520,6 +593,7 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                         capabilities = await workspace("capabilities", {})
                         assert "allocate" not in capabilities["operations"]
                         assert "submit" not in capabilities["operations"]
+                        assert ("retained-comment" in capabilities["operations"]) is mapping_enabled
                         inspected = (await workspace("inspect", {
                             "number": 42, "operation_id": "foreground-selection",
                         }))["result"]
@@ -530,6 +604,15 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                             preparation_state.with_suffix(".calls").read_text().splitlines()
                         ]
                         assert len([call for call in origin_calls if "--source-root" in call]) == 1
+                    if mapping_enabled:
+                        mapping = (await workspace("retained-comment", retained_request))["result"]
+                        assert mapping["mapping"]["status"] == "unavailable"
+                        assert mapping["mapping"]["reason"] == "native_thread_missing"
+                        assert mapping["mapping"]["generation_id"] == generation_id
+                        assert mapping["action_state"] == "confirmed"
+                        assert not any(mapping[name] for name in (
+                            "fresh_native_read", "original_version_proven", "feedback_progress",
+                        ))
                     retained = (await workspace("events", {
                         "number": 42, "after": cursor, "limit": 16,
                     }))["result"]

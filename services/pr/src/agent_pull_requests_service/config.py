@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import AbstractSet, Any
+from typing import AbstractSet, Any, TypedDict
 import os
 import time
 
@@ -25,6 +25,29 @@ from single_instance_lease import SingleInstance
 from .preparation import PreparationConfig
 
 _LIMIT = 1024 * 1024
+
+
+class _MappingOptions(TypedDict, total=False):
+    comment_mappings: bool
+
+
+def _mapping_store() -> Any:
+    try:
+        from agent_pull_requests.review_comment_mapping import CommentMappingStore
+        from agent_pull_requests.workspace_comment_mapping import contract
+        value = contract()
+    except (ImportError, AttributeError, TypeError, ValueError, RuntimeError):
+        return None
+    expected = {
+        "protocol": "agent-pull-requests.retained-comment-reader/v1",
+        "result_protocol": "agent-pull-requests.retained-comment-observation/v1",
+        "storage_extension": "review_comment_mapping_version:1",
+        "acquisition": "workspace-projection/v1",
+        "effects": "none",
+    }
+    return CommentMappingStore if isinstance(value, dict) and all(
+        value.get(name) == selected for name, selected in expected.items()
+    ) else None
 
 
 def _path(value: object) -> Path:
@@ -72,6 +95,7 @@ class WorkspaceConfig:
     cache_bytes: int
     cache_generations: int
     preparations: tuple[tuple[str, str, PreparationConfig], ...] = ()
+    comment_mappings: tuple[tuple[str, str], ...] = ()
 
     def cache(self, store: ReplayStore) -> GenerationCache:
         return GenerationCache(
@@ -83,6 +107,10 @@ class WorkspaceConfig:
         self, store: ReplayStore, checkpoint: Callable[[], None], seconds: int,
     ) -> dict[tuple[str, str], WorkspaceOperations]:
         cache = self.cache(store)
+        mappings = self.comment_mappings if self.comment_mappings and _mapping_store() else ()
+        mapping_options: dict[tuple[str, str], _MappingOptions] = {
+            key: {"comment_mappings": True} for key in mappings
+        }
         preparations = {
             (principal, target): config.select(
                 dict(reader.scope), checkpoint, seconds,
@@ -96,6 +124,7 @@ class WorkspaceConfig:
                 binding_ref=reader.binding_ref, checkpoint=checkpoint,
                 max_work_seconds=seconds, conversations=True,
                 prepared_reviews=(principal, target) in preparations,
+                **mapping_options.get((principal, target), {}),
                 selection_preparer=preparations.get((principal, target)),
                 selection_preparer_deadline=preparations.get((principal, target)) is not None,
             )
@@ -133,6 +162,9 @@ class HostConfig:
 
     def provision(self) -> None:
         store = self.store()
+        mapping_store = _mapping_store() if self.workspaces and self.workspaces.comment_mappings else None
+        if self.workspaces and self.workspaces.comment_mappings and mapping_store is None:
+            raise ValueError("selected comment mapping core unsupported")
         if self.workspaces is not None and (
             self.root.is_symlink() or self.root.exists() and any(self.root.iterdir())
         ):
@@ -159,6 +191,10 @@ class HostConfig:
                 ReviewSelectionStore(store).adopt(
                     lifecycle_checkpoint=lifecycle, expires_at=expires_at, checkpoint=lifecycle,
                 )
+                if mapping_store is not None:
+                    mapping_store(store).adopt(
+                        lifecycle_checkpoint=lifecycle, expires_at=expires_at, checkpoint=lifecycle,
+                    )
                 self.workspaces.cache(store).provision()
                 lifecycle()
             return
@@ -180,8 +216,16 @@ def _workspaces(value: object, bindings: list[WatchScopeBinding],
     native = {(b.account, b.repo): b for b in observations}
     readers: list[tuple[str, str, NativeReadHandler]] = []
     preparations: list[tuple[str, str, PreparationConfig]] = []
+    comment_mappings: list[tuple[str, str]] = []
     for raw in _collection(selected["bindings"]):
-        entry = _fields(raw, {"principal", "target", "command", "scope"}, {"preparation"})
+        entry = _fields(raw, {"principal", "target", "command", "scope"}, {
+            "preparation", "comment_mappings",
+        })
+        mapping = entry.get("comment_mappings", False)
+        if type(mapping) is not bool:
+            raise ValueError("comment_mappings requires a JSON boolean")
+        if mapping and "preparation" not in entry:
+            raise ValueError("comment_mappings requires explicit preparation hosting")
         key = (entry["principal"], entry["target"])
         if key not in scopes or any((p, t) == key for p, t, _ in readers):
             raise ValueError("workspace requires one existing admitted caller/target")
@@ -211,7 +255,11 @@ def _workspaces(value: object, bindings: list[WatchScopeBinding],
                 visibility=preparation["visibility"],
                 allow_anonymous=preparation["allow_anonymous"],
             )))
-    return WorkspaceConfig(tuple(readers), cache_bytes, cache_generations, tuple(preparations))
+        if mapping:
+            comment_mappings.append(key)
+    return WorkspaceConfig(
+        tuple(readers), cache_bytes, cache_generations, tuple(preparations), tuple(comment_mappings),
+    )
 
 
 def load_config(path: Path) -> HostConfig:

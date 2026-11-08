@@ -343,6 +343,51 @@ forge enrollment. The standalone packet separately verifies strict passive
 configuration, actual helper composition outside the replay lock, fresh-only
 adoption, scope/privacy/profile refusal and independent submission refusal.
 
+### Optional retained comment mappings
+
+A workspace binding with the existing `preparation` configuration may additionally
+set `"comment_mappings": true` alongside `principal`, `target`, `command`, `scope`
+and `preparation`. Absence or explicit `false` preserves prior behavior.
+Only a JSON boolean is accepted; enabling mappings without preparation hosting
+refuses passively. This is a trusted host selection, never a remote request field.
+The host resolves the executing PR core's existing retained-reader declaration
+before selecting its new constructor input. A missing or incompatible optional
+core leaves baseline serving intact and receives no new keyword. Explicit fresh
+mapping provisioning instead refuses before creating state; it cannot claim to
+adopt an unavailable contract. Expected optional import/declaration failures
+also report unavailable support, without exposing dependency diagnostics.
+
+Explicit **fresh** provisioning adopts the existing bounded
+`review_comment_mapping_version:1` extension under the same writer exclusion
+and deadline as prepared-intent/selection adoption. Serving never adopts or
+migrates an existing volume. If a selected existing prepared volume lacks the
+extension, baseline operations remain available but mapping support is absent;
+a configuration change cannot replace the storage/lifecycle owner's migration.
+Older strict hosts reject the new field. Binary rollback must preserve a reader
+that supports the adopted extension; stripping metadata or downgrading the
+retained envelope is not supported.
+
+The actual selected `WorkspaceOperations` binding advertises the existing
+[retained-comment contract](../../plugins/agent-pull-requests/docs/workspace-tools.md#retained-acquired-comment-reader)
+only while its storage owner supports it. Successful explicit load/sync uses its
+already acquired, confirmed cache generation to update bounded body-free mapping
+metadata under the original intent/receipt owner. No extra exporter invocation,
+credential lookup, watcher or mapping file is added.
+`retained-comment` reads that metadata through the normal authenticated Gateway
+route without a cache body, native read or protected writer. It stays available
+when optional origin/preparation discovery is unavailable; new allocation does
+not. Removing the host selection withdraws serving and later ingestion without
+deleting original mappings.
+
+The host remains read-only: it does not submit comments or manufacture confirmed
+receipts. Existing confirmed and unknown outcomes retain their original meaning.
+Current content correlation is neither original-version proof nor feedback,
+handled, ACK or echo progress. The foreground TLS/PoP fixture seeds one synthetic
+original receipt **before** starting the writer, then crosses the real native
+exporter subprocess and workspace CLI to qualify load/sync, mapping retention,
+and restart after optional origin-provider withdrawal. It does not qualify a
+live native send, provider enrollment, production migration or rollout.
+
 ## Independently constructed container
 
 `container/Dockerfile` is an offline wheel-only recipe, not an image published
