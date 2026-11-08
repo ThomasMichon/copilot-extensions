@@ -244,7 +244,7 @@ def test_invalid_later_plan_target_refuses_before_any_deletion(repo, tmp_path, c
     assert first.is_dir() and second.is_dir()
 
 
-def test_permission_retry_does_not_change_shared_hardlink_permissions(tmp_path, monkeypatch):
+def test_permission_failure_does_not_change_shared_hardlink_permissions(tmp_path, monkeypatch):
     outside = tmp_path / "shared-file"
     outside.write_bytes(b"shared bytes")
     tree = tmp_path / "tree"
@@ -263,13 +263,13 @@ def test_permission_retry_does_not_change_shared_hardlink_permissions(tmp_path, 
     monkeypatch.setattr(reclaim.shutil, "rmtree", rmtree)
     errors = []
     reclaim._remove(tree, errors)
-    assert errors and "shared entry" in errors[0]
+    assert errors and "read-only" in errors[0]
     assert outside.stat().st_mode == before
     assert outside.read_bytes() == b"shared bytes"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
-def test_permission_retry_preserves_other_permission_bits(tmp_path, monkeypatch):
+def test_permission_failure_preserves_existing_permission_bits(tmp_path, monkeypatch):
     tree = tmp_path / "tree"
     tree.mkdir()
     target = tree / "file"
@@ -283,8 +283,30 @@ def test_permission_retry_preserves_other_permission_bits(tmp_path, monkeypatch)
     monkeypatch.setattr(reclaim.shutil, "rmtree", rmtree)
     errors = []
     reclaim._remove(tree, errors)
-    assert not errors
-    assert stat.S_IMODE(target.stat().st_mode) == 0o640
+    assert errors
+    assert stat.S_IMODE(target.stat().st_mode) == 0o440
+
+
+@pytest.mark.parametrize("legacy_error", [False, True])
+def test_multi_argument_rmtree_failure_is_reported_without_blind_retry(
+    repo, tmp_path, capsys, monkeypatch, legacy_error,
+):
+    target = _legacy(repo)
+    code, plan = _plan(repo, tmp_path, target, capsys=capsys)
+    assert code == 0
+
+    def rmtree(path, **callbacks):
+        error = PermissionError("open denied")
+        detail = (PermissionError, error, None) if legacy_error else error
+        report = callbacks.get("onexc") or callbacks["onerror"]
+        report(os.open, path, detail)
+
+    monkeypatch.setattr(reclaim.shutil, "rmtree", rmtree)
+    code, result = _run("--apply-plan", plan, "--confirm-writers-stopped", capsys=capsys)
+    assert code == 1 and result["candidates"][0]["status"] == "partial"
+    assert "open denied" in result["candidates"][0]["errors"][0]
+    assert (target / "linux" / "plugin" / "python").is_file()
+    assert not list(repo.glob(".test-venvs.reclaiming-*"))
 
 
 @pytest.mark.parametrize("relative", ["reports/session.json", "Lib/reports/session.json", "capture.json"])

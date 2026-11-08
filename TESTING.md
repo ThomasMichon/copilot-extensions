@@ -8366,8 +8366,8 @@ Stop test and capture writers for the selected set before applying a plan.
 These checks detect known users when they run; they do not prove exclusive use
 or protect against concurrent or adversarial mutation. Windows rename detects
 sharing violations, not every possible open handle.
-Permission-error retries never change the permissions of shared hard-linked
-files; any resulting incomplete removal is reported as partial.
+Permission failures are reported without changing permissions or blindly
+retrying filesystem functions; incomplete removal is reported as partial.
 `tools/typecheck.py` keeps its prepared environments under the same
 `ce-tests-<canonical-checkout-key>/typecheck/<platform>/` retained cache.
 Changing scratch storage starts a separate cache; keep the same setting between

@@ -359,27 +359,14 @@ def evaluate(checkout: Path, path: Path, *, min_age: float, now: float,
 
 
 def _remove(path: Path, errors: list[str]) -> None:
-    def retry(func: Any, target: str, _exc: object) -> None:
-        try:
-            info = os.lstat(target)
-            if (
-                _is_link(info, Path(target))
-                or not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode))
-                or (stat.S_ISREG(info.st_mode) and info.st_nlink > 1)
-            ):
-                raise OSError("permission retry refused for an unsafe or shared entry")
-            mode = stat.S_IMODE(info.st_mode) | stat.S_IWUSR
-            if stat.S_ISDIR(info.st_mode):
-                mode |= stat.S_IRUSR | stat.S_IXUSR
-            os.chmod(target, mode)
-            func(target)
-        except OSError as exc:
-            errors.append(f"{target}: {exc.strerror or exc}")
+    def report(_func: Any, target: str, exc: object) -> None:
+        detail = exc[1] if isinstance(exc, tuple) else exc
+        errors.append(f"{target}: {detail}")
 
     if sys.version_info >= (3, 12):
-        shutil.rmtree(_native(path), onexc=retry)
+        shutil.rmtree(_native(path), onexc=report)
     else:
-        shutil.rmtree(_native(path), onerror=retry)
+        shutil.rmtree(_native(path), onerror=report)
 
 
 def reclaim(candidate: Candidate, planned: dict[str, Any]) -> None:
