@@ -5,12 +5,38 @@ an actual existing host binding, with a separate existing-owner retained source
 reader. It adds no installed owner, service, credentials or acquisition fallback.
 
 `WorkspaceOperations` composes the existing `OwnerReadHandler`,
-`GenerationCache`, `ReplayStore` and protected `execute_review`. It performs no
-provisioning/adoption, source fetching, installation or credential acquisition.
+`GenerationCache`, `ReplayStore` and protected `execute_review`. Construction
+performs no provisioning/adoption, source fetching, installation or credential
+acquisition.
 Construct it only inside the current owner pipeline with an authorized fixed
 native repository/principal scope, read binding and actual write-context factory.
 The factory accepts the selected PR number and returns the normal pinned context;
 it is not reconstructed from caller JSON, cached data or a claimed role.
+
+Alternatively, explicitly supply the optional in-process `write_context_factory`
+instead of `write_context`. Both at once refuse. This synchronous resolver
+receives `(scope, checkpoint=..., deadline=...)`, with the full selected PR
+scope and enclosing monotonic deadline, and returns a synchronous no-argument
+context factory. It is called lazily at most once per submission execution,
+only when the executor or feedback actually requests a protected context.
+All action and feedback contexts then use that same returned factory. A failed
+resolution is not retried during feedback; a later request has its own resolver
+selection, not a host-lifetime cached material reference.
+
+The resolver must compose the actual credential/transport owner, for example
+the optional [pinned native ADO factory](../../agent-worktrees/docs/azure-review-transport.md),
+honor the supplied finite budget/checkpoint and retain current native
+admission, permission and material-generation checks. The supplied checkpoint
+also rejects withdrawal/replacement of the selected workspace writer. This
+embedding does not implement native permission verification or host enrollment.
+The existing per-context `write_context(number)` path keeps its prior calling
+semantics; the request-local path never falls back to it.
+
+Capabilities, allocation/preview, retained selection/receipt lookup and a
+confirmed replay needing no protected readback do not resolve this factory.
+Unknown actions may use a later execution's pinned context for reconciliation,
+never automatic resend or replacement of their original durable identity.
+Default and standalone read-only hosts still supply neither writer.
 
 Pass optional `workspaces={(caller_principal, target): operations}` to the existing
 `WatchService` or `WatchGateway`. Each key must already have a watch scope and the
@@ -165,7 +191,8 @@ or operations from a package-version assumption.
 After explicit prepared-intent and
 [selection storage adoption](review-owner-store.md#optional-pre-approval-selection-retention),
 the existing host may supply `selection_preparer` alongside `prepared_reviews=True`
-and its normal `write_context`. This trusted synchronous resolver receives the
+and its selected `write_context` or `write_context_factory`. This trusted
+synchronous preparation resolver receives the
 selected cached generation and `checkpoint` keyword; it resolves actual current
 destination policy, AI profile and producer origin outside the replay lock,
 then returns bounded pure synchronous composition with the existing

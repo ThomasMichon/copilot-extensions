@@ -396,7 +396,8 @@ _Operator-required outcome; agent-recommended slices and validation._
   delivery leaf above does not close native rotation/unknown-effect or
   normal-host qualification.
   The [current-authority and request-local material design](comment-producer-enrollment.md#current-authority-and-request-local-material)
-  separates actual source/native/custodian verification and binds one factory
+  cleared review in #11450. It separates actual source/native/custodian
+  verification and binds one factory
   per execution before strict host configuration expands.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
@@ -1125,6 +1126,10 @@ callback an implicit credential store.
 
 ### 2026-11-07 - Refine current authority and request-local writer design
 
+- #11450 actually merged as `fe70e2d4b898d3a835d8f452d9c51d72146738b4`
+  after current-head Copilot approval `5815965694` with no open issues and
+  latest required CI `42434797023` / `128591352150` passed. Managed completion
+  reconciled the source and retained its backup.
 - Trace the actual Fleet verifier, raw Azure relay source, standalone host,
   workspace executor and pinned native factory. The raw relay's action/host
   policy is not Fleet's mandatory material verifier, and local process
@@ -1139,6 +1144,27 @@ callback an implicit credential store.
   Documentation consistency and whitespace checks pass; implementation,
   contained lifetime controls, native source adoption and both parent effort
   acceptance gates remain open.
+
+### 2026-11-07 - Qualify the finite request-local workspace factory source
+
+- Implement the reviewed optional in-process resolver at `WorkspaceOperations`.
+  It resolves lazily once per submission execution, retaining the selected
+  factory across action and feedback contexts. Failed resolution, material
+  rotation or writer withdrawal cannot reacquire or switch to legacy
+  authentication. Existing per-context embeddings and read-only hosts remain.
+- The coupled lifetime/workspace/selection/owned-edit/attention packet passes
+  151 cases with verified cleanup. It includes actual pre-approval selection
+  and original receipts without acquisition, multiple action/feedback
+  contexts, concurrent request isolation, failed resolution, rotation,
+  withdrawal and unknown-action reconciliation without resend.
+  The first concurrency fixture incorrectly raced the cache's nonblocking
+  custody lock; it was corrected to overlap at the actual resolver boundary,
+  not by adding storage retries or weakening the lock.
+- Fatal Python lint, module size, documentation and installation-contract
+  checks pass. This finite source seam does not implement native source-grant
+  verification, normal-host enrollment, installed/provider acceptance or
+  representative native latency. Broader typing remains pending under #9807.
+  Both parent Plan/Validation gates remain open.
 
 ### 2026-11-07 - Deliver finite pinned native requests without host enrollment
 

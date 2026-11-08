@@ -81,12 +81,18 @@ class WorkspaceOperations:
                  feedback_owner: Callable[[dict], FeedbackInputs] | None = None,
                  prepared_reviews: bool = False,
                  selection_preparer: Callable[..., Callable[..., dict]] | None = None,
-                 selection_owned_edits: bool = False) -> None:
+                 selection_owned_edits: bool = False,
+                 write_context_factory: Callable[..., Callable] | None = None) -> None:
+        writers = (write_context, write_context_factory)
+        write_available = sum(value is not None for value in writers) == 1
         if (
             not isinstance(cache, GenerationCache)
             or not isinstance(read_owner, (OwnerReadHandler, NativeReadHandler))
             or not callable(checkpoint)
-            or write_context is not None and not callable(write_context)
+            or any(value is not None and (
+                not callable(value) or iscoroutinefunction(value)
+            ) for value in writers)
+            or all(value is not None for value in writers)
             or type(max_work_seconds) not in (int, float)
             or not math.isfinite(max_work_seconds) or max_work_seconds <= 0
             or type(conversations) is not bool
@@ -95,11 +101,11 @@ class WorkspaceOperations:
             or selection_owned_edits and selection_preparer is None
             or selection_preparer is not None and (
                 not callable(selection_preparer) or iscoroutinefunction(selection_preparer)
-                or not prepared_reviews or write_context is None
+                or not prepared_reviews or not write_available
             )
             or attention_owner is not None and (not callable(attention_owner) or not conversations)
             or feedback_owner is not None and (
-                not callable(feedback_owner) or not conversations or write_context is None
+                not callable(feedback_owner) or not conversations or not write_available
             )
         ):
             raise ValueError("actual workspace owner inputs required")
@@ -116,6 +122,7 @@ class WorkspaceOperations:
         self.store, self.cache = store, cache
         self.read_owner, self.binding_ref = read_owner, binding_ref
         self.write_context, self.checkpoint = write_context, checkpoint
+        self.write_context_factory = write_context_factory
         self.max_work_seconds = max_work_seconds
         self.conversations = conversations
         self.attention_owner = attention_owner
@@ -126,6 +133,44 @@ class WorkspaceOperations:
         self._materializations = OrderedDict()
         self._generation_positions: OrderedDict[str, dict | None] = OrderedDict()
         self._materialization_lock = threading.Lock()
+
+    @property
+    def write_available(self) -> bool:
+        """Whether exactly one synchronous trusted writer is currently selected."""
+        return sum(
+            callable(value) and not iscoroutinefunction(value)
+            for value in (self.write_context, self.write_context_factory)
+        ) == 1 and not all(
+            value is not None for value in (self.write_context, self.write_context_factory)
+        )
+
+    def _review_context_factory(self, scope, checkpoint, deadline):
+        from agent_worktrees.providers.azure_owned_review import ReviewContextUnavailable
+
+        legacy, resolve = self.write_context, self.write_context_factory
+        selected, attempted = None, False
+
+        def current():
+            checkpoint()
+            if not self.write_available or (
+                self.write_context is not legacy or self.write_context_factory is not resolve
+            ):
+                raise ReviewContextUnavailable("selected protected write owner changed")
+
+        def context():
+            nonlocal selected, attempted
+            current()
+            if resolve is None:
+                return legacy(scope["number"])
+            if not attempted:
+                attempted = True
+                selected = resolve(copy.deepcopy(scope), checkpoint=current, deadline=deadline)
+            if not callable(selected) or iscoroutinefunction(selected):
+                raise ReviewContextUnavailable("request-local protected write factory unavailable")
+            current()
+            return selected()
+
+        return context
 
     def validate_storage(self, *, expires_at: int, checkpoint: Callable[[], None]) -> None:
         """Check already-adopted state under the existing service writer."""
@@ -182,14 +227,14 @@ class WorkspaceOperations:
             ) == (1, 2)
             from .review_selection_store import ReviewSelectionStore
             selection = (
-                prepared and self.selection_preparer is not None and self.write_context is not None
+                prepared and self.selection_preparer is not None and self.write_available
                 and ReviewSelectionStore(self.store).supported(expires_at=expires_at, checkpoint=check)
             )
             return {
                 "protocol": PROTOCOL,
                 "operations": [
                     name for name in OPERATIONS
-                    if (name != "submit" or self.write_context is not None)
+                    if (name != "submit" or self.write_available)
                     and (name != "events" or self.conversations)
                     and (name != "receipt" or prepared)
                     and (name != "allocate" or selection)
@@ -310,7 +355,7 @@ class WorkspaceOperations:
                 expires_at=expires_at, checkpoint=check,
             )
         else:
-            if self.write_context is None:
+            if not self.write_available:
                 raise WorkspaceUnavailable("existing protected write context unavailable")
             intent = payload["intent"]
             if not isinstance(intent, dict) or intent.get("scope") != scope:
@@ -342,7 +387,7 @@ class WorkspaceOperations:
                         return (latest, Cursor(**position)) if position is not None else None
             result = execute_review(
                 self.store, intent, generation, payload["source_attachment"],
-                context_factory=lambda: self.write_context(number), checkpoint=check,
+                context_factory=self._review_context_factory(scope, check, deadline), checkpoint=check,
                 expires_at=expires_at, budget_seconds=seconds, feedback=feedback,
                 feedback_position=feedback_position,
                 feedback_current=feedback_current,
