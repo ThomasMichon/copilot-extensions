@@ -13,10 +13,11 @@ from .workspace_operations import PROTOCOL, encoded, needs_prepared_review, supp
 from .review_workspace import MAX_GENERATION_BYTES, _generation, _scope
 from .review_intent import identifier
 from .workspace_selection import supports_selection
+from .review_comment_observation import supports as supports_comment_observation
 
 TOOL_PROTOCOL = "agent-pull-requests.workspace-tools/v1"
 COMMANDS = ("capabilities", "load", "sync", "materialize", "source", "source-read", "submit", "inspect", "events", "receipt",
-            "prepare", "allocate")
+            "prepare", "allocate", "observe-comment")
 FIELDS = {
     "capabilities": (),
     "load": ("number", "expected_current", "budget_seconds"),
@@ -27,6 +28,7 @@ FIELDS = {
     "submit": ("number", "intent", "source_attachment", "budget_seconds"),
     "inspect": ("number", "operation_id"),
     "receipt": ("number", "operation_id", "action_id"),
+    "observe-comment": ("number", "operation_id", "action_id", "generation_id"),
     "prepare": ("number", "intent", "identities"),
     "allocate": ("number", "intent", "source_attachment", "budget_seconds"),
     "events": ("number", "after", "limit"),
@@ -147,10 +149,14 @@ class WorkspaceTools:
                 raise WorkspaceToolUnavailable("workspace_contract_unsupported")
             available = backend.get("operations", [])
             operations += [
-                name for name in ("load", "sync", "submit", "inspect", "events", "receipt", "allocate")
+                name for name in ("load", "sync", "submit", "inspect", "events", "receipt", "allocate", "observe-comment")
                 if name in available and (
                     name != "receipt" or supports_prepared_review(backend.get("prepared_review_contract"))
                 ) and (name != "allocate" or supports_selection(backend.get("selection_contract")))
+                and (name != "observe-comment" or (
+                    supports_comment_observation(backend.get("comment_observation_contract"))
+                    and supports_prepared_review(backend.get("prepared_review_contract"))
+                ))
             ]
             if (
                 callable(self.comment_preparer) and "submit" in available
@@ -251,7 +257,7 @@ class WorkspaceTools:
             raise WorkspaceToolUnavailable("prepared_review_contract_unsupported")
         if command == "prepare":
             return await self._prepare_comments(request)
-        if command in ("load", "sync", "submit", "inspect", "events", "receipt", "allocate"):
+        if command in ("load", "sync", "submit", "inspect", "events", "receipt", "allocate", "observe-comment"):
             return await _call(self.client.exchange, command, copy.deepcopy(request))
         required = {"number", "generation_id"}
         if command in ("source", "source-read"):
