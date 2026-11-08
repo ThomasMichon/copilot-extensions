@@ -59,7 +59,7 @@ it only when clean on its default branch. Read it freely; never edit,
 generate, build, stage or leave files there -- use
 `agent-worktrees -p <name> create --json`. To recover a dirty, ahead,
 diverged or off-default anchor, follow the `worktree` skill's
-`references/anchor-recovery.md`; never discard unpreserved work without
+`references/anchor-recovery.md`; never discard anything there without
 operator approval.
 
 ## Diagnosing across entities (worktree, session, task, bridge, ...)

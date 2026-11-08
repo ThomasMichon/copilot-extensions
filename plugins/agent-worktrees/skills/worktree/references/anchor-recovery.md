@@ -42,8 +42,8 @@ into a managed worktree:
   object store. Cherry-picking onto a newer base creates new commit IDs, so
   verify two things separately: the originals are reachable from the recovery
   branch (`git branch --contains <original-sha>`), and the managed worktree's
-  replayed commits carry the same content (`git range-diff` or a per-commit
-  `git show --stat` comparison).
+  replayed commits carry the same changes (read the `git range-diff` output or
+  compare the full per-commit patches; `--stat` counts are not enough).
 - **Uncommitted content**: export staged and unstaged changes as separate
   patches -- `git diff --cached --binary` (index vs HEAD) and `git diff --binary`
   (working tree vs index) -- because a single `git diff HEAD` hides index-only
@@ -55,15 +55,17 @@ into a managed worktree:
   switching away loses nothing, but report it so its owner can adopt it.
 
 If another live session may own the anchor's changes, or their purpose is
-unclear, ask the operator before moving anything. Discarding unpreserved work
-always requires operator approval. When an anchor write guard blocks a step
+unclear, ask the operator before moving anything. Discarding anything --
+including confirmed line-ending-only noise -- always requires operator
+approval. When an anchor write guard blocks a step
 here or in step 3, acquire its time-bounded allowance for this single repair
 (for example
 `agent-worktrees repos allow-edits <name> --reason "<why>" --minutes 10`).
 
 ## 3. Restore
 
-- **Line-ending-only noise:** restore both the index and working tree of the
+- **Line-ending-only noise:** with operator approval (as for any discard; see
+  `cleanup-details.md`), restore both the index and working tree of the
   confirmed paths from HEAD (`git restore --staged --worktree -- <paths>`; a
   plain `git restore` leaves staged noise in place, as described in
   `cleanup-details.md`) and record that no content was discarded.
