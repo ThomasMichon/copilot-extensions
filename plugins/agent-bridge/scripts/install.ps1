@@ -3964,7 +3964,7 @@ try {
     if ($Action -ne 'schedule' -and -not $ForceTaskRepair) { Initialize-SourceRuntime }
     if ($Action -in @('install', 'update', 'provision') -and -not $ForceTaskRepair) {
         . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
-        Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+        Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot -RuntimeRoot $InstallDir
     }
     switch ($Action) {
         'install'   { Invoke-Install }

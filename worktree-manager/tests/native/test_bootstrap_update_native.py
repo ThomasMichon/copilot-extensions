@@ -272,7 +272,7 @@ def bootstrap_source(tmp_path_factory):
         "runtime_source_config", "runtime_source", "self_install", "self_install_runtime",
         "self_install_payload", "config_write_lock", "update_python_path", "runtime_identity",
         "runtime_launchers", "self_install_recovery", "mux_file_lock",
-        "engine_client", "engine_sessions", "agent_plugin_runtime", "picker_review", "engine_posix_process",
+        "engine_client", "engine_progress", "engine_sessions", "agent_plugin_runtime", "picker_review", "engine_posix_process",
         "engine_environment", "worktree_rows_contract", "worktree_observation_contract",
         "update_orchestration", "update_events", "project_update_controller",
     ):

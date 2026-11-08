@@ -152,11 +152,18 @@ class ShellInstanceSession:
                 return store._read(record_path)
         if command == "root":
             return str(store.registry_root())
+        if command == "reconcile-contract":
+            return {"version": 1, "termination_policy": True, "runtime_scope": True}
         if command == "reconcile":
             root = parameters.get("registry_root")
+            scope = parameters.get("runtime_root")
+            terminate = parameters.get("terminate", False)
+            if type(terminate) is not bool:
+                raise ValueError("daemon reconciliation termination policy must be boolean")
             return [asdict(result) for result in store.reconcile(
                 Path(root) if root else None, parameters.get("limit", 128),
                 parameters.get("max_seconds", 5), _caller_pid=self.owner.identity.pid,
+                terminate=terminate, runtime_root=Path(scope) if scope else None,
             )]
         raise ValueError("unknown instance shell operation")
 
