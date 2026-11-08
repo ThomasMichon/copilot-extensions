@@ -62,6 +62,17 @@ def test_read_and_review_permissions_must_each_be_positive(bit):
         evaluate(denied_bit=bit)
 
 
+@pytest.mark.parametrize("translated", [False, True])
+def test_native_translator_flag_preserves_logical_git_token(translated):
+    body = namespaces()
+    body["value"][0]["useTokenTranslator"] = translated
+    calls = evaluate(namespace=body)
+    assert len(calls) == 3
+    assert parse_qs(urlsplit(calls[-1]).query)["tokens"] == [
+        f"repoV2/{PROJECT}/{REPOSITORY},repoV2/{PROJECT}/{REPOSITORY}/refs/heads/6d00610069006e00/",
+    ]
+
+
 @pytest.mark.parametrize("body", [
     {}, {"count": True, "value": [True]}, {"count": 2, "value": [True]},
     {"count": 1, "value": [True]}, {"count": 2, "value": [True, 1]},
@@ -76,7 +87,7 @@ def test_missing_partial_or_truthy_permission_results_refuse(body):
     lambda body: body.update(count=2),
     lambda body: body["value"].append(copy.deepcopy(body["value"][0])),
     lambda body: body["value"][0].update(namespaceId="not-a-uuid"),
-    lambda body: body["value"][0].update(useTokenTranslator=True),
+    lambda body: body["value"][0].update(useTokenTranslator="true"),
     lambda body: body["value"][0].update(readPermission=4),
     lambda body: body["value"][0]["actions"].pop(),
     lambda body: body["value"][0]["actions"].append(copy.deepcopy(body["value"][0]["actions"][0])),

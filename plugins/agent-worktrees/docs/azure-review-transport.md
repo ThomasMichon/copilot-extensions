@@ -63,6 +63,9 @@ unambiguous `GenericRead` and `PullRequestContribute` actions. Namespace UUIDs
 and action bits come from that native definition, not caller fields, translated
 display names or a hardcoded identifier. Unsupported, duplicate or incomplete
 definitions refuse.
+Both native boolean `useTokenTranslator` forms are accepted: translation is
+performed by the security service, not by replacing the documented logical
+Git resource token on the client.
 
 The documented
 [Has Permissions GET](https://learn.microsoft.com/en-us/rest/api/azure/devops/security/permissions/has-permissions?view=azure-devops-rest-7.1)

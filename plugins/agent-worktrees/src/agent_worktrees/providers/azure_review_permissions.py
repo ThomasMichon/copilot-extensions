@@ -37,7 +37,7 @@ def _namespace(body: dict[str, Any]) -> tuple[str, tuple[int, int]]:
     namespace = _uuid(selected.get("namespaceId"))
     if (
         selected.get("separatorValue") != "/" or type(selected.get("structureValue")) is not int
-        or selected["structureValue"] != 1 or selected.get("useTokenTranslator") is not False
+        or selected["structureValue"] != 1 or type(selected.get("useTokenTranslator")) is not bool
         or not isinstance(selected.get("actions"), list)
     ):
         raise ValueError("native Git security namespace is unsupported")

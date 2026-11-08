@@ -28,7 +28,7 @@ NAMESPACE = "33333333-3333-4333-8333-333333333333"
 def namespaces():
     return {"count": 1, "value": [{
         "name": "Git Repositories", "namespaceId": NAMESPACE, "separatorValue": "/",
-        "structureValue": 1, "useTokenTranslator": False, "readPermission": 2,
+        "structureValue": 1, "useTokenTranslator": True, "readPermission": 2,
         "actions": [
             {"name": name, "bit": bit, "namespaceId": NAMESPACE}
             for name, bit in (("GenericRead", 2), ("PullRequestContribute", 8))
