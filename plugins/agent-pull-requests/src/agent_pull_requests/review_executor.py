@@ -300,42 +300,45 @@ def execute_review(
                     return policy_check(selected_operation, selected_action, fresh, context=context)
 
                 context.review_check = checked_policy
-                context.review_check(copy.deepcopy(operation), copy.deepcopy(action), copy.deepcopy(current), context=context)
-                context.check()
-                result["stage"] = "intent_fence"
-                begun = store.begin_review_action(
-                    operation_id, scope, action["id"], expires_at=expires_at, checkpoint=checkpoint,
-                )
-                if not begun["new_attempt"]:
-                    result["status"] = "unknown"
-                    break
-                operation = store.inspect_review(operation_id, scope, expires_at=expires_at, checkpoint=checkpoint)
-                # Persistence and credential renewal may change eligibility.
-                current = context.read_state()
-                if tracking is not None:
-                    tracking.check_target(current)
-                actual = _check_candidate(current, operation, baseline)
-                _check_selected_ownership(action, actual, scope["principal_id"])
-                context.review_check(copy.deepcopy(operation), copy.deepcopy(action), copy.deepcopy(current), context=context)
-                context.check()
-                result["stage"] = "effect"
-                result["entered_writes"] += 1
-                native = context.perform(copy.deepcopy(operation), copy.deepcopy(action))
-                result["stage"] = "receipt"
-                receipt = tracking.response_receipt(native, action) if tracking is not None else native.receipt
-                recorded = store.record_review_receipt(
-                    operation_id, scope, action["id"], begun["action"]["attempt_id"], receipt,
-                    expires_at=expires_at, checkpoint=checkpoint, confirm=native.confirmed,
-                )
-                if recorded["state"] != "confirmed":
-                    result["status"] = "unknown"
-                    break
-                result["stage"] = "readback"
-                operation = store.inspect_review(operation_id, scope, expires_at=expires_at, checkpoint=checkpoint)
-                current = context.read_state()
-                if tracking is not None:
-                    tracking.check_target(current)
-                _check_candidate(current, operation, baseline)
+                try:
+                    context.review_check(copy.deepcopy(operation), copy.deepcopy(action), copy.deepcopy(current), context=context)
+                    context.check()
+                    result["stage"] = "intent_fence"
+                    begun = store.begin_review_action(
+                        operation_id, scope, action["id"], expires_at=expires_at, checkpoint=checkpoint,
+                    )
+                    if not begun["new_attempt"]:
+                        result["status"] = "unknown"
+                        break
+                    operation = store.inspect_review(operation_id, scope, expires_at=expires_at, checkpoint=checkpoint)
+                    # Persistence and credential renewal may change eligibility.
+                    current = context.read_state()
+                    if tracking is not None:
+                        tracking.check_target(current)
+                    actual = _check_candidate(current, operation, baseline)
+                    _check_selected_ownership(action, actual, scope["principal_id"])
+                    context.review_check(copy.deepcopy(operation), copy.deepcopy(action), copy.deepcopy(current), context=context)
+                    context.check()
+                    result["stage"] = "effect"
+                    result["entered_writes"] += 1
+                    native = context.perform(copy.deepcopy(operation), copy.deepcopy(action))
+                    result["stage"] = "receipt"
+                    receipt = tracking.response_receipt(native, action) if tracking is not None else native.receipt
+                    recorded = store.record_review_receipt(
+                        operation_id, scope, action["id"], begun["action"]["attempt_id"], receipt,
+                        expires_at=expires_at, checkpoint=checkpoint, confirm=native.confirmed,
+                    )
+                    if recorded["state"] != "confirmed":
+                        result["status"] = "unknown"
+                        break
+                    result["stage"] = "readback"
+                    operation = store.inspect_review(operation_id, scope, expires_at=expires_at, checkpoint=checkpoint)
+                    current = context.read_state()
+                    if tracking is not None:
+                        tracking.check_target(current)
+                    _check_candidate(current, operation, baseline)
+                finally:
+                    context.review_check = policy_check
         else:
             result["status"] = "complete"
     except PermissionError:

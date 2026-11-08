@@ -40,6 +40,9 @@ its unknown-effect fence before entering the native effect path. Its bound
 policy callback reruns those same candidate/discussion/owned-target checks on
 every fresher snapshot supplied by the transport, including the post-connect
 read. Observed drift refuses dispatch while retaining the unknown attempt.
+The executor restores the original policy callback after each action,
+including refusal and early exits, so an owner can reuse one pinned context
+without retaining a prior action's guard.
 
 Each HTTPS exchange shares the caller's finite remaining budget, additionally
 bounded by credential expiry. The existing Fleet resolver owns DNS cleanup;
