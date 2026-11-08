@@ -1,0 +1,9 @@
+{
+  "comment": "monitor-agent-fleet: name the Bridge no-ensure switch, keep exact keyed-receipt bindings, separate consumption from action, verify synthetic-model selection, avoid self-added holds and single-schedule adaptive cadence",
+  "changes": [
+    {
+      "plugin": "agent-roles",
+      "type": "patch"
+    }
+  ]
+}
