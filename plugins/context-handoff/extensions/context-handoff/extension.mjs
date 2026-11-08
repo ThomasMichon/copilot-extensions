@@ -556,7 +556,8 @@ const session = await joinSession({
         },
         required: ["snapshot"],
       },
-      handler: async (args) => {
+      handler: async (args, invocation) => {
+        ensureState(invocation);
         try {
           const page = intentObservation.page(args.snapshot, {
             record: args.record ?? 0, offset: args.offset ?? 0,
@@ -1253,7 +1254,7 @@ const session = await joinSession({
         "control system watching the worktree, dispatch task, or " +
         "session-state marker when automatic mode is enabled.",
       handler: async (ctx) => {
-        void ctx;
+        ensureState(ctx);
         await handoffConfigPromise;
         await session.send({
           source: "system",
@@ -1308,6 +1309,7 @@ const session = await joinSession({
         "prompt into THIS session (foreground). Consumes the agent-dispatch " +
         "handoff task if present, else the newest matching worktree handoff file.",
       handler: async (ctx) => {
+        ensureState(ctx);
         await handoffConfigPromise;
         const cwd = state.cwd || process.cwd();
         const sid = state.sessionId || ctx?.sessionId || "unknown";
@@ -1423,7 +1425,8 @@ const session = await joinSession({
       description:
         "Compatibility alias for /consume-handoff. Asks this session to invoke " +
         "the canonical stored-handoff consumer.",
-      handler: async () => {
+      handler: async (ctx) => {
+        ensureState(ctx);
         await handoffConfigPromise;
         await session.send({
           source: "system",
@@ -1442,6 +1445,7 @@ const session = await joinSession({
         "resume | clear | set soft=60 hard=150k force=78%]. Edits to " +
         ".context-handoff/config.yaml also reload automatically mid-session.",
       handler: async (ctx) => {
+        ensureState(ctx);
         let request;
         try {
           request = parseOverrideArgs(ctx?.args);
@@ -1449,7 +1453,6 @@ const session = await joinSession({
           session.log(`[Context Handoff] /handoff-pressure: ${error.message}`, { level: "warning" });
           return;
         }
-        ensureState(ctx);
         const result = await applyPressureOverride(request, ACTOR_OPERATOR);
         session.log(
           result.ok ? result.text : `[Context Handoff] /handoff-pressure: ${result.text}`,

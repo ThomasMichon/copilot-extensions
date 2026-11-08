@@ -18,11 +18,22 @@ await emit("user.message", { content: "Keep the bound mission.", source: "user" 
 if (process.env.FIXTURE_DELAYED_ID) {
   assert.equal(session.sends.length, 0);
   assert.equal(globalThis.intentGoalReads, undefined);
-  const generate = session.config.tools.find((tool) => tool.name === "generate_handoff_prompt");
-  const generated = await generate.handler({}, { sessionId: "fixture-bound-session" });
-  assert.match(generated.textResultForLlm, /Bound Goal/u);
-  assert.match(generated.textResultForLlm, /Keep the bound mission/u);
-  assert.ok(generated.textResultForLlm.includes(process.env.FIXTURE_BOUND_CWD.replaceAll("\\", "\\\\")));
+  let text;
+  if (process.env.FIXTURE_CONSUME) {
+    const consume = session.config.commands.find((command) => command.name === "consume-handoff");
+    await consume.handler({ sessionId: "fixture-bound-session" });
+    assert.equal(session.sends.length, 1);
+    text = session.sends[0].prompt;
+    assert.ok(globalThis.consumeCwds.length);
+    assert.ok(globalThis.consumeCwds.every((cwd) => cwd === process.env.FIXTURE_BOUND_CWD));
+    session.sends.length = 0;
+  } else {
+    const generate = session.config.tools.find((tool) => tool.name === "generate_handoff_prompt");
+    text = (await generate.handler({}, { sessionId: "fixture-bound-session" })).textResultForLlm;
+  }
+  assert.match(text, /Bound Goal/u);
+  assert.match(text, /Keep the bound mission/u);
+  assert.ok(text.includes(process.env.FIXTURE_BOUND_CWD.replaceAll("\\", "\\\\")));
 }
 await emit("session.context_cleared");
 // Bound mode off must win over launch mode auto, including the initial-load race.

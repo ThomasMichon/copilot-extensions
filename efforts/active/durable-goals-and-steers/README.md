@@ -224,3 +224,8 @@ root-goal string. Research may refine these choices within the Request.
   fixture covers early null identity followed by tool-invocation identity, bound
   Goal/config, retained exact input and emergency storage. Changed packet:
   32 passed, one platform skip.
+- The next review found the same late-identity class at slash-command entry.
+  All command entrypoints and the corpus reader now adopt invocation identity
+  before reading scope/config. Production regression variants cover file,
+  dispatch-task and delivery-checkpoint consumption as the first late-identity
+  command. The affected production fixture packet passes both tests.

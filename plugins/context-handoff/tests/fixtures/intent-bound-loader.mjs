@@ -31,6 +31,31 @@ export async function load(url, context, nextLoad) {
         globalThis.emergencyStored = options;
         return {ok:false,error:"fixture stops after capture"};
       }
+      const kind = process.env.FIXTURE_CONSUME;
+      const checkScope = (cwd) => {
+        if (cwd !== process.env.FIXTURE_BOUND_CWD) throw new Error("wrong consumption scope");
+        globalThis.consumeCwds = [...(globalThis.consumeCwds || []), cwd];
+      };
+      export function agentDispatchAvailable() { return kind === "task"; }
+      export function agentWorktreesGet(_key, cwd) { checkScope(cwd); return cwd; }
+      export function findHandoffTask(cwd) { checkScope(cwd); return {id:"synthetic-task"}; }
+      export function findTaskDeliveryCheckpoint(cwd) {
+        checkScope(cwd);
+        return kind === "checkpoint" ? {handoffToken:"synthetic-checkpoint"} : null;
+      }
+      export function findHandoffFile(cwd) {
+        checkScope(cwd);
+        return kind === "file" ? {record:{id:"synthetic-file"},path:"synthetic-file.md"} : null;
+      }
+      export function consumeDispatchHandoffTask(cwd) {
+        checkScope(cwd);
+        return {ok:true,payload:"Synthetic bound continuation.",checkpointState:{}};
+      }
+      export function consumeFileHandoff(cwd) {
+        checkScope(cwd);
+        return {ok:true,id:"synthetic-file",payload:"Synthetic bound continuation."};
+      }
+      export function markDeliveryPromptInjected() {}
     `,
   };
 }

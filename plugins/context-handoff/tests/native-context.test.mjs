@@ -186,13 +186,15 @@ test("bound config overrides launch config, reloads live, and emergency store sk
     const fixture = fileURLToPath(new URL("./fixtures/intent-bound-extension.mjs", import.meta.url));
     const loader = new URL("./fixtures/intent-bound-loader.mjs", import.meta.url).href;
     const extension = fileURLToPath(new URL("../extensions/context-handoff/extension.mjs", import.meta.url));
-    for (const delayed of ["", "true"]) {
+    for (const variant of ["immediate", "delayed", "file", "task", "checkpoint"]) {
       await writeFile(join(bound, ".context-handoff", "config.yaml"), "mode: off\n");
       await writeFile(join(root, "settings.json"), '{"contextManagementTools":true}');
       const result = spawnSync(process.execPath, ["--experimental-loader", loader, fixture, extension], {
         cwd: root, encoding: "utf8", windowsHide: true, timeout: 15000,
         env: { ...process.env, COPILOT_HOME: root, HOME: root, USERPROFILE: root,
-          FIXTURE_BOUND_CWD: bound, FIXTURE_DELAYED_ID: delayed, COPILOT_AGENT_SESSION_ID: "" },
+          FIXTURE_BOUND_CWD: bound, FIXTURE_DELAYED_ID: variant === "immediate" ? "" : "true",
+          FIXTURE_CONSUME: ["file", "task", "checkpoint"].includes(variant) ? variant : "",
+          COPILOT_AGENT_SESSION_ID: "" },
       });
       assert.equal(result.status, 0, result.stderr || result.stdout);
     }
