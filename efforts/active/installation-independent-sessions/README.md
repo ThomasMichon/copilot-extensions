@@ -389,9 +389,13 @@ retains the operator's wording.
     unless the adopter deliberately selects absence.
     - [x] Land the Logger/Codespaces source slice (#11202), including exact-head
       native fixture qualification and corrected GUI-interpreter ownership.
-      Bridge/Vault, Index, Dispatch, driver integration and installed acceptance
+      Bridge/Vault, Dispatch, driver integration and installed acceptance
       remain separate open work; see the
       [source journal](<journal/2026/11.08 scheduling-source-qualification.md>).
+    - [x] Land the Index source slice (#11430), including refreshed activation
+      holds, strict engine-health readiness and UTF-8 policy controls.
+      Actual driver-selector integration, containing release and installed
+      non-admin/lifetime acceptance remain open.
   - [ ] Prove fresh default absence, repeat-update absence, explicit scheduling
     compatibility and task-only retirement without stopping protected services
     or deleting their state. Missing scheduling support is not permission to

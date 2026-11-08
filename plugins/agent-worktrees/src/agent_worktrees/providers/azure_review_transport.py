@@ -103,6 +103,10 @@ def ado_review_context_factory(
             )
             self._selected = None
 
+        def check_review(self, operation: dict, action: dict, current: dict) -> None:
+            self.require_review_permissions(current)
+            super().check_review(operation, action, current)
+
         def perform(self, operation, action):
             if (
                 self._selected is not None or action["kind"] not in review.actions
@@ -110,7 +114,7 @@ def ado_review_context_factory(
             ):
                 raise _unavailable()
             current = self.read_state()
-            self.review_check(copy.deepcopy(operation), copy.deepcopy(action), current, context=self)
+            self.check_review(copy.deepcopy(operation), copy.deepcopy(action), current)
             self._selected = (copy.deepcopy(operation), copy.deepcopy(action))
             try:
                 return super().perform(operation, action)
@@ -158,7 +162,8 @@ def ado_review_context_factory(
             if method == "GET":
                 changes = re.fullmatch(re.escape(base) + r"/iterations/[1-9][0-9]*/changes\?api-version=7\.1", url)
                 keys = {"$compareTo", "$top", "$skip"} if changes else {"$top", "$skip"}
-                if (url not in reads and not changes) or body is not None or (
+                permission_read = url == self._permission_url
+                if (url not in reads and not changes and not permission_read) or body is not None or (
                     query is not None and ((url != policy and not changes) or set(query) != keys
                                            or any(type(v) is not int or v < 0 for v in query.values()))
                 ):
@@ -205,9 +210,7 @@ def ado_review_context_factory(
                     self.remaining = lambda: min(remaining_before_dispatch(), deadline - time.monotonic())
                     try:
                         current = self.read_state()
-                        self.review_check(
-                            copy.deepcopy(operation), copy.deepcopy(action), current, context=self,
-                        )
+                        self.check_review(copy.deepcopy(operation), copy.deepcopy(action), current)
                     finally:
                         self.remaining = remaining_before_dispatch
                     check()
