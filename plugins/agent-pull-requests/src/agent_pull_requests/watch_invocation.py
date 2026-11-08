@@ -75,25 +75,29 @@ def _running_slot(installation: WatchInstallation) -> Path:
 
 
 def _require_modules(slot: Path) -> None:
-    import agent_procutil
-    import single_instance_lease
-    import work_coalescing_singleton
-    import zdd
-
     from importlib import import_module
 
+    for package in ("agent_procutil", "single_instance_lease", "work_coalescing_singleton", "zdd"):
+        import_module(package)
     for name in ("__main__", "watch_daemon", "watch_journal", "watch_writer"):
         import_module(f"{__package__}.{name}")
+    _require_loaded_modules(slot)
 
+
+def _require_loaded_modules(slot: Path) -> None:
     roots = {
         Path(sysconfig.get_path(key)) for key in ("purelib", "platlib")
     }
     if any(not _beneath(root, slot) for root in roots):
         raise PermissionError("watch installation library roots escape the running slot")
     packages = (
-        __package__, agent_procutil.__name__, single_instance_lease.__name__,
-        work_coalescing_singleton.__name__, zdd.__name__,
+        __package__, "agent_procutil", "single_instance_lease", "work_coalescing_singleton", "zdd",
     )
+    required = (*packages, *(f"{__package__}.{name}" for name in (
+        "__main__", "watch_daemon", "watch_journal", "watch_writer",
+    )))
+    if any(name not in sys.modules for name in required):
+        raise PermissionError("watch runtime module is unavailable")
     modules = (
         module for name, module in tuple(sys.modules.items())
         if any(name == package or name.startswith(package + ".") for package in packages)
@@ -145,15 +149,13 @@ def capture_running(
         runtime_version=slot.name, runtime_root=slot,
         payload_root=Path(payload["root"]), payload_version=payload["version"],
         environment=environment,
+        require_selected=require_selected,
     )
     if __version__ != runtime.runtime_version:
         raise PermissionError("watch loaded package version differs from the completed slot")
     if _running_slot(installation) != slot:
         raise PermissionError("watch running interpreter changed during validation")
-    _require_modules(slot)
-    runtime.require_current(
-        installation, environment=environment, require_selected=require_selected,
-    )
+    _require_loaded_modules(slot)
     return runtime
 
 

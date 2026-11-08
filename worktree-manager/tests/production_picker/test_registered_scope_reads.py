@@ -690,86 +690,6 @@ def test_real_held_stream_deadline_stops_a_provider_without_any_publication(tmp_
         runtime.close()
 
 
-@pytest.mark.parametrize("stalled", [False, True])
-def test_finite_stream_progress_renews_silence_budget_but_not_silent_output(
-    tmp_path, monkeypatch, stalled,
-):
-    provider = tmp_path / "finite.py"
-    provider.write_text(
-        "import json,time\n"
-        "print(json.dumps({'type':'row','entry':{'id':'one','state':'checking'}}),flush=True)\n"
-        "for index in range(8):\n"
-        " time.sleep(.15)\n"
-        + (" print('not a protocol frame',flush=True)\n" if stalled else
-           " print(json.dumps({'type':'delta','entry':{'id':'one','state':str(index)}}),flush=True)\n")
-        + "print(json.dumps({'type':'done'}),flush=True)\n",
-        encoding="utf-8",
-    )
-    reg = pivots.parse_manifest({
-        "label": "Finite readiness", "list": [sys.executable, str(provider)], "stream": True,
-    }, name="finite", source_path="fixture")
-    monkeypatch.setattr(tasks, "STREAM_TIMEOUT", .5)
-    runtime = tasks.RegisteredPivotRuntime(reg)
-    try:
-        runtime.ensure("")
-        wait(lambda: runtime.get("")[0] in ("ready", "error"), timeout=4)
-        wait(lambda: not runtime._procs, timeout=4)
-        state, rows, error = runtime.get("")
-        if stalled:
-            assert state == "error" and "no progress within" in error
-            assert rows and rows[0]["state"] == "checking"
-        else:
-            assert state == "ready" and not error and rows[0]["state"] == "7"
-    finally:
-        runtime.close()
-
-
-def test_finite_stream_keeps_process_deadline_despite_progress(tmp_path, monkeypatch):
-    provider = tmp_path / "endless.py"
-    provider.write_text(
-        "import json,time\n"
-        "while True:\n"
-        " print(json.dumps({'type':'row','entry':{'id':'one'}}),flush=True)\n"
-        " time.sleep(.05)\n",
-        encoding="utf-8",
-    )
-    reg = pivots.parse_manifest({
-        "label": "Finite readiness", "list": [sys.executable, str(provider)], "stream": True,
-    }, name="finite", source_path="fixture")
-    monkeypatch.setattr(tasks, "STREAM_TIMEOUT", .5)
-    monkeypatch.setattr(tasks, "STREAM_PROCESS_TIMEOUT", 1.2)
-    runtime = tasks.RegisteredPivotRuntime(reg)
-    try:
-        runtime.ensure("")
-        wait(lambda: runtime.get("")[0] == "error", timeout=4)
-        assert "process budget" in runtime.get("")[2]
-        assert not runtime._procs
-    finally:
-        runtime.close()
-
-
-@pytest.mark.parametrize("done,code", [(False, 0), (False, 7), (True, 7)])
-def test_finite_stream_requires_successful_terminal_completion(tmp_path, done, code):
-    provider = tmp_path / "incomplete.py"
-    provider.write_text(
-        "import json\n"
-        "print(json.dumps({'type':'row','entry':{'id':'one','state':'checking'}}),flush=True)\n"
-        + ("print(json.dumps({'type':'done'}),flush=True)\n" if done else "")
-        + f"raise SystemExit({code})\n",
-        encoding="utf-8",
-    )
-    reg = pivots.parse_manifest({
-        "label": "Finite readiness", "list": [sys.executable, str(provider)], "stream": True,
-    }, name="finite", source_path="fixture")
-    runtime = tasks.RegisteredPivotRuntime(reg)
-    try:
-        runtime.ensure("")
-        wait(lambda: runtime.get("")[0] == "error", timeout=4)
-        assert "incomplete stream" in runtime.get("")[2] and not runtime._procs
-    finally:
-        runtime.close()
-
-
 def test_held_stream_first_commits_release_bounded_startup_slots(tmp_path):
     provider = tmp_path / "provider.py"
     provider.write_text(
@@ -1066,7 +986,6 @@ def test_refresh_does_not_overwrite_synchronous_admission_diagnostic():
 
 
 def test_native_reload_key_repaints_scoped_footer_and_navigation(monkeypatch):
-    from test_config_actions import _wait
     from test_picker_tui import _wait_for_initial_setup
 
     tick = PickerScreen._tick
@@ -1111,7 +1030,6 @@ def test_native_reload_key_repaints_scoped_footer_and_navigation(monkeypatch):
 
             monkeypatch.setattr(footer, "render", paint)
             await pilot.press("r")
-            await _wait(pilot, lambda: painted and "reading declared scope(s)" in painted[-1])
             assert calls
             assert "reading declared scope(s)" in painted[-1]
             state["pending"] = False
@@ -1122,11 +1040,10 @@ def test_native_reload_key_repaints_scoped_footer_and_navigation(monkeypatch):
             screen.frame = 4
             painted.clear()
             tick(screen)
-            await _wait(pilot, lambda: painted and "read settled" in painted[-1])
+            await pilot.pause()
             assert painted and "read settled" in painted[-1]
             assert "Enter: actions for Fixture tasks row" in painted[-1]
             await pilot.press("ctrl+shift+left")
-            await _wait(pilot, lambda: painted and "Fixture tasks:" not in painted[-1])
             assert screen._kind() == "worktrees"
             assert "Fixture tasks:" not in painted[-1]
 

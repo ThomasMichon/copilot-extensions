@@ -7,14 +7,6 @@ single JSON payload with ``machine``/``env`` tagged on every row. An
 unreachable/offline host degrades to a partial result (marked
 ``reachable: false``) instead of failing the whole call.
 
-Each row is the host's own ``list --json`` record, so it carries both the
-lifecycle ``status`` (active/complete/finalized/...) and the derived
-``state`` (active/wip/dirty/convo/unused/completed). Live work is
-``state == "active"``; many ``status == "active"`` rows are idle. The call
-covers the selected project only (each host runs ``agent-worktrees
---project <project> list``), so an all-projects inventory runs it once per
-project.
-
 Manually dispatched from ``__main__.py`` (mirrors ``lease``/``pr``'s own
 top-level verb pattern -- see the ``if args_list[0] == "lease":`` block) so
 this module owns its own argparse and never grows the already-at-its-
@@ -34,12 +26,10 @@ from __future__ import annotations
 import argparse
 import base64
 import json
-import os
 import shlex
 import subprocess
 import sys
-
-from agent_procutil import no_window_kwargs
+from pathlib import Path
 
 from . import config as cfg
 
@@ -52,8 +42,8 @@ def _fleet_targets(config):
     """Yield ``(machine_key, env_name, alias, shell, is_local)`` for every
     Copilot-enabled, ssh-ready machine x environment in ``machines.yaml``,
     plus the current machine's own environment (``is_local=True``, run
-    locally via :func:`_local_project_argv` rather than over a loopback SSH
-    hop -- a child process, not literally in-process).
+    locally via the binstub rather than over a loopback SSH hop -- not
+    literally in-process).
 
     A machine with no per-environment alias falls back to its top-level
     ``alias`` (one row, ``env_name=""``) -- mirrors
@@ -86,77 +76,35 @@ def _fleet_targets(config):
             yield key, "", entry.alias, "bash", is_local
 
 
-#: Set for every child ``list`` so a host whose runtime is missing reports a
-#: gap instead of self-provisioning one -- ``fleet`` stays a passive read.
-NO_SELFPROVISION_ENV = "AGENT_WORKTREES_NO_SELFPROVISION"
-
-#: The owner command the installer always deploys on every host; project
-#: binstubs are thin ``<owner> --project <project>`` wrappers that a
-#: registered repository need not have.
-OWNER_COMMAND = "agent-worktrees"
-
-
 def _remote_list_cmd(shell: str, project: str, extra_args: list[str]) -> str:
-    """Build the remote command running
-    ``agent-worktrees --project <project> list --json``.
+    """Build the remote command string invoking ``<project> list --json``.
 
     Mirrors ``claimant.py``'s ``_remote_probe_cmd`` (pwsh EncodedCommand on
     Windows, ``bash -lc`` elsewhere) for the same reason: robust against a
-    cmd.exe default sshd shell. Uses the owner command with an explicit
-    ``--project`` rather than a ``<project>`` binstub, which a registered
-    repository on the remote host may not have.
+    cmd.exe default sshd shell.
 
-    Every argument is quoted for the target shell (PowerShell single quotes
-    or ``shlex``) rather than concatenated -- ``extra_args`` (e.g. a
-    ``--tracking-status`` value) and the project name are caller-influenced
-    and must never be interpolated into a shell string unescaped (review
-    #3134). Both shapes set :data:`NO_SELFPROVISION_ENV` (matching
-    ``pr_sweep_transport``) and propagate the command's exit status, so a
-    missing runtime or project surfaces as a nonzero exit.
+    Builds the inner command as a properly quoted argv (``shlex.join``)
+    rather than naive string concatenation -- ``extra_args`` (e.g. a
+    ``--tracking-status`` value) is caller-influenced and must never be
+    interpolated into a shell string unescaped (review #3134).
     """
-    argv = [OWNER_COMMAND, "--project", project, "list", "--json", *extra_args]
+    inner = shlex.join([project, "list", "--json", *extra_args])
     if shell == "pwsh":
-        def quoted(value: str) -> str:
-            return "'" + value.replace("'", "''") + "'"
-
-        # A missing owner command exits 127 with bash's wording, so both
-        # shells report it the same way; otherwise the exit status of
-        # `list` is propagated unchanged.
-        script = (
-            "$ProgressPreference='SilentlyContinue';"
-            f"$env:{NO_SELFPROVISION_ENV}='1';"
-            f"if (-not (Get-Command {quoted(OWNER_COMMAND)} -ErrorAction SilentlyContinue))"
-            f" {{ [Console]::Error.WriteLine({quoted(OWNER_COMMAND + ': command not found')}); exit 127 }};"
-            f"& {' '.join(map(quoted, argv))};exit $LASTEXITCODE"
-        )
-        enc = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
-        return f"pwsh -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand {enc}"
-    inner = f"{NO_SELFPROVISION_ENV}=1 " + shlex.join(argv)
+        enc = base64.b64encode(inner.encode("utf-16-le")).decode("ascii")
+        return f"pwsh -NoProfile -WindowStyle Hidden -EncodedCommand {enc}"
     return f"bash -lc {shlex.quote(inner)}"
 
 
-def _local_project_argv(project: str) -> list[str]:
-    """Return the argv prefix that runs a project-scoped command locally.
-
-    Invokes this same runtime as ``python -m agent_worktrees --project
-    <project>`` -- what the owner command and every project binstub
-    ultimately exec -- instead of a launcher file. Launchers are
-    platform-shaped (an extensionless script on POSIX, ``.cmd``/``.ps1``
-    shims on Windows), and an argv-list ``subprocess.run`` cannot launch a
-    ``.ps1`` or reliably resolve PATHEXT, so a binstub lookup made the local
-    fleet row fail on Windows. ``sys.executable`` keeps the child on the
-    same interpreter as the caller on every platform, and needs no
-    ``<project>`` binstub at all. ``-I`` keeps this passive read from
-    importing a shadowing ``agent_worktrees`` out of the caller's working
-    directory or a ``PYTHON*`` variable, matching the package's other
-    self-invocations.
-    """
-    return [sys.executable, "-I", "-X", "utf8", "-m", "agent_worktrees", "--project", project]
+def _local_binstub(project: str) -> str:
+    """Resolve the local project binstub path, falling back to PATH lookup."""
+    binstub = Path.home() / ".local" / "bin" / project
+    return str(binstub) if binstub.exists() else project
 
 
-def _parse_list_envelope(raw: str) -> dict | None:
-    """Extract the enveloped ``list --json`` payload (``{"worktrees": [...],
-    "projection": {...}, "availability": ...}`` -- see ``emit_current``), or
+def _parse_list_payload(raw: str) -> list | None:
+    """Extract the ``worktrees`` array from a ``list --json`` payload
+    (always an enveloped ``{"worktrees": [...]}`` object -- see
+    ``cmd_list``'s own ``_json_output({"worktrees": worktrees})``), or
     None on any parse/shape failure.
 
     Tolerates surrounding shell/login-banner noise by scanning for the
@@ -181,15 +129,8 @@ def _parse_list_envelope(raw: str) -> dict | None:
         data = json.loads(raw[start:end + 1])
     except (ValueError, TypeError):
         return None
-    if not isinstance(data, dict) or not isinstance(data.get("worktrees"), list):
-        return None
-    return data
-
-
-def _parse_list_payload(raw: str) -> list | None:
-    """The ``worktrees`` array of :func:`_parse_list_envelope`, or None."""
-    envelope = _parse_list_envelope(raw)
-    return None if envelope is None else envelope["worktrees"]
+    worktrees = data.get("worktrees") if isinstance(data, dict) else data
+    return worktrees if isinstance(worktrees, list) else None
 
 
 def _probe_host(
@@ -208,17 +149,11 @@ def _probe_host(
         "machine": machine_key, "env": env_name,
         "reachable": False, "worktrees": [],
     }
-    # stdin is closed so neither child can read (or block on) the caller's
-    # stdin. A local timeout ends only the local client: some SSH servers
-    # keep the remote command running after the client disconnects.
     try:
         if is_local:
-            cmd = [*_local_project_argv(project), "list", "--json", *extra_args]
+            cmd = [_local_binstub(project), "list", "--json", *extra_args]
             proc = subprocess.run(
-                cmd, capture_output=True, text=True, encoding="utf-8",
-                errors="replace", timeout=timeout + 4,
-                stdin=subprocess.DEVNULL, env={**os.environ, NO_SELFPROVISION_ENV: "1"},
-                **no_window_kwargs(),
+                cmd, capture_output=True, text=True, timeout=timeout + 4,
             )
         else:
             remote_cmd = _remote_list_cmd(shell, project, extra_args)
@@ -226,9 +161,7 @@ def _probe_host(
                 ["ssh", "-o", "BatchMode=yes",
                  "-o", f"ConnectTimeout={max(1, int(timeout))}",
                  alias, remote_cmd],
-                capture_output=True, text=True, encoding="utf-8",
-                errors="replace", timeout=timeout + 4,
-                stdin=subprocess.DEVNULL, **no_window_kwargs(),
+                capture_output=True, text=True, timeout=timeout + 4,
             )
     except (subprocess.SubprocessError, OSError) as exc:
         row["error"] = str(exc)[:500]
@@ -236,20 +169,12 @@ def _probe_host(
     if proc.returncode != 0:
         row["error"] = (proc.stderr or proc.stdout or f"exit {proc.returncode}").strip()[:500]
         return row
-    envelope = _parse_list_envelope(proc.stdout)
-    if envelope is None:
+    worktrees = _parse_list_payload(proc.stdout)
+    if worktrees is None:
         row["error"] = "unparseable or unexpected `list --json` output"
         return row
     row["reachable"] = True
-    row["worktrees"] = envelope["worktrees"]
-    # Provenance stays with the rows: `availability` is set (status
-    # "advisory") when the host served its saved roster instead of a
-    # current resident publication; `projection.observed_at` dates it. Any
-    # availability label is kept so delegate inference fails closed on it.
-    if isinstance(envelope.get("projection"), dict):
-        row["projection"] = envelope["projection"]
-    if envelope.get("availability") is not None:
-        row["availability"] = envelope["availability"]
+    row["worktrees"] = worktrees
     return row
 
 
@@ -257,30 +182,14 @@ def run_fleet(argv: list[str]) -> int:
     """Entry point for the ``fleet`` verb (manual dispatch from ``__main__.py``)."""
     parser = argparse.ArgumentParser(
         prog="agent-worktrees fleet",
-        description="Aggregate one project's `list --json` across every "
-        "reachable machine x environment -- one invocation per SSH target, "
-        "never per-worktree (#2732). Covers the selected project only (the "
-        "current or `--project <project>` one), not every project on a host. "
-        "A host that is unreachable, times out, lacks the owner command or "
-        "exits nonzero degrades to a partial row (`reachable: false` with an "
-        "`error`), which means unknown, not zero worktrees. Each host is read "
-        "with `list --json --passive`: one bounded, demand-free resident "
-        "attempt that never starts, waits for or wakes a host's status-monitor, "
-        "otherwise that host's "
-        "saved roster labeled by the row's `availability` (status advisory) "
-        "and `projection.observed_at`; a host without a saved roster, or whose "
-        "older runtime rejects `--passive`, is a partial row. Registration is "
-        "not checked per host: confirm a host's empty list against that "
-        "host's `repos list --strict --json`. Rows carry both the lifecycle "
-        "`status` and the derived `state`; live work is `state == \"active\"`.",
+        description="Aggregate `list --json` across every reachable machine "
+        "x environment -- one invocation per SSH target, never per-worktree "
+        "(#2732). An unreachable host degrades to a partial result.",
     )
     parser.add_argument("--json", action="store_true", help="JSON output (default: human summary)")
     parser.add_argument(
         "--timeout", type=float, default=DEFAULT_TIMEOUT,
-        help=f"Per-host timeout in seconds, > 0 (default {DEFAULT_TIMEOUT}): the SSH "
-        "connect timeout, after which the local client also gives up shortly. "
-        "It does not stop a remote command on SSH servers that keep it running "
-        "after the client disconnects",
+        help=f"Per-host SSH connect timeout in seconds, > 0 (default {DEFAULT_TIMEOUT})",
     )
     parser.add_argument(
         "--tracking-status", default=None,
@@ -311,8 +220,7 @@ def run_fleet(argv: list[str]) -> int:
     except Exception:
         project = "agent-worktrees"
 
-    # Every host read is passive: it never starts or awaits a status-monitor.
-    extra_args: list[str] = ["--passive"]
+    extra_args: list[str] = []
     if args.tracking_status:
         extra_args += ["--tracking-status", args.tracking_status]
     if args.all:
@@ -333,8 +241,28 @@ def run_fleet(argv: list[str]) -> int:
     ]
     from . import delegate_cli
 
-    # Only a host's current publication can prove a caller gone or terminal.
-    delegate_cli.annotate_fleet_hosts(rows)
+    reachable_hosts = {
+        (str(row.get("machine") or ""), str(row.get("env") or "")): bool(row.get("reachable"))
+        for row in rows
+    }
+    worktrees = [
+        dict(worktree)
+        for row in rows
+        for worktree in row.get("worktrees", [])
+        if isinstance(worktree, dict)
+    ]
+    delegate_cli.annotate_delegate_graph(worktrees, reachable_hosts=reachable_hosts)
+    worktrees_by_id = {
+        str(worktree.get("id")): worktree
+        for worktree in worktrees
+        if isinstance(worktree.get("id"), str)
+    }
+    for row in rows:
+        row["worktrees"] = [
+            worktrees_by_id.get(str(worktree.get("id")), worktree)
+            for worktree in row.get("worktrees", [])
+            if isinstance(worktree, dict)
+        ]
 
     if args.json:
         print(json.dumps({"version": 1, "hosts": rows}, default=str))
@@ -348,8 +276,7 @@ def run_fleet(argv: list[str]) -> int:
             continue
         n = len(row.get("worktrees", []))
         total += n
-        saved = " (saved roster)" if row.get("availability") else ""
-        print(f"  {label:30} {n} worktree(s){saved}")
+        print(f"  {label:30} {n} worktree(s)")
     print(f"\n{total} worktree(s) across {len(rows)} host(s).")
     return 0
 

@@ -1,9 +1,0 @@
-{
-  "comment": "Recover original Codespace returns from qualified generation evidence",
-  "changes": [
-    {
-      "plugin": "agent-codespaces",
-      "type": "patch"
-    }
-  ]
-}

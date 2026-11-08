@@ -77,15 +77,9 @@ def test_running_payload_uses_outer_slot_source(tmp_path, monkeypatch, nested):
     assert si.payload_version() == "1.2.3"
 
 
-@pytest.mark.parametrize("failure", [None, "qualification", "activation", "wrong-root", "wrong-package"])
-@pytest.mark.parametrize("alias", [
-    None, *(
-        pytest.param(value, marks=pytest.mark.skipif(os.name != "nt", reason="Windows path aliases"))
-        for value in ("root", "prefix", "package")
-    ),
-])
+@pytest.mark.parametrize("failure", [None, "qualification", "activation", "wrong-root"])
 def test_app_only_self_install_qualifies_and_transactionally_activates_without_source(
-    tmp_path, monkeypatch, failure, alias,
+    tmp_path, monkeypatch, failure,
 ):
     installer = si._runtime_installer()
     root = tmp_path / "root"
@@ -109,12 +103,6 @@ def test_app_only_self_install_qualifies_and_transactionally_activates_without_s
         Path(__file__).resolve().parents[1] / "references" / "control-plane-provider.json",
         references / "control-plane-provider.json",
     )
-    if failure == "wrong-package":
-        monkeypatch.setattr(si.worktree_manager, "__file__", str(tmp_path / "foreign-package" / "__init__.py"))
-    if alias == "prefix":
-        monkeypatch.setattr(si.sys, "prefix", "\\\\?\\" + str(slot / ".venv"))
-    elif alias == "package":
-        monkeypatch.setattr(si.worktree_manager, "__file__", "\\\\?\\" + si.worktree_manager.__file__)
     monkeypatch.setattr(si.worktree_manager, "__version__", "1.2.3")
     _patch_local_bin(monkeypatch, tmp_path)
     _patch_provider_registry(monkeypatch, tmp_path)
@@ -126,7 +114,7 @@ def test_app_only_self_install_qualifies_and_transactionally_activates_without_s
 
     @contextmanager
     def qualified(candidate, record):
-        assert candidate.samefile(slot) and record["name"] == "worktree-manager"
+        assert candidate == slot and record["name"] == "worktree-manager"
         events.append("qualified")
         if failure == "qualification":
             raise RuntimeError("injected qualification failure")
@@ -155,7 +143,7 @@ def test_app_only_self_install_qualifies_and_transactionally_activates_without_s
         options["after_publish"]()
 
     def startup(_root, candidate, *, start_if_missing):
-        assert candidate.samefile(slot)
+        assert candidate == slot
         assert start_if_missing is True
         events.append("started")
         if failure == "activation":
@@ -166,21 +154,18 @@ def test_app_only_self_install_qualifies_and_transactionally_activates_without_s
     monkeypatch.setattr(installer, "activate", activate)
     monkeypatch.setattr(installer, "_activate_after_bootstrap_update", startup)
     monkeypatch.setattr(si.importlib.util, "spec_from_file_location", application_spec)
-    selected_root = tmp_path / "foreign" if failure == "wrong-root" else root
-    if alias == "root":
-        selected_root = Path("\\\\?\\" + str(selected_root))
     result = si.self_install(
-        root=selected_root, dry_run=False,
+        root=tmp_path / "foreign" if failure == "wrong-root" else root, dry_run=False,
         _reconcile_instances=False,
     )
     if failure is None:
         assert result.action == "installed", result.reason
-        assert result.version == "1.2.3" and Path(result.slot).samefile(slot)
+        assert result.version == "1.2.3" and result.slot == str(slot)
         assert events.index("published") < events.index("started") < events.index("released")
     else:
         assert result.action == "error", result
         assert not si.local_bin().exists() or not any(path.is_file() for path in si.local_bin().iterdir())
-        if failure in {"wrong-root", "wrong-package"}:
+        if failure == "wrong-root":
             assert "another installation" in result.reason
             assert events == []
     assert not (slot / "payload").exists()

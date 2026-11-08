@@ -67,7 +67,6 @@ def register_status_routes(
     bus: EventBus,
     *,
     control_token: str | None = None,
-    data_auth_required: bool = False,
     cohort_source_owned: bool = False,
 ) -> None:
     @app.get("/health")
@@ -81,9 +80,6 @@ def register_status_routes(
             "status": "draining" if gate.draining else "ok",
             "version": __version__,
             "runtime_config_identity": getattr(request.app.state, "runtime_config_identity", None),
-            "runtime_behavior_identity_v1": getattr(request.app.state, "runtime_behavior_identity_v1", None),
-            "data_auth_required": data_auth_required,
-            "data_token_match_v1": getattr(request.state, "data_token_match_v1", False),
             "draining": gate.draining,
             "subscribers": bus.subscriber_count,
             "backlog": queue.backlog_health(repo=repo),

@@ -68,50 +68,6 @@ def plan(kind, owner, source):
     )
 
 
-@pytest.mark.parametrize("action", ["install", "repair"])
-def test_native_engine_fresh_action_keeps_the_selected_artifact(selected, action):
-    owner, artifact, _, source = selected
-    step = update_runtime_plan.plan_engine(owner, "linux", force=True, source=source, action=action)
-    assert not step.status
-    assert step.argv[2] == action
-    assert step.artifact == artifact
-    assert step.environment[PIN_ENV] == source.identity
-
-
-@pytest.mark.parametrize("kind", ["engine", "module", "registered"])
-@pytest.mark.parametrize("custom_entry", [False, True])
-def test_native_profile_flows_through_existing_plan_owner(
-    selected, kind, monkeypatch, tmp_path, custom_entry,
-):
-    owner, artifact, _, source = selected
-    script = "native_source" if custom_entry else "install"
-    if custom_entry:
-        for extension in ("sh", "ps1"):
-            (artifact / "scripts" / f"{script}.{extension}").write_text("exit 0\n")
-    (artifact / "source-install.json").write_text(json.dumps({
-        "schema": "copilot-extensions.native-source-install", "version": 1,
-        "windows": {"script": f"scripts/{script}.ps1", "argument": "-InstallSource"},
-        "posix": {"script": f"scripts/{script}.sh", "argument": "--install-source"},
-    }))
-    snapshot = tmp_path / "prepared"
-    snapshot.mkdir()
-    native = {
-        "identity": json.loads(source.identity),
-        "runtime_version": source.version + ".profile." + "d" * 16,
-        "payload_hash": "e" * 64,
-    }
-    source = dataclasses.replace(source, install_source=snapshot, native=json.dumps(native))
-    monkeypatch.setattr(PreparedRuntimeSource, "validate", lambda *args: None)
-    step = plan(kind, owner, source)
-    assert not step.status
-    assert step.target_version == native["runtime_version"]
-    assert any(Path(argument) == artifact / "scripts" / f"{script}.sh" for argument in step.argv)
-    index = step.argv.index("--install-source")
-    assert step.argv[index + 1] == str(snapshot)
-    assert step.environment[PIN_ENV] == source.identity
-    assert step.fallback_argv == ()
-
-
 @pytest.mark.parametrize("kind", ["engine", "module", "registered"])
 def test_source_selection_does_not_skip_on_matching_package(selected, kind, monkeypatch):
     owner, artifact, runtime, source = selected

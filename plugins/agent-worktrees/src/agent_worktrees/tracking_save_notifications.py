@@ -24,7 +24,6 @@ MAX_PENDING = 32
 MAX_PENDING_BYTES = 1024 * 1024
 MAX_SUBSCRIBERS = 32
 MAX_DRAIN = 64
-MAX_CHANGED_PATHS = 32
 MAX_COUNTER = (1 << 63) - 1
 ReceiptEvent = capture.SaveReceipt | capture.DeliveryIssue
 ReceiptObserver = Callable[[ReceiptEvent], object]
@@ -65,8 +64,6 @@ class _State:
     omitted_bytes: int = 0
     saturated: bool = False
     unknown_bytes: bool = False
-    changed_paths: dict[str, None] = field(default_factory=dict)
-    changed_all: bool = False
 
 
 @dataclass
@@ -91,29 +88,7 @@ def _key(path: Path) -> str:
 def capture_idle() -> bool:
     """Whether a new optional compute scope can exclude earlier deferred saves."""
     state = _state()
-    return not (
-        state.holds or state.pending or state.delivering or state.omitted_count
-        or state.changed_paths or state.changed_all
-    )
-
-
-def worktree_changed(worktree_path: str) -> None:
-    """Defer small native wakes until every record and pair hold is released."""
-    state = _state()
-    if not isinstance(worktree_path, str) or not worktree_path:
-        return
-    try:
-        oversized = len(worktree_path.encode("utf-8")) > 4096
-    except UnicodeError:
-        oversized = True
-    if oversized or (
-        worktree_path not in state.changed_paths and len(state.changed_paths) >= MAX_CHANGED_PATHS
-    ):
-        state.changed_paths.clear()
-        state.changed_all = True
-    elif not state.changed_all:
-        state.changed_paths[worktree_path] = None
-    _drain(state)
+    return not (state.holds or state.pending or state.delivering or state.omitted_count)
 
 
 def acquire(*, path: Path | None = None) -> Hold:
@@ -378,24 +353,5 @@ def _drain(state: _State) -> None:
                 _omit(state, len(state.pending), state.size, "reentrant-omission-callback-bound")
                 state.pending.clear()
                 state.size = 0
-        if not state.holds and (state.changed_paths or state.changed_all):
-            paths = [None] if state.changed_all else list(state.changed_paths)
-            state.changed_paths.clear()
-            state.changed_all = False
-            try:
-                from .worktree_notifications import notify_worktree_changed
-
-                for index, path in enumerate(paths):
-                    if state.holds:
-                        if path is None:
-                            state.changed_all = True
-                            state.changed_paths.clear()
-                        else:
-                            for remaining in paths[index:]:
-                                worktree_changed(remaining)
-                        break
-                    notify_worktree_changed(path)
-            except Exception:
-                logger.exception("Native worktree wake failed after canonical persistence")
     finally:
         state.delivering = False

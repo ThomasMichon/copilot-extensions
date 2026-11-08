@@ -423,65 +423,6 @@ def test_unavailable_configured_source_does_not_fall_back_to_cwd(repository, tmp
             pytest.fail("a valid ambient checkout is not a fallback")
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Windows source-acquisition sharing retry")
-@pytest.mark.parametrize("change", ["head", "owner", "appeared", "unsafe", "cap", "deadline"])
-def test_acquisition_retry_refuses_drift_and_expiry(repository, tmp_path, monkeypatch, change):
-    repo, _release, development = repository
-    clock = [time.monotonic()]
-    monkeypatch.setattr(source.time, "monotonic", lambda: clock[0])
-    monkeypatch.setattr(source.time, "sleep", lambda delay: clock.__setitem__(0, clock[0] + delay))
-    rename, is_symlink = Path.rename, Path.is_symlink
-    calls = []
-    target = []
-
-    def linked(path):
-        return bool(target and change == "unsafe" and path == target[0]) or is_symlink(path)
-
-    def blocked(path, destination):
-        if not path.parent.name.startswith(".acquire-"):
-            return rename(path, destination)
-        calls.append(path)
-        if len(calls) != 1:
-            pytest.fail("rename retried after source/path/deadline refusal")
-        target.append(destination)
-        if change == "head":
-            git(path, "checkout", "--detach", development)
-        elif change == "owner":
-            marker = path / ".git" / "runtime-source-owner.json"
-            owner = json.loads(marker.read_text(encoding="utf-8"))
-            owner["repo"] += "-foreign"
-            marker.write_text(json.dumps(owner), encoding="utf-8")
-        elif change == "appeared":
-            destination.mkdir()
-            (destination / "foreign").write_text("preserved", encoding="utf-8")
-        elif change == "cap":
-            clock[0] += 15
-        elif change == "deadline":
-            clock[0] += 6
-        error = PermissionError("controlled sharing failure")
-        error.winerror = 32
-        raise error
-
-    monkeypatch.setattr(Path, "rename", blocked)
-    monkeypatch.setattr(Path, "is_symlink", linked)
-    expected = {
-        "head": "moved during initialization", "owner": "different selection owner",
-        "appeared": "appeared during initialization", "unsafe": "must not be linked",
-        "cap": "retry deadline", "deadline": "deadline exceeded",
-    }
-    deadline = clock[0] + 5 if change == "deadline" else None
-    with pytest.raises(source.SourceAcquisitionError, match=expected[change]):
-        with source.acquire(
-            config.RuntimeSource("main", str(repo)), root=tmp_path / "manager", deadline=deadline,
-        ):
-            pytest.fail("refused acquisition reached source consumption")
-    assert len(calls) == 1
-    if change == "appeared":
-        assert (target[0] / "foreign").read_text(encoding="utf-8") == "preserved"
-    else:
-        assert not target[0].exists()
-
-
 def test_worktree_cannot_replace_owned_checkout(repository):
     repo, _release, _development = repository
     selection = config.RuntimeSource("main", str(repo))

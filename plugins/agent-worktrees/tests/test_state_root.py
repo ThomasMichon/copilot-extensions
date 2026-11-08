@@ -251,8 +251,6 @@ def test_coordination_readiness_cli_is_json_default(
     assert payload["version"] == 1
     assert payload["ready"] is False
     assert payload["code"] == "knowledge_binding_required"
-    assert "lease-acquire-released-only-v1" in payload["capabilities"]
-    assert "lease-return-proof-v1" in payload["capabilities"]
 
 
 # ---------------------------------------------------------------------------

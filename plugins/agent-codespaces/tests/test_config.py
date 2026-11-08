@@ -77,47 +77,6 @@ def test_layered_codespace_real_load_and_knowledge_file_ownership(layered_codesp
     assert not (machine / "adopted-repos.yaml").exists()
 
 
-def test_layered_owned_limit_defaults_and_exact_override(layered_codespace_context):
-    base, knowledge, _, _ = layered_codespace_context
-    assert load_merged_config().max_owned_codespaces == 30
-    _write_codespace_layer(base, {"defaults": {"max_owned_codespaces": 35}})
-    _write_codespace_layer(knowledge, {"defaults": {"max_owned_codespaces": 40}})
-    _write_codespace_layer(base, {"defaults": {"max_owned_codespaces": 45}}, local=True)
-    assert load_merged_config().max_owned_codespaces == 45
-
-
-@pytest.mark.parametrize("value", [0, -1, True, "30"])
-def test_owned_limit_rejects_invalid_native_values(layered_codespace_context, value):
-    base, _, _, _ = layered_codespace_context
-    _write_codespace_layer(base, {"defaults": {"max_owned_codespaces": value}})
-    with pytest.raises(ValueError, match="positive integer"):
-        load_merged_config()
-
-
-@pytest.mark.parametrize("command", ["create", "allocate"])
-def test_cli_capacity_configuration_error_can_be_repaired(layered_codespace_context, monkeypatch, capsys, command):
-    from types import SimpleNamespace
-    from agent_codespaces import __main__ as cli, allocation
-    from agent_codespaces.pool import build_pool
-
-    base, _, _, _ = layered_codespace_context
-    _write_codespace_layer(base, {"defaults": {"max_owned_codespaces": 0}})
-    monkeypatch.setattr(cli, "validate_context", lambda: None)
-    monkeypatch.setattr(cli, "_gh_binary_available", lambda: True)
-    monkeypatch.setattr(cli, "_require_codespace_scope", lambda *a, **kw: None)
-    monkeypatch.setattr(allocation, "allocation_context", lambda repo: ("fixture-owner", {"GH_TOKEN": "fixture-token"}))
-    empty = build_pool(codespaces=[], leases=[], markers={}, l2_leases={}, clean_records={}, live={})
-    monkeypatch.setattr(cli.pool_mod, "build_pool", lambda **kw: empty)
-    monkeypatch.setattr(cli, "create_codespace", lambda *a, **kw: SimpleNamespace(name="fixture-created"))
-    extra = ["--json"] if command == "allocate" else ["--no-wait"]
-    assert cli.main([command, "example/project", *extra]) == 1
-    assert "positive integer" in capsys.readouterr().err
-    _write_codespace_layer(base, {"defaults": {"max_owned_codespaces": 30}})
-    assert cli.main([command, "example/project", *extra]) == 0
-    if command == "allocate":
-        assert json.loads(capsys.readouterr().out)["action"] == "create"
-
-
 def test_layered_codespace_selected_context_not_shadowed_by_adoption(
     layered_codespace_context, tmp_path, monkeypatch,
 ):

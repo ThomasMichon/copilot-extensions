@@ -13,19 +13,12 @@ on:
       - worktree-manager/scripts/bootstrap_update.py
       - worktree-manager/scripts/runtime_install.py
       - worktree-manager/src/worktree_manager/update_driver_cli.py
-      - worktree-manager/src/worktree_manager/runtime_application_inputs.py
-      - worktree-manager/src/worktree_manager/update_bootstrap.py
-      - worktree-manager/src/worktree_manager/runtime_source_repair.py
-      - worktree-manager/packaged-assets.json
       - worktree-manager/tests/native/test_bootstrap_update_native.py
       - worktree-manager/tests/test_update_python_path.py
       - worktree-manager/tests/test_bootstrap_dispatch.py
       - worktree-manager/tests/test_install_source.py
       - worktree-manager/tests/test_bootstrap_inputs.py
       - worktree-manager/tests/test_bootstrap_update.py
-      - worktree-manager/tests/test_application_input_provider.py
-      - worktree-manager/tests/test_update_bootstrap.py
-      - worktree-manager/tests/test_recovery_source.py
 
 permissions:
   contents: read
@@ -64,18 +57,12 @@ jobs:
           --test-file tests/test_bootstrap_dispatch.py
           --test-file tests/test_install_source.py
           --test-file tests/test_bootstrap_inputs.py
-          --test-file tests/test_application_input_provider.py
-          --test-file tests/test_update_bootstrap.py
-          --test-file tests/test_recovery_source.py
           --test-file tests/test_bootstrap_update.py --allow-explicit-tiers
           -k "not full_declared_repository_inputs_reach_immutable_retention and
           (not test_bootstrap_dispatch or removed_source_anchor or missing_executable) and
           (not test_install_source or standalone_prepared_updates) and
           (not test_bootstrap_inputs or first_touch_retention or unresolved_source_selection or
-          prepared_source_retains_only or preparation_asset) and
-          (not test_application_input_provider.py or child_receives_no_mixed_case) and
-          (not test_update_bootstrap.py or prepared_repair_uses_declared_installer_entry) and
-          (not test_recovery_source.py or unattributable_engine_uses_native_fresh_installation) and
+          prepared_source_retains_only) and
           (not test_bootstrap_update.py or observer_modes_share)"
 
   bootstrap-update-windows:

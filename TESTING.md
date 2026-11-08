@@ -174,20 +174,6 @@ must not substitute for bounded tests and timely CI feedback.
 
 ## Focused packet catalog
 
-`python-selection-native.yml` supplies real Python 3.9 and supported Python
-side by side on a disposable hosted Windows runner. Its `TEST_PYTHON39` input
-names the existing 3.9 executable explicitly and is version-checked before
-selection; an invalid supplied prerequisite fails instead of skipping.
-The existing Worktrees first-touch admission test reaches its isolated binding
-receipt through PS5.1 and pwsh. The Procutil `real_python39` cases use the
-unchanged daemon helper with actual PATH discovery, covering old-first/
-supported-later selection and unsupported-only refusal, native Job adoption
-and original helper cleanup. Both groups must produce all six passing JUnit
-cases without skips. The synthetic version controls remain separate.
-This is source-consumer qualification, not an installed runtime, public PATH
-repair, a Python-free OS, production daemon launch or full setup acceptance.
-The ordinary focused hosted controller does not provision this old interpreter.
-
 Dispatch's `--test-file tests/test_pool_startup_client.py --test-file
 tests/test_ordinary_pool_startup.py --test-file tests/test_workspace_continuity.py
 --test-file tests/test_pool_placement_client.py --allow-explicit-tiers` packet
@@ -320,11 +306,7 @@ It requires PowerShell 7, real PSMux and the Windows .NET Framework compiler,
 without fallback or prerequisite skips on Windows. A private executable adapter
 adds the runner-owned `-L` namespace to the launcher's PSMux calls; fixture
 control and cleanup calls use that same namespace. The adapter restores the
-backend's original PATH. A separate native executable carries the synthetic
-Python owner's literal argv, stdin and exit status; it is not a PowerShell
-script substituted for a Python executable. The actual hosting-admission
-function is also checked before and after a real private mux probe, retaining
-BOM-free JSON input despite console-encoding changes. Two small native controls cover direct and adapted
+backend's original PATH. Two small native controls cover direct and adapted
 private mux startup. Four concurrent admitted
 Resume plans traverse the unchanged production launcher, copied pane assets,
 argument receipt and startup reader,
@@ -1343,7 +1325,7 @@ beyond the quiet allowance, retaining a flushed byte and deadline renewal for
 each unit while detailed diagnostics coalesce below64 KiB. Terminal counts,
 unchanged stdout and subsequent silent expiry are checked independently.
 
-The focused `owned-budget-native-acceptance.yml` manual workflow runs
+The focused `owned-budget-native-acceptance.yml` manual workflow runs only
 the bounded borrowed-parent budget packet on
 native Linux and macOS. It records the exact dispatched source, uses isolated
 test roots, and pins descendant exits across accepted delegation, sequential
@@ -1353,13 +1335,6 @@ Its separate dispatch preserves all existing installation-context selectors
 within GitHub's 25-input limit.
 PR-branch changes to this workflow or its packet tests also run the same two jobs, allowing the
 workflow itself to qualify before its first default-branch registration.
-Changes to Machines' repair-process owner also select this optional workflow.
-Its Linux job additionally runs only
-`test_outer_required_read_timeout_reaps_nested_probe` through the contained
-plugin runner: a required-module read is cut off while its probe and grandchild
-are live, and both must exit before the outer owner returns. This is native
-process-lifetime evidence, not clean-machine onboarding or credential receiving,
-and does not enlarge the required unit-only CI packet.
 The legacy-wrapper control separately removes only the parent watch to
 reproduce a retained supervisor after real Bash caller death. The corrected
 control confirms pinned exits without reporting unconfirmed SDK cleanup as
@@ -2372,221 +2347,6 @@ Run the expensive current-runtime matrix explicitly on Windows with
 `python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_native_seed_runtime.py --allow-explicit-tiers --timeout 1000 --plugin-timeout 1600`.
 The existing `native` discovery exclusion keeps it out of ordinary unit CI.
 
-For the actual Worktrees Python launch owner, select
-`tests/native/test_headed_worktrees_copilot.py` with
-`COPILOT_DRIVER_HEADED_MUX_E2E=1`, `COPILOT_NATIVE_TEST_EXECUTABLE` naming an
-existing native Copilot executable, and an existing PSMux/PowerShell installation.
-Run `python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_headed_worktrees_copilot.py --allow-explicit-tiers --timeout 300 --plugin-timeout 600 --test-timeout 180`.
-This focused lane uses the managed test environment, a loopback-only model
-provider, disposable Copilot state and the runner's private mux namespace.
-It checks literal startup input, fresh launch and same-session native resume,
-broker prompts, real child PID/birth receipts, seed non-replay and exact
-fixture retirement. A second control sends literal native terminal input,
-checks that the old broker refuses further prompt delivery, then explicitly
-stops through the original owner and resumes the same conversation through a
-new broker. Each control checks the exact user history and provider request
-count, with no replay of the rejected prompt. A third `manager-no-mux`
-control invokes the actual Manager `launch-session.ps1` and Worktrees resolver,
-using an unmodified private copy of the Manager scripts rather than a synthetic
-resolved plan, through the explicit no-mux path. It checks
-the same native history, broker, PID/birth and original-owner exit receipts.
-The `manager-mux` control invokes that same Manager launcher without
-`--no-mux`, from a separate private caller pane. It requires the caller to
-return while the Manager-created pane and native broker remain alive, then
-invokes the real caller from a newly named private outer pane before each
-fresh/resume broker prompt. Manager reuse must
-preserve the mux incarnation and native process births without another mux
-creation or startup-input replay. Native execution completion is read from
-the backend receipt, not inferred from the earlier successful caller return.
-These controls use ordinary unseeded admission and an explicit native initial
-prompt; they do not claim staged-seed qualification. The existing real
-PowerShell cold-resume consumer instead verifies Windows refusal before the
-backend starts, with its seed retained, when mux absence is unconfirmed.
-Discovery uses an adapter to the real private mux, not the host's
-default server or fabricated successful replies. Its only writes are creation
-and session options/configuration for the fixture's UUID-named Manager target.
-Outer fixture panes explicitly propagate their private PATH/profile with mux
-environment flags and verify selection before invoking Manager; inherited
-profile variables alone can be rewritten by PSMux. Cleanup pins both caller
-and Manager session incarnations. The fixture preserves the
-runner's registry/lifecycle context while scrubbing Copilot settings and
-credentials. Its raw pane entrypoint uses the physical Python interpreter
-with the same managed test packages, avoiding the
-Windows venv redirector and ambient Python site initialization. The fixture
-disables the wrapper's post-error display hold, not native execution or its
-required process/exit receipts.
-It does not install a runtime or qualify copied setup, Manager's externally
-attached/new-window paths or the full embody planner, guarded-head or auth-wait
-recovery, physical keyboard input or survival
-after caller cleanup Jobs. Those remain separate acceptance lanes.
-
-Driver's explicit `tests/native/test_headed_extension.py` lane uses the same
-canonical private mux routing, with raw pane argv separated from mux options
-by `--`. Two finite pane controls check actual script entry, PID and exit with
-default and null fixture configuration, always using a private data directory
-and rejecting inherited config/data overrides. PID and owner-result markers
-are published atomically. The SDK/broker control selects `direct` and
-`manager-wrapper` pane owners. The latter runs the actual Manager PowerShell 7
-pane wrapper with its normal pane Job enabled and a private home without an
-installed Worktrees runtime. Both owners preserve one native conversation
-across WebSocket and TCP prompts and check exact pane, CLI and extension exit.
-Run just these two controls with `-k native_headed_sdk`; this does not qualify
-the full Manager launch-session planner or survival after caller cleanup Jobs.
-The coordinator controls still invoke Python directly.
-Unit isolation controls reject default,
-foreign and whole-server routing before spawn, without mistaking child flags
-after `--` for mux routing.
-The focused `joined_session_reports_pending_read` control queries the executing
-CLI's `session.rpc.tasks.list()` and `session.rpc.schedule.list()` without a
-permission grant, checking the native `tasks` and `entries` arrays in the same
-conversation. Missing/failed/invalid reads do not produce an empty snapshot.
-This is SDK read-support qualification, not complete background-agent evidence,
-active-work/schedule mutation coverage or automatic-idle retirement.
-
-Manager's focused `tests/test_pane_startup.py` controls also execute its actual
-persisted AHP-binding and final startup-serialization blocks against copied
-launch commands. Inline and split resume arguments must be replaced, not duplicated;
-literal drive paths and prompt text survive the final consumer. Companion
-controls refresh the inner runtime before serialization, including recovery
-commands. The Bash inner-owner refresh also recognizes the existing
-`env BASH_ENV=` prefix and leaves native executables unchanged.
-Its runtime-refresh and AHP grammar checks use native Bash on POSIX or Git
-Bash on Windows, disabling MSYS argument translation only in that Windows
-fixture. Git Bash coverage is not native POSIX lifecycle qualification.
-The producer's Windows capability-absence
-control leaves older callers on their legacy path. These are isolated contract
-controls with a synthetic binding/token, not an authenticated AHP connection.
-They preserve selector-shaped interactive/model/agent values and reject
-runtime replacement of a native executable whose literal arguments resemble
-the Python owner. Matching native-Bash AHP controls live in
-`tests/test_launch_session_unwrap.py -k shell_ahp_binding`.
-Worktrees' `tests/test_session_shell.py -k headed_bash` checks effective
-`BASH_ENV` selection before copying and explicit empty-value pinning.
-On POSIX, the same selection executes real Bash exit/exec primers against
-refused admission; neither primer may run before the outer owner.
-The AHP controls also retain the option after a bare `--resume`.
-Both launchers use the bundled `bin/ahp-command.py` read-only adapter for this
-rewrite. Its actual command/argument transport is exercised through both final
-consumers: native positional tails are preserved, authoritative options precede
-their terminator, and copied-wrapper/inner-owner separators remain intact.
-The adapter travels with the launchers' existing runtime assets and uses the
-existing Worktrees option table, not a new installed-peer capability. The
-coupled `test_ahp_launcher_contract.py` pins this delegation and the existing
-credential/post-exit boundaries. Environment prefixes retain assignments,
-unset/chdir flags and env's own terminator before locating native options.
-The supported env grammar uses the standard option parser, including attached
-short-option values and combined flags; incomplete options emit no command.
-Opaque env split-string forms are refused, not interpreted or silently rewritten.
-Driver's `tests/test_headed_launcher.py -k native_validator` checks
-selector-shaped values and missing-value refusal. The existing
-`tests/test_session_host_core.py -k retained_headed_executable` control
-passes a literal `--log-dir` value through the real retained archive and
-verifies native exit. The Worktrees copied-wrapper controls call the same
-validator on the delivered native argv; no native Copilot or rollout is
-implied by these finite-process checks.
-The `retained_headed_extension_options` controls execute the archive and
-observe the real child's argv: extension flags precede the option terminator,
-selector-shaped values remain literal, and only an actual experimental option
-suppresses injection.
-The `headed_selection` controls also keep a selector-shaped split `-C` value
-from inventing a conversation, while preserving a real selected conversation.
-The optional Worktrees `tests/native/test_native_seed_application.py` constructs
-and installs the real wheel application through the canonical build/profile
-owners in a private home, removes its disposable source inputs, and checks
-current-runtime native admission. Disposable build inputs retain application
-Python source, operational scripts, top-level build metadata and dependency
-sources, not unrelated plugin surfaces or non-shipped test trees. Runtime
-assets and notices remain in the real wheel.
-Existing local `libs` are preserved on materialized release checkouts; a focused
-copy/materializer/resolver regression covers that layout without building wheels.
-It also builds the real installed CLI's launch
-command and invokes the packaged finite native provider after removing source
-inputs. Both scripts must belong to the installed nested environment, and the
-completion marker must remain unchanged. Its private project registry is empty and
-resident startup remains suppressed by the real pytest-owned test override.
-This first-touch check is distinct from full Manager/Copilot launch qualification.
-The focused `test_launch_cmd.py`, `test_session_shell.py`,
-`test_native_seed_shell.py` and `test_native_seed_phase_shell.py` controls retain
-legacy selection and literal argument transport, cover application-owned copying,
-and refuse flat-interpreter fallback for an incomplete application. The Bash
-controls use Git Bash on Windows; that is not native POSIX lifecycle evidence.
-Set `COPILOT_NATIVE_TEST_EXECUTABLE` for the real offline CLI through the installed
-command builder, wrapper and default setup. It reuses the startup/history
-control's literal two-turn fresh/resume assertions and synthetic local provider.
-Setup recovery suppresses host reconciliation; this does not qualify Manager,
-headed-broker admission, setup hooks or survival across caller cleanup Jobs.
-The admission case builds the application only once, whether or not native checks
-are explicitly enabled; construction and consumers share its existing
-300-second case budget. Without that prerequisite it qualifies only admission,
-asset selection and the finite provider, not native Copilot history.
-
-With the same native executable, existing PSMux/PowerShell prerequisites and
-`COPILOT_DRIVER_HEADED_MUX_E2E=1`, select the separate installed broker case:
-`python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_native_seed_application.py --allow-explicit-tiers -k owns_native_broker --timeout 480 --plugin-timeout 600 --test-timeout 480`.
-It builds and installs once, deletes source inputs, and runs the Worktrees
-execution owner from that actual installed interpreter/root without adding
-the managed test environment's site-packages or copying source launch assets.
-Both Worktrees and Driver Core imports must belong to the installed environment.
-The real native fresh/resume flow checks one conversation, literal startup input,
-broker prompts, PID/birth and terminal exit receipts, seed non-replay and exact
-fixture retirement. Construction, install, source removal and packaged admission
-must finish within 300 seconds; the complete native consumer runs in a separate
-caller-owned child with the existing 180-second ceiling. The composed case has
-a 480-second bound, not a claimed combined 300-second pass. The original
-admission case retains its 300-second bound and the plugin aggregate stays 600.
-This is installed execution-owner evidence, not the public Worktrees command,
-Manager integration, desktop attachment or survival across caller cleanup Jobs.
-The existing managed-environment controls remain separate and unchanged.
-
-The adjacent `tests/native/test_manager_application_launch.py` builds and
-installs the real Manager wheel application through the canonical standalone
-source/profile owners, removes disposable source inputs, and exercises the
-actual Worktrees launcher-discovery consumer. Manager's special installer
-starts its resident: the fixture supplies a private home, mux-data root and
-renewable native daemon-test lifecycle, and verifies settled cleanup receipts
-even when the body fails. A successful body must have started an owned
-resident. The 300-second case deadline is shared with cleanup, not extended.
-The installed Manager supplies its packaged launcher through the existing
-retention bootstrap and actual CLI version check; no synthetic health response,
-runtime marker or legacy payload directory qualifies this flow.
-`test_manager_canonical_runtime.py` preserves legacy paths and refuses missing
-or foreign application resources without recovery-generation fallback.
-Manager's focused `test_self_install.py -k app_only_self_install` and
-`test_update_bootstrap_activation.py` controls retain foreign-root/package,
-qualification, activation and startup-outcome refusals while accepting native
-path aliases. These are distinct from full native Copilot launch, desktop or
-all-caller-cleanup-Job qualification.
-With both `COPILOT_NATIVE_TEST_EXECUTABLE` and
-`COPILOT_DRIVER_HEADED_MUX_E2E=1`, the application fixture selects separate
-`manager-no-mux` and `manager-mux` cases through its actual packaged launcher.
-Run each selector in a separate contained invocation; construction and native
-calls share each case's unchanged 300-second deadline, not a combined budget.
-Fresh and resumed offline Copilot conversations must
-expose the common broker, retain one history and publish exact native
-process/exit receipts after disposable Manager source inputs are gone.
-The mux case also reads the installed Manager's registry through its own
-interpreter: each live CLI pane must match the private mux incarnation and
-become an exact exit-code tombstone before the next conversation resumes.
-The private adapter embeds its sole allowed write target and log path, and
-reads the current namespace from a fixture-owned file; callbacks and residents
-need not inherit routing variables from a caller that has already returned.
-The constructed cases omit additional warm-reuse launches; the copied-script
-mux control retains that separate coverage. Without the native prerequisites,
-the fixture still constructs only one launcher-discovery case.
-The Worktrees resolver remains the managed test runtime; this does not qualify
-an installed Worktrees application, resident status painting, desktop attachment
-or caller cleanup-Job escape. Manager's focused
-`tests/native/test_pane_boundary_native.py -k validation_cancels` controls
-preserve both native-command and script exit codes when the real pane reader
-enters its wrapper in a nested PowerShell scope. Bash already reads its
-child's `$?`; the automatic-variable shadowing correction is Windows-only.
-
-Manager's `tests/test_shutdown_exit.py` also runs the application probe in
-bounded children with the CPython 3.13 shutdown-workaround branch armed.
-The real callable CLI version handler must finish and the resource JSON must
-be emitted before the final hard exit; a failed version result emits no
-resource report. This covers exit ordering, not native CPython 3.13 installation.
-
 The optional native runtime-removal portfolio includes
 `tools/test_installer_engine_uninstall.py`,
 `tools/test_installer_engine_commands.py`,
@@ -3493,31 +3253,13 @@ refuses a missing sibling. The real application handoff and changed-wheel,
 installed-content and origin controls in `tools/test_local_install_source.py`
 exercise that companion loading through staged nested environments.
 
-The same file's `application_adapter` refusal controls check the explicit prepared
-downstream composition API. Four controls stop changed selection,
+The same file's `application_adapter` packet qualifies the explicit prepared
+downstream composition API. Four refusal controls stop changed selection,
 missing application, mismatched construction and Manager-native ownership
-before construction. `tools/test_application_adapter_journey.py` retains the
-contained synthetic application journey: real UV
+before construction. Its contained synthetic application executes real UV
 construction, setup/start, unchanged repeat, changed-declaration refusal before
-callbacks, a failed-start selected generation with unchanged last-known-good, distinct repair
-with the new declaration and the published stable command.
-The `application-adapter` contract in `tools/run-manager-runtime-acceptance.py`
-explicitly selects the ordered source-input, application-preparation, selection, install, repeat, refusal,
-failed-start, retry and physical-command items for both plugin and standalone
-forms. Each form retains one disposable source/application/runtime across its
-phases. Every item has 30 seconds, including its fixture work; one contained
-300-second group includes all application preparation, both forms and cleanup.
-Source freezing and application-profile construction remain separate bounded
-items; both retain the complete original dependency graph and production checks.
-The existing managed `agent-worktrees` test environment must already be prepared;
-this contract never bootstraps tooling or prepares an application outside that group.
-It is a changed per-phase allocation, **not** an original single-30-second pass.
-The runner supplies exact node order and requires all 16 unique, successful
-JUnit cases before accepting the journey. A later phase without its predecessors
-refuses; an independently selected phase reports only partial coverage.
-Function-scoped environment restoration and canonical group cleanup retain
-custody on failure and timeout. Native child and routing deadlines are unchanged.
-The source receipt and application are fixtures,
+callbacks, failed-start selector rollback, distinct repair with the new
+declaration and the published stable command. The source receipt and application are fixtures,
 not authenticated release/deployment evidence. Native Windows qualification
 does not qualify Linux, resident-service readiness or an adopter's host rollout;
 these cases do not expand required unit-only CI.
@@ -4722,34 +4464,6 @@ cross-host writer fence or completed update/rollback lifecycle.
 
 ## Optional SSH service and native relay
 
-The separate `plugins/agent-ssh/tests/test_gateway_sshd_native.py` source
-packet has an opt-in `AGENT_SSH_VAULT_NATIVE=1` / `-k vault-pair` case.
-Select the current first-party agent-ssh and agent-vault sources with prepared
-test dependencies, actual KeePassXC CLI and native OpenSSH server/client/keygen
-under the canonical contained runner. It reuses the PID-owned disposable Vault
-fixture, public-only preparation and pinned protected installation, then uses
-that exact pair for the existing listener's command/context, authorization,
-preservation and teardown assertions. Locked new setup refuses while the
-materialized pair remains usable; no system agent or production Vault is used.
-`-k 'not vault-pair and not encrypted-pair'` preserves the independent
-synthetic-key/outer-shell packet.
-On Linux, retain the disposable-account/host-state prerequisites below.
-This is current-source first-touch consumer proof, not installed setup,
-encrypted-key signing or user-logon lifetime. Default runs skip the Vault case.
-
-The same packet's Windows-only `AGENT_SSH_ENCRYPTED_NATIVE=1` /
-`-k encrypted-pair` case generates an encrypted disposable peer key. An
-already-available .NET Framework compiler builds a GUI-subsystem askpass
-fixture; no compiler or signer is installed. Its captured stdout is checked
-before the native consumer runs. BatchMode must refuse without invoking the
-helper, refused fixture unlock must not authenticate, and explicit fixture
-unlock must complete the existing pinned listener's command/context,
-refresh/withdrawal, forwarding-refusal and teardown controls. Private-key
-bytes/timestamp remain unchanged. Select this opt-in under the same contained
-runner and60s item/180s aggregate limits. The helper substitutes a synthetic
-human response; it is not an attended operator unlock, selected production
-signer, installed user-logon setup or lifetime proof. Default runs skip it.
-
 The independent `ssh_service=true` selector runs the contained standalone
 `services/ssh` suite on Linux and Windows. It covers installed foreground
 Gateway registration, later-machine enrollment/notifications, original-request
@@ -5382,11 +5096,6 @@ the same monotonic idle grace. Generation, admission, malformed and expired
 notifications cannot renew it or invoke policy. Actual sockets, the final
 idle-check/drain interleaving and Windows shell delivery remain in the explicit
 Worktrees consumer packet, not this actor-free inventory.
-The same in-memory handler fixture covers optional `worktreeChanged` delivery:
-current generation/admission accepts the wake, while stale, closed, legacy,
-malformed and expired frames neither reply nor invoke tool policy. Associated
-application-marker units supply a synthetic marker environment; dependency
-evaluation must not discover the test host's identity.
 The PowerShell SDK and Bridge resume fixtures compile immutable admitted source
 once per test session, then execute that code in fresh per-case module globals.
 They do not share module state, results, provider observations or qualification
@@ -5808,10 +5517,6 @@ these units do not qualify Windows read-sharing fences.
 Guardian cleanup checks its operation-owned module namespaces while preserving
 pre-existing modules; legitimate lazy standard-library imports are not treated
 as leaked private modules.
-The existing local-launch boundary fixture loads the core-owned native
-value-option table and Worktrees re-export through restored synthetic package
-namespaces. Both source files are explicitly hash-bound; moving the table does
-not add unit nodes, coverage targets, application imports or actor permissions.
 
 `tools/promotion_unit_tests/test_cell_installer.py` admits the original thirteen
 actor-free Machines release-payload and watchdog controls. The owned process
@@ -6387,30 +6092,6 @@ wheel's exact bytes. The full development extra remains broader than the
 dependency-free client; selected source distributions can still require a
 platform's native build prerequisites.
 
-## Fleet host probes: native Windows opt-in
-
-`agent-worktrees fleet` launches a local interpreter child and a real `ssh`
-client per host. `tests/test_fleet_cli.py` checks their argv and kwargs with a
-mocked `subprocess.run`; the desktop regression observes the actual launches
-and stays outside the required lane:
-
-```powershell
-$env:COPILOT_EXTENSIONS_NATIVE_WINDOWS = '1'
-try {
-    python tools\run-plugin-tests.py agent-worktrees --allow-explicit-tiers --test-file tests\test_fleet_windowless.py
-} finally {
-    Remove-Item Env:COPILOT_EXTENSIONS_NATIVE_WINDOWS
-}
-```
-
-From a real windowless `pythonw.exe` parent in a kill-on-close Job, it runs
-two cycles of each probe path with its production kwargs. The local path
-substitutes a real console `python.exe` for the `list` run. The SSH path runs
-the real `ssh` client through an isolated `-F` config whose `ProxyCommand` is
-a real console `python.exe` that closes the connection, so no remote host is
-contacted. It checks observed visible windows and foreground transitions; the
-SSH case is skipped when no `ssh` client is on `PATH`.
-
 ## Optional busy-host Codespaces functional qualification
 
 The manual `Installation context full` workflow's `codespaces-installer`
@@ -6522,64 +6203,12 @@ guardian's complete source shape without executing that actor during discovery.
 
 ## The turn-key runner
 
-Worktrees' Windows update admission controls live in
-`plugins/agent-worktrees/tests/test_update_entry_windows.py`. Contained pytest
-proves early refusal through native and Git-sh fronts, read-only/foreground
-availability and exact installed-runtime forwarding. The unmocked positive
-check requires an explicitly detached/outside-Job Windows host, rather than
-weakening the normal runner's restrictive Job. Prepare its interpreter with
-`python tools/run-plugin-tests.py agent-worktrees --prepare-only`, then run:
-
-```powershell
-& "<prepared-test-python>" "plugins\agent-worktrees\tests\test_update_entry_windows.py" --native-breakaway-root "<private-caller-owned-scratch>" --powershell "<absolute-native-powershell>"
-```
-
-This dedicated check creates only private profiles and permissive fixture Jobs,
-enters the real global/payload fronts with an offline bootstrap, and independently
-pins any surviving probe child for exact cleanup. It refuses contained mode;
-do not clear its marker or change an enclosing Job to manufacture a pass.
-The corresponding pytest positive cases are skipped under containment, not
-reported as native qualification. No real installation or request is submitted.
-
 The Manager plugin and standalone test preparers install its application
 non-editably through the normal retained-source policy. Both use the shared
 cache, whose fingerprint binds that installation shape; embedded first-party
 imports must survive private-input cleanup. Other plugin targets and the
 separately prepared Bridge remain editable. Production installation and test
 selection are unchanged.
-
-The `TestSelectedManagerMaterialization` source-equivalence class is one ordered,
-fresh-fixture sequence: fixture creation, full compose, selected compose,
-full equivalence, then all 161 SDK byte comparisons and trailing rewrite checks.
-Select the complete class, not an individual method. Partial/reordered collection
-and missing predecessors fail; the class finalizer removes its owned workspace
-and rejects incomplete evidence. Whole-tree equivalence alone has a 60-second
-item limit; fixture creation, both compose phases, and SDK comparison retain
-30 seconds each.
-The native packet retains one 300-second clock from before fixture creation
-through cleanup. This allocation does not turn the former compound item's
-30-second timeout into a monolithic pass.
-
-Closed-wheel deadline negatives use `negative_source_plugin`: a fresh real
-three-package local source graph with non-Python resources, not the full
-procutil/ZDD process-owner input. Invalid deadlines use an absent source path
-to prove refusal before source lookup. The full `plugin` fixture remains
-unchanged for native construction, child lifetime and positive consumers;
-the negative graph does not qualify those integrations or replace cold proof.
-
-Source-only tooling preparation selects the owning project's declared `dev`
-extra (or flat `dev` dependency group) through
-`declared_test_tooling_requirements`, plus the existing runner requirements.
-The group is a fallback only when the extra is absent. Malformed metadata
-tables or non-flat selected lists refuse before installation; group inclusion
-objects are not implicitly resolved.
-It does not promote runtime dependencies or `first-party-core` build inputs
-into tooling. Source-only cache identity includes that selected requirement
-set, so a pre-selection environment cannot silently retain missing dev tools.
-A selected packet still uses each owner's source-bound native
-environment and lease; package-cache warming alone is not preparation evidence.
-The optional declared-tooling proof checks a real isolated tooling environment's
-import after canonical retained installation, not application construction.
 
 Worktrees' managed-session admission packet is explicitly selectable:
 `python tools/run-plugin-tests.py agent-worktrees --test-file tests/test_managed_session.py`.
@@ -8330,24 +7959,6 @@ outside ordinary unit discovery; pure asset and registry controls remain in
 their owning unit suites.
 
 Manager's cold canonical-adopter acceptance has an explicit native lane:
-
-The separate `tools/run-manager-runtime-acceptance.py --contract provider
---root <ignored-output>` packet builds
-the actual Manager wheel with its canonical resource hooks, installs it into a
-fresh dependency-free environment, removes its disposable build checkout, and
-invokes the installed provider through an explicitly prepared native tooling
-interpreter. Tooling is a separate disposable environment populated from
-Manager's declared development requirements through the canonical seasoned
-registry installer, not an editable Manager or Bridge application install.
-Tooling preparation and cleanup share the same 300-second group.
-The complete-profile/compiler, admission and offline application
-lock pipeline runs without mocked producer calls. Synthetic associated
-first-party inputs have no registry dependencies; this is not production-feed
-transport or the full real Manager dependency closure. Wrong source identity
-and corrupt wheel inputs refuse without changing completed output or activating
-a runtime. The existing 300-second group, 180-second native child and 30-second
-assertion limits remain unchanged. This packet does not qualify the separate
-multi-install adapter's existing deadline failure, default routing or rollout.
 
 The focused `tests/native/test_manager_runtime_install.py -k
 preparation_completed_units` packet separately connects the real Manager copy

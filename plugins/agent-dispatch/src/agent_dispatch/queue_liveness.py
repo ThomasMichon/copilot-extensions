@@ -208,13 +208,9 @@ class LivenessMixin:
             "suspended": 0,
         }
         with self._connect() as conn:
-            # The wake snapshot is taken before probing: a wake delivered while
-            # a probe runs resumes the native, so its stale verdict is unusable.
             held = conn.execute(
-                "SELECT t.id, t.owner, t.owner_session_id, t.generation, t.attempts,"
-                " t.status, t.wake_operation_id, w.status AS wake_status"
-                " FROM tasks t LEFT JOIN wake_outbox w ON w.id = t.wake_operation_id"
-                " WHERE t.status IN (?, ?)",
+                "SELECT id, owner, owner_session_id, generation, attempts, status"
+                " FROM tasks WHERE status IN (?, ?)",
                 (Status.CLAIMED, Status.STARTED),
             ).fetchall()
             # Phase 1 (fast, DB-only): classify each held task by which probe
@@ -258,9 +254,7 @@ class LivenessMixin:
         # timeout meant none of that cycle's transitions landed at all. That
         # was the exact mechanism letting `held_unknown` tasks and cold
         # reservations pile up unreaped indefinitely.
-        probed: list[
-            tuple[str, str, str | None, int, int, str, bool, tuple[str | None, str | None]]
-        ] = []
+        probed: list[tuple[str, str, str | None, int, int, str, bool]] = []
         if specs:
             pool = _get_probe_executor()
             for row, verdict, cli_embodied in pool.map(_probe, specs):
@@ -270,7 +264,7 @@ class LivenessMixin:
                     (
                         row["id"], verdict, row["owner_session_id"],
                         row["generation"], row["attempts"], row["status"],
-                        cli_embodied, (row["wake_operation_id"], row["wake_status"]),
+                        cli_embodied,
                     )
                 )
         if not probed:
@@ -279,7 +273,6 @@ class LivenessMixin:
             conn.execute("BEGIN IMMEDIATE")
             for (
                 task_id, verdict, owner_session_id, generation, attempts, status, cli_embodied,
-                wake_snapshot,
             ) in probed:
                 # Persist the last verdict for the buildup metric (fenced on the
                 # generation so a re-claim mid-pass isn't tagged with a stale beat).
@@ -311,26 +304,6 @@ class LivenessMixin:
                     retained is not None and retained["driver"] == "ordinary-bridge"
                 )
                 if ordinary_native and (not owner_session_id or status != Status.STARTED):
-                    continue
-                if ordinary_native and tuple(conn.execute(
-                    "SELECT t.wake_operation_id, w.status FROM tasks t"
-                    " LEFT JOIN wake_outbox w ON w.id = t.wake_operation_id WHERE t.id = ?",
-                    (task_id,),
-                ).fetchone()) != wake_snapshot:
-                    continue
-                # A current wake still being delivered to the same ordinary
-                # native is how the Bridge resumes it (e.g. a rejected
-                # submission); suspending here would fence that wake stale.
-                if ordinary_native and conn.execute(
-                    "SELECT 1 FROM tasks t JOIN wake_outbox w ON w.id = t.wake_operation_id"
-                    " WHERE t.id = ? AND t.status = ? AND t.generation = ?"
-                    " AND t.owner_session_id = ? AND w.task_id = t.id"
-                    " AND w.generation = t.generation AND w.owner = t.owner"
-                    " AND w.owner_session_id = t.owner_session_id"
-                    " AND w.pool_recovery_revision IS NULL"
-                    " AND w.status IN ('pending', 'delivering') LIMIT 1",
-                    (task_id, Status.STARTED, generation, owner_session_id),
-                ).fetchone():
                     continue
                 suspend = (cli_embodied or ordinary_native) and status == Status.STARTED
                 if suspend:

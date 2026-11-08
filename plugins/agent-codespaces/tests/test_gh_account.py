@@ -68,11 +68,8 @@ def test_env_for_account_sets_gh_token():
     with patch.object(gh_account.shutil, "which", return_value="gh"), \
          patch.object(gh_account.subprocess, "run") as run:
         run.return_value = MagicMock(returncode=0, stdout="ghs_tok\n")
-        env = gh_account.env_for_account(
-            "ThomasMichon", base={"GITHUB_TOKEN": "old", "GH_HOST": "github.example.com"},
-        )
+        env = gh_account.env_for_account("ThomasMichon", base={"GITHUB_TOKEN": "old"})
         assert env["GH_TOKEN"] == "ghs_tok"
-        assert env["GH_HOST"] == "github.com"
         assert "GITHUB_TOKEN" not in env  # stale token dropped
 
 
@@ -87,36 +84,6 @@ def test_env_for_account_ambient_when_no_token():
 def test_env_for_account_none_login():
     env = gh_account.env_for_account(None, base={"X": "1"})
     assert env == {"X": "1"}
-
-
-@pytest.mark.parametrize("consumer", ["inventory", "verified_token"])
-def test_saved_account_credential_lookup_ignores_ambient_enterprise_host(monkeypatch, consumer):
-    from agent_codespaces import allocation, owner_inventory
-
-    monkeypatch.setenv("GH_HOST", "github.example.com")
-    for name in ("GH_TOKEN", "GITHUB_TOKEN"):
-        monkeypatch.delenv(name, raising=False)
-    monkeypatch.setattr("agent_codespaces.picker_auth.credential_token", lambda login: None)
-    monkeypatch.setattr(gh_account.shutil, "which", lambda name: "gh")
-    observed = []
-
-    def run(argv, **kwargs):
-        observed.append(argv)
-        assert argv[:3] == ["gh", "auth", "token"]
-        assert argv[argv.index("--hostname") + 1] == "github.com"
-        assert argv[argv.index("--user") + 1] == "selected-owner"
-        return MagicMock(returncode=0, stdout="fixture-token")
-
-    monkeypatch.setattr(gh_account.subprocess, "run", run)
-    if consumer == "inventory":
-        environment = owner_inventory.qualified_environment("selected-owner")
-        assert environment["GH_HOST"] == "github.com"
-        token = environment["GH_TOKEN"]
-    else:
-        token = allocation.verified_account_token("selected-owner")
-    assert token == "fixture-token"
-    assert len(observed) == 1
-    assert os.environ["GH_HOST"] == "github.example.com"
 
 
 def test_mapped_accounts_parses_json():

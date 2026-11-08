@@ -41,7 +41,6 @@ from .leases_cli import _hold_is_self, _self_claim_identity, _short_owner
 from .live_users import busy_report as _busy_report
 from .live_users import recheck_before as _recheck_before
 from . import pool as pool_mod
-from .allocation import intended_cores as _intended_cores
 from . import relay_launch
 from .codespace_config import CodespaceSource
 from .worktrees import ContextRefused, validate_context
@@ -1097,7 +1096,7 @@ def main(argv: list[str] | None = None) -> int:
     except ContextRefused as error:
         print(f"[BLOCKED] CodeSpace installation context refused: {error}", file=sys.stderr)
         return _COORDINATION_EXIT
-    except (RuntimeError, ValueError) as e:
+    except RuntimeError as e:
         print(f"ERROR: {e}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
@@ -2929,7 +2928,7 @@ def _parse_gh_account_scopes(status_text: str) -> dict[str, set[str]]:
     return parse_gh_account_scopes(status_text)
 
 
-def _gh_auth_status(environment: dict | None = None) -> tuple[int, str]:
+def _gh_auth_status() -> tuple[int, str]:
     """Run ``gh auth status`` once -> ``(returncode, combined stdout+stderr)``.
 
     The single shared ``gh`` invocation behind both the multi-account
@@ -2939,12 +2938,10 @@ def _gh_auth_status(environment: dict | None = None) -> tuple[int, str]:
     caller map the can't-check case to its own guidance.
     """
     import subprocess as sp
-    from agent_procutil import no_window_kwargs
-    args = ["gh", "auth", "status"] + (["--active", "--hostname", "github.com"] if environment is not None else [])
     try:
         r = sp.run(
-            args,
-            capture_output=True, text=True, timeout=20, env=environment, **no_window_kwargs(),
+            ["gh", "auth", "status"],
+            capture_output=True, text=True, timeout=20,
         )
     except FileNotFoundError:
         return -1, ""
@@ -2960,9 +2957,9 @@ def _gh_auth_preflight() -> list[str]:
     return gh_auth_preflight(_gh_auth_status, _account_login_remedy)
 
 
-def _ambient_codespace_scope(environment: dict | None = None) -> tuple[bool, str]:
-    """``(ok, remedy)`` for the selected (default: ambient) token's ``codespace``
-    scope. Focused (one credential only, unlike
+def _ambient_codespace_scope() -> tuple[bool, str]:
+    """``(ok, remedy)`` for the **ambient** gh token's ``codespace`` scope -- the
+    scope every ``gh codespace`` op needs. Focused (ambient account only, unlike
     :func:`_gh_auth_preflight` which also checks each mapped account) so a
     connect/mutating gate fails only on the account the op will actually use.
 
@@ -2972,7 +2969,7 @@ def _ambient_codespace_scope(environment: dict | None = None) -> tuple[bool, str
     backstop). ``ok=False`` only on a positively-confirmed missing scope /
     unauthenticated ambient token.
     """
-    rc, combined = _gh_auth_status(environment) if environment is not None else _gh_auth_status()
+    rc, combined = _gh_auth_status()
     if rc < 0:
         return True, ""  # gh can't be run/read -> don't block
     if rc != 0 or "not logged" in combined.lower():
@@ -2985,10 +2982,10 @@ def _ambient_codespace_scope(environment: dict | None = None) -> tuple[bool, str
     return True, ""
 
 
-def _require_codespace_scope(op: str, *, environment: dict | None = None) -> int | None:
+def _require_codespace_scope(op: str) -> int | None:
     """Fail-fast gate before a mutating CodeSpace op (#980).
 
-    When the selected gh token lacks the ``codespace`` scope, a ``gh codespace``
+    When the ambient gh token lacks the ``codespace`` scope, a ``gh codespace``
     call would otherwise fail with an opaque 403/404 *after* doing work; this
     surfaces the exact remedy up front instead. Returns an exit code the caller
     propagates (``if (rc := _require_codespace_scope("create")) is not None:
@@ -2998,7 +2995,7 @@ def _require_codespace_scope(op: str, *, environment: dict | None = None) -> int
     """
     if os.environ.get("AGENT_CODESPACES_SKIP_SCOPE_CHECK"):
         return None
-    ok, remedy = _ambient_codespace_scope(environment) if environment is not None else _ambient_codespace_scope()
+    ok, remedy = _ambient_codespace_scope()
     if ok:
         return None
     print(f"[gh] {remedy}", file=sys.stderr)
@@ -3270,7 +3267,6 @@ def _config_show() -> int:
 
     print("\nDefaults:")
     print(f"  machine_type: {config.default_machine_type}")
-    print(f"  max_owned_codespaces: {config.max_owned_codespaces}")
     print(f"  location: {config.default_location}")
     if config.dotfiles_repo:
         print(f"  dotfiles_repo: {config.dotfiles_repo}")
@@ -3824,10 +3820,7 @@ def _cmd_prune(args: argparse.Namespace) -> int:
     return 0
 
 
-def _reclaim_for_quota(
-    err: str, *, account: str | None = None, environment: dict | None = None,
-    budget_cores: int | None = None,
-) -> str | None:
+def _reclaim_for_quota(err: str) -> str | None:
     """On a CodeSpace-create quota error, attempt ONE safe reclaim so a retry
     can succeed. Returns a human note describing what it freed, or None.
 
@@ -3854,61 +3847,22 @@ def _reclaim_for_quota(
         or "you have reached" in low
         or ("reached" in low and "codespace" in low and "limit" in low)
     )
-    account_rows = None
-    if account and (total_limit or running_limit):
-        from .allocation import list_account_codespaces
-
-        try:
-            account_rows = list_account_codespaces(account, environment=environment)
-        except ContextRefused:
-            raise
-        except RuntimeError:
-            return None
-
-    def reclaim_identity(name):
-        if account is None:
-            return {}
-        from . import account_binding
-        from .owner_inventory import credential
-
-        try:
-            bound = account_binding.bound_account_or_raise(name)
-            if not bound or bound.casefold() != account.casefold():
-                log.warning("Skipping quota reclaim for %s: account binding is absent or different", name)
-                return None
-            return {"account": account, "token": environment["GH_TOKEN"] if environment else credential(account)}
-        except ContextRefused:
-            raise
-        except RuntimeError as exc:
-            log.warning("Skipping quota reclaim for %s: %s", name, exc)
-            return None
 
     if total_limit:
         for rec in sorted(list_by_state(STATE_PRUNABLE), key=lambda s: s.state_at):
             name = rec.codespace
-            if account_rows is not None and not any(cs.name == name for cs in account_rows):
-                continue
-            identity = reclaim_identity(name)
-            if identity is None:
-                continue
             from ssh_manager import TargetBusyError
 
             from .lifecycle_lock import lifecycle_lock
 
             try:
                 with lifecycle_lock(name, refuse_live_users="prune") as lock:
-                    from .allocation import quota_rescue_admitted
-                    if budget_cores is not None and not quota_rescue_admitted(name, account, environment, budget_cores):
-                        log.warning("Skipping quota rescue for %s: running-core headroom is insufficient or unknown", name)
-                        continue
-                    res = sync_codespace_sessions(
-                        name, skip_if_shutdown=False, lock=lock, **identity,
-                    )
+                    res = sync_codespace_sessions(name, skip_if_shutdown=False, lock=lock)
                     if not (res.get("ok") or res.get("skipped")):
                         continue
                     try:
                         _recheck_before(name, "prune")
-                        delete_codespace(name, force=False, **identity)
+                        delete_codespace(name, force=False)
                     except RuntimeError:
                         continue
             except TargetBusyError:
@@ -3922,8 +3876,7 @@ def _reclaim_for_quota(
         try:
             from .lifecycle import _SHUTDOWN_STATE
 
-            rows = account_rows if account_rows is not None else list_codespaces()
-            running = [c for c in rows if c.state != _SHUTDOWN_STATE]
+            running = [c for c in list_codespaces() if c.state != _SHUTDOWN_STATE]
         except RuntimeError:
             return None
         # Only stop a running box that is already finalized (eligible) -- never
@@ -3931,16 +3884,13 @@ def _reclaim_for_quota(
         for cs in running:
             st = get_status(cs.name)
             if st and st.state in (STATE_RECOVERED, STATE_PRUNABLE):
-                identity = reclaim_identity(cs.name)
-                if identity is None:
-                    continue
                 from ssh_manager import TargetBusyError
 
                 from .lifecycle_lock import lifecycle_lock
 
                 try:  # never stop a box still in use; check + stop under the lock
                     with lifecycle_lock(cs.name, refuse_live_users="stop"):
-                        stop_codespace(cs.name, **identity)
+                        stop_codespace(cs.name)
                 except (RuntimeError, TargetBusyError):
                     continue
                 return f"stopped eligible running box '{cs.name}' to free running quota"
@@ -3958,43 +3908,47 @@ def _cmd_create(args: argparse.Namespace) -> int:
     """
     from ssh_manager import ConnectionManager
 
+    # #980: fail-fast if the gh 'codespace' scope is missing -- a create without
+    # it fails confusingly minutes in (after provisioning starts). Best-effort +
+    # escape-hatchable so it never wedges a legit create.
+    if (rc := _require_codespace_scope("create a CodeSpace")) is not None:
+        return rc
+
     config = load_merged_config()
 
-    from .allocation import allocation_context, plan_creation
-
-    sequential = not (getattr(args, "devcontainer_path", None) or getattr(args, "display_name", None))
+    # Phase 2b (#708): resume this workstream's own claimed box, never a
+    # stranger's idle one; degrade-safe. ``--force-create`` skips this.
     if not getattr(args, "force_create", False):
         try:
-            account, environment = allocation_context(args.repo)
-            decision = plan_creation(
-                args.repo, config, account, environment, branch=args.branch, allow_sequential=sequential,
-            )
-        except ContextRefused:
-            raise
-        except RuntimeError as exc:
-            print(f"[pressure] {exc}", file=sys.stderr)
-            return _ALLOC_PRESSURE_EXIT
+            from .driving_worktrees import resolve_current_workstream_box
+            _members, _budget = pool_mod.build_pool()
+            decision = pool_mod.plan_allocation(
+                _members, _budget, repo=args.repo,
+                new_cores=_intended_cores(config, args.repo),
+                workstream_box=resolve_current_workstream_box(_members, args.repo))
+        except Exception:
+            decision = None
         if decision is not None and decision.action == pool_mod.ALLOC_REUSE:
-            from .reuse import reuse_for_create
-
-            return reuse_for_create(decision, args, config, account, environment)
-        if decision is not None and decision.action in (pool_mod.ALLOC_PRESSURE, pool_mod.ALLOC_RECYCLE):
+            print(f"[reuse] {decision.reason}")
+            print(
+                f"This workstream already has a CodeSpace -- reuse "
+                f"'{decision.codespace}' (ssh/borrow) instead of creating a new "
+                f"box, or pass --force-create to create anyway.",
+                file=sys.stderr,
+            )
+            print(decision.codespace)   # machine-readable: the box to reuse
+            return 0
+        if decision is not None and decision.action == pool_mod.ALLOC_PRESSURE:
             print(f"[pressure] {decision.reason}", file=sys.stderr)
             print(
-                "Reuse an eligible venue, resolve unknown capacity, or pass "
-                "--force-create to override the local policy. Cleanup requires "
-                "its existing ownership and safety gates.",
+                "Free budget (finalize/prune a box) or pass --force-create to "
+                "override.",
                 file=sys.stderr,
             )
             return _ALLOC_PRESSURE_EXIT
-        # Only CREATE admits compute; recycle advice is not executed capacity.
+        # CREATE / RECYCLE -> proceed; a RECYCLE's reclaim is handled by the
+        # on-quota retry below.
 
-    else:
-        account, environment = allocation_context(args.repo)
-        print("[override] --force-create bypasses local capacity policy, not provider limits", file=sys.stderr)
-
-    if (rc := _require_codespace_scope("create a CodeSpace", environment=environment)) is not None:
-        return rc
     print(f"Creating CodeSpace for {args.repo}...")
 
     def _create():
@@ -4002,40 +3956,15 @@ def _cmd_create(args: argparse.Namespace) -> int:
             args.repo, config, branch=args.branch,
             display_name=getattr(args, "display_name", None),
             devcontainer_path=getattr(args, "devcontainer_path", None),
-            account=account,
-            environment=environment,
         )
 
     try:
         info = _create()
-    except ContextRefused:
-        raise
     except RuntimeError as exc:
-        note = _reclaim_for_quota(
-            str(exc), account=account, environment=environment,
-            budget_cores=None if getattr(args, "force_create", False) else pool_mod.DEFAULT_BUDGET_CORES,
-        )
+        note = _reclaim_for_quota(str(exc))
         if not note:
             raise
-        print(f"[..] Codespace quota hit; {note}.")
-        if not getattr(args, "force_create", False):
-            try:
-                decision = plan_creation(
-                    args.repo, config, account, environment, branch=args.branch, allow_sequential=sequential,
-                )
-            except ContextRefused:
-                raise
-            except RuntimeError as error:
-                print(f"[pressure] {error}", file=sys.stderr)
-                return _ALLOC_PRESSURE_EXIT
-            if decision.action == pool_mod.ALLOC_REUSE:
-                from .reuse import reuse_for_create
-
-                return reuse_for_create(decision, args, config, account, environment)
-            if decision.action != pool_mod.ALLOC_CREATE:
-                print(f"[pressure] Retry refused: {decision.reason}", file=sys.stderr)
-                return _ALLOC_PRESSURE_EXIT
-        print("[..] Retrying create...")
+        print(f"[..] Codespace quota hit; {note}. Retrying create...")
         info = _create()
     print(f"Created: {info.name}")
 
@@ -4043,7 +3972,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
         return 0
 
     print("Waiting for CodeSpace to become Available...")
-    if not wait_for_available(info.name, timeout=args.timeout, account=account):
+    if not wait_for_available(info.name, timeout=args.timeout):
         print(
             f"[WARN] {info.name} did not reach Available within "
             f"{args.timeout:.0f}s -- run provisioning later with "
@@ -4056,7 +3985,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
     # (including on_create extras).
     from .relay_launch import effective_relay_port
     relay_env, relay_port = relay_launch.build_relay_launch_env(info.name, effective_relay_port(config))
-    source = CodespaceSource(info.name, account=account, token=environment["GH_TOKEN"])
+    source = CodespaceSource(info.name, account=info.account or None)
     manager = ConnectionManager()
 
     async def _run() -> int:
@@ -4182,7 +4111,6 @@ def _cmd_claim(args: argparse.Namespace) -> int:
             active=active_worktree_ids(),
             holder_ref=holder_ref,
             preflight_result=readiness,
-            journal=True,
         )
     except ClaimConflict as exc:
         print(f"[BUSY] {exc} Use --force-claim to take over.", file=sys.stderr)
@@ -4249,6 +4177,21 @@ def _annotate_pool_members(members) -> None:
             )
 
 
+def _intended_cores(config, repo: str) -> int:
+    """Cores a *new* box for ``repo`` would spend -- the machine tier ``create``
+    would pick (the repo's ``machine_type`` else the config default), mapped to a
+    core count. Feeds the budget-fit check in ``allocate`` / the ``create`` guard.
+    Best-effort: an unresolvable tier yields 0 (the planner then treats it as a
+    conservative 1)."""
+    try:
+        from .config import RepoConfig
+        repo_config = config.repos.get(repo, RepoConfig())
+        machine_type = repo_config.machine_type or config.default_machine_type
+        return pool_mod.machine_cores(machine_type or "")
+    except Exception:
+        return 0
+
+
 # Exit code for a venue request that cannot be satisfied (pool at budget, nothing
 # recyclable) -- so a scripted `allocate && create` gate can branch on pressure.
 _ALLOC_PRESSURE_EXIT = 4
@@ -4270,20 +4213,17 @@ def _cmd_allocate(args: argparse.Namespace) -> int:
         args.stale_after if args.stale_after is not None
         else pool_mod.DEFAULT_STALE_AFTER
     )
+    members, budget = pool_mod.build_pool(
+        budget_cores=budget_cores, stale_after=stale_after,
+    )
     try:
-        from .allocation import allocation_context, plan_creation
-
-        account, environment = allocation_context(args.repo)
-        decision = plan_creation(
-            args.repo, config, account, environment,
-            budget_cores=budget_cores, stale_after=stale_after, new_cores=new_cores,
-        )
-    except ContextRefused:
-        raise
-    except RuntimeError as exc:
-        decision = pool_mod.AllocationDecision(
-            action=pool_mod.ALLOC_PRESSURE, codespace=None, reason=str(exc),
-        )
+        from .driving_worktrees import resolve_current_workstream_box
+        workstream_box = resolve_current_workstream_box(members, args.repo)
+    except Exception:
+        workstream_box = None
+    decision = pool_mod.plan_allocation(
+        members, budget, repo=args.repo, new_cores=new_cores,
+        workstream_box=workstream_box)
     if args.json_output:
         print(json.dumps(decision.to_dict()))
     else:
@@ -4310,7 +4250,6 @@ def _cmd_pool(args: argparse.Namespace) -> int:
     )
     members, budget = pool_mod.build_pool(
         budget_cores=budget_cores, stale_after=stale_after,
-        max_owned_codespaces=load_merged_config().max_owned_codespaces,
     )
 
     # Self-recognition (#1362 / agent-claim-awareness): mark the box(es) THIS
@@ -4332,14 +4271,9 @@ def _cmd_pool(args: argparse.Namespace) -> int:
     )
     print(
         f"Budget: {budget.spent_cores}/{budget.total_cores} cores in use, "
-        f"{'at most ' if budget.unknown_cores_count else ''}{budget.headroom_cores} free  "
+        f"{budget.headroom_cores} free  "
         f"({budget.running_count} running / {budget.total_count} total){unknown}"
     )
-    counts = ", ".join(
-        f"{account}: {count}/{budget.max_owned_codespaces}"
-        for account, count in sorted(budget.owned_by_account.items())
-    )
-    print(f"Owned venues by account (observed counts; completeness unqualified): {counts or 'none'}")
     if not members:
         print("No CodeSpaces in the pool.")
         return 0

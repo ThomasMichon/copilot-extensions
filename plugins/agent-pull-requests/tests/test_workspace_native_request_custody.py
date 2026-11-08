@@ -117,7 +117,6 @@ def test_workspace_exchange_uses_real_source_admission_and_request_native_join(
     _, _, initial, _, _, _ = environment
     owner = AsyncReviewSource(native_host.source_owner, executor=execution_pool)
     entered, release = threading.Event(), threading.Event()
-    read_started = threading.Event()
     denied = PermissionError("selected source ownership lost")
     revoked = threading.Event()
     original_checkpoint = native_host.source_owner.checkpoint
@@ -128,7 +127,6 @@ def test_workspace_exchange_uses_real_source_admission_and_request_native_join(
     native_host.source_owner.checkpoint = current
     original_read = credential_references.read_credential_reference
     def read(path):
-        read_started.set()
         entered.set()
         assert release.wait(10)
         value = original_read(path)
@@ -164,7 +162,7 @@ def test_workspace_exchange_uses_real_source_admission_and_request_native_join(
                 if boundary == "submit-owner-loss":
                     original_submit = operation._submit_native
                     def submit(function, *args):
-                        if function is credential_references.read_access_token_reference:
+                        if function is read:
                             entered.set()
                             raise denied
                         return original_submit(function, *args)
@@ -181,8 +179,6 @@ def test_workspace_exchange_uses_real_source_admission_and_request_native_join(
                         with pytest.raises(PermissionError) as observed:
                             await task
                         assert observed.value is denied
-                        if boundary == "submit-owner-loss":
-                            assert not read_started.is_set()
                     else:
                         task.cancel()
                         with pytest.raises(asyncio.CancelledError):

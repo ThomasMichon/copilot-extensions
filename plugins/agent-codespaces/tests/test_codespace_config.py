@@ -89,22 +89,3 @@ def test_token_bypasses_env_for_account_entirely(monkeypatch):
     assert called["n"] == 0
     assert src._gh_env["GH_TOKEN"] == "exact-token"
     assert "GITHUB_TOKEN" not in src._gh_env
-
-
-def test_recovery_ssh_adapter_retains_pinned_host_and_token(monkeypatch, tmp_path):
-    monkeypatch.setenv("GH_HOST", "github.example.com")
-    monkeypatch.setattr("agent_codespaces.codespace_config.SSH_CONFIG_DIR", tmp_path)
-    observed = []
-
-    def run(argv, **kwargs):
-        assert argv[:4] == ["gh", "codespace", "ssh", "--config"]
-        observed.append(kwargs["env"])
-        assert kwargs["env"]["GH_HOST"] == "github.com"
-        assert kwargs["env"]["GH_TOKEN"] == "exact-token"
-        return MagicMock(returncode=0, stdout=SAMPLE_GH_CONFIG, stderr="")
-
-    with patch("ssh_manager.codespace_source.subprocess.run", side_effect=run):
-        config = CodespaceSource("fluffy-parakeet-abc123", account="selected-owner", token="exact-token").refresh()
-    assert config.process_env["GH_HOST"] == "github.com"
-    assert config.process_env["GH_TOKEN"] == "exact-token"
-    assert len(observed) == 1

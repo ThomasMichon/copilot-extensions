@@ -73,185 +73,14 @@ def test_python_prerequisite_requires_a_successful_supported_version(
     from worktree_manager import prereqs
 
     monkeypatch.setattr(prereqs, "_which", lambda name: ("python3", "selected-python"))
-    monkeypatch.setitem(prereqs._EXE_ALIASES, "python3", ())
     monkeypatch.setattr(
         prereqs.subprocess, "run",
         lambda *args, **kwargs: subprocess.CompletedProcess(args, returncode, output, ""),
     )
     status = detect_prereq(Prereq("python3", min="3.10"))
     assert status.present
-    assert status.path == "selected-python"
     assert status.satisfied is satisfied
     assert PrereqStatus("fixture-tool", present=True, min_required="1.0").satisfied
-
-
-@pytest.mark.parametrize("first_version", ["3.9.5", None])
-@pytest.mark.parametrize("same_alias", [False, True])
-def test_python_prerequisite_continues_to_supported_path_candidate(
-    monkeypatch, tmp_path, first_version, same_alias,
-):
-    import os
-
-    from worktree_manager import prereqs
-
-    directories = [str(tmp_path / "older Python"), str(tmp_path / "supported Python")]
-    first, supported = [str(Path(directory) / "python.exe") for directory in directories]
-    monkeypatch.setenv("PATH", os.pathsep.join(directories))
-    mapping = {
-        ("python3", None): first,
-        ("python3", directories[0]): first,
-        ("python3" if same_alias else "python", directories[1]): supported,
-    }
-    monkeypatch.setattr(
-        prereqs.shutil, "which",
-        lambda name, path=None: mapping.get((Path(name).stem.lower(), path)),
-    )
-    probes = []
-
-    def probe(path):
-        probes.append(path)
-        return {first: first_version, supported: "3.11.9"}[path]
-
-    monkeypatch.setattr(prereqs, "_probe_version", probe)
-    status = detect_prereq(Prereq("python3", min="3.10"))
-    assert status.satisfied
-    assert status.path == supported
-    assert probes == [first, supported]
-    assert os.environ["PATH"] == os.pathsep.join(directories)
-
-
-def test_python_prerequisite_stops_at_supported_first_candidate(monkeypatch):
-    from worktree_manager import prereqs
-
-    def which(name, path=None):
-        assert path is None
-        return "selected-python"
-
-    monkeypatch.setattr(prereqs.shutil, "which", which)
-    monkeypatch.setattr(prereqs, "_probe_version", lambda path: "3.11.9")
-    assert detect_prereq(Prereq("python3", min="3.10")).path == "selected-python"
-
-
-def test_python_prerequisite_without_candidates_is_missing(monkeypatch):
-    from worktree_manager import prereqs
-
-    monkeypatch.setattr(prereqs.shutil, "which", lambda *args, **kwargs: None)
-    monkeypatch.setattr(
-        prereqs, "_probe_version", lambda path: pytest.fail("no executable to probe"),
-    )
-    status = detect_prereq(Prereq("python3", min="3.10"))
-    assert not status.present
-    assert not status.satisfied
-    assert status.path is None
-
-
-@pytest.mark.portfolio_tier("T2")
-@pytest.mark.effect("filesystem")
-def test_python_prerequisite_empty_path_entry_searches_current_directory(
-    monkeypatch, tmp_path,
-):
-    import os
-
-    from worktree_manager import prereqs
-
-    older = tmp_path / "older Python"
-    current = tmp_path / "current"
-    older.mkdir()
-    current.mkdir()
-    filename = "python3.exe" if os.name == "nt" else "python3"
-    for directory in (older, current):
-        executable = directory / filename
-        executable.write_bytes(b"synthetic version-probe fixture\n")
-        executable.chmod(0o700)
-    monkeypatch.chdir(current)
-    monkeypatch.setenv("PATH", str(older) + os.pathsep)
-    monkeypatch.setenv("NoDefaultCurrentDirectoryInExePath", "1")
-    monkeypatch.setitem(prereqs._EXE_ALIASES, "python3", (filename,))
-    monkeypatch.setattr(
-        prereqs, "_probe_version",
-        lambda path: "3.9.5" if Path(path).samefile(older / filename) else "3.11.9",
-    )
-    status = detect_prereq(Prereq("python3", min="3.10"))
-    assert status.satisfied
-    assert Path(status.path).samefile(current / filename)
-
-
-@pytest.mark.parametrize("supported_available", [False, True])
-@pytest.mark.parametrize("platform", ["windows", "linux"])
-def test_python_prerequisite_windowsapps_alias_is_windows_only(
-    monkeypatch, tmp_path, supported_available, platform,
-):
-    import os
-
-    from worktree_manager import prereqs
-
-    monkeypatch.setattr(prereqs, "current_os", lambda: platform)
-    alias_dir = str(tmp_path / "WindowsApps")
-    supported_dir = str(tmp_path / "supported Python")
-    alias = str(Path(alias_dir) / "python.exe")
-    supported = str(Path(supported_dir) / "python.exe")
-    monkeypatch.setenv("PATH", os.pathsep.join([alias_dir, supported_dir]))
-    mapping = {
-        ("python3", None): alias,
-        ("python3", alias_dir): alias,
-        ("python", supported_dir): supported if supported_available else None,
-    }
-    monkeypatch.setattr(
-        prereqs.shutil, "which",
-        lambda name, path=None: mapping.get((Path(name).stem.lower(), path)),
-    )
-    probes = []
-
-    def probe(path):
-        if platform == "windows":
-            assert path != alias
-        probes.append(path)
-        return "3.11.9"
-
-    monkeypatch.setattr(prereqs, "_probe_version", probe)
-    status = detect_prereq(Prereq("python3", min="3.10"))
-    assert status.satisfied is (supported_available or platform != "windows")
-    assert status.path == (
-        supported if platform == "windows" and supported_available else alias
-    )
-    assert probes == (
-        ([supported] if supported_available else []) if platform == "windows" else [alias]
-    )
-
-
-@pytest.mark.portfolio_tier("T2")
-@pytest.mark.effect("filesystem")
-@pytest.mark.parametrize(
-    "supported_suffix,older_location", [(".exe", "current"), (".cmd", "current"), (".cmd", "path")],
-)
-def test_python_prerequisite_windows_candidates_cannot_hide_supported_path_python(
-    monkeypatch, tmp_path, supported_suffix, older_location,
-):
-    import os
-
-    from worktree_manager import prereqs
-
-    if os.name != "nt":
-        pytest.skip("native Windows implicit current-directory search")
-    current = tmp_path / "current"
-    supported = tmp_path / "supported Python"
-    current.mkdir()
-    supported.mkdir()
-    older = current if older_location == "current" else supported
-    for executable in (older / "python.exe", supported / ("python" + supported_suffix)):
-        executable.write_bytes(b"synthetic version-probe fixture\n")
-    monkeypatch.chdir(current)
-    monkeypatch.setenv("PATH", str(supported))
-    monkeypatch.setenv("PATHEXT", ".EXE;.CMD;")
-    monkeypatch.delenv("NoDefaultCurrentDirectoryInExePath", raising=False)
-    monkeypatch.setitem(prereqs._EXE_ALIASES, "python3", ("python",))
-    monkeypatch.setattr(
-        prereqs, "_probe_version",
-        lambda path: "3.9.5" if Path(path).samefile(older / "python.exe") else "3.11.9",
-    )
-    status = detect_prereq(Prereq("python3", min="3.10"))
-    assert status.satisfied
-    assert Path(status.path).samefile(supported / ("python" + supported_suffix))
 
 
 @pytest.mark.parametrize(
@@ -294,9 +123,9 @@ def test_python_prerequisite_probes_the_exact_discovered_executable(monkeypatch)
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("filesystem")
 @pytest.mark.effect("process")
-@pytest.mark.parametrize("selection", ["unusable", "supported", "supported-later"])
+@pytest.mark.parametrize("usable", [False, True])
 def test_setup_qualifies_actual_python_before_core_and_repository(
-    monkeypatch, tmp_path, capsys, selection,
+    monkeypatch, tmp_path, capsys, usable,
 ):
     import os
     import sys
@@ -306,29 +135,22 @@ def test_setup_qualifies_actual_python_before_core_and_repository(
     from worktree_manager.provision import ProvisionResult
 
     python = Path(sys.executable)
-    usable = selection != "unusable"
-    if selection != "supported":
+    if not usable:
         python = tmp_path / ("unusable-python.exe" if os.name == "nt" else "unusable-python")
         python.write_bytes(b"not an executable\n")
         python.chmod(0o700)
-    candidates = (str(python),)
-    if selection == "supported-later":
-        candidates += (sys.executable,)
-    monkeypatch.setitem(prereqs._EXE_ALIASES, "python3", candidates)
+    monkeypatch.setitem(prereqs._EXE_ALIASES, "python3", (str(python),))
     monkeypatch.setattr(
         cli, "detect_baseline",
         lambda: [detect_prereq(Prereq("python3", min="3.10"))],
     )
-    provisioned = []
-
-    def provision(actions, **kwargs):
-        provisioned.extend(actions)
-        return [
+    monkeypatch.setattr(
+        cli, "provision_apply",
+        lambda actions, **kwargs: [
             ProvisionResult(action, False, skipped_reason="fixture does not install")
             for action in actions
-        ]
-
-    monkeypatch.setattr(cli, "provision_apply", provision)
+        ],
+    )
     monkeypatch.setattr(
         cli, "core_status",
         lambda: CoreStatus("installed", True, True, None, "fixture-core"),
@@ -350,7 +172,6 @@ def test_setup_qualifies_actual_python_before_core_and_repository(
         0 if usable else 1
     )
     assert calls == (["core", "repository"] if usable else [])
-    assert bool(provisioned) is not usable
     output = capsys.readouterr().out
     if not usable:
         assert "prerequisites still needed: python3" in output

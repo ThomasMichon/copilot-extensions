@@ -58,7 +58,6 @@ def emit(
     commands: dict[str, str], wheels: dict[str, Path], primary: str | None = None,
     setup: list[str] | None = None, start: list[str] | None = None,
     runtime_source: dict | None = None, target_environment: dict | None = None,
-    target_tags: list[str] | None = None,
     requirements: list[str] | None = None,
     source_fallbacks: dict[str, Path] | None = None,
     construction: dict | None = None,
@@ -71,20 +70,9 @@ def emit(
     primary = primary or (distribution if distribution in commands else next(iter(commands)))
     if primary not in commands:
         raise ValueError("primary application command is not declared")
-    python_platform = None
-    if target_environment is not None and target_environment["sys_platform"] == "win32":
-        platforms = {tag.rsplit("-", 1)[-1] for tag in target_tags or []} - {"any"}
-        targets = {
-            "win_amd64": "x86_64-pc-windows-msvc",
-            "win_arm64": "aarch64-pc-windows-msvc",
-            "win32": "i686-pc-windows-msvc",
-        }
-        if len(platforms) != 1 or not platforms <= targets.keys():
-            raise ValueError("application profile has no unambiguous Windows Python ABI platform")
-        python_platform = targets[platforms.pop()]
     launchers = {}
     for name, entry in commands.items():
-        for filename, content in slot_binstubs(name, entry, python_platform=python_platform).items():
+        for filename, content in slot_binstubs(name, entry).items():
             if filename in {"install", "install.cmd", "install.ps1", "install.sh"} and name != primary:
                 continue
             if filename in launchers:

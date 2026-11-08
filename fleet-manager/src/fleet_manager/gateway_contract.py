@@ -10,7 +10,6 @@ from .planning import PlanError, canonical, decode, digest
 
 MAX_WIRE = 65536
 INDEX_CONTRACT = "fleet-index-scoped-v1"
-REVIEW_CREDENTIAL_CONTRACT = "fleet-manager.protected-review-credential/v1"
 CREDENTIAL_ACTIONS = frozenset({"get-azure-token", "get-github-token", "get-access-token"})
 CREDENTIAL_WORKERS = frozenset({"index-worker", "pr-worker"})
 
@@ -127,45 +126,6 @@ class ForgeScope:
 
 
 @dataclass(frozen=True)
-class ReviewScope:
-    """Separate selected ADO review binding; never an observation credential."""
-
-    api_base: str
-    repository: str
-    authentication: str
-    project_id: str
-    repository_id: str
-    number: int
-    principal_id: str
-    actions: tuple[str, ...]
-
-    def __post_init__(self) -> None:
-        # Reuse target syntax validation only, not an acquired observation binding.
-        ForgeScope("azure-devops", self.api_base, self.repository, "observe", self.authentication)
-        for value in (self.project_id, self.repository_id, self.principal_id):
-            text(value)
-            require(value == value.strip() and not any(c in value for c in "/\\?#%"),
-                    "invalid-review-identity")
-        number(self.number, 1, 2**63 - 1)
-        require(type(self.actions) is tuple and 0 < len(self.actions) <= 4
-                and all(isinstance(action, str)
-                        and action in ("comment", "reply", "edit_owned_comment", "verdict")
-                        for action in self.actions)
-                and len(set(self.actions)) == len(self.actions), "unsupported-review-actions")
-
-    @classmethod
-    def load(cls, value: Any) -> ReviewScope:
-        fields(value, {"contract", *cls.__dataclass_fields__})
-        require(value["contract"] == REVIEW_CREDENTIAL_CONTRACT, "unsupported-review-contract")
-        actions = strings(value["actions"], 4)
-        return cls(**{key: item for key, item in value.items()
-                      if key not in ("contract", "actions")}, actions=actions)
-
-    def to_dict(self) -> dict:
-        return asdict(self) | {"actions": list(self.actions), "contract": REVIEW_CREDENTIAL_CONTRACT}
-
-
-@dataclass(frozen=True)
 class Enrollment:
     principal: str
     role: str
@@ -278,15 +238,12 @@ class GatewayConfig:
     signing_key: str
     signing_kid: str
     identity: dict
-    protected_review: bool = False
 
     @classmethod
     def load(cls, value: Any) -> GatewayConfig:
-        fields(value, {"schema", "version", "role",
-                       *(set(cls.__dataclass_fields__) - {"protected_review"}), "remote"})
+        fields(value, {"schema", "version", "role", *cls.__dataclass_fields__, "remote"})
         require(value["schema"] == "fleet-manager.gateway" and type(value["version"]) is int
-                and value["version"] in (1, 2) and value["role"] == "gateway", "gateway-role-required")
-        protected_review = value["version"] == 2
+                and value["version"] == 1 and value["role"] == "gateway", "gateway-role-required")
         require(type(value["remote"]) is bool)
         for key in ("fleet", "installation", "issuer", "audience", "signing_key", "signing_kid"):
             text(value[key])
@@ -316,24 +273,21 @@ class GatewayConfig:
         identities = set()
         for rule in rules:
             fields(rule, {"worker", "controller", "source", "account", "audience", "scopes", "action"},
-                   {"forge", "review"} if protected_review else {"forge"})
+                   {"forge"})
             for key in ("worker", "controller", "source", "account", "audience", "action"):
                 text(rule[key])
             strings(rule["scopes"])
             require(rule["action"] in CREDENTIAL_ACTIONS, "unsupported-action")
             forge = ForgeScope.load(rule["forge"]) if "forge" in rule else None
-            review = ReviewScope.load(rule["review"]) if "review" in rule else None
-            require(forge is None or review is None, "ambiguous-provider-policy")
             identity = (rule["worker"], rule["source"], rule["account"], rule["audience"], rule["action"],
-                        tuple(rule["scopes"]), forge, review)
+                        tuple(rule["scopes"]), forge)
             require(identity not in identities, "ambiguous-provider-policy")
             identities.add(identity)
             worker = next((e for e in enrolled if e.principal == rule["worker"]), None)
             controller = next((e for e in enrolled if e.principal == rule["controller"]), None)
             require(worker is not None and worker.role in CREDENTIAL_WORKERS
                     and worker.recipient_jwk is not None)
-            require((worker.role == "pr-worker") == (forge is not None or review is not None),
-                    "forge-binding-required")
+            require((worker.role == "pr-worker") == (forge is not None), "forge-binding-required")
             require(controller is not None and controller.role == "credential-controller")
             for peer in (worker, controller):
                 require(rule["source"] in peer.sources and rule["account"] in peer.accounts
@@ -350,7 +304,7 @@ class GatewayConfig:
         return cls(*(value[k] for k in ("fleet", "installation", "issuer", "audience")), value["jwks"],
                    enrolled, tuple(revoked), backends, tuple(rules),
                    number(value["pending_limit"], 1, 256), number(value["lease_seconds"], 2, 60),
-                   tls, value["signing_key"], value["signing_kid"], auth_identity, protected_review)
+                   tls, value["signing_key"], value["signing_kid"], auth_identity)
 
 
 def request(value: Any) -> dict:
@@ -374,18 +328,14 @@ def search(value: Any) -> dict:
     return value
 
 
-def credential(value: Any, *, protected_review: bool = False) -> dict:
-    fields(value, {"job", "source", "account", "audience", "scopes", "action", "recipient"},
-           {"review"} if protected_review else {"forge"})
+def credential(value: Any) -> dict:
+    fields(value, {"job", "source", "account", "audience", "scopes", "action", "recipient"}, {"forge"})
     for key in ("job", "source", "account", "audience", "action", "recipient"):
         text(value[key])
     strings(value["scopes"])
     require(value["action"] in CREDENTIAL_ACTIONS, "unsupported-action")
     if "forge" in value:
         ForgeScope.load(value["forge"])
-    if protected_review:
-        require("review" in value, "review-binding-required")
-        ReviewScope.load(value["review"])
     return value
 
 

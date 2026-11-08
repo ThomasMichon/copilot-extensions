@@ -6,10 +6,8 @@ then reconciled under knowledge_plugins' workspace lease and atomic writer.
 
 from __future__ import annotations
 
-import json
 import os
 import stat
-import time
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 from typing import Any
@@ -69,21 +67,17 @@ def _safe_path(root: Path, path: Path) -> None:
             raise _error(f"settings parent is not a directory: {item}")
 
 
-def _common(path: Path, *, deadline: float | None = None) -> str:
+def _common(path: Path) -> str:
     _safe_path(path, path / ".git")
-    remaining = deadline - time.monotonic() if deadline is not None else None
-    if remaining is not None and remaining <= 0:
-        raise TimeoutError("tool profile observation exhausted its budget")
     try:
         result = git_ops.git("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=path,
-                             isolated_repository=True, input_data=b"",
-                             **({"timeout": remaining, "kill_tree": True} if remaining is not None else {}))
+                             isolated_repository=True, input_data=b"")
     except git_ops.GitError as exc:
         raise _error(f"cannot inspect project Git custody: {exc}") from exc
     return _identity(Path(os.fsdecode(result.stdout).removesuffix("\n")))
 
 
-def _family(project: str, *, anchor_only: bool = False, deadline: float | None = None) -> _Family:
+def _family(project: str) -> _Family:
     if project not in installer.read_projects_registry(strict=True).get("projects", {}):
         raise _error("tool profile project is not registered")
     entry, root = repos.resolve_registered_repo(project)
@@ -99,11 +93,9 @@ def _family(project: str, *, anchor_only: bool = False, deadline: float | None =
         raise _error("registered project has no local root")
     raw = Path(raw_path)
     _safe_path(raw, raw)
-    common = _common(root, **({"deadline": deadline} if deadline is not None else {}))
+    common = _common(root)
     if common not in (_identity(root / ".git"), _identity(root)):
         raise _error("registered project root is not its Git anchor")
-    if anchor_only:
-        return _Family(project, root, common, (root,), frozenset({_identity(root)}))
     try:
         roots = git_ops.list_worktree_paths(cwd=root, fail_on_error=True, isolated_repository=True)
     except (git_ops.GitError, RuntimeError) as exc:
@@ -284,59 +276,6 @@ def _stage(root: Path, checkout: Path, project: str, profile: str | None, desire
     return _stage_locked(root, checkout, project, profile, desired, _family(project))
 
 
-def _project(root: Path, checkout: Path, project: str, profile: str | None,
-             desired: dict[str, dict], family: _Family, existing: dict) -> tuple[dict, dict]:
-    from . import knowledge_plugins as kp
-
-    path = checkout / ".github" / "copilot" / "settings.local.json"
-    previous = validate_marker(existing, path, project=project, root=root, family=family)
-    personal = kp._managed_marker(existing, path, tool_family=family)
-    legacy_path = checkout / ".claude" / "settings.local.json"
-    _safe_path(checkout, legacy_path)
-    legacy = kp._load_json_object(legacy_path)
-    result = dict(existing)
-    managed: dict[str, dict[str, Any]] = {key: {} for key in SETTING_KEYS}
-    conflicts: dict[str, list[str]] = {key: [] for key in SETTING_KEYS}
-    for key in SETTING_KEYS:
-        current = kp._dict_setting(existing, key, path)
-        legacy_values = kp._dict_setting(legacy, key, legacy_path)
-        prior = previous[key] if previous else {}
-        personal_values = personal["marketplaces" if key == "extraKnownMarketplaces" else key] if personal else {}
-        if set(prior) & set(personal_values):
-            raise _error(f"ambiguous tool/personal receipt ownership in {path}")
-        kp._retire_previous(current, prior)
-        for name, value in desired[key].items():
-            if name in personal_values:
-                conflicts[key].append(name)
-                continue
-            if name in current:
-                if not kp.same_json_value(current[name], value):
-                    conflicts[key].append(name)
-                continue
-            if name in legacy_values:
-                native = {**existing, key: current}
-                tiers = kp._read_harness_settings(
-                    checkout, native, ignored_native_marketplaces=set(), ignored_native_enabled=set())
-                effective = tiers.marketplaces.get(name) if key == "extraKnownMarketplaces" else tiers.enabled.get(name)
-                if not kp.same_json_value(legacy_values[name], value) or not kp.same_json_value(effective, value):
-                    conflicts[key].append(name)
-                continue
-            current[name] = value
-            managed[key][name] = value
-        if current:
-            result[key] = current
-        else:
-            result.pop(key, None)
-    if any(conflicts.values()):
-        raise _error(f"tool plugin conflicts in {checkout}: {conflicts}")
-    if profile is not None:
-        result[KEY] = {"version": 1, "project": project, "root": _identity(root), "profile": profile, **managed}
-    else:
-        result.pop(KEY, None)
-    preserve_guard(result)
-    return result, conflicts
-
-
 def _stage_locked(root: Path, checkout: Path, project: str, profile: str | None,
                   desired: dict[str, dict], family: _Family, *, retire_only: bool = False) -> dict[str, Any]:
     """Use only this owner's guarded transaction evidence; recheck the target."""
@@ -350,48 +289,56 @@ def _stage_locked(root: Path, checkout: Path, project: str, profile: str | None,
         existing = kp._load_json_object(path)
         if retire_only and KEY not in existing:
             return {"action": "no-op", "checkout": str(checkout), "changed": False}
-        result, conflicts = _project(root, checkout, project, profile, desired, family, existing)
+        previous = validate_marker(existing, path, project=project, root=root, family=family)
+        personal = kp._managed_marker(existing, path, tool_family=family)
+        legacy_path = checkout / ".claude" / "settings.local.json"
+        _safe_path(checkout, legacy_path)
+        legacy = kp._load_json_object(legacy_path)
+        result = dict(existing)
+        managed: dict[str, dict[str, Any]] = {key: {} for key in SETTING_KEYS}
+        conflicts: dict[str, list[str]] = {key: [] for key in SETTING_KEYS}
+        for key in SETTING_KEYS:
+            current = kp._dict_setting(existing, key, path)
+            legacy_values = kp._dict_setting(legacy, key, legacy_path)
+            prior = previous[key] if previous else {}
+            personal_values = personal["marketplaces" if key == "extraKnownMarketplaces" else key] if personal else {}
+            if set(prior) & set(personal_values):
+                raise _error(f"ambiguous tool/personal receipt ownership in {path}")
+            kp._retire_previous(current, prior)
+            for name, value in desired[key].items():
+                if name in personal_values:
+                    conflicts[key].append(name)
+                    continue
+                if name in current:
+                    if not kp.same_json_value(current[name], value):
+                        conflicts[key].append(name)
+                    continue
+                if name in legacy_values:
+                    native = {**existing, key: current}
+                    tiers = kp._read_harness_settings(
+                        checkout, native, ignored_native_marketplaces=set(), ignored_native_enabled=set())
+                    effective = tiers.marketplaces.get(name) if key == "extraKnownMarketplaces" else tiers.enabled.get(name)
+                    if not kp.same_json_value(legacy_values[name], value) or not kp.same_json_value(effective, value):
+                        conflicts[key].append(name)
+                    continue
+                current[name] = value
+                managed[key][name] = value
+            if current:
+                result[key] = current
+            else:
+                result.pop(key, None)
+        if any(conflicts.values()):
+            raise _error(f"tool plugin conflicts in {checkout}: {conflicts}")
+        if profile is not None:
+            result[KEY] = {"version": 1, "project": project, "root": _identity(root), "profile": profile, **managed}
+        else:
+            result.pop(KEY, None)
+        preserve_guard(result)
         changed = kp._write_overlay(path, result)
         return {"checkout": str(checkout), "changed": changed, "conflicts": conflicts}
 
 
-def _has_profile_input(config: cfg.Config) -> bool:
-    if config.default_repo.copilot_plugin_profile is not None:
-        return True
-    root = Path(config.default_repo.anchor)
-    path = root / ".github" / "copilot" / "settings.local.json"
-    _safe_path(root, path)
-    return path.is_file() and KEY in path.read_text(encoding="utf-8")
-
-
-def _observe(config: cfg.Config, family: _Family, profile: str | None, desired: dict) -> str:
-    from . import knowledge_plugins as kp
-
-    root = family.root
-    if _identity(Path(config.default_repo.anchor)) != _identity(root):
-        raise _error("effective project anchor differs from its registered root")
-    path = root / ".github" / "copilot" / "settings.local.json"
-    _safe_path(root, path)
-    existing = kp._load_json_object(path)
-    projected, _ = _project(root, root, config.repo_name, profile, desired, family, existing)
-    actual = {key: kp._dict_setting(existing, key, path) for key in SETTING_KEYS}
-    intended = {key: kp._dict_setting(projected, key, path) for key in SETTING_KEYS}
-    if not kp.same_json_value(actual, intended):
-        raise _error("project tool profile is not staged; re-register the project")
-    return json.dumps([config.repo_name, _identity(root), profile, desired, actual], sort_keys=True)
-
-
-def observe_for_admission(config: cfg.Config, *, deadline: float | None = None) -> str:
-    """Read the writer's prospective anchor settings without locks or effects."""
-    if not _has_profile_input(config):
-        return json.dumps([config.repo_name, _identity(Path(config.default_repo.anchor)), None])
-    family = _family(config.repo_name, anchor_only=True, deadline=deadline)
-    profile, desired = _profile(family.root, config.default_repo.copilot_plugin_profile)
-    return _observe(config, family, profile, desired)
-
-
-def prepare_checkout(checkout: str | Path, *, config: cfg.Config | None = None,
-                     checked_profile: str | None = None) -> dict:
+def prepare_checkout(checkout: str | Path, *, config: cfg.Config | None = None) -> dict:
     """Stage only one registered checkout; no profile preserves old behavior."""
     if config is not None and not hasattr(config, "default_repo"):
         config = None
@@ -409,8 +356,6 @@ def prepare_checkout(checkout: str | Path, *, config: cfg.Config | None = None,
     repo = config.default_repo
     selected = getattr(repo, "copilot_plugin_profile", None)
     if selected is None:
-        if checked_profile is not None and observe_for_admission(config) != checked_profile:
-            raise _error("project tool profile changed after application admission")
         path = Path(checkout) / ".github" / "copilot" / "settings.local.json"
         if not path.is_file():
             return {"action": "no-op"}
@@ -427,8 +372,6 @@ def prepare_checkout(checkout: str | Path, *, config: cfg.Config | None = None,
         if _identity(candidate) not in family.identities:
             raise _error("checkout is not in the registered project Git family")
         profile, desired = _profile(root, selected)
-        if checked_profile is not None and _observe(config, family, profile, desired) != checked_profile:
-            raise _error("project tool profile changed after application admission")
         registry = installer.read_projects_registry(strict=True)
         entry = registry["projects"][project]
         if REGISTRY_KEY in entry and entry[REGISTRY_KEY] != _identity(root):

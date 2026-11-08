@@ -785,12 +785,6 @@ def cmd_start(args):
     return 1
 
 
-def cmd_source_start(args):
-    from .source_start import command
-
-    return command(args)
-
-
 def cmd_stop(args):
     resp = send_command({"action": "stop"})
     if resp and resp.get("ok"):
@@ -1678,8 +1672,6 @@ def _main(argv: list[str] | None = None):
     p = ssh_key_sub.add_parser("install", help="Install an existing SSH pair into an owner-private local directory")
     p.add_argument("--entry", required=True)
     p.add_argument("--directory", required=True, help="Absolute dedicated directory; its parent must exist")
-    p.add_argument("--expected-fingerprint",
-                   help="Require the inspected SHA256 public-key identity before writing local files")
     p.add_argument("--prompt", action="store_true", help="Explicitly allow unlock prompting")
     p.add_argument("--require-running", action="store_true",
                    help="Require the selected service to be running; never activate it")
@@ -1709,9 +1701,6 @@ def _main(argv: list[str] | None = None):
 
     p = sub.add_parser("start", help="Start the vault service")
     p.set_defaults(func=cmd_start)
-
-    p = sub.add_parser("__source-start", help=argparse.SUPPRESS, allow_abbrev=False)
-    p.set_defaults(func=cmd_source_start)
 
     p = sub.add_parser("stop", help="Stop the vault service")
     p.set_defaults(func=cmd_stop)

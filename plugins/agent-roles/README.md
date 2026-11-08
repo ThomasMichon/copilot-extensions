@@ -20,7 +20,6 @@ native Task session, a Bridge peer, or an `agent-dispatch` task/recipe.
 |------|-------|---------|----------------|
 | Fleet monitor ("task master") | [`monitor-agent-fleet`](skills/monitor-agent-fleet/SKILL.md) | [charter](skills/monitor-agent-fleet/assets/CHARTER.md) | Reconstruct each agent's root goal from bounded history, classify time honestly, diagnose misdirection patterns and, only within an explicit steering scope, send deduplicated corrective steers |
 | Sustained PR reviewer | [`review-pull-requests`](skills/review-pull-requests/SKILL.md) | [charter](skills/review-pull-requests/assets/CHARTER.md) | Independent review lanes with a work-conserving concurrency target, retained per-PR context, repository-specific verdict/merge policy and existing agent-to-agent communication |
-| Persistent issue triager | [`triage-issue-backlog`](skills/triage-issue-backlog/SKILL.md) | [charter](skills/triage-issue-backlog/assets/CHARTER.md) | Selected GitHub/ADO backlog and filter, durable harness/knowledge addenda, bounded read-only research, one publisher, evidence acceptance and change-driven revisits |
 
 A static [progress instruction](instructions/progress.instructions.md) gives
 every agent in a consuming repository the worker-side kernel: name the unmet
@@ -35,8 +34,6 @@ parent return before a detour, and deliver once the actual gates pass.
 | "Monitor this fleet under this charter; steer within this scope" | The same assessment on the charter's cadence, plus at most one persisted, deduplicated steer per target and issue to the resolved current head |
 | "Correct the charters of last week's dormant worktrees" | Per-candidate verdicts from full chronology; clear record corrections written through their owners with a pre-write liveness recheck and readback, ambiguous cases in one decision packet; **messages sent: none** |
 | "Set up sustained PR attention with three lanes" | A filled reviewer charter, qualified adapter/policy table, complete census and lane assignment through existing owners |
-| "Run the persistent issue triager role for example/project" | Resolved target/filter, durable triager charter and applicable rubric/addenda; continuous assessment through existing adapters, with writes only under an original grant |
-| "Run the persistent issue-triager role for Example Controls ADO backlog, Widget issues only" | Exact provider-supported organization/project/query/filter selection or one focused scope question; no broadened intake or inferred write permission |
 
 Example read-only sweep result:
 
@@ -77,28 +74,12 @@ obligations, prerequisite growth, budgets, validation weight, delivery state
 and handoff fidelity, classify every wait as required, productive or waste,
 and escalate once when a delivered steer stalls; the watchdog never asks a
 blocking question itself.
-Each sweep reports evidence against enforced goals (fleet discovery, on-charter
-agents, fleet weak points, monitor weak points and, for recurring assignments
-only, recurring until confident), and a self-improvement loop folds learnings
-into the consumer's own weak-point catalogue and adapter.
-A thread register classifies every operator message (one-shot, charter,
-steer follow-up or delegated side-quest) so the monitor keeps its main
-analysis thread and closes threads only on their exit criteria.
 Its separately granted dormant correction mode fixes an inactive owner's
 persisted charter (effort plan, workspace title/summary, agenda cursor or,
 only through a verified record-only supersede, a pending baton) through each
 record's owner. It never messages,
 writes checkouts or claims, finalizes or retires work; live-idle, newly active
 and unknown targets stay unchanged.
-
-The issue triager is an agent-driven fallback, not an activated registrar or new
-queue. It defaults to read-only without write authority, separates complete
-assessments from partial evidence and software delivery, and keeps one
-publication owner. Optional `.agent-roles/triage-issue-backlog.md` addenda in the
-executing harness and bound knowledge workspace refine only applicable,
-delegable parameters; target/provider owners retain rubric, access and safety.
-An idle continuous pass stays Active. Restoring Dispatch does not automatically
-transfer the charter or pending effects.
 
 ## Dependencies & assumptions
 
@@ -122,7 +103,6 @@ references where available, and a private writable report home.
 | `skills/monitor-agent-fleet/SKILL.md` | Fleet monitor runbook |
 | `skills/monitor-agent-fleet/assets/CHARTER.md` | Fleet monitor charter template |
 | `skills/monitor-agent-fleet/assets/scenarios.json` | Offline behavioral cases, not live commands |
-| `skills/monitor-agent-fleet/assets/WEAK-POINTS.md` | Weak-point catalogue template; the consuming repository owns its filled-in copy |
 | `skills/monitor-agent-fleet/references/misdirection-patterns.md` | Patterns, distinguishing evidence and corrective steers |
 | `skills/monitor-agent-fleet/references/steering.md` | Authorized steer protocol |
 | `skills/monitor-agent-fleet/references/history-analysis.md` | Chunking, accounting and classifications |
@@ -130,14 +110,9 @@ references where available, and a private writable report home.
 | `skills/monitor-agent-fleet/references/interventions.md` | Testing, review and priority interventions |
 | `skills/monitor-agent-fleet/references/fabric-readers.md` | Optional existing reader adapters |
 | `skills/monitor-agent-fleet/references/dormant-correction.md` | Separately granted record correction for inactive owners |
-| `skills/monitor-agent-fleet/references/self-improvement.md` | Improve-the-fleet and improve-the-monitor loops; capture, fold and route learnings |
-| `skills/monitor-agent-fleet/references/thread-register.md` | Durable thread register: classify operator messages, delegate side-quests, close threads only on their exit criterion |
 | `skills/review-pull-requests/SKILL.md` | Sustained PR reviewer runbook |
 | `skills/review-pull-requests/assets/` | Reviewer charter and synthetic ledger example |
 | `skills/review-pull-requests/references/` | Setup/adapters, coordination/recovery and communication |
-| `skills/triage-issue-backlog/SKILL.md` | Persistent issue-triager procedure and target resolution |
-| `skills/triage-issue-backlog/assets/` | Fillable charter and synthetic contract walkthroughs |
-| `skills/triage-issue-backlog/references/` | Durable addenda/adapters, evidence, publication and continuity |
 | `instructions/progress.instructions.md` | Static worker-side progress guidance |
 | `instruction-projections.json` | Managed instruction delivery declaration |
 | `tests/` | Structural guidance regressions, not runtime qualification |

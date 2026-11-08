@@ -883,7 +883,6 @@ def self_install(
 ) -> SelfInstallResult:
     """Construct and health-gate with the canonical engine before selection."""
     from .runtime_identity import running_application_slot
-    from ._installation_context import path_is_within, paths_equal
 
     r = (root or default_root()).resolve()
     application_slot = running_application_slot() if payload_dir is None else None
@@ -896,8 +895,8 @@ def self_install(
     try:
         installer = _runtime_installer()
         if application_slot is not None and (
-            not paths_equal(application_slot.parent.parent, r)
-            or not path_is_within(worktree_manager.__file__, application_slot / ".venv")
+            application_slot.parent.parent != r
+            or not Path(worktree_manager.__file__).resolve().is_relative_to(application_slot / ".venv")
         ):
             raise RuntimeError("Running Manager application belongs to another installation")
         if dry_run:

@@ -1958,7 +1958,6 @@ fi
 # try (and fail) to resolve same-named index packages. `plugin-activation`
 # is installed LAST since it imports `dropin_registry`/`plugin_resolve` at
 # module load time.
-workspace_refresh=()
 for _lib_entry in \
     'dropin-registry:agent-dropin-registry' \
     'plugin-resolve:agent-plugin-resolve' \
@@ -1980,29 +1979,31 @@ for _lib_entry in \
     fi
     if [[ -f "$_lib_path/pyproject.toml" ]]; then
         if [[ "$HAVE_UV" -eq 1 ]]; then
-            workspace_refresh+=(--reinstall-package "$_lib_pkg_name")
+            _lib_install_rc=0
+            "$VENV_PYTHON" -I -B "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --reinstall-package "$_lib_pkg_name" \
+                "$_lib_path" --quiet || _lib_install_rc=$?
         else
             _lib_install_rc=0
             "$VENV_PYTHON" -I -B "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --quiet "$_lib_path" || _lib_install_rc=$?
-            if [[ "$_lib_install_rc" -ne 0 ]]; then
-                _fail "$_lib_dir_name library install failed"
-                exit 1
-            fi
-            _ok "$_lib_dir_name installed"
         fi
+        if [[ "$_lib_install_rc" -ne 0 ]]; then
+            _fail "$_lib_dir_name library install failed"
+            exit 1
+        fi
+        _ok "$_lib_dir_name installed"
     fi
 done
 
 # -- 3. Install the package into the venv ------------------------------
 if [[ "$HAVE_UV" -eq 1 ]]; then
     if [[ "$CELL_MODE" == 1 ]]; then
-        if "$VENV_PYTHON" -I -B "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" "${workspace_refresh[@]}" "$PLUGIN_DIR" --quiet; then
+        if "$VENV_PYTHON" -I -B "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet; then
             PACKAGE_INSTALL_STATUS=0
         else
             PACKAGE_INSTALL_STATUS=$?
         fi
     else
-        if "$VENV_PYTHON" -I -B "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" "${workspace_refresh[@]}" "$PLUGIN_DIR" --quiet 2>/dev/null; then
+        if "$VENV_PYTHON" -I -B "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" "$PLUGIN_DIR" --quiet 2>/dev/null; then
             PACKAGE_INSTALL_STATUS=0
         else
             PACKAGE_INSTALL_STATUS=$?

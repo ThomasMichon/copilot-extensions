@@ -96,12 +96,11 @@ def _function(source, name):
     return source[start:source.index("\n}\n", start) + 3]
 
 
-def _manager_driver(path, *, core):
+def _manager_driver(path):
     source = (ROOT / "worktree-manager/bin/launch-session.ps1").read_text("utf-8")
     helpers = "\n".join(_function(source, name) for name in (
         "Invoke-AwPsmuxFromHome", "Test-AwMuxCreationSession", "Invoke-AwPsmuxCreation",
         "Enter-AwMuxCreation",
-        "Invoke-AwMuxCoreProcess", "Resolve-AwMuxCore", "Invoke-AwMuxCoreCreation",
     ))
     start = source.index("                try {\n", source.index("$savedAuth = $null"))
     end = source.index("\n                    $newSessionExit", start)
@@ -110,15 +109,11 @@ def _manager_driver(path, *, core):
         "$ErrorActionPreference='Stop'\n"
         "$LASTEXITCODE=41\n"
         "$script:AwPsmuxBin=$args[0]\n$sessName='wt-'+$args[1]\n"
-        "$VenvPython=$args[3]\n"
         "$plan=@{work_dir=$args[2]}\n$envFlags=@('-e','FIXTURE=two words')\n"
         "$paneCmd=@('child with spaces','quote \"inside\"','tail\\','','--allow-all')\n"
         "$script:CleanupCalled=$false\n"
         "function Stop-AwOwnedPsmuxSession { $script:CleanupCalled=$true }\n"
         "$joinedDuringCreate=$false\n" + helpers + "\n"
-        + ("$muxCore=Resolve-AwMuxCore\n"
-           "if(-not $muxCore){throw 'Expected finite core provider'}\n" if core else "")
-        +
         "$ready=Join-Path $HOME ('ready-'+$env:MUX_ACTOR_ID)\n"
         "$go=Join-Path $HOME ('go-'+$env:MUX_ACTOR_ID)\n"
         "$boot=Join-Path $plan.work_dir ('boot-'+$env:MUX_ACTOR_ID)\n"
@@ -148,9 +143,8 @@ def _wait(check, message, actors=(), *, timeout=15, diagnostic=None):
 
 
 @pytest.mark.parametrize("first,second", [("manager", "engine"), ("engine", "manager")])
-@pytest.mark.parametrize("core", [False, True], ids=["legacy-manager", "core-manager"])
 def test_same_target_joins_at_discovery_while_other_target_creates_in_parallel(
-    tmp_path, first, second, core,
+    tmp_path, first, second,
 ):
     home = tmp_path / "home with spaces"
     home.mkdir()
@@ -163,7 +157,7 @@ def test_same_target_joins_at_discovery_while_other_target_creates_in_parallel(
     )
     assert compiled.returncode == 0, compiled.stdout + compiled.stderr
     driver = tmp_path / "manager.ps1"
-    _manager_driver(driver, core=core)
+    _manager_driver(driver)
     engine = tmp_path / "engine.py"
     engine.write_text(ENGINE, encoding="utf-8")
     env = dict(os.environ, HOME=str(home), USERPROFILE=str(home))
@@ -174,7 +168,7 @@ def test_same_target_joins_at_discovery_while_other_target_creates_in_parallel(
         identity = kind + "-" + str(len(actors))
         argv = (
             [shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-File", str(driver),
-            str(binary), wt, str(home), sys.executable]
+            str(binary), wt, str(home)]
             if kind == "manager" else [sys.executable, str(engine), wt, str(home), str(binary)]
         )
         child = subprocess.Popen(

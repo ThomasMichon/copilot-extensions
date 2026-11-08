@@ -225,32 +225,6 @@ def test_activation_refuses_a_base_interpreter(constructed_update):
         bootstrap_activation.main(["--root", str(constructed_update.root)])
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Windows path aliases")
-@pytest.mark.parametrize("alias", ["root", "prefix"])
-@pytest.mark.parametrize("foreign", [False, True])
-def test_activation_binds_physical_root_across_native_path_aliases(
-    constructed_update, monkeypatch, alias, foreign,
-):
-    from worktree_manager import bootstrap_activation, mux_daemon_cutover
-
-    state = constructed_update
-    root = state.root / "foreign" if foreign else state.root
-    prefix = state.slot / ".venv"
-    monkeypatch.setattr(sys, "prefix", "\\\\?\\" + str(prefix) if alias == "prefix" else str(prefix))
-    activate = []
-    monkeypatch.setattr(mux_daemon_cutover, "activate_after_update", lambda **options: (
-        activate.append(options) or {"action": "noop", "reason": "no-live-daemon"}
-    ))
-    arguments = ["--root", "\\\\?\\" + str(root) if alias == "root" else str(root)]
-    if foreign:
-        with pytest.raises(RuntimeError, match="constructed Manager slot"):
-            bootstrap_activation.main(arguments)
-        assert not activate
-    else:
-        assert bootstrap_activation.main(arguments) == 0
-        assert len(activate) == 1 and activate[0]["root"].samefile(state.root)
-
-
 @pytest.mark.parametrize("start,ready", [(False, False), (True, False), (True, True)])
 def test_explicit_application_start_preserves_update_noop_and_checks_startup(
     constructed_update, monkeypatch, start, ready,

@@ -70,19 +70,14 @@ def run(setup: protocol.Setup, name: str, *, apply: bool) -> protocol.Outcome:
 
         if not {
             ssh_setup.CAPABILITY, ssh_setup.PIN_CAPABILITY, "continuity-machine-reference-v1",
-        } | ({ssh_setup.KEY_REFERENCE_CAPABILITY, ssh_setup.KEY_PIN_CAPABILITY}
-             if context.ssh_key is not None else set()) <= set(capability["capabilities"]):
+        } <= set(capability["capabilities"]):
             raise protocol.SetupError("Installed Fleet executable lacks selected SSH setup support.")
         ssh_arguments = [
             "ssh-setup", "--request", str(Path(context.ssh_setup).expanduser()),
             "--source", str(Path(context.source).expanduser()),
             "--harness", context.name, "--state-root", str(_state_root(setup, name)),
         ]
-        if context.ssh_key is not None:
-            ssh_arguments.append("--key-references-only")
         description = ssh_setup._description(_invoke(ssh_arguments))
-        if context.ssh_key is not None:
-            ssh_setup.key_binding(context, description)
         with ssh_setup.selected_inputs(description):
             setup.verify()
     command = [
@@ -95,28 +90,6 @@ def run(setup: protocol.Setup, name: str, *, apply: bool) -> protocol.Outcome:
         {"status": "needed", "stage": "enrollment"}, {"status": "needed", "stage": "connection"})
     if needed and not apply:
         return protocol.Outcome("needed", "Selected context needs machine enrollment.")
-    if context.ssh_key is not None and (needed or result == {"status": "ready", "stage": "connected"}):
-        key_arguments = [
-            *[item for item in ssh_arguments if item != "--key-references-only"],
-            "--expected-request-digest", description["request_digest"],
-            "--expected-key-fingerprint", context.ssh_key.fingerprint,
-        ]
-        with ssh_setup.selected_inputs(description) as (module, _selected):
-            setup.verify()
-            if not needed and ssh_setup.status(description, module):
-                if not ssh_setup.same_description(_invoke(key_arguments), description):
-                    raise protocol.SetupError("SSH inputs changed during pinned readiness inspection.")
-                setup.verify()
-                return protocol.Outcome("ready", "Selected SSH application has converged its authenticated directory.")
-        if not apply:
-            return protocol.Outcome("needed", "Selected SSH application requires its normal installation and owning Vault key.")
-        waiting = ssh_setup.prepare_key(setup, context, description)
-        if waiting is not None:
-            return waiting
-        current = _invoke(key_arguments)
-        if not ssh_setup.same_description(current, description):
-            raise protocol.SetupError("SSH inputs changed after pinned key installation; preserve the original selection.")
-        setup.verify()
     if needed and apply:
         setup.verify()
         result = _invoke(command + ["--apply"])

@@ -41,16 +41,6 @@ if TYPE_CHECKING:
 def install_dir() -> Path:
     """~/.agent-worktrees (shared runtime)"""
     return cfg.install_dir()
-
-
-def scripts_dir() -> Path:
-    """Return launch assets belonging to this package, or the legacy runtime."""
-    packaged = Path(__file__).resolve().parent / "_runtime_assets" / "scripts"
-    environment = Path(sys.prefix)
-    application = environment.name == ".venv" and (environment.parent / "application.json").is_file()
-    return packaged if application or packaged.is_dir() else install_dir() / "scripts"
-
-
 def lib_dir() -> Path:
     """~/.agent-worktrees/lib -- deployed Python package source."""
     return install_dir() / "lib"

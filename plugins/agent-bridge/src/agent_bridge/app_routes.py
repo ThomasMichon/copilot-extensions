@@ -11,12 +11,10 @@ from .auth import BearerAuthMiddleware
 from .auth_custody import AuthCustody, AuthCustodyMiddleware
 from .live_representation import LiveEventStore
 from .live_inbox_runtime import LiveInboxRuntime
-from .live_questions import LiveQuestions
-from .mux_questions import MuxQuestions
 from .models import ServiceConfig
 from .routes import (
-    acquisitions, acp_ws, admin, agents, dispatch_tasks, health, live_inbox, live_questions, live_sessions,
-    mux_questions, owner_membership, remote, session_observations, sessions, ui, worktrees,
+    acquisitions, acp_ws, admin, agents, dispatch_tasks, health, live_inbox, live_sessions,
+    owner_membership, remote, session_observations, sessions, ui, worktrees,
 )
 
 
@@ -43,15 +41,13 @@ def configure_serving_app(
     app.state.auth_custody = auth_custody if auth_custody is not None else AuthCustody()
     app.state.live_event_store = LiveEventStore()
     app.state.live_inbox_runtime = LiveInboxRuntime()
-    app.state.live_questions = LiveQuestions()
-    app.state.mux_questions = MuxQuestions()
     app.add_middleware(BearerAuthMiddleware, token=auth_token)
     app.add_middleware(AuthCustodyMiddleware, custody=app.state.auth_custody)
     for router in (
         worktree_native_resume.router,
         acquisitions.router, health.router, ui.router, acp_ws.router,
         sessions.router, session_observations.router, owner_membership.router, live_sessions.router,
-        live_inbox.router, live_questions.router, mux_questions.router, remote.router, agents.router,
+        live_inbox.router, remote.router, agents.router,
         worktrees.router, admin.router, dispatch_tasks.router,
     ):
         app.include_router(router)

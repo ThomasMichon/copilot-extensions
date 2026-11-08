@@ -77,14 +77,6 @@ Windows setup probes optional Python-launcher versions quietly when choosing a
 signed base interpreter. Unavailable candidates are verbose diagnostics; actual
 venv creation and package-install failures retain their normal error reporting.
 
-Windows setup requires an existing Python 3.11+ for its construction helpers
-(the runtime package retains its Python 3.10+ minimum). It preserves the native
-driver's selected interpreter and otherwise checks all application candidates
-on PATH, the Python launcher and standard Python install roots, skipping older
-interpreters and WindowsApps aliases. The selected executable also reaches the
-venv fallback, including `uv --python`; signed-base preference is unchanged.
-This selection does not install Python or change PATH.
-
 The Windows `init.ps1` installer declares its requested UTF-8 human-output
 boundary for the updater's existing timed adapter. Construction-shell and GC
 count diagnostics pass through the existing dual-stream native helper without

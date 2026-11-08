@@ -773,13 +773,7 @@ $resolveArgs += @('resolve') + $CopilotArgs
 Write-SetupLog "Calling agent_worktrees resolve"
 Write-LaunchTrace 'resolve_start'
 
-$savedStartupFinalize = $env:AGENT_WORKTREES_FINALIZE_STARTUP_MANIFEST
-try {
-    $env:AGENT_WORKTREES_FINALIZE_STARTUP_MANIFEST = '1'
-    $jsonOutput = & $VenvPython @resolveArgs
-} finally {
-    $env:AGENT_WORKTREES_FINALIZE_STARTUP_MANIFEST = $savedStartupFinalize
-}
+$jsonOutput = & $VenvPython @resolveArgs
 
 if ($LASTEXITCODE -ne 0) {
     Write-SetupLog "agent_worktrees resolve failed (exit $LASTEXITCODE)" 'ERROR'
@@ -1092,17 +1086,6 @@ if ($plan.cmd) {
         $planCmd[1] -eq '-m' -and $planCmd[2] -eq 'agent_worktrees.launch_seed_exec') {
         $planCmd[0] = $VenvPython
     }
-    if ($planCmd.Count -gt 9 -and
-        [IO.Path]::GetFileNameWithoutExtension($planCmd[0]) -eq 'pwsh' -and
-        $planCmd[3] -eq '-File' -and [IO.Path]::GetFileName($planCmd[4]) -eq 'launch-command.ps1') {
-        $ownerIndex = if ($planCmd[5] -eq '--recovery') { 7 } else { 6 }
-        if ($planCmd[$ownerIndex - 1] -eq '--' -and
-            [IO.Path]::GetFileNameWithoutExtension($planCmd[$ownerIndex]) -in @('python', 'python3') -and
-            $planCmd[$ownerIndex + 1] -eq '-m' -and
-            $planCmd[$ownerIndex + 2] -eq 'agent_worktrees.launch_seed_exec') {
-            $planCmd[$ownerIndex] = $VenvPython
-        }
-    }
     for ($i = 0; $i -lt $planCmd.Count - 1; $i++) {
         if ($planCmd[$i] -in @('-RuntimePython', '--runtime-python')) {
             if ($planCmd[$i + 1] -ne $VenvPython) {
@@ -1274,11 +1257,27 @@ if ($CopilotPassthrough.Count -gt 0) {
 }
 
 if ($ahpArgs.Count -gt 0) {
-    $reboundJson = & $VenvPython (Join-Path $PSScriptRoot 'ahp-command.py') json $ahpArgs[1] $sessionId -- @cmd
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Could not rebind the prepared native AHP command.'
+    $filteredCmd = [System.Collections.Generic.List[string]]::new()
+    $skipNext = $false
+    foreach ($arg in $cmd) {
+        if ($skipNext) {
+            $skipNext = $false
+            continue
+        }
+        if ($arg -eq '--ahp') {
+            $skipNext = $true
+            continue
+        }
+        if ($arg -like '--ahp=*' -or $arg -like '--resume=*') {
+            continue
+        }
+        $filteredCmd.Add([string]$arg)
     }
-    $cmd = @($reboundJson | ConvertFrom-Json)
+    $cmd = @($filteredCmd)
+    if ($cmd -notcontains '--experimental') {
+        $cmd += '--experimental'
+    }
+    $cmd += $ahpArgs
 }
 
 # ── psmux pane command: pass VERBATIM (`pwsh -File <script>`) ─────────────
@@ -1834,75 +1833,6 @@ function Enter-AwMuxCreation {
         }
     }
 }
-function Invoke-AwMuxCoreProcess {
-    param([string]$Python, [string[]]$Arguments, [string]$InputText = '')
-    $start = [Diagnostics.ProcessStartInfo]::new()
-    $start.FileName = $Python
-    $start.UseShellExecute = $false
-    $start.CreateNoWindow = $true
-    $start.RedirectStandardInput = $true
-    $start.RedirectStandardOutput = $true
-    $start.RedirectStandardError = $true
-    $start.StandardInputEncoding = [Text.UTF8Encoding]::new($false)
-    $start.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
-    foreach ($argument in $Arguments) { $start.ArgumentList.Add($argument) }
-    $process = [Diagnostics.Process]::Start($start)
-    try {
-        $stdout = $process.StandardOutput.ReadToEndAsync()
-        $stderr = $process.StandardError.ReadToEndAsync()
-        $write = $process.StandardInput.WriteAsync($InputText)
-        if (-not $write.Wait(5000)) { throw 'Mux core input timed out.' }
-        $process.StandardInput.Close()
-        if (-not $process.WaitForExit(40000)) { throw 'Mux core result timed out.' }
-        if (-not [Threading.Tasks.Task]::WaitAll(@($stdout, $stderr), 5000)) {
-            throw 'Mux core output timed out.'
-        }
-        return @{ code = $process.ExitCode; output = $stdout.Result }
-    } finally {
-        if (-not $process.HasExited) { $process.Kill(); $null = $process.WaitForExit(5000) }
-        $process.Dispose()
-    }
-}
-
-function Resolve-AwMuxCore {
-    $reply = Invoke-AwMuxCoreProcess -Python $VenvPython -Arguments @(
-        '-I', '-X', 'utf8', '-m', 'agent_remote_driver.mux_creation', '--describe-contract'
-    )
-    # Older selected Worktrees runtimes have no finite core boundary.
-    if ($reply.code -ne 0) { return $null }
-    $contract = ConvertFrom-Json -InputObject $reply.output -ErrorAction Stop
-    if (
-        $contract.contract -ne 'copilot-driver.mux-creation' -or
-        $contract.version -ne 1 -or
-        'windows-psmux-create-or-join' -notin $contract.operations
-    ) { return $null }
-    if (
-        -not [IO.Path]::IsPathFullyQualified([string]$contract.python) -or
-        -not [IO.Path]::IsPathFullyQualified([string]$contract.entrypoint) -or
-        -not (Test-Path -LiteralPath $contract.python -PathType Leaf) -or
-        -not (Test-Path -LiteralPath $contract.entrypoint -PathType Leaf)
-    ) { throw 'Mux core returned an unavailable selected runtime.' }
-    return $contract
-}
-
-function Invoke-AwMuxCoreCreation {
-    param($Core, [string]$Session, [string[]]$CommandArgs)
-    $request = ConvertTo-Json -Compress -Depth 4 -InputObject @{
-        version = 1; binary = $script:AwPsmuxBin
-        session = $Session; argv = @($CommandArgs)
-    }
-    $reply = Invoke-AwMuxCoreProcess -Python $Core.python -Arguments @(
-        '-I', '-X', 'utf8', [string]$Core.entrypoint, '--create'
-    ) -InputText $request
-    $result = ConvertFrom-Json -InputObject $reply.output -ErrorAction Stop
-    if (
-        $result.contract -ne 'copilot-driver.mux-creation' -or $result.version -ne 1 -or
-        $result.status -notin @('created', 'joined', 'rejected', 'unknown') -or
-        ($reply.code -eq 0) -ne ($result.status -in @('created', 'joined'))
-    ) { throw 'Mux core creation result is unconfirmed.' }
-    return $result.status
-}
-
 function Join-AwExistingPsmuxSession {
     Assert-AwColdResume -LiveSessionKnown
     if ($nested) {
@@ -1938,7 +1868,6 @@ function Join-AwExistingPsmuxSession {
     exit $attachExit
 }
 if (-not $noMux) {
-    $muxCore = Resolve-AwMuxCore
     $wtId = if ([string]::IsNullOrWhiteSpace($plan.worktree_id)) { 'base' } else { $plan.worktree_id }
     # `.` is the window/pane separator in a mux target -- keep in sync with
     # `sessions.mux_session_name` (and the bash launcher).
@@ -2192,44 +2121,34 @@ if (-not $noMux) {
                         'new-session', '-d', '-s', $sessName,
                         '-c', [string]$plan.work_dir
                     ) + $envFlags + $paneCmd
-                    if ($muxCore) {
-                        # Lost replies are possible admission, never an old-path retry.
-                        $muxPublished = $true
-                        $coreStatus = Invoke-AwMuxCoreCreation -Core $muxCore `
-                            -Session $sessName -CommandArgs $psmuxArgs
-                        $joinedDuringCreate = $coreStatus -eq 'joined'
-                        $muxPublished = $coreStatus -ne 'rejected'
-                        $createExit = if ($coreStatus -in @('created', 'joined')) { 0 } else { 3 }
-                    } else {
-                        $creationLease = Enter-AwMuxCreation $sessName
-                        $createExit = 0
-                        try {
-                            if ($null -eq $creationLease) {
-                                $joinedDuringCreate = $true
-                            } else {
-                                try {
-                                    Invoke-AwPsmuxFromHome -CommandArgs $psmuxArgs `
-                                        -CreationLease $creationLease
-                                    $createExit = if ($null -eq $LASTEXITCODE) {
-                                        0
-                                    } else {
-                                        [int]$LASTEXITCODE
-                                    }
-                                } catch {
-                                    if ($creationLease.CanWrite) {
-                                        Stop-AwOwnedPsmuxSession $sessName
-                                    }
-                                    throw
+                    $creationLease = Enter-AwMuxCreation $sessName
+                    $createExit = 0
+                    try {
+                        if ($null -eq $creationLease) {
+                            $joinedDuringCreate = $true
+                        } else {
+                            try {
+                                Invoke-AwPsmuxFromHome -CommandArgs $psmuxArgs `
+                                    -CreationLease $creationLease
+                                $createExit = if ($null -eq $LASTEXITCODE) {
+                                    0
+                                } else {
+                                    [int]$LASTEXITCODE
                                 }
-                                if ($createExit -ne 0 -and $creationLease.CanWrite) {
+                            } catch {
+                                if ($creationLease.CanWrite) {
                                     Stop-AwOwnedPsmuxSession $sessName
                                 }
+                                throw
                             }
-                        } finally {
-                            if ($null -ne $creationLease) {
-                                $muxPublished = -not $creationLease.CanWrite
-                                $creationLease.Dispose()
+                            if ($createExit -ne 0 -and $creationLease.CanWrite) {
+                                Stop-AwOwnedPsmuxSession $sessName
                             }
+                        }
+                    } finally {
+                        if ($null -ne $creationLease) {
+                            $muxPublished = -not $creationLease.CanWrite
+                            $creationLease.Dispose()
                         }
                     }
                     $LASTEXITCODE = $createExit
@@ -2308,7 +2227,7 @@ if (-not $noMux) {
         )
         if ($creationUncertain) {
             $message = (
-                "PSMux creation outcome is uncertain (exit $newSessionExit)$detail. " +
+                "PSMux client failed after session discovery (exit $newSessionExit)$detail. " +
                 "The pane's argument and token handoffs are preserved. " +
                 "Inspect the existing session '$sessName' before any retry."
             )
@@ -2512,17 +2431,13 @@ try {
                 'GH_TOKEN', $token.Trim(), 'Process'
             )
         }
-        . (Join-Path $PSScriptRoot 'pane-args.ps1')
-        $directStartupManifest = $null
-        $directCommand = New-AwPaneStartupCommand $cmd ([ref]$directStartupManifest) ([string]$plan.record_path)
-        & $directCommand[0] $directCommand[1..($directCommand.Count - 1)]
+        & $cmd[0] $cmd[1..($cmd.Count - 1)]
         $copilotExit = $LASTEXITCODE
     } catch [System.Management.Automation.PipelineStoppedException] {
         $copilotExit = 130  # 128 + SIGINT(2)
         Write-SetupLog "Session interrupted (Ctrl+C)"
     }
 } finally {
-    if ($directStartupManifest) { Remove-AwPaneArgsFile $directStartupManifest }
     foreach ($name in $savedDirectAuth.Keys) {
         [Environment]::SetEnvironmentVariable(
             $name,

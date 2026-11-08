@@ -92,53 +92,6 @@ def test_existing_writable_owner_never_migrates_or_starts_writer(
         readonly.close()
 
 
-@pytest.mark.parametrize("storage", ["previous", "missing", "malformed"])
-def test_mux_storage_requires_writable_preparation_before_passive_adoption(tmp_path, storage):
-    path = tmp_path / "sessions.db"
-    prepared = Database(path)
-    prepared.create_session("retained", "retained", None, ".", "local", "stopped", 1)
-    prepared.close()
-    passive = Database(path, read_only=True)
-    try:
-        with sqlite3.connect(path) as conn:
-            conn.execute("DROP TABLE mux_question_answers")
-            if storage == "previous":
-                conn.execute("UPDATE schema_version SET version=?", (SCHEMA_VERSION - 1,))
-            elif storage == "malformed":
-                conn.execute("CREATE TABLE mux_question_answers (inspection_id TEXT PRIMARY KEY)")
-        before = path.read_bytes()
-        with pytest.raises(ValueError, match="schema|preparation"):
-            Database(path, read_only=True)
-        with pytest.raises(ValueError, match="schema|preparation"):
-            open_existing_writable(passive)
-        assert path.read_bytes() == before
-        assert passive._writer_thread is None and passive.read_only
-    finally:
-        passive.close()
-    if storage == "previous":
-        prepared = Database(path)
-        prepared.close()
-        passive = Database(path, read_only=True)
-        writable = open_existing_writable(passive)
-        try:
-            assert writable.get_session("retained")["status"] == "stopped"
-            writable.execute_write(
-                "INSERT INTO mux_question_answers "
-                "(inspection_id,session_id,fingerprint,sender,answer,state,created_at) "
-                "VALUES ('inspection','retained','screen','controller','blue','unverified',1)"
-            )
-            with pytest.raises(sqlite3.IntegrityError):
-                writable.execute_write(
-                    "INSERT INTO mux_question_answers "
-                    "(inspection_id,session_id,fingerprint,sender,answer,state,created_at) "
-                    "VALUES ('duplicate','retained','screen','controller','blue','admitted',2)"
-                )
-            assert writable._writer_thread is None
-        finally:
-            writable.close()
-            passive.close()
-
-
 @pytest.mark.parametrize("drift", ["schema", "journal", "missing", "replaced", "active"])
 def test_writable_open_refuses_missing_changed_or_unprepared_database(
     tmp_path: Path, drift: str,

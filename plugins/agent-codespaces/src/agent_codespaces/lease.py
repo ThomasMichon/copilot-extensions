@@ -21,7 +21,6 @@ from agent_procutil import no_window_flags
 from ssh_manager.locks import pid_alive
 
 from . import coordination
-from .claim_guard import claim_guard, serialize_claim
 from .config import RUNTIME_DIR, ensure_runtime_dir
 
 log = logging.getLogger("agent-codespaces")
@@ -123,7 +122,7 @@ def _lease_lock(timeout: float = 10.0, poll: float = 0.05) -> Iterator[None]:
                         continue
                 except OSError:
                     pass
-                raise ProviderAdmissionError(
+                raise RuntimeError(
                     "Could not acquire lease lock (held by another process)"
                 ) from None
             time.sleep(poll)
@@ -159,9 +158,10 @@ def _read_leases() -> dict[str, Lease]:
 
 def _write_leases(leases: dict[str, Lease]) -> None:
     """Atomically write leases.json."""
-    from .claim_return import pending_returns, write_leases
-
-    write_leases(leases, pending_returns())
+    _write_private_json(
+        LEASE_FILE,
+        {codespace: asdict(lease) for codespace, lease in leases.items()},
+    )
 
 
 def _read_records(path, record_type, *, fail_closed: bool = False):
@@ -184,12 +184,6 @@ def _read_records(path, record_type, *, fail_closed: bool = False):
         return {}
     records = {}
     for key, rec in (raw or {}).items():
-        if path == LEASE_FILE and record_type is Lease:
-            from .claim_return import RETURN_KEY, validate_pending
-
-            if key == RETURN_KEY:
-                validate_pending(rec, raw)
-                continue
         try:
             records[key] = record_type(**rec)
         except TypeError as exc:
@@ -324,12 +318,9 @@ def _is_stale(lease: Lease, ttl: float) -> bool:
 
 def _prune(leases: dict[str, Lease], ttl: float) -> dict[str, Lease]:
     """Drop stale leases in-place and return the cleaned dict."""
-    from .claim_return import pending_returns
-
-    pending = pending_returns()
     live = {}
     for codespace, lease in leases.items():
-        if codespace not in pending and _is_stale(lease, ttl):
+        if _is_stale(lease, ttl):
             log.info(
                 "Reclaiming stale lease: %s (effort=%s, host=%s, pid=%s)",
                 codespace, lease.effort, lease.host, lease.pid,
@@ -351,7 +342,6 @@ def list_leases(ttl: float = DEFAULT_TTL, prune: bool = True) -> list[Lease]:
         return list(leases.values())
 
 
-@serialize_claim(1)
 def borrow(
     effort: str,
     codespace: str,
@@ -412,19 +402,20 @@ def borrow(
 def release(target: str, ttl: float = DEFAULT_TTL) -> bool:
     """Release a lease by CodeSpace name or effort name."""
     with _lease_lock():
-        leases = _read_records(LEASE_FILE, Lease, fail_closed=True)
-        selected = [
-            (c, lease) for c, lease in leases.items()
+        leases = _prune(_read_leases(), ttl)
+        to_remove = [
+            c for c, lease in leases.items()
             if c == target or lease.effort == target
         ]
-    released = [
-        release_claim(c, _claim_owner(held), ttl=ttl, expected=held)
-        for c, held in selected
-    ]
-    return bool(released) and all(released)
+        if not to_remove:
+            return False
+        for c in to_remove:
+            del leases[c]
+            log.info("Released lease on '%s'", c)
+        _write_leases(leases)
+        return True
 
 
-@serialize_claim()
 def heartbeat(codespace: str, ttl: float = DEFAULT_TTL) -> bool:
     """Refresh the local heartbeat and best-effort renew any L2 token."""
     with _lease_lock():
@@ -579,23 +570,20 @@ def deploy_hold(
         heartbeat_at=now,
         expires_at=now + max_lifetime,
     )
-    try:
-        with claim_guard(codespace), _lease_lock():
-            holds = _read_live_records(
-                _DEPLOY_HOLDS_FILE,
-                DeployHold,
-                DEPLOY_HOLD_TTL,
+    with _lease_lock():
+        holds = _read_live_records(
+            _DEPLOY_HOLDS_FILE,
+            DeployHold,
+            DEPLOY_HOLD_TTL,
+        )
+        existing = holds.get(codespace)
+        if existing:
+            raise DeployHoldError(
+                f"CodeSpace '{codespace}' already has a provider "
+                f"{existing.operation} hold"
             )
-            existing = holds.get(codespace)
-            if existing:
-                raise DeployHoldError(
-                    f"CodeSpace '{codespace}' already has a provider "
-                    f"{existing.operation} hold"
-                )
-            holds[codespace] = hold
-            _write_records(_DEPLOY_HOLDS_FILE, holds)
-    except CoordinationRejected as error:
-        raise DeployHoldError(str(error)) from error
+        holds[codespace] = hold
+        _write_records(_DEPLOY_HOLDS_FILE, holds)
     heartbeat_stop = threading.Event()
     heartbeat_thread = threading.Thread(
         target=_heartbeat_record,
@@ -654,22 +642,18 @@ class CoordinationRejected(RuntimeError):
     """The owning worktree cannot create durable coordination state."""
 
 
-class ClaimAdmissionRejected(CoordinationRejected, ProviderAdmissionError):
-    """Mandatory claim admission failed; a connection must not proceed."""
-
-
 def _claim_owner(lease: Lease) -> str:
     """Return the worktree owner for a claim, else the effort owner."""
     return lease.worktree or lease.effort
 
 
 def _same_holder_ref(a: str | None, b: str | None) -> bool:
-    """Compare the complete owner scope, ignoring only its session suffix."""
-    if not isinstance(a, str) or not isinstance(b, str) or not a or not b:
+    """True when two ClaimRefs name the same worktree id."""
+    if not a or not b:
         return False
-    aw = a.split("#", 1)[0].split("/")
-    bw = b.split("#", 1)[0].split("/")
-    return len(aw) == 3 and all(aw) and aw == bw
+    aw = a.split("/")[-1].split("#")[0].strip()
+    bw = b.split("/")[-1].split("#")[0].strip()
+    return bool(aw) and aw == bw
 
 
 def resolve_owner_worktree(
@@ -769,15 +753,12 @@ def sweep_dead(
     active: set[str] | None = None, ttl: float = DEFAULT_TTL
 ) -> list[str]:
     """Release claims whose owning worktree is positively gone."""
-    from .claim_return import pending_returns
-
     with _lease_lock():
         leases = _prune(_read_leases(), ttl)
-        pending = pending_returns()
         released: list[str] = []
         for cs, lease in list(leases.items()):
             owner = _claim_owner(lease)
-            if cs not in pending and lease.worktree and not _worktree_alive(owner, active):
+            if lease.worktree and not _worktree_alive(owner, active):
                 log.info(
                     "Auto-releasing claim on '%s' -- owner worktree '%s' is gone",
                     cs, owner,
@@ -789,7 +770,6 @@ def sweep_dead(
         return released
 
 
-@serialize_claim()
 def claim(
     codespace: str,
     owner: str,
@@ -800,7 +780,6 @@ def claim(
     holder_ref: str | None = None,
     coordinate: bool = True,
     preflight_result: coordination.PreflightResult | None = None,
-    journal: bool = False,
 ) -> Lease:
     """Acquire or refresh an exclusive worktree claim on ``codespace``.
 
@@ -808,18 +787,121 @@ def claim(
     owners are reclaimed. When ``coordinate`` and ``holder_ref`` are present, a
     best-effort cross-machine L2 lease is acquired before the local write.
     """
-    from .claim_admission import admit_claim
+    from .worktrees import validate_context
 
-    try:
-        return admit_claim(
-            codespace, owner, force=force, ttl=ttl, active=active,
-            holder_ref=holder_ref, coordinate=coordinate,
-            preflight_result=preflight_result, journal=journal,
+    validate_context()
+    if not codespace:
+        raise RuntimeError("claim requires a CodeSpace name")
+    if not owner:
+        raise RuntimeError("claim requires an owner worktree")
+
+    lease_token = ""
+    if coordinate and holder_ref:
+        peek = _read_leases().get(codespace)
+        same_owner = bool(peek and _claim_owner(peek) == owner)
+        prior_token = peek.lease_token if (same_owner and peek) else ""
+        lease_token = prior_token
+        if same_owner and prior_token:
+            res = coordination.renew(codespace, prior_token)
+        else:
+            readiness = preflight_result or coordination.preflight(holder_ref)
+            if readiness.rejected:
+                raise CoordinationRejected(
+                    f"{readiness.code}: {readiness.detail}"
+                )
+            res = coordination.acquire(codespace, holder_ref)
+        if res.ok:
+            lease_token = res.token
+        elif res.rejected:
+            raise CoordinationRejected(res.detail)
+        elif res.conflict:
+            self_conflict = same_owner or _same_holder_ref(res.holder, holder_ref)
+            if self_conflict:
+                log.info(
+                    "Re-entrant claim on '%s' by its own owner '%s'; adopting "
+                    "the existing lease (L1-only; token heals on next renew).",
+                    codespace, owner,
+                )
+                lease_token = prior_token
+            elif not force:
+                held_local = _read_leases().get(codespace)
+                if held_local is not None:
+                    raise ClaimConflict(
+                        codespace, _claim_owner(held_local),
+                        held_local.host, held_local.pid,
+                    )
+                raise ClaimConflict(
+                    codespace, res.holder or "(cross-machine)",
+                    "(cross-machine)", 0,
+                )
+            else:
+                log.warning(
+                    "Forced claim on '%s' over a live cross-machine lease held "
+                    "by '%s'; proceeding without the L2 lease.",
+                    codespace, res.holder or "?",
+                )
+                lease_token = ""
+
+    release_after_reject = ""
+    hold_operation = ""
+    with _lease_lock():
+        holds = _read_live_records(
+            _DEPLOY_HOLDS_FILE,
+            DeployHold,
+            DEPLOY_HOLD_TTL,
         )
-    except CoordinationRejected:
-        raise
-    except ProviderAdmissionError as error:
-        raise ClaimAdmissionRejected(str(error)) from error
+        hold = holds.get(codespace)
+        if hold:
+            release_after_reject = lease_token
+            hold_operation = hold.operation
+        else:
+            leases = _prune(_read_leases(), ttl)
+            held = leases.get(codespace)
+            if held and _claim_owner(held) != owner:
+                holder = _claim_owner(held)
+                from .driving_worktrees import same_worktree_family
+
+                family = same_worktree_family(holder, owner)
+                if _worktree_alive(holder, active) and not force and not family:
+                    raise ClaimConflict(codespace, holder, held.host, held.pid)
+                log.info(
+                    "Taking CodeSpace '%s' claim from '%s' for '%s' (%s)",
+                    codespace, holder, owner,
+                    "forced" if force
+                    else "same worktree family" if family
+                    else "prior owner gone",
+                )
+            now = time.time()
+            keep_acquired = (
+                held.acquired_at if held and _claim_owner(held) == owner else now
+            )
+            lease = Lease(
+                codespace=codespace,
+                effort="",
+                pid=os.getpid(),
+                host=_this_host(),
+                acquired_at=keep_acquired,
+                heartbeat_at=now,
+                worktree=owner,
+                lease_token=lease_token,
+            )
+            leases[codespace] = lease
+            _write_leases(leases)
+            return lease
+    if release_after_reject:
+        try:
+            coordination.release(codespace, release_after_reject)
+        except Exception:
+            log.warning(
+                "Could not release cross-machine token for '%s' "
+                "after deploy-hold rejection",
+                codespace,
+                exc_info=True,
+            )
+    raise ProviderAdmissionError(
+        f"CodeSpace '{codespace}' is unavailable while provider "
+        f"{hold_operation} is in progress"
+    )
 
 
 def claim_for_connect(
@@ -847,8 +929,14 @@ def claim_for_connect(
     claim(
         codespace, claim_owner, force=force,
         active=active_worktree_ids(), holder_ref=fence_holder_ref,
-        journal=True,
     )
+    if fence_holder_ref and coordination.journal_obligation(
+        codespace, fence_holder_ref,
+    ):
+        log.info(
+            "Journaled CodeSpace %s as an obligation on %s",
+            codespace, fence_holder_ref,
+        )
     return fence_holder_ref
 
 
@@ -863,25 +951,39 @@ def lease_token_for(codespace: str, ttl: float = DEFAULT_TTL) -> str | None:
         return None
 
 
-def release_claim(
-    codespace: str, owner: str, ttl: float = DEFAULT_TTL, *, expected: Lease | None = None,
-) -> bool:
+def release_claim(codespace: str, owner: str, ttl: float = DEFAULT_TTL) -> bool:
     """Release ``codespace``'s claim when ``owner`` still holds it."""
-    from .claim_return import release_claim as confirmed_release
-
-    return confirmed_release(codespace, owner, expected=expected)
+    with _lease_lock():
+        leases = _prune(_read_leases(), ttl)
+        held = leases.get(codespace)
+        if not held or _claim_owner(held) != owner:
+            return False
+        token = held.lease_token
+        del leases[codespace]
+        _write_leases(leases)
+        log.info("Released claim on '%s' (owner '%s')", codespace, owner)
+    if token:
+        coordination.release(codespace, token)
+    return True
 
 
 def release_worktree_claims(owner: str, ttl: float = DEFAULT_TTL) -> list[str]:
     """Release every claim owned by ``owner`` and tombstone any L2 leases."""
     with _lease_lock():
-        leases = _read_records(LEASE_FILE, Lease, fail_closed=True)
-        selected = [
-            (cs, lease)
+        leases = _prune(_read_leases(), ttl)
+        released_tokens = {
+            cs: lease.lease_token
             for cs, lease in leases.items()
             if _claim_owner(lease) == owner
-        ]
-    return [
-        name for name, held in selected
-        if release_claim(name, owner, ttl=ttl, expected=held)
-    ]
+        }
+        for cs in released_tokens:
+            del leases[cs]
+        if released_tokens:
+            _write_leases(leases)
+            log.info(
+                "Released %d claim(s) for worktree '%s'", len(released_tokens), owner
+            )
+    for cs, token in released_tokens.items():
+        if token:
+            coordination.release(cs, token)
+    return list(released_tokens)

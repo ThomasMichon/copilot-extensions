@@ -63,9 +63,9 @@ def test_repeated_mux_calls_preserve_suppression_and_capture(monkeypatch: pytest
         return subprocess.CompletedProcess(argv, 0, stdout="captured", stderr="")
 
     monkeypatch.setattr(mux_daemon, "run_mux_child", run)
-    entry = {"mux_bin": "tmux", "mux_session": "example-session"}
+    entry = {"mux_bin": "psmux", "mux_session": "example-session"}
     for _ in range(2):
-        assert mux_daemon._mux_session_alive("tmux", "example-session")
+        assert mux_daemon._mux_session_alive("psmux", "example-session")
         assert mux_daemon.apply_status_options(entry, {"@aw_ctx": "context", "@aw_seg": "status"})
     assert len(calls) == 6
     for argv, kwargs in calls:
@@ -88,7 +88,7 @@ def test_mux_failure_behavior_preserved(
 
     monkeypatch.setattr(mux_daemon, "run_mux_child", run)
     if probe:
-        assert mux_daemon._mux_session_alive("tmux", "example-session") is None
+        assert not mux_daemon._mux_session_alive("psmux", "example-session")
     else:
         assert not mux_daemon.apply_status_options(
             {"mux_bin": "psmux", "mux_session": "example-session"}, {"@aw_ctx": "context"},
@@ -192,7 +192,7 @@ finally:
             while not output.exists() and time.monotonic() < deadline:
                 time.sleep(.02)
             assert output.exists(), "PSMux fixture failed to produce its two-cycle result"
-            assert json.loads(output.read_text(encoding="utf-8")) == [[None, True], [None, True]]
+            assert json.loads(output.read_text(encoding="utf-8")) == [[True, True], [True, True]]
             assert launched[0].wait(timeout=5) == 0
             assert roots and owned, "observer never identified its fixture processes"
             deadline = time.monotonic() + 3

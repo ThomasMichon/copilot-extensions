@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import sys
-from contextlib import nullcontext
 from pathlib import Path
 
 from zdd import diagnostics
 
 from . import mux_daemon, mux_daemon_cutover
-from .mux_file_lock import _try_read_lock_file_once
 from .self_install import default_root
 
 
@@ -24,47 +22,16 @@ def _candidates(root: Path) -> list[diagnostics.DaemonCandidate]:
     ]
 
 
-def _report_cutover_guard(root: Path):
-    try:
-        handle = mux_daemon_cutover._cutover_lock_path(root).open("rb")
-    except FileNotFoundError:
-        return nullcontext()
-    try:
-        if not _try_read_lock_file_once(handle):
-            raise TimeoutError("mux-daemon cutover lock busy")
-        return mux_daemon_cutover._CutoverLease(handle)
-    except BaseException:
-        handle.close()
-        raise
-
-
-def _context(
-    root: Path | None = None, *, apply: bool = False,
-    credential_findings: list[dict] | None = None,
-) -> diagnostics.DiagnosticContext:
+def _context(root: Path | None = None) -> diagnostics.DiagnosticContext:
     resolved_root = root if root is not None else default_root()
 
     def _reachability_check(host: str, port: int) -> bool:
-        from .mux_serving_observation import _existing_token
-
-        try:
-            token, _identity = _existing_token(resolved_root)
-        except Exception:
-            if credential_findings is not None:
-                credential_findings.append({
-                    "kind": "control_credential_unavailable",
-                    "summary": "existing Manager control credential is unavailable; endpoint reachability is unconfirmed",
-                    "repairable": False,
-                    "blocked_reason": "credential observation unavailable",
-                })
-            return False
         try:
             return bool(
                 mux_daemon_cutover.ControlClient(
                     f"http://{mux_daemon_cutover.routing.format_authority(host, port)}",
                     root=resolved_root,
                     timeout=5.0,
-                    token=token,
                 ).health()
             )
         except Exception:
@@ -75,9 +42,9 @@ def _context(
         config_dir=mux_daemon_cutover.routing_dir(resolved_root),
         read_lock=lambda: mux_daemon.read_lock_data(mux_daemon.lock_path(resolved_root)),
         list_candidates=lambda: _candidates(resolved_root),
-        acquire_cutover_guard=lambda timeout: (
-            mux_daemon_cutover._acquire_cutover_lock(resolved_root, timeout_s=timeout)
-            if apply else _report_cutover_guard(resolved_root)
+        acquire_cutover_guard=lambda timeout: mux_daemon_cutover._acquire_cutover_lock(
+            resolved_root,
+            timeout_s=timeout,
         ),
         repair_supported=(sys.platform != "darwin"),
         is_superseded=lambda pid, generation: mux_daemon_cutover.is_superseded(
@@ -92,14 +59,7 @@ def _context(
 
 
 def doctor_report(*, root: Path | None = None, apply: bool) -> dict[str, object]:
-    credential_findings: list[dict] = []
-    ctx = _context(root, apply=apply, credential_findings=credential_findings)
+    ctx = _context(root)
     if apply:
         return diagnostics.apply_daemon_health(ctx)
-    report = diagnostics.audit_daemon_health(ctx)
-    if credential_findings:
-        report["findings"].extend(credential_findings)
-        report["counts"]["total"] += len(credential_findings)
-        kind = "control_credential_unavailable"
-        report["counts"][kind] = report["counts"].get(kind, 0) + len(credential_findings)
-    return report
+    return diagnostics.audit_daemon_health(ctx)

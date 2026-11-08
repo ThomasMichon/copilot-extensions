@@ -11,11 +11,9 @@ from agent_worktrees import launch_seed_contract as contract
 
 @pytest.mark.parametrize("fault", [
     None, "old", "full-environment-only", "malformed", "failed", "selector-changed", "custody-unknown",
-    "no-admission", "invalid-admission",
 ])
-@pytest.mark.parametrize("admission_only", [False, True])
 def test_discovery_queries_only_the_selected_completed_runtime_without_admission(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str | None, admission_only: bool,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str | None,
 ) -> None:
     root = tmp_path / "runtime"
     slot = root / "versions" / "selected"
@@ -38,10 +36,6 @@ def test_discovery_queries_only_the_selected_completed_runtime_without_admission
             ["full"] if fault == "full-environment-only" else ["full", "execution-hint"]
         ),
     }
-    if fault != "no-admission":
-        descriptor["setup_admission_modes"] = (
-            "posix-live-owner-v1" if fault == "invalid-admission" else ["posix-live-owner-v1"]
-        )
     queries = []
 
     def query(command: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -62,8 +56,7 @@ def test_discovery_queries_only_the_selected_completed_runtime_without_admission
         )
 
     monkeypatch.setattr(contract, "run_caller_owned", query)
-    expected = fault is None or not admission_only and fault in {"no-admission", "invalid-admission"}
-    assert contract.supports_posix_setup(root, admission_only=admission_only) is expected
+    assert contract.supports_posix_setup(root) is (fault is None)
     assert len(queries) == 1
     assert not list(root.rglob("*.execution.json"))
 
@@ -74,44 +67,3 @@ def test_discovery_does_not_run_an_incomplete_slot(tmp_path: Path, monkeypatch: 
     (root / "current-version").write_text("../foreign", encoding="utf-8")
     monkeypatch.setattr(contract, "run_caller_owned", lambda *_a, **_k: pytest.fail("Unsafe runtime"))
     assert not contract.supports_posix_setup(root)
-
-
-@pytest.mark.parametrize("layout", ["nested-only", "flat-leftover", "missing-nested"])
-def test_packaged_setup_discovery_never_queries_a_flat_leftover(tmp_path, monkeypatch, layout):
-    root = tmp_path / "runtime"
-    slot = root / "versions/selected"
-    python = slot / ".venv/bin/python"
-    bootstrap = slot / ".runtime-bootstrap/runtime_launcher.py"
-    bootstrap.parent.mkdir(parents=True)
-    bootstrap.touch()
-    (slot / "application.json").write_text("{}", encoding="utf-8")
-    (slot / ".install-complete.json").touch()
-    (root / "current-version").write_text("selected\n", encoding="utf-8")
-    if layout != "missing-nested":
-        python.parent.mkdir(parents=True)
-        python.touch()
-    if layout != "nested-only":
-        flat = slot / "bin/python"
-        flat.parent.mkdir()
-        flat.touch()
-    queries = []
-
-    def query(command, **_kwargs):
-        queries.append(command)
-        assert command == [
-            str(python), "-I", "-S", "-B", "-X", "utf8", str(bootstrap),
-            "-m", "agent_worktrees.launch_seed_native", "--describe-contract",
-        ]
-        return subprocess.CompletedProcess(command, 0, json.dumps({
-            "contract": "agent-worktrees.native-seed", "version": 1,
-            "preparation_output_formats": ["nul"],
-            "nul_reply_schema": "agent-worktrees.native-seed-reply.v1",
-            "setup_process_start_time_sources": ["provider"],
-            "backend_execution_modes": ["posix-exec-env-v1"],
-            "preparation_environment_modes": ["execution-hint"],
-            "setup_admission_modes": ["posix-live-owner-v1"],
-        }), "")
-
-    monkeypatch.setattr(contract, "run_caller_owned", query)
-    assert contract.supports_posix_setup(root, admission_only=True) is (layout != "missing-nested")
-    assert len(queries) == int(layout != "missing-nested")

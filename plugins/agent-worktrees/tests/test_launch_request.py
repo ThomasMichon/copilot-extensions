@@ -307,50 +307,6 @@ def test_creation_time_knowledge_refusal_preserves_admitted_retry(
     assert len(tracking.list_records(tmp_path)) == 1
 
 
-@pytest.mark.parametrize("version", [1, 2])
-@pytest.mark.parametrize("creation_time", [False, True])
-def test_required_application_refusal_preserves_request_retry(
-    tmp_path, authority, monkeypatch, version, creation_time,
-):
-    from test_worktree_creation_seed import _create_config
-    from agent_worktrees import application_admission
-    from agent_worktrees.launch_preflight import LaunchPreflight, LaunchPreflightError
-
-    base = _create_config(tmp_path)
-    config = replace(base, repos={base.repo_name: replace(
-        base.default_repo, require_application_readiness=True,
-    )})
-    _stub_create_worktree_core_internals(monkeypatch, tmp_path, config)
-    intent = _intent("new")
-    if version == 2:
-        intent.update(version=2, attempt_id=None, native_seed_required=True)
-    observations = []
-
-    def incomplete(*_args, **_kwargs):
-        observations.append(1)
-        return LaunchPreflight(policy_error=(
-            None if creation_time and len(observations) == 1 else "Application Readiness incomplete"))
-
-    with monkeypatch.context() as blocked:
-        blocked.setattr(application_admission, "new_application_preflight", incomplete)
-        with pytest.raises(LaunchPreflightError, match="Application Readiness"):
-            request.execute(config, intent)
-    assert len(observations) == (2 if creation_time else 1)
-    assert not tracking.list_records(tmp_path)
-    allocation = None
-    if creation_time:
-        allocation = request._read_admission(tmp_path, intent["request_id"])
-        assert not allocation.get("creation_started") and not allocation.get("accepted")
-    else:
-        assert not request._admission_path(tmp_path, intent["request_id"]).exists()
-    monkeypatch.setattr(application_admission, "new_application_preflight", lambda *a, **k: LaunchPreflight())
-    result = request.execute(config, intent)
-    if allocation:
-        assert result["worktree_id"] == allocation["worktree_id"]
-    assert request.execute(config, intent) == result
-    assert len(tracking.list_records(tmp_path)) == 1
-
-
 @pytest.mark.parametrize("machine,platform,prefix", [
     ("test", "windows", "test-win"),
     ("test-wsl", "wsl", "test-wsl"),

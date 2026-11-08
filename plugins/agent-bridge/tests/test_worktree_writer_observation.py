@@ -152,7 +152,7 @@ def test_repeated_health_reuses_real_resolver_but_refreshes_selected_slot(
     "legacy", "malformed", "oversized", "non-ascii", "mutable", "linked-generation",
     "linked-bootstrap", "linked-slot", "changed-selection", "changed-generation",
 ])
-def test_unknown_or_changed_slot_never_certifies_a_build(tmp_path, monkeypatch, case, native_file_symlink):
+def test_unknown_or_changed_slot_never_certifies_a_build(tmp_path, monkeypatch, case):
     root = tmp_path / "worktrees"
     slot = root / "versions" / ("dev" if case == "mutable" else "1.0.0")
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -165,18 +165,20 @@ def test_unknown_or_changed_slot_never_certifies_a_build(tmp_path, monkeypatch, 
         value = {"malformed": "unknown", "oversized": "a" * 65, "non-ascii": "\u2603"}
         generation.write_text(value.get(case, "a" * 32), encoding="utf-8")
     if case.startswith("linked-"):
+        if os.name == "nt":
+            pytest.skip("symlink control requires a native POSIX host")
         if case == "linked-generation":
             target = tmp_path / "foreign-generation"
             generation.rename(target)
-            native_file_symlink(generation, target)
+            generation.symlink_to(target)
         elif case == "linked-bootstrap":
             target = tmp_path / "foreign-bootstrap"
             bootstrap.rename(target)
-            native_file_symlink(bootstrap, target, target_is_directory=True)
+            bootstrap.symlink_to(target, target_is_directory=True)
         else:
             target = tmp_path / "foreign-slot"
             slot.rename(target)
-            native_file_symlink(slot, target, target_is_directory=True)
+            slot.symlink_to(target, target_is_directory=True)
     selected = (["bridge-owner"], root, python)
     calls = []
 
@@ -196,20 +198,6 @@ def test_unknown_or_changed_slot_never_certifies_a_build(tmp_path, monkeypatch, 
         "installation_root": None if case.startswith("changed-") else str(root),
         "runtime_generation": None,
     }
-
-
-@pytest.mark.parametrize("winerror", [1314, 5])
-def test_native_symlink_prerequisite_skips_only_windows_privilege_error(
-    tmp_path, monkeypatch, native_file_symlink, winerror,
-):
-    error = OSError("fixture link refusal")
-    error.winerror = winerror
-    def refuse(*args, **kwargs):
-        raise error
-    monkeypatch.setattr(Path, "symlink_to", refuse)
-    outcome = pytest.skip.Exception if os.name == "nt" and winerror == 1314 else OSError
-    with pytest.raises(outcome):
-        native_file_symlink(tmp_path / "link", tmp_path / "target")
 
 
 def test_repeated_health_retains_packaged_validator_but_rechecks_cell_receipts(

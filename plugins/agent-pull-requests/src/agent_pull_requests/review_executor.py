@@ -150,8 +150,29 @@ def _check_selected_ownership(action, actual, principal):
             raise ReviewCandidateChanged("selected owned comment differs from reviewed baseline")
 
 
-def validate_review_selection(selected: dict, generation: dict, source_attachment: object) -> tuple[dict, dict]:
-    """Pure existing selection/source validation; no admission, authority or native IO."""
+def execute_review(
+    store, selected, generation, source_attachment, *, context_factory, checkpoint,
+    expires_at: int, budget_seconds: float, clock=time.monotonic, feedback=None,
+    feedback_position=None, feedback_current=None, enclosing_deadline: float | None = None,
+    prepared_intent: bool = False,
+):
+    """Existing owner factory supplies actual pinned auth/input/transport, not caller labels."""
+    from agent_worktrees.providers.azure_owned_review import (
+        ReviewContextUnavailable, protected_review_context,
+    )
+    if not callable(context_factory) or not callable(checkpoint):
+        raise ValueError("existing protected context factory/checkpoint required")
+    if type(prepared_intent) is not bool:
+        raise ValueError("explicit prepared-intent selection must be boolean")
+    if type(budget_seconds) not in (int, float) or not math.isfinite(budget_seconds) or budget_seconds <= 0:
+        raise ValueError("finite review IO budget required")
+    if enclosing_deadline is not None and (
+        type(enclosing_deadline) not in (int, float) or not math.isfinite(enclosing_deadline)
+    ):
+        raise ValueError("finite enclosing monotonic deadline required")
+    selected = review_intent.intent(selected, versions=(2,) if prepared_intent else (1,))
+    generation = copy.deepcopy(generation)
+    source_attachment = copy.deepcopy(source_attachment)
     scope = _scope(generation.get("scope"))
     _generation(generation, scope)
     if (
@@ -178,33 +199,7 @@ def validate_review_selection(selected: dict, generation: dict, source_attachmen
         or source["id"] != _digest({key: value for key, value in source.items() if key != "id"})
     ):
         raise ValueError("review source manifest differs from the exact reviewed generation")
-    return scope, _threads(generation["sections"]["discussions"]["data"])
-
-
-def execute_review(
-    store, selected, generation, source_attachment, *, context_factory, checkpoint,
-    expires_at: int, budget_seconds: float, clock=time.monotonic, feedback=None,
-    feedback_position=None, feedback_current=None, enclosing_deadline: float | None = None,
-    prepared_intent: bool = False,
-):
-    """Existing owner factory supplies actual pinned auth/input/transport, not caller labels."""
-    from agent_worktrees.providers.azure_owned_review import (
-        ReviewContextUnavailable, protected_review_context,
-    )
-    if not callable(context_factory) or not callable(checkpoint):
-        raise ValueError("existing protected context factory/checkpoint required")
-    if type(prepared_intent) is not bool:
-        raise ValueError("explicit prepared-intent selection must be boolean")
-    if type(budget_seconds) not in (int, float) or not math.isfinite(budget_seconds) or budget_seconds <= 0:
-        raise ValueError("finite review IO budget required")
-    if enclosing_deadline is not None and (
-        type(enclosing_deadline) not in (int, float) or not math.isfinite(enclosing_deadline)
-    ):
-        raise ValueError("finite enclosing monotonic deadline required")
-    selected = review_intent.intent(selected, versions=(2,) if prepared_intent else (1,))
-    generation = copy.deepcopy(generation)
-    source_attachment = copy.deepcopy(source_attachment)
-    scope, baseline = validate_review_selection(selected, generation, source_attachment)
+    baseline = _threads(generation["sections"]["discussions"]["data"])
     start = clock()
     deadline = start + budget_seconds
     if enclosing_deadline is not None:

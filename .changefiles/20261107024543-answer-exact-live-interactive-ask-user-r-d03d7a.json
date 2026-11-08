@@ -1,9 +1,0 @@
-{
-  "comment": "Answer exact live interactive ask_user requests through authenticated, single-use native question controls with durable outcomes",
-  "changes": [
-    {
-      "plugin": "agent-bridge",
-      "type": "patch"
-    }
-  ]
-}

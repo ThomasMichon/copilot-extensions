@@ -262,34 +262,6 @@ def test_current_feed_availability_and_cutover_do_not_rederive_domain_state():
     assert receiver.notice == "update" and receiver.rows[0]["dirty"] == 7
 
 
-@pytest.mark.parametrize("failure", ["publication", "disconnect"])
-def test_current_feed_uncertainty_disables_normalized_mux_controls_and_recovers(failure):
-    source = data_ssh.Source("host", "Win", None, local=True)
-    loader = data_ssh.LiveLoader([source])
-    row = {
-        "id": "one", "dirty": 7, "state": "wip", "mux_session": True,
-        "mux_attached": True, "mux_clients": 7,
-    }
-    loader._feed_commit(source, 0, [row])
-    assert loader.records()[0]["sess"] == "MUX(7)"
-    if failure == "publication":
-        loader._feed_commit(
-            source, 0, [row],
-            availability={"status": "stale", "reason": "publication failed"},
-        )
-    else:
-        loader._feed_error(source, 0, "disconnected")
-    retained = loader.records()[0]
-    assert retained["sess"] == "MUX(?)"
-    assert retained["attached"] is False and retained["mux_live"] is False
-    assert retained["raw"]["dirty"] == 7 and retained["raw"]["state"] == "wip"
-    assert retained["raw"]["mux_clients"] == 7
-    loader._feed_commit(source, 0, [row])
-    recovered = loader.records()[0]
-    assert recovered["sess"] == "MUX(7)"
-    assert recovered["attached"] is True and recovered["mux_live"] is True
-
-
 @pytest.mark.parametrize("local", [True, False])
 def test_current_feed_actual_loader_subprocess_commits_both_sources_and_cancels(monkeypatch, local):
     monkeypatch.delenv("AGENT_WORKTREES_PICKER_STREAM", raising=False)

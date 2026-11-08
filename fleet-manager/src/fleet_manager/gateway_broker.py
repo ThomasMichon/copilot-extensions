@@ -11,7 +11,6 @@ from dataclasses import dataclass, field
 from .gateway_auth import AuthContext, Signer, thumbprint, verify
 from .gateway_contract import (
     CREDENTIAL_WORKERS,
-    REVIEW_CREDENTIAL_CONTRACT,
     GatewayConfig,
     correlation,
     credential,
@@ -38,7 +37,6 @@ class Broker:
         self.config, self.signer, self.epoch = config, signer, epoch
         self._items: dict[tuple[str, str], Pending] = {}
         self._subscriptions: dict[str, tuple[str, int]] = {}
-        self._review_subscriptions: set[str] = set()
         self._lock = threading.RLock()
 
     def _live(self, principal: str) -> bool:
@@ -59,22 +57,16 @@ class Broker:
                     item.delivery = None
 
     def subscribe(self, context: AuthContext, payload: dict) -> dict:
-        fields(payload, {"lease"}, {"subscription", "contracts"}
-               if self.config.protected_review else {"subscription"})
+        fields(payload, {"lease"}, {"subscription"})
         require(context.peer.role == "credential-controller", "role-denied")
         from .gateway_contract import number
 
         lease = number(payload["lease"], 2, self.config.lease_seconds)
-        review = "contracts" in payload
-        if review:
-            require(payload["contracts"] == [REVIEW_CREDENTIAL_CONTRACT], "unsupported-operation")
         with self._lock:
             self._expire()
             old = self._subscriptions.get(context.peer.principal)
             if "subscription" in payload:
                 require(old is not None and old[0] == payload["subscription"] and old[1] > time.time(),
-                        "subscription-unavailable")
-                require(review == (context.peer.principal in self._review_subscriptions),
                         "subscription-unavailable")
                 subscription = old[0]
             else:
@@ -82,21 +74,7 @@ class Broker:
                 subscription = secrets.token_hex(16)
             expires = min(int(time.time()) + lease, context.expires_at)
             self._subscriptions[context.peer.principal] = (subscription, expires)
-            self._review_subscriptions.discard(context.peer.principal)
-            if review:
-                self._review_subscriptions.add(context.peer.principal)
             return {"state": "SUBSCRIBED", "subscription": subscription, "expires_at": expires}
-
-    def supports_review(self, principal: str) -> bool:
-        """Current controller support, not a package/configuration-only promise."""
-        with self._lock:
-            return self.config.protected_review and self._live(principal) and any(
-                rule["worker"] == principal and "review" in rule
-                and rule["controller"] in self._review_subscriptions
-                and self._live(rule["controller"])
-                and self._subscriptions.get(rule["controller"], ("", 0))[1] > time.time()
-                for rule in self.config.credential_rules
-            )
 
     def disconnect(self, context: AuthContext, payload: dict) -> dict:
         fields(payload, {"subscription"})
@@ -105,7 +83,6 @@ class Broker:
             old = self._subscriptions.get(context.peer.principal)
             require(old is not None and old[0] == payload["subscription"], "subscription-unavailable")
             del self._subscriptions[context.peer.principal]
-            self._review_subscriptions.discard(context.peer.principal)
             self._expire()
         return {"state": "UNAVAILABLE"}
 
@@ -113,13 +90,11 @@ class Broker:
         value = request(payload)
         peer = context.peer
         require(peer.role in CREDENTIAL_WORKERS, "role-denied")
-        review = value["operation"] == "credential.review"
-        require(value["operation"] == "credential.get"
-                or review and self.config.protected_review, "unsupported-operation")
+        require(value["operation"] == "credential.get", "unsupported-operation")
         require(value["service_id"] == peer.service and value["installation_id"] == peer.installation
                 and value["generation"] == peer.generation, "worker-binding-mismatch")
-        parameters = credential(value["parameters"], protected_review=review)
-        require((peer.role == "pr-worker") == ("forge" in parameters or review), "credential-scope-denied")
+        parameters = credential(value["parameters"])
+        require((peer.role == "pr-worker") == ("forge" in parameters), "credential-scope-denied")
         require(parameters["recipient"] == peer.principal and peer.recipient_jwk is not None,
                 "recipient-denied")
         require(parameters["source"] in peer.sources and parameters["account"] in peer.accounts
@@ -128,7 +103,6 @@ class Broker:
                 and set(parameters["scopes"]) <= set(peer.scopes), "credential-scope-denied")
         rule = next((r for r in self.config.credential_rules
                      if r["worker"] == peer.principal and r.get("forge") == parameters.get("forge")
-                     and r.get("review") == parameters.get("review")
                      and all(r[k] == parameters[k] for k in
                              ("source", "account", "audience", "action", "scopes"))), None)
         require(rule is not None, "provider-policy-denied")
@@ -142,8 +116,6 @@ class Broker:
             subscribed = self._subscriptions.get(rule["controller"])
             require(subscribed is not None and subscribed[1] > time.time()
                     and self._live(rule["controller"]), "controller-unavailable")
-            require(not review or rule["controller"] in self._review_subscriptions,
-                    "controller-unavailable")
             binding = correlation(value) | {
                 "epoch": self.epoch, "fleet": self.config.fleet, "worker": peer.principal,
                 "controller": rule["controller"], "parameters": parameters,

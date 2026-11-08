@@ -323,8 +323,7 @@ def test_prepared_source_activation_uses_existing_transactional_daemon_boundary(
 @pytest.mark.parametrize("metadata_name", [
     "copilot-extensions-worktree-manager", "Copilot_Extensions_Worktree_Manager",
 ])
-@pytest.mark.parametrize("mutation", [None, "source", "provenance", "missing", "linked"])
-def test_local_source_retains_real_inspected_wheels(snapshot, metadata_name, mutation, monkeypatch):
+def test_local_source_retains_real_inspected_wheels(snapshot, metadata_name):
     selected = inputs.select(snapshot)
     filename = "copilot_extensions_worktree_manager-1.0.0-py3-none-any.whl"
     wheel_dir = snapshot / "wheels"
@@ -362,44 +361,10 @@ def test_local_source_retains_real_inspected_wheels(snapshot, metadata_name, mut
     (snapshot / "profile.json").write_text(json.dumps(profile), encoding="utf-8")
     selected.record["projects"]["worktree-manager"].update(profile="profile.json", wheel_inputs="wheels")
     (snapshot / inputs.MANIFEST).write_text(json.dumps(selected.record), encoding="utf-8")
-    events = []
-    select_project = inputs.select_project
-
-    def observe(*args, **kwargs):
-        events.append("select")
-        return select_project(*args, **kwargs)
-
-    monkeypatch.setattr(inputs, "select_project", observe)
-    error = {
-        "source": "Materialized payload bytes do not match the source identity",
-        "provenance": "project repository provenance changed during installation",
-        "missing": "source differs from its immutable source association",
-        "linked": "installation input member must not be linked",
-    }
-    with pytest.raises(ValueError, match=error[mutation]) if mutation else nullcontext():
-        with inputs.manager_inputs(snapshot) as (retained, wheels):
-            assert retained.identity == selected.identity
-            wheels.verify()
-            assert wheels.distributions[0][:2] == ("copilot-extensions-worktree-manager", "1.0.0")
-            events.append("consumer")
-            if mutation == "source":
-                (retained.payload / "src/worktree_manager/__init__.py").write_text(
-                    '__version__ = "1.0.0"\nCHANGED = True\n', encoding="utf-8",
-                )
-            elif mutation == "provenance":
-                record = json.loads((snapshot / inputs.MANIFEST).read_text(encoding="utf-8"))
-                record["source_descriptor"] = {
-                    "kind": "git", "canonical": "https://example.com/source.git", "ref": "a" * 40,
-                }
-                (snapshot / inputs.MANIFEST).write_text(json.dumps(record), encoding="utf-8")
-            elif mutation == "missing":
-                (retained.payload / inputs.sources.SOURCE_FILE).unlink()
-            elif mutation == "linked":
-                is_symlink = Path.is_symlink
-                monkeypatch.setattr(
-                    Path, "is_symlink", lambda path: path == retained.payload or is_symlink(path),
-                )
-    assert events == ["select", "consumer", "select"]
+    with inputs.manager_inputs(snapshot) as (retained, wheels):
+        assert retained.identity == selected.identity
+        wheels.verify()
+        assert wheels.distributions[0][:2] == ("copilot-extensions-worktree-manager", "1.0.0")
 
 
 @pytest.mark.parametrize("component,name,key", [

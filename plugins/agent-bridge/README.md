@@ -64,10 +64,6 @@ The interactive extension's [retained SDK consumer](docs/retained-sdk-consumer.m
 is explicitly opt-in. Legacy defaults are unchanged; selected retained delivery
 requires HTTP 50 recovery and never silently downgrades or resends an ambiguous
 original. Native qualification and installed adoption remain separate.
-An original headed-core launch can also select it with its private client
-declaration: delivery then uses the retained common Session Host rather than
-a competing direct SDK sender. Ordinary launches without that declaration
-keep their existing selection.
 
 Remote credential-relay admission and persisted-session reconnect use
 `timeouts.session_host_ready` (90 seconds by default) as a bounded readiness
@@ -904,10 +900,6 @@ as a quiet empty stream. The HTTP equivalents live below
 `/api/v1/remote/{host}/...` and require the ordinary local bearer token.
 
 ### Bounded result snapshots
-
-For an actual pending interactive `ask_user`, use the separately qualified
-[live question answer path](docs/live-question-answers.md); passive history is
-not answer authority.
 
 `result` is the cursor-neutral answer to "what did this delegate produce?":
 

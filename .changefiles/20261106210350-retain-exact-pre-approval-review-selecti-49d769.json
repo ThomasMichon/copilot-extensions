@@ -1,9 +1,0 @@
-{
-  "comment": "Retain exact pre-approval review selections under the existing owner without admitting execution.",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

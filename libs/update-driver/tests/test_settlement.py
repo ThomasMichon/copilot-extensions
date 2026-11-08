@@ -10,7 +10,6 @@ from single_instance_lease.operation import OperationLock
 from update_driver import (
     InterruptedError, ParticipantError, RequestSpec, StateError, TrustedRunner,
     drain, enqueue, foundation_state, kernel_boot_identity, status,
-    run_explicit,
 )
 from update_driver import core
 
@@ -51,92 +50,6 @@ def test_schema_two_reads_and_enqueue_do_not_migrate(area):
     assert status(queued.id, root=root) == queued
     assert request(area, root).id == queued.id
     assert version(root) == 2
-
-
-def test_explicit_foreground_migrates_schema_two_before_executor_and_outcome(area):
-    root = legacy_queue(area)
-    peer = request(area, root)
-    with closing(sqlite3.connect(root / "queue.sqlite3")) as db, db:
-        db.execute(
-            "UPDATE requests SET state='completed',exit_code=0,finished_at=2 WHERE id=?", (peer.id,),
-        )
-        columns = [row[1] for row in db.execute("PRAGMA table_info(requests)")]
-        before = db.execute("SELECT * FROM requests WHERE id=?", (peer.id,)).fetchone()
-    prior = status(peer.id, root=root)
-    effects = []
-
-    def execute(tx):
-        assert version(root) == core.SCHEMA
-        effects.append(tx.request.id)
-        return 17
-
-    result = run_explicit(
-        RequestSpec("source-recovery"), runner=TrustedRunner((sys.executable,), str(area)),
-        root=root, executor=execute,
-    )
-    assert effects == [result.id]
-    assert result.state == "completed" and result.exit_code == 17
-    assert status(result.id, root=root) == result
-    assert status(peer.id, root=root) == prior
-    assert all(row.state != "running" for row in status(root=root))
-    with closing(sqlite3.connect(root / "queue.sqlite3")) as db:
-        assert db.execute(
-            "SELECT " + ",".join(columns) + " FROM requests WHERE id=?", (peer.id,),
-        ).fetchone() == before
-
-
-@pytest.mark.parametrize("state", ["pending", "running", "interrupted", "blocked", "foundation-running"])
-def test_explicit_foreground_schema_two_blockers_are_not_migrated_or_modified(area, monkeypatch, state):
-    root = legacy_queue(area)
-    peer = request(area, root)
-    foundation_before = None
-    with closing(sqlite3.connect(root / "queue.sqlite3")) as db, db:
-        if state == "foundation-running":
-            db.execute(
-                "UPDATE requests SET state='completed',exit_code=0,finished_at=2 WHERE id=?", (peer.id,),
-            )
-        else:
-            db.execute(
-                "UPDATE requests SET state=?,started_at=1,boot_id=? WHERE id=?",
-                (state, kernel_boot_identity(), peer.id),
-            )
-        before = db.execute("SELECT * FROM requests WHERE id=?", (peer.id,)).fetchone()
-    if state == "foundation-running":
-        with OperationLock(root / "execution.lock") as owned:
-            foundation_state.begin(root, "a" * 64, owned)
-        foundation_before = (root / foundation_state.FILENAME).read_bytes()
-    prior = status(peer.id, root=root)
-    monkeypatch.setattr(core, "_upgrade_schema", lambda *args: pytest.fail("no migration before admission"))
-    with pytest.raises((StateError, InterruptedError)):
-        run_explicit(
-            RequestSpec("source-recovery"), runner=TrustedRunner((sys.executable,), str(area)),
-            root=root, executor=lambda tx: pytest.fail("no foreign executor effects"),
-        )
-    assert version(root) == 2
-    assert status(root=root) == (prior,)
-    with closing(sqlite3.connect(root / "queue.sqlite3")) as db:
-        assert db.execute("SELECT * FROM requests WHERE id=?", (peer.id,)).fetchone() == before
-    if foundation_before is not None:
-        assert (root / foundation_state.FILENAME).read_bytes() == foundation_before
-
-
-def test_explicit_foreground_failed_schema_two_migration_has_no_executor_effects(area, monkeypatch):
-    root = legacy_queue(area)
-    validate = core._validate_db
-
-    def reject_new_schema(db):
-        validate(db)
-        if db.execute("PRAGMA user_version").fetchone()[0] == core.SCHEMA:
-            raise StateError("synthetic migration verification failure")
-
-    monkeypatch.setattr(core, "_validate_db", reject_new_schema)
-    with pytest.raises(StateError, match="migration verification"):
-        run_explicit(
-            RequestSpec("source-recovery"), runner=TrustedRunner((sys.executable,), str(area)),
-            root=root, executor=lambda tx: pytest.fail("uncommitted schema executed"),
-        )
-    assert version(root) == 2
-    assert status(root=root) == ()
 
 
 def test_exclusive_drain_migrates_schema_two_preserving_pending_identity(area):

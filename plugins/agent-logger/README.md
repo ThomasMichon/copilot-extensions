@@ -30,8 +30,8 @@ session-to-log pipeline out of any single bespoke service:
   provider-owned rescue captures, accepts only independently complete sessions,
   and projects them into the same target layout under stable venue keys, with
   host-authoritative generic per-session provenance. Configure with
-  the `session-sync-setup` skill; run on demand, explicitly opt into a 4-hourly
-  Scheduled Task (Windows), or deploy a systemd user timer (Linux).
+  the `session-sync-setup` skill; deploy as a 4-hourly Scheduled Task (Windows)
+  or systemd user timer (Linux).
   The provider-first [typed worktree-state collection library](docs/worktree-state.md)
   separately supports explicitly admitted owner exports, optional complete
   contributor provenance, fresh local readback, passive exact-repository
@@ -52,36 +52,6 @@ session-to-log pipeline out of any single bespoke service:
   with explicit empirical uncertainty and unknowns. See
   [usage evidence](docs/usage-evidence.md) and
   [transcript estimation](docs/usage-estimation.md).
-
-## Windows scheduling
-
-Install/update preserve Windows scheduling by default: a missing task stays
-absent, and existing/custom triggers, actions and enablement are not rewritten.
-No ScheduledTasks module, local-account setup or administrator rights are needed
-for this default. On-demand `session-sync run --prune` remains available; this
-does not disable logging or introduce a replacement scheduler.
-
-The installation's own `<runtime>/config.yaml` can set
-`windows_scheduled_task: preserve` (default), `enabled` (explicit 4-hourly
-scheduling), or `absent` (retire only the owned task registration during
-install/update). This field is installation-local, not a layered repository
-preference. Invalid values and explicit scheduling query/removal failures are
-errors. Existing disabled tasks are held, never reenabled by this policy.
-
-For registration-only retirement without installing or selecting incoming code:
-
-```powershell
-pwsh -File plugins\agent-logger\scripts\install.ps1 task-retire -InstallDir <runtime>
-```
-
-`-DryRun` previews this action. Missing tasks are idempotent. Exact task name
-(including the scoped-install suffix), root task folder, and the installation's
-supported launcher action must match; foreign/ambiguous/legacy unsupported
-actions are refused. A disabled task is retained because removing it would lose
-its independent hold. Retirement neither stops a running sync nor removes
-runtime generations, configuration, databases, logs or credentials. Full
-`uninstall` remains a separate operation. Deliberately configured custom
-scheduling remains operator-owned.
 
 ## Design principles
 

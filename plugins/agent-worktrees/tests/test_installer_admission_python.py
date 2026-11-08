@@ -46,7 +46,6 @@ def admission(tmp_path: Path):
     )[1].split("# === end command-lifecycle: admission before staging ===", 1)[0]
     program = (
         "param([string]$BootstrapPython='',[string]$ProjectName='',[string]$Owner='',"
-        "[string]$RuntimeSourceDescriptor='',[switch]$RuntimeOnly,[string]$InstallSource='',"
         "[switch]$Force,[switch]$ZeroDowntime,[switch]$ProvisionMissingRuntime,[switch]$RemoveConfig)\n"
         "Set-StrictMode -Version Latest\n"
         "$ErrorActionPreference='Stop'\n$ContextualInstall=$false\n"
@@ -332,24 +331,16 @@ def test_discovered_python_preserves_unicode_path_through_native_output(admissio
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows Python launcher")
 @pytest.mark.parametrize("host", HOSTS)
 def test_real_python39_launcher_first_touch_uses_compatible_alternative(admission, host):
-    supplied = os.environ.get("TEST_PYTHON39")
-    launcher = shutil.which("py") if not supplied else None
-    if not supplied and launcher is None:
+    launcher = shutil.which("py")
+    if launcher is None:
         pytest.skip("Python launcher unavailable")
-    if supplied:
-        assert Path(supplied).is_absolute() and Path(supplied).is_file()
     discovery = subprocess.run(
-        [*([supplied] if supplied else [launcher, "-3.9"]),
-         "-I", "-B", "-c",
-         "import json,sys; print(json.dumps([sys.executable,list(sys.version_info[:2])]))"],
+        [launcher, "-3.9", "-I", "-B", "-c", "import sys; print(sys.executable)"],
         capture_output=True, text=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW,
     )
-    if discovery.returncode != 0 and not supplied:
+    if discovery.returncode != 0:
         pytest.skip("Existing Python 3.9 interpreter unavailable")
-    assert discovery.returncode == 0, discovery.stdout + discovery.stderr
-    old_python, version = json.loads(discovery.stdout)
-    assert version == [3, 9]
-    assert not Path(old_python).samefile(sys.executable)
+    old_python = discovery.stdout.strip()
     fixture_launcher = admission[0] / "real-old-launcher.ps1"
     fixture_launcher.write_text(
         f"& {_quote(old_python)} @($args | Where-Object {{ $_ -notmatch '^-3' }})\n"
@@ -362,4 +353,3 @@ def test_real_python39_launcher_first_touch_uses_compatible_alternative(admissio
     assert result.returncode == 0, result.stdout + result.stderr
     assert receipt["python"] == sys.executable
     assert "--run-lifecycle" in receipt["arguments"]
-    print(f"Actual Python {version} refused; admission reached Python {sys.version_info[:2]}")

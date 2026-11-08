@@ -27,9 +27,17 @@ def _path_name(path: Path) -> Path:
     return path
 
 
-def _require_selected_facts(facts, *, owner: str = "Source") -> Path:
+def require_selected_source() -> Path:
+    from agent_procutil._daemon_instance_identity import runtime_slot_paths
     from .self_update import read_current_version
+    from .source_build import _SOURCE_VERSION
 
+    facts = runtime_slot_paths(sys.prefix)
+    if (
+        _SOURCE_VERSION.fullmatch(__version__) is None or ".profile." not in __version__
+        or facts is None or Path(sys.prefix).name != ".venv"
+    ):
+        raise ValueError("startup requires its physical selected Source application")
     generation, slot_path, root_path = facts
     root, slot = Path(root_path), Path(slot_path)
     if (
@@ -40,61 +48,25 @@ def _require_selected_facts(facts, *, owner: str = "Source") -> Path:
         )
         or read_current_version(root) != generation
     ):
-        raise ValueError(f"{owner} startup selection does not match the physical application")
+        raise ValueError("Source startup selection does not match the physical application")
     helper = slot / ".runtime-bootstrap" / "versioned_runtime.py"
     if _path_name(helper.resolve(strict=True)) != _path_name(helper):
-        raise ValueError(f"{owner} completion helper is redirected")
+        raise ValueError("Source completion helper is redirected")
     spec = importlib.util.spec_from_file_location("_dispatch_source_completion", helper)
     if spec is None or spec.loader is None:
-        raise ValueError(f"{owner} completion helper is unavailable")
+        raise ValueError("Source completion helper is unavailable")
     runtime = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = runtime
     spec.loader.exec_module(runtime)
     if not runtime.is_complete(root, generation):
-        raise ValueError(f"{owner} startup requires canonical complete construction")
+        raise ValueError("Source startup requires canonical complete construction")
     return root
 
 
-def require_selected_source() -> Path:
-    from agent_procutil._daemon_instance_identity import runtime_slot_paths
-    from .source_build import _SOURCE_VERSION
-
-    facts = runtime_slot_paths(sys.prefix)
-    if (
-        _SOURCE_VERSION.fullmatch(__version__) is None or ".profile." not in __version__
-        or facts is None or Path(sys.prefix).name != ".venv"
-    ):
-        raise ValueError("startup requires its physical selected Source application")
-    return _require_selected_facts(facts)
-
-
-def require_selected_generation() -> Path:
-    """Admit a selected completed Source or direct repair-generation runtime."""
-    from agent_procutil._daemon_instance_identity import runtime_slot_paths
-    from .source_build import _REPAIR_VERSION, _SOURCE_VERSION
-
-    if _SOURCE_VERSION.fullmatch(__version__) is not None:
-        return require_selected_source()
-    facts = runtime_slot_paths(sys.prefix)
-    match = _REPAIR_VERSION.fullmatch(__version__)
-    if (
-        facts is None or match is None
-        or ("+" in match["package"]) != (match["separator"] == ".")
-        or _path_name(Path(sys.prefix).resolve()) != _path_name(Path(facts[1]).resolve())
-    ):
-        raise ValueError("reconcile requires its physical selected repair generation")
-    return _require_selected_facts(facts, owner="Coordinator")
-
-
-def config_identity(cfg, *, base_dir: Path | None = None) -> str:
+def config_identity(cfg) -> str:
     # Authentication is exercised by the probe, not serialized into health.
-    database = Path(cfg.db_path).expanduser()
-    if base_dir is not None and not database.is_absolute():
-        if database.drive:
-            raise ValueError("drive-relative coordinator database is ambiguous")
-        database = Path(base_dir).expanduser().resolve() / database
     selected = {
-        "database": str(database.resolve()),
+        "database": str(Path(cfg.db_path).expanduser().resolve()),
         "host": cfg.host,
         "pool_publication": cfg.pool_publication_enabled,
     }
@@ -104,28 +76,7 @@ def config_identity(cfg, *, base_dir: Path | None = None) -> str:
     return hashlib.sha256(json.dumps(selected, sort_keys=True).encode()).hexdigest()
 
 
-def behavior_identity(cfg) -> str:
-    """Fingerprint the version-1 nonsecret coordinator behavior settings."""
-    selected = {
-        "sweep_interval": float(cfg.sweep_interval),
-        "orphan_grace": float(cfg.orphan_grace),
-        "handoff_fallback_enabled": cfg.handoff_fallback_enabled,
-        "handoff_fallback_grace": float(cfg.handoff_fallback_grace),
-    }
-    return hashlib.sha256(json.dumps(selected, sort_keys=True, allow_nan=False).encode()).hexdigest()
-
-
-def data_auth_matches(payload, required: bool) -> bool:
-    return (
-        payload.get("data_auth_required") is required
-        and payload.get("data_token_match_v1") is required
-    )
-
-
-def accept_readiness(
-    payload, *, handle, version: str, config_identity: str,
-    active=False, expected_behavior: str | None = None, expected_data_auth: bool | None = None,
-) -> bool:
+def accept_readiness(payload, *, handle, version: str, config_identity: str, active=False) -> bool:
     from zdd.diagnostics import process_start_time
 
     slot = payload.get("slot") if isinstance(payload, dict) else None
@@ -139,8 +90,6 @@ def accept_readiness(
         type(handle.pid) is int and handle.pid > 0 and bool(birth)
         and payload.get("version") == version and payload.get("status") == "ok"
         and payload.get("runtime_config_identity") == config_identity
-        and (expected_behavior is None or payload.get("runtime_behavior_identity_v1") == expected_behavior)
-        and (expected_data_auth is None or data_auth_matches(payload, expected_data_auth))
         and slot.get("pid") == handle.pid and slot.get("process_start_time") == birth
         and (not active or slot.get("role") == "active")
         and process_start_time(handle.pid) == birth
@@ -167,49 +116,29 @@ def _route_owner_state(endpoint):
     return "unknown" if _process_exists(endpoint.pid) else "dead"
 
 
-def run_coordinator(
-    cfg, routing_root, *, token, spawn_passive, pick_free_port, timeout=60.0,
-    verify_selected=None, start_if_missing=True, confirm_inactive=None, expected_table=None,
-):
+def run_coordinator(cfg, routing_root, *, token, spawn_passive, pick_free_port, timeout=60.0):
     from types import SimpleNamespace
     from zdd import breadcrumb, routing
     from zdd.cutover import CutoverOrchestrator
     from zdd.diagnostics import process_start_time
     from .client import DispatchClient
 
-    verify_selected = require_selected_source if verify_selected is None else verify_selected
-    if (
-        not callable(verify_selected) or type(start_if_missing) is not bool
-        or (expected_table is not None and not isinstance(expected_table, dict))
-    ):
-        raise ValueError("coordinator selection owner is unavailable")
-    verify_selected()
+    require_selected_source()
     table = routing.read_table(routing_root, strict=True) or {}
-    if expected_table is not None and table != expected_table:
-        raise RuntimeError("coordinator preflight route changed")
-    if not start_if_missing and os.path.lexists(breadcrumb.breadcrumb_path(routing_root)):
-        raise RuntimeError("previous cutover remains unsettled; owner-led recovery is required")
     raw = table.get("active")
     old = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
-    if raw is not None and old is None:
+    if isinstance(raw, dict) and old is None:
         raise ValueError("Source startup cannot interpret incumbent routing ownership")
-    if old is not None and not start_if_missing:
-        from .coordinator_observation import _loopback
-
-        _loopback(old.client_host, old.port)
-    identity = config_identity(cfg, base_dir=install_dir())
-    behavior = behavior_identity(cfg) if not start_if_missing else None
+    identity = config_identity(cfg)
     handles = {}
 
     if old is not None and old.version == __version__ and _route_owner_state(old) in {"dead", "reused"}:
-        if not start_if_missing:
-            raise RuntimeError("coordinator inactive state is unconfirmed")
         if breadcrumb.read_breadcrumb(routing_root) is not None or table.get("previous") is not None:
             raise RuntimeError("previous cutover remains unsettled; owner-led recovery is required")
         stale = old
 
         def refuse_stale(current):
-            verify_selected()
+            require_selected_source()
             if (
                 current != raw or routing.read_table(routing_root, strict=True) != table
                 or _route_owner_state(stale) not in {"dead", "reused"}
@@ -223,225 +152,74 @@ def run_coordinator(
         )
         old, raw = None, None
 
-    if old is None and not start_if_missing:
-        if (
-            breadcrumb.read_breadcrumb(routing_root) is not None or table.get("previous") is not None
-            or not callable(confirm_inactive) or confirm_inactive(table) is not True
-        ):
-            raise RuntimeError("coordinator inactive state is unconfirmed")
-        verify_selected()
-        if (
-            (routing.read_table(routing_root, strict=True) or {}) != table
-            or confirm_inactive(table) is not True
-        ):
-            raise RuntimeError("coordinator inactive state changed")
-        verify_selected()
-        return {"ok": True, "status": "inactive"}
-
-    probe_timeout = 2.0 if start_if_missing else min(timeout, 2.0)
-
-    def endpoint_url(host, port):
-        if not start_if_missing:
-            from .coordinator_observation import _loopback
-
-            host = _loopback(host, port)
-        return f"http://{routing.format_authority(host, port)}"
-
-    def selected_client(url, request_timeout):
-        if start_if_missing:
-            return DispatchClient(url, token=token, timeout=request_timeout)
-        from .coordinator_observation import _local_client
-
-        return _local_client(url, token=token, timeout=request_timeout)
-
-    def make_client(url):
-        if not start_if_missing:
-            from urllib.parse import urlsplit
-
-            parsed = urlsplit(url)
-            if (
-                parsed.scheme != "http" or not parsed.hostname or parsed.port is None
-                or parsed.username is not None or parsed.password is not None
-                or parsed.path not in ("", "/") or parsed.query or parsed.fragment
-            ):
-                raise ValueError("coordinator control endpoint is invalid")
-            url = endpoint_url(parsed.hostname, parsed.port)
-        return selected_client(url, timeout)
-
-    def read_health(host, port):
-        url = endpoint_url(host, port)
-        if not start_if_missing:
-            from .coordinator_observation import _local_health
-
-            return _local_health(url, token=token, timeout=probe_timeout)
-        with selected_client(url, probe_timeout) as client:
-            return client.health()
-
-    def old_is_live():
-        if old is None or not old.process_start_time:
-            return False
-        if not start_if_missing:
-            return _route_owner_state(old) == "matching"
-        return process_start_time(old.pid) == old.process_start_time
-
     def probe(host, port, *, active=False):
-        payload = read_health(host, port)
+        with DispatchClient(
+            f"http://{routing.format_authority(host, port)}", token=token, timeout=2.0,
+        ) as client:
+            payload = client.health()
         handle = handles.get(port)
         if handle is None:
             if old is None or not old.process_start_time:
                 return False
             handle = SimpleNamespace(
-                pid=old.pid, poll=lambda: None if old_is_live() else 0,
+                pid=old.pid,
+                poll=lambda: None if process_start_time(old.pid) == old.process_start_time else 0,
             )
         return accept_readiness(
             payload, handle=handle, version=__version__, config_identity=identity, active=active,
-            expected_behavior=behavior,
-            expected_data_auth=None if start_if_missing else token is not None,
         )
 
+    if old is not None and old.version == __version__:
+        if not probe(old.client_host, old.port, active=True):
+            raise RuntimeError("selected coordinator owner failed native application readiness")
+        return {"ok": True, "status": "reused", "pid": old.pid, "new_port": old.port}
     if old is not None:
-        payload = read_health(old.client_host, old.port)
+        with DispatchClient(old.base_url, token=token, timeout=2.0) as client:
+            payload = client.health()
         handle = SimpleNamespace(
-            pid=old.pid, poll=lambda: None if old_is_live() else 0,
+            pid=old.pid,
+            poll=lambda: None if process_start_time(old.pid) == old.process_start_time else 0,
         )
         if not accept_readiness(
             payload, handle=handle, version=old.version, config_identity=identity, active=True,
         ):
             raise RuntimeError("incumbent effective configuration or native ownership is unconfirmed")
-        if old.version == __version__ and (
-            start_if_missing or (
-                payload.get("runtime_behavior_identity_v1") == behavior
-                and data_auth_matches(payload, token is not None)
-            )
-        ):
-            verify_selected()
-            if (
-                (routing.read_table(routing_root, strict=True) or {}).get("active") != raw
-                or not old_is_live()
-                or (not start_if_missing and os.path.lexists(breadcrumb.breadcrumb_path(routing_root)))
-            ):
-                raise RuntimeError("selected coordinator owner changed during readiness")
-            return {"ok": True, "status": "reused", "pid": old.pid, "new_port": old.port}
-    retirement = payload.get("slot", {}).get("self_retire", {}) if old is not None else {}
-    manual_retirement = (
-        not start_if_missing and old is not None
-        and not (
-            isinstance(retirement, dict)
-            and retirement.get("enabled") is True and retirement.get("armed") is True
-        )
-    )
     if breadcrumb.read_breadcrumb(routing_root) is not None:
         raise RuntimeError("previous cutover remains unsettled; owner-led recovery is required")
 
     def guard(current):
-        verify_selected()
+        require_selected_source()
         if current != raw:
             return "Source startup predecessor changed"
-        if old is not None and not old_is_live():
+        if old is not None and (
+            not old.process_start_time
+            or process_start_time(old.pid) != old.process_start_time
+        ):
             return "Source startup predecessor native ownership is unconfirmed"
         return None
 
     def spawn(port):
-        verify_selected()
-        if not start_if_missing and (
-            not old_is_live()
-            or (routing.read_table(routing_root, strict=True) or {}).get("active") != raw
-        ):
-            raise RuntimeError("coordinator predecessor native ownership changed before spawn")
+        require_selected_source()
         handle = spawn_passive(port)
         handles[port] = handle
         return handle
 
     def activate(endpoint):
-        verify_selected()
+        require_selected_source()
         if not probe(endpoint.client_host, endpoint.port, active=True):
             raise RuntimeError("published coordinator has not admitted its selected native owner")
-
-    def retire_predecessor(endpoint):
-        deadline = time.monotonic() + timeout
-
-        def remaining():
-            value = deadline - time.monotonic()
-            if value <= 0:
-                raise TimeoutError("coordinator predecessor retirement timed out")
-            return value
-
-        def successor(expected=None):
-            verify_selected()
-            table = routing.read_table(routing_root, strict=True) or {}
-            active = table.get("active")
-            target = routing.Endpoint.from_dict(active) if isinstance(active, dict) else None
-            handle = handles.get(target.port) if target is not None else None
-            if (
-                target is None or (expected is not None and active != expected)
-                or target.version != __version__ or handle is None or handle.pid != target.pid
-                or handle.poll() is not None or not target.process_start_time
-                or process_start_time(target.pid) != target.process_start_time
-                or not probe(target.client_host, target.port, active=True)
-            ):
-                raise RuntimeError("coordinator successor is unconfirmed")
-            remaining()
-            return active
-
-        try:
-            if endpoint != old:
-                raise RuntimeError("coordinator predecessor changed")
-            active = successor()
-            state = _route_owner_state(endpoint)
-            if state in {"dead", "reused"}:
-                return {"exit_confirmed": True, "reason": "already-exited"}
-            if state != "matching":
-                raise RuntimeError("coordinator predecessor identity is unconfirmed")
-            previous = read_health(endpoint.client_host, endpoint.port)
-            handle = SimpleNamespace(pid=endpoint.pid, poll=lambda: None if old_is_live() else 0)
-            if not accept_readiness(
-                previous, handle=handle, version=endpoint.version, config_identity=identity,
-            ):
-                raise RuntimeError("coordinator predecessor health is unconfirmed")
-            successor(active)
-            with selected_client(endpoint_url(endpoint.client_host, endpoint.port), remaining()) as client:
-                drained = client.drain(timeout=remaining(), poll=min(1.0, remaining()), force=False)
-                if (
-                    not isinstance(drained, dict) or drained.get("drained") is not True
-                    or drained.get("clean") is not True or drained.get("forced") is not False
-                ):
-                    raise RuntimeError("coordinator predecessor did not drain cleanly")
-                successor(active)
-                if _route_owner_state(endpoint) != "matching":
-                    raise RuntimeError("coordinator predecessor changed before shutdown")
-                shutdown = client.shutdown()
-                if not isinstance(shutdown, dict) or shutdown.get("shutdown") is not True:
-                    raise RuntimeError("coordinator predecessor shutdown is unconfirmed")
-            while True:
-                state = _route_owner_state(endpoint)
-                if state in {"dead", "reused"}:
-                    successor(active)
-                    return {"exit_confirmed": True, "reason": "drained-and-exited"}
-                if state != "matching":
-                    raise RuntimeError("coordinator predecessor exit is unconfirmed")
-                time.sleep(min(0.1, remaining()))
-        except Exception as error:
-            if callable(getattr(error, "retry_cleanup", None)):
-                raise
-            return {"exit_confirmed": False, "reason": type(error).__name__}
 
     orchestrator = CutoverOrchestrator(
         routing_root, bind="::" if cfg.host == "[::]" else cfg.host,
         version=__version__, spawn_passive=spawn, health_check=probe,
-        make_client=make_client,
+        make_client=lambda url: DispatchClient(url, token=token, timeout=timeout),
         pick_free_port=pick_free_port, refuse_old=guard, expected_old=old,
         self_retirement=True, activate_successor=activate,
         serving_health_check=lambda host, port: probe(host, port, active=True),
         service="agent-dispatch",
-        **({
-            "retire_failed_predecessor": retire_predecessor,
-            "require_predecessor_retirement": True,
-        } if manual_retirement else {}),
-        **({"routing_lock_timeout": min(5.0, timeout)} if not start_if_missing else {}),
     )
     return orchestrator.run(
-        health_timeout=timeout, drain_timeout=timeout,
-        lock_timeout=5.0 if start_if_missing else min(5.0, timeout),
+        health_timeout=timeout, drain_timeout=timeout, lock_timeout=5.0,
     ).to_dict()
 
 

@@ -198,14 +198,13 @@ def _cmd_session_fetch(args: argparse.Namespace) -> int:
     Exit ``0`` with a JSON ``{"session": {...}, "events": [...]}`` payload on
     stdout when found, ``cold_store.NOT_FOUND_EXIT_CODE`` (never an error) when
     this host has no evidence of the session at all. See
-    ``agent_logger.cold_store`` for the resolution order. The payload is
-    streamed event by event, so transcript size never bounds memory.
+    ``agent_logger.cold_store`` for the resolution order.
     """
-    from agent_logger.cold_store import write_session_json
+    from agent_logger.cold_store import fetch_session_json
 
-    code = write_session_json(args.session_id, sys.stdout)
-    if code == 0:
-        sys.stdout.write("\n")
+    code, payload = fetch_session_json(args.session_id)
+    if payload:
+        print(payload)
     return code
 
 

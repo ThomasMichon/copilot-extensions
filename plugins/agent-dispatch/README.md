@@ -207,46 +207,6 @@ classic-mode migrations and unconfirmed readiness fail rather than report
 installation success. A committed cutover with an unsettled startup result is
 not proof that the incumbent or selectors were restored.
 
-Selected, complete physical Source or repair generations also provide
-`python -m agent_dispatch.coordinator_observation --probe` and `--apply`.
-The version-1 `agent-dispatch.coordinator-serving-observation` JSON contract
-reports a verified local serving generation, an evidenced inactive state, or
-an explicit unknown result. Observation checks routed process liveness and
-birth, effective configuration and route identity. The version-1 behavior
-fingerprint covers sweep cadence, orphan grace and handoff-fallback settings
-without including credentials. A relative database path is compared against
-the coordinator's installed working directory, not the invoking shell; an
-incumbent using a different database is not admitted. An incumbent lacking or
-differing in the fingerprint is not reused, even when its code generation
-matches; a verified owner can instead be transitioned to the selected
-configuration. Health reports
-whether data authentication is required and whether the request matched the
-actual data token, without exposing credentials. When a token is configured,
-an unauthenticated health request must also be rejected. An older owner without
-the match signal can be admitted for guarded replacement but is not reported
-ready or reused. A data token equal to the control token is invalid; replacement
-fails without disturbing the incumbent. Legacy discovery or an unverified
-endpoint is not treated as inactive. Local control uses loopback without
-environment proxies and does not pass update-driver custody to the daemon.
-For `localhost`, observation uses the same resolved address family as the
-service bind; inactive checks also refuse an IPv4 or IPv6 legacy listener.
-Probes refuse a pending cutover breadcrumb and report the start-lock path
-resolved from the captured service environment. That path is coordination
-information, not evidence that a caller holds the lock or may alter selection.
-`--apply` reuses the existing guarded coordinator cutover without starting an
-absent service or running broad reaping. It rechecks incumbent liveness before
-spawn and bounds each native routing-lock wait by the requested timeout. It
-uses asynchronous self-retirement only when the incumbent reports that its
-retirement loop is enabled and armed. Otherwise it drains and shuts down the
-exact predecessor without force after the successor serves, retaining committed
-recovery evidence if predecessor exit cannot be confirmed. It does not update
-the supervisor or claim suite-wide readiness. Older runtimes
-without this module remain unchanged:
-callers must establish support before invoking the new form and must not replay
-an effectful request through another command after an uncertain result.
-`agent_dispatch.config.coordinator_start_lock_path()` resolves the same native
-start/cutover lock used by serve and deploy; the pathname alone is not custody.
-
 Source validation compares the actual installation identity and normalizes
 equivalent Windows extended-path spellings without relaxing module containment
 or redirected-slot refusal. Supervisor intent is captured before coordinator
@@ -363,13 +323,6 @@ payload; the session-start hook can **stamp** a binstub into `~/.local/bin` so
 the first `agent-dispatch` invocation self-provisions the runtime. Repos that use
 agent-worktrees may also machine-gate the runtime and reconcile it automatically,
 but that is composition, not a requirement. To install/manage it directly:
-
-With UV, Windows prepares the declared local workspace dependencies in the
-root package transaction, matching the POSIX path. Per-package reinstall and
-refresh flags, governed dependency policy and before/after build-artifact
-scrubbing remain intact. Standalone prerequisite installs remain only for the
-non-UV fallback. Supervisor enablement also leaves an already-enabled native
-task unchanged; a disabled task still requires a successful enable operation.
 
 ```bash
 # via the marketplace (once published):
@@ -589,15 +542,6 @@ The installer requires a valid Python Software Foundation Authenticode signature
 and probes the executable in isolation for supported 64-bit CPython 3.10+.
 It uses that base before PATH or launcher discovery, without changing the global
 Python default, PATH, or other plugins' interpreter selection.
-
-Source-validation and construction helpers separately require Python 3.11+.
-The Windows installer retains native admission's executable for these helpers,
-or qualifies compatible PATH applications, launcher registrations/version
-selectors and standard Python installation roots, excluding WindowsApps
-aliases. An explicit signed 3.10+ choice still controls the runtime venv; it
-does not lower the helper floor. Without an explicit runtime choice, venv
-fallbacks carry the qualified helper base, including `uv --python`. Failure to
-find a compatible helper is explicit and never changes global PATH or Python.
 
 After a qualified candidate publishes, Dispatch atomically stores the choice in
 `base-python.json` under its runtime root. Later updates use that preference

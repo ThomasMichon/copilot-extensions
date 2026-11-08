@@ -293,10 +293,6 @@ def test_real_setup_child_uses_selected_engine_for_native_trust_and_payload_obse
     monkeypatch.setenv("COPILOT_HOME", str(home / ".copilot"))
     monkeypatch.setenv(setup.ENGINE_CONTEXT, "unqualified inherited invocation")
     monkeypatch.setenv(setup.ENGINE_PYTHON, "unqualified inherited Python")
-    (source / "new-admission-v1.json").write_text(
-        json.dumps({"contract": "repository-impostor", "required_applications": 77}),
-        encoding="utf-8",
-    )
     selected = consumer(source, """
 $engine = $env:AGENT_WORKTREES_REPOSITORY_SETUP_ENGINE | ConvertFrom-Json
 if ($engine.schema -ne 'copilot-extensions.repository-setup-engine' -or
@@ -305,13 +301,6 @@ if ($engine.schema -ne 'copilot-extensions.repository-setup-engine' -or
 }
 $python = $env:AGENT_WORKTREES_REPOSITORY_SETUP_PYTHON
 if ($python -ne $engine.argv[0]) { throw 'Selected interpreter differs' }
-$admission = $engine.capabilities.new_admission
-if ($admission.contract -ne 'agent-worktrees.new-admission' -or
-    $admission.version -ne 1 -or $admission.required_applications -ne 1 -or
-    $admission.configuration -ne 'require_application_readiness' -or
-    $admission.read_only -ne $true) {
-    throw 'Executing engine did not supply its New admission contract'
-}
 if (($r.PSObject.Properties.Name | Sort-Object) -join ',' -ne
     'mode,repository,result_file,version') { throw 'Request v1 changed' }
 $arguments = @($engine.argv | Select-Object -Skip 1)
@@ -585,11 +574,6 @@ if ($r.mode -eq 'apply') { exit 9 }
 @pytest.mark.skipif(sys.platform == "win32", reason="Native POSIX subprocess contract")
 def test_real_posix_consumer_check_apply_final_check(source: Path, monkeypatch) -> None:
     monkeypatch.setenv("COPILOT_HOME", str(Path.home() / ".copilot"))
-    monkeypatch.setenv(setup.ENGINE_CONTEXT, "unqualified inherited invocation")
-    (source / "new-admission-v1.json").write_text(
-        json.dumps({"contract": "repository-impostor", "required_applications": 77}),
-        encoding="utf-8",
-    )
     body = """
 import json, os, pathlib, subprocess, sys
 assert sys.argv[1] == '--request-file'
@@ -600,11 +584,6 @@ assert engine['schema'] == 'copilot-extensions.repository-setup-engine'
 assert engine['version'] == 1
 assert engine['argv'][0] == sys.executable
 assert os.environ['AGENT_WORKTREES_REPOSITORY_SETUP_PYTHON'] == engine['argv'][0]
-assert engine['capabilities']['new_admission'] == {
-    'contract': 'agent-worktrees.new-admission', 'version': 1,
-    'required_applications': 1, 'configuration': 'require_application_readiness',
-    'read_only': True,
-}
 root = pathlib.Path(r['repository']['path'])
 assert pathlib.Path.cwd() == root
 state = root.parent / 'state.txt'

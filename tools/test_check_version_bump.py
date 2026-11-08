@@ -218,26 +218,6 @@ def test_packaged_canonical_change_requires_consumer_bump(repo: Path):
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_packaged_groups_charge_standalone_consumer_for_every_canonical_root(tmp_path, monkeypatch):
-    spec = importlib.util.spec_from_file_location("_group_asset_version_guard", SCRIPT)
-    guard = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(guard)
-    monkeypatch.setattr(guard, "REPO", tmp_path)
-    monkeypatch.setattr(guard, "PLUGINS_DIR", tmp_path / "plugins")
-    (tmp_path / "plugins").mkdir()
-    _write(tmp_path, "worktree-manager/pyproject.toml", '[project]\nname="manager"\nversion="1.0.0"\n')
-    _write(tmp_path, "worktree-manager/packaged-assets.json", json.dumps({
-        "schema": "copilot-extensions.packaged-assets", "version": 2,
-        "groups": [
-            {"canonicalDir": "tools", "payloadDir": "scripts/tools", "files": ["prepare.py"]},
-            {"canonicalDir": "libs/owned", "payloadDir": "scripts/owned", "files": ["helper.py"]},
-        ],
-    }))
-    changes = ["tools/prepare.py", "libs/owned/helper.py"]
-    charged = guard._plugins_needing_bump(changes, {})
-    assert charged == {"worktree-manager": {f"packaged source {path}" for path in changes}}
-
-
 @pytest.mark.parametrize("plugin", ["agent-worktrees", "agent-pull-requests"])
 def test_peer_boundary_change_charges_registered_owner(repo: Path, plugin: str):
     _plugin(repo, plugin, "1.0.0-dev1")

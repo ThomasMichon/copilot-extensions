@@ -16,71 +16,6 @@ import bridge_http52_evidence as evidence
 from bridge_http_retained_probes import capture_request, record_observations
 from http51_receipt_probes import observe as observe_receipt
 from http51_live_cli_probes import observe as observe_live_cli
-from test_mux_questions import (
-    mux_api as mux_api,
-    test_http_choice_and_freeform_are_verified_audited_and_single_use
-    as test_http_choice_and_freeform_are_verified_audited_and_single_use,
-    test_terminal_first_and_changed_inputs_never_send_keys
-    as test_terminal_first_and_changed_inputs_never_send_keys,
-    test_restart_expiry_and_other_session_tokens_have_no_input_authority
-    as test_restart_expiry_and_other_session_tokens_have_no_input_authority,
-    test_key_failure_is_unknown_and_blocks_reinspection_after_restart
-    as test_key_failure_is_unknown_and_blocks_reinspection_after_restart,
-    test_pane_replacement_after_navigation_stops_before_enter
-    as test_pane_replacement_after_navigation_stops_before_enter,
-    test_preissued_inspection_cannot_bypass_an_uncertain_sibling_attempt
-    as test_preissued_inspection_cannot_bypass_an_uncertain_sibling_attempt,
-    test_same_screen_has_one_admission_even_with_two_inspection_tokens
-    as test_same_screen_has_one_admission_even_with_two_inspection_tokens,
-    test_authentication_and_malformed_permission_mixed_answers_have_no_effect
-    as test_authentication_and_malformed_permission_mixed_answers_have_no_effect,
-    test_native_answering_and_multifield_or_permission_evidence_prevent_fallback
-    as test_native_answering_and_multifield_or_permission_evidence_prevent_fallback,
-    test_ambiguous_rendering_never_parses_as_an_answerable_form
-    as test_ambiguous_rendering_never_parses_as_an_answerable_form,
-    test_completion_requires_a_new_exact_answer_echo_not_old_history
-    as test_completion_requires_a_new_exact_answer_echo_not_old_history,
-)
-from test_mux_question_client import (
-    test_backend_uses_selected_owner_and_exact_confirmed_native_pane
-    as test_backend_uses_selected_owner_and_exact_confirmed_native_pane,
-    test_old_provider_never_receives_mux_mutation_and_writes_are_not_retried
-    as test_old_provider_never_receives_mux_mutation_and_writes_are_not_retried,
-    test_cli_mux_does_not_start_a_daemon_or_touch_native_or_permission_paths
-    as test_cli_mux_does_not_start_a_daemon_or_touch_native_or_permission_paths,
-)
-from test_db_adoption import (
-    test_mux_storage_requires_writable_preparation_before_passive_adoption
-    as test_mux_storage_requires_writable_preparation_before_passive_adoption,
-)
-from test_runtime_serving import (
-    captured as captured,
-    test_foreground_serves_real_authenticated_routes_only_after_fenced_commit
-    as test_foreground_serves_real_authenticated_routes_only_after_fenced_commit,
-)
-from test_live_questions import (
-    api as api,
-    test_live_question_provider_advertises_actual_capability
-    as test_live_question_provider_advertises_actual_capability,
-    test_passive_native_correlation_is_exact_and_charged_to_its_budget
-    as test_passive_native_correlation_is_exact_and_charged_to_its_budget,
-    test_current_native_roundtrip_and_durable_outcome
-    as test_current_native_roundtrip_and_durable_outcome,
-    test_authentication_mismatch_and_single_use_refusals
-    as test_authentication_mismatch_and_single_use_refusals,
-    test_terminal_completion_restart_and_process_replacement_revoke_observation
-    as test_terminal_completion_restart_and_process_replacement_revoke_observation,
-    test_question_answers_do_not_follow_session_aliases
-    as test_question_answers_do_not_follow_session_aliases,
-    test_native_rejection_and_uncertainty_are_not_acceptance
-    as test_native_rejection_and_uncertainty_are_not_acceptance,
-    test_unclaimed_timeout_withdraws_and_missing_required_field_refuses
-    as test_unclaimed_timeout_withdraws_and_missing_required_field_refuses,
-    test_old_provider_refuses_before_mutation_and_new_provider_gets_pinned_shape
-    as test_old_provider_refuses_before_mutation_and_new_provider_gets_pinned_shape,
-    test_cli_live_branch_preserves_owned_answer_and_permission_boundaries
-    as test_cli_live_branch_preserves_owned_answer_and_permission_boundaries,
-)
 from test_live_exact_rollback import (
     test_interrupted_pre30_upgrade_reopens_every_legacy_guard_checkpoint
     as test_interrupted_pre30_upgrade_reopens_every_legacy_guard_checkpoint,
@@ -353,8 +288,6 @@ def test_http51_capture_actual_observations(
         for key in ("protocol_version", "min_protocol_version")
     }}
     health = api.get("/health").json()
-    observed["live_question_answers"] = health["capabilities"]["live_question_answers"]
-    observed["mux_question_answers"] = health["capabilities"]["mux_question_answers"]
     observed["portable_capabilities"] = {
         key: health["capabilities"][key] for key in vector["expected"]["portable_capabilities"]
     }

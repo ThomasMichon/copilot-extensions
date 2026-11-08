@@ -60,21 +60,6 @@ def test_native_creation_reuse_and_openssh_consumer(tmp_path, record):
         raise AssertionError("Native OpenSSH derived a different public key")
 
 
-@pytest.mark.skipif(os.name != "nt", reason="Native Windows SID-alias normalization")
-def test_native_numeric_system_sid_retains_owner_private_publication(tmp_path, monkeypatch, record):
-    original = ssh_key_files.WindowsSecurity.descriptor
-    monkeypatch.setattr(
-        ssh_key_files.WindowsSecurity, "descriptor",
-        lambda self, directory: original(self, directory).replace(";;;SY)", ";;;S-1-5-18)"),
-    )
-    directory = tmp_path / "keys"
-    private, public = pair(record)
-    assert ssh_key_files.install(directory, private, public)["status"] == "installed"
-    assert ssh_key_files.install(directory, private, public)["status"] == "reused"
-    matches(directory / "id_ed25519", private)
-    matches(directory / "id_ed25519.pub", public)
-
-
 @pytest.mark.parametrize("survivor", ["id_ed25519", "id_ed25519.pub"])
 def test_matching_partial_pair_is_recovered(tmp_path, record, survivor):
     directory = tmp_path / "keys"
@@ -268,9 +253,8 @@ def test_strict_service_read_is_existing_validated_record_only(isolated, monkeyp
     assert request(svc, isolated, action="ssh-key-read")["code"] == "needs_unlock"
 
 
-@pytest.mark.parametrize("pinned", [False, True])
 def test_cli_installs_with_selected_context_and_public_only_output(
-    isolated, monkeypatch, capsys, record, tmp_path, pinned,
+    isolated, monkeypatch, capsys, record, tmp_path,
 ):
     destination = tmp_path / "keys"
     sent = []
@@ -281,11 +265,9 @@ def test_cli_installs_with_selected_context_and_public_only_output(
         return {"ok": True} if payload["action"] == "ping" else {"ok": True, "value": record}
 
     monkeypatch.setattr(cli, "send_command", send)
-    selected = ssh_key._read_record(record)
-    pin = ["--expected-fingerprint", selected["fingerprint"]] if pinned else []
     assert cli.main([
         "ssh-key", "install", "--entry", "SSH/node-a", "--directory", str(destination),
-        "--require-running", "--json", *pin,
+        "--require-running", "--json",
     ]) == 0
     output = capsys.readouterr()
     assert json.loads(output.out)["status"] == "installed"
@@ -296,36 +278,6 @@ def test_cli_installs_with_selected_context_and_public_only_output(
         "group": "", "allow_prompt": False,
     }
     assert kwargs == {"timeout": 90.0, "strict_endpoint": True}
-
-@pytest.mark.parametrize("pin", ["different", "malformed"])
-def test_cli_public_pin_refuses_before_local_publication(
-    isolated, monkeypatch, capsys, record, tmp_path, pin,
-):
-    destination = tmp_path / "keys"
-    sent = []
-    fingerprint = ssh_key._read_record(record)["fingerprint"]
-    expected = (
-        fingerprint[:-1] + ("E" if fingerprint[-1] == "A" else "A")
-        if pin == "different" else "SHA256:" + "A" * 42 + "B"
-    )
-    monkeypatch.setattr(cli, "ensure_service", Mock(side_effect=AssertionError))
-
-    def send(payload, **kwargs):
-        sent.append(payload["action"])
-        return {"ok": True} if payload["action"] == "ping" else {"ok": True, "value": record}
-
-    monkeypatch.setattr(cli, "send_command", send)
-    assert cli.main([
-        "ssh-key", "install", "--entry", "SSH/node-a", "--directory", str(destination),
-        "--require-running", "--json", "--expected-fingerprint", expected,
-    ]) == 1
-    output = capsys.readouterr()
-    assert json.loads(output.out)["error"] == (
-        "key_mismatch" if pin == "different" else "invalid_fingerprint"
-    )
-    assert sent == (["ping", "ssh-key-read"] if pin == "different" else [])
-    assert not destination.exists()
-    assert record not in output.out + output.err and "BEGIN OPENSSH" not in output.out + output.err
 
 
 @pytest.mark.parametrize("response,error", [
@@ -356,78 +308,3 @@ def test_required_stopped_service_never_activates_or_creates(isolated, monkeypat
     ]) == 1
     assert json.loads(capsys.readouterr().out)["error"] == "service_unavailable"
     assert not destination.exists()
-
-
-@pytest.mark.parametrize("operation", ["prepare", "install"])
-@pytest.mark.parametrize("availability", ["missing", "inaccessible", "stat-inaccessible", "directory"])
-def test_unavailable_database_is_reported_before_service_or_key_effects(
-    isolated, monkeypatch, capsys, tmp_path, operation, availability,
-):
-    database = tmp_path / "sync space" / "selected.kdbx"
-    destination = tmp_path / "keys"
-    monkeypatch.setenv("KPDB", str(database))
-    if availability == "directory":
-        database.mkdir(parents=True)
-    elif availability == "inaccessible":
-        original_resolve = Path.resolve
-
-        def resolve(path, *args, **kwargs):
-            if path == database:
-                raise PermissionError("fixture database lookup refused")
-            return original_resolve(path, *args, **kwargs)
-
-        monkeypatch.setattr(Path, "resolve", resolve)
-    elif availability == "stat-inaccessible":
-        database.parent.mkdir()
-        database.write_bytes(b"selected fixture")
-        original_is_file = Path.is_file
-
-        def is_file(path):
-            if path == database:
-                raise PermissionError("fixture database inspection refused")
-            return original_is_file(path)
-
-        monkeypatch.setattr(Path, "is_file", is_file)
-    activate = Mock(side_effect=AssertionError)
-    send = Mock(side_effect=AssertionError)
-    publish = Mock(side_effect=AssertionError)
-    monkeypatch.setattr(cli, "ensure_service", activate)
-    monkeypatch.setattr(cli, "send_command", send)
-    monkeypatch.setattr(ssh_key_files, "install", publish)
-    arguments = ["ssh-key", operation, "--entry", "SSH/node-a", "--require-running", "--json"]
-    if operation == "install":
-        arguments.extend(["--directory", str(destination)])
-    assert cli.main(arguments) == 1
-    output = capsys.readouterr()
-    result = json.loads(output.out)
-    assert result["error"] == "database_unavailable"
-    assert str(database) not in output.out + output.err
-    activate.assert_not_called()
-    send.assert_not_called()
-    publish.assert_not_called()
-    assert not destination.exists()
-    assert Path(isolated).read_bytes() == b"disposable fixture"
-
-
-@pytest.mark.parametrize("operation", ["prepare", "install"])
-def test_native_cli_reports_unsynchronized_database_without_creating_it(
-    isolated, monkeypatch, tmp_path, operation,
-):
-    database = tmp_path / "sync space" / "selected.kdbx"
-    destination = tmp_path / "keys"
-    monkeypatch.setenv("KPDB", str(database))
-    arguments = [
-        sys.executable, "-m", "agent_vault", "ssh-key", operation,
-        "--entry", "SSH/node-a", "--require-running", "--json",
-    ]
-    if operation == "install":
-        arguments.extend(["--directory", str(destination)])
-    result = subprocess.run(
-        arguments, stdin=subprocess.DEVNULL, capture_output=True,
-        timeout=10, **no_window_kwargs(),
-    )
-    assert result.returncode == 1
-    assert json.loads(result.stdout)["error"] == "database_unavailable"
-    assert str(database).encode() not in result.stdout + result.stderr
-    assert not database.parent.exists() and not destination.exists()
-    assert Path(isolated).read_bytes() == b"disposable fixture"

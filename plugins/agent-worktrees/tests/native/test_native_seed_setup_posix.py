@@ -62,7 +62,7 @@ while True:
         json.loads(path.read_text())
         for path in Path(os.environ["FIXTURE_RECORD"]).parent.glob("launch-attempts/*/*.execution.json")
     ]
-    if not os.environ["FIXTURE_NATIVE"] or any(
+    if not os.environ["FIXTURE_SEEDED"] or any(
         event["phase"] == "process-spawned" and event["details"]["pid"] == os.getpid()
         for saved in observations for event in saved["events"]
     ):
@@ -145,12 +145,11 @@ prepared = launch_seed_exec.deferred_command(
     mux=sys.argv[11] == "1",
 )
 index = launch_seed_exec.native_setup_index(prepared)
-assert (index is not None) == (not sys.argv[8] and sys.argv[9] == "1"), prepared
+assert (index is not None) == (bool(seed_kind) and not sys.argv[8] and sys.argv[9] == "1"), prepared
 print(json.dumps({
     "record": str(created.yaml_path), "command": prepared,
     "copied": prepared[index] if index is not None else str(root / "scripts/default-setup.sh"),
     "seed_id": seed.seed_id if seed else None,
-    "native": index is not None,
 }))
 '''
     plan = json.loads(_run(
@@ -165,7 +164,7 @@ print(json.dumps({
     ))
     env = {
         **environment, "FIXTURE_CASE": str(tmp_path), "FIXTURE_RECORD": plan["record"],
-        "FIXTURE_NATIVE": "1" if plan["native"] else "", "FIXTURE_INTERACTIVE": "1" if interactive else "",
+        "FIXTURE_SEEDED": "1" if seed_kind else "", "FIXTURE_INTERACTIVE": "1" if interactive else "",
         "FIXTURE_LITERAL": "literal environment ' \u03a9\n\n",
         "AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED": "1",
     }
@@ -183,21 +182,19 @@ def _observations(plan):
 
 def _assert_return(plan, code, seeded):
     observations = _observations(plan)
-    native = plan["native"]
-    assert len(observations) == (2 if native or seeded else 1)
+    assert len(observations) == (2 if seeded else 1)
     for saved in observations:
         assert saved["events"][-1]["phase"] == "execution-returned", {
             "setup": saved["parent_id"] is None,
             "phases": [event["phase"] for event in saved["events"]],
         }
         assert saved["events"][-1]["details"]["exit_code"] == code
-    if native or seeded:
+    if seeded:
         backend, = [saved for saved in observations if saved["parent_id"]]
         setup, = [saved for saved in observations if not saved["parent_id"]]
         assert backend["parent_id"] == setup["operation_id"]
         assert [event["phase"] for event in backend["events"]] == [
-            "execution-requested", *(["seed-claimed"] if seeded else []),
-            "process-spawned", "execution-returned",
+            "execution-requested", "seed-claimed", "process-spawned", "execution-returned",
         ]
 
 
@@ -219,7 +216,7 @@ def test_copied_setup_preserves_native_wait_literal_streams_and_seed_custody(
     assert reply["argv"] == ARGUMENTS + (["--interactive", SEED] if seed_kind else [])
     assert reply["stdin"] == "retained stdin\n"
     assert reply["literal_env"] == environment["FIXTURE_LITERAL"]
-    assert "bash" in reply["parent_command"].lower()
+    assert ("bash" if seed_kind else "python") in reply["parent_command"].lower()
     assert reply["terminal"] == [False, False, False]
     _assert_return(plan, 7, bool(seed_kind))
     if seed_kind:

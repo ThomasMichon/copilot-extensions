@@ -187,7 +187,6 @@ def test_actual_serve_command_preserves_admission_selection(boundary):
     command.decorator_list = []
     configured = SimpleNamespace(
         token=None, port=9847, db_path="/queue", sweep_interval=0,
-        orphan_grace=17.0, handoff_fallback_enabled=True, handoff_fallback_grace=29.0,
         pool_publication_enabled=False, relationship_admission="policy:factory",
         relationship_authority="local",
     )
@@ -218,9 +217,6 @@ def test_actual_serve_command_preserves_admission_selection(boundary):
     cfg, flags = calls[0]
     assert cfg.relationship_admission == configured.relationship_admission
     assert cfg.relationship_authority == configured.relationship_authority
-    assert cfg.orphan_grace == configured.orphan_grace
-    assert cfg.handoff_fallback_enabled is True
-    assert cfg.handoff_fallback_grace == configured.handoff_fallback_grace
     assert flags == {"passive": True, "force": False}
 
 

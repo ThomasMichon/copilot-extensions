@@ -65,9 +65,6 @@ class SessionContext:
     last_activity: dict[str, str] = field(default_factory=dict)
     """normalized_path → ISO updated_at of the most-recent session"""
 
-    last_message_at: dict[str, str] = field(default_factory=dict)
-    """normalized_path → latest real root user/assistant message instant."""
-
     context_pct: dict[str, int] = field(default_factory=dict)
     """normalized_path → context-window utilization % of the most-recent session"""
 
@@ -447,9 +444,41 @@ def _count_user_turns(entry: Path) -> int:
     file shrank/rotated or the sidecar is unreadable. Best-effort: a read/write
     hiccup never raises (returns the best count it has).
     """
-    from .sessions_messages import read
-
-    return read(entry)[0]
+    events = entry / "events.jsonl"
+    try:
+        size = events.stat().st_size
+    except OSError:
+        return 0
+    prev_size = 0
+    prev_turns = 0
+    sidecar = entry / _TURNS_SIDECAR
+    try:
+        d = json.loads(sidecar.read_text(encoding="utf-8"))
+        prev_size = int(d.get("size", 0))
+        prev_turns = int(d.get("turns", 0))
+    except Exception:
+        prev_size = prev_turns = 0
+    if prev_size == size and size > 0:
+        return prev_turns
+    # Grown file: resume from the cached boundary; otherwise full recount.
+    resume = 0 < prev_size < size
+    start = prev_size if resume else 0
+    turns = prev_turns if resume else 0
+    try:
+        with open(events, "rb") as f:
+            if start:
+                f.seek(start)
+            for line in f:
+                if b'"user.message"' in line:
+                    turns += 1
+    except OSError:
+        return prev_turns
+    try:
+        sidecar.write_text(
+            json.dumps({"size": size, "turns": turns}), encoding="utf-8")
+    except OSError:
+        pass
+    return turns
 
 
 def _session_entry_lock_state(
@@ -572,19 +601,14 @@ def _enrich_session_dir(
 
     norm_path = _normalize_path(worktree_path)
 
-    from . import sessions_messages
-
-    # Turn count and message activity share the same incremental metadata read.
+    # Turn count from events.jsonl (incremental, size-keyed sidecar).
     events_file = entry / "events.jsonl"
-    if events_file.exists() or (entry / "substatus.json").exists():
-        turns, message_at = sessions_messages.read(entry)
+    if events_file.exists():
+        turns = _count_user_turns(entry)
         if turns > 0:
             ctx.turn_count[norm_path] = (
                 ctx.turn_count.get(norm_path, 0) + turns
             )
-        latest = sessions_messages.newest(ctx.last_message_at.get(norm_path), message_at)
-        if latest:
-            ctx.last_message_at[norm_path] = latest
 
     # Summary from workspace.yaml
     ws_file = entry / "workspace.yaml"
@@ -1186,9 +1210,6 @@ class MuxInfo:
     clients: int | None = None
     """Number of attached terminal clients, or None if unknown."""
 
-    observed: bool = True
-    """False only for an explicitly unavailable passive display observation."""
-
     @property
     def attached(self) -> bool | None:
         """Whether a human terminal is attached.
@@ -1408,20 +1429,14 @@ def _list_mux_sessions(*, strict: bool = False) -> dict[str, int] | None:
     from .mux_list_result import is_empty_tmux_listing, parse_session_counts
 
     if platform.system() == "Windows":
-        return None
-    cmd = ["tmux", "list-sessions", "-F", "#{session_name}:#{session_attached}"]
+        cmd = ["psmux", "list-sessions", "-F", "#{session_name}:#{session_attached}"]
+    else:
+        cmd = ["tmux", "list-sessions", "-F", "#{session_name}:#{session_attached}"]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=5, **no_window_kwargs())
         if result.returncode != 0:
             return {} if is_empty_tmux_listing(cmd[0], result) else None
-        if (result.stderr or "").strip():
-            return None
-        try:
-            return parse_session_counts(result.stdout, strict=True)
-        except ValueError:
-            if strict:
-                raise
-            return None
+        return parse_session_counts(result.stdout, strict=strict)
     except (OSError, subprocess.TimeoutExpired):
         # OSError covers FileNotFoundError (mux not installed) as well as
         # spawn failures such as WinError 4551 (Application Control policy
@@ -1442,9 +1457,11 @@ def _mux_session_activity() -> dict[str, int]:
     import subprocess
 
     if platform.system() == "Windows":
-        return {}
-    cmd = ["tmux", "list-sessions", "-F",
-           "#{session_name}:#{session_activity}"]
+        cmd = ["psmux", "list-sessions", "-F",
+               "#{session_name}:#{session_activity}"]
+    else:
+        cmd = ["tmux", "list-sessions", "-F",
+               "#{session_name}:#{session_activity}"]
     out: dict[str, int] = {}
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
@@ -1464,12 +1481,9 @@ def _mux_session_activity() -> dict[str, int]:
 
 
 def mux_status_many(worktree_ids: list[str], *, strict: bool = False) -> dict[str, MuxInfo]:
-    """Get mux status, requiring confirmed absence for authoritative callers."""
-    import subprocess
-
+    """Get mux status, requiring confirmed absence for authoritative callers.
+    """
     result: dict[str, MuxInfo] = {}
-    if not worktree_ids:
-        return result
 
     all_sessions = _list_mux_sessions(strict=True) if strict else _list_mux_sessions()
     if all_sessions is not None:
@@ -1480,33 +1494,12 @@ def mux_status_many(worktree_ids: list[str], *, strict: bool = False) -> dict[st
             else:
                 result[wt_id] = MuxInfo(exists=False, clients=0)
     else:
-        if platform.system() == "Windows" and not strict:
-            from .mux_list_result import MuxObservationUnavailable
-            raise MuxObservationUnavailable(
-                "Passive PSMux CLI observation is unsupported; mux presence is unknown",
-            )
         # Fallback: per-worktree has-session (no client count available)
         for wt_id in worktree_ids:
-            try:
-                exists = has_mux_session(wt_id, strict=True)
-            except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
-                if strict:
-                    raise
-                from .mux_list_result import MuxObservationUnavailable
-                raise MuxObservationUnavailable("Passive mux presence observation failed") from exc
+            exists = has_mux_session(wt_id, strict=True) if strict else has_mux_session(wt_id)
             result[wt_id] = MuxInfo(exists=exists, clients=None)
 
     return result
-
-
-def mux_status_for_display(worktree_ids: list[str]) -> dict[str, MuxInfo]:
-    """Keep independent display facts usable without inventing mux negatives."""
-    from .mux_list_result import MuxObservationUnavailable
-
-    try:
-        return mux_status_many(worktree_ids)
-    except MuxObservationUnavailable:
-        return {wt_id: MuxInfo(observed=False) for wt_id in worktree_ids}
 
 
 def kill_tmux_session(worktree_id: str) -> bool:

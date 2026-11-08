@@ -116,12 +116,11 @@ async def test_resolved_setup_keeps_final_native_arguments_in_envelope(
 
 @pytest.mark.skipif(os.name != "nt", reason="complete Windows Worktrees launch producer")
 @pytest.mark.asyncio
-@pytest.mark.parametrize("layout", ["legacy", "wheel", "application", "application-alias"])
 @pytest.mark.parametrize("shape", ["wrapped", "deferred", "prepared"])
 @pytest.mark.parametrize("resume", [False, True])
 @pytest.mark.parametrize("prepare_plugins", [False, True])
 async def test_complete_worktrees_plan_preserves_final_native_boundary(
-    tmp_path, monkeypatch, layout, shape, resume, prepare_plugins,
+    tmp_path, monkeypatch, shape, resume, prepare_plugins,
 ):
     for key in ("HOME", "USERPROFILE", "AGENT_WORKTREES_CONFIG_DIR"):
         monkeypatch.setenv(key, str(tmp_path))
@@ -133,31 +132,6 @@ async def test_complete_worktrees_plan_preserves_final_native_boundary(
     from agent_worktrees import config, launch_seed_exec, manager_launch_cli
 
     root = SETUP_SOURCE.parents[1]
-    if layout != "legacy":
-        root = tmp_path / "worktrees"
-        slot = root / "versions" / "test-build"
-        environment = slot / ".venv" if layout.startswith("application") else slot
-        package = environment / "Lib/site-packages/agent_worktrees"
-        scripts = package / "_runtime_assets/scripts"
-        scripts.mkdir(parents=True)
-        if layout.startswith("application"):
-            (slot / "application.json").write_text("{}", encoding="utf-8")
-        for name in (
-            "default-setup.ps1", "launch-command.ps1",
-            "native-seed-boundary.ps1", "reconcile-machine-settings.ps1",
-        ):
-            shutil.copy2(SETUP_SOURCE.with_name(name), scripts / name)
-        monkeypatch.setattr(owner.inst, "__file__", str(package / "installer.py"))
-        if layout == "application-alias":
-            import _winapi
-
-            alias = tmp_path / "worktrees-alias"
-            _winapi.CreateJunction(str(root), str(alias))
-            root = alias
-        monkeypatch.setattr(
-            local_launch_arguments, "_worktrees_setup_script",
-            lambda: root / "scripts/default-setup.ps1",
-        )
     monkeypatch.setattr(owner.inst, "install_dir", lambda: root)
     monkeypatch.setattr(owner, "resolve_launch_pref_flags", lambda *_: [])
     manager = tmp_path / "manager"
@@ -233,78 +207,6 @@ async def test_complete_worktrees_plan_preserves_final_native_boundary(
     assert target.worktree_id == "test-worktree"
     assert target.native_resume_id == ("original-head" if resume else None)
     assert barrier.await_count == int(prepare_plugins)
-
-
-@pytest.mark.parametrize("foreign_root", [False, True])
-def test_prepared_setup_requires_installation_root_not_package_root(
-    tmp_path, monkeypatch, foreign_root,
-):
-    root = tmp_path / "worktrees"
-    monkeypatch.setattr(
-        local_launch_arguments, "_worktrees_setup_script",
-        lambda: root / "scripts/default-setup.ps1",
-    )
-    record = tmp_path / "workspace.yaml"
-    script = (
-        record.parent / "launch-attempts" / ("a" * 32)
-        / ("b" * 32 + ".shell") / "default-setup.ps1"
-    )
-    command = [
-        "pwsh", "-File", str(script), "-LaunchSeedPreparation", "admission",
-        "-LaunchSeedNativeRoot", str(root / "foreign" if foreign_root else root),
-        "-LaunchSeedRecord", str(record), "-NativeArgumentsJson", '{"args":[]}',
-    ]
-    result = local_launch_arguments.append_local_launch_arguments(
-        command, ["--acp", "--stdio"], record_path=str(record),
-    )
-    if foreign_root:
-        assert result == [*command, "--acp", "--stdio"]
-    else:
-        assert json.loads(result[-1]) == {"args": ["--acp", "--stdio"]}
-
-
-@pytest.mark.parametrize("invalid", [
-    "foreign-root", "missing-declaration", "wrong-package", "application-flat",
-])
-def test_packaged_lookalikes_keep_custom_append_semantics(tmp_path, monkeypatch, invalid):
-    root = tmp_path / "worktrees"
-    monkeypatch.setattr(
-        local_launch_arguments, "_worktrees_setup_script",
-        lambda: root / "scripts/default-setup.ps1",
-    )
-    slot = (tmp_path / "other" if invalid == "foreign-root" else root) / "versions/test-build"
-    package = "other_package" if invalid == "wrong-package" else "agent_worktrees"
-    environment = slot if invalid == "application-flat" else slot / ".venv"
-    script = environment / "Lib/site-packages" / package / "_runtime_assets/scripts/default-setup.ps1"
-    script.parent.mkdir(parents=True)
-    shutil.copy2(SETUP_SOURCE, script)
-    if invalid != "missing-declaration":
-        (slot / "application.json").write_text("{}", encoding="utf-8")
-    command = setup_command([], script=script)
-    assert transport._append_local_launch_arguments(command, ["--acp"]) == [*command, "--acp"]
-
-
-def test_packaged_assets_cannot_escape_through_alias(tmp_path, monkeypatch):
-    root = tmp_path / "worktrees"
-    monkeypatch.setattr(
-        local_launch_arguments, "_worktrees_setup_script",
-        lambda: root / "scripts/default-setup.ps1",
-    )
-    slot = root / "versions/test-build"
-    package = slot / ".venv/Lib/site-packages/agent_worktrees"
-    package.mkdir(parents=True)
-    (slot / "application.json").write_text("{}", encoding="utf-8")
-    foreign = tmp_path / "foreign-assets"
-    (foreign / "scripts").mkdir(parents=True)
-    shutil.copy2(SETUP_SOURCE, foreign / "scripts" / SETUP_SOURCE.name)
-    if os.name == "nt":
-        import _winapi
-
-        _winapi.CreateJunction(str(foreign), str(package / "_runtime_assets"))
-    else:
-        (package / "_runtime_assets").symlink_to(foreign, target_is_directory=True)
-    command = setup_command([], script=package / "_runtime_assets/scripts" / SETUP_SOURCE.name)
-    assert transport._append_local_launch_arguments(command, ["--acp"]) == [*command, "--acp"]
 
 
 @pytest.mark.parametrize("command", [

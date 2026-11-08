@@ -11,8 +11,7 @@ from typing import Any
 from .credential_references import read_credential_reference as _file
 from .gateway_client import CredentialMaterial, Discovery, GatewayClient, consume_credential
 from .gateway_contract import (
-    REVIEW_CREDENTIAL_CONTRACT, ForgeScope, GatewayError, ReviewScope, credential, fields,
-    number, parse, require, text, validate_jwks,
+    ForgeScope, GatewayError, credential, fields, number, parse, require, text, validate_jwks,
 )
 from .planning import digest
 
@@ -21,7 +20,6 @@ class CredentialWorker:
     def __init__(
         self, client: GatewayClient, *, service: str, installation: str, generation: int,
         recipient_key: Any, controller: str, controller_generation: int, controller_keys: dict,
-        protected_review: bool = False,
     ):
         self.client = client
         self.service, self.installation = text(service), text(installation)
@@ -31,25 +29,18 @@ class CredentialWorker:
         self.controller_generation = number(controller_generation)
         validate_jwks(controller_keys)
         self.controller_keys = controller_keys
-        require(type(protected_review) is bool, "unsupported-review-contract")
-        self.protected_review = protected_review
 
     def acquire(self, parameters: dict, *, timeout: float = 30) -> CredentialMaterial:
         require(type(timeout) in (float, int) and 0 < timeout <= 60, "invalid-deadline")
-        parameters = credential(parameters, protected_review=self.protected_review)
+        parameters = credential(parameters)
         require(parameters["recipient"] == self.client.principal, "recipient-denied")
         deadline = time.monotonic() + timeout
-        if self.protected_review or self.client.epoch is None:
-            supported = self.client.connect(deadline=deadline)
-            require(not self.protected_review or (
-                REVIEW_CREDENTIAL_CONTRACT in supported.get("contracts", [])
-                and "credential.review" in supported.get("supported", [])
-            ), "unsupported-review-contract")
-        value: dict[str, Any] = {
+        if self.client.epoch is None:
+            self.client.connect(deadline=deadline)
+        value = {
             "request_id": secrets.token_hex(16), "service_id": self.service,
             "installation_id": self.installation, "generation": self.generation,
-            "operation": "credential.review" if self.protected_review else "credential.get",
-            "parameters": dict(parameters),
+            "operation": "credential.get", "parameters": dict(parameters),
         }
         require(time.monotonic() < deadline, "credential-unavailable")
         submitted = self.client.request_credential(value, deadline=deadline)
@@ -79,7 +70,7 @@ class CredentialWorker:
 
 def _configured_provider(
     path: Path, *, source: str, account: str, forge: ForgeScope | None = None,
-    review: ReviewScope | None = None, timeout: float = 30,
+    timeout: float = 30,
 ) -> Callable[[], CredentialMaterial]:
     from jwcrypto import jwk
     from cryptography.hazmat.primitives import serialization
@@ -92,18 +83,14 @@ def _configured_provider(
         "controller_keys", "bindings",
     })
     require(value["schema"] == "fleet-manager.credential-worker"
-            and type(value["version"]) is int
-            and value["version"] == (2 if review is not None else 1))
+            and type(value["version"]) is int and value["version"] == 1)
     bindings = value["bindings"]
     require(type(bindings) is list and 0 < len(bindings) <= 128)
     matches = []
     identities = set()
     for binding in bindings:
-        credential(binding, protected_review=review is not None)
-        target: ForgeScope | ReviewScope | None
-        if review is not None:
-            target = ReviewScope.load(binding["review"])
-        elif forge is None:
+        credential(binding)
+        if forge is None:
             require("forge" not in binding, "typed-forge-consumer-required")
             target = None
         else:
@@ -113,7 +100,7 @@ def _configured_provider(
         require(identity not in identities, "ambiguous-provider-policy")
         identities.add(identity)
         require(binding["recipient"] == value["principal"], "recipient-denied")
-        if identity == (source, account, review if review is not None else forge):
+        if identity == (source, account, forge):
             matches.append(binding)
     require(len(matches) == 1, "provider-policy-denied")
     parameters = matches[0]
@@ -141,7 +128,6 @@ def _configured_provider(
         client, service=value["service"], installation=value["installation"],
         generation=value["generation"], recipient_key=recipient, controller=value["controller"],
         controller_generation=value["controller_generation"], controller_keys=value["controller_keys"],
-        protected_review=review is not None,
     )
 
     def acquire() -> CredentialMaterial:
@@ -162,11 +148,3 @@ def credential_provider(
     """Load an exact typed forge binding; retain scope, auth type and expiry on renewal."""
     require(isinstance(forge, ForgeScope), "typed-forge-policy-required")
     return _configured_provider(path, source=source, account=account, forge=forge, timeout=timeout)
-
-
-def review_credential_provider(
-    path: Path, *, source: str, account: str, review: ReviewScope, timeout: float = 30,
-) -> Callable[[], CredentialMaterial]:
-    """Select separate v2 configuration; never reinterpret an observation source."""
-    require(isinstance(review, ReviewScope), "typed-review-policy-required")
-    return _configured_provider(path, source=source, account=account, review=review, timeout=timeout)

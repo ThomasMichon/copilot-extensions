@@ -17,7 +17,7 @@ import sys
 import tempfile
 import time
 from contextlib import ExitStack, contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from types import ModuleType
@@ -218,19 +218,18 @@ def _source_files(
         raise error
 
     for root in roots:
-        native_root = Path(_native_retained_path(root))
-        for directory, children, names in os.walk(native_root, onerror=scan_error, followlinks=False):
-            parent = root / Path(directory).relative_to(native_root)
+        for directory, children, names in os.walk(root, onerror=scan_error, followlinks=False):
+            parent = Path(directory)
             for name in list(children):
                 path = parent / name
-                mode = Path(_native_retained_path(path)).lstat().st_mode
+                mode = path.lstat().st_mode
                 if not stat.S_ISDIR(mode):
                     raise ValueError(f"Runtime input directory is not ordinary: {path}")
                 if name in _GENERATED_DIRECTORIES or name.endswith((".egg-info", ".dist-info")):
                     children.remove(name)
             for name in names:
                 path = parent / name
-                if not stat.S_ISREG(Path(_native_retained_path(path)).lstat().st_mode):
+                if not stat.S_ISREG(path.lstat().st_mode):
                     raise ValueError(f"Runtime input file is not ordinary: {path}")
                 if not name.endswith((".pyc", ".pyo")):
                     files.add(path)
@@ -267,12 +266,10 @@ def freeze_inputs(
             raise ValueError(f"Frozen input destination is inside runtime source: {destination}")
     progress = {"on_progress": on_progress} if on_progress is not None else {}
     files = _source_files(roots, **progress)
-    Path(_native_retained_path(destination)).mkdir(parents=True, exist_ok=False)
+    destination.mkdir(parents=True, exist_ok=False)
     try:
         buffer_limit = 32 * 1024 * 1024
-        with tempfile.SpooledTemporaryFile(
-            max_size=buffer_limit, dir=_native_retained_path(destination),
-        ) as buffer:
+        with tempfile.SpooledTemporaryFile(max_size=buffer_limit, dir=destination) as buffer:
             offsets: dict[Path, tuple[int, int]] = {}
 
             def retain_source(source: Path, data: bytes) -> None:
@@ -295,7 +292,7 @@ def freeze_inputs(
                 if len(data) != length:
                     raise OSError("Frozen source buffer read was incomplete")
                 target = destination / source.relative_to(common)
-                Path(_native_retained_path(target.parent)).mkdir(parents=True, exist_ok=True)
+                target.parent.mkdir(parents=True, exist_ok=True)
                 Path(_native_retained_path(target)).write_bytes(data)
                 shutil.copymode(
                     _native_retained_path(source), _native_retained_path(target),
@@ -319,15 +316,14 @@ def freeze_inputs(
             detail = ", ".join(str(path.relative_to(common)) for path in changed[:10])
             raise RuntimeError(f"Runtime input file set changed while freezing inputs: {detail}")
         after = runtime.fingerprint_source(files, **progress)
-        native_roots = tuple(Path(_native_retained_path(root)) for root in frozen_roots)
-        frozen_hash = runtime.fingerprint_source(_source_files(native_roots, **progress), **progress)
+        frozen_hash = runtime.fingerprint_source(_source_files(frozen_roots, **progress), **progress)
         if before != after or before != frozen_hash:
             raise RuntimeError("Runtime input content changed while freezing inputs")
         if deadline is not None:
             _check_deadline(deadline)
         return FrozenInputs(frozen_plugin, frozen_roots, frozen_hash)
     except BaseException:
-        shutil.rmtree(_native_retained_path(destination))
+        shutil.rmtree(destination)
         raise
 
 
@@ -624,7 +620,7 @@ def _construct(
 
 def _prepare_installed(
     inputs: FrozenInputs, slot: Path, python: Path, callable_name: str,
-    data: dict, descriptor: int, timeout: float, payload: FrozenInputs,
+    data: dict, descriptor: int, timeout: float,
 ) -> None:
     module, separator, function = callable_name.partition(":")
     if not separator or not module or not function:
@@ -644,7 +640,7 @@ getattr(module, sys.argv[3])(json.loads(sys.argv[4]))
 """
     _child(
         [str(python), "-I", "-B", "-c", probe, str(slot), module, function,
-         json.dumps({**data, "frozen_plugin": str(payload.plugin)}),
+         json.dumps({**data, "frozen_plugin": str(inputs.plugin)}),
          hashlib.sha256(inputs.source_wheels.canonical).hexdigest()
          if inputs.source_wheels is not None else ""],
         inputs=inputs, descriptor=descriptor, timeout=timeout, candidate=slot,
@@ -858,21 +854,6 @@ def _candidate(
                     slot = runtime.slot(root, version)
                     environment = slot / ".venv" if application is not None else slot
                     python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-                    if construction_callable is not None:
-                        # UV's non-editable metadata projection is a build input,
-                        # not the selected source payload copied by preparation.
-                        temporary = retained.enter_context(_temporary_inputs(None))
-                        with _source_phase("payload-snapshot", child_timeout, {}) as progress:
-                            deadline = _source_deadline(progress)
-                            if inputs.wheel_inputs is not None:
-                                deadline = min(deadline, inputs.wheel_inputs.deadline)
-                            frozen = freeze_inputs(
-                                inputs.plugin, _private_retained_root(Path(temporary)) / "source",
-                                deadline=deadline, on_progress=progress.renew,
-                            )
-                        payload = replace(inputs, plugin=frozen.plugin, packages=frozen.packages)
-                        _revalidate_input_content(payload)
-                        _assert_source_pin(payload.plugin, expected_source_identity)
                     inputs = retained.enter_context(_retained_inputs(
                         inputs, uv, python, refresh=False, timeout=child_timeout,
                     ))
@@ -922,14 +903,10 @@ def _candidate(
                             ) / name
                             shutil.copyfile(source, bootstrap / name)
                     if construction_callable is not None:
-                        _revalidate_input_content(payload)
-                        _assert_source_pin(payload.plugin, expected_source_identity)
                         _prepare_installed(
                             inputs, slot, python, construction_callable,
-                            construction_data or {}, descriptor, child_timeout, payload,
+                            construction_data or {}, descriptor, child_timeout,
                         )
-                        _revalidate_input_content(payload)
-                        _assert_source_pin(payload.plugin, expected_source_identity)
                     _verify_installed(
                         inputs, slot, python, health_module, descriptor, child_timeout,
                         health_callable=health_callable,

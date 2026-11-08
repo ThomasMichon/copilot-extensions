@@ -190,10 +190,9 @@ def project_inputs(snapshot: Path, component: str, *, deadline: float | None = N
         inputs.verify()
         yield selected, inputs
         inputs.verify()
-        observed = select_project(snapshot, component)
-        if observed.identity != selected.identity:
+        if select_project(snapshot, component).identity != selected.identity:
             raise ValueError("project source changed during installation")
-        if observed.source_descriptor != selected.source_descriptor:
+        if select_project(snapshot, component).source_descriptor != selected.source_descriptor:
             raise ValueError("project repository provenance changed during installation")
 
 

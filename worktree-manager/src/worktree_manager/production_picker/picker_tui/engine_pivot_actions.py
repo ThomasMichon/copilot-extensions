@@ -10,7 +10,7 @@ from .create_action_screen import CreateActionScreen
 from .background import run_background
 from .inbox import ensure_inbox
 from .engine_form_drafts import PivotFormDraftActionsMixin
-from .registered_scopes import action_scopes, actions_ready, read_scope, request_scopes
+from .registered_scopes import read_scope, request_scopes
 from .steering import PivotCardScreen, PivotFormScreen, SubmitErrorScreen, _normalize_form_fields, _steer_draft_path
 
 log = logging.getLogger("agent-worktrees.picker")
@@ -35,12 +35,6 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
             self.refresh()
 
         def run():
-            if (getattr(action, "card", None) is None
-                    and getattr(action, "internal", None) != "recover-forms"
-                    and not actions_ready(rt, scopes)):
-                self.debug = "Source read is not current; refresh and reopen this action."
-                self.refresh()
-                return
             if action.internal or action.form or action.card or not action.progress:
                 self._run_task_action(reg, action, ctx)
             else:
@@ -277,7 +271,8 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
         ``progress`` action (D4) streams into the modal ProgressScreen instead of
         the sync status-line path."""
         if "_manager_scope" in rec and getattr(action, "card", None) is None:
-            if not actions_ready(self._pivot_runtime(reg), (rec["_manager_scope"],)):
+            state = self._pivot_runtime(reg).get(rec["_manager_scope"])[0]
+            if state != "ready":
                 self.debug = "Source read is not current; press r to retry before running this action."
                 return
         ctx = self._task_action_ctx(reg, rec)
@@ -316,7 +311,7 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
             argv = _pivots.format_template(action.run, ctx)
 
             def work():
-                result = rt.run_resolved(argv, preserve_output=True, scopes=action_scopes(ctx))
+                result = rt.run_resolved(argv, preserve_output=True)
                 for scope in scopes:
                     rt.invalidate(scope)
                 return result
@@ -571,12 +566,11 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
             try:
                 if retained_request is not None:
                     from .engine_form_requests import run_retained_request
-                    ok, msg = run_retained_request(
-                        *retained_request, runtime=rt, scopes=action_scopes(ctx),
-                    )
+                    ok, msg = run_retained_request(*retained_request)
                 else:
-                    ok, msg = rt.run_resolved(
-                        argv, preserve_output=text_result, scopes=action_scopes(ctx),
+                    ok, msg = (
+                        rt.run_resolved(argv, preserve_output=True) if text_result
+                        else rt.run_resolved(argv)
                     )
             except Exception as exc:  # never let a delivery attempt vanish silently
                 ok, msg = False, f"{type(exc).__name__}: {exc}"

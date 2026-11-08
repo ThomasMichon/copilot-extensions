@@ -153,39 +153,17 @@ def confirms(value, selected, scope):
     return selected["verdict"] != "COMMENTED" and ids.get("reviewer_id") == scope["principal_id"]
 
 
-def new_operation(selected: dict, *, created_at: float, receipt_bytes: int) -> dict:
-    """Reserve one final intent and its eventual attempt/receipt growth."""
-    operation = {
-        "intent": copy.deepcopy(selected), "intent_id": _digest(selected), "created_at": created_at,
-        "actions": [{"id": action["id"], "state": "unattempted", "attempt_id": None, "receipt": None}
-                    for action in selected["actions"]],
-    }
-    operation["reserved_bytes"] = (
-        len(encoded(operation)) + len(selected["actions"]) * (receipt_bytes + 512) + 1024
-    )
-    return operation
-
-
-def validate_operations(operations, *, receipt_bytes, review_bytes, versions=(1,), selections=False):
+def validate_operations(operations, *, receipt_bytes, review_bytes, versions=(1,)):
     if not isinstance(operations, list) or len(operations) > MAX_OPERATIONS:
         raise ValueError("invalid persisted review operations")
     identities = set()
     write_ids = set()
     for operation in operations:
-        names = {"intent", "intent_id", "reserved_bytes", "created_at", "actions"}
-        selection = operation.get("selection") if isinstance(operation, dict) else None
-        if selections and isinstance(operation, dict) and "selection" in operation:
-            names.add("selection")
-            if not isinstance(selection, dict) or set(selection) != {"input_id", "stage"}:
-                raise ValueError("invalid retained review selection")
-            identifier(selection["input_id"])
-            if selection["stage"] not in ("prepared", "admitted"):
-                raise ValueError("invalid retained review selection stage")
-        if not isinstance(operation, dict) or set(operation) != names:
+        if not isinstance(operation, dict) or set(operation) != {
+            "intent", "intent_id", "reserved_bytes", "created_at", "actions",
+        }:
             raise ValueError("invalid persisted review operation")
         selected = intent(operation["intent"], persisted=True, versions=versions)
-        if selection is not None and selected["version"] != 2:
-            raise ValueError("retained selection requires prepared intent")
         identity = selected["operation_id"]
         if identity in identities or operation["intent_id"] != _digest(selected):
             raise ValueError("persisted review intent identity mismatch")
@@ -207,8 +185,6 @@ def validate_operations(operations, *, receipt_bytes, review_bytes, versions=(1,
                 raise ValueError("invalid persisted action state")
             if state["id"] != chosen["id"] or state["state"] not in ("unattempted", "unknown", "confirmed"):
                 raise ValueError("persisted review action mismatch")
-            if selection is not None and selection["stage"] == "prepared" and state["state"] != "unattempted":
-                raise ValueError("pre-approval selection cannot contain an execution attempt")
             if state["state"] == "unattempted":
                 if state["attempt_id"] is not None or state["receipt"] is not None:
                     raise ValueError("unattempted review action has an effect")
@@ -220,12 +196,9 @@ def validate_operations(operations, *, receipt_bytes, review_bytes, versions=(1,
                     state["receipt"] is None or not confirms(state["receipt"], chosen, selected["scope"])
                 ):
                     raise ValueError("confirmed review action lacks a native receipt")
-        reserved = {"intent": selected, "intent_id": _digest(selected), "created_at": operation["created_at"],
-                    "actions": [{"id": a["id"], "state": "unattempted", "attempt_id": None, "receipt": None}
-                                for a in selected["actions"]]}
-        if selection is not None:
-            reserved["selection"] = selection
-        required = len(encoded(reserved)) + len(actions) * (receipt_bytes + 512) + 1024
+        required = len(encoded({"intent": selected, "intent_id": _digest(selected), "created_at": operation["created_at"],
+                                "actions": [{"id": a["id"], "state": "unattempted", "attempt_id": None, "receipt": None}
+                                            for a in selected["actions"]]})) + len(actions) * (receipt_bytes + 512) + 1024
         if type(operation["reserved_bytes"]) is not int or operation["reserved_bytes"] < required:
             raise ValueError("review operation lost its receipt reservation")
         if len(encoded(operation)) > operation["reserved_bytes"]:

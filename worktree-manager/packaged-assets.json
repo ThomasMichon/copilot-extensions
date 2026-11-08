@@ -1,108 +1,17 @@
 {
   "schema": "copilot-extensions.packaged-assets",
-  "version": 2,
-  "groups": [
-    {
-      "canonicalDir": "tools",
-      "payloadDir": "scripts/runtime-source-tools",
-      "files": [
-        "prepare_runtime_source.py", "materialize_main.py", "materialize_installer_engine.py",
-        "installer_engine_ref.py", "materialize_launch_wrapper_assets.py",
-        "launch_wrapper_assets_ref.py", "uv_editable_ref.py", "nested_uv_editable_ref.py",
-        "standalone_consumers.py"
-      ]
-    },
-    {
-      "canonicalDir": "tools",
-      "payloadDir": "scripts/runtime-input-provider/tools",
-      "files": [
-        "prepare_manager_application.py", "manager_application_provider.json",
-        "local_install_source.py", "local_install_profile.py", "runtime_application_project.py",
-        "application_sources.py", "python_project_inventory.py",
-        "prepare_runtime_source.py", "materialize_main.py", "materialize_installer_engine.py",
-        "installer_engine_ref.py", "materialize_launch_wrapper_assets.py",
-        "launch_wrapper_assets_ref.py", "uv_editable_ref.py", "nested_uv_editable_ref.py",
-        "standalone_consumers.py", "build_python_artifacts.py", "build_toolchain_lock.py",
-        "build_toolchain_queries.py", "artifact_source_build.py", "governed_feed_trust.py",
-        "public_toolchain_source.py", "seasoned_public_feed.py", "seasoned_uv.py",
-        "promotion_python_artifacts.py", "promotion_bundle_members.py", "standalone_python_artifacts.py",
-        "plugin_runtime_resources.py", "artifact_attestation.py", "runtime_wheel_inspection.py",
-        "runtime_profile.py", "runtime_profile_policy.py", "runtime_profile_release.py",
-        "runtime_profile_wheels.py", "runtime_source_lock.py", "runtime_feed_configuration.py"
-      ]
-    },
-    {
-      "canonicalDir": "libs/installer-engine",
-      "payloadDir": "scripts/runtime-input-provider/libs/installer-engine",
-      "files": [
-        "installer_engine.py", "installer_engine_health.py", "runtime_launcher.py",
-        "installer_driver.py", "install_source.py", "installer_wheel_inputs.py",
-        "installer_wheel_snapshot.py", "installer_wheel_acquisition.py", "installer_native_feed.py",
-        "installer_feed_policy.py", "installer_packaging_seed.py", "installer_source_build.py",
-        "installer_source_wheel_cache.py", "installer_dependency_policy.py",
-        "installer_dependency_config.py", "installer_retained_content.py",
-        "installer_dependency_arguments.py", "installer_engine_uninstall.py",
-        "installer_engine_uninstall_darwin.py", "installer_engine_uninstall_windows.py",
-        "installer_engine_footprint.py", "installer_engine_uninstall_controllers.py",
-        "installer_engine_commands.py", "installer_engine_stop.py", "installer_engine_process.py",
-        "runtime_application_binstubs.py", "runtime_application_install.py"
-      ]
-    },
-    {
-      "canonicalDir": "libs/versioned-runtime",
-      "payloadDir": "scripts/runtime-input-provider/libs/versioned-runtime",
-      "files": [
-        "versioned_runtime.py", "versioned_runtime_leases.py", "versioned_runtime_source.py",
-        "versioned_runtime_construction.py", "versioned_runtime_publication.py",
-        "standalone_build.py", "versioned_runtime_native.ps1"
-      ]
-    },
-    {
-      "canonicalDir": "libs/installation-context",
-      "payloadDir": "scripts/runtime-input-provider/libs/installation-context",
-      "files": [
-        "installation_context.py", "_installation_context_base.py",
-        "_installation_context_files.py", "_installation_context_source.py",
-        "_installation_context_lock_recovery.py", "_installation_context_receipts.py",
-        "_installation_context_snapshot.py", "_installation_context_runtime_slot_ownership.py",
-        "_installation_context_runtime_slot_completion.py", "_installation_context_resolution.py",
-        "_installation_context_guest_environment.py", "_installation_context_activation.py",
-        "_installation_context_legacy_attribution.py", "_installation_context_legacy_transition.py",
-        "_installation_context_legacy_retirement.py", "_installation_context_maintenance.py",
-        "_installation_context_mode_cli.py", "_installation_context_deployment.py",
-        "_installation_context_publication.py", "_installation_context_powershell.py"
-      ]
-    },
-    {
-      "canonicalDir": "libs/agent-procutil/src/agent_procutil",
-      "payloadDir": "scripts/runtime-input-provider/libs/agent-procutil/src/agent_procutil",
-      "files": [
-        "__init__.py", "_async.py", "_caller_owned.py", "_daemon_instance_child.py",
-        "_daemon_instance_cli.py", "_daemon_instance_clock.py", "_daemon_instance_identity.py",
-        "_daemon_instance_linux.py", "_daemon_instance_native.py", "_daemon_instance_owner.py",
-        "_daemon_instance_records.py", "_daemon_instance_shell_windows.py",
-        "_daemon_instance_shell.py", "_daemon_instance_store.py", "_darwin_caller_owned.py",
-        "_interactive_groups.py", "_interactive_session.py", "_interactive_terminal.py",
-        "_interpreter.py", "_job_scopes.py", "_linux_pidfd.py", "_native_owned.py",
-        "_native_query.py", "_output_relay.py", "_retirement_channel.py",
-        "_retirement_custodian.py", "_shell_caller_owned.py", "_terminal_offer.py",
-        "_windows_caller_owned.py", "_windows_job_types.py", "_windows_parent_job.py",
-        "daemon_broker.py", "daemon_instance_runtime.pyz", "daemon_instances.ps1",
-        "daemon_instances.py", "daemon_instances.sh", "daemon.py", "diagnostics.py",
-        "interactive.py", "job_activity.py", "linux_daemon_scope.py", "metrics_accounting.py",
-        "metrics.py", "native_child.py", "native_daemon.ps1", "native_daemon.sh",
-        "native_owned.ps1", "native_owned.sh", "owned_budget.py", "owned_process.py",
-        "process_retirement.py", "python_cache.py", "retirement_custody.py", "startup.py",
-        "streaming.py", "windows_broker_cell.py", "windows_broker_entry.py",
-        "windows_broker_installation.py", "windows_broker_native.py",
-        "windows_broker_protocol.py", "windows_broker_retention.py", "windows_broker_task.ps1",
-        "windows_task_broker.py", "wsl.py"
-      ]
-    },
-    {
-      "canonicalDir": "worktree-manager/scripts",
-      "payloadDir": "scripts/runtime-input-provider/worktree-manager/scripts",
-      "files": ["install_source.py"]
-    }
+  "version": 1,
+  "canonicalDir": "tools",
+  "payloadDir": "scripts/runtime-source-tools",
+  "files": [
+    "prepare_runtime_source.py",
+    "materialize_main.py",
+    "materialize_installer_engine.py",
+    "installer_engine_ref.py",
+    "materialize_launch_wrapper_assets.py",
+    "launch_wrapper_assets_ref.py",
+    "uv_editable_ref.py",
+    "nested_uv_editable_ref.py",
+    "standalone_consumers.py"
   ]
 }

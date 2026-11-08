@@ -29,14 +29,8 @@ def _infer_worktree_id_from_cwd(*args, **kwargs): return _core()._infer_worktree
 def _confirm_clear_publication(worktree_id: str, *, after: float, timeout: float = 35.0) -> dict:
     """Wait for the existing resident producer; reads never recompute the roster."""
     from . import worktrees_client
-    from .worktree_notifications import notify_worktree_changed
     from .worktrees_projection_index import ProjectionUnavailable
 
-    try:
-        record = tracking.load_record(cfg.tracking_dir() / f"{worktree_id}.yaml")
-        notify_worktree_changed(record.worktree_path)
-    except Exception:
-        pass
     request = {
         "contract_version": 1, "project": cfg.project_name(),
         "worktree_id": worktree_id, "include_missing": True,

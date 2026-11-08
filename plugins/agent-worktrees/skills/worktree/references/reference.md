@@ -45,29 +45,6 @@ ssh <machine-alias> "<project> worktrees list-sessions --worktree <full-worktree
 ssh <machine-alias> "<project> worktrees session-transcript <session-id> --json"
 ```
 
-To inventory one project across every SSH-ready machine in a single bounded
-call, use the fleet reader instead of per-host SSH scripts:
-
-```bash
-<agent-worktrees catalog argv[0]> --project <project> fleet --json
-```
-
-It runs one `agent-worktrees --project <project> list --json --passive`
-per target, which never starts or waits for a host's status-monitor, and
-returns `{"version": 1, "hosts": [...]}`. Live work is rows whose
-derived `state == "active"`, not lifecycle `status == "active"`. A row with
-`reachable: false` carries an `error` and is unknown coverage, never zero
-worktrees; a row with `availability` holds saved, possibly stale rows. `fleet`
-covers the selected project only; for other projects, read each target host's
-own `repos list --strict --json`, require `inventory_authority: "complete"`
-(otherwise that host's projects are unknown), and run one read per
-registered project. See the CLI reference's
-[Fleet worktree inventory](../../../docs/cli-reference.md#fleet-worktree-inventory).
-
-Do not use an unscoped `list-sessions` or `list-sessions --all-projects` as
-an inventory sweep: it scans all session history and can take over a minute
-on a host with a large history. Narrow it with `--worktree <full-worktree-id>`.
-
 Always pass the resolved **full worktree id** to follow-up commands; some
 surfaces display or accept a four-character suffix, but support is not
 uniform and suffixes can be ambiguous. Once `list-sessions` supplies exact

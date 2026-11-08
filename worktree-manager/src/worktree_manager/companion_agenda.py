@@ -8,7 +8,7 @@ from collections.abc import Callable
 from contextlib import closing
 from threading import Event
 from rich.text import Text
-from . import agenda_graph_render, agenda_transport, engine_client
+from . import agenda_transport, engine_client
 from .agenda_contract import AgendaFeed, AgendaPublicationFence, AgendaUnavailable
 from .engine_process import EngineCleanupError
 
@@ -31,12 +31,6 @@ def agenda_text(frame: dict | None, error: str | None) -> Text:
         )
         return text
     observation = frame["observation"]
-    if "graph" in observation:
-        # Lanes only line up unwrapped; long rows end in an ellipsis instead.
-        text.no_wrap, text.overflow = True, "ellipsis"
-        text.append_text(agenda_graph_render.render(observation))
-        text.append("Publication is not acceptance, permission, or an action.", style="dim")
-        return text
     snapshot = observation["snapshot"]
     text.append(
         f"Published revision {observation['revision']} at {observation['committed_at']}\n",

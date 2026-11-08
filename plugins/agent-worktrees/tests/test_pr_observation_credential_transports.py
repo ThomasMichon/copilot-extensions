@@ -27,7 +27,6 @@ from test_pr_observation_credentials import Binding, Source
     ("github.com", "https://api.github.com", "api.github.com:443"),
     ("github.com:443", "https://api.github.com", "api.github.com:443"),
     ("tenant.ghe.com:443", "https://api.tenant.ghe.com", "api.tenant.ghe.com:443"),
-    ("forge.example:8443", "https://forge.example:8443/api/v3", "forge.example:8443"),
 ])
 def test_actual_gh_api_host_override_cannot_redirect_a_scoped_request(
     tmp_path, monkeypatch, host, api_base, destination,
@@ -85,13 +84,6 @@ def test_actual_gh_api_host_override_cannot_redirect_a_scoped_request(
                 )
             assert destinations == [destination]
             assert source.calls == 1
-            destinations.clear()
-            with pytest.raises(ProviderError):
-                github.GitHubProvider().observe_branch(
-                    "owner/repository", "topic/branch",
-                    api_base="https://" + host, token="synthetic-control",
-                )
-            assert destinations == [destination]
         finally:
             server.shutdown()
             thread.join(timeout=5)
@@ -109,8 +101,6 @@ def test_actual_native_subprocess_receives_each_renewal_without_token_argv(tmp_p
         "url = sys.argv[-1]\n"
         "if '/pulls/7' == url[-8:]:\n"
         "    value = {'state':'open','head':{'sha':'head'},'title':'Example'}\n"
-        "elif '/git/ref/heads/topic' in url:\n"
-        "    value = {'ref':'refs/heads/topic','object':{'type':'commit','sha':'a'*40}}\n"
         "elif url.endswith('/status'):\n"
         "    value = {'total_count':0,'statuses':[]}\n"
         "elif '/check-runs?' in url:\n"
@@ -133,11 +123,6 @@ def test_actual_native_subprocess_receives_each_renewal_without_token_argv(tmp_p
     assert snapshot.head_sha == "head" and snapshot.checks_complete
     assert source.calls == 4
     assert "synthetic-" not in repr(snapshot)
-    observed = github.GitHubProvider().observe_branch(
-        "owner/repository", "topic", api_base="https://forge.example",
-        token="synthetic-branch",
-    )
-    assert observed["head_sha"] == "a" * 40
 
 
 def certificate(tmp_path):

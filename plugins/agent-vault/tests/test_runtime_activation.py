@@ -1,6 +1,5 @@
 """Actual payload first-touch controls with no Vault runtime or backend."""
 
-import base64
 import json
 import os
 from pathlib import Path
@@ -120,9 +119,7 @@ def test_native_payload_configuration_root_keeps_caller_paths(tmp_path, environm
         payload, env, home, "--configuration-root", str(project), "invocation-contract", "--json",
     )
     assert metadata.returncode == 0, metadata.stdout + metadata.stderr
-    assert json.loads(metadata.stdout)["capabilities"] == [
-        "configuration-root-v1", "batch-get-v1", "ssh-key-install-pin-v1",
-    ]
+    assert json.loads(metadata.stdout)["capabilities"] == ["configuration-root-v1", "batch-get-v1"]
     assert not (runtime / "run").exists()
 
 
@@ -326,9 +323,7 @@ def test_native_user_shortcut_preserves_cold_scope_and_read_only_contract(
     if prepared and operation == "scope":
         assert json.loads(result.stdout)["group"] == "selected"
     if prepared and operation == "contract":
-        assert json.loads(result.stdout)["capabilities"] == [
-            "configuration-root-v1", "batch-get-v1", "ssh-key-install-pin-v1",
-        ]
+        assert json.loads(result.stdout)["capabilities"] == ["configuration-root-v1", "batch-get-v1"]
     if not prepared and dispatcher_aware and operation == "contract":
         assert json.loads(result.stdout)["runtime_prepared"] is False
     assert (runtime / "versions").exists() is prepared
@@ -356,22 +351,18 @@ def test_native_payload_explains_missing_repository_before_unlock(tmp_path):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows PowerShell strict-mode contract")
-@pytest.mark.parametrize("reason", [None, "repository-context-missing", "startup"])
+@pytest.mark.parametrize("reason", [None, "repository-context-missing"])
 def test_native_activation_failure_retains_diagnostic_under_strict_mode(tmp_path, reason):
     home, payload, runtime, _identity, _context = prepare_payload(tmp_path, "legacy")
     failure = {"state": "failed", "detail": "fixture invalid configuration"}
-    if reason == "repository-context-missing":
+    if reason:
         failure["reason"] = reason
-    reader = payload / "scripts" / "runtime-activation.py"
-    if reason == "startup":
-        reader.unlink()
-    else:
-        reader.write_text(
-            "import json\n"
-            f"print(json.dumps({failure!r}))\n"
-            "raise SystemExit(3)\n",
-            encoding="utf-8",
-        )
+    (payload / "scripts" / "runtime-activation.py").write_text(
+        "import json\n"
+        f"print(json.dumps({failure!r}))\n"
+        "raise SystemExit(3)\n",
+        encoding="utf-8",
+    )
     script = str(payload / "scripts" / "runtime-activation.ps1").replace("'", "''")
     project = str(tmp_path).replace("'", "''")
     python = str(sys.executable).replace("'", "''")
@@ -388,193 +379,13 @@ def test_native_activation_failure_retains_diagnostic_under_strict_mode(tmp_path
         cwd=home, env=env, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
     )
     assert result.returncode == 3, result.stdout + result.stderr
-    if reason == "startup":
-        assert "can't open file" in result.stderr
-    elif reason:
+    if reason:
         assert "repository context is missing" in result.stderr
         assert "<repo> vault unlock" in result.stderr
     else:
         assert "Reader exit: 3; state: failed" in result.stderr
         assert "fixture invalid configuration" in result.stderr
     assert not runtime.exists()
-
-
-@pytest.mark.skipif(os.name != "nt", reason="native Windows activation selection")
-@pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
-@pytest.mark.parametrize(
-    "scenario", ["old-first", "3.10-only", "launcher", "unsupported", "missing", "explicit"],
-)
-def test_native_cold_activation_qualifies_reader_without_installing(tmp_path, host, scenario):
-    executable = shutil.which(host)
-    if executable is None:
-        pytest.skip(f"{host} unavailable")
-    home, payload, runtime, _identity, _context = prepare_payload(tmp_path / "cold reader", "legacy")
-    configuration = home / ".agent-vault.json"
-    configuration.write_bytes(b'{"enabled":false}')
-    retained = configuration.read_bytes()
-    old = tmp_path / "old" / "python.exe"
-    alias = tmp_path / "WindowsApps" / "python.exe"
-    launcher_path = tmp_path / "launcher" / "py.exe"
-    physical = Path(sys._base_executable)
-
-    def literal(value):
-        return "'" + str(value).replace("'", "''") + "'"
-
-    candidates = {
-        "old-first": [old, alias, physical],
-        "3.10-only": [physical],
-        "launcher": [],
-        "unsupported": [old, alias],
-        "missing": [],
-        "explicit": [old],
-    }[scenario]
-    helper = payload / "scripts" / "versioned_runtime_native.ps1"
-    helper.write_text(
-        helper.read_text(encoding="utf-8") + f"""
-Rename-Item Function:\\Invoke-Hidden Invoke-ActivationRealHidden
-$script:activationDiscoveries=0
-$script:activationReaderCalls=0
-function Get-Command {{
-    param($Name,[switch]$All,$CommandType,$ErrorAction)
-    $script:activationDiscoveries++
-    if ($Name -eq 'python3') {{
-        foreach ($path in @({','.join(literal(path) for path in candidates)})) {{
-            [pscustomobject]@{{Source=$path;CommandType='Application'}}
-        }}
-    }} elseif ($Name -eq 'py' -and {literal(scenario)} -eq 'launcher') {{
-        [pscustomobject]@{{Source={literal(launcher_path)};CommandType='Application'}}
-    }}
-}}
-function Invoke-Hidden {{
-    param($FilePath,$ArgList,[ref]$ErrorOutput,[switch]$StreamOutput,[hashtable]$Environment)
-    if ($StreamOutput) {{ throw 'activation entered an installer driver' }}
-    $capture=@{{}}
-    if ($PSBoundParameters.ContainsKey('ErrorOutput')) {{ $capture.ErrorOutput=$ErrorOutput }}
-    if ($PSBoundParameters.ContainsKey('Environment')) {{ $capture.Environment=$Environment }}
-    if ($FilePath -eq {literal(launcher_path)}) {{
-        $global:LASTEXITCODE=1
-        if ($ArgList[0] -eq '-3.10') {{
-            $global:LASTEXITCODE=0
-            return (ConvertTo-Json -Compress {literal(physical)})
-        }}
-        return
-    }}
-    if ($ArgList -contains '-c') {{
-        $version=if ($FilePath -eq {literal(old)}) {{ '(3,9)' }} else {{ '(3,10)' }}
-        $prefix='import sys;sys.version_info=' + $version + ';'
-        return Invoke-ActivationRealHidden -FilePath {literal(physical)} -ArgList @(
-            '-I','-S','-B','-c',($prefix+$ArgList[[array]::IndexOf($ArgList,'-c')+1]),
-            $ArgList[-2],$ArgList[-1]
-        ) @capture
-    }}
-    $script:activationReaderCalls++
-    Invoke-ActivationRealHidden -FilePath $FilePath -ArgList $ArgList @capture
-}}
-""",
-        encoding="utf-8",
-    )
-    command = f"""
-Set-StrictMode -Version 2
-$ErrorActionPreference='Stop'
-$env:OS='Windows_NT'
-$env:LOCALAPPDATA={literal(tmp_path / 'no-installations')}
-$env:ProgramFiles=$env:LOCALAPPDATA
-${{env:ProgramFiles(x86)}}=$env:LOCALAPPDATA
-$before=$env:PATH
-. {literal(payload / 'scripts' / 'runtime-activation.ps1')}
-$failure=$null
-$activation=$null
-try {{
-    $activation=Get-VaultRuntimeActivation -Project {literal(home)} -RuntimeRoot {literal(runtime)} {
-        '-Python ' + literal(physical) if scenario == 'explicit' else ''
-    }
-}} catch {{ $failure=$_.Exception.Message }}
-@{{activation=$activation;failure=$failure;pathUnchanged=($before -ceq $env:PATH);
-   discoveries=$script:activationDiscoveries;readerCalls=$script:activationReaderCalls}} |
-    ConvertTo-Json -Compress
-"""
-    encoded = base64.b64encode(command.encode("utf-16le")).decode("ascii")
-    env = _clean_env({"HOME": str(home), "USERPROFILE": str(home)})
-    result = subprocess.run(
-        [executable, "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
-        env=env, cwd=home, capture_output=True, text=True, encoding="utf-8",
-        timeout=30, **no_window_kwargs(),
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    details = json.loads(result.stdout)
-    assert details["pathUnchanged"] is True
-    if scenario in ("unsupported", "missing"):
-        assert details["activation"] is None
-        assert "Python 3.10+ reader" in details["failure"]
-        assert details["readerCalls"] == 0
-    else:
-        assert details["failure"] is None
-        assert details["activation"]["state"] == "configuration-empty"
-        assert details["readerCalls"] == 1
-    if scenario == "explicit":
-        assert details["discoveries"] == 0
-    assert configuration.read_bytes() == retained
-    assert not runtime.exists()
-    assert not (home / ".copilot-extensions").exists()
-
-
-@pytest.mark.skipif(os.name == "nt", reason="native POSIX activation selection")
-@pytest.mark.parametrize("scenario", ["old-first", "unsupported", "missing", "explicit"])
-def test_posix_cold_activation_qualifies_reader_without_installing(tmp_path, scenario):
-    import shlex
-
-    host = shutil.which("bash")
-    if host is None:
-        pytest.skip("bash unavailable")
-    home, payload, runtime, _identity, _context = prepare_payload(tmp_path / "cold reader", "legacy")
-    configuration = home / ".agent-vault.json"
-    configuration.write_bytes(b'{"enabled":false}')
-    retained = configuration.read_bytes()
-    old, supported = tmp_path / "old", tmp_path / "supported"
-    old.mkdir()
-    supported.mkdir()
-    (old / "python3").write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
-    (old / "python3").chmod(0o700)
-    (supported / "python3").write_text(
-        "#!/bin/sh\nexec " + shlex.quote(sys.executable) + ' "$@"\n', encoding="utf-8",
-    )
-    (supported / "python3").chmod(0o700)
-    paths = {
-        "old-first": [old, supported],
-        "unsupported": [old],
-        "missing": [],
-        "explicit": [old],
-    }[scenario]
-    # dirname is the shell helper's ordinary prerequisite, not a Python fallback.
-    utilities = tmp_path / "utilities"
-    utilities.mkdir()
-    dirname = shutil.which("dirname")
-    if dirname is None:
-        pytest.skip("dirname unavailable")
-    (utilities / "dirname").symlink_to(dirname)
-    command = (
-        ". " + shlex.quote(str(payload / "scripts" / "runtime-activation.sh"))
-        + "; before=$PATH; vault_runtime_activation " + shlex.quote(str(home))
-        + " " + shlex.quote(sys.executable if scenario == "explicit" else "")
-        + '; code=$?; test "$PATH" = "$before" || exit 91; exit "$code"'
-    )
-    env = _clean_env({
-        "HOME": str(home), "USERPROFILE": str(home),
-        "PATH": os.pathsep.join(map(str, [*paths, utilities])),
-        "AGENT_VAULT_HOME": str(runtime),
-    })
-    result = subprocess.run(
-        [host, "-c", command], cwd=home, env=env, capture_output=True,
-        text=True, encoding="utf-8", timeout=30, **no_window_kwargs(),
-    )
-    assert result.returncode == (3 if scenario in ("unsupported", "missing") else 2), result.stderr
-    details = json.loads(result.stdout)
-    assert details["state"] == ("failed" if result.returncode == 3 else "configuration-empty")
-    if result.returncode == 3:
-        assert "Python 3.10+ reader" in details["detail"]
-    assert configuration.read_bytes() == retained
-    assert not runtime.exists()
-    assert not (home / ".copilot-extensions").exists()
 
 
 @pytest.mark.skipif(os.name == "nt", reason="native POSIX installer argument validation")
@@ -602,58 +413,6 @@ def test_native_installer_rejects_arguments_before_activation(
     assert result.returncode == code, result.stdout + result.stderr
     assert message in result.stderr
     assert not (home / ".agent-vault").exists()
-    assert not (home / ".copilot-extensions").exists()
-
-
-@pytest.mark.skipif(os.name != "nt", reason="real Windows cold activation entry")
-@pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
-def test_actual_cold_activation_uses_path_python_without_runtime(tmp_path, host):
-    executable = shutil.which(host)
-    if executable is None:
-        pytest.skip(f"{host} unavailable")
-    home, payload, runtime, _identity, _context = prepare_payload(tmp_path / "actual cold reader", "legacy")
-    configuration = home / ".agent-vault.json"
-    configuration.write_bytes(b'{"enabled":false}')
-    console_receipt = home / "reader-console.json"
-    reader = payload / "scripts" / "runtime-activation.py"
-    reader.write_text(
-        reader.read_text(encoding="utf-8").replace(
-            "import argparse\n",
-            "import argparse\nimport ctypes\nimport json\nfrom pathlib import Path\n"
-            "_kernel = ctypes.WinDLL('kernel32', use_last_error=True)\n"
-            "_kernel.GetConsoleWindow.restype = ctypes.c_void_p\n"
-            f"Path({str(console_receipt)!r}).write_text(json.dumps("
-            "{'console_window': _kernel.GetConsoleWindow()}), encoding='utf-8')\n",
-            1,
-        ),
-        encoding="utf-8",
-    )
-    script = str(payload / "scripts" / "runtime-activation.ps1").replace("'", "''")
-    project = str(home).replace("'", "''")
-    selected_root = str(runtime).replace("'", "''")
-    command = (
-        "Set-StrictMode -Version 2; $ErrorActionPreference='Stop'; $before=$env:PATH; "
-        "Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; "
-        "public static class ConsoleProbe { [DllImport(\"kernel32.dll\")] "
-        "public static extern IntPtr GetConsoleWindow(); }'; "
-        "if ([ConsoleProbe]::GetConsoleWindow() -ne [IntPtr]::Zero) { exit 92 }; "
-        f". '{script}'; Get-VaultRuntimeActivation -Project '{project}' -RuntimeRoot '{selected_root}' "
-        "| ConvertTo-Json -Compress; if ($before -cne $env:PATH) { exit 91 }"
-    )
-    env = _clean_env({
-        "HOME": str(home), "USERPROFILE": str(home),
-        "PATH": str(Path(sys._base_executable).parent),
-    })
-    result = subprocess.run(
-        [executable, "-NoProfile", "-NonInteractive", "-Command", command],
-        env=env, cwd=home, capture_output=True, text=True, encoding="utf-8",
-        timeout=30, **no_window_kwargs(),
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert json.loads(result.stdout)["state"] == "configuration-empty"
-    assert json.loads(console_receipt.read_text(encoding="utf-8"))["console_window"] is None
-    assert configuration.read_bytes() == b'{"enabled":false}'
-    assert not runtime.exists()
     assert not (home / ".copilot-extensions").exists()
 
 

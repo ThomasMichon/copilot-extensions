@@ -453,12 +453,10 @@ def test_retained_controller_prepares_dev_source_without_its_acquisition(
     _root, acquisition, driver, _start, _effects = bootstrap
     manifest = SOURCE / "worktree-manager" / "packaged-assets.json"
     shutil.copy2(manifest, acquisition / "worktree-manager" / manifest.name)
-    declaration = json.loads(manifest.read_text(encoding="utf-8"))
-    for group in declaration.get("groups", [declaration]):
-        for name in group["files"]:
-            destination = acquisition / group["canonicalDir"] / name
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(SOURCE / group["canonicalDir"] / name, destination)
+    tools = acquisition / "tools"
+    tools.mkdir()
+    for name in json.loads(manifest.read_text(encoding="utf-8"))["files"]:
+        shutil.copy2(SOURCE / "tools" / name, tools / name)
     _git(acquisition, "add", ".")
     _git(
         acquisition, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",

@@ -288,9 +288,9 @@ def _admit_queue(root: Path, custody: OperationLock | BorrowedCustody) -> None:
         current is not None and current.root == root and current._lock is custody
     )
     with core._database(root, expected_identity=identity) as db:
-        if core._has_fence(db, root):
-            raise FoundationStateError("foundation fenced by unsettled queue transaction")
-        for row in db.execute("SELECT * FROM requests WHERE state='running'"):
+        for row in db.execute(
+            "SELECT * FROM requests WHERE state IN ('running','interrupted','blocked')",
+        ):
             request = core._request(row, root)
             if not request.unresolved:
                 continue

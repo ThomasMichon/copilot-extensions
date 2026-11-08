@@ -473,22 +473,6 @@ def test_require_scope_escape_hatch(monkeypatch):
         assert m._require_codespace_scope("create") is None
 
 
-def test_selected_scope_does_not_check_unrelated_saved_accounts(monkeypatch):
-    monkeypatch.delenv("AGENT_CODESPACES_SKIP_SCOPE_CHECK", raising=False)
-    environment = {"GH_TOKEN": "selected-fixture-token"}
-
-    def run(argv, **kwargs):
-        assert kwargs["env"] == environment
-        selected_only = "--active" in argv and argv[-2:] == ["--hostname", "github.com"]
-        return MagicMock(
-            returncode=0 if selected_only else 1,
-            stdout="Token scopes: codespace", stderr="" if selected_only else "unrelated login expired",
-        )
-
-    with patch("subprocess.run", side_effect=run):
-        assert m._require_codespace_scope("create", environment=environment) is None
-
-
 def test_doctor_exit_zero_when_clean(capsys):
     async def _ok(_account=None):
         return GithubCredentialPreflight(ok=True, source="git-credential")

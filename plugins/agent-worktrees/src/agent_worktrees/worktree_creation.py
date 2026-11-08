@@ -33,11 +33,9 @@ from datetime import datetime
 from pathlib import Path
 
 from lazy_cli_dispatch import self_override as _self_override
-from agent_procutil.owned_process import OwnedCleanupError
 
 from . import (
     activity,
-    application_admission,
     codename_tracking,
     creation_diagnostics,
     git_ops,
@@ -50,11 +48,50 @@ from . import (
 from . import config as cfg
 from .launch_progress import step
 from .creation_allocation import AdmittedAllocation, creation_parameters
-from .creation_failures import LaunchSeedStagingFailure as LaunchSeedStagingFailure
 from .creation_identity import IdentityMode, new_machine_identity, require_same_machine_identity, validate_mode
 from .worktree_machine_identity import WorktreeMachineIdentity
 from .receiving_allocation import ReceivingAllocation
 from .creation_owner_claim import _journal_owner_reciprocal_claim as _journal_owner_reciprocal_claim
+
+
+class LaunchSeedStagingFailure(RuntimeError):
+    """Creation succeeded, but seed staging did not produce a confirmed result."""
+
+    def __init__(self, record, seed_id: str, cause: Exception):
+        from .tracking_write import AmbiguousWriteOutcome
+
+        self.worktree = {
+            "id": record.worktree_id, "path": record.worktree_path,
+            "branch": record.branch, "repo": record.repo,
+        }
+        self.seed_id = seed_id
+        self.ambiguous = isinstance(cause, AmbiguousWriteOutcome)
+        super().__init__(
+            f"Worktree {record.worktree_id} was created at {record.worktree_path}, "
+            f"but launch-prompt staging did not confirm: {cause}. "
+            f"Do not retry --new; recover this existing --worktree-id {record.worktree_id}."
+        )
+
+    def payload(self) -> dict:
+        return {
+            "error": str(self), "created": True, "worktree": self.worktree,
+            "launch_seed": {
+                "seed_id": self.seed_id, "status": "unknown" if self.ambiguous else "unconfirmed",
+            },
+            "recovery": {
+                "action": "inspect-and-retry-existing",
+                "worktree_id": self.worktree["id"], "repeat_new": False,
+            },
+        }
+
+    def emit(self, *, json_out: bool) -> int:
+        from . import output
+
+        if json_out:
+            output._json_output(self.payload())
+        else:
+            output.err(str(self))
+        return 3
 
 
 def _core():
@@ -120,7 +157,6 @@ def _carve_paired_knowledge(
     machine_identity: WorktreeMachineIdentity | None = None,
     legacy_machine: str | None = None,
     revalidate_creation: Callable[[], None] | None = None,
-    retained_pair_path: Path | None = None,
 ) -> dict | None:
     """Carve/stamp the citadel knowledge-repo PAIR for a stateless harness (#957).
 
@@ -201,11 +237,7 @@ def _carve_paired_knowledge(
     # Worktree-class knowledge -> carve its paired worktree.
     knowledge_id = f"{harness_id}-k"
     knowledge_branch = f"worktree/{knowledge_id}"
-    from . import paired_allocation_location
-
-    knowledge_wt_root, original_path = paired_allocation_location.receiver_root(
-        config, harness_id, res, retained_pair_path,
-    )
+    knowledge_wt_root = cfg.derive_worktree_root(knowledge_anchor)
     knowledge_wt_path = str(Path(knowledge_wt_root) / knowledge_id)
     knowledge_ref = tracking.format_claim_ref(execution_machine, knowledge_name, knowledge_id)
     knowledge_tracking_path = cfg.project_dir(knowledge_name) / "worktrees"
@@ -296,9 +328,6 @@ def _carve_paired_knowledge(
             ) from exc
         if revalidate_creation is not None:
             revalidate_creation()
-        paired_allocation_location.require_receiver_root(
-            res, knowledge_wt_root, retained=original_path is not None,
-        )
         knowledge_codename = codename_tracking.assign_new_codename(
             knowledge_tracking_path, knowledge_wordlist
         )
@@ -782,12 +811,7 @@ def _create_worktree_core(
             owner_guard.__enter__()
 
         try:
-            receiving_nonce = secrets.token_hex(8)
-            from .paired_allocation_location import reserve as reserve_pair_location
-            reserve_pair_location(
-                config, worktree_id, receiving_nonce, kind=kind, no_pair=no_pair,
-                machine_identity=machine_identity, platform_name=plat,
-            )
+            receiving_nonce = secrets.token_hex(8) if receiving_allocation is not None else None
             if receiving_allocation is not None:
                 receiving_allocation.require_planned_identity(
                     worktree_id, receiving_nonce, str(worktree_path), branch,
@@ -873,8 +897,7 @@ def _create_worktree_core(
                 owner_ref=owner_ref or None,
                 bound_agent=bound_agent or None,
                 pending_seed=None,
-                creation_nonce=receiving_nonce,
-                **({"receiving_allocation": receiving_allocation}
+                **({"receiving_allocation": receiving_allocation, "creation_nonce": receiving_nonce}
                    if receiving_allocation is not None else {}),
             )
         finally:
@@ -903,18 +926,13 @@ def _create_worktree_core(
             print("Added worktree path to trustedFolders.", file=sys.stderr)
         if build_launch_plan and permissions.ensure_extension_permission_approvals(worktree_path):
             print("Pre-approved facility extension permissions for worktree path.", file=sys.stderr)
-        checked_profile = getattr(launch_preflight, "checked_profile", None)
-        tool_options = {"checked_profile": checked_profile} if checked_profile is not None else {}
-        local_cache_refresh.prepare_tool_roster(worktree_path, config=config, **tool_options)
+        from .copilot_plugin_profile import prepare_checkout
+        prepare_checkout(worktree_path, config=config)
         composition_ready = _complete_created_pair(
             config, record, timestamp=timestamp, suffix=suffix, no_pair=no_pair,
         )
         if build_launch_plan and not defer_projections and composition_ready:
-            local_cache_refresh.prepare_admitted_launch(
-                worktree_path, **({"config": config, **tool_options} if tool_options else {}),
-            )
-        if launches_copilot:
-            application_admission.require_received_applications(config, worktree_path, launch_preflight)
+            local_cache_refresh.prepare_for_launch(worktree_path)
         result = {"worktree": core._worktree_to_dict(record)}
         if receiving_allocation is not None:
             from .receiving_creation_recovery import note_ready
@@ -960,16 +978,6 @@ def _create_worktree_core(
         if selection.assignment is not None:
             result["launch"]["profile_assignment"] = profile_assignment.metadata(selection.assignment)
         return result
-    except OwnedCleanupError as exc:
-        exc.worktree = {
-            "id": record.worktree_id, "path": record.worktree_path,
-            "branch": record.branch, "repo": record.repo,
-        }
-        exc.seed_id = seed_id
-        if add_note := getattr(exc, "add_note", None):
-            add_note(f"Worktree {record.worktree_id} was allocated at {record.worktree_path}; "
-                     "cleanup remains unconfirmed. Retain cleanup custody; do not retry New.")
-        raise
     except LaunchSeedStagingFailure:
         raise
     except Exception as exc:

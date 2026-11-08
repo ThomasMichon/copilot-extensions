@@ -45,7 +45,7 @@ def _relocate(tmp_path: Path) -> Path:
     return relocated
 
 
-def test_consumers_reach_the_same_core_through_canonical_build_owners(monkeypatch):
+def test_both_consumers_reach_the_same_core_through_canonical_build_owners(monkeypatch):
     root = Path(__file__).resolve().parents[3]
     monkeypatch.syspath_prepend(str(root / "tools"))
     monkeypatch.syspath_prepend(str(root / "libs" / "installer-engine"))
@@ -53,33 +53,10 @@ def test_consumers_reach_the_same_core_through_canonical_build_owners(monkeypatc
     from installer_dependency_policy import _anchor_roots
 
     canonical = root / "libs" / "copilot-driver-core"
-    for consumer in ("agent-remote-driver", "agent-bridge", "agent-worktrees"):
+    for consumer in ("agent-remote-driver", "agent-bridge"):
         closure = dict(builder.resolve_vendored_libs(root / "plugins" / consumer))
         assert closure["copilot-driver-core"] == canonical
     assert canonical in _anchor_roots()
-
-
-def test_core_mux_execution_preserves_literal_arguments_without_worktrees(tmp_path):
-    from agent_procutil import direct_python
-
-    interpreter, environment = direct_python(sys.executable)
-    literal = 'first line\n"quoted" & literal $value'
-    program = """
-import json,sys
-from agent_remote_driver.mux_creation import run_or_join
-result=run_or_join([], binary=sys.executable, session="unused-fixture", prepare=lambda: [
-    sys.executable, "-c", "import json,sys; print(json.dumps(sys.argv[1:]))", sys.argv[1],
-])
-assert result.returncode == 0, result.stderr
-assert json.loads(result.stdout) == [sys.argv[1]]
-assert not any(name == "agent_worktrees" or name.startswith("agent_worktrees.") for name in sys.modules)
-"""
-    result = subprocess.run(
-        [interpreter, "-I", "-c", program, literal],
-        cwd=tmp_path, env={**os.environ, **environment}, capture_output=True,
-        text=True, timeout=15, **no_window_kwargs(),
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_receiving_archive_publication_stays_on_the_selected_filesystem(tmp_path, monkeypatch):
@@ -122,70 +99,6 @@ def test_legacy_receiving_artifact_declares_and_enforces_only_legacy_support(tmp
             capture_output=True, timeout=5, **no_window_kwargs(),
         )
         assert result.returncode == 2 and not marker.exists()
-
-
-@pytest.mark.parametrize("program,expected,native_exit", [
-    ("raise SystemExit(17)", 17, 17),
-    pytest.param(
-        "import os,signal;os.kill(os.getpid(),signal.SIGTERM)", 143, -15,
-        marks=pytest.mark.skipif(os.name != "posix", reason="Native POSIX signal exit"),
-    ),
-])
-def test_retained_headed_executable_propagates_actual_native_exit(
-    tmp_path, program, expected, native_exit,
-):
-    from agent_procutil._interpreter import physical_executable
-    from agent_remote_driver.headed.launcher import prepare_headed_command
-
-    python = physical_executable(getattr(sys, "_base_executable", sys.executable))
-    state_file = tmp_path / "headed.json"
-    command = prepare_headed_command(
-        [python, "-I", "-c", program, "--session-id", "fixture-native",
-         "--log-dir", "--resume=literal"],
-        session_id="fixture-native", attempt_directory=tmp_path / "attempt",
-        state_file=state_file, cwd=str(tmp_path),
-    )
-    result = subprocess.run(
-        command, cwd=tmp_path, env={**os.environ, "COPILOT_EXTENSIONS_TEST_CONTAINED": "1"},
-        capture_output=True, text=True, timeout=15, **no_window_kwargs(),
-    )
-    assert result.returncode == expected, result.stdout + result.stderr
-    state = json.loads(state_file.read_text(encoding="utf-8"))
-    assert state["child_exit_code"] == native_exit and state["state"] == "child_exited"
-
-
-@pytest.mark.parametrize("before,after,experimental", [
-    (["--log-dir", "--experimental"], [], False),
-    ([], ["--", "--experimental", "literal"], False),
-    (["--log-dir", "--"], ["--", "literal"], False),
-    (["--experimental"], ["--", "literal"], True),
-])
-def test_retained_headed_extension_options_respect_native_boundaries(
-    tmp_path, before, after, experimental,
-):
-    from agent_procutil._interpreter import physical_executable
-    from agent_remote_driver.headed.launcher import prepare_headed_command
-
-    python = physical_executable(getattr(sys, "_base_executable", sys.executable))
-    command = prepare_headed_command(
-        [python, "-I", "-c", "import json,sys; print(json.dumps(sys.argv[1:]))",
-         "--session-id", "fixture-native", *before, *after],
-        session_id="fixture-native", attempt_directory=tmp_path / "attempt",
-        state_file=tmp_path / "headed.json", cwd=str(tmp_path),
-    )
-    result = subprocess.run(
-        command, cwd=tmp_path, env={**os.environ, "COPILOT_EXTENSIONS_TEST_CONTAINED": "1"},
-        capture_output=True, text=True, timeout=15, **no_window_kwargs(),
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    actual = json.loads(result.stdout)
-    plugin_index = actual.index("--plugin-dir")
-    plugin = actual[plugin_index + 1]
-    assert Path(plugin).is_dir()
-    assert actual == [
-        "--session-id", "fixture-native", *before, "--plugin-dir", plugin,
-        *([] if experimental else ["--experimental"]), *after,
-    ]
 
 
 def test_legacy_entrypoint_defaults_to_its_declared_lifetime(monkeypatch, capsys):

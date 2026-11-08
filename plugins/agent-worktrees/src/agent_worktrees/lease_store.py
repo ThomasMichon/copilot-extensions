@@ -8,7 +8,7 @@ import tempfile
 import time
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -18,16 +18,12 @@ from . import git_ops
 from .lease_config import LeaseSettings
 from .lease_protocol import (
     LeaseRecord,
-    PROOF_SCHEMA_VERSION,
     ProtocolError,
-    RETURN_PROOF_LIMIT,
     Resource,
-    ReturnedGeneration,
     format_timestamp,
     parse_record,
     parse_timestamp,
     ref_for,
-    record_payload,
     resource,
     resource_from_ref,
     serialize_record,
@@ -42,14 +38,13 @@ class GitError(RuntimeError):
 
 
 class LeaseConflict(RuntimeError):
-    """A resource's existing lease does not permit this acquisition."""
+    """A resource has a live lease held by another client."""
 
-    def __init__(self, snapshot: LeaseSnapshot, *, released_only: bool = False) -> None:
+    def __init__(self, snapshot: LeaseSnapshot) -> None:
         self.snapshot = snapshot
         super().__init__(
             f"{snapshot.record.resource['identity']} is leased by "
             f"{snapshot.record.holder!r} until {snapshot.record.expires_at}"
-            + ("; --released-only requires an explicit release, not expiry" if released_only else "")
         )
 
 
@@ -72,7 +67,7 @@ class LeaseSnapshot:
     safe_deadline: str
 
     def to_dict(self) -> dict[str, object]:
-        result = record_payload(self.record)
+        result = asdict(self.record)
         result.update(
             {
                 "ref": self.ref,
@@ -123,9 +118,8 @@ class GitLeaseStore:
         ttl_seconds: int | None = None,
         context: object = None,
         retries: int | None = None,
-        released_only: bool = False,
     ) -> LeaseSnapshot:
-        """Acquire an absent/released lease, or a stale one unless prohibited."""
+        """Acquire an absent, released, or stale resource lease."""
         item = resource(kind, key)
         holder = validate_holder(holder)
         ttl = self.settings.ttl(ttl_seconds)
@@ -137,10 +131,8 @@ class GitLeaseStore:
         for attempt in range(retry_count + 1):
             current = self.inspect(kind, key)
             now = self._utc_now()
-            if current is not None and (
-                current.live or (released_only and current.record.state != "released")
-            ):
-                raise LeaseConflict(current, released_only=released_only)
+            if current is not None and current.live:
+                raise LeaseConflict(current)
             event = (
                 "takeover"
                 if current is not None and current.record.state == "leased"
@@ -148,7 +140,7 @@ class GitLeaseStore:
             )
             stamp = format_timestamp(now)
             record = LeaseRecord(
-                schema_version=current.record.schema_version if current is not None else 1,
+                schema_version=1,
                 resource={"identity": item.identity, "kind": item.kind, "key": item.key},
                 state="leased",
                 event=event,
@@ -159,7 +151,6 @@ class GitLeaseStore:
                 expires_at=format_timestamp(now + timedelta(seconds=ttl)),
                 ttl_seconds=ttl,
                 context=context_value,
-                returned_generations=current.record.returned_generations if current is not None else (),
             )
             expected = current.oid if current is not None else ""
             try:
@@ -200,7 +191,7 @@ class GitLeaseStore:
             current.record.context if context is None else validate_context(context)
         )
         record = LeaseRecord(
-            schema_version=current.record.schema_version,
+            schema_version=1,
             resource=current.record.resource,
             state="leased",
             event="renew",
@@ -211,7 +202,6 @@ class GitLeaseStore:
             expires_at=format_timestamp(now + timedelta(seconds=ttl)),
             ttl_seconds=ttl,
             context=context_value,
-            returned_generations=current.record.returned_generations,
         )
         try:
             oid = self._transition(item, token, record)
@@ -254,7 +244,7 @@ class GitLeaseStore:
         )
         stamp = format_timestamp(now)
         record = LeaseRecord(
-            schema_version=current.record.schema_version,
+            schema_version=1,
             resource=current.record.resource,
             state="leased",
             event="transfer",
@@ -265,7 +255,6 @@ class GitLeaseStore:
             expires_at=format_timestamp(now + timedelta(seconds=ttl)),
             ttl_seconds=ttl,
             context=context_value,
-            returned_generations=current.record.returned_generations,
         )
         try:
             oid = self._transition(item, token, record)
@@ -273,9 +262,7 @@ class GitLeaseStore:
             raise LeaseLost("transfer compare-and-swap failed; the lease is lost") from None
         return self._snapshot(item, oid, record, now)
 
-    def release(
-        self, kind: str, key: str, token: str, *, retain_return_proof: bool = False,
-    ) -> LeaseSnapshot:
+    def release(self, kind: str, key: str, token: str) -> LeaseSnapshot:
         """Append a release tombstone iff token is the exact current OID."""
         item = resource(kind, key)
         token = validate_oid(token)
@@ -284,14 +271,8 @@ class GitLeaseStore:
             raise LeaseLost("cannot release a lease that is already tombstoned")
         now = self._utc_now()
         stamp = format_timestamp(now)
-        version = PROOF_SCHEMA_VERSION if retain_return_proof else current.record.schema_version
-        returned = current.record.returned_generations
-        if version == PROOF_SCHEMA_VERSION:
-            returned = (*returned, ReturnedGeneration(
-                current.record.lease_id, current.record.holder, stamp,
-            ))[-RETURN_PROOF_LIMIT:]
         record = LeaseRecord(
-            schema_version=version,
+            schema_version=1,
             resource=current.record.resource,
             state="released",
             event="release",
@@ -302,7 +283,6 @@ class GitLeaseStore:
             expires_at=stamp,
             ttl_seconds=0,
             context=current.record.context,
-            returned_generations=returned,
         )
         try:
             oid = self._transition(item, token, record)
@@ -410,7 +390,6 @@ class GitLeaseStore:
             expires_at=record.issued_at,
             ttl_seconds=0,
             context=record.context,
-            returned_generations=record.returned_generations[:-1],
         )
         with tempfile.TemporaryDirectory(prefix="agent-leases-gc-write-") as temp:
             repo = Path(temp) / "repo.git"
@@ -625,17 +604,6 @@ class GitLeaseStore:
             if current.event != "acquire":
                 raise ProtocolError("the root lease commit must be an acquire event")
             return
-        if current.schema_version < previous.schema_version:
-            raise ProtocolError("a lease cannot downgrade retained return evidence")
-        if current.schema_version != previous.schema_version and current.event != "release":
-            raise ProtocolError("only an explicit release can opt into retained return evidence")
-        expected_returns = previous.returned_generations
-        if current.event == "release" and current.schema_version == PROOF_SCHEMA_VERSION:
-            expected_returns = (*expected_returns, ReturnedGeneration(
-                previous.lease_id, previous.holder, current.renewed_at,
-            ))[-RETURN_PROOF_LIMIT:]
-        if current.returned_generations != expected_returns:
-            raise ProtocolError("lease transition changed retained return evidence")
 
         issued = datetime.strptime(
             current.issued_at, "%Y-%m-%dT%H:%M:%SZ"

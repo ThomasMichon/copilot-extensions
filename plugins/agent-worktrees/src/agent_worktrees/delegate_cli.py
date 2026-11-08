@@ -19,7 +19,6 @@ import shlex
 import subprocess
 import sys
 from collections import defaultdict
-from collections.abc import Collection
 from typing import Any
 
 from agent_procutil import no_window_kwargs
@@ -31,7 +30,6 @@ from .worktree_machine_identity import execution_machine_from_fields, projected_
 from .worktree_naming import parse_session_worktree_id, session_worktree_prefix
 
 _HOST_TERMINAL_STATUSES = frozenset({"complete", "completed", "finalized"})
-_ROSTER_ADVISORY_REASON = "host-roster-advisory"
 
 
 def _parse_json_object(raw: str) -> dict[str, Any] | None:
@@ -87,16 +85,8 @@ def annotate_delegate_graph(
     *,
     reachable_hosts: dict[tuple[str, str], bool] | None = None,
     current_only: bool = False,
-    authoritative_hosts: Collection[tuple[str, str]] | None = None,
-    advisory_rows: Collection[int] = frozenset(),
 ) -> list[dict[str, Any]]:
-    """Annotate ``list``/``fleet`` rows with caller/host + delegate state.
-
-    ``authoritative_hosts`` (fleet reads) names the reachable hosts whose
-    roster is a current publication; any other reachable host can omit a
-    caller that exists now, so a caller expected there is ``unknown``, never
-    ``gone``. ``advisory_rows`` holds the ``id()`` of rows read from such a
-    host; a terminal caller resolved to one never authorizes finalization."""
+    """Annotate ``list``/``fleet`` rows with caller/host + delegate state."""
     id_index: dict[str, list[dict[str, Any]]] = defaultdict(list)
     qualified_index: dict[tuple[str, str, str], dict[str, Any]] = {}
     for row in worktrees:
@@ -157,10 +147,7 @@ def annotate_delegate_graph(
                 "status": host.get("status"),
             }
             host_status = str(host.get("status") or "")
-            if host_status in _HOST_TERMINAL_STATUSES and id(host) in advisory_rows:
-                row["delegate_finalizable"] = False
-                row["delegate_finalizable_reason"] = _ROSTER_ADVISORY_REASON
-            elif host_status in _HOST_TERMINAL_STATUSES:
+            if host_status in _HOST_TERMINAL_STATUSES:
                 row["delegate_finalizable"] = True
                 row["delegate_finalizable_reason"] = f"host-{host_status}"
             else:
@@ -204,18 +191,14 @@ def annotate_delegate_graph(
                 caller_state["machine"] = expected[0]
                 if expected[1]:
                     caller_state["platform"] = expected[1]
-                if reachable_hosts.get(expected) is not True:
-                    caller_state["state"] = "unreachable"
-                    row["delegate_finalizable"] = False
-                    row["delegate_finalizable_reason"] = "host-unreachable"
-                elif authoritative_hosts is not None and expected not in authoritative_hosts:
-                    caller_state["state"] = "unknown"
-                    row["delegate_finalizable"] = False
-                    row["delegate_finalizable_reason"] = _ROSTER_ADVISORY_REASON
-                else:
+                if reachable_hosts.get(expected) is True:
                     caller_state["state"] = "gone"
                     row["delegate_finalizable"] = True
                     row["delegate_finalizable_reason"] = "host-gone"
+                else:
+                    caller_state["state"] = "unreachable"
+                    row["delegate_finalizable"] = False
+                    row["delegate_finalizable_reason"] = "host-unreachable"
             else:
                 row["delegate_finalizable"] = False
                 row["delegate_finalizable_reason"] = "host-unresolved"
@@ -253,50 +236,6 @@ def delegate_graph_overlays(
     return overlays
 
 
-def host_roster_is_current(host: dict[str, Any]) -> bool:
-    """True only for a reachable fleet host row read from a current publication.
-
-    A saved (``availability.status: "advisory"``) or stale-labeled roster, or
-    a reply without current-roster provenance (as from an older runtime or a
-    cached listing), may omit or misstate a caller that exists now."""
-    projection = host.get("projection")
-    return (
-        host.get("reachable") is True
-        and host.get("availability") is None
-        and isinstance(projection, dict)
-        and projection.get("quality") == "current"
-    )
-
-
-def annotate_fleet_hosts(hosts: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Annotate the delegate graph across fleet host rows, in place.
-
-    Only hosts whose roster is current are authoritative: elsewhere a missing
-    caller is ``unknown`` and a resolved caller cannot authorize finalization."""
-    reachable_hosts: dict[tuple[str, str], bool] = {}
-    authoritative_hosts: set[tuple[str, str]] = set()
-    advisory_rows: set[int] = set()
-    worktrees: list[dict[str, Any]] = []
-    for host in hosts:
-        key = (str(host.get("machine") or ""), str(host.get("env") or ""))
-        reachable_hosts[key] = bool(host.get("reachable"))
-        current = host_roster_is_current(host)
-        if current:
-            authoritative_hosts.add(key)
-        copies = [dict(row) for row in host.get("worktrees") or [] if isinstance(row, dict)]
-        if not current:
-            advisory_rows.update(id(row) for row in copies)
-        worktrees.extend(copies)
-        host["worktrees"] = copies
-    annotate_delegate_graph(
-        worktrees,
-        reachable_hosts=reachable_hosts,
-        authoritative_hosts=authoritative_hosts,
-        advisory_rows=advisory_rows,
-    )
-    return hosts
-
-
 def _fleet_snapshot(
     *,
     project: str,
@@ -319,11 +258,31 @@ def _fleet_snapshot(
         for machine_key, env_name, alias, shell, is_local
         in list(list_views_cli._fleet_targets(config))
     ]
-    annotate_fleet_hosts(rows)
+    reachable_hosts = {
+        (str(row.get("machine") or ""), str(row.get("env") or "")): bool(row.get("reachable"))
+        for row in rows
+    }
+    worktrees = [
+        dict(worktree)
+        for row in rows
+        for worktree in row.get("worktrees", [])
+        if isinstance(worktree, dict)
+    ]
+    annotate_delegate_graph(worktrees, reachable_hosts=reachable_hosts)
+    worktrees_by_id = {
+        str(worktree.get("id")): worktree
+        for worktree in worktrees
+        if isinstance(worktree.get("id"), str)
+    }
     for row in rows:
-        row["worktrees"] = [
-            worktree for worktree in row["worktrees"] if isinstance(worktree.get("id"), str)
-        ]
+        resolved = []
+        for worktree in row.get("worktrees", []):
+            if not isinstance(worktree, dict):
+                continue
+            worktree_id = worktree.get("id")
+            if isinstance(worktree_id, str) and worktree_id in worktrees_by_id:
+                resolved.append(worktrees_by_id[worktree_id])
+        row["worktrees"] = resolved
     return rows
 
 
@@ -374,7 +333,7 @@ def _finalize_target(
         if is_local:
             proc = subprocess.run(
                 [
-                    *list_views_cli._local_project_argv(project),
+                    list_views_cli._local_binstub(project),
                     "finalize",
                     "--json",
                     "--worktree-id",

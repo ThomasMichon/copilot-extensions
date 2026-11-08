@@ -24,80 +24,6 @@ if TYPE_CHECKING:
 PIN_ENV = "COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN"
 SOURCES_SCHEMA = "copilot-extensions.prepared-runtime-sources"
 SOURCES_CONTRACT = 1
-PREPARED_INPUTS_CONTRACT = 2
-
-
-def _existing_source_entry(payload: Path, platform: str) -> dict[str, str] | None:
-    """Recognize the already-released native protocol before sidecar declarations."""
-    native = payload / "scripts/runtime_install.py"
-    if not native.is_file() or native.is_symlink():
-        return None
-    try:
-        tree = ast.parse(native.read_text(encoding="utf-8"))
-    except SyntaxError as error:
-        raise ValueError("Selected native installer cannot describe source inputs") from error
-    if not any(
-        isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "add_argument"
-        and any(isinstance(arg, ast.Constant) and arg.value == "--install-source" for arg in node.args)
-        for node in ast.walk(tree)
-    ) or not any(
-        isinstance(node, ast.ImportFrom) and node.module == "install_source"
-        for node in ast.walk(tree)
-    ):
-        return None
-    windows = platform == "windows"
-    extension = "ps1" if windows else "sh"
-    for relative in (f"scripts/install.{extension}", f"bootstrap.{extension}"):
-        script = payload / relative
-        if script.is_symlink() or not script.is_file():
-            continue
-        text = script.read_text(encoding="utf-8")
-        if "--install-source" not in text:
-            continue
-        if windows and relative.startswith("scripts/"):
-            if re.search(r"\[string\]\s*\$InstallSource\b", text, re.IGNORECASE) is None:
-                continue
-            argument = "-InstallSource"
-        else:
-            argument = "--install-source"
-        return {"script": relative, "argument": argument}
-    return None
-
-
-def source_install_entry(payload: Path, platform: str) -> dict[str, str] | None:
-    """A package opts into prepared inputs through its native installer declaration."""
-    path = payload / "source-install.json"
-    try:
-        if path.is_symlink() or (path.exists() and not path.is_file()):
-            raise ValueError("Native source installation declaration must be ordinary")
-        value = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=strict_json_object)
-    except FileNotFoundError:
-        return _existing_source_entry(payload, platform)
-    if (
-        not isinstance(value, dict) or set(value) != {"schema", "version", "windows", "posix"}
-        or value["schema"] != "copilot-extensions.native-source-install"
-        or type(value["version"]) is not int or value["version"] != 1
-    ):
-        raise ValueError("Unsupported native source installation declaration")
-    for key in ("windows", "posix"):
-        row = value[key]
-        if (
-            not isinstance(row, dict) or set(row) != {"script", "argument"}
-            or not isinstance(row["script"], str)
-            or not re.fullmatch(r"(?:scripts/)?[a-z][a-z0-9_-]*\.(?:ps1|sh)", row["script"])
-            or not row["script"].endswith(".ps1" if key == "windows" else ".sh")
-            or not isinstance(row["argument"], str)
-            or not re.fullmatch(r"--?[A-Za-z][A-Za-z-]*", row["argument"])
-        ):
-            raise ValueError("Invalid native source installation entry")
-        script = payload / row["script"]
-        if (
-            script.is_symlink() or (payload / "scripts").is_symlink()
-            or not script.is_file() or not script.resolve().is_relative_to(payload.resolve())
-        ):
-            raise ValueError("Native source installation script is unavailable or indirect")
-    return value["windows" if platform == "windows" else "posix"]
 
 
 def parse_sources(raw: str | None) -> dict[str, PreparedRuntimeSource] | None:
@@ -108,7 +34,7 @@ def parse_sources(raw: str | None) -> dict[str, PreparedRuntimeSource] | None:
     if (
         not isinstance(packet, dict) or set(packet) != {"schema", "version", "sources"}
         or packet["schema"] != SOURCES_SCHEMA or type(packet["version"]) is not int
-        or packet["version"] not in (SOURCES_CONTRACT, PREPARED_INPUTS_CONTRACT)
+        or packet["version"] != SOURCES_CONTRACT
         or not isinstance(packet["sources"], dict) or not packet["sources"]
     ):
         raise ValueError("Unsupported prepared-runtime-sources packet")
@@ -117,24 +43,12 @@ def parse_sources(raw: str | None) -> dict[str, PreparedRuntimeSource] | None:
     for name, record in packet["sources"].items():
         if (
             not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name)
-            or not isinstance(record, dict)
-            or set(record) not in (
-                {"payload", "identity"},
-                *([{"payload", "identity", "install_source", "native"}]
-                  if packet["version"] == PREPARED_INPUTS_CONTRACT else []),
-            )
+            or not isinstance(record, dict) or set(record) != {"payload", "identity"}
             or not isinstance(record["payload"], str) or not record["payload"]
             or not Path(record["payload"]).is_absolute()
-            or ("install_source" in record and (
-                not isinstance(record["install_source"], str) or not record["install_source"]
-            ))
         ):
             raise ValueError(f"Invalid prepared-runtime-sources entry: {name}")
-        source = PreparedRuntimeSource(
-            Path(record["payload"]), json.dumps(record["identity"]),
-            Path(record["install_source"]) if "install_source" in record else None,
-            json.dumps(record["native"], sort_keys=True) if "native" in record else None,
-        )
+        source = PreparedRuntimeSource(Path(record["payload"]), json.dumps(record["identity"]))
         identity = json.loads(source.identity)["runtime_source"]
         commit, tree = identity.get("source_commit"), identity.get("source_tree")
         if (
@@ -168,8 +82,6 @@ def check_source_coverage(
 class PreparedRuntimeSource:
     payload: Path
     identity: str
-    install_source: Path | None = None
-    native: str | None = None
 
     def __post_init__(self) -> None:
         fields = json.loads(self.identity, object_pairs_hook=strict_json_object)
@@ -187,32 +99,10 @@ class PreparedRuntimeSource:
             raise ValueError("Prepared runtime requires a complete source selection")
         object.__setattr__(self, "payload", self.payload.resolve(strict=True))
         object.__setattr__(self, "identity", json.dumps(fields, sort_keys=True))
-        if (self.install_source is None) != (self.native is None):
-            raise ValueError("Prepared installation requires both its snapshot and native selection")
-        if self.install_source is not None:
-            if not self.install_source.is_absolute() or not self.install_source.is_dir():
-                raise ValueError("Prepared installation requires an absolute snapshot")
-            native = json.loads(self.native, object_pairs_hook=strict_json_object)
-            if (
-                not isinstance(native, dict) or native.get("identity") != fields
-                or not isinstance(native.get("runtime_version"), str)
-                or not native["runtime_version"].startswith(fields["runtime_version"] + ".profile.")
-                or not isinstance(native.get("payload_hash"), str)
-                or re.fullmatch(r"[0-9a-f]{64}", native["payload_hash"]) is None
-            ):
-                raise ValueError("Prepared installation has a conflicting native selection")
 
     @property
     def version(self) -> str:
-        return json.loads(self.native or self.identity)["runtime_version"]
-
-    def installer_arguments(self, platform: str) -> list[str]:
-        if self.install_source is None:
-            return []
-        entry = source_install_entry(self.payload, platform)
-        if entry is None:
-            raise ValueError("Prepared payload has no native installation-source capability")
-        return [entry["argument"], str(self.install_source)]
+        return json.loads(self.identity)["runtime_version"]
 
     @property
     def package_version(self) -> str:
@@ -238,7 +128,7 @@ class PreparedRuntimeSource:
         result = subprocess.run(
             [sys.executable, "-I", "-B", str(validator),
              "--payload", str(self.payload), "--package-version", self.package_version,
-             "--plugin", name, "--expected-runtime-version", json.loads(self.identity)["runtime_version"],
+             "--plugin", name, "--expected-runtime-version", self.version,
              "--expected-source-identity", self.identity, "--format", "json"],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             env=dict(environment), timeout=30, check=False, **no_window_kwargs(),
@@ -249,22 +139,6 @@ class PreparedRuntimeSource:
             )
         if result.stdout.strip() != self.identity:
             raise ValueError("Installed source validator returned a different selection")
-        if self.install_source is not None:
-            if (self.payload / "runtime-source-target.json").exists():
-                raise ValueError(
-                    "Prepared wheel inputs cannot bypass a package's independent source target policy"
-                )
-            result = subprocess.run(
-                [sys.executable, "-I", "-B", str(owner / "scripts/install_source.py"),
-                 "--install-source", str(self.install_source), "--component", name,
-                 "--payload", str(self.payload), "--native-inputs"],
-                capture_output=True, text=True, encoding="utf-8", errors="replace",
-                env=dict(environment), timeout=60, check=False, **no_window_kwargs(),
-            )
-            if result.returncode or json.loads(
-                result.stdout, object_pairs_hook=strict_json_object,
-            ) != json.loads(self.native):
-                raise ValueError("Installed native source validator returned a different selection")
         if not (owner / "scripts" / "command_binding.py").is_file():
             raise ValueError("Installed payload has no command lifecycle helper")
 
@@ -320,8 +194,6 @@ class PreparedRuntimeSource:
         ):
             return None
         hash_arguments: list[str] = []
-        if self.native is not None:
-            hash_arguments = ["--expect-hash", json.loads(self.native)["payload_hash"]]
         if target is not None:
             from .update_runtime_target import profile_hash
 

@@ -15,7 +15,6 @@ from urllib.parse import urlsplit
 
 from .gateway_contract import (
     ForgeScope,
-    ReviewScope,
     MAX_WIRE,
     GatewayError,
     encode,
@@ -190,13 +189,10 @@ class GatewayClient:
         return self._send("/v1/credentials/ack",
                           {"request_id": request_id, "request_digest": request_digest}, deadline=deadline)
 
-    def subscribe(self, lease: int, subscription: str | None = None, *,
-                  contracts: tuple[str, ...] = ()) -> dict:
-        payload: dict[str, Any] = {"lease": lease}
+    def subscribe(self, lease: int, subscription: str | None = None) -> dict:
+        payload = {"lease": lease}
         if subscription is not None:
             payload["subscription"] = subscription
-        if contracts:
-            payload["contracts"] = list(contracts)
         return self._send("/v1/controllers/subscribe", payload)
 
     def poll(self, subscription: str) -> dict:
@@ -219,7 +215,6 @@ class CredentialMaterial:
     audience: str
     scopes: tuple[str, ...]
     forge: ForgeScope | None = None
-    review: ReviewScope | None = None
 
 
 def consume_credential(client: GatewayClient, value: dict, result: dict, *, recipient_key: Any,
@@ -256,23 +251,18 @@ def consume_credential(client: GatewayClient, value: dict, result: dict, *, reci
         plain = parse(envelope.payload)
     except (jwe.JWException, ValueError, TypeError):
         raise GatewayError("sealed-credential-denied") from None
-    review_selected = value["operation"] == "credential.review"
-    fields(plain, {"binding", "token", "expires_at", "source", "account", "audience", "scopes"},
-           {"review"} if review_selected else {"forge"})
+    fields(plain, {"binding", "token", "expires_at", "source", "account", "audience", "scopes"}, {"forge"})
     require(plain["binding"] == binding, "credential-binding-mismatch")
     parameters = value["parameters"]
     require(all(plain[k] == parameters[k] for k in ("source", "account", "audience", "scopes")),
             "credential-scope-mismatch")
     forge = ForgeScope.load(plain["forge"]) if "forge" in plain else None
-    review = ReviewScope.load(plain["review"]) if "review" in plain else None
     require(plain.get("forge") == parameters.get("forge"), "credential-scope-mismatch")
-    require(plain.get("review") == parameters.get("review") and (review is not None) == review_selected,
-            "credential-scope-mismatch")
     require(number(plain["expires_at"]) > time.time() and plain["expires_at"] <= claims["exp"],
             "credential-expired")
     material = CredentialMaterial(text(plain["token"], 16384), plain["expires_at"],
                                   plain["source"], plain["account"], plain["audience"],
-                                  strings(plain["scopes"]), forge, review)
+                                  strings(plain["scopes"]), forge)
     try:
         ack = (client.acknowledge(value["request_id"], digest(value), deadline=deadline)
                if deadline is not None else client.acknowledge(value["request_id"], digest(value)))

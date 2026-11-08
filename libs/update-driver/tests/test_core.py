@@ -24,8 +24,6 @@ from update_driver import (
     ensure_worker,
     participant,
     runtime_command,
-    runtime_script_command,
-    run_explicit,
     status,
     wait,
 )
@@ -165,71 +163,6 @@ def test_manager_policy_preserves_unrelated_cell_scope(area, monkeypatch):
     assert "maintenance.automatic is false" in automatic_update_refusal(
         RequestSpec("engine", ("--auto",), context=addressed),
     )
-def test_explicit_foreground_uses_native_custody_and_preserves_exit(area, monkeypatch):
-    from update_driver import core
-
-    monkeypatch.setattr(core, "_reconcile_foundation", lambda *args: pytest.fail("no queue repair"))
-    seen = []
-    result = run_explicit(
-        RequestSpec("source-recovery", source="frozen-selection"),
-        runner=TrustedRunner((sys.executable, "-c", "pass"), str(area)),
-        root=area / "state", executor=lambda tx: seen.append(tx.request.id) or 17,
-    )
-    assert result.state == "completed" and result.exit_code == 17
-    assert seen == [result.id]
-
-
-def test_explicit_foreground_never_replays_foreign_pending_work(area, monkeypatch):
-    from update_driver import core
-
-    peer = sample(area, source="peer")
-    before = status(root=area / "state")
-    monkeypatch.setattr(core, "_reconcile_foundation", lambda *args: pytest.fail("no queue repair"))
-    with pytest.raises(StateError, match="nothing replayed"):
-        run_explicit(
-            RequestSpec("source-recovery"),
-            runner=TrustedRunner((sys.executable, "-c", "pass"), str(area)),
-            root=area / "state", executor=lambda tx: pytest.fail("no peer execution"),
-        )
-    assert status(root=area / "state") == before
-    assert status(peer.id, root=area / "state").state == "pending"
-
-
-def test_explicit_foreground_stops_before_a_later_peer(area):
-    later = []
-
-    def execute(tx):
-        later.append(sample(area, source="later"))
-        return 0
-
-    result = run_explicit(
-        RequestSpec("source-recovery"),
-        runner=TrustedRunner((sys.executable, "-c", "pass"), str(area)),
-        root=area / "state", executor=execute,
-    )
-    assert result.state == "completed"
-    assert len(later) == 1
-    assert status(later[0].id, root=area / "state").state == "pending"
-
-
-def test_explicit_foreground_native_child_borrows_the_same_custody(area):
-    child = (
-        "import sys\nfrom pathlib import Path\n"
-        "from update_driver import borrowed_custody\n"
-        "custody=borrowed_custody(root=Path(sys.argv[1]))\n"
-        "assert custody is not None\n"
-        "with custody:\n"
-        "    custody.assert_owned()\n"
-        "    print('native-source-custody', flush=True)\n"
-        "raise SystemExit(17)\n"
-    )
-    result = run_explicit(
-        RequestSpec("source-recovery", source="frozen-selection"),
-        runner=TrustedRunner((sys.executable, "-I", "-c", child, str(area / "state")), str(area)),
-        root=area / "state",
-    )
-    assert result.state == "completed" and result.exit_code == 17, result.log_path.read_text(encoding="utf-8")
-    assert "native-source-custody" in result.log_path.read_text(encoding="utf-8")
 
 
 def test_killswitch_retires_pending_normal_work_but_executes_repair(area, monkeypatch, capsys):
@@ -700,22 +633,6 @@ def test_failed_spawn_is_visible_and_never_foreground(area, monkeypatch):
     assert "secret" not in status(request.id, root=area / "state").error
 
 
-def test_worker_admission_refuses_pending_execution_evidence(area, monkeypatch):
-    import agent_procutil
-
-    root = area / "state"
-    request = sample(area)
-    with closing(sqlite3.connect(root / "queue.sqlite3")) as db, db:
-        db.execute("UPDATE requests SET started_at=1 WHERE id=?", (request.id,))
-    monkeypatch.setattr(
-        agent_procutil, "spawn_daemon",
-        lambda *_args, **_kwargs: pytest.fail("fenced worker was started"),
-    )
-    with pytest.raises(InterruptedError):
-        ensure_worker((sys.executable, "-m", "update_driver", "worker"), root=root)
-    assert status(request.id, root=root).state == "pending"
-
-
 @pytest.mark.parametrize("retained", [False, True])
 def test_worker_preserves_native_handle_and_selected_python_bootstrap(area, monkeypatch, retained):
     from types import SimpleNamespace
@@ -793,24 +710,6 @@ def test_waiter_reports_fenced_pending_request(area):
     with pytest.raises(InterruptedError):
         wait(pending.id, root=root, timeout=1)
     assert status(request.id, root=root).state == "interrupted"
-
-
-@pytest.mark.parametrize("target", ["uncertain", "later"])
-def test_waiter_reports_pending_execution_evidence_without_worker_or_timeout(area, monkeypatch, target):
-    from update_driver import core
-
-    root = area / "state"
-    uncertain = sample(area)
-    later = sample(area, argv=("later",))
-    with closing(sqlite3.connect(root / "queue.sqlite3")) as db, db:
-        db.execute(
-            "UPDATE requests SET started_at=1,error='unconfirmed' WHERE id=?", (uncertain.id,),
-        )
-    monkeypatch.setattr(core.time, "sleep", lambda _seconds: pytest.fail("fenced waiter slept"))
-    with pytest.raises(InterruptedError):
-        wait(uncertain.id if target == "uncertain" else later.id, root=root)
-    assert status(uncertain.id, root=root).state == "pending"
-    assert status(later.id, root=root).state == "pending"
 
 
 def test_participant_live_forged_stale_and_missing(area):
@@ -949,30 +848,6 @@ def test_runtime_command_uses_original_bootstrap(area, monkeypatch, nested):
 
 
 @pytest.mark.parametrize("nested", [False, True])
-def test_runtime_script_command_shares_source_and_retained_selection(area, monkeypatch, nested):
-    import agent_procutil
-
-    slot = area / "versions" / "1.2.3" if nested else area
-    slot.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(sys, "prefix", str(slot / ".venv" if nested else slot))
-    monkeypatch.setattr(agent_procutil, "direct_python", lambda exe: (exe, {"selected": "runtime"}))
-    script = area / "script \u03b1 space.py"
-    script.write_text("# controlled script\n", encoding="utf-8")
-    args = ["", "two words", "\u00fc"]
-    argv, env = runtime_script_command(script, args)
-    assert argv == (sys.executable, str(script), *args)
-    bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
-    bootstrap.parent.mkdir()
-    bootstrap.write_text("# controlled fixture", encoding="utf-8")
-    argv, env = runtime_script_command(script, args)
-    assert argv == (
-        sys.executable, "-I", "-S", "-B", "-X", "utf8", str(bootstrap),
-        str(script), *args,
-    )
-    assert env == {"selected": "runtime"}
-
-
-@pytest.mark.parametrize("nested", [False, True])
 def test_completed_installed_runtime_never_uses_source_fallback(area, monkeypatch, nested):
     import agent_procutil
     slot = area / "versions" / "1.2.3" if nested else area
@@ -982,25 +857,6 @@ def test_completed_installed_runtime_never_uses_source_fallback(area, monkeypatc
     (slot / ".install-complete.json").write_text("{}", encoding="utf-8")
     with pytest.raises(StateError, match="missing its retention bootstrap"):
         runtime_command("some.adapter")
-
-
-@pytest.mark.parametrize("script", [False, True])
-def test_runtime_invocation_preserves_core_command_seam(area, monkeypatch, script):
-    from update_driver import core
-
-    entry = area / "entry.py" if script else "some.adapter"
-    arguments = ("", "two words", "\u03b1")
-    expected = (("retained-command",), {"selected": "runtime"})
-    calls = []
-
-    def command(selected, args):
-        calls.append((selected, args))
-        return expected
-
-    monkeypatch.setattr(core, "_runtime_command", command)
-    invoke = runtime_script_command if script else runtime_command
-    assert invoke(entry, arguments) is expected
-    assert calls == [((str(entry),) if script else ("-m", entry), arguments)]
 
 
 def test_linked_installed_bootstrap_refuses(area, monkeypatch):

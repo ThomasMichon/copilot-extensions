@@ -78,8 +78,6 @@ def main(argv=None):
     ssh_setup.add_argument("--state-root", type=Path, required=True)
     ssh_setup.add_argument("--apply", action="store_true")
     ssh_setup.add_argument("--expected-request-digest")
-    ssh_setup.add_argument("--key-references-only", action="store_true")
-    ssh_setup.add_argument("--expected-key-fingerprint")
     credential = commands.add_parser(
         "credential", help="Acquire one typed forge credential; secret JSON is for a captured pipe only",
     )
@@ -172,11 +170,7 @@ def main(argv=None):
                 CAPABILITY, MACHINE_CALLER_CAPABILITY, MACHINE_REFERENCE_CAPABILITY, PROVIDER, bootstrap,
             )
             from .gateway_service_channel import TransportError
-            from .ssh_setup import (
-                CAPABILITY as SSH_SETUP_CAPABILITY, PIN_CAPABILITY as SSH_SETUP_PIN_CAPABILITY,
-                KEY_REFERENCE_CAPABILITY as SSH_KEY_REFERENCE_CAPABILITY,
-                KEY_PIN_CAPABILITY as SSH_KEY_PIN_CAPABILITY,
-            )
+            from .ssh_setup import CAPABILITY as SSH_SETUP_CAPABILITY, PIN_CAPABILITY as SSH_SETUP_PIN_CAPABILITY
         except ImportError:
             print("fleet-manager: continuity bootstrap requires the service-gateway extra",
                   file=sys.stderr)
@@ -186,8 +180,7 @@ def main(argv=None):
                 result = {"schema": "fleet-manager.capabilities", "version": 1,
                           "capabilities": [
                               CAPABILITY, PROVIDER, MACHINE_CALLER_CAPABILITY, MACHINE_REFERENCE_CAPABILITY,
-                              SSH_SETUP_CAPABILITY, SSH_SETUP_PIN_CAPABILITY, SSH_KEY_REFERENCE_CAPABILITY,
-                              SSH_KEY_PIN_CAPABILITY,
+                              SSH_SETUP_CAPABILITY, SSH_SETUP_PIN_CAPABILITY,
                           ]}
             elif args.command == "ssh-setup":
                 from .ssh_setup import run as setup_ssh
@@ -196,8 +189,6 @@ def main(argv=None):
                     args.request.expanduser().absolute(), source=args.source.expanduser().absolute(),
                     harness=args.harness, state_root=args.state_root.expanduser().absolute(),
                     apply=args.apply, expected_request_digest=args.expected_request_digest,
-                    key_references_only=args.key_references_only,
-                    expected_key_fingerprint=args.expected_key_fingerprint,
                 )
             else:
                 result = asyncio.run(bootstrap(

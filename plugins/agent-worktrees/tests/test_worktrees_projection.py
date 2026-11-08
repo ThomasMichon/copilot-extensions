@@ -54,23 +54,6 @@ def test_cold_and_restarted_live_reads_are_explicitly_unready(tmp_path):
     assert not (tmp_path / "missing.sqlite3").exists()
 
 
-def test_message_field_rollback_refuses_expanded_advisory_but_can_publish_legacy_rows(tmp_path, monkeypatch):
-    path = tmp_path / "current.sqlite3"
-    current = projection.WorktreesProjection(path)
-    current.publish("project", [_row(message_activity={
-        "version": 1, "last_message_at": "2026-11-07T01:00:00Z",
-    })], observed_at=1)
-    assert projection.read_advisory(path, "project")["worktrees"][0]["message_activity"]["version"] == 1
-    monkeypatch.setattr(projection, "ROW_FIELDS", projection.ROW_FIELDS - {"message_activity"})
-    monkeypatch.setattr(projection, "_OBJECT_FIELDS", projection._OBJECT_FIELDS - {"message_activity"})
-    with pytest.raises(projection.ProjectionError, match="undeclared"):
-        projection.read_advisory(path, "project")
-    legacy = projection.WorktreesProjection(path)
-    legacy.activate(expected_generation=current.generation)
-    legacy.publish("project", [_row()], observed_at=2)
-    assert projection.read_advisory(path, "project")["worktrees"] == [_row()]
-
-
 def test_publication_is_atomic_replaces_deletes_and_preserves_project_isolation(tmp_path):
     path = tmp_path / "current.sqlite3"
     store = projection.WorktreesProjection(path)

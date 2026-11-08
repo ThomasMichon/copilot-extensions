@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
-import sys
 
 import pytest
 
@@ -88,108 +87,6 @@ def test_picker_startup_handoff_reaches_real_copied_reader(tmp_path, direct):
     assert json.loads(capture.read_text("utf-8")) == expected
     assert not reconcile.exists()
     assert not manifest.exists()
-
-
-@pytest.mark.parametrize("resume_args", [["--resume=original"], ["--resume", "original"], ["--resume"]])
-@pytest.mark.parametrize("literal_args", [
-    ["--model", "--ahp=literal", "-i", "--resume", "--agent", "--experimental"],
-    ["--interactive", "--resume=literal", "--model", "--ahp"],
-])
-@pytest.mark.parametrize("positionals", [[], ["--", "--resume=literal-position", "--ahp", "--experimental", ""]])
-def test_manager_serializes_direct_resume_after_authoritative_binding(
-    tmp_path, resume_args, literal_args, positionals,
-):
-    shell = _copied_setup(tmp_path)
-    record = tmp_path / "fixture.yaml"
-    capture = tmp_path / "capture.py"
-    capture.write_text("import json,sys\nprint(json.dumps(sys.argv[1:]))\n", encoding="utf-8")
-    literal = "literal\n' \" & $value"
-    command = [
-        PWSH, "-NoProfile", "-NoLogo", "-File", str(shell / "launch-command.ps1"),
-        "--", sys.executable, str(capture), *resume_args, *literal_args, r"-C=C:\two words", literal,
-        *positionals,
-    ]
-    source = WRAPPER.with_name("launch-session.ps1").read_text(encoding="utf-8")
-    unpack = source[source.index("if ($plan.cmd) {"):source.index("# Apply environment variables")]
-    first = source.index("    if (\n        $executionLeg.execution_leg -and")
-    last = source.index("# Append copilot passthrough args", first)
-    binding = source[first:last].rstrip()
-    assert binding.endswith("}")
-    binding = binding[:-1]
-    mutate = source[last:source.index("# ── psmux pane command", last)]
-    first = source.index("        $directStartupManifest = $null")
-    last = source.index("        $copilotExit = $LASTEXITCODE", first)
-    execute = source[first:last]
-    plan = tmp_path / "plan.json"
-    plan.write_text(json.dumps({
-        "cmd": command, "record_path": str(record), "worktree_id": "fixture",
-        "post_exit": True,
-    }), encoding="utf-8")
-    probe = tmp_path / "binding.ps1"
-    shutil.copy2(WRAPPER.with_name("ahp-command.py"), tmp_path)
-    probe.write_text(
-        "$ErrorActionPreference='Stop'\n"
-        "function Write-SetupLog {}\n"
-        "function gh { $global:LASTEXITCODE=0; 'fixture-token' }\n"
-        + HELPERS.read_text(encoding="utf-8") + "\n"
-        "$plan=Get-Content -LiteralPath $args[0] -Raw | ConvertFrom-Json\n"
-        "$VenvPython=$args[1]\n"
-        + unpack + "\n$cmd=@($plan.cmd)\n"
-        "$executionLeg=[pscustomobject]@{execution_leg=[pscustomobject]@{"
-        "provider='ahp';state='active';blob=[pscustomobject]@{"
-        "auth_account='fixture';endpoint_url='http://127.0.0.1:1234';session_id='authoritative'}}}\n"
-        "$ahpArgs=@()\n$CopilotPassthrough=@('--resume=passthrough')\n"
-        + binding + "\n" + mutate + "\n" + execute,
-        encoding="utf-8",
-    )
-    result = subprocess.run(
-        [PWSH, "-NoProfile", "-File", str(probe), str(plan), sys.executable],
-        capture_output=True, text=True, encoding="utf-8", timeout=15,
-        env=dict(_test_env(tmp_path), PYTHONPATH=str(SETUP_SCRIPTS.parent / "src")),
-        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert json.loads(result.stdout) == [
-        *literal_args, r"-C=C:\two words", literal, "--experimental",
-        "--ahp", "http://127.0.0.1:1234", "--resume=authoritative",
-        *positionals, *(["--resume=passthrough"] if positionals else []),
-    ]
-    assert not list((shell / "pane-args").glob("*.json"))
-
-
-@pytest.mark.parametrize("recovery", [False, True])
-@pytest.mark.parametrize("native", [False, True])
-def test_manager_refreshes_the_inner_runtime_before_startup_serialization(tmp_path, recovery, native):
-    shell = _copied_setup(tmp_path)
-    record = tmp_path / "fixture.yaml"
-    stale = str(tmp_path / "old-runtime" / "python.exe")
-    command = [
-        PWSH, "-NoProfile", "-NoLogo", "-File", str(shell / "launch-command.ps1"),
-        *(["--recovery"] if recovery else []),
-        "--", "copilot" if native else stale, "-m", "agent_worktrees.launch_seed_exec", "--record", str(record),
-        "--admission-only", "--", "copilot", "--resume=original",
-    ]
-    source = WRAPPER.with_name("launch-session.ps1").read_text(encoding="utf-8")
-    unpack = source[source.index("if ($plan.cmd) {"):source.index("# Apply environment variables")]
-    plan = tmp_path / "plan.json"
-    plan.write_text(json.dumps({"cmd": command, "record_path": str(record)}), encoding="utf-8")
-    probe = tmp_path / "refresh.ps1"
-    probe.write_text(
-        "$ErrorActionPreference='Stop'\nfunction Write-SetupLog {}\n"
-        "$plan=Get-Content -LiteralPath $args[0] -Raw | ConvertFrom-Json\n"
-        "$VenvPython=$args[1]\n" + unpack + "\nConvertTo-Json -InputObject @($plan.cmd) -Compress\n",
-        encoding="utf-8",
-    )
-    result = subprocess.run(
-        [PWSH, "-NoProfile", "-File", str(probe), str(plan), sys.executable],
-        capture_output=True, text=True, encoding="utf-8", timeout=15, env=_test_env(tmp_path),
-        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
-    arguments = json.loads(result.stdout)
-    assert arguments[arguments.index("-m") - 1] == ("copilot" if native else sys.executable)
-    assert stale not in arguments and arguments[-1] == "--resume=original"
-    assert not (shell / "pane-args").exists()
 
 
 @pytest.mark.parametrize("unsupported", [

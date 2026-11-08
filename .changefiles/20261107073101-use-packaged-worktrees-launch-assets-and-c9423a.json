@@ -1,9 +1,0 @@
-{
-  "comment": "Use packaged Worktrees launch assets and nested application interpreters without legacy fallback for incomplete applications.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -88,7 +88,7 @@ def _cmd_list_stream(args: argparse.Namespace, records) -> int:
 
     mux_map: dict[str, sessions.MuxInfo] = {}
     if getattr(args, "mux_details", False):
-        mux_map = sessions.mux_status_for_display([r.worktree_id for r in records])
+        mux_map = sessions.mux_status_many([r.worktree_id for r in records])
     session_ctx = sessions.scan_sessions_fast(records)
     bare_orphan_wts: set[str] | None = None
 
@@ -268,7 +268,7 @@ def _build_list_json_payload(
     if getattr(args, "mux_details", False):
         if enrichment.mux_map is None:
             wt_ids = [rec.worktree_id for rec in records]
-            enrichment.mux_map = sessions.mux_status_for_display(wt_ids)
+            enrichment.mux_map = sessions.mux_status_many(wt_ids)
         mux_map = enrichment.mux_map
     if enrichment.session_ctx is None:
         enrichment.session_ctx = sessions.scan_sessions_fast(records)
@@ -340,10 +340,10 @@ def _build_list_json_payload(
 
 def _warm_list_cache_for_active_project(*, interval: float = 15, cleanup_owner=None) -> int:
     """Refresh exact, recently requested list shapes for the active project."""
-    if list_cache.ttl_seconds() <= 0:
-        return 0
     project = cfg.project_name()
     if cleanup_owner is not None and cleanup_owner.observation_blocked(project):
+        return 0
+    if list_cache.ttl_seconds() <= 0:
         return 0
     warmed = 0
     enrichments: dict[tuple[str, bool, bool], _ListEnrichment] = {}
@@ -385,9 +385,7 @@ def _warm_list_cache_for_active_project(*, interval: float = 15, cleanup_owner=N
 
 def cmd_list(args: argparse.Namespace) -> int:
     """List worktrees from tracking records."""
-    if getattr(args, "follow", False) or getattr(args, "current", False) or getattr(
-        args, "passive", False
-    ) or (
+    if getattr(args, "follow", False) or getattr(args, "current", False) or (
         (getattr(args, "json", False) or getattr(args, "stream", False))
         and not getattr(args, "glance", False)
         and not getattr(args, "profile_assignment_history", False)

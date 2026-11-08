@@ -1,9 +1,0 @@
-{
-  "comment": "Allocate fresh comment and reply identities under original-selection custody before preview.",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

@@ -6,7 +6,6 @@ import logging
 from typing import TYPE_CHECKING
 
 from . import routing_persistence
-from .cutover_selection import routing_lock_kwargs
 from .routing import Endpoint
 
 if TYPE_CHECKING:
@@ -162,13 +161,11 @@ def _rollback(
                         process_start_time=old.process_start_time,
                         expected_active=current,
                         **({"refuse_current": refuse_restoration} if retracted or self.refuse_restoration is not None else {}),
-                        **routing_lock_kwargs(getattr(self, "routing_lock_timeout", None)),
                     )
                 else:
                     self.routing.publish_active(
                         self.config_dir, bind=old.bind, port=old.port,
                         pid=old.pid, version=old.version, demote_existing=True,
-                        **routing_lock_kwargs(getattr(self, "routing_lock_timeout", None)),
                     )
                 old_restored = True
                 result.steps.append("rollback: restored old as active")
@@ -214,14 +211,12 @@ def _rollback(
                         pid=getattr(handle, "pid", None), version=self.version,
                         process_start_time=expected_new.process_start_time,
                         demote_existing=True, expected_active=expected_new,
-                        **routing_lock_kwargs(getattr(self, "routing_lock_timeout", None)),
                     )
                 else:
                     self.routing.publish_active(
                         self.config_dir, bind=self.bind, port=new_port,
                         pid=getattr(handle, "pid", None), version=self.version,
                         demote_existing=True,
-                        **routing_lock_kwargs(getattr(self, "routing_lock_timeout", None)),
                     )
             except Exception as exc:  # noqa: BLE001
                 log.error("Commit-forward could not re-assert route: %s", exc)

@@ -49,6 +49,7 @@ def install_scope_boundary(app, is_active):
 
 def _make_auth(token: str | None, control_token: str | None):
     bearer = HTTPBearer(auto_error=False)
+    accepted = tuple(value for value in (token, control_token) if value)
 
     def check(
         request: Request,
@@ -73,14 +74,10 @@ def _make_auth(token: str | None, control_token: str | None):
                 request.path_params["task_id"], None,
             )
             return
-        data_token_match = bool(
-            token and creds is not None and secrets.compare_digest(creds.credentials, token)
-        )
-        request.state.data_token_match_v1 = data_token_match
         if token is None:
             return
-        if data_token_match or (
-            control_token and creds is not None and secrets.compare_digest(creds.credentials, control_token)
+        if creds is not None and any(
+            secrets.compare_digest(creds.credentials, value) for value in accepted
         ):
             return
         raise HTTPException(status_code=401, detail="invalid or missing bearer token")

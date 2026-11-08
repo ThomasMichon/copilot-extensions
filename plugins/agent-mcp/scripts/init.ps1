@@ -80,7 +80,6 @@ if ($env:OS -eq 'Windows_NT' -and
         -Plugin 'agent-mcp' -Action $Action -Options $driverOptions
     if (-not $driverEntry.Participant -or $driverEntry.ExitCode -ne 0) { exit $driverEntry.ExitCode }
     $driverPython = $driverEntry.Python
-    $script:McpBootstrapPython = $driverPython
     $driverArguments = $driverEntry.Arguments
 }
 if ($Action -eq 'broker-remove') {
@@ -392,88 +391,23 @@ function Remove-ConsoleTrampolines {
 # === install-contract:v4 marker/toss helpers (#935) ===
 function Get-BootstrapPython {
     param([switch]$ExternalOnly)
-    # Construction helpers share the native driver's 3.11 floor, not the
-    # package's 3.10 floor. External callers must run outside the slot.
-    $probe = @'
-import json,sys
-assert sys.version_info >= (3,11)
-print(json.dumps(sys._base_executable if sys.argv[1] == 'base' else sys.executable))
-'@
-    $mode = if ($ExternalOnly) { 'base' } else { 'executable' }
-    $resolve = {
-        param([string]$Candidate)
-        if (-not $Candidate -or $Candidate -match '[\\/]WindowsApps[\\/]') { return $null }
-        try {
-            $nativeError = ''
-            $output = Invoke-Hidden -FilePath $Candidate -ArgList @(
-                '-I', '-S', '-B', '-c', $probe, $mode
-            ) -ErrorOutput ([ref]$nativeError)
-            if ($LASTEXITCODE -eq 0) {
-                $selected = ($output | Out-String) | ConvertFrom-Json
-                if ($selected -and $selected -notmatch '[\\/]WindowsApps[\\/]' -and
-                    (Test-Path -LiteralPath $selected -PathType Leaf)) { return $selected }
-            }
-        } catch { }
-        return $null
-    }
+    <# A python to run the stdlib-only versioned_runtime.py helper (#935).
+       Prefers the freshly-built slot venv python ($VenvDir, present at
+       mark-complete before the link is swapped), then the active link's
+       python, then a real base python via the `py` launcher -- avoiding the
+       Windows Store 'python' alias stub. Returns $null if none. #>
     foreach ($d in @($VenvDir, $LinkDir)) {
         if ($ExternalOnly) { break }
-        if ($d) {
-            foreach ($rel in 'Scripts\python.exe', 'bin/python') {
-                $p = Join-Path $d $rel
-                if (Test-Path -LiteralPath $p -PathType Leaf) {
-                    $selected = & $resolve $p
-                    if ($selected) { return $selected }
-                }
-            }
-        }
+        # Windows venv layout first; `bin/python` is the POSIX layout pwsh sees off Windows.
+        if ($d) { foreach ($rel in 'Scripts\python.exe', 'bin/python') { $p = Join-Path $d $rel; if (Test-Path $p) { return $p } } }
     }
-    $preferred = Get-Variable McpBootstrapPython -Scope Script -ValueOnly -ErrorAction SilentlyContinue
-    $selected = & $resolve $preferred
-    if ($selected) { return $selected }
-    $candidates = @()
-    foreach ($name in 'python3', 'python') {
-        $candidates += @(Get-Command $name -All -CommandType Application -ErrorAction SilentlyContinue |
-            Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' } |
-            ForEach-Object { $_.Source })
+    if (Get-Command py -ErrorAction SilentlyContinue) {
+        $exe = (Invoke-Hidden -FilePath py -ArgList @('-3', '-c', 'import sys; print(sys.executable)') | Out-String).Trim()
+        if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { return $exe }
     }
-    foreach ($launcher in @(Get-Command py -All -CommandType Application -ErrorAction SilentlyContinue |
-            Where-Object { $_.Source -notmatch '[\\/]WindowsApps[\\/]' })) {
-        try {
-            $nativeError = ''
-            $listed = Invoke-Hidden -FilePath $launcher.Source -ArgList @('-0p') -ErrorOutput ([ref]$nativeError)
-            $launcherMatches = @()
-            if ($LASTEXITCODE -eq 0) {
-                $launcherMatches = @([regex]::Matches("$listed", '(?m)((?:[A-Za-z]:[\\/]|\\\\).*python(?:[0-9.]*)?\.exe)"?\s*$'))
-            }
-            if ($launcherMatches.Count) {
-                foreach ($match in $launcherMatches) { $candidates += $match.Groups[1].Value }
-            } else {
-                foreach ($version in '3.13', '3.12', '3.11', '3') {
-                    $exe = Invoke-Hidden -FilePath $launcher.Source -ArgList @(
-                        "-$version", '-I', '-S', '-B', '-c', 'import json,sys; print(json.dumps(sys.executable))'
-                    ) -ErrorOutput ([ref]$nativeError)
-                    if ($LASTEXITCODE -eq 0 -and $exe) { $candidates += ($exe | Out-String) | ConvertFrom-Json }
-                }
-            }
-        } catch { }
-    }
-    if ($env:OS -eq 'Windows_NT') {
-        $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)})
-        if ($env:LOCALAPPDATA) { $roots += Join-Path $env:LOCALAPPDATA 'Programs\Python' }
-        foreach ($root in $roots) {
-            if (-not $root) { continue }
-            $candidates += @(Get-ChildItem -LiteralPath $root -Filter 'Python3*' -Directory -ErrorAction SilentlyContinue |
-                Sort-Object Name -Descending |
-                ForEach-Object { Join-Path $_.FullName 'python.exe' })
-        }
-    }
-    foreach ($candidate in @($candidates | Select-Object -Unique)) {
-        $selected = & $resolve $candidate
-        if ($selected) {
-            $script:McpBootstrapPython = $selected
-            return $selected
-        }
+    foreach ($cand in 'python3', 'python') {
+        $c = Get-Command $cand -ErrorAction SilentlyContinue
+        if ($c -and $c.Source -notmatch 'WindowsApps') { return $c.Source }
     }
     return $null
 }
@@ -874,12 +808,28 @@ if (-not (Test-Path $PkgSrcDir)) {
 
 $hasWinget = $null -ne (Get-Command winget -ErrorAction SilentlyContinue)
 
-$pythonCmd = Get-BootstrapPython -ExternalOnly
+# Find a Python interpreter (skip Windows Store aliases that aren't real)
+$pythonCmd = $null
+foreach ($candidate in @('python', 'python3', 'py')) {
+    $found = Get-Command $candidate -ErrorAction SilentlyContinue
+    if ($found) {
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $testOut = & $found.Source --version 2>&1
+            if ($LASTEXITCODE -eq 0 -and $testOut -match 'Python') {
+                $pythonCmd = $found.Source
+            }
+        } catch { }
+        $ErrorActionPreference = $prevEAP
+        if ($pythonCmd) { break }
+    }
+}
 if (-not $pythonCmd) {
-    Write-Fail 'MCP setup requires an existing Python 3.11+ bootstrap interpreter'
+    Write-Fail 'Python not found on PATH (need 3.10+)'
     Write-Host '  Install Python from https://python.org or via winget:' -ForegroundColor DarkGray
     Write-Host '    winget install Python.Python.3.13' -ForegroundColor DarkGray
-    throw 'MCP setup requires an existing Python 3.11+ bootstrap interpreter'
+    throw 'Python not found on PATH (need 3.10+)'
 }
 Write-Ok "Python: $pythonCmd"
 
@@ -937,7 +887,7 @@ if ($Force -or -not (Test-Path $VenvPython)) {
         if (Get-Command uv -ErrorAction SilentlyContinue) {
             Write-Step 'Creating venv via uv...'
             Invoke-VersionedSlotClean
-            Invoke-Hidden -FilePath uv -ArgList @('venv', $VenvDir, '--python', $pythonCmd, '--allow-existing') | Out-Null
+            Invoke-Hidden -FilePath uv -ArgList @('venv', $VenvDir, '--allow-existing') | Out-Null
             if ($LASTEXITCODE -ne 0) {
                 Write-Step 'uv venv failed -- falling back to python -m venv'
                 Invoke-Hidden -FilePath $pythonCmd -ArgList @('-m', 'venv', $VenvDir) | Out-Null

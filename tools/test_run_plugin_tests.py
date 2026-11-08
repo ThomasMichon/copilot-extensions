@@ -608,7 +608,7 @@ def test_explicit_reinstall_invalidates_uv_cached_path_dependency_wheels(
     monkeypatch.setattr(runner, "_plugin_dir", lambda _name: plugin)
     monkeypatch.setattr(runner, "VENV_ROOT", tmp_path / "venvs")
     monkeypatch.setattr(runner, "_has_pyproject", lambda _name: True)
-    monkeypatch.setattr(runner, "has_dev_extra", lambda _project: True)
+    monkeypatch.setattr(runner, "_has_dev_extra", lambda _name: True)
     monkeypatch.setattr(runner, "_dep_fingerprint", lambda _name: "current")
     root = runner.VENV_ROOT / "example"
     root.mkdir(parents=True)
@@ -657,104 +657,6 @@ def selectable_tests(tmp_path, monkeypatch):
     for name in ("test_selected.py", "test_unrelated.py", "nested/test_child.py"):
         (tests / name).write_text("def test_example(): pass\n", encoding="utf-8")
     return tests
-
-
-def test_source_tooling_selects_declared_dev_not_runtime_or_first_party_core(tmp_path, monkeypatch):
-    import json
-    import tomllib
-
-    manager = tomllib.loads((runner.REPO / "worktree-manager/pyproject.toml").read_text())
-    dev = manager["project"]["optional-dependencies"]["dev"]
-    (tmp_path / "pyproject.toml").write_text(
-        '[project]\nname="tooling-fixture"\nversion="1"\n'
-        'dependencies=["runtime-must-not-be-selected"]\n'
-        '[project.optional-dependencies]\ndev=' + json.dumps(dev) + '\n'
-        '[dependency-groups]\nfirst-party-core=["core-must-not-be-selected"]\n',
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(runner, "_plugin_dir", lambda _name: tmp_path)
-    selected = runner.declared_test_tooling_requirements("installation-context")
-    assert set(dev) <= set(selected)
-    assert "pydantic>=2" in selected
-    assert "runtime-must-not-be-selected" not in selected
-    assert "core-must-not-be-selected" not in selected
-
-
-def test_declared_manager_tooling_preparation_imports_in_own_runtime():
-    import json
-    import os
-    import subprocess
-
-    value = os.environ.get("COPILOT_EXTENSIONS_DECLARED_TOOLING_PROOF")
-    if not value:
-        pytest.skip("Explicit native tooling-preparation proof was not supplied")
-    proof = json.loads(Path(value).read_text(encoding="utf-8"))
-    assert proof["requirements"] == list(runner.declared_test_tooling_requirements("worktree-manager"))
-    assert proof["created_by_real_native_uv"] and proof["canonical_retained_install_succeeded"]
-    process = subprocess.run(
-        [
-            proof["python"], "-I", "-B", "-c",
-            "import json,sys,pydantic;from importlib.metadata import version;"
-            "assert int(version('pydantic').split('.')[0])>=2;"
-            "print(json.dumps({'prefix':sys.prefix,'pydantic':pydantic.__version__,"
-            "'module':pydantic.__file__}))",
-        ],
-        capture_output=True, text=True, check=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-    )
-    observed = json.loads(process.stdout)
-    assert Path(observed["prefix"]).resolve() == Path(proof["environment"]).resolve()
-    assert Path(observed["module"]).resolve().is_relative_to(Path(proof["environment"]).resolve())
-
-
-@pytest.mark.parametrize("extras", ["", '[project.optional-dependencies]\nother=["unselected"]\n'])
-def test_source_tooling_falls_back_to_flat_dev_group(tmp_path, monkeypatch, extras):
-    (tmp_path / "pyproject.toml").write_text(
-        '[project]\nname="tooling-fixture"\nversion="1"\n'
-        'dependencies=["runtime-must-not-be-selected"]\n' + extras
-        + '[dependency-groups]\ndev=["pydantic>=2"]\n'
-        'first-party-core=["core-must-not-be-selected"]\n',
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(runner, "_plugin_dir", lambda _name: tmp_path)
-    selected = runner.declared_test_tooling_requirements("installation-context")
-    assert "pydantic>=2" in selected
-    assert "runtime-must-not-be-selected" not in selected
-    assert "core-must-not-be-selected" not in selected
-    assert "unselected" not in selected
-
-
-@pytest.mark.parametrize("metadata", [
-    'project="not-a-table"\n',
-    '[project]\noptional-dependencies="not-a-table"\n',
-    '[project]\noptional-dependencies=[]\n',
-    'dependency-groups="not-a-table"\n',
-    'dependency-groups=[]\n',
-    '[project.optional-dependencies]\ndev="not-a-list"\n',
-    '[project.optional-dependencies]\ndev=[1]\n',
-    '[dependency-groups]\ndev="not-a-list"\n',
-    '[dependency-groups]\ndev=[1]\n',
-    '[dependency-groups]\ndev=[{include-group="other"}]\nother=["pydantic>=2"]\n',
-    'dependency-groups=[]\n[project.optional-dependencies]\ndev=["pydantic>=2"]\n',
-])
-def test_source_tooling_refuses_malformed_metadata_before_install(tmp_path, monkeypatch, metadata):
-    (tmp_path / "pyproject.toml").write_text(metadata, encoding="utf-8")
-    monkeypatch.setattr(runner, "_plugin_dir", lambda _name: tmp_path)
-    monkeypatch.setattr(runner, "VENV_ROOT", tmp_path / "venvs")
-    monkeypatch.setattr(runner, "ordinary_cache_root", lambda path: path)
-    monkeypatch.setattr(runner, "run_uv_install", lambda *a, **k: pytest.fail("install attempted"))
-    monkeypatch.setattr(runner.subprocess, "run", lambda *a, **k: pytest.fail("subprocess attempted"))
-    with pytest.raises(ValueError, match="Test tooling requires"):
-        runner._prepare_venv("installation-context", "unused-uv", reinstall=False, environment={})
-
-
-def test_source_only_cache_invalidates_the_previous_tooling_selection():
-    name = "installation-context"
-    previous = runner.dependency_fingerprint(
-        name, runner._plugin_dir(name), runner.REPO,
-        (*runner.RUNNER_DEPENDENCIES, *runner.EXTERNAL_TEST_DEPENDENCIES.get(name, ())),
-    )
-    assert runner._dep_fingerprint(name) != previous
 
 
 @pytest.mark.parametrize("name,extra", [
@@ -1086,67 +988,6 @@ def manager_acceptance(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(acceptance.sys, "argv", [str(script), "--root", str(tmp_path / "acceptance")])
     return acceptance, releases
-
-
-@pytest.mark.portfolio_tier("T1")
-@pytest.mark.effect("filesystem")
-@pytest.mark.parametrize("tooling_failure", [False, True])
-def test_manager_provider_prepares_only_declared_tooling(
-    manager_acceptance, monkeypatch, tmp_path, tooling_failure,
-):
-    acceptance, releases = manager_acceptance
-    requirements = runner.declared_test_tooling_requirements("worktree-manager")
-    selected = []
-    commands = []
-
-    def declared(name):
-        selected.append(name)
-        return requirements
-
-    monkeypatch.setattr(acceptance.runpy, "run_path", lambda _path: {
-        "declared_test_tooling_requirements": declared,
-    })
-    monkeypatch.setattr(acceptance.shutil, "which", lambda _name: "fixture-uv")
-
-    def run(command, **kwargs):
-        commands.append(command)
-        sandbox = kwargs["sandbox"]
-        assert kwargs["limits"].wall_seconds <= 300
-        assert not sandbox.is_relative_to(acceptance.REPO)
-        if len(commands) == 2 and tooling_failure:
-            return 7
-        if "--prepare" in command:
-            wheel = sandbox / "manager.whl"
-            wheel.write_bytes(b"fixture")
-            snapshot = sandbox / "complete"
-            snapshot.mkdir()
-            (sandbox / "fixtures.json").write_text(json.dumps({
-                "provider_wheel": str(wheel), "complete_snapshot": str(snapshot),
-            }), encoding="utf-8")
-        return 0
-
-    monkeypatch.setattr(acceptance, "run_contained", run)
-    root = tmp_path / "provider"
-    root.mkdir()
-    assert acceptance._provider_acceptance(root) == (
-        7 if tooling_failure else 0
-    )
-    assert selected == ["worktree-manager"]
-    assert len(commands) == (2 if tooling_failure else 4)
-    assert commands[0][:4] == ["fixture-uv", "venv", "--python", sys.executable]
-    install = commands[1]
-    assert install[install.index("--registry-only") + 1:] == [
-        "--", "--python", str(Path(commands[0][-1]) / (
-            "Scripts/python.exe" if os.name == "nt" else "bin/python"
-        )), *requirements,
-    ]
-    assert "-e" not in install
-    assert not releases
-    if tooling_failure:
-        assert not (root / "provider-fixtures.json").exists()
-    else:
-        assert (root / "artifacts" / "manager.whl").is_file()
-        assert "--timeout=30" in commands[-1]
 
 
 @pytest.mark.portfolio_tier("T1")

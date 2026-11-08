@@ -40,15 +40,6 @@ root. Equal physical version strings from separate installations do not confer
 ownership of a shared handle. Missing or foreign installation identity refuses
 before replacement; no foreign listener or held client is closed to obtain it.
 
-A retained data handle without an active route is not itself a live owner.
-Under the existing cutover lock, native listener inspection must establish
-that no process serves it before incoming startup can proceed. An unavailable
-inspection or a live unattributable listener still refuses. The original
-handle and listener ownership are rechecked at guarded publication; a listener
-appearing during readiness cannot be overwritten. Successful recovery atomically
-repoints the handle to the qualified incoming generation, without deleting it
-first or terminating an incumbent process.
-
 An explicit bridge configuration need not appear in global discovery. When
 serving is enabled, fresh admission can publish the selected generation on
 demand. A configured catalog alone does not start an inactive resident during

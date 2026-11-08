@@ -196,41 +196,23 @@ def _materialize(
         return destination
 
     shutil.copytree(source, destination, copy_function=copy_file if deadline is not None else shutil.copy2)
-    materialize_consumer(snapshot, source, destination, deadline=deadline)
-
-
-def materialize_consumer(
-    snapshot: Path, source: Path, destination: Path, *, deadline: float | None = None,
-    file_pointer_candidates: list[Path] | None = None,
-) -> None:
-    """Close one consumer through the same native owners, copied or in-place."""
-    _remaining(deadline)
     for metadata in (SOURCE_FILE, "snapshot-provenance.json"):
         if (destination / metadata).exists() or (destination / metadata).is_symlink():
             raise SourcePreparationError("Source payload already contains reserved deployment metadata")
     retired = materializer.find_retired_directory_pointers_in_plugin(destination)
     if retired:
         raise SourcePreparationError("Source payload contains retired directory vendor pointers")
-    log = materializer.materialize_file_pointers(
-        destination, canonical_root=snapshot, candidates=file_pointer_candidates,
-    )
+    log = materializer.materialize_file_pointers(destination, canonical_root=snapshot)
     log.extend(materializer.materialize_uv_editable_ref_into(
         source_consumer_dir=source, dest_consumer_dir=destination, canonical_root=snapshot,
-        dest_root=snapshot if destination.is_relative_to(snapshot) else destination,
     ))
     log.extend(materializer.materialize_installer_engine_ref_into(
         source_consumer_dir=source, dest_consumer_dir=destination, canonical_root=snapshot,
-        dest_root=snapshot if destination.is_relative_to(snapshot) else destination,
     ))
     log.extend(materializer.materialize_launch_wrapper_assets_into(
         source_consumer_dir=source, dest_consumer_dir=destination, canonical_root=snapshot,
-        dest_root=snapshot if destination.is_relative_to(snapshot) else destination,
         reuse_existing=True,
     ))
-    log.extend(
-        f"SKIP {problem}"
-        for problem in materializer.uer.materialized_local_source_problems(destination)
-    )
     refusals = [entry for entry in log if entry.startswith("SKIP ")]
     _remaining(deadline)
     if refusals:

@@ -248,11 +248,6 @@ class MuxCompanionApp(CompanionPrMixin, App):
         padding: 1 2;
     }
 
-    #agenda.agenda-graph {
-        text-wrap: nowrap;
-        text-overflow: ellipsis;
-    }
-
     #pr-controls {
         height: auto;
         margin: 0 2;
@@ -389,7 +384,6 @@ class MuxCompanionApp(CompanionPrMixin, App):
         yield Footer()
 
     def on_mount(self) -> None:
-        self.query_one("#views", TabbedContent).hide_tab("agenda-tab")
         self._timeline_panel.set_demand_visible(False)
         self._reload()
         self.set_interval(5, self._poll_attention)
@@ -547,23 +541,9 @@ class MuxCompanionApp(CompanionPrMixin, App):
         )
 
     def _update_agenda(self) -> None:
-        agenda = self.query_one("#agenda", Static)
-        frame = self._data.agenda
-        # The tab exists only for heads that produced an agenda. Head changes,
-        # loading, reconnects and errors keep the last settled visibility.
-        if self._data.agenda_error is None and isinstance(frame, dict):
-            views = self.query_one("#views", TabbedContent)
-            if frame.get("availability") == "observed":
-                views.show_tab("agenda-tab")
-            elif frame.get("availability") == "not-published":
-                views.hide_tab("agenda-tab")
-        # Graph lanes only line up unwrapped, so long rows end in an ellipsis.
-        agenda.set_class(
-            self._data.agenda_error is None and isinstance(frame, dict)
-            and isinstance(frame.get("observation"), dict) and "graph" in frame["observation"],
-            "agenda-graph",
-        )
-        agenda.update(agenda_text(frame, self._data.agenda_error))
+        self.query_one("#agenda", Static).update(agenda_text(
+            self._data.agenda, self._data.agenda_error,
+        ))
 
     def _receive_agenda(self, data, generation, cancelled, frame, error) -> None:
         if (

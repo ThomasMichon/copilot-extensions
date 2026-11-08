@@ -261,29 +261,6 @@ def test_read_only_controls_preserve_defaults_without_creating_state(
     assert not list(policy.home.iterdir())
 
 
-def test_controller_uses_runtime_resources_without_loading_native_owner(
-    policy: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    scripts = policy.home / "resources"
-    scripts.mkdir()
-    for name in ("bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1"):
-        (scripts / name).write_text("inert unit fixture\n", encoding="utf-8")
-    calls = []
-
-    def resources():
-        calls.append("runtime resources")
-        return scripts
-
-    monkeypatch.setitem(sys.modules, "worktree_manager.self_install", SimpleNamespace(
-        _runtime_scripts=resources,
-        running_payload_dir=lambda: pytest.fail("legacy payload selected"),
-    ))
-    monkeypatch.setattr(bootstrap_policy.shutil, "which", lambda name: "inert-shell")
-    command = bootstrap_policy._guard_command()
-    assert Path(command[-1]).parent == scripts and Path(command[-1]).is_file()
-    assert calls == ["runtime resources"]
-
-
 def test_direct_manager_recheck_keeps_its_invocation_directory(
     policy: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, manager_policy_boundary: None,
 ) -> None:
@@ -408,12 +385,12 @@ def test_suite_authority_classifies_reconciliation_and_independent_backends() ->
         node for node in tree.body
         if isinstance(node, ast.ImportFrom) and node.module == "__future__"
         or isinstance(node, ast.Assign) and any(
-            isinstance(target, ast.Name) and target.id in {"_DIRECT_WRITER_BACKENDS", "_SUITE_BACKENDS"}
+            isinstance(target, ast.Name) and target.id == "_SUITE_BACKENDS"
             for target in node.targets
         )
         or isinstance(node, ast.FunctionDef) and node.name == "suite_request"
     ]
-    assert len(selected) == 4
+    assert len(selected) == 3
     namespace = {}
     exec(compile(ast.Module(body=selected, type_ignores=[]), str(source), "exec"), namespace)
     classify = namespace["suite_request"]
@@ -425,11 +402,6 @@ def test_suite_authority_classifies_reconciliation_and_independent_backends() ->
     ))
     assert classify(SimpleNamespace(backend="manager-self-install", argv=()))
     assert classify(SimpleNamespace(backend="engine-dev-release", argv=()))
-    for backend in (
-        "engine-native-install", "plugin-native-install", "manager-bootstrap",
-        "manager-uninstall", "owning-plugin-provision",
-    ):
-        assert classify(SimpleNamespace(backend=backend, argv=()))
     assert not classify(SimpleNamespace(backend="other-product", argv=()))
 
 

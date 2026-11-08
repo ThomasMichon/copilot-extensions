@@ -540,26 +540,16 @@ reusing stale "already synced" state from the old one.
 
 ## Schedule (deployed service)
 
-The Windows installer preserves scheduling by default; missing tasks stay
-absent. On-demand `session-sync run --prune` does not require Task Scheduler.
-For explicit 4-hourly scheduling set `windows_scheduled_task: enabled` in the
-installation's own `<runtime>/config.yaml`, then run its installer:
+Installed via the plugin's installers, which register a 4-hourly run of
+the session-sync `run --prune` management action:
 
 This timer/task launch is an explicit service-management boundary; session
 catalogs do not replace it in this phase.
 
 - **Windows:** `pwsh -File plugins\agent-logger\scripts\install.ps1 install`
-  (Scheduled Task only with explicit scheduling opt-in).
+  (Scheduled Task).
 - **Linux/WSL:** `bash plugins/agent-logger/scripts/install.sh install`
   (systemd user timer).
-
-`windows_scheduled_task: preserve` leaves existing/custom scheduling and
-enablement unchanged; `absent` retires only an owned registration on
-install/update. `install.ps1 task-retire -InstallDir <runtime>` performs the same
-task-only retirement without installing incoming code (`-DryRun` supported).
-Foreign/ambiguous tasks, disabled-task holds and query/removal failures are
-explicit refusals; missing tasks are idempotent. Running syncs, runtime and
-durable state remain intact. See [Windows scheduling](../../README.md#windows-scheduling).
 
 The Windows GUI-root launcher loads process support from the selected installed
 runtime through the canonical installed resolver on each run, rather than pinning

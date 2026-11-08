@@ -235,7 +235,6 @@ def run_ps(tmp_path: Path, script: str) -> subprocess.CompletedProcess[str]:
         + formatter + "\n"
         "function Write-Skip { param($Msg) }\n"
         "function Write-Fail { param($Msg) throw $Msg }\n"
-        f"function Get-BootstrapPython {{ param([switch]$ExternalOnly) return '{sys._base_executable}' }}\n"
         "function Start-Process { throw 'Forbidden process launch' }\n"
         "function Stop-Process { throw 'Forbidden process termination' }\n"
         "function Register-ScheduledTask { throw 'Forbidden task registration' }\n"
@@ -601,7 +600,7 @@ function Invoke-NativeCapture {{
 function Invoke-UvVenvResilient {{
     param($UvCommand, $VenvDir, $Arguments)
     if ($UvCommand -ne 'fixture-only-uv') {{ throw 'escaped fake uv' }}
-    if (($Arguments -join '|') -ne '--allow-existing|--python|forbidden') {{ throw 'selected fallback base was lost' }}
+    if ($Arguments -contains '--python') {{ throw 'changed interpreter selection policy' }}
     if (Test-Path (Join-Path $Dir 'signed-attempt')) {{ throw 'unusable signed attempt retained' }}
     $script:Retried = $true
     $script:Healthy = $true
@@ -656,7 +655,7 @@ function Set-Location {{ param($Path) }}
 function Test-IndexVenv {{ param($Dir, $Python) return $script:Healthy }}
 function Invoke-UvVenvResilient {{
     param($UvCommand, $VenvDir, $Arguments)
-    if ($UvCommand -ne 'fixture-only-uv' -or ($Arguments -join '|') -ne '--allow-existing|--python|forbidden') {{ throw 'selected engine base was lost' }}
+    if ($UvCommand -ne 'fixture-only-uv' -or $Arguments -contains '--python') {{ throw 'changed uv policy' }}
     $script:Healthy=$true
     $script:UvCalls=1+$script:UvCalls
     [pscustomobject]@{{ ExitCode=0; Output='' }}

@@ -36,28 +36,13 @@ def represented_pending_events(events: list[Any]) -> list[Any]:
             event.data.get("tool_call_id") or event.data.get("toolCallId")
         )
         key = str(tool_call_id) if tool_call_id else ""
-        request_id = event.data.get("request_id")
-        request_key = (
-            f"request:{event.data.get('request_family')}:{request_id}"
-            if request_id else ""
-        )
         if event.event in {"ask_user_request", "permission_request"}:
-            if request_key:
-                if key:
-                    for pending_key, pending in list(pending_by_id.items()):
-                        if key == str(pending.data.get("tool_call_id") or ""):
-                            pending_by_id.pop(pending_key, None)
-                pending_by_id[request_key] = event
-            elif key:
+            if key:
                 pending_by_id[key] = event
             else:
                 unkeyed.append(event)
-        elif event.event == "ask_user_resolved" and request_key:
-            pending_by_id.pop(request_key, None)
         elif event.event in {"tool_call_start", "tool_call_update"} and key:
-            for pending_key, pending in list(pending_by_id.items()):
-                if key == str(pending.data.get("tool_call_id") or pending.data.get("toolCallId") or ""):
-                    pending_by_id.pop(pending_key, None)
+            pending_by_id.pop(key, None)
     return [*unkeyed, *pending_by_id.values()]
 
 

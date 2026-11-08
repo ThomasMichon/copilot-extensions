@@ -220,53 +220,6 @@ def test_integration_phase_uses_engine_scope_without_plugin_sweep(phase_portfoli
     assert planned == ["agent-worktrees"]
 
 
-def test_delegated_project_integration_uses_controller_owned_manager(phase_portfolio, monkeypatch):
-    from agent_worktrees import project_update_controller, update_integration, update_runtime_plan
-
-    _engine, _peer, calls, planned = phase_portfolio
-    monkeypatch.setattr(config, "active_project", lambda: "example")
-    monkeypatch.setattr(
-        update_runtime_plan, "plan_modules", lambda *a, **kw: pytest.fail("integration planned modules"),
-    )
-    monkeypatch.setattr(
-        update_integration, "finish",
-        lambda _payload, _platform, _env, **kwargs: calls.append(
-            ["integration", kwargs.get("manager_owned_by_controller")]
-        ) or True,
-    )
-    request = SimpleNamespace(authority="project", project="example", argv=())
-    authority = SimpleNamespace(configured=True, mode="project", project="example")
-    selected = _phase_args("integration")
-    selected._controller_request = request
-    selected._controller_authority = authority
-    result = project_update_controller.dispatch_update(
-        selected, lambda _args: pytest.fail("auth report ran"),
-        lambda _args: pytest.fail("Manager handoff ran"),
-        lambda: update_cli._update_in_plugin_steps(selected),
-    )
-    assert result == 0
-    assert calls == [["integration", True]]
-    assert planned == ["agent-worktrees"]
-    assert not hasattr(selected, "_controller_owns_manager")
-
-
-def test_standalone_integration_does_not_accept_boolean_owner_marker(phase_portfolio, monkeypatch):
-    from agent_worktrees import update_integration
-
-    _engine, _peer, calls, planned = phase_portfolio
-    monkeypatch.setattr(
-        update_integration, "finish",
-        lambda _payload, _platform, _env, **kwargs: calls.append(
-            ["integration", kwargs.get("manager_owned_by_controller")]
-        ) or True,
-    )
-    selected = _phase_args("integration")
-    selected._controller_owns_manager = True
-    assert update_cli._update_in_plugin_steps(selected) == 0
-    assert calls == [["integration", None]]
-    assert planned == ["agent-worktrees"]
-
-
 def test_integration_phase_refuses_invalid_selected_scope(phase_portfolio, monkeypatch):
     _engine, _peer, calls, _planned = phase_portfolio
 
@@ -470,7 +423,6 @@ def test_installer_project_overrides_inherited_staging_context(portfolio, monkey
     monkeypatch.setattr(update_runtime_target, "plan_target", lambda *args: None)
     source = SimpleNamespace(
         payload=payload, identity="prepared-source", version="2", validate=lambda *args: None,
-        installer_arguments=lambda *args: None, install_source=None,
     ) if prepared else None
     step = update_runtime_plan._select_inputs(
         update_runtime_plan.RuntimeUpdateStep("agent-vault", "runtime_reconcile", payload),
@@ -544,7 +496,6 @@ def test_source_index_without_repository_does_not_export_neutral_cwd(portfolio, 
     source = SimpleNamespace(
         payload=payload, identity="prepared-source", version="2",
         validate=lambda *args: None,
-        install_source=None, installer_arguments=lambda platform: [],
     )
     monkeypatch.setattr(update_runtime_target, "plan_target", lambda *args: None)
     step = update_runtime_plan._select_inputs(
@@ -610,7 +561,6 @@ def test_index_update_selects_real_host_repository(tmp_path, monkeypatch, kind, 
                 **({"source": SimpleNamespace(
                     payload=payload, identity="prepared-source", version="new",
                     validate=lambda *args: None, deployed_version=lambda *args, **kwargs: "old",
-                    install_source=None, installer_arguments=lambda platform: [],
                 )} if prepared else {}))
     assert not step.blocked, step.status
     assert step.project_root == repos["host"]

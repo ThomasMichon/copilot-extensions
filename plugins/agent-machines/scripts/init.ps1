@@ -2498,7 +2498,6 @@ if ($Force -or -not (Test-Path $VenvPython)) {
 # is installed LAST since it imports `dropin_registry`/`plugin_resolve` at
 # module load time.
 $haveUv = [bool](Get-Command uv -ErrorAction SilentlyContinue)
-$workspaceRefresh = @()
 foreach ($lib in @(
     @{ Dir = 'dropin-registry'; Pkg = 'agent-dropin-registry' },
     @{ Dir = 'plugin-resolve'; Pkg = 'agent-plugin-resolve' },
@@ -2516,15 +2515,15 @@ foreach ($lib in @(
     }
     if (Test-Path (Join-Path $libDir 'pyproject.toml')) {
         if ($haveUv) {
-            $workspaceRefresh += @('--reinstall-package', $lib.Pkg)
+            & $VenvPython -I -B (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --reinstall-package $lib.Pkg "$libDir" --quiet 2>&1 | Out-Null
         } else {
             & $VenvPython -I -B (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython --quiet "$libDir" 2>&1 | Out-Null
-            if ($LASTEXITCODE -ne 0) {
-                Write-Fail "$($lib.Dir) library install failed"
-                exit 1
-            }
-            Write-Ok "$($lib.Dir) installed"
         }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Fail "$($lib.Dir) library install failed"
+            exit 1
+        }
+        Write-Ok "$($lib.Dir) installed"
     }
 }
 
@@ -2536,10 +2535,10 @@ $ErrorActionPreference = 'Continue'
 Remove-ConsoleTrampolines -VenvDir $VenvDir
 if (Get-Command uv -ErrorAction SilentlyContinue) {
     if ($CellMode) {
-        & $VenvPython -I -B (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython @workspaceRefresh "$PluginDir" --quiet 2>&1 |
+        & $VenvPython -I -B (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython "$PluginDir" --quiet 2>&1 |
             ForEach-Object { Write-Host $_ }
     } else {
-        & $VenvPython -I -B (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython @workspaceRefresh "$PluginDir" --quiet 2>&1 | Out-Null
+        & $VenvPython -I -B (Join-Path $PSScriptRoot 'installer_dependency_policy.py') --uv uv -- --python $VenvPython "$PluginDir" --quiet 2>&1 | Out-Null
     }
 } else {
     if ($CellMode) {

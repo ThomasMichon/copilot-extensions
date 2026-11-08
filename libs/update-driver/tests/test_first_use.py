@@ -47,24 +47,6 @@ def test_fixed_request_is_durable_coalesced_and_not_a_recipe(owning_payload, are
     assert not installation.exists()
 
 
-def test_first_use_obeys_project_authority_and_recovers_in_standalone(owning_payload, area):
-    from update_driver import StateError, change_authority
-
-    payload, installation, project = owning_payload
-    root = area / "queue"
-    change_authority("project", project="example", root=root, timeout=5,
-                     verify_capabilities=lambda _deadline: True)
-    with pytest.raises(StateError, match="authority"):
-        provision.enqueue(payload, installation, project, root=root)
-    assert not installation.exists()
-    change_authority("standalone", root=root, timeout=5, verify_capabilities=lambda _deadline: True)
-    request = provision.enqueue(payload, installation, project, root=root)
-    assert request.spec.authority == "standalone"
-    assert drain(root=root) == 0
-    assert status(request.id, root=root).exit_code == 7
-    assert (installation / "executed").read_text() == "provision"
-
-
 @pytest.mark.parametrize("installer_action", ["provision", "stamp"])
 def test_pinned_active_recipe_shares_one_canonical_result(owning_payload, area, installer_action):
     payload, installation, project = owning_payload

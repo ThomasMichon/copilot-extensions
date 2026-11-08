@@ -20,12 +20,6 @@
 
 $ErrorActionPreference = 'Stop'
 
-# copilot-extensions:recovery-source-contract=1
-if ($args.Count -eq 1 -and $args[0] -ceq '--describe-recovery-source') {
-    [Console]::Out.WriteLine('{"schema":"copilot-extensions.recovery-source-capability","version":1,"capabilities":["request-file","preview","install","main","commit","configured-main-pin","legacy-install-flow","prepared-install-source"]}')
-    exit 0
-}
-
 if ($args.Count -eq 1 -and $args[0] -ceq '--describe-source-inputs') {
     [Console]::Out.WriteLine('{"schema":"copilot-extensions.manager-source-inputs","version":1,"capabilities":["install-source"]}')
     exit 0
@@ -248,65 +242,7 @@ function Find-BootstrapPython([string]$Uv) {
     return [string]$python[0]
 }
 
-if ($args -ccontains '--recover-source' -or $args -ccontains '--describe-recovery-source') {
-    if ($args.Count -ne 2 -or $args[0] -cne '--recover-source' -or
-        -not [IO.Path]::IsPathRooted($args[1])) {
-        throw 'Recovery requires only --recover-source <absolute-request-json-path>.'
-    }
-    $requestRoot = [IO.Path]::GetPathRoot($args[1])
-    if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and
-        ($requestRoot -in @('\', '/') -or $requestRoot -match '^[A-Za-z]:$')) {
-        throw 'Recovery request path must be fully qualified, not drive-relative.'
-    }
-    $request = [IO.Path]::GetFullPath($args[1])
-    if (-not (Test-Path -LiteralPath $request -PathType Leaf)) { throw 'Recovery request is unavailable.' }
-    $retainToolkit = $false
-    try {
-        if ((Get-Item -LiteralPath $request).Length -le 65536) {
-            $retainToolkit = (([IO.File]::ReadAllText($request) | ConvertFrom-Json).operation -ceq 'install')
-        }
-    } catch { }
-    # Neither configured transport nor an installed dispatcher supplies this toolkit.
-    $python = Find-PhysicalBootstrapPython
-    if (-not $python) { throw 'Recovery requires an existing physical Python 3.11+; nothing was provisioned.' }
-    if (-not (Get-Command git -CommandType Application -ErrorAction SilentlyContinue)) {
-        throw 'Recovery requires git; nothing was provisioned.'
-    }
-    $workspace = Join-Path ([IO.Path]::GetTempPath()) ('source-recovery.' + [Guid]::NewGuid().ToString('N'))
-    $savedGit = @{}
-    foreach ($item in @(Get-ChildItem Env: | Where-Object { $_.Name -like 'GIT_*' })) {
-        $savedGit[$item.Name] = $item.Value
-        [Environment]::SetEnvironmentVariable($item.Name, $null, 'Process')
-    }
-    try {
-        $env:GIT_CONFIG_NOSYSTEM = '1'
-        $env:GIT_CONFIG_GLOBAL = [IO.Path]::Combine($workspace, 'no-global-config')
-        $env:GIT_TERMINAL_PROMPT = '0'
-        New-Item -ItemType Directory -Path $workspace | Out-Null
-        $toolkit = Join-Path $workspace 'toolkit'
-        & git -c core.hooksPath= -c core.fsmonitor=false -c core.longpaths=true `
-            clone --quiet --single-branch --branch main -- `
-            'https://github.com/ThomasMichon/copilot-extensions.git' $toolkit
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-        & $python -I -S -B -X utf8 (Join-Path $toolkit 'tools\recover_source.py') --request $request
-        $recoveryExit = $LASTEXITCODE
-    } finally {
-        foreach ($item in @(Get-ChildItem Env: | Where-Object { $_.Name -like 'GIT_*' })) {
-            [Environment]::SetEnvironmentVariable($item.Name, $null, 'Process')
-        }
-        foreach ($name in $savedGit.Keys) {
-            [Environment]::SetEnvironmentVariable($name, $savedGit[$name], 'Process')
-        }
-        if ($retainToolkit) {
-            [Console]::Error.WriteLine("Recovery toolkit retained: $workspace")
-        } elseif (Test-Path -LiteralPath $workspace) {
-            Remove-Item -LiteralPath $workspace -Recurse -Force
-        }
-    }
-    exit $recoveryExit
-}
-
-$Root = if ($env:WORKTREE_MANAGER_ROOT) { $env:WORKTREE_MANAGER_ROOT } else { Join-Path $env:USERPROFILE '.worktree-manager' }
+$Root    = if ($env:WORKTREE_MANAGER_ROOT) { $env:WORKTREE_MANAGER_ROOT } else { Join-Path $env:USERPROFILE '.worktree-manager' }
 $Staging = Join-Path $Root 'staging'
 $Config  = Join-Path $Root 'config.toml'
 

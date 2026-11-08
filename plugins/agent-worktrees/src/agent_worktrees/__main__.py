@@ -461,16 +461,22 @@ def _build_active_paths(
             if rec.worktree_path and sessions.mux_session_name(rec.worktree_id) in mux_sessions:
                 active.add(sessions._normalize_path(rec.worktree_path))
     else:
-        # Unknown presence is not activity; cleanup has its own refusal gates.
-        # Only TMux may use per-session fallback; passive PSMux CLI execution
-        # can reap live servers during startup.
+        # Batch list unavailable (mux missing or blocked): prefer the #4057
+        # cached liveness hint on the record (a free read, stamped by the
+        # authoritative verify at the action moments) when it is a FRESH
+        # ``True`` -- that short-circuits the slow per-worktree probe. A
+        # missing hint OR a fresh cached ``False`` both still fall through to
+        # the authoritative ``has_mux_session`` probe (cleanup-toctou-
+        # revalidation effort): a cached negative is not proof a session
+        # hasn't attached since the stamp, so it must never be trusted on its
+        # own to skip the fallback check.
         for rec in records:
             if not rec.worktree_path:
                 continue
             hint = _fresh_mux_live_hint(rec)
             if hint is True:
                 active.add(sessions._normalize_path(rec.worktree_path))
-            elif sessions.platform.system() != "Windows" and sessions.has_mux_session(rec.worktree_id):
+            elif sessions.has_mux_session(rec.worktree_id):
                 active.add(sessions._normalize_path(rec.worktree_path))
     # #4057/#1416 bare-resume blind spot: a bare-resumed Copilot (cwd=home) is
     # invisible to BOTH the lock scan above (its session isn't registered under
@@ -1309,18 +1315,13 @@ def _worktree_to_dict(
             git_ops.can_fast_forward(state_info)
             and state_info.state != git_ops.WorktreeState.ACTIVE
         )
-    if mux_info is not None and not getattr(mux_info, "observed", True):
-        d["mux_observation_unavailable"] = True
-        if rec.mux_live is not None:
-            d["mux_last_known"] = {"present": rec.mux_live, "observed_at": rec.mux_live_at}
-    elif mux_info is not None:
+    if mux_info is not None:
         d["mux_session"] = mux_info.exists
         d["mux_clients"] = mux_info.clients
         d["mux_attached"] = mux_info.attached
     if session_ctx is not None:
         norm = sessions._normalize_path(rec.worktree_path)
         d["turn_count"] = session_ctx.turn_count.get(norm, 0)
-        d["message_activity"] = {"version": 1, "last_message_at": session_ctx.last_message_at.get(norm)}
         # Legacy records with no registry retain the scan-derived count.  Once
         # a registry exists, its journal is authoritative even when a session
         # directory is temporarily unavailable.
@@ -2083,7 +2084,7 @@ def _build_launch_cmd(
                 resolved_hook = str(Path(anchor) / resolved_hook)
             config_root_path = preflight.config_root_path
             if is_windows:
-                launcher = str(inst.scripts_dir() / "default-setup.ps1")
+                launcher = str(inst.install_dir() / "scripts" / "default-setup.ps1")
                 cmd = [
                     "pwsh.exe",
                     "-NoProfile",
@@ -2106,7 +2107,7 @@ def _build_launch_cmd(
                 if recovery:
                     cmd.append("-Recovery")
             else:
-                launcher = str(inst.scripts_dir() / "default-setup.sh")
+                launcher = str(inst.install_dir() / "scripts" / "default-setup.sh")
                 cmd = [
                     "bash",
                     launcher,
@@ -2133,7 +2134,7 @@ def _build_launch_cmd(
                 and not configured_copilot_path
             )
             if not legacy:
-                setup_path = str(inst.scripts_dir() / "default-setup.ps1")
+                setup_path = str(inst.install_dir() / "scripts" / "default-setup.ps1")
             cmd = [
                 "pwsh.exe",
                 "-NoProfile",
@@ -2162,7 +2163,7 @@ def _build_launch_cmd(
                 and not configured_copilot_path
             )
             if not legacy:
-                setup_path = str(inst.scripts_dir() / "default-setup.sh")
+                setup_path = str(inst.install_dir() / "scripts" / "default-setup.sh")
             cmd = ["bash", setup_path, "--machine", config.machine]
             if session_path_arg and not legacy:
                 cmd += ["--session-path", session_path_arg]
@@ -2227,10 +2228,10 @@ def _build_launch_cmd(
     # This gives optional sibling integrations a single pre-exec seam even for
     # explicit and legacy launch templates, while recovery remains available.
     if is_windows:
-        wrapper = str(inst.scripts_dir() / "launch-command.ps1")
+        wrapper = str(inst.install_dir() / "scripts" / "launch-command.ps1")
         prefix = ["pwsh.exe", "-NoProfile", "-NoLogo", "-File", wrapper]
     else:
-        wrapper = str(inst.scripts_dir() / "launch-command.sh")
+        wrapper = str(inst.install_dir() / "scripts" / "launch-command.sh")
         prefix = ["bash", wrapper]
     if recovery:
         prefix.append("--recovery")
@@ -3058,7 +3059,6 @@ def _monitor_sweep(
 ) -> int:
     """One coalescing pass over the Step 4 served-session union."""
     from . import config_cache as _config_cache, list_cli as _list_cli, mux_status_link as _mux_status_link, status_bar_cli as _status_bar_cli, status_monitor_runtime as _smr, status_updater_cli as _status_updater_cli
-    from .worktrees_producer import publish_project_rosters
 
     _monitor_list_sessions = _self_override("_monitor_list_sessions", _smr._monitor_list_sessions)
     _monitor_registry_dir = _self_override("_monitor_registry_dir", _smr._monitor_registry_dir)
@@ -3087,15 +3087,7 @@ def _monitor_sweep(
     if mux_bin:
         live = _monitor_list_sessions(mux_bin)
         if live is None:
-            if sessions._is_psmux(mux_bin) and roster_publisher is not None:
-                # Publish independent facts without discovering, pruning or painting panes.
-                publish_project_rosters(
-                    picker_projects or set(), interval=interval, project_lock=project_lock,
-                    lifecycle_priority=lifecycle_priority, governance=governance,
-                    segment_cache=segment_cache, config_cache_for_project=config_cache_for_project,
-                    roster_publisher=roster_publisher, warm_list_cache=_warm_list_cache_for_active_project,
-                )
-            if roster_failure is not None and not sessions._is_psmux(mux_bin):
+            if roster_failure is not None:
                 roster_failure(RuntimeError("mux-session enumeration unavailable"))
             return -1
         from .status_monitor_discovery import discover_connected_worktrees
@@ -3319,12 +3311,33 @@ def _monitor_sweep(
                     raise
                 except Exception:
                     pass
-    publish_project_rosters(
-        warm_projects, interval=interval, project_lock=project_lock,
-        lifecycle_priority=lifecycle_priority, governance=governance,
-        segment_cache=segment_cache, config_cache_for_project=config_cache_for_project,
-        roster_publisher=roster_publisher, warm_list_cache=_warm_list_cache_for_active_project,
-    )
+    for project in warm_projects:
+        _wait_for_lifecycle_priority(lifecycle_priority)
+        with project_lock if project_lock is not None else contextlib.nullcontext():
+            try:
+                _status_monitor_recheck(governance, "pre-mutation:warm-list-cache")
+                cfg.set_active_project(project)
+                config_scope = _config_cache.project_scope(config_cache_for_project, project)
+                with config_scope:
+                    if roster_publisher is not None:
+                        roster_publisher()
+                    else:
+                        _warm_list_cache_for_active_project(
+                            interval=interval,
+                            **({"cleanup_owner": segment_cache}
+                               if segment_cache is not None and git_ops._windows_observation() else {}),
+                        )
+            except _StatusMonitorGovernanceDeferred:
+                raise
+            except git_ops.push_timeout.ObservationCleanupError as exc:
+                if segment_cache is None:
+                    raise
+                segment_cache.retain_unclaimed_cleanup(project, None, exc)
+                if roster_publisher is not None:
+                    print(f"current-roster publication failed for {project}: {exc}", file=sys.stderr)
+            except Exception as exc:
+                if roster_publisher is not None:
+                    print(f"current-roster publication failed for {project}: {exc}", file=sys.stderr)
     return len(served)
 
 
@@ -5316,7 +5329,6 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'conclude-session': ('session_tracking_cli', 'cmd_conclude_session'),
     'config-migrate': ('maintenance_cli', 'cmd_config_migrate'),
     'create': ('worktree_ops_cli', 'cmd_create'),
-    'move': ('worktree_ops_cli', 'cmd_move'),
     'create-pr': ('finalize_cli', 'cmd_create_pr'),
     'pr-publication-labels': ('finalize_cli', 'cmd_publication_labels'),
     **pr_author_commands.LAZY_DISPATCH,
@@ -5713,7 +5725,7 @@ def _load_full_command_surface() -> None:
     cmd_session_tail = session_tracking_cli.cmd_session_tail
     cmd_recent_messages = session_tracking_cli.cmd_recent_messages
     cmd_resolve_handoff_successor = handoff_successor_repair_cli.cmd_resolve_handoff_successor
-    from . import terminal_conclusion
+    terminal_conclusion = session_tracking_cli.terminal_conclusion
     _resolve_worktree_for_read = session_metadata_cli._resolve_worktree_for_read
     _session_role = session_metadata_cli._session_role
     _CONCLUDED_STATES = session_metadata_cli._CONCLUDED_STATES
@@ -6062,7 +6074,6 @@ def _load_full_command_surface() -> None:
         "claimant-liveness": cmd_claimant_liveness,
         "codename-lookup": cmd_codename_lookup,
         "create": cmd_create,
-        "move": worktree_ops_cli.cmd_move,
         "run": cmd_run,
         "remove-system": cmd_remove_system,
         "cleanup": cmd_cleanup,
@@ -6436,7 +6447,6 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         print("One-shot: pr-sweep <repo> --fleet --json")
         print("Guard facts: refresh-guards [--repo PATH] [--json]")
-        print("Fleet inventory (selected project only): fleet [--json] [--timeout N] [--tracking-status S] [--all]")
         return 0
 
     # Fast path (checked before manual-dispatch verbs + the blanket

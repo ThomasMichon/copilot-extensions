@@ -5,8 +5,8 @@
 .DESCRIPTION
     Installs the agent-logger runtime into the selected install root (default:
     ~/.agent-logger, or -InstallDir for an explicit scoped root), then
-    preserves scheduling by default. Explicit scheduling can run
-    `session-sync run --prune` every 4 hours. The runtime is the venv's
+    registers a Scheduled Task that runs `session-sync run --prune` every 4
+    hours for that install. Windows-first by design: the runtime is the venv's
     python invoked as `python -m agent_logger.sync.engine` (the console-script
     .exe is not relied upon, matching the other plugins' Smart App Control
     posture). The scheduled task runs through a durable PowerShell launcher so
@@ -18,8 +18,7 @@
       pwsh -File plugins\agent-logger\scripts\install.ps1 status
 
 .PARAMETER Action
-    Lifecycle action: install | update | uninstall | status; task-retire removes
-    only the owned scheduling registration, without selecting incoming code.
+    Lifecycle action: install | update | uninstall | status.
 
 .PARAMETER InstallDir
     Override the runtime install directory (default: ~/.agent-logger).
@@ -27,7 +26,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('install', 'update', 'uninstall', 'status', 'stamp', 'provision', 'task-retire')]
+    [ValidateSet('install', 'update', 'uninstall', 'status', 'stamp', 'provision')]
     [string]$Action = 'status',
 
     [Alias('install-dir')]
@@ -35,7 +34,7 @@ param(
 
     [string]$BootstrapPython,
 
-    # Preview mode for uninstall/task-retire: print what WOULD be removed
+    # Preview mode for the 'uninstall' action: print what WOULD be removed
     # without touching the scheduled task or binstubs.
     [switch]$DryRun
 )
@@ -642,12 +641,6 @@ $TaskName   = if ($publishGlobalBinstubs) {
     "Agent Logger Session Sync - $serviceSuffix"
 }
 $TaskLauncher = Join-Path (Join-Path $InstallDir 'bin') 'session-sync-task.ps1'
-. (Join-Path $PSScriptRoot 'windows-scheduled-task.ps1')
-if ($Action -eq 'task-retire') {
-    Remove-LoggerScheduledTaskOnly
-    Write-Ok 'task-only retirement complete; runtime and session state retained'
-    return
-}
 $BinstubPs1 = Join-Path $LocalBin 'session-sync.ps1'
 $BinstubCmd = Join-Path $LocalBin 'session-sync.cmd'
 # Every CLI name deployed as a binstub (.ps1 primary + .cmd fallback), each
@@ -1618,7 +1611,7 @@ function Test-SyncTaskActionCurrent {
     # nothing changed only risks an unnecessary Access-Denied WARN on a
     # non-elevated run for zero effect.
     param($Action)
-    $existing = Get-LoggerScheduledTask
+    $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     if (-not $existing) { return $false }
     $existingAction = @($existing.Actions) | Select-Object -First 1
     return $existingAction -and
@@ -1645,7 +1638,7 @@ function Register-SyncTask {
     # per-user roaming workstation. (Run-when-logged-off would need admin.)
     $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
 
-    if (Get-LoggerScheduledTask) {
+    if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
         if (Test-SyncTaskActionCurrent -Action $action) {
             Write-Ok "scheduled task already correct (every 4h) -- left registered as-is"
             return
@@ -1700,7 +1693,7 @@ function Write-TaskAccessDeniedWarning {
 }
 
 function Update-SyncTaskBinding {
-    if (Get-LoggerScheduledTask) {
+    if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
         $action = New-SyncTaskAction
         if (-not $action) {
             Write-Warn2 "scheduled task left unchanged: no provisioned runtime"
@@ -2018,12 +2011,12 @@ switch ($Action) {
     }
     'install' {
         if (-not $script:SkipPackageInstall) { Install-Package }
-        Sync-LoggerScheduledTask
+        Register-SyncTask
         Write-Ok "install complete"
     }
     'update' {
         if (-not $script:SkipPackageInstall) { Install-Package }
-        Sync-LoggerScheduledTask -LifecycleAction update
+        Update-SyncTaskBinding
     }
     'uninstall' {
         $uninstallPython = Get-FiniteUninstallPython -InstallRoot $InstallDir
@@ -2099,9 +2092,7 @@ switch ($Action) {
         } else {
             Write-Warn2 "binstub not deployed"
         }
-        if (-not (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)) {
-            Write-Ok 'Windows scheduling unavailable; on-demand sync remains available'
-        } elseif (Get-LoggerScheduledTask) {
+        if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
             Write-Ok "scheduled task present"
         } else {
             Write-Warn2 "scheduled task not registered"

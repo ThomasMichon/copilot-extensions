@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -207,9 +206,7 @@ def test_project_authority_fails_closed_if_controller_disappears(project, monkey
 @pytest.mark.parametrize("parent_flags", [
     ("--phase", "runtimes"), ("--target", "agent-bridge"), ("--no-project-controller",),
 ])
-@pytest.mark.parametrize("child", [
-    {"phase": "runtimes"}, {"phase": "integration"}, {"target": "agent-bridge"},
-])
+@pytest.mark.parametrize("child", [{"phase": "runtimes"}, {"target": "agent-bridge"}])
 def test_partial_parent_request_cannot_claim_controller_delegation(project, parent_flags, child):
     from update_driver import RequestSpec
     from update_driver.authority import selection
@@ -224,10 +221,7 @@ def test_partial_parent_request_cannot_claim_controller_delegation(project, pare
     ) == 1
 
 
-@pytest.mark.parametrize("legacy_schema", [False, True])
-def test_project_authority_reaches_controller_under_real_driver_custody(
-    project, monkeypatch, tmp_path, legacy_schema,
-):
+def test_project_authority_reaches_controller_under_real_driver_custody(project, monkeypatch, tmp_path):
     import update_driver
     from agent_worktrees import update_driver_cli
 
@@ -261,11 +255,6 @@ def test_project_authority_reaches_controller_under_real_driver_custody(
         runner=update_driver.TrustedRunner((sys.executable, "-c", "pass"), str(tmp_path)),
         root=driver_root,
     )
-    if legacy_schema:
-        with sqlite3.connect(driver_root / "queue.sqlite3") as db:
-            db.execute("PRAGMA user_version=5")
-        with pytest.raises(update_driver.StateError, match="protocol upgrade"):
-            update_driver.current_authority(root=driver_root)
     monkeypatch.setattr(config, "install_dir", lambda: engine)
     borrow = update_driver.borrowed_custody
 
@@ -283,7 +272,6 @@ def test_project_authority_reaches_controller_under_real_driver_custody(
 
 @pytest.mark.parametrize(("delegation", "expected"), [
     ("phase", "runtimes"), ("standalone", "standalone"), ("target", "agent-bridge"),
-    ("integration", "integration:owned"),
 ])
 def test_project_controller_can_delegate_under_real_custody(
     project, monkeypatch, tmp_path, delegation, expected,
@@ -302,19 +290,13 @@ def test_project_controller_can_delegate_under_real_custody(
         "import argparse,sys\n"
         f"sys.path[:0] = {paths!r}\n"
         "from pathlib import Path\n"
-        "from agent_worktrees import config,project_update_controller,update_cli,update_driver_cli\n"
+        "from agent_worktrees import config,update_cli,update_driver_cli\n"
         "config.set_active_project('example')\n"
         f"config.install_dir = lambda: Path({str(engine)!r})\n"
-        "def phase(args):\n"
-        "    value = getattr(args,'phase',None) or getattr(args,'target',None) or 'standalone'\n"
-        "    if value == 'integration':\n"
-        "        value += ':owned' if getattr(args,'_controller_owns_manager',None) is project_update_controller._CONTROLLER_OWNS_MANAGER else ':unowned'\n"
-        f"    Path({str(result)!r}).write_text(value, encoding='utf-8')\n"
-        "    return 0\n"
+        f"def phase(args): Path({str(result)!r}).write_text(getattr(args,'phase',None) or getattr(args,'target',None) or 'standalone', encoding='utf-8'); return 0\n"
         "update_cli._core_helper = lambda name, local: phase if name == '_cmd_update_in_plugin' else local\n"
         "raise SystemExit(update_driver_cli.cmd_update_request(argparse.Namespace("
         + ("phase='runtimes', no_manager=True" if delegation == "phase"
-           else "phase='integration', no_manager=True" if delegation == "integration"
            else "target='agent-bridge', no_manager=True" if delegation == "target"
            else "no_project_controller=True, no_manager=True")
         + ")))\n"
@@ -378,44 +360,6 @@ def test_standalone_authority_is_forwarded_to_manager(project, monkeypatch):
     )
     assert result == 7
     assert "--no-project-controller" in observed
-
-
-@pytest.mark.parametrize(("phase", "expected"), [("integration", True), ("runtimes", False)])
-def test_delegated_project_phase_exposes_manager_ownership_only_during_integration(
-    project, phase, expected,
-):
-    request = SimpleNamespace(authority="project", project="example", argv=())
-    authority = SimpleNamespace(configured=True, mode="project", project="example")
-    selected = args(phase=phase, _controller_request=request, _controller_authority=authority)
-    observed = []
-    result = project_update_controller.dispatch_update(
-        selected, lambda _args: pytest.fail("auth report ran"),
-        lambda _args: pytest.fail("Manager handoff ran"),
-        lambda: observed.append(
-            getattr(selected, "_controller_owns_manager", None)
-            is project_update_controller._CONTROLLER_OWNS_MANAGER
-        ) or 0,
-    )
-    assert result == 0
-    assert observed == [expected]
-    assert not hasattr(selected, "_controller_owns_manager")
-
-
-def test_delegated_integration_restores_manager_marker_after_error(project):
-    request = SimpleNamespace(authority="project", project="example", argv=())
-    authority = SimpleNamespace(configured=True, mode="project", project="example")
-    selected = args(
-        phase="integration", _controller_request=request, _controller_authority=authority,
-        _controller_owns_manager="previous",
-    )
-
-    def fail():
-        assert selected._controller_owns_manager is project_update_controller._CONTROLLER_OWNS_MANAGER
-        raise RuntimeError("integration failed")
-
-    with pytest.raises(RuntimeError, match="integration failed"):
-        project_update_controller.dispatch_update(selected, lambda _args: 0, lambda _args: 0, fail)
-    assert selected._controller_owns_manager == "previous"
 
 
 def test_automatic_controller_rechecks_policy_when_enabled_after_submission(

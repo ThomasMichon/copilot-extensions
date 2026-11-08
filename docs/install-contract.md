@@ -5052,43 +5052,6 @@ is a separate, explicit portfolio-wide choice. A first-party-only snapshot is
 preparation data and refuses runtime installation until its native profile is
 complete.
 
-The local builder loads the canonical artifact builder independently of the
-release controller. Its existing toolchain owner accepts an optional absolute
-`uv` executable and monotonic `deadline` for governed preparation. Interpreter
-discovery, environment creation, retained installation and version readback
-share the caller's remaining budget, checked before publication and success.
-The caller still owns process-tree containment. Public toolchain discovery does
-not yet support this bounded entry and refuses before requests; existing callers
-without a deadline retain their prior policy and behavior. These preparation
-primitives do not change Manager's ordinary bootstrap or source routing.
-
-Manager wheels also carry an explicit, non-routing complete-profile provider.
-`runtime_source_prepare.prepare_application_inputs` accepts an independently
-admitted, immutable first-party snapshot and identity, fresh output, selected
-absolute native Python/UV and an explicitly prepared tooling interpreter.
-The installed provider invokes canonical `local_install_profile` compilation,
-admission, wheel inspection and application emission from its own declared
-assets, never tools from the acquired checkout. It preserves the caller deadline
-and existing 180-second native child cap. The caller retains source/feed authority
-and consumes the returned actual snapshot through `manager_inputs`; returned
-paths and consistency checks do not grant approval or install a runtime.
-
-The tooling interpreter must already supply the canonical preparation
-dependencies, including `packaging`; the provider does not install host
-dependencies. This boundary completes associated first-party inputs, not Git
-acquisition or first-party wheel production. Missing assets report provider
-unavailability; invalid declarations, conflicting source/target/wheel facts and
-worker failures refuse without source/PATH substitution. Authentic resource
-repair and immutable candidate health remain with their existing owners.
-Ordinary bootstrap, configured-source routing and automatic policy are unchanged.
-
-The existing packaged-assets receiver supports explicit version-two `groups`
-for these multiple canonical roots. Each group retains basename-only files,
-contained relative roots, link refusal and no-overwrite publication. All groups
-are preflighted before copying. Version-one declarations and the separate
-legacy source-only preparer remain supported; a single-group-only receiver
-refuses a multi-group declaration instead of silently omitting resources.
-
 `tools/local_install_profile.py --prepare-profile` completes one selected
 component's native dependency closure through the existing configured-feed
 compiler and acquisition owners. Supply `--component worktree-manager` or
@@ -5712,15 +5675,8 @@ command surface, not just a package import.
 An optional installed `module:function` construction callable receives JSON
 data under the same owned, isolated candidate interpreter. It runs only for
 fresh construction, before the installed-origin/full-surface health gate and
-immutable completion publication; exact reuse never reruns it. It receives
-the `frozen_plugin` field as a pristine, verified source snapshot held by the
-candidate owner through preparation and health. It is separate from UV's
-retained build projection, whose dependency metadata may be rewritten to
-disable editable installation. Payload preparation must not copy that build
-projection into an identity-qualified payload or return to live source inputs.
-Both snapshot content and selected source identity are revalidated around the
-callback; installed-origin checks continue to attest the actual UV build inputs.
-Worktrees uses this seam to stamp source provenance, the frozen package version, UTC build
+immutable completion publication; exact reuse never reruns it. Worktrees uses
+this seam to stamp source provenance, the frozen package version, UTC build
 time and a distinct `runtime_generation`, and to remove unused unsigned
 Windows `agent-*.exe` console trampolines. POSIX scripts and the signed Windows
 interpreter are preserved. Package-version comparison accounts for normalized

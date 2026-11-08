@@ -36,11 +36,9 @@ dependencies = [
     "agent-update-telemetry",
     "agent-update-driver",
     "agent-repository-policy",
-    "agent-copilot-driver-core",
 ]
 
 [tool.uv.sources]
-agent-copilot-driver-core = { path = "../../libs/copilot-driver-core", editable = true }
 agent-configuration-layers = { path = "../../libs/configuration-layers", editable = true }
 agent-repository-policy = { path = "../../libs/repository-policy", editable = true }
 agent-worktree-identity = { path = "../../libs/worktree-identity", editable = true }
@@ -128,7 +126,6 @@ fleet-ssh = ["fleet-manager[service-gateway,ssh-client]"]
 dev = [
     "pytest>=9.1.1",
     "pytest-xdist>=3.8,<4",
-    "psutil>=6",
     # Exercise the runtime's Python 3.10 TOML fallback on newer test interpreters too.
     "tomli>=2",
 ]
@@ -157,4 +154,4 @@ select = ["E", "F", "W", "I", "UP", "B", "RUF"]
 where = ["src"]
 
 [tool.setuptools.package-data]
-agent_worktrees = ["pre_push.sh", "repository-authentication-v1.json", "new-admission-v1.json"]
+agent_worktrees = ["pre_push.sh", "repository-authentication-v1.json"]

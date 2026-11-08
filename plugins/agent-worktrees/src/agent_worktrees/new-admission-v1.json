@@ -1,7 +1,0 @@
-{
-  "contract": "agent-worktrees.new-admission",
-  "version": 1,
-  "required_applications": 1,
-  "configuration": "require_application_readiness",
-  "read_only": true
-}

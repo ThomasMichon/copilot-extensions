@@ -10,8 +10,6 @@ from datetime import datetime, timedelta, timezone
 
 SENTINEL = "agent-leases-envelope-v1"
 SCHEMA_VERSION = 1
-PROOF_SCHEMA_VERSION = 2
-RETURN_PROOF_LIMIT = 16
 _KIND_RE = re.compile(r"[a-z][a-z0-9-]{0,62}\Z")
 _OID_RE = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?\Z")
 _TIME_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\Z")
@@ -46,15 +44,6 @@ class Resource:
 
 
 @dataclass(frozen=True)
-class ReturnedGeneration:
-    """One explicit return retained independently of intermediate Git history."""
-
-    lease_id: str
-    holder: str
-    released_at: str
-
-
-@dataclass(frozen=True)
 class LeaseRecord:
     """Canonical payload stored in a synthetic commit message."""
 
@@ -69,7 +58,6 @@ class LeaseRecord:
     expires_at: str
     ttl_seconds: int
     context: dict[str, str | int | bool]
-    returned_generations: tuple[ReturnedGeneration, ...] = ()
 
     def expires(self) -> datetime:
         return parse_timestamp(self.expires_at)
@@ -186,47 +174,7 @@ def canonical_json(value: object) -> str:
 
 def serialize_record(record: LeaseRecord) -> str:
     """Serialize a record as a strict sentinel plus canonical JSON message."""
-    return f"{SENTINEL}\n{canonical_json(record_payload(record))}"
-
-
-def record_payload(record: LeaseRecord) -> dict[str, object]:
-    """Preserve the version-1 wire shape until a resource explicitly opts in."""
-    result = asdict(record)
-    if record.schema_version == SCHEMA_VERSION:
-        if record.returned_generations:
-            raise ProtocolError("version-1 leases cannot discard retained return proof")
-        result.pop("returned_generations")
-    else:
-        result["returned_generations"] = [asdict(item) for item in record.returned_generations]
-    return result
-
-
-def _returned_generations(raw: object, *, state: str, lease_id: str, holder: str,
-                          renewed: datetime) -> tuple[ReturnedGeneration, ...]:
-    if not isinstance(raw, list) or len(raw) > RETURN_PROOF_LIMIT:
-        raise ProtocolError("returned_generations must be a bounded array")
-    result: list[ReturnedGeneration] = []
-    seen: set[str] = set()
-    previous: datetime | None = None
-    for row in raw:
-        if not isinstance(row, dict) or set(row) != {"lease_id", "holder", "released_at"}:
-            raise ProtocolError("returned generation is malformed")
-        identity = row["lease_id"]
-        if not isinstance(identity, str) or not _LEASE_ID_RE.fullmatch(identity) or identity in seen:
-            raise ProtocolError("returned generation identity is invalid or duplicated")
-        returned_at = parse_timestamp(row["released_at"])
-        if returned_at > renewed or previous is not None and returned_at < previous:
-            raise ProtocolError("returned generation time is invalid")
-        result.append(ReturnedGeneration(identity, validate_holder(row["holder"]), row["released_at"]))
-        seen.add(identity)
-        previous = returned_at
-    if state == "leased" and lease_id in seen:
-        raise ProtocolError("a leased generation cannot already have returned")
-    if state == "released" and (
-        not result or result[-1] != ReturnedGeneration(lease_id, holder, format_timestamp(renewed))
-    ):
-        raise ProtocolError("released generation proof must match its tombstone")
-    return tuple(result)
+    return f"{SENTINEL}\n{canonical_json(asdict(record))}"
 
 
 def parse_record(message: str, expected: Resource | None = None) -> LeaseRecord:
@@ -239,16 +187,12 @@ def parse_record(message: str, expected: Resource | None = None) -> LeaseRecord:
         raw = json.loads(body)
     except json.JSONDecodeError as exc:
         raise ProtocolError("lease commit payload is not valid JSON") from exc
-    if not isinstance(raw, dict):
-        raise ProtocolError("lease payload must be an object")
-    version = raw.get("schema_version")
-    if type(version) is not int or version not in (SCHEMA_VERSION, PROOF_SCHEMA_VERSION):
-        raise ProtocolError("unsupported lease schema_version")
-    keys = _TOP_LEVEL_KEYS | ({"returned_generations"} if version == PROOF_SCHEMA_VERSION else set())
-    if set(raw) != keys:
+    if not isinstance(raw, dict) or set(raw) != _TOP_LEVEL_KEYS:
         raise ProtocolError("lease payload has missing or unknown fields")
     if canonical_json(raw) != body:
         raise ProtocolError("lease payload JSON is not canonical")
+    if raw["schema_version"] != SCHEMA_VERSION:
+        raise ProtocolError("unsupported lease schema_version")
     resource_raw = raw["resource"]
     if not isinstance(resource_raw, dict) or set(resource_raw) != _RESOURCE_KEYS:
         raise ProtocolError("lease resource identity is malformed")
@@ -285,11 +229,8 @@ def parse_record(message: str, expected: Resource | None = None) -> LeaseRecord:
     if state == "released" and (ttl != 0 or expires != renewed):
         raise ProtocolError("release tombstones must expire at renewed_at with TTL zero")
     context = validate_context(raw["context"])
-    returned = _returned_generations(
-        raw["returned_generations"], state=state, lease_id=lease_id, holder=holder, renewed=renewed,
-    ) if version == PROOF_SCHEMA_VERSION else ()
     return LeaseRecord(
-        schema_version=version,
+        schema_version=SCHEMA_VERSION,
         resource={"identity": item.identity, "kind": item.kind, "key": item.key},
         state=state,
         event=event,
@@ -300,5 +241,4 @@ def parse_record(message: str, expected: Resource | None = None) -> LeaseRecord:
         expires_at=format_timestamp(expires),
         ttl_seconds=ttl,
         context=context,
-        returned_generations=returned,
     )

@@ -307,7 +307,6 @@ def _write_snapshot(
             commands=commands, setup=setup, start=start,
             wheels={row["name"]: wheels / row["filename"] for row in profile_record["wheels"]},
             runtime_source=selected.identity.document(), target_environment=environment,
-            target_tags=profile_record["target"]["tags"],
             construction=construction,
             requirements=[
                 *roots,

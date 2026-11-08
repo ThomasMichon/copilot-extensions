@@ -47,7 +47,7 @@ class CodespaceSource(CodespaceConfigSource):
         if token is not None:
             import os
 
-            gh_env = dict(os.environ, GH_HOST="github.com")
+            gh_env = dict(os.environ)
             gh_env["GH_TOKEN"] = token
             gh_env.pop("GITHUB_TOKEN", None)
         else:

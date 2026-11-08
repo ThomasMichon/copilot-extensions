@@ -2,54 +2,15 @@
 
 from __future__ import annotations
 
-import logging
+from typing import TYPE_CHECKING
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
 
 from . import lifecycle
 from .routing import Endpoint
 
 if TYPE_CHECKING:
     from .conditional import PreparedCutover
-    from .cutover import CutoverOrchestrator, CutoverResult, _Client
-
-log = logging.getLogger("zdd")
-
-
-def validate_retirement_options(
-    required: bool, self_retirement: bool, callback: Callable[[Endpoint], dict[str, Any]] | None,
-    expected_old: Endpoint | None, drain: bool,
-) -> tuple[bool, bool]:
-    if callback is not None and expected_old is None:
-        raise ValueError("best-effort retirement requires an exact observed predecessor")
-    if type(required) is not bool or (required and (not self_retirement or callback is None)):
-        raise ValueError("required predecessor retirement needs an explicit self-retirement fallback")
-    if type(drain) is not bool or (not drain and callback is None):
-        raise ValueError("skipping predecessor drain requires bounded native retirement")
-    return required, drain
-
-
-def adopt_relay(
-    self: CutoverOrchestrator, new_port: int, result: CutoverResult, *,
-    make_client: Callable[[str], _Client] | None = None,
-    adopt_relay: Callable[[], dict] | None = None,
-) -> None:
-    from .cutover import CutoverError
-
-    try:
-        if adopt_relay is not None:
-            adopt = adopt_relay()
-        else:
-            new_client = (make_client or self.make_client)(self._base_url(new_port))
-            adopt = new_client.adopt_relay()
-        adopted = adopt.get("adopted")
-        if adopted is not None and type(adopted) is not bool:
-            raise CutoverError("relay adoption response has an invalid boolean")
-        result.steps.append(f"relay adopt: {adopted}")
-    except Exception as exc:
-        failure = type(exc).__name__
-        result.steps.append(f"relay adopt failed (non-fatal): {failure}")
-        log.warning("Relay adoption failed after cutover (%s)", failure)
+    from .cutover import CutoverOrchestrator, CutoverResult
 
 
 def _drain_old(
@@ -192,12 +153,6 @@ def complete_self_retirement(
                 "old_endpoint": old.to_dict(), "predecessor_cleanup": result.predecessor_cleanup,
             },
         )
-        if self.require_predecessor_retirement:
-            if not result.retirement_confirmed:
-                result.error = "predecessor retirement unconfirmed; committed recovery record retained"
-                result.steps.append(result.error)
-                return result
-            result.retirement_pending = False
     if not breadcrumb.clear_breadcrumb(self.config_dir):
         raise CutoverError("committed recovery record retained; retry cleanup")
     result.ok = True

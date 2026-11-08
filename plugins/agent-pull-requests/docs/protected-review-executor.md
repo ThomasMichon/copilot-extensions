@@ -129,10 +129,8 @@ preview/approval and immutable admission. Execution sends its retained body
 unchanged through the same pinned context, candidate/discussion/owned-target
 checks, caller policy, unknown fence and native receipt path. It allocates no
 GUID, decorates no selected text and acquires no additional write authority.
-Default workspace CLI/HTTP handlers remain v1. A separate
-[optional workspace receiver](workspace-integration.md#optional-prepared-review-receiver)
-can explicitly select this source path through the existing capability exchange;
-neither native support nor discovery is installed adoption or write authority.
+The existing workspace CLI/HTTP request shapes and default handlers remain
+unchanged; no prepared receiver capability or installed adoption is advertised.
 
 `ReplayStore.prepared_review_receipt(operation_id, scope, action_id,
 expires_at=..., checkpoint=...)` reads one original selected action through the

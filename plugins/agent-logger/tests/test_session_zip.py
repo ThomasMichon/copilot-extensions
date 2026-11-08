@@ -492,64 +492,6 @@ def test_tar_comparison_streams_instead_of_materializing_headers(
     assert "events.jsonl" in sessions.CODECS["targz"].member_digests(ref.path)
 
 
-def _targz(path: Path, members: list[tuple[str, bytes | None]]) -> None:
-    """Write ``members`` in order; ``None`` data adds a directory entry."""
-    with tarfile.open(path, "w:gz") as output:
-        for name, data in members:
-            info = tarfile.TarInfo(name)
-            if data is None:
-                info.type = tarfile.DIRTYPE
-                output.addfile(info)
-            else:
-                info.size = len(data)
-                output.addfile(info, io.BytesIO(data))
-
-
-def test_tar_member_streams_without_reading_headers_past_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    archive = tmp_path / "ordered.tar.gz"
-    events = b'{"type":"session.start"}\n' * 1000
-    _targz(archive, [
-        ("workspace.yaml", b"id: s\n"),
-        ("events.jsonl", events),
-        ("tail.bin", os.urandom(2 * 1024 * 1024)),
-    ])
-    seen: list[str] = []
-    original_next = tarfile.TarFile.next
-
-    def recording_next(self: tarfile.TarFile) -> tarfile.TarInfo | None:
-        info = original_next(self)
-        if info is not None:
-            seen.append(info.name)
-        return info
-
-    monkeypatch.setattr(tarfile.TarFile, "next", recording_next)
-    codec = sessions.CODECS["targz"]
-    with codec.open_member(archive, "events.jsonl") as fh:
-        assert fh is not None and "tail.bin" not in seen
-        assert fh.read() == events
-    assert codec.read_member(archive, "events.jsonl") == events
-    assert set(seen) == {"workspace.yaml", "events.jsonl"}
-
-
-def test_tar_duplicate_member_names_resolve_to_the_first_entry(tmp_path: Path) -> None:
-    codec = sessions.CODECS["targz"]
-    archive = tmp_path / "duplicate.tar.gz"
-    _targz(archive, [("events.jsonl", b"first\n"), ("events.jsonl", b"second\n")])
-    assert codec.read_member(archive, "events.jsonl") == b"first\n"
-    with codec.open_member(archive, "events.jsonl") as fh:
-        assert fh is not None and fh.read() == b"first\n"
-    with pytest.raises(ValueError, match="duplicate"):
-        codec.member_digests(archive)
-
-    shadowed = tmp_path / "shadowed.tar.gz"
-    _targz(shadowed, [("events.jsonl", None), ("events.jsonl", b"later\n")])
-    assert codec.read_member(shadowed, "events.jsonl") is None
-    with codec.open_member(shadowed, "events.jsonl") as fh:
-        assert fh is None
-
-
 def test_tar_comparison_counts_directory_headers_toward_budget(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

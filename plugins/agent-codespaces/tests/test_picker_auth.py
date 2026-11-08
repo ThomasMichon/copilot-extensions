@@ -243,58 +243,6 @@ def test_inventory_timeout_publishes_error_then_recovers_empty_subscription(monk
     assert "TimeoutExpired" in summaries[0]["banner_text"]
 
 
-def test_invalid_current_capacity_config_preserves_json_and_subscription_recovery(monkeypatch, tmp_path, capsys):
-    from agent_codespaces import config, configuration_layers_adapter as adapter
-
-    base, knowledge, machine = (tmp_path / name for name in ("current", "knowledge", "machine"))
-    for root in (base, knowledge, machine):
-        root.mkdir()
-    report = {
-        "schema": "agent-worktrees.configuration", "version": 1,
-        "context": {
-            "repository_id": "repo-qualified", "execution_machine": "logical-worker",
-            "installation_cell": "cell-one", "binding": "bound",
-            "base_root": str(base), "knowledge_root": str(knowledge),
-        },
-    }
-    monkeypatch.setattr(config, "cwd_repo_root", lambda: base)
-    monkeypatch.setattr(config, "load_adopted_repos", lambda: [])
-    monkeypatch.setattr(config, "RUNTIME_DIR", machine)
-    monkeypatch.setattr(adapter, "configuration_report", lambda root: report)
-    folder = base / ".copilot-extensions" / "agent-codespaces"
-    folder.mkdir(parents=True)
-    path = folder / "config.yaml"
-    path.write_text("defaults:\n  max_owned_codespaces: 0\n", encoding="utf-8")
-    assert config.load_merged_config(include_cwd=False).max_owned_codespaces == 30
-    monkeypatch.setattr(picker_auth, "probe", lambda: {"status": "ready", "account": "example-user", "message": ""})
-    monkeypatch.setattr(pool, "build_pool", lambda **kw: ([], object()))
-    monkeypatch.setattr(pool, "picker_payload", lambda *a: {"entries": [], "summary": {}})
-    args = SimpleNamespace(budget=None, stale_after=None, stream=False, subscribe=True, interval=1)
-    assert picker_pool.command(args) == 0
-    initial = json.loads(capsys.readouterr().out)["summary"]
-    assert initial["auth_status"] == "error"
-    assert "ValueError" in initial["banner_text"]
-    path.write_text("defaults:\n  max_owned_codespaces: 30\n", encoding="utf-8")
-    pauses = iter([0, 30, KeyboardInterrupt])
-
-    def sleep(_):
-        value = next(pauses)
-        if value is KeyboardInterrupt:
-            raise KeyboardInterrupt
-        path.write_text(f"defaults:\n  max_owned_codespaces: {value}\n", encoding="utf-8")
-
-    monkeypatch.setattr(picker_pool.time, "sleep", sleep)
-    stream = io.StringIO()
-    monkeypatch.setattr("sys.__stdout__", stream)
-    args.stream = True
-    assert picker_pool.command(args) == 0
-    summaries = [
-        json.loads(line)["summary"] for line in stream.getvalue().splitlines()
-        if json.loads(line)["type"] == "summary"
-    ]
-    assert [summary["auth_status"] for summary in summaries] == ["ready", "error", "ready"]
-
-
 @pytest.mark.parametrize("active_rows", [[], [{"id": "active-space"}]])
 def test_mapped_only_account_scope_blocks_before_inventory(monkeypatch, active_rows):
     from agent_codespaces import account_binding, config

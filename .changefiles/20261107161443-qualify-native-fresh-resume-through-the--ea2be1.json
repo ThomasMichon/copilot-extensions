@@ -1,9 +1,0 @@
-{
-  "comment": "Qualify native fresh/resume through the installed Worktrees application with bounded construction and consumer phases.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -90,7 +90,6 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin, PickerFooterMix
                 getattr(self, "_knowledge_readiness", {}).get("ready"),
                 getattr(self, "_knowledge_readiness", {}).get("code"),
                 self.cmd_mode, self.list_view.query, self.list_view.sort_index,
-                self.list_view.group_index, self.list_view.status_index,
                 tuple(worktree_read_feedback(self)) if kind == "worktrees" else ())
     def _build_body_split(self, width, sel=None):
         """Return ``(chrome_vrows, data_vrows)`` for the current pivot -- the
@@ -272,7 +271,6 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin, PickerFooterMix
         finally:
             self._nf_syncing = False
         self._nf_mounted = True
-        self.refresh()
     def _sync_focus_to_sel(self):
         """Mirror native focus onto the region widget that owns the current
         ``sel`` (the other half of the on_focus -> sel bridge), so Tab/arrow
@@ -372,13 +370,10 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin, PickerFooterMix
         if self._kind() == "config_section":
             return Text("Configuration", style=C_LABEL)
         if self._kind() == "worktrees":
-            sections = self.current_list()[1]
-            secs = {label: len(rows) for label, rows in sections}
-            rows = [row for label, items in sections if not label.startswith(("Owned", "Unowned"))
-                    for row in items]
-            a = sum(row["state"] == "ACTIVE" for row in rows)
-            c = sum(row["state"] in ("FINAL", "MERGED") for row in rows)
-            r = len(rows) - a - c
+            secs = dict((lbl, len(rows)) for lbl, rows in self.current_list()[1])
+            a = secs.get("Active", 0)
+            r = secs.get("Recent", 0)
+            c = secs.get("Completed", 0)
             u = sum(n for lbl, n in secs.items() if lbl.startswith("Unowned"))
             owned = sum(n for lbl, n in secs.items() if lbl.startswith("Owned"))
             t.append("●", style=C_PULSE[self.pulse])
@@ -392,9 +387,9 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin, PickerFooterMix
             else:
                 t.append(f" {a} active", style=C_LABEL)
                 t.append(" · ", style=C_DIM)
-                t.append(f"{r} unfinished", style=C_META)
+                t.append(f"{r} recent", style=C_META)
                 t.append(" · ", style=C_DIM)
-                t.append(f"{c} completed", style=C_META)
+                t.append(f"{c} done", style=C_META)
                 if owned:
                     t.append(" · ", style=C_DIM)
                     t.append(f"{owned} owned", style=C_META)

@@ -714,7 +714,6 @@ def _run_installation_mode_helper(
     *,
     context: Path | None,
     action: str = "probe-legacy",
-    budget=None,
 ) -> dict[str, Any]:
     durable_home = _home() / ".copilot-extensions"
     common = {
@@ -798,7 +797,6 @@ def _run_installation_mode_helper(
         child_environment.pop(key, None)
     return run_installation_probe(
         command, child_environment, plugin_name, action=action,
-        **({"budget": budget} if budget is not None else {}),
     )
 
 
@@ -969,7 +967,6 @@ def resolve_runtime_installation(
     plugin_dir: Path,
     *,
     home: Path | None = None,
-    budget=None,
 ) -> RuntimeInstallationResolution:
     """Resolve the authoritative runtime root without activating any mode.
 
@@ -1023,7 +1020,6 @@ def resolve_runtime_installation(
         helper,
         runtime_dir(plugin_name, home),
         context=context,
-        **({"budget": budget} if budget is not None else {}),
     )
     return _select_runtime_installation(plugin_name, result, home=home)
 

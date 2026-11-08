@@ -74,8 +74,7 @@ def test_bare_bootstrap_does_not_resolve_a_project_before_construction(extension
     assert "runtime_install.py" in text
 
 
-@pytest.mark.parametrize("registered", [False, True])
-def test_bootstrap_admits_current_manager_owned_templates(tmp_path, monkeypatch, registered):
+def test_registered_bootstrap_admits_current_manager_owned_templates(tmp_path, monkeypatch):
     script = (
         "import sys,json;"
         "sys.path.insert(0,sys.argv[1]);"
@@ -100,11 +99,10 @@ def test_bootstrap_admits_current_manager_owned_templates(tmp_path, monkeypatch,
     monkeypatch.setenv("AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR", str(registry))
     root = home / ".worktree-manager"
     primary = "worktree-manager.cmd" if os.name == "nt" else "worktree-manager"
-    if registered:
-        (registry / "worktree-manager.json").write_text(json.dumps({
-            "schema_version": 1, "provider": "worktree-manager",
-            "provider_root": str(root), "command": [str(commands / primary)],
-        }))
+    (registry / "worktree-manager.json").write_text(json.dumps({
+        "schema_version": 1, "provider": "worktree-manager",
+        "provider_root": str(root), "command": [str(commands / primary)],
+    }))
     templates = json.loads(result.stdout)
     for name, body in templates.items():
         (commands / name).write_bytes(body.encode("utf-8"))
@@ -112,24 +110,4 @@ def test_bootstrap_admits_current_manager_owned_templates(tmp_path, monkeypatch,
         "validate_manager_ownership"
     ]
     observed = validate(root, REPO / "worktree-manager")
-    assert observed == {
-        **{commands / name: body.encode("utf-8") for name, body in templates.items()},
-        commands / "worktree-manager.sh": None,
-    }
-    code = (
-        "import pathlib,runpy,sys;"
-        "validate=runpy.run_path(sys.argv[1])['validate_manager_ownership'];"
-        "validate(pathlib.Path(sys.argv[2]),pathlib.Path(sys.argv[3]))"
-    )
-    result = subprocess.run(
-        [sys.executable, "-I", "-S", "-B", "-c", code,
-         str(REPO / "worktree-manager" / "scripts" / "update_entry.py"),
-         str(root), str(REPO / "worktree-manager")],
-        capture_output=True, text=True, timeout=10,
-        **({"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}),
-    )
-    assert result.returncode == 0, result.stderr
-    assert not root.exists()
-    assert {path.name: path.read_bytes() for path in commands.iterdir()} == {
-        name: body.encode("utf-8") for name, body in templates.items()
-    }
+    assert observed == {commands / name: body.encode("utf-8") for name, body in templates.items()}

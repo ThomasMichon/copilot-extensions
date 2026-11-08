@@ -370,13 +370,11 @@ if ($ahpChildToken) {
         $exitCode = 1
     }
 } else {
-    # Native exits update the global automatic variable even when pane-launch
-    # invokes this wrapper in a nested script scope.
-    $global:LASTEXITCODE = $null
+    $LASTEXITCODE = $null
     try {
         & $rest[0] @($rest[1..($rest.Count - 1)])
         $commandSucceeded = $?
-        $exitCode = $global:LASTEXITCODE
+        $exitCode = $LASTEXITCODE
         if (-not $commandSucceeded -and $null -eq $exitCode) { $exitCode = 127 }
     } catch {
         [Console]::Error.WriteLine("[agent-worktrees] child launch failed: $($_.Exception.Message)")

@@ -7,7 +7,6 @@ on:
     paths:
       - ".github/workflows/owned-budget-native-acceptance.yml"
       - "libs/agent-procutil/tests/test_owned_budget_native.py"
-      - "plugins/agent-machines/src/agent_machines/installation_repair_process.py"
 
 permissions:
   contents: read
@@ -57,13 +56,6 @@ jobs:
               )
           raise SystemExit(result)
           PY
-      - name: Required readiness probe exits with its enclosing caller
-        if: runner.os == 'Linux'
-        run: >-
-          python tools/run-plugin-tests.py agent-machines
-          --allow-explicit-tiers
-          --test-file tests/test_installation_repair.py
-          -k outer_required_read_timeout_reaps_nested_probe
   owned-budget-native-macos:
     name: Borrowed budget native (macOS)
     runs-on: macos-latest

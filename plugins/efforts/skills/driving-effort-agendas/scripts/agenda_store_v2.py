@@ -15,7 +15,6 @@ from agenda_operations import fields
 from agenda_context import context_body
 from agenda_queue import QueueState, init_queue
 from agenda_v2_operations import apply
-from agenda_v2_graph import attach as attach_graph
 from agenda_v2_projection import project as project_at
 from agenda_v2_schema import MODE, board, project, validate, CAPS
 
@@ -141,7 +140,6 @@ def _prepare(
         "revision": revision, "committed_at": now, "snapshot": asdict(project_at(
             queue.documents, queue.records, now=datetime.fromisoformat(now.replace("Z", "+00:00")),
         ))}
-    observation = attach_graph(observation, queue.documents, queue.records, common.encode)
     observation_text = common.encode(observation)
     oversized = len(observation_text.encode()) + 1 > 32768
     if oversized:

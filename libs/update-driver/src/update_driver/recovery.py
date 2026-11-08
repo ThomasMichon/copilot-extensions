@@ -173,7 +173,7 @@ def recover_for_repair(
             released_at = time.time()
             for request in candidates:
                 db.execute(
-                    """UPDATE requests SET state=CASE WHEN state IN ('running','pending')
+                    """UPDATE requests SET state=CASE WHEN state='running'
                     THEN 'interrupted' ELSE state END,
                     finished_at=COALESCE(finished_at,?),
                     error=COALESCE(NULLIF(error,''),'operator authorized repair; settlement unconfirmed'),

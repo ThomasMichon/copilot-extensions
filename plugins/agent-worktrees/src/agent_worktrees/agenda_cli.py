@@ -28,24 +28,17 @@ def add_parsers(sub) -> None:
         if name != "agenda-publish":
             parser.add_argument("--worktree", required=True)
             parser.add_argument("--session", required=True)
-            parser.add_argument(
-                "--agenda-graph",
-                type=int,
-                choices=contract.GRAPH_VERSIONS,
-                default=None,
-                help="Also return the optional display graph (requires --contract-version 2)",
-            )
         parser.set_defaults(func=cmd_agenda)
 
 
-def _client(version=1, *, graph=False):
+def _client(version=1):
     client = _control_client()
     health = client._request("health", max_response_bytes=contract.FRAME_BYTES, total_timeout=1.0)
-    required = [contract.capability(version)] + ([contract.GRAPH_CAPABILITY] if graph else [])
-    capabilities = health.get("capabilities")
-    for name in required:
-        if not isinstance(capabilities, list) or name not in capabilities:
-            raise contract.AgendaError(f"resident lacks {name}", "unsupported")
+    required = contract.capability(version)
+    if not isinstance(health.get("capabilities"), list) or (
+        required not in health["capabilities"]
+    ):
+        raise contract.AgendaError(f"resident lacks {required}", "unsupported")
     worktrees = health.get("worktrees")
     if not isinstance(worktrees, dict) or worktrees.get("status") != "ready":
         raise contract.AgendaError("resident agenda authority is not ready", "unavailable")
@@ -170,9 +163,6 @@ def cmd_agenda(args) -> int:
                 "worktree_id": body["source"]["worktree"],
                 "session_id": body["source"]["session"],
             }
-            if "graph" in body:
-                # The resident echoes a committed graph, so request and require it.
-                request["graph"] = body["graph"]["version"]
         else:
             request = {
                 "contract_version": version,
@@ -180,10 +170,8 @@ def cmd_agenda(args) -> int:
                 "worktree_id": args.worktree,
                 "session_id": args.session,
             }
-            if getattr(args, "agenda_graph", None) is not None:
-                request["graph"] = args.agenda_graph
         contract.selection(request)
-        client, generation = _client(version, graph="graph" in request)
+        client, generation = _client(version)
         if feed:
             return relay(client, request, generation)
         payload = (

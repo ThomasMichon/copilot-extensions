@@ -54,52 +54,15 @@ def _is_plain_basename(value: str) -> bool:
 
 
 def load_manifest(plugin_dir: Path, *, manifest_name: str = MANIFEST_NAME) -> LaunchWrapperAssets | None:
-    groups = load_manifest_groups(plugin_dir, manifest_name=manifest_name)
-    if len(groups) > 1:
-        raise ValueError(f"{plugin_dir / manifest_name}: requires the group-aware asset receiver")
-    return groups[0] if groups else None
-
-
-def load_manifest_groups(
-    plugin_dir: Path, *, manifest_name: str = MANIFEST_NAME,
-) -> tuple[LaunchWrapperAssets, ...]:
-    """Read explicit multi-root packaged assets without changing version-one declarations."""
     manifest_path = plugin_dir / manifest_name
     if not manifest_path.is_file():
-        return ()
+        return None
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError(f"{manifest_path}: expected an asset manifest object")
     schema = _SCHEMA if manifest_name == MANIFEST_NAME else "copilot-extensions.packaged-assets"
-    if data.get("schema") != schema:
+    if data.get("schema") != schema or data.get("version") != 1:
         raise ValueError(f"{manifest_path}: unsupported launch-wrapper-assets schema")
-    if data.get("version") == 1:
-        return (_manifest_group(manifest_path, data, manifest_name=manifest_name),)
-    if (
-        manifest_name != PACKAGED_MANIFEST_NAME or type(data.get("version")) is not int
-        or data.get("version") != 2
-        or set(data) != {"schema", "version", "groups"}
-        or not isinstance(data["groups"], list) or not 1 <= len(data["groups"]) <= 32
-        or any(not isinstance(group, dict) for group in data["groups"])
-    ):
-        raise ValueError(f"{manifest_path}: unsupported packaged-asset groups")
-    groups = tuple(
-        _manifest_group(manifest_path, group, manifest_name=manifest_name)
-        for group in data["groups"]
-    )
-    targets = [
-        Path(group.payload_dir_raw) / name for group in groups for name in group.files
-    ]
-    if len(set(targets)) != len(targets) or any(
-        parent in targets for target in targets for parent in target.parents
-    ):
-        raise ValueError(f"{manifest_path}: packaged-asset groups have overlapping targets")
-    return groups
-
-
-def _manifest_group(
-    manifest_path: Path, data: dict, *, manifest_name: str = MANIFEST_NAME,
-) -> LaunchWrapperAssets:
     canonical_dir = data.get("canonicalDir")
     files = data.get("files")
     payload_dir = data.get("payloadDir", "bin")

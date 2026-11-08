@@ -75,10 +75,6 @@ import json, os, signal, subprocess, sys, time
 from pathlib import Path
 from agent_worktrees import locks
 root = Path(sys.argv[1])
-if os.environ.get("AW_EXEC_ADMISSION"):
-    from agent_worktrees import launch_admission
-    with launch_admission.guard(Path(os.environ["AW_EXEC_RECORD"])):
-        pass
 deadline = time.monotonic() + 5
 while not (root / ".native-seed-exec.complete").read_text() and time.monotonic() < deadline:
     time.sleep(0.01)
@@ -115,11 +111,9 @@ raise SystemExit(code)
 '''
 
 
-def _run(record, tmp_path, native_bash, command, *, fault=None, admission_only=False):
-    seed = seeds.stage(record, kind="new", text="literal prompt ' \" \u03a9\n") if not admission_only else None
-    prepared = native.prepare(
-        record, command, seed_id=seed.seed_id if seed else None, admission_only=admission_only,
-    )
+def _run(record, tmp_path, native_bash, command, *, fault=None):
+    seed = seeds.stage(record, kind="new", text="literal prompt ' \" \u03a9\n")
+    prepared = native.prepare(record, command, seed_id=seed.seed_id)
     correlation = audit.Correlation(
         prepared["attempt_id"], prepared["resolution_id"], prepared["parent_id"],
     )
@@ -134,7 +128,6 @@ def _run(record, tmp_path, native_bash, command, *, fault=None, admission_only=F
         "operation": prepared["operation_id"], "command": prepared["argv"],
         "completion": str(completion), "assets": str(assets),
         "fault": fault,
-        "admission_only": admission_only,
     }), encoding="utf-8")
     driver = tmp_path / "exec-driver.py"
     driver.write_text('''
@@ -190,26 +183,12 @@ elif r["fault"] == "restore-interrupt":
             signal.raise_signal(signal.SIGINT)
         return result
     signal.signal = interrupt_restore
-if r["admission_only"]:
-    from agent_worktrees import launch_admission, launch_seed_state
-    if r["fault"] == "new-intent":
-        launch_seed_state.stage(Path(r["record"]), kind="new", text="newer intent")
-    original_exec = launch_seed_posix.os.execvpe
-    def admitted_exec(*args):
-        try:
-            with launch_admission.guard(Path(r["record"])):
-                raise AssertionError("Creation fence was released before exec")
-        except launch_admission.LaunchAdmissionBusy:
-            pass
-        return original_exec(*args)
-    launch_seed_posix.os.execvpe = admitted_exec
 try:
     code = launch_seed_posix.execute(
         Path(r["record"]), Correlation(r["attempt"], r["resolution"], r["parent"]),
         r["operation"], r["command"], Path(r["completion"]),
-        admission_only=r["admission_only"],
     )
-except (KeyboardInterrupt, UnicodeError, ValueError):
+except (KeyboardInterrupt, UnicodeError):
     deadline = time.monotonic() + 12
     while not Path(r["completion"]).read_text() and time.monotonic() < deadline:
         time.sleep(0.01)
@@ -229,49 +208,11 @@ raise SystemExit(code)
          'for ((i=0;i<1100;i++)); do [[ -s "$AW_EXEC_COMPLETION" ]] && break; sleep 0.01; done; '
          'exit "$code"',
          "owner", sys.executable, "-I", "-B", str(driver), str(request)],
-        env={
-            **environment, "AW_EXEC_COMPLETION": str(completion),
-            "AW_EXEC_ADMISSION": "1" if admission_only else "", "AW_EXEC_RECORD": str(record),
-        },
+        env={**environment, "AW_EXEC_COMPLETION": str(completion)},
         input_text="retained stdin\n", timeout=20,
         max_stdout_bytes=4096, max_stderr_bytes=4096,
     )
     return seed, prepared, correlation, assets, result
-
-
-@pytest.mark.parametrize("changed", [False, True])
-def test_no_seed_exec_keeps_creation_fence_until_kernel_exec_and_refuses_new_intent(
-    record, tmp_path, native_bash, changed,
-):
-    command = [
-        sys.executable, "-c",
-        BACKEND.replace(
-            'root = Path(sys.argv[1])',
-            'root = next(Path(sys.argv[1]).glob("*/*/.native-seed-exec.complete")).parent',
-        ),
-        str(record.parent / "launch-attempts"), "7", "", "two words",
-    ]
-    _seed, prepared, correlation, assets, result = _run(
-        record, tmp_path, native_bash, command, admission_only=True,
-        fault="new-intent" if changed else None,
-    )
-    assert result.returncode == (3 if changed else 7), result.stderr
-    assert (assets / ".native-seed-exec.complete").read_text() == ("3\n" if changed else "0\n")
-    if changed:
-        assert not (assets / "backend.json").exists()
-        assert seeds.peek(record).handoff_id is None
-    else:
-        backend = json.loads((assets / "backend.json").read_text())
-        before = json.loads((assets / "before.json").read_text())
-        assert backend["pid"] == before["pid"]
-        assert backend["birth"] == before["birth"]
-        assert backend["argv"] == ["", "two words"]
-        assert backend["children"] == ""
-        assert seeds.peek(record) is None
-        native.returned(record, correlation, prepared["operation_id"], exit_code=7)
-        assert [event["phase"] for event in audit.read(
-            record.parent, prepared["attempt_id"], prepared["operation_id"],
-        )["events"]] == ["execution-requested", "process-spawned", "execution-returned"]
 
 
 @pytest.mark.parametrize("exit_code, fault", [

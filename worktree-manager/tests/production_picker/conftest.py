@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import os
 import pathlib
 import subprocess
@@ -13,33 +12,10 @@ import urllib.error
 
 import pytest
 
-from worktree_manager.agent_worktrees_runtime import ENGINE_SOURCE_ENV, ensure_engine_runtime
+from worktree_manager.agent_worktrees_runtime import ensure_engine_runtime
 
 
-@contextlib.contextmanager
-def _source_engine():
-    # The contained wheel runner has no installed host engine; use this checkout.
-    previous = os.environ.get(ENGINE_SOURCE_ENV)
-    os.environ[ENGINE_SOURCE_ENV] = str(
-        pathlib.Path(__file__).resolve().parents[3] / "plugins" / "agent-worktrees" / "src",
-    )
-    try:
-        yield
-    finally:
-        if previous is None:
-            os.environ.pop(ENGINE_SOURCE_ENV, None)
-        else:
-            os.environ[ENGINE_SOURCE_ENV] = previous
-
-
-with _source_engine():
-    ensure_engine_runtime()
-
-
-@pytest.fixture(autouse=True)
-def _use_source_engine():
-    with _source_engine():
-        yield
+ensure_engine_runtime()
 
 
 @pytest.fixture(autouse=True)

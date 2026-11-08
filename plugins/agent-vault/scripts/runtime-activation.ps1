@@ -8,13 +8,24 @@ function Get-VaultRuntimeActivation {
         [switch]$RetainNativeSelector
     )
     $reader = Join-Path $PSScriptRoot 'runtime-activation.py'
-    . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
     $pythonPath = $Python
+    $pythonArgs = @()
     if (-not $pythonPath) {
-        $pythonPath = Resolve-NativeBootstrapPython -MinimumMinor 10
-        if (-not $pythonPath) {
-            throw 'Agent Vault activation requires an existing Python 3.10+ reader; no installation was attempted.'
+        $candidate = Get-Command python3 -CommandType Application -ErrorAction SilentlyContinue |
+            Where-Object { $_.Source -notlike '*\WindowsApps\*' } | Select-Object -First 1
+        if (-not $candidate) {
+            $candidate = Get-Command python -CommandType Application -ErrorAction SilentlyContinue |
+                Where-Object { $_.Source -notlike '*\WindowsApps\*' } | Select-Object -First 1
         }
+        if (-not $candidate) {
+            $candidate = Get-Command py -CommandType Application -ErrorAction SilentlyContinue |
+                Where-Object { $_.Source -notlike '*\WindowsApps\*' } | Select-Object -First 1
+            $pythonArgs = @('-3')
+        }
+        if (-not $candidate) {
+            throw 'Agent Vault activation requires an available Python reader; no installation was attempted.'
+        }
+        $pythonPath = $candidate.Source
     }
     $previousPreference = $ErrorActionPreference
     $readerArgs = @('--cwd', $Project)
@@ -24,10 +35,7 @@ function Get-VaultRuntimeActivation {
     if ($PSBoundParameters.ContainsKey('Context')) { $readerArgs += "--context=$Context" }
     $ErrorActionPreference = 'Continue'
     try {
-        $arguments = @(
-            '-I', '-B', '-X', 'utf8', $reader
-        ) + $readerArgs
-        $output = @(Invoke-Hidden -FilePath $pythonPath -ArgList $arguments)
+        $output = @(& $pythonPath @pythonArgs -I -B -X utf8 $reader @readerArgs)
         $code = $LASTEXITCODE
     } finally { $ErrorActionPreference = $previousPreference }
     $result = ($output -join "`n") | ConvertFrom-Json -ErrorAction Stop

@@ -51,12 +51,11 @@ def configured(tmp_path, scope=None):
     return fixture, parameters
 
 
-def worker(fixture, client, *, protected_review=False):
+def worker(fixture, client):
     return CredentialWorker(
         client, service="pr-observation", installation="pr-install", generation=1,
         recipient_key=fixture.recipient, controller="controller", controller_generation=1,
         controller_keys={"keys": [public(fixture.proofs["controller"], "proof")]},
-        protected_review=protected_review,
     )
 
 
@@ -77,12 +76,11 @@ class ScopedProvider:
 
 
 @contextmanager
-def responding(fixture, gateway, provider, *, protected_review=False):
+def responding(fixture, gateway, provider):
     responder = Controller(
         fixture.client("controller", gateway.server_port), provider,
         Signer(fixture.proofs["controller"], "proof", "controller", "controller"),
         fleet="fleet-a", generation=1, lease_seconds=15,
-        protected_review=protected_review,
     )
     responder.start()
     stop = threading.Event()

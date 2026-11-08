@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-import re
 
 from .identity_key import IdentityKeyError
 from .ssh_key import FAILURE_HINTS, _crypto, decode_record, public_metadata, validate_request
@@ -16,13 +15,6 @@ def command(args) -> int:
 
     stage = "context"
     try:
-        expected = args.expected_fingerprint
-        # Unpadded SHA256 Base64 has two zero padding bits in its final character.
-        if expected is not None and (
-            not isinstance(expected, str)
-            or re.fullmatch(r"SHA256:[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]", expected) is None
-        ):
-            raise IdentityKeyError("invalid_fingerprint", "Select a canonical SHA256 public-key fingerprint.")
         validate_request(args.entry, False, False)
         _crypto()
         directory = Path(args.directory).expanduser()
@@ -31,15 +23,9 @@ def command(args) -> int:
         context = config.resolve_context(strict=True)
         if not context.kpdb:
             raise IdentityKeyError("database_unconfigured", "Configure an existing KeePass database first.")
-        try:
-            database = Path(context.kpdb).expanduser().resolve(strict=True)
-            if not database.is_file():
-                raise IdentityKeyError("database_unavailable", "Configured KeePass database is not a file.")
-        except OSError:
-            raise IdentityKeyError(
-                "database_unavailable",
-                "Configured KeePass database is unavailable; restore access or synchronization without replacing it.",
-            ) from None
+        database = Path(context.kpdb).expanduser().resolve(strict=True)
+        if not database.is_file():
+            raise IdentityKeyError("database_unavailable", "Configured KeePass database is not a file.")
         entry = config.normalize_entry(args.entry, context.group)
         validate_request(entry, False, False)
         stage = "service"
@@ -59,18 +45,12 @@ def command(args) -> int:
                 code = "service_unavailable"
             raise IdentityKeyError(code, FAILURE_HINTS[code])
         record = decode_record(response.get("value"))
-        metadata = public_metadata(record["public_key"])
-        if expected is not None and metadata["fingerprint"] != expected:
-            raise IdentityKeyError(
-                "key_mismatch",
-                "Selected Vault key differs from the inspected public identity; preserve it and reconcile the selection.",
-            )
         stage = "files"
         result = install(
             directory, record["private_key"].encode("ascii"),
             (record["public_key"] + "\n").encode("ascii"),
         )
-        print(json.dumps({"version": 1, **result, **metadata}, sort_keys=True))
+        print(json.dumps({"version": 1, **result, **public_metadata(record["public_key"])}, sort_keys=True))
         return 0
     except IdentityKeyError as exc:
         payload = {"version": 1, "error": exc.code, "message": str(exc)}

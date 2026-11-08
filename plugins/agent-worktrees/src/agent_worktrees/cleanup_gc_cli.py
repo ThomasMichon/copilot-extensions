@@ -330,15 +330,6 @@ def _revalidate_cleanup_safety(
             if _hosted_session_blocks_cleanup(latest):
                 return RevalidationResult(
                     False, "active hosted Copilot session in use", "active")
-            mux = sessions._list_mux_sessions()
-            if mux is None:
-                return RevalidationResult(
-                    False, "mux presence is unknown; cleanup deferred", "mux-unknown",
-                )
-            if sessions.mux_session_name(latest.worktree_id) in mux:
-                return RevalidationResult(
-                    False, "worktree became active since the initial scan", "active",
-                )
             fresh_info, active_paths, session_ctx = _fresh_liveness(latest)
             if fresh_info.state == git_ops.WorktreeState.ACTIVE:
                 return RevalidationResult(

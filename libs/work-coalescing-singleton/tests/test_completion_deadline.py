@@ -103,18 +103,6 @@ def test_default_transport_preserves_ordinary_server_deadline_grace(
     assert sock.timeouts == [31, 31, 31]
 
 
-def test_release_completion_deadline_cannot_be_reset_by_fragments(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _, sock, _ = _connection(monkeypatch)
-    sock.responses = [(b'{"version":1,', 3), (b'"ok":true}\n', 0)]
-    client.release(
-        "127.0.0.1", 12345, "test-owned-token", "client",
-        timeout=30, completion_timeout_s=5,
-    )
-    assert len(sock.responses) == 1
-
-
 def test_real_tcp_incomplete_response_does_not_use_ordinary_extra_grace() -> None:
     release = threading.Event()
     errors = []
@@ -151,20 +139,13 @@ def test_real_tcp_incomplete_response_does_not_use_ordinary_extra_grace() -> Non
         assert not errors
 
 
-@pytest.mark.parametrize("operation", ["request", "release"])
 @pytest.mark.parametrize("invalid", [0, -1, True, "5", float("nan"), float("inf")])
 def test_invalid_completion_budget_refuses_before_dial(
-    monkeypatch: pytest.MonkeyPatch, invalid: object, operation: str,
+    monkeypatch: pytest.MonkeyPatch, invalid: object,
 ) -> None:
     def no_dial(*_args: object, **_kwargs: object) -> NoReturn:
         pytest.fail("no dial")
 
     monkeypatch.setattr(socket, "create_connection", no_dial)
     with pytest.raises(ValueError, match="finite and positive"):
-        if operation == "request":
-            _request(completion_timeout_s=cast(float, invalid))
-        else:
-            client.release(
-                "127.0.0.1", 12345, "test-owned-token", "client",
-                completion_timeout_s=cast(float, invalid),
-            )
+        _request(completion_timeout_s=cast(float, invalid))

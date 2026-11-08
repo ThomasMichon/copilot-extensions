@@ -222,15 +222,9 @@ def command(args) -> int:
         context = config.resolve_context(strict=True)
         if not context.kpdb:
             raise IdentityKeyError("database_unconfigured", "Configure an existing KeePass database first.")
-        try:
-            database = Path(context.kpdb).expanduser().resolve(strict=True)
-            if not database.is_file():
-                raise IdentityKeyError("database_unavailable", "Configured KeePass database is not a file.")
-        except OSError:
-            raise IdentityKeyError(
-                "database_unavailable",
-                "Configured KeePass database is unavailable; restore access or synchronization without replacing it.",
-            ) from None
+        database = Path(context.kpdb).expanduser().resolve(strict=True)
+        if not database.is_file():
+            raise IdentityKeyError("database_unavailable", "Configured KeePass database is not a file.")
         entry = config.normalize_entry(args.entry, context.group)
         validate_request(entry, args.initialize, args.confirm_initialization)
         if args.require_running:

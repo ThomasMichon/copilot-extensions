@@ -19,7 +19,6 @@ from . import update_auth_context as _auth
 from . import worktree_identity
 from .installer_run import InstallerLaunchError
 from .reconcile_freshness import check_runtime_freshness
-from .update_integration import PROJECT_INTEGRATION_CAPABILITY as PROJECT_INTEGRATION_CAPABILITY, run_selected
 from .update_runtime import describe_copilot_spawn_error as _describe_copilot_spawn_error
 from .update_runtime import (  # noqa: F401 - compatibility seams used by the plan collector
     _installer_timeout, _run_engine_installer, installer_deadline_status,
@@ -28,6 +27,7 @@ from .update_runtime import (
     _invocation_update_context as _invocation_update_context,
     _project_update_context as _project_update_context,
 )
+
 
 def _core():
     from . import __main__ as core
@@ -355,7 +355,9 @@ def _update_in_plugin_steps(args: argparse.Namespace) -> int:
     _events.enter("runtime_preflight")
     plat = cfg.detect_platform()
     if phase == "integration":
-        return 0 if run_selected(plugin_dir, plat, controller_args=args) else 1
+        from .update_integration import run_selected
+
+        return 0 if run_selected(plugin_dir, plat) else 1
     force = getattr(args, "force", False)
     forced = update_options.forced_runtimes(args)
     skip_modules = getattr(args, "skip_modules", None)

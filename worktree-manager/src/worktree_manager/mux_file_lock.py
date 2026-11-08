@@ -23,14 +23,6 @@ if sys.platform == "win32":
             return True
         except OSError:
             return False
-
-    def _try_read_lock_file_once(fh) -> bool:
-        fh.seek(0)
-        try:
-            msvcrt.locking(fh.fileno(), msvcrt.LK_NBRLCK, 1)
-            return True
-        except OSError:
-            return False
 else:
     import fcntl
 
@@ -40,13 +32,6 @@ else:
     def _try_lock_file_once(fh) -> bool:
         try:
             fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return True
-        except OSError:
-            return False
-
-    def _try_read_lock_file_once(fh) -> bool:
-        try:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_SH | fcntl.LOCK_NB)
             return True
         except OSError:
             return False

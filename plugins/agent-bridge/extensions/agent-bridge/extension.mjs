@@ -24,6 +24,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { open } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { approveAll } from "@github/copilot-sdk";
 import { joinSession } from "@github/copilot-sdk/extension";
 import {
   InFlightMessages, MainTurn, REPLAY_MAX_BYTES, adoptSessionId, drainControls, drainInbox, serializedRegister,
@@ -33,8 +34,7 @@ import { firstLoadThisSession } from "./announce.mjs";
 import { makeBridgeEndpoint } from "./bridge-endpoint.mjs";
 import { metadataRefresher, processIdentity, registrationMetadata, resolveMetadataAsync } from "./metadata.mjs";
 import { createRetainedInbox, retainedDeliverySelected } from "./retained-delivery.mjs";
-import { createHeadedDriverSession, createRemoteDriverSession, isRemoteDriverSource } from "./remote-driver.mjs";
-import { PendingQuestions, QUESTION_TYPES, pollQuestions } from "./questions.mjs";
+import { createRemoteDriverSession, isRemoteDriverSource } from "./remote-driver.mjs";
 
 // --- Constants ---
 const HEARTBEAT_MS = 30_000; // refresh liveness (updated_at) every 30s
@@ -55,10 +55,8 @@ const DELIVERY_DEFAULT_ON = !/^(0|false|off|no)$/i.test(
 );
 // Selected only by an explicit consumer opt-in. Unsupported retained delivery
 // must hold the original work, never fall through to the legacy ACK path.
-const HEADED_CLIENT = process.env.COPILOT_DRIVER_HEADED_CLIENT;
-delete process.env.COPILOT_DRIVER_HEADED_CLIENT;
 const RETAINED_INBOX = retainedDeliverySelected(process.env.AGENT_BRIDGE_RETAINED_INBOX)
-  || Boolean(process.env.AGENT_BRIDGE_REMOTE_DRIVER_ROOT) || HEADED_CLIENT !== undefined;
+  || Boolean(process.env.AGENT_BRIDGE_REMOTE_DRIVER_ROOT);
 // SDK event types we represent (Phase 5). Everything else is intentionally not
 // forwarded -- the bridge-side translator maps exactly this subset into its
 // event vocabulary; keeping the whitelist here avoids buffering noise.
@@ -72,7 +70,6 @@ const REPRESENT_TYPES = new Set([
   "session.usage_info",
   "assistant.turn_end",
   "permission.requested",
-  ...QUESTION_TYPES,
   "session.compaction_start",
   "session.compaction_complete",
 ]);
@@ -101,8 +98,6 @@ const state = {
   mainTurn: new MainTurn(), // is the main agent's turn running (not a sub-agent's)?
   lastEventAt: 0, // advanced by the observe-only event handler
   readinessTasks: new Map(),
-  questions: new PendingQuestions(),
-  questioning: false,
 };
 
 function extLog(msg) {
@@ -161,7 +156,6 @@ function resolveToken() {
 // bridge-endpoint.mjs); state.base/state.token mirror it for the guards below.
 let endpoint = null;
 let retainedInbox = null;
-let headedControl = null;
 
 async function fetchBridge(method, path, body) {
   const res = await endpoint.call(method, path, body);
@@ -345,23 +339,6 @@ async function pollControls() {
   }
 }
 
-async function pollQuestionAnswers() {
-  if (state.questioning || !state.registered || state.nativeSessionId !== state.sessionId) return;
-  state.questioning = true;
-  const sid = state.sessionId;
-  try {
-    await pollQuestions(sid, {
-      questions: state.questions, identity: processIdentity(), session,
-      request: retainedBridgeRequest,
-      endpointKey: () => state.base,
-      log: extLog,
-      isCurrent: () => state.registered && state.sessionId === sid && state.nativeSessionId === sid,
-    });
-  } finally {
-    state.questioning = false;
-  }
-}
-
 // The bridge lost this session's represented history in a restart: send it the
 // tail of the session's own transcript (control:replay-history). The bridge
 // lands it before the live events it held meanwhile, and drops duplicates.
@@ -386,6 +363,11 @@ async function replayHistory(sid) {
 
 // --- Extension ---
 const session = await joinSession({
+  // This extension registers no tools, so no permission request is ever routed
+  // to it; approveAll is a proven, inert default (matches talk-mode). It does
+  // NOT auto-approve the operator's own tool calls -- those stay with the CLI.
+  onPermissionRequest: approveAll,
+
   // /peer -- optional MUTE toggle for message delivery INTO this session.
   // Delivery is ON by default (single-operator mesh; trust is the transport, not
   // a consent prompt) -- this just lets the operator silence a focused session.
@@ -419,13 +401,7 @@ const session = await joinSession({
 
 if (RETAINED_INBOX) {
   const driverRoot = process.env.AGENT_BRIDGE_REMOTE_DRIVER_ROOT;
-  const deliverySession = HEADED_CLIENT !== undefined ? await createHeadedDriverSession(session, {
-    declaration: HEADED_CLIENT, cwd: process.cwd(), nativePid: process.ppid,
-    ...(driverRoot ? {
-      pluginRoot: driverRoot, bridgePluginRoot: process.env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT,
-      expectedSessionId: process.env.AGENT_BRIDGE_NATIVE_SESSION_ID,
-    } : {}),
-  }) : driverRoot ? createRemoteDriverSession(session, {
+  const deliverySession = driverRoot ? createRemoteDriverSession(session, {
     pluginRoot: driverRoot,
     descriptorDirectory: join(process.env.AGENT_REMOTE_DRIVER_CONFIG_DIR
       || join(homedir(), ".copilot", "remote-driver"), "sessions"),
@@ -434,12 +410,11 @@ if (RETAINED_INBOX) {
     ownerId: process.env.AGENT_BRIDGE_DRIVER_OWNER,
     bridgePluginRoot: process.env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT,
   }) : session;
-  if (HEADED_CLIENT !== undefined) headedControl = deliverySession;
   retainedInbox = createRetainedInbox({
     session: deliverySession, request: retainedBridgeRequest, processIdentity: processIdentity(),
     cwd: () => state.meta?.cwd, isCurrent: (sid) => state.sessionId === sid,
     canSend: () => state.deliveryEnabled && state.registered, log: extLog,
-    ...(driverRoot || HEADED_CLIENT !== undefined ? { sourceAllowed: isRemoteDriverSource } : {}),
+    ...(driverRoot ? { sourceAllowed: isRemoteDriverSource } : {}),
     ...(process.env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT
       ? { portableLaunch: process.env.AGENT_BRIDGE_PORTABLE_ATTEMPT || null } : {}),
   });
@@ -462,7 +437,6 @@ session.on((event) => {
       // off the event loop (the bridge folds a renamed placeholder into it).
       setTimeout(() => register().catch(() => {}), 0);
     }
-    state.questions.observe(event, state.nativeSessionId);
     // Represent (Phase 5): enqueue whitelisted events for the flusher. This is
     // pure in-memory bookkeeping -- NO I/O, NO await, NO translation (the bridge
     // translates) -- so the hot-potato rule holds. The bounded queue drops the
@@ -545,7 +519,6 @@ try {
     state.inboxPoll = setInterval(() => {
       pollInbox().catch(() => {});
       pollControls().catch(() => {});
-      pollQuestionAnswers().catch(() => {});
     }, INBOX_POLL_MS);
     if (state.inboxPoll.unref) state.inboxPoll.unref();
   }
@@ -557,7 +530,6 @@ try {
 function shutdown() {
   try {
     retainedInbox?.close();
-    headedControl?.close();
     if (state.heartbeat) {
       clearInterval(state.heartbeat);
       state.heartbeat = null;

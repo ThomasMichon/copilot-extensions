@@ -40,25 +40,6 @@ def has_dev_extra(project: Path) -> bool:
     return "dev" in data.get("project", {}).get("optional-dependencies", {})
 
 
-def declared_test_requirements(plugin: Path, additional: tuple[str, ...]) -> tuple[str, ...]:
-    """Select test-only declarations, never application runtime/core dependencies."""
-    manifest = plugin / "pyproject.toml"
-    declared = []
-    if manifest.is_file():
-        data = tomllib.loads(manifest.read_text(encoding="utf-8"))
-        project = data.get("project", {})
-        if not isinstance(project, dict):
-            raise ValueError("Test tooling requires a project table")
-        extras = project.get("optional-dependencies", {})
-        groups = data.get("dependency-groups", {})
-        if not isinstance(extras, dict) or not isinstance(groups, dict):
-            raise ValueError("Test tooling requires optional-dependencies and dependency-groups tables")
-        declared = extras.get("dev", groups.get("dev", []))
-        if not isinstance(declared, list) or any(not isinstance(value, str) for value in declared):
-            raise ValueError("Test tooling requires a flat declared dev requirement list")
-    return tuple(dict.fromkeys(("pytest", *declared, *additional)))
-
-
 def _dependency_entries(name: str, plugin: Path, repo: Path) -> list[tuple[Path, tuple[str, ...]]]:
     entries: list[tuple[Path, tuple[str, ...]]] = []
     manifest = plugin / "pyproject.toml"

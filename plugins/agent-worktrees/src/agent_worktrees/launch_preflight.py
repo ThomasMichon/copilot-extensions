@@ -16,7 +16,6 @@ class LaunchPreflight:
 
     config_root: ConfigRoot | None = None
     policy_error: str | None = None
-    checked_profile: str | None = None
 
     @property
     def error(self) -> str | None:
@@ -45,19 +44,6 @@ def new_knowledge_error(config, *, source: str) -> str | None:
     if not readiness.ready:
         return "New authoring requires knowledge readiness before allocation. " + readiness.error
     return None
-
-
-def new_authoring_error(config, *, source: str) -> str | None:
-    return new_authoring_preflight(config, source=source).error
-
-
-def new_authoring_preflight(config, *, source: str) -> LaunchPreflight:
-    """Keep knowledge-first New admission and its checked staging input together."""
-    from .application_admission import new_application_preflight
-
-    if error := new_knowledge_error(config, source=source):
-        return LaunchPreflight(policy_error=error)
-    return new_application_preflight(config, source=source)
 
 
 def require_repository_hosting(path: str | Path) -> None:

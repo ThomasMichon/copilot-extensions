@@ -1,9 +1,0 @@
-{
-  "comment": "Recognize current Manager launchers during unregistered bootstrap",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

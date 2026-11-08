@@ -17,14 +17,6 @@ from installer_wheel_inputs import _check_deadline
 from runtime_profile import ProfileError, _requirement
 
 
-@pytest.fixture(autouse=True)
-def marker_environment(monkeypatch):
-    monkeypatch.setattr(
-        "packaging.markers.default_environment",
-        lambda: {"extra": "", "python_full_version": "3.12.0"},
-    )
-
-
 @pytest.fixture(scope="module")
 def registry_roots():
     source = ROOT / "tools" / "local_install_profile.py"

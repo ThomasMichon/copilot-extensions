@@ -1,9 +1,0 @@
-{
-  "comment": "Retain bounded generation-qualified lease return proof through reuse and compaction",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

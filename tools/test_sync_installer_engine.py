@@ -567,13 +567,12 @@ def test_whole_payload_human_contract(
             if (source / manifest).is_file():
                 shutil.copyfile(source / manifest, consumer / manifest)
                 data = json.loads((source / manifest).read_text(encoding="utf-8"))
-                for group in data.get("groups", [data]):
-                    for asset in group["files"]:
-                        origin = REPO / group["canonicalDir"] / asset
-                        assert origin.resolve().is_relative_to(REPO.resolve())
-                        target = source_root / group["canonicalDir"] / asset
-                        target.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copyfile(origin, target)
+                for asset in data["files"]:
+                    origin = REPO / data["canonicalDir"] / asset
+                    assert origin.resolve().is_relative_to(REPO.resolve())
+                    target = source_root / data["canonicalDir"] / asset
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(origin, target)
     original = materialize_main.materialize_launch_wrapper_assets
 
     def later_owner(dest, *, canonical_root):

@@ -59,18 +59,6 @@ worktrees programmatically, use `agent-worktrees create [--json]` (no launch) or
 > version is guided to install it — never a silent break, and never an
 > auto-executed remote script.
 
-### Installed launch-script resources
-
-When Worktrees needs Manager's launch-session script, it selects the configured
-current runtime, not another generation or a same-named executable on `PATH`.
-For a wheel application, its slot-local `.venv` runs a read-only probe through
-the existing retention bootstrap. That single probe executes Manager's actual
-`--version` command and asks Manager for its packaged launcher location. Only
-an existing, slot-relative resource is accepted. Missing bootstrap/interpreter
-or malformed, foreign or missing resources refuse discovery without installing,
-resolving a project or launching a client. Legacy retained-payload and source
-layouts keep their existing health-probe path.
-
 ### ① Freshness done for you at launch
 
 Before the Picker paints, the launcher brings the environment up to date so you

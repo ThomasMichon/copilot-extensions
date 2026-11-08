@@ -6,69 +6,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 export const isRemoteDriverSource = (source) =>
   typeof source === "string" && /^agent-remote-driver-[0-9a-f-]{36}$/.test(source);
 
-async function selectedLoadout(native, { pluginRoot, expectedSessionId, cwd, bridgePluginRoot }) {
-  if (bridgePluginRoot === undefined) return;
-  const canonical = (path) => realpathSync(resolve(path));
-  if (typeof bridgePluginRoot !== "string" || !isAbsolute(bridgePluginRoot)
-      || canonical(bridgePluginRoot) !== canonical(fileURLToPath(new URL("../..", import.meta.url)))
-      || typeof native.rpc?.plugins?.list !== "function") {
-    throw new Error("Portable receiving requires native observation of its selected extension roots");
-  }
-  const before = await native.rpc.metadata.snapshot();
-  const loadout = await native.rpc.plugins.list();
-  const after = await native.rpc.metadata.snapshot();
-  for (const snapshot of [before, after]) {
-    if (snapshot?.sessionId !== expectedSessionId
-        || typeof snapshot.workingDirectory !== "string"
-        || canonical(snapshot.workingDirectory) !== canonical(cwd)) {
-      throw new Error("Portable receiving native execution context changed");
-    }
-  }
-  if (!Array.isArray(loadout?.plugins)) throw new Error("Portable receiving plugin observation is unavailable");
-  for (const [name, root] of [["agent-bridge", bridgePluginRoot], ["agent-remote-driver", pluginRoot]]) {
-    const active = loadout.plugins.filter((plugin) => plugin?.name === name && plugin.enabled === true);
-    if (active.length !== 1 || active[0].installed === false
-        || typeof active[0].installedFrom !== "string"
-        || !isAbsolute(active[0].installedFrom)
-        || canonical(active[0].installedFrom) !== canonical(root)) {
-      throw new Error("Portable receiving extensions are missing, duplicated or from another root");
-    }
-  }
-}
-
-export async function createHeadedDriverSession(native, {
-  declaration, cwd, nativePid, pluginRoot, bridgePluginRoot, expectedSessionId,
-}) {
-  let binding;
-  try { binding = JSON.parse(declaration); }
-  catch { throw new Error("Invalid headed launch declaration; native SDK fallback is forbidden"); }
-  if (binding?.contract !== "copilot-driver.headed-client" || binding.version !== 1 ||
-      typeof binding.client !== "string" || !isAbsolute(binding.client)) {
-    throw new Error("Missing retained headed client; native SDK fallback is forbidden");
-  }
-  if (pluginRoot !== undefined && (
-    typeof pluginRoot !== "string" || !isAbsolute(pluginRoot) || expectedSessionId !== binding.sessionId
-  )) throw new Error("Retained receiving selection differs from the headed native launch");
-  const module = await import(pathToFileURL(binding.client).href);
-  const client = module.createHeadedSession(native, { binding, cwd, nativePid });
-  let held = null;
-  return {
-    ...client,
-    get sessionId() { return native.sessionId; },
-    async send(options) {
-      if (held) throw held;
-      try {
-        await selectedLoadout(native, { pluginRoot, bridgePluginRoot, expectedSessionId: binding.sessionId, cwd });
-      } catch (error) {
-        held = error;
-        client.close();
-        throw error;
-      }
-      return client.send(options);
-    },
-  };
-}
-
 export function createRemoteDriverSession(native, {
   pluginRoot, descriptorDirectory, expectedSessionId, cwd, ownerId, bridgePluginRoot,
 }) {
@@ -79,6 +16,36 @@ export function createRemoteDriverSession(native, {
   }
   let startup = null;
   let held = null;
+
+  async function selectedLoadout() {
+    if (bridgePluginRoot === undefined) return;
+    const canonical = (path) => realpathSync(resolve(path));
+    if (typeof bridgePluginRoot !== "string" || !isAbsolute(bridgePluginRoot)
+        || canonical(bridgePluginRoot) !== canonical(fileURLToPath(new URL("../..", import.meta.url)))
+        || typeof native.rpc?.plugins?.list !== "function") {
+      throw new Error("Portable receiving requires native observation of its selected extension roots");
+    }
+    const before = await native.rpc.metadata.snapshot();
+    const loadout = await native.rpc.plugins.list();
+    const after = await native.rpc.metadata.snapshot();
+    for (const snapshot of [before, after]) {
+      if (snapshot?.sessionId !== expectedSessionId
+          || typeof snapshot.workingDirectory !== "string"
+          || canonical(snapshot.workingDirectory) !== canonical(cwd)) {
+        throw new Error("Portable receiving native execution context changed");
+      }
+    }
+    if (!Array.isArray(loadout?.plugins)) throw new Error("Portable receiving plugin observation is unavailable");
+    for (const [name, root] of [["agent-bridge", bridgePluginRoot], ["agent-remote-driver", pluginRoot]]) {
+      const active = loadout.plugins.filter((plugin) => plugin?.name === name && plugin.enabled === true);
+      if (active.length !== 1 || active[0].installed === false
+          || typeof active[0].installedFrom !== "string"
+          || !isAbsolute(active[0].installedFrom)
+          || canonical(active[0].installedFrom) !== canonical(root)) {
+        throw new Error("Portable receiving extensions are missing, duplicated or from another root");
+      }
+    }
+  }
 
   async function connect() {
     if (native.sessionId !== expectedSessionId) throw new Error("Remote-driver native session changed");
@@ -103,7 +70,7 @@ export function createRemoteDriverSession(native, {
     if (native.sessionId !== expectedSessionId) throw new Error("Remote-driver native session changed");
     if (held) throw held;
     try {
-      await selectedLoadout(native, { pluginRoot, expectedSessionId, cwd, bridgePluginRoot });
+      await selectedLoadout();
     } catch (error) {
       held = error;
       throw error;

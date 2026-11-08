@@ -389,13 +389,7 @@ function Resolve-CopilotApplication {
 
 function Invoke-CopilotBackend {
     param([string]$Executable, [string[]]$LeadingArgs = @())
-    $backendRecord = $LaunchSeedRecord
-    if (
-        -not $backendRecord -and $nativeSetup -and
-        [IO.Path]::GetFileName($Executable) -in @('copilot', 'copilot.exe') -and
-        (Test-AwHeadedPreparation $LaunchSeedNativeRoot (Get-AwNativeSeedRuntime $LaunchSeedNativeRoot))
-    ) { $backendRecord = $nativeSetupRecord }
-    if (-not $backendRecord) {
+    if (-not $LaunchSeedRecord) {
         $consoleControl = $null
         try {
             if ($nativeSetup) { $consoleControl = Register-AwNativeSeedConsoleControl }
@@ -413,11 +407,9 @@ function Invoke-CopilotBackend {
             $LeadingArgs = @('-NoProfile', '-NoLogo', '-File', $Executable) + $LeadingArgs
             $Executable = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
         }
-        $code = Invoke-AwNativeSeedBackend -Root $LaunchSeedNativeRoot -Record $backendRecord `
+        $code = Invoke-AwNativeSeedBackend -Root $LaunchSeedNativeRoot -Record $LaunchSeedRecord `
             -SeedId $LaunchSeedId -Command (@($Executable) + $LeadingArgs + $CopilotArgs) `
-            -LaunchAttemptId $LaunchAttemptId -LaunchResolutionId $LaunchResolutionId -LaunchParentId $LaunchParentId `
-            -AdmissionOnly:($LaunchSeedPreparation -eq 'admission') `
-            -PreserveSeedId $LaunchSeedPreserveId -NativeResumeSession $LaunchNativeResumeSession
+            -LaunchAttemptId $LaunchAttemptId -LaunchResolutionId $LaunchResolutionId -LaunchParentId $LaunchParentId
         $global:LASTEXITCODE = $code
         return
     }

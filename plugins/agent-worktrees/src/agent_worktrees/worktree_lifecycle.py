@@ -10,7 +10,7 @@ from single_instance_lease import AlreadyRunningError, SingleInstance
 
 
 @contextmanager
-def guard(path: Path, *, timeout: float = 3.0, relocation: bool = False):
+def guard(path: Path, *, timeout: float = 3.0):
     from .launch_seed_state import state_path
 
     lease = SingleInstance(
@@ -28,13 +28,6 @@ def guard(path: Path, *, timeout: float = 3.0, relocation: bool = False):
                 raise TimeoutError("Worktree launch or retirement is in progress") from exc
             time.sleep(min(0.01, remaining))
     try:
-        if not relocation:
-            from .checkout_relocation_state import require_idle
-
-            try:
-                require_idle(path)
-            except (ValueError, OSError) as exc:
-                raise TimeoutError(f"Worktree relocation blocks lifecycle mutation: {exc}") from exc
         yield
     finally:
         lease.release()

@@ -548,11 +548,9 @@ def test_actual_local_resume_alias_grid_preserves_record(tmp_path, monkeypatch, 
 
 
 @pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell consumer unavailable")
-def test_cold_resume_plan_obeys_native_evidence_at_powershell_boundary(
+def test_cold_resume_plan_executes_with_exact_prompt_at_powershell_boundary(
     tmp_path: Path, monkeypatch,
 ):
-    import venv
-
     from agent_procutil.owned_process import run_caller_owned
     from agent_worktrees import output
 
@@ -566,11 +564,7 @@ def test_cold_resume_plan_obeys_native_evidence_at_powershell_boundary(
     )
     _stub_launch_plumbing(monkeypatch, config)
     consumer = tmp_path / "capture.ps1"
-    marker = tmp_path / "consumer-started"
-    consumer.write_text(
-        "[IO.File]::WriteAllText('" + str(marker).replace("'", "''") + "', 'started')\n"
-        "ConvertTo-Json -InputObject @($args) -Compress\n", encoding="utf-8",
-    )
+    consumer.write_text("ConvertTo-Json -InputObject @($args) -Compress\n", encoding="utf-8")
     monkeypatch.setattr(
         m, "_build_launch_cmd",
         lambda *_a, **_k: [
@@ -586,40 +580,16 @@ def test_cold_resume_plan_obeys_native_evidence_at_powershell_boundary(
     with output.capture_json_output() as captured:
         assert resolve_cli.cmd_resolve(_args(seed=seed, no_mux=True)) == 0
     plan = json.loads(captured.getvalue())["launch"]
-    assert plan["cmd"][:3] == [sys.executable, "-m", "agent_worktrees.launch_seed_exec"]
-    # Both the outer owner and setup's isolated Python child need this
-    # fixture's cold-probe I/O boundary, not an installed host mux/runtime.
-    runtime = tmp_path / "seed-runtime"
-    venv.EnvBuilder(with_pip=False).create(runtime)
-    if os.name == "nt":
-        python, site = runtime / "Scripts/python.exe", runtime / "Lib/site-packages"
-    else:
-        python = runtime / "bin/python"
-        site = runtime / f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
-    (site / "fixture.pth").write_text(
-        "\n".join(str(Path(path).resolve()) for path in sys.path if path) + "\n", encoding="utf-8")
-    (site / "sitecustomize.py").write_text(
-        "from agent_worktrees import sessions\n"
-        "sessions.verify_worktree_active = lambda *a: sessions.LiveVerdict()\n", encoding="utf-8")
     try:
         proc = run_caller_owned(
-            [str(python), *plan["cmd"][1:]],
-            timeout=20, max_stdout_bytes=1024 * 1024,
+            plan["cmd"], timeout=20, max_stdout_bytes=1024 * 1024,
             max_stderr_bytes=1024 * 1024,
             cwd=work_dir,
             env={**os.environ, "AGENT_WORKTREES_MACHINE_SETTINGS_RECONCILED": "1"},
         )
     except subprocess.TimeoutExpired as error:
         pytest.fail(f"Native seed handoff timed out: stdout={error.stdout!r}; stderr={error.stderr!r}")
-    if os.name == "nt":
-        assert proc.returncode == 3, proc.stderr
-        assert "Could not verify cold Copilot handoff" in proc.stderr
-        staged = launch_seed_state.peek(tmp_path / "wt-a.yaml")
-        assert staged.text == seed and staged.handoff_id is None
-        assert not marker.exists()
-        return
     assert proc.returncode == 0, proc.stderr
-    assert marker.read_text(encoding="utf-8") == "started"
     assert json.loads(proc.stdout.splitlines()[-1]) == ["--resume=history-s1", "--interactive", seed]
     assert tracking.load_record(tmp_path / "wt-a.yaml").pending_seed is None
     assert launch_seed_state.peek(tmp_path / "wt-a.yaml") is None

@@ -159,15 +159,9 @@ def source_identity() -> dict[str, object]:
     }
 
 
-def request_context(*, capture_engine: bool = True) -> dict[str, str]:
-    excluded = set() if capture_engine else {
-        "WORKTREE_MANAGER_ENGINE_ARGV", "WORKTREE_MANAGER_ENGINE_CMD",
-    }
-    context = {
-        key: os.environ[key] for key in _CONTEXT_KEYS
-        if key in os.environ and key not in excluded
-    }
-    if capture_engine and f"{__package__}.engine_client" in sys.modules:
+def request_context() -> dict[str, str]:
+    context = {key: os.environ[key] for key in _CONTEXT_KEYS if key in os.environ}
+    if f"{__package__}.engine_client" in sys.modules:
         from .engine_client import ENGINE_ARGV_ENV, inherited_engine_command
 
         accepted = inherited_engine_command()

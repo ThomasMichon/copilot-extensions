@@ -10,7 +10,6 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from agent_procutil.owned_process import run_caller_owned
@@ -51,65 +50,6 @@ def _inner_command(cmd: list[str]) -> list[str]:
 def test_plain_launch_appends_allow_all():
     cmd = m._build_launch_cmd(_config(), _args([]), "/w/wt")
     assert cmd[-2:] == ["--allow-all", "--experimental"]
-
-
-@pytest.mark.parametrize("packaged", [False, True], ids=["legacy", "application"])
-@pytest.mark.parametrize("platform_name", ["Windows", "Linux"])
-@pytest.mark.parametrize("hook", [False, True], ids=["default", "hook"])
-def test_launch_uses_its_own_setup_assets(tmp_path, monkeypatch, packaged, platform_name, hook):
-    from agent_worktrees import installer
-    from agent_worktrees.process_launcher import _normalized_setup_index
-
-    root = tmp_path / "installation"
-    package = root / "versions" / "current" / ".venv" / "agent_worktrees"
-    scripts = package / "_runtime_assets" / "scripts" if packaged else root / "scripts"
-    scripts.mkdir(parents=True)
-    monkeypatch.setattr(installer, "__file__", str(package / "installer.py"))
-    monkeypatch.setattr(installer, "install_dir", lambda: root)
-    monkeypatch.setattr(m.platform, "system", lambda: platform_name)
-    platform_key = "windows" if platform_name == "Windows" else "linux"
-    config = dataclasses.replace(_config(), platform=platform_key)
-    config.repos["ext"] = cfg.RepoConfig(
-        anchor=str(tmp_path), worktree_root=str(tmp_path),
-        setup_hook={platform_key: "hook"} if hook else {},
-    )
-    args = _args(["--model", "--resume=literal", "--", "tail"])
-    args.recovery = True
-    command = m._build_launch_cmd(config, args, str(tmp_path))
-    inner = _inner_command(command)
-    suffix = ".ps1" if platform_name == "Windows" else ".sh"
-    assert str(scripts / ("launch-command" + suffix)) in command[:command.index("--")]
-    setup = _normalized_setup_index(inner)
-    assert setup is not None
-    assert Path(inner[setup]) == scripts / ("default-setup" + suffix)
-    if platform_name == "Windows":
-        native = json.loads(inner[inner.index("-NativeArgumentsJson") + 1])["args"]
-        assert inner[inner.index("-ExecutionDirectory") + 1] == str(tmp_path)
-    else:
-        native = inner
-        assert inner[inner.index("--execution-directory") + 1] == str(tmp_path)
-    assert native[-2:] == ["--", "tail"]
-    assert native[native.index("--model") + 1] == "--resume=literal"
-
-
-def test_damaged_application_does_not_select_legacy_launch_assets(tmp_path, monkeypatch):
-    from agent_worktrees import installer
-
-    slot = tmp_path / "versions" / "selected"
-    slot.mkdir(parents=True)
-    (slot / "application.json").write_text("{}", encoding="utf-8")
-    package = slot / ".venv" / "agent_worktrees"
-    monkeypatch.setattr(installer, "__file__", str(package / "installer.py"))
-    monkeypatch.setattr(installer, "sys", SimpleNamespace(**{**vars(sys), "prefix": str(slot / ".venv")}))
-    monkeypatch.setattr(installer, "install_dir", lambda: tmp_path)
-    config = _config()
-    config.repos["ext"] = cfg.RepoConfig(anchor=str(tmp_path), worktree_root=str(tmp_path))
-    command = m._build_launch_cmd(config, _args([]), str(tmp_path))
-    assert str(package / "_runtime_assets" / "scripts" / (
-        "launch-command.ps1" if m.platform.system() == "Windows" else "launch-command.sh"
-    )) in command
-    assert str(tmp_path / "scripts" / "launch-command.sh") not in command
-    assert str(tmp_path / "scripts" / "launch-command.ps1") not in command
 
 
 @pytest.mark.guard

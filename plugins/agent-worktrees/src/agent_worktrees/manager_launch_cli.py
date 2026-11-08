@@ -304,17 +304,10 @@ def _usable_worktree_manager_launcher_dir() -> Path | None:
     )
     if slot is None:
         return None
-    application = (slot / "application.json").is_file()
     bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
-    if application and not bootstrap.is_file():
-        output.warn(f"Ignoring an incomplete Worktree Manager application at {slot}")
-        return None
     if bootstrap.is_file():
-        environments = (slot / ".venv",) if application else (slot, slot / ".venv")
         python = next(
-            (path for environment in environments for path in (
-                environment / "bin" / "python", environment / "Scripts" / "python.exe",
-            ) if path.is_file()),
+            (path for path in (slot / "bin" / "python", slot / "Scripts" / "python.exe") if path.is_file()),
             None,
         )
         if python is None:
@@ -322,9 +315,7 @@ def _usable_worktree_manager_launcher_dir() -> Path | None:
             return None
         command = [
             str(python), "-I", "-S", "-B", "-X", "utf8", str(bootstrap),
-            *([str(Path(__file__).with_name("manager_application_probe.py"))] if application else [
-                "-m", "worktree_manager", "--version",
-            ]),
+            "-m", "worktree_manager", "--version",
         ]
         launcher_dir = slot / "payload" / "bin"
     else:
@@ -352,20 +343,6 @@ def _usable_worktree_manager_launcher_dir() -> Path | None:
             f"{slot}: its --version output did not include a supported version."
         )
         return None
-    if application:
-        try:
-            declaration = json.loads(proc.stdout.splitlines()[-1])
-            relative = Path(declaration["launcher_directory"])
-            if relative.anchor or not relative.parts or ".." in relative.parts:
-                raise ValueError("Manager launcher path is not a slot-relative resource")
-            launcher_dir = (slot / relative).resolve()
-            launcher_dir.relative_to(slot)
-            script = launcher_dir / ("launch-session.ps1" if os.name == "nt" else "launch-session.sh")
-            if not script.is_file():
-                raise ValueError("Manager application launcher is missing")
-        except (ValueError, KeyError, TypeError, IndexError, OSError):
-            output.warn(f"Ignoring an invalid Worktree Manager application launcher at {slot}")
-            return None
     return launcher_dir
 
 

@@ -122,10 +122,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         conn.execute(statement)
 
 
-def validate_schema(conn: sqlite3.Connection, *, require_worktree_writer: bool = True) -> None:
-    """Refuse custody whose shape differs from the current one. The Worktrees writer
-    trigger arrived with schema version 42; an older database is validated without it
-    so its migration can add it."""
+def validate_schema(conn: sqlite3.Connection) -> None:
     columns = {row[1]: row for row in conn.execute("PRAGMA table_info(acquisition_attempts)")}
     for name, kind in COLUMNS.items():
         row = columns.get(name)
@@ -142,8 +139,6 @@ def validate_schema(conn: sqlite3.Connection, *, require_worktree_writer: bool =
         ):
             raise RuntimeCustodyError(f"Acquisition custody requires writable preparation: {name}")
     for name, (table, statement) in schema_triggers().items():
-        if name == "acquisition_worktree_writer_retained" and not require_worktree_writer:
-            continue
         row = conn.execute(
             "SELECT type,tbl_name,sql FROM sqlite_master WHERE name=?", (name,),
         ).fetchone()

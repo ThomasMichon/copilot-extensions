@@ -14,10 +14,7 @@ from work_coalescing_singleton import client as wcs_client
 from .mux_mapping_registry import _try_lock_file_once, _unlock_file
 from .self_install import default_root
 
-_DAEMON_EXCLUDED_ENV_KEYS = {
-    "GH_TOKEN", "GITHUB_TOKEN", "AGENT_WORKTREES_AHP_AUTH_TOKEN",
-    "UPDATE_DRIVER_WITNESS", "AGENT_WORKTREES_INTERNAL_PROJECT_CONTROLLER",
-}
+_SESSION_CREDENTIAL_ENV_KEYS = {"GH_TOKEN", "GITHUB_TOKEN", "AGENT_WORKTREES_AHP_AUTH_TOKEN"}
 
 
 def selected_root(root: Path | None = None) -> Path:
@@ -68,7 +65,7 @@ def scrub_session_credentials(env: dict[str, str]) -> dict[str, str]:
     return {
         key: value
         for key, value in env.items()
-        if key.upper() not in _DAEMON_EXCLUDED_ENV_KEYS
+        if key.upper() not in _SESSION_CREDENTIAL_ENV_KEYS
     }
 
 

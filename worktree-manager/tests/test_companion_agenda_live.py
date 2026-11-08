@@ -93,10 +93,6 @@ def widget(app):
     return content.plain if isinstance(content, Text) else content.label.plain
 
 
-def agenda_tab_hidden(app) -> bool:
-    return app.query_one("#views", TabbedContent).get_tab("agenda-tab").has_class("-hidden")
-
-
 async def until(pilot, predicate, *, attempts=80):
     for _ in range(attempts):
         if predicate():
@@ -123,49 +119,6 @@ def test_agenda_field_contract_displays_markdown_and_rich_markup_literally(synth
                 assert literal in content.plain
                 assert json.dumps(["**literal criterion**"]) in content.plain
 
-    asyncio.run(check())
-
-
-def test_agenda_tab_is_offered_only_for_heads_that_published(synthetic_peer, tmp_path):
-    transient = {
-        "type": "error", "ok": False, "contract_version": 1,
-        "error": {"code": "unavailable", "message": "synthetic route retry"},
-    }
-    unpublished = {"availability": "not-published", "observation": None}
-
-    async def check():
-        app = companion.MuxCompanionApp(cwd=str(tmp_path))
-        async with app.run_test() as pilot:
-            assert agenda_tab_hidden(app)
-            first = await asyncio.to_thread(accept, synthetic_peer)
-            with first:
-                send(first, {**publication(), **unpublished})
-                await until(pilot, lambda: "Not published" in widget(app))
-                assert agenda_tab_hidden(app)
-                send(first, publication(1, kind="update", revision=1))
-                await until(pilot, lambda: "Action 1" in widget(app))
-                assert not agenda_tab_hidden(app)
-                views = app.query_one("#views", TabbedContent)
-                views.active = "agenda-tab"
-                await pilot.pause()
-                # A transient failure keeps the settled tab instead of flickering it away.
-                send(first, transient)
-                await until(pilot, lambda: "reconnecting in 1s" in widget(app))
-                assert not agenda_tab_hidden(app) and views.active == "agenda-tab"
-                assert await asyncio.to_thread(first.recv, 1) == b""
-            second = await asyncio.to_thread(accept, synthetic_peer)
-            with second:
-                send(second, {**publication(2), **unpublished})
-                await until(pilot, lambda: "Not published" in widget(app))
-                await pilot.pause()
-                assert agenda_tab_hidden(app) and views.active != "agenda-tab"
-                # A head change after not-published must not reveal an empty tab.
-                send(second, {
-                    **publication(3, kind="update"), "availability": "head-changed", "observation": None,
-                })
-                await until(pilot, lambda: "Refresh required" in widget(app))
-                assert agenda_tab_hidden(app)
-                assert await asyncio.to_thread(second.recv, 1) == b""
     asyncio.run(check())
 
 

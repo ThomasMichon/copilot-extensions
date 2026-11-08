@@ -11,14 +11,13 @@ from .runtime_identity import running_slot
 
 def main(argv: list[str] | None = None) -> int:
     from . import mux_daemon, mux_daemon_cutover
-    from ._installation_context import paths_equal
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--start-if-missing", action="store_true")
     args = parser.parse_args(argv)
     root, slot = args.root.resolve(), running_slot()
-    if slot is None or not paths_equal(slot.parent, root / "versions") or not (slot / ".runtime-bootstrap").is_dir():
+    if slot is None or slot.parent != root / "versions" or not (slot / ".runtime-bootstrap").is_dir():
         raise RuntimeError("Bootstrap activation must execute from its constructed Manager slot")
     for attempt in range(2):
         result = mux_daemon_cutover.activate_after_update(root=root, slot=slot, version=slot.name)

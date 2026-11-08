@@ -30,17 +30,13 @@ def _extract_loop() -> str:
     text = INSTALLER.read_text(encoding="utf-8")
     start = "for _lib_entry in \\\n    'dropin-registry:agent-dropin-registry'"
     end = "\ndone\n"
-    return "workspace_refresh=()\n" + start + text.split(start, 1)[1].split(end, 1)[0] + "\ndone"
+    return start + text.split(start, 1)[1].split(end, 1)[0] + "\ndone"
 
 
 def _run(
     bash: str, plugin_dir: Path, have_uv: bool, *, source_qualified: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     loop = _extract_loop()
-    text = INSTALLER.read_text(encoding="utf-8")
-    install = text.split("# -- 3. Install the package", 1)[1].split("\n", 1)[1].split(
-        "_ok 'Package installed: agent-machines'", 1
-    )[0]
     scripts = plugin_dir / "scripts"
     scripts.mkdir(parents=True)
     policy = scripts / "installer_dependency_policy.py"
@@ -67,11 +63,10 @@ venv_python_stub() {{
        "$7" == --python && "$8" == "$VENV_PYTHON" ]] ||
         _fail 'Preinstall bypassed canonical dependency policy'
     if [[ "$HAVE_UV" == 1 ]]; then
-        [[ "$#" == 26 && "$9" == --reinstall-package &&
-           "${{25}}" == "$PLUGIN_DIR" && "${{26}}" == --quiet ]] ||
-            _fail 'Root transaction lost workspace refresh inputs'
-        printf 'ROOT_INSTALL:%s\\n' "${{25}}"
-        return
+        [[ "$#" == 12 && "$9" == --reinstall-package &&
+           "${{10}}" == "$_lib_pkg_name" && "${{12}}" == --quiet ]] ||
+            _fail 'Invalid policy reinstall arguments'
+        _installed_path="${{11}}"
     else
         [[ "$#" == 10 && "$9" == --quiet ]] || _fail 'Invalid policy arguments'
         _installed_path="${{10}}"
@@ -81,9 +76,7 @@ venv_python_stub() {{
 PLUGIN_DIR={shlex.quote(str(plugin_dir))}
 SOURCE_RUNTIME_IDENTITY={'source-fixture' if source_qualified else "''"}
 HAVE_UV={1 if have_uv else 0}
-CELL_MODE=1
 {loop}
-{install if have_uv else ""}
 """
     return subprocess.run(
         [bash, "-c", script],
@@ -102,12 +95,12 @@ def _make_libs(root: Path) -> None:
         (lib_dir / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
 
 
-def test_preinstall_loop_preserves_canonical_policy_for_pip_fallback():
+def test_preinstall_loop_requires_canonical_policy_in_both_branches():
     loop = _extract_loop()
     assert loop.count(
         '"$VENV_PYTHON" -I -B "$SCRIPT_DIR/installer_dependency_policy.py" '
         '--uv uv -- --python "$VENV_PYTHON"'
-    ) == 1
+    ) == 2
     assert "pip install" not in loop
 
 
@@ -131,10 +124,6 @@ def test_preinstall_loop_resolves_plugin_local_copy_and_orders_correctly(
         for line in proc.stdout.splitlines()
         if line.startswith(marker)
     ]
-    if have_uv:
-        assert not installs
-        assert proc.stdout.count("ROOT_INSTALL:") == 1
-        return
     assert len(installs) == 8
     order = [Path(p).name for p in installs]
     assert order == LIB_ORDER
@@ -166,10 +155,6 @@ def test_preinstall_loop_falls_back_to_repo_root_canonical_when_absent(
         for line in proc.stdout.splitlines()
         if line.startswith(marker)
     ]
-    if have_uv:
-        assert not installs
-        assert proc.stdout.count("ROOT_INSTALL:") == 1
-        return
     assert len(installs) == 8
     assert [Path(p).name for p in installs] == LIB_ORDER
     for resolved in installs:

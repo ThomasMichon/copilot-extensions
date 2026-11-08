@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import math
-import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -11,27 +9,6 @@ if TYPE_CHECKING:
     from .cutover import CutoverOrchestrator
     from .cutover_result import CutoverResult
     from .routing import Endpoint
-
-
-def validate_routing_lock_timeout(value: float | None) -> float | None:
-    if value is not None:
-        try:
-            valid = type(value) in (int, float) and math.isfinite(value) and value >= 0
-        except OverflowError:
-            valid = False
-        if not valid:
-            raise ValueError("routing lock timeout must be finite and nonnegative")
-    return value
-
-
-def routing_deadline(conditional: PreparedCutover | None, timeout: float | None) -> float | None:
-    if conditional is not None:
-        return conditional.routing_deadline()
-    return time.monotonic() + timeout if timeout is not None else None
-
-
-def routing_lock_kwargs(timeout: float | None) -> dict:
-    return {"lock_deadline": time.monotonic() + timeout} if timeout is not None else {}
 
 
 def candidate_port(

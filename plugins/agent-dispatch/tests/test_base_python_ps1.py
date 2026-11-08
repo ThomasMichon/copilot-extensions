@@ -85,37 +85,6 @@ if ($stored.python -ceq $other) { throw 'unpublished override changed stored cho
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_signed_runtime_floor_remains_independent_of_helper_floor(tmp_path: Path, shell: str) -> None:
-    result = native(tmp_path, shell, """
-function Invoke-Hidden {
-    param($FilePath,$ArgList,[ref]$ErrorOutput)
-    $global:LASTEXITCODE=0
-    return (@{implementation='cpython';version=@(3,10,0);machine='AMD64';bits=64;
-        executable=$base;base_executable=$base} | ConvertTo-Json -Compress)
-}
-$env:AGENT_DISPATCH_BASE_PYTHON = $base
-if ((Resolve-DispatchBasePython) -cne $base) { throw 'signed 3.10 runtime base was rejected' }
-Assert-DispatchCandidateBase -Python $base -BasePython $base
-""")
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-def test_bootstrap_discovery_does_not_hide_invalid_runtime_choice(tmp_path: Path, shell: str) -> None:
-    source = (SCRIPTS / "install.ps1").read_text(encoding="utf-8")
-    bootstrap = re.search(r"(?ms)^function Get-BootstrapPython \{.*?^\}", source)
-    assert bootstrap is not None
-    result = native(tmp_path, shell, bootstrap.group() + """
-$script:DispatchBootstrapPython = $null
-$env:AGENT_DISPATCH_BASE_PYTHON = 'relative-python.exe'
-function Get-Command { throw 'invalid explicit choice fell through to discovery' }
-try { Get-BootstrapPython -ExternalOnly; throw 'invalid explicit choice was ignored' }
-catch {
-    if ($_.Exception.Message -notlike '*absolute executable path*') { throw }
-}
-""")
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
 @pytest.mark.parametrize("invalid", [
     "missing", "relative", "unsigned", "publisher", "version", "implementation", "architecture", "probe", "array",
 ])
@@ -240,8 +209,6 @@ def test_runtime_publication_gates_preference(
     installer = (SCRIPTS / "install.ps1").read_text(encoding="utf-8")
     runtime = re.search(r"(?ms)^function Install-Runtime \{.*?^\}", installer)
     assert runtime
-    action_guard = re.search(r"(?ms)^function Assert-DispatchActions \{.*?^\}", installer)
-    assert action_guard
     fixture_python = tmp_path / "fixture-python.ps1"
     fixture_python.write_text(
         "if ($args -contains '-c') {\n"
@@ -249,7 +216,7 @@ def test_runtime_publication_gates_preference(
         + "}\nexit 0\n",
         encoding="utf-8",
     )
-    body = action_guard.group(0) + "\n" + runtime.group(0) + f"""
+    body = runtime.group(0) + f"""
 $env:AGENT_DISPATCH_BASE_PYTHON = $base
 $SrcVersion = '1.2.3'
 $VersionedRuntime = $true

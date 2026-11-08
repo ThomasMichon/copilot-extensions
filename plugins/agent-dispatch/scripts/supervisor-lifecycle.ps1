@@ -183,12 +183,7 @@ function Invoke-SupervisorTaskAction {
         switch ($Operation) {
             'stop' { Stop-ScheduledTask -TaskName $Name -ErrorAction Stop }
             'start' { Start-ScheduledTask -TaskName $Name -ErrorAction Stop }
-            'enable' {
-                $task = Get-ScheduledTask -TaskName $Name -ErrorAction Stop
-                if (-not $task -or $task.Settings.Enabled -ne $true) {
-                    Enable-ScheduledTask -TaskName $Name -ErrorAction Stop | Out-Null
-                }
-            }
+            'enable' { Enable-ScheduledTask -TaskName $Name -ErrorAction Stop | Out-Null }
             'disable' { Disable-ScheduledTask -TaskName $Name -ErrorAction Stop | Out-Null }
         }
 

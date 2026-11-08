@@ -7,7 +7,6 @@ import subprocess
 from typing import Any
 
 from agent_procutil import no_window_kwargs
-from agent_procutil.owned_process import OwnedExecutionBudget, run_caller_owned
 
 
 def strict_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -54,13 +53,9 @@ def run_context_resolution(
 
 def run_installation_probe(
     command: list[str], environment: dict[str, str], plugin: str, *, action: str,
-    budget: OwnedExecutionBudget | None = None,
 ) -> dict[str, Any]:
     try:
-        process = run_caller_owned(
-            command, env=environment, timeout=15, budget=budget,
-            max_stdout_bytes=1024 * 1024, max_stderr_bytes=65536,
-        ) if budget is not None else subprocess.run(
+        process = subprocess.run(
             command, capture_output=True, text=True, encoding="utf-8",
             check=False, env=environment, timeout=15, **no_window_kwargs(),
         )

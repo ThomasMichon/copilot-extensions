@@ -48,8 +48,6 @@ class CandidateServing:
             runtime.live_events if runtime.live_events is not None
             else self._target.state.live_event_store
         )
-        app.state.live_questions = self._target.state.live_questions
-        app.state.mux_questions = self._target.state.mux_questions
         self._target.state = app.state
         self._target.middleware_stack = self._target.build_middleware_stack()
         self._stack = self._target.middleware_stack

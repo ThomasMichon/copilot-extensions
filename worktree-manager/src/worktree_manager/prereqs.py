@@ -14,8 +14,7 @@ import re
 import shutil
 import subprocess
 from contextlib import nullcontext
-from collections.abc import Iterator
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -89,27 +88,6 @@ def _which(name: str) -> tuple[str, str | None]:
     return name, None
 
 
-def _python_candidates(first: str | None) -> Iterator[str]:
-    if first:
-        yield first
-    for exe in _EXE_ALIASES["python3"]:
-        suffixes = ("",)
-        if os.name == "nt":
-            # Python 3.11 does not apply PATHEXT to directory-qualified commands.
-            extensions = tuple(
-                ext for ext in (os.environ.get("PATHEXT") or ".COM;.EXE;.BAT;.CMD").split(os.pathsep)
-                if ext
-            )
-            if extensions and not any(exe.lower().endswith(ext.lower()) for ext in extensions):
-                suffixes = extensions
-        for directory in os.get_exec_path():
-            for suffix in suffixes:
-                candidate = os.path.abspath(os.path.join(directory or os.curdir, exe + suffix))
-                found = shutil.which(candidate, path=directory or os.curdir)
-                if found:
-                    yield found
-
-
 def _probe_version(exe: str) -> str | None:
     powershell = Path(exe).stem.lower() == "pwsh"
     context = TemporaryDirectory(prefix="manager-pwsh-probe-") if powershell else nullcontext(None)
@@ -149,37 +127,16 @@ def _probe_version(exe: str) -> str | None:
 
 def detect_prereq(pr: Prereq) -> PrereqStatus:
     _, path = _which(pr.name)
-    absent = PrereqStatus(
+    version = _probe_version(path) if path else None
+    return PrereqStatus(
         name=pr.name,
-        present=False,
+        present=path is not None,
+        path=path,
+        version=version,
         min_required=pr.min,
         optional=pr.optional,
         notes=pr.notes,
     )
-    paths = _python_candidates(path) if pr.name == "python3" else (path,)
-    first = None
-    seen = set()
-    for candidate in paths:
-        if not candidate:
-            continue
-        key = os.path.normcase(os.path.abspath(candidate))
-        if key in seen:
-            continue
-        seen.add(key)
-        store_alias = (
-            pr.name == "python3"
-            and current_os() == "windows"
-            and Path(candidate).parent.name.lower() == "windowsapps"
-        )
-        status = replace(
-            absent, present=not store_alias, path=candidate,
-            version=None if store_alias else _probe_version(candidate),
-        )
-        if first is None:
-            first = status
-        if not store_alias and status.satisfied:
-            return status
-    return first or absent
 
 
 def detect_baseline(catalog=None) -> list[PrereqStatus]:

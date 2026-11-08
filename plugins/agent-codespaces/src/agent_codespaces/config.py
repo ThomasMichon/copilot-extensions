@@ -483,9 +483,6 @@ def _validate_dropin_config(raw: object) -> str | None:
     for name in ("defaults", "credentials", "connection_owner", "repos", "provision"):
         if name in raw and not isinstance(raw[name], dict):
             return f"{name} must be a mapping"
-    owned_limit = raw.get("defaults", {}).get("max_owned_codespaces", 30)
-    if type(owned_limit) is not int or owned_limit < 1:
-        return "defaults.max_owned_codespaces must be a positive integer"
     if "codespace_plugins" in raw and not isinstance(raw["codespace_plugins"], list):
         return "codespace_plugins must be a list"
     for index, plugin in enumerate(raw.get("codespace_plugins", [])):
@@ -1643,7 +1640,6 @@ class CodespacesConfig:
     # Defaults for CodeSpace creation
     default_machine_type: str = "largePremiumLinux"
     default_location: str = "EastUs"
-    max_owned_codespaces: int = 30
     dotfiles_repo: str | None = None
     ssh_user: str = "vscode"
 
@@ -2440,10 +2436,6 @@ def load_merged_config(
             merged.default_location = defaults.get(
                 "location", merged.default_location
             )
-            owned_limit = defaults.get("max_owned_codespaces", merged.max_owned_codespaces)
-            if type(owned_limit) is not int or owned_limit < 1:
-                raise ValueError("defaults.max_owned_codespaces must be a positive integer")
-            merged.max_owned_codespaces = owned_limit
             merged.default_devcontainer_path = defaults.get(
                 "devcontainer_path", merged.default_devcontainer_path
             )

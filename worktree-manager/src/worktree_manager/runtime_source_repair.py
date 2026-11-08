@@ -20,24 +20,6 @@ def prepare_engine(resolved: ResolvedSource) -> tuple[Path, str]:
         default_root().absolute() / "runtime-sources/prepared",
     )
     payload = Path(record["payload"])
-    qualify_engine(payload)
-    return payload, json.dumps(record["identity"], sort_keys=True)
-
-
-def engine_installer(payload: Path, platform: str, *, prepared: bool = False) -> tuple[Path, str | None]:
-    """Select the declared prepared entry or preserve the native legacy entry."""
-    if prepared:
-        from agent_worktrees.update_runtime_source import source_install_entry
-
-        entry = source_install_entry(payload, platform)
-        if entry is None:
-            raise ValueError("Prepared engine has no native installation-source capability")
-        return payload / entry["script"], entry["argument"]
-    return payload / "scripts" / ("install.ps1" if platform == "windows" else "install.sh"), None
-
-
-def qualify_engine(payload: Path, *, prepared: bool = False) -> None:
-    """Negotiate native isolated repair before any other runtime is published."""
     declaration = ast.parse(
         (payload / "scripts/versioned_runtime_source.py").read_text(encoding="utf-8"),
     )
@@ -49,70 +31,10 @@ def qualify_engine(payload: Path, *, prepared: bool = False) -> None:
         for node in declaration.body
     ):
         raise ValueError("Prepared engine installer does not support transaction source pinning")
-    installer, _argument = engine_installer(
-        payload, "windows" if os.name == "nt" else "posix", prepared=prepared,
-    )
+    installer = payload / "scripts" / ("install.ps1" if os.name == "nt" else "install.sh")
     if "AGENT_WORKTREES_TARGETED_UPDATE" not in installer.read_text(encoding="utf-8"):
         raise ValueError("Prepared engine installer does not support runtime-only repair")
-
-
-def fresh_engine_plan(source: Path, prepared):
-    """Use native installation, not incumbent repair, for unattributable footprints."""
-    from dataclasses import replace
-    from agent_worktrees import config, reconcile, update_runtime_plan
-    from agent_worktrees.installation_updates import isolated_engine_step
-    from . import core_install, update_bootstrap
-
-    environment = dict(os.environ)
-    _script, _sdk, helper, _api, primitive = update_bootstrap._policy_sdk(source)
-    _current, profile = primitive._current_environment(
-        environment=environment, os_profile=None, platform=None, wsl_distro=None,
-    )
-    root = core_install.runtime_dir(Path(profile))
-    helper["_ordinary"](root)
-    helper["_ordinary"](root / "deploy-manifest.json")
-    malformed = getattr(primitive, "MalformedDeploymentManifest", json.JSONDecodeError)
-    try:
-        captured = update_bootstrap._legacy_owner_selection(helper, primitive, root)
-        if captured.binding is not None:
-            update_bootstrap._identity(update_bootstrap._Installation(
-                root, captured.payload, captured.binding, _sdk,
-            ))
-    except PermissionError:
-        raise
-    except (FileNotFoundError, malformed, RuntimeError, KeyError):
-        pass
-    else:
-        return None
-    owner = reconcile.core_installed_payload_dir("agent-worktrees")
-    if owner is None:
-        raise ValueError(
-            "Unattributable engine footprint has no registered source; "
-            "its native setup owner must establish that source before recovery"
-        )
-    action = "repair" if root.exists() else "install"
-    if action == "repair":
-        entry, _argument = engine_installer(
-            prepared.payload, "windows" if os.name == "nt" else "posix",
-            prepared=prepared.install_source is not None,
-        )
-        if "repair" not in entry.read_text(encoding="utf-8"):
-            raise ValueError("Selected native engine lacks independent repair support")
-    step = update_runtime_plan.plan_engine(
-        owner, config.detect_platform(), force=True, source=prepared, action=action,
-    )
-    if step.blocked:
-        raise ValueError(f"Native engine installation preflight failed: {step.status}")
-    if step.runtime_root != root:
-        raise ValueError("Native engine installation scope differs from the inspected legacy root")
-    step = isolated_engine_step(step)
-    child = dict(step.environment)
-    defer = os.environ.get("AGENT_WORKTREES_DEFER_LOCAL_INTEGRATION")
-    if defer is None:
-        child.pop("AGENT_WORKTREES_DEFER_LOCAL_INTEGRATION", None)
-    else:
-        child["AGENT_WORKTREES_DEFER_LOCAL_INTEGRATION"] = defer
-    return replace(step, environment=child)
+    return payload, json.dumps(record["identity"], sort_keys=True)
 
 
 def verify_engine(root: Path, pin: str | None) -> None:

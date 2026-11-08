@@ -14,13 +14,6 @@ fields. Neither migration nor ordinary startup enrolls an acquisition producer.
 Already-current damaged layouts refuse; passive opening and existing-only
 writable adoption validate without migration, bootstrap or writer startup.
 
-Schema 42 adds the retained Worktrees writer trigger
-(`acquisition_worktree_writer_retained`) to databases prepared before it. A
-database stamped below 42 is validated against the shape it had, without that
-trigger, and then migrated; one already stamped 42 that lacks the trigger is
-damaged and refuses like any other current layout. Existing sessions, events
-and acquisition history are kept.
-
 `AcquisitionJournal.claim(request, runtime_admission=...)` can retain the
 installation/epoch/producer association with the original request and claim in
 one `synchronous=FULL` transaction. The same insertion guard orders closure and

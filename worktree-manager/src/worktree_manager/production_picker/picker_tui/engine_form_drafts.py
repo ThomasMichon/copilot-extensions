@@ -4,7 +4,7 @@ from worktree_manager.form_drafts import draft_ack, read_path, update_draft_cont
 
 from .steering import SubmitErrorScreen
 from .engine_form_requests import PivotFormRequestActionsMixin
-from .registered_scopes import action_scopes, read_scope
+from .registered_scopes import read_scope
 
 
 class PivotFormDraftActionsMixin(PivotFormRequestActionsMixin):
@@ -19,7 +19,7 @@ class PivotFormDraftActionsMixin(PivotFormRequestActionsMixin):
 
         def work():
             try:
-                ok, message = rt.run_json_resolved(argv, scopes=action_scopes(ctx))
+                ok, message = rt.run_json_resolved(argv)
                 if not ok:
                     return False, message, None
                 result = draft_ack(spec, ctx, message, clear=clear, expected_values=values)

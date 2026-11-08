@@ -337,9 +337,10 @@ def test_claim_self_conflict_same_owner_adopts(leases, monkeypatch):
 
 def test_claim_self_conflict_via_holder_ref_adopts(leases, monkeypatch):
     from agent_codespaces import coordination
-    # A different session of the same fully qualified worktree is re-entrant.
+    # No local L1 record, but the L2 acquire says WE hold it (same worktree id,
+    # different session/machine-prefix in the ref) -> recognized as self, adopt.
     monkeypatch.setattr(coordination, "acquire",
-                        _l2_conflict("m/p/wt-a#sess"))
+                        _l2_conflict("othermachine/p/wt-a#sess"))
     cl = lease_mod.claim("cs-x", "/path/wt-a", active={"/path/wt-a"},
                          holder_ref="m/p/wt-a")
     assert cl.worktree == "/path/wt-a"
@@ -376,7 +377,6 @@ def test_claim_releases_new_l2_token_when_hold_appears_before_local_write(leases
     from agent_codespaces import coordination
 
     responses = iter([
-        {},
         {
             "cs-one": lease_mod.DeployHold(
                 codespace="cs-one",
@@ -413,11 +413,13 @@ def test_claim_releases_new_l2_token_when_hold_appears_before_local_write(leases
         ),
     )
     released = {}
-    def release(codespace, token):
-        released.update({"codespace": codespace, "token": token})
-        return coordination.L2Result("ok")
-
-    monkeypatch.setattr(coordination, "release", release)
+    monkeypatch.setattr(
+        coordination,
+        "release",
+        lambda codespace, token: released.update(
+            {"codespace": codespace, "token": token}
+        ),
+    )
 
     with pytest.raises(
         lease_mod.ProviderAdmissionError,
@@ -433,23 +435,8 @@ def test_claim_releases_new_l2_token_when_hold_appears_before_local_write(leases
     assert released == {"codespace": "cs-one", "token": "new-token"}
 
 
-@pytest.mark.parametrize("foreign", ["other/p/wt-a", "m/other/wt-a"])
-@pytest.mark.parametrize("local", [False, True])
-def test_claim_foreign_scope_never_adopts_same_leaf(leases, monkeypatch, foreign, local):
-    from agent_codespaces import coordination
-
-    if local:
-        lease_mod.claim("cs-one", "/wt/a", active={"/wt/a"})
-    monkeypatch.setattr(coordination, "acquire", _l2_conflict(foreign))
-    with pytest.raises(lease_mod.ClaimConflict):
-        lease_mod.claim("cs-one", "/wt/a", active={"/wt/a"}, holder_ref="m/p/wt-a")
-
-
-def test_same_holder_ref_matches_complete_scope():
-    assert lease_mod._same_holder_ref("m/p/wt-a", "m/p/wt-a#sess") is True
-    assert lease_mod._same_holder_ref("m/p/wt-a", "other/p/wt-a#sess") is False
-    assert lease_mod._same_holder_ref("m/p/wt-a", "m/other/wt-a#sess") is False
-    assert lease_mod._same_holder_ref("wt-a", "wt-a") is False
+def test_same_holder_ref_matches_worktree_id():
+    assert lease_mod._same_holder_ref("m/p/wt-a", "other/p/wt-a#sess") is True
     assert lease_mod._same_holder_ref("m/p/wt-a", "m/p/wt-b") is False
     assert lease_mod._same_holder_ref(None, "m/p/wt-a") is False
     assert lease_mod._same_holder_ref("m/p/wt-a", "") is False

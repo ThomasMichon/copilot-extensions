@@ -1729,35 +1729,6 @@ def test_sweep_transient_mux_failure_holds(tmp_path, monkeypatch):
     assert (reg / "wt-a").exists()  # registry untouched
 
 
-@pytest.mark.parametrize("stdout,stderr", [
-    ("wt-other:1:$1:100\nmalformed\n", ""),
-    ("wt-other:1:$1:100\nwt-other:2:$2:200\n", ""),
-    ("", "one server could not be queried"),
-])
-def test_sweep_incomplete_native_listing_preserves_registry_and_roster(
-    tmp_path, monkeypatch, stdout, stderr,
-):
-    import subprocess
-
-    reg = tmp_path / "reg"
-    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
-    m._register_session_for_monitor("wt-a", "/w/a", session_incarnation="$1:100")
-    monkeypatch.setattr(status_monitor_runtime, "_core_helper", lambda _name, local: local)
-    monkeypatch.setattr(m, "_monitor_list_sessions", status_monitor_runtime._monitor_list_sessions)
-    monkeypatch.setattr(
-        subprocess, "run",
-        lambda command, **kwargs: subprocess.CompletedProcess(command, 0, stdout, stderr),
-    )
-    failures = []
-    assert m._monitor_sweep(
-        "tmux", "T", "P", set(),
-        roster_publisher=lambda: pytest.fail("partial observation published current rows"),
-        roster_failure=failures.append,
-    ) == -1
-    assert (reg / "wt-a").read_text() == "/w/a"
-    assert failures
-
-
 def test_sweep_mux_failure_labels_all_published_and_initial_demanded_rosters(tmp_path, monkeypatch):
     from agent_worktrees.worktrees_runtime import WorktreesRuntime
 
@@ -1784,45 +1755,6 @@ def test_sweep_mux_failure_labels_all_published_and_initial_demanded_rosters(tmp
         assert owner.handle(request)["error"]["message"] == "mux-session enumeration unavailable"
     finally:
         owner.shutdown()
-
-
-def test_psmux_sweep_publishes_independent_rosters_without_probing_or_pruning(tmp_path, monkeypatch):
-    import subprocess
-
-    reg = tmp_path / "reg"
-    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
-    m._register_session_for_monitor("wt-a", "/w/a", session_incarnation="$1:100")
-    monkeypatch.setattr(status_monitor_runtime, "_core_helper", lambda _name, local: local)
-    monkeypatch.setattr(m, "_monitor_list_sessions", status_monitor_runtime._monitor_list_sessions)
-    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: pytest.fail("passive PSMux execution"))
-    projects = []
-    assert m._monitor_sweep(
-        "psmux", "T", "P", set(), picker_projects={"project"},
-        catalog_observer=lambda _: pytest.fail("unknown catalog observed as complete"),
-        roster_publisher=lambda: projects.append(m.cfg.project_name()),
-        roster_failure=lambda _: pytest.fail("independent roster marked failed"),
-    ) == -1
-    assert projects == ["project"]
-    assert (reg / "wt-a").read_text() == "/w/a"
-
-
-def test_psmux_sweep_isolates_project_publication_failure(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: tmp_path)
-    monkeypatch.setattr(m, "_monitor_list_sessions", lambda _: None)
-    projects = []
-
-    def publish():
-        project = m.cfg.project_name()
-        projects.append(project)
-        if project == "a-broken":
-            raise ValueError("synthetic failed publication")
-
-    assert m._monitor_sweep(
-        "psmux", "T", "P", set(), picker_projects={"a-broken", "b-ready"},
-        roster_publisher=publish,
-    ) == -1
-    assert projects == ["a-broken", "b-ready"]
-    assert "a-broken" in capsys.readouterr().err
 
 
 def _wire_monitor_handoff_session(tmp_path, monkeypatch):
@@ -4634,8 +4566,8 @@ def test_guarded_undrain_reuses_native_routing_custody_in_actual_monitor(tmp_pat
     from agent_worktrees import status_monitor_recovery_contract as recovery
 
     directory = tmp_path / "status-monitor-routing"
-    monkeypatch.setattr("agent_worktrees.runtime_identity.PROCESS_GENERATION", "a" * 32)
-    monkeypatch.setattr("agent_worktrees.status_monitor_health.PROCESS_GENERATION", "a" * 32)
+    monkeypatch.setattr("agent_worktrees.runtime_identity.PROCESS_GENERATION", "fixture-build")
+    monkeypatch.setattr("agent_worktrees.status_monitor_health.PROCESS_GENERATION", "fixture-build")
     monkeypatch.setattr(m, "_monitor_lock_path", lambda: tmp_path / "status-monitor.lock")
     monkeypatch.setattr(m, "_aw_runtime_home", lambda: tmp_path)
     monkeypatch.setattr(m, "_load_hook_client_module", lambda: None)
@@ -4777,7 +4709,6 @@ def test_idle_exit_rechecks_new_conditions_after_acquiring_cutover_guard(tmp_pat
 
 @pytest.mark.parametrize("kind,idle_gap", [
     ("preToolUse", False), ("postToolUse", False), ("readHookDemand", False), ("readHookDemand", True),
-    ("worktreeChanged", False), ("worktreeChanged", True),
 ])
 def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, monkeypatch, kind, idle_gap):
     from zdd import lifecycle
@@ -4787,7 +4718,7 @@ def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, mo
     from agent_worktrees.status_monitor_handover import MonitorHandover
 
     clock = {"now": 0.0, "advanced": 0}
-    sweeps, servers, replies, changes = [], [], [], []
+    sweeps, servers, replies = [], [], []
     gap = {"guard": False, "injected": False}
     entered, finished = threading.Event(), threading.Event()
     late_callers = []
@@ -4831,14 +4762,13 @@ def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, mo
     endpoint = tmp_path / "hook-endpoint.json"
 
     def dial(server):
-        if kind in {"readHookDemand", "worktreeChanged"}:
+        if kind == "readHookDemand":
             import socket
 
             with socket.create_connection(server.server.server_address, timeout=1) as conn:
                 conn.sendall(json.dumps({
                     "version": 1, "token": server.token, "kind": kind,
                     "hook_generation": server.generation, "deadline": time.time() + 1,
-                    **({"payload": {"cwd": str(tmp_path)}} if kind == "worktreeChanged" else {}),
                 }).encode() + b"\n")
                 assert conn.recv(1) == b""
             replies.append(server.has_recent_hook_demand())
@@ -4854,13 +4784,6 @@ def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, mo
 
     class Server(hook_ipc.HookIpcServer):
         def __init__(self, decide, **kwargs):
-            changed = kwargs.get("worktree_changed")
-            if kind == "worktreeChanged":
-                def record_change(cwd):
-                    changes.append(cwd)
-                    if changed is not None:
-                        changed(cwd)
-                kwargs["worktree_changed"] = record_change
             super().__init__(decide, **kwargs)
             self._clock = lambda: clock["now"]
             servers.append(self)
@@ -4875,15 +4798,6 @@ def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, mo
                 entered.set()
             try:
                 super()._on_read_demand(request)
-            finally:
-                if gap["injected"]:
-                    finished.set()
-
-        def _on_worktree_changed(self, request):
-            if gap["injected"]:
-                entered.set()
-            try:
-                super()._on_worktree_changed(request)
             finally:
                 if gap["injected"]:
                     finished.set()
@@ -4923,12 +4837,9 @@ def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, mo
         return 0
 
     monkeypatch.setattr(m, "_monitor_sweep", sweep)
-    deadline = None
+    deadline = time.monotonic() + 5
 
     def wait(event, interval):
-        nonlocal deadline
-        if deadline is None:
-            deadline = time.monotonic() + 5
         assert time.monotonic() < deadline, "monitor did not reach true idle expiry"
         assert not [event for event in lifecycle.read_events(tmp_path / "routing")
                     if event["action"] == "monitor-exit"], "hot sweeps must not write exit diagnostics"
@@ -4949,7 +4860,6 @@ def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, mo
             assert not caller.is_alive()
     assert replies == ([True, True, False] if idle_gap else [True, True])
     assert gap["injected"] is idle_gap
-    assert changes == ([str(tmp_path), str(tmp_path)] if kind == "worktreeChanged" else [])
     assert sweeps == list(range(0, 271, 30))
     exits = [event for event in lifecycle.read_events(tmp_path / "routing")
              if event["action"] == "monitor-exit"]
@@ -5345,7 +5255,7 @@ def test_status_monitor_backs_off_at_iteration_boundary_without_mutating(
 
 
 @pytest.mark.parametrize("kind", [
-    "handoffWake", "worktreeChanged", "nativeToolMutation", "native-unadmitted",
+    "handoffWake", "nativeToolMutation", "native-unadmitted",
     "nativeToolBatchMutation", "batch-unadmitted", "batch-reads",
     "legacy-batch-shell", "legacy-batch-native", "legacy-batch-read",
     "shellToolMutation", "shell-unadmitted", "shell-read",
@@ -5416,23 +5326,9 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
 
     dial_results = []
     wake_at_reply = []
-    start_errors = []
 
     class _DialingServer(hook_ipc.HookIpcServer):
-        handler_settled = threading.Event()
-
-        def _on_request_finished(self) -> None:
-            super()._on_request_finished()
-            self.handler_settled.set()
-
         def start(self) -> None:
-            try:
-                self._start_and_dial()
-            except Exception as error:
-                start_errors.append(repr(error))
-                raise
-
-        def _start_and_dial(self) -> None:
             # Dial AFTER the real (single) start() production calls --
             # production's own _start_request_surfaces() does
             # `HookIpcServer(_decide); hook_server.start()`, so dialing
@@ -5477,11 +5373,9 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
                         payload.update(toolName="powershell", toolArgs={"command": "git commit -m test"})
                     elif kind == "legacy-batch-read":
                         payload.update(toolName="view")
-                if kind == "worktreeChanged":
-                    payload = {"cwd": str(tmp_path)}
                 request = {
                     "version": 1, "token": self.token,
-                    "kind": "worktreeChanged" if kind == "worktreeChanged" else "postToolUse" if legacy else "shellToolMutation" if shell else "nativeToolBatchMutation" if batch else "nativeToolMutation",
+                    "kind": "postToolUse" if legacy else "shellToolMutation" if shell else "nativeToolBatchMutation" if batch else "nativeToolMutation",
                     "hook_generation": self.generation, "deadline": time.time() + 1,
                     "payload": payload,
                 }
@@ -5489,10 +5383,8 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
                     conn.sendall(json.dumps(request).encode() + b"\n")
                     if legacy:
                         dial_results.append(json.loads(conn.makefile("rb").readline())["result"] == {})
-                        assert conn.recv(1) == b""
                     else:
                         dial_results.append(conn.recv(1) == b"")
-                assert self.handler_settled.wait(1), "request handler did not settle"
                 assert self.has_recent_hook_demand() is (
                     kind not in {"native-unadmitted", "batch-unadmitted", "shell-unadmitted"}
                 )
@@ -5502,7 +5394,6 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
 
     assert m.cmd_status_monitor(argparse.Namespace(interval=5)) == 0
 
-    assert not start_errors, start_errors
     assert dial_results == [True], "the real wire round-trip must be accepted"
     assert len(bound) == 1
     # The loop may legitimately consume the event while draining after start().
@@ -5720,7 +5611,6 @@ def test_classify_daemon_started_published_in_lock_and_closed_on_exit(
     # before either server exists -- it never carries rendezvous fields.
     assert "classify_endpoint" not in early_stamp
     assert "hook_endpoint" not in early_stamp
-    assert "checkout_relocation_writer_generation" not in early_stamp
     assert isinstance(servers_stamp, dict)
     assert "classify_endpoint" in servers_stamp
     assert "classify_token" in servers_stamp
@@ -5736,7 +5626,6 @@ def test_classify_daemon_started_published_in_lock_and_closed_on_exit(
     assert "tracking_write_endpoint" in servers_stamp
     assert "tracking_write_token" in servers_stamp
     assert "tracking_write_generation" in servers_stamp
-    assert servers_stamp["checkout_relocation_writer_generation"] == 1
     assert closed["n"] == 4  # classify_server + worktree_status_server + managed_mux_server + tracking_write_server
 
 

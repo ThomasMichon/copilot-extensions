@@ -7,10 +7,6 @@ from pathlib import PureWindowsPath
 from subprocess import CompletedProcess
 
 
-class MuxObservationUnavailable(RuntimeError):
-    """The provider cannot safely supply a passive observation."""
-
-
 def is_empty_tmux_listing(binary: str, result: CompletedProcess[str]) -> bool:
     """Recognize only tmux's definitive no-server responses to list-sessions."""
     name = binary.replace("\\", "/").rsplit("/", 1)[-1].casefold().removesuffix(".exe")
@@ -43,14 +39,14 @@ def confirmed_has_session(
     if isinstance(message, bytes):
         message = message.decode("utf-8", errors="replace")
     message = message.strip()
-    if (
-        binary is not None and PureWindowsPath(binary).stem.casefold() == "psmux"
-    ):
-        raise RuntimeError("Mux presence probe is unavailable; absence is unconfirmed")
     if result.returncode == 1 and not (result.stdout or "").strip() and (
         message in {f"can't find session: {session_name}", f"session not found: {session_name}"}
         or re.fullmatch(r"no server running(?: on [^\r\n]+)?", message)
         or re.fullmatch(r"error connecting to [^\r\n]+ \(No such file or directory\)", message)
+        or (
+            binary is not None and PureWindowsPath(binary).stem.casefold() == "psmux"
+            and not message
+        )
     ):
         return False
     raise RuntimeError("Mux presence probe is unavailable; absence is unconfirmed")
@@ -69,22 +65,13 @@ def parse_session_counts(stdout: str | None, *, strict: bool = False) -> dict[st
     return result
 
 
-def parse_monitor_sessions(
-    stdout: str | None, *, strict: bool = False,
-) -> dict[str, tuple[int, str]]:
+def parse_monitor_sessions(stdout: str | None) -> dict[str, tuple[int, str]]:
     result: dict[str, tuple[int, str]] = {}
     for line in (stdout or "").strip().splitlines():
         if line.count(":") < 3:
-            if strict:
-                raise ValueError("Mux listing is malformed; absence is unconfirmed")
             continue
         name, _, created = line.rpartition(":")
         name, _, session_id = name.rpartition(":")
         name, _, count = name.rpartition(":")
-        if strict and (
-            not name or not count.isdecimal() or not re.fullmatch(r"\$[0-9]+", session_id)
-            or not created.isdecimal() or name in result
-        ):
-            raise ValueError("Mux listing is malformed; absence is unconfirmed")
         result[name] = (_attached_count(count), f"{session_id}:{created}")
     return result

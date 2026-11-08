@@ -46,12 +46,6 @@ environment-only equivalent. Existing cached bytes stay part of the selection.
 Package builds use the dependency installer's existing retained-input copy, so
 backend build/egg-info output does not mutate the verified snapshot.
 
-UV resolves the declared local libraries with the root package in one
-dependency-policy transaction, retaining each library's reinstall flag.
-The non-UV fallback retains its ordered standalone prerequisite installs.
-Missing source-qualified materialized libraries still refuse; batching does
-not permit resolving an undeclared replacement from a package index.
-
 ## Legacy runtime removal
 
 The native `scripts/init.ps1 -Action uninstall -InstallDir <root>` and
@@ -185,43 +179,6 @@ For implementation details, see [`docs/architecture.md`](docs/architecture.md).
 
 ## Explicit installation repair
 
-### Application Readiness in Configuration
-
-An enabled, already-installed Machines owner contributes **Application
-Readiness** to Manager Configuration. It observes the selected registered
-project's required module closure through the same conductor described below,
-including actual optional prerequisites but not unrelated optional modules.
-Rows distinguish unobserved, ready, not-ready, failed, configuration-empty,
-unsupported, dependency-blocked and restart-required states. This is installation
-readiness, not authentication, complete app health or permission to create a task.
-An installer failure remains `repair-failed` even when it also leaves a pending
-restart; the detail card preserves that separate restart obligation.
-
-The native adapter is also available without Manager:
-
-```text
-agent-machines installation-configuration --project <registered-project> [--stream]
-agent-machines installation-configuration --project <registered-project> --apply --expected-plan-digest <digest>
-```
-
-Browsing and refresh do not install. The payload entry refuses an absent
-Machines runtime without self-provisioning. Progressive NDJSON is the existing
-Manager v1 list protocol, not a second health database or service. Intermediate
-rows cannot enable repair; only a completed qualified observation supplies its
-plan digest. Errors and interrupted observations are not empty successful lists.
-Older native runtimes reject the new command; update through the normal owner
-before retrying, without falling back to an ambient executable.
-
-**Run declared repair for the displayed required closure** is explicitly
-confirmed and invokes the existing owner with that observation's digest. It may
-run the selected owners' installer actions; it is not an update of every installed
-component. Changed input refuses before installers. `--progress` on explicit
-apply emits the existing Manager action-progress protocol. Independent post-readiness,
-partial failure, cancellation, active-core limitations and restart obligations
-retain the conductor's semantics. No action restarts the machine, attests a
-restart, adds a sign-in flow or automatically replays an interrupted repair.
-Use the native restart-confirmation flow below when required, then refresh.
-
 `installation-repair` is separate from requirement-package restore. It discovers
 enabled, attributable plugin-owned `installer-readiness.json` contracts for the
 current project and global settings. Discovery never invokes an installer;
@@ -267,29 +224,6 @@ retain their syntax and semantics. A consumer first obtains a read-only
 before applying its digest. Older runtimes reject the unknown option; retain
 that unsupported outcome without retrying a weaker selection. Payload versions
 alone do not establish receiver support. No existing form is deprecated.
-
-The installed distribution's `agent_machines/installation-repair-v1.json`
-declares version-1 required selection, read-only observation and project-root
-identity. Qualify this descriptor from the exact selected runtime, not an
-available payload. Ordinary results add `projectRoot` (the resolved selected
-repository path) and `requiredSelection` (a boolean). Consumers requiring that
-selection must check both, `apply: false`, `requiredSatisfied`, interruption,
-selection refusal, outcomes and pending restarts; exit zero alone is not ready.
-Existing explicit-module callers may ignore the additive fields. No old syntax
-or result meaning is removed, and an older runtime without the declaration is
-unsupported for a caller requiring these semantics, not an empty requirement.
-
-An enclosing finite caller can select `--required --caller-owned-readiness`
-only after the selected runtime declares `caller_owned_readiness: 1`. This
-read-only form acknowledges `callerOwnedReadiness: true` and refuses apply,
-plan-digest and restart-confirmation combinations. On POSIX it requires the
-caller's direct native parent/session group, and readiness probes borrow that
-scope instead of detaching into separate sessions; the enclosing owner must
-settle the complete group before returning. Windows retains nested Job
-containment. Ordinary standalone reads and explicit repair keep their prior
-ownership. This mode is not install authority or permission to borrow an
-unowned scope. An old runtime lacking support is incompatible; do not retry
-without containment.
 
 Review the returned closure and `planDigest`, then apply that exact selection:
 

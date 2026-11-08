@@ -12,18 +12,12 @@ import subprocess
 import sys
 from types import SimpleNamespace
 from typing import Callable, cast
-from uuid import uuid4
 
 import pytest
 
 from tools import typecheck
 from tools import typecheck_source_views as views
 from installer_dependency_policy import DependencyPolicyError
-
-
-@pytest.fixture(autouse=True)
-def fixed_checker_stage(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(typecheck, "uuid4", lambda: SimpleNamespace(hex=""))
 
 
 def _harness_emitted_fixture(root: Path) -> tuple[str, ...]:
@@ -423,30 +417,17 @@ def test_optional_constructor_positions_and_combined_manifest(tmp_path: Path) ->
 
 
 @pytest.mark.parametrize("mutate", [False, True])
-@pytest.mark.parametrize("fresh_namespace", [False, True])
 def test_combined_matrix_preserves_import_custody_and_failure_collection(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutate: bool, fresh_namespace: bool,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mutate: bool,
 ) -> None:
     (tmp_path / "helpers").mkdir()
     helper = tmp_path / "helpers/contract.py"
     helper.write_text("value: int = 1\n", encoding="utf-8")
     (tmp_path / ".typecheck-prepared").write_text("test-context\n", encoding="utf-8")
-    retained = {
-        tmp_path / "typecheck-targets.txt": b"other invocation targets\n",
-        tmp_path / "typecheck-mypy.ini": b"other invocation configuration\n",
-    }
-    for path, content in retained.items():
-        path.write_bytes(content)
     item = replace(
         project(), additional_python_versions=("3.11",), platforms=("linux", "win32"),
         import_roots=("helpers",),
     )
-    if fresh_namespace:
-        monkeypatch.setattr(typecheck, "uuid4", uuid4)
-        old_stage = tmp_path.parent / ("source-views-" + tmp_path.name) / item.name
-        old_stage.mkdir(parents=True)
-        retained[old_stage / "retained.py"] = b"other invocation source view\n"
-        (old_stage / "retained.py").write_bytes(retained[old_stage / "retained.py"])
     lease = Lease()
     calls: list[tuple[str, str]] = []
 
@@ -466,8 +447,6 @@ def test_combined_matrix_preserves_import_custody_and_failure_collection(
     ) -> subprocess.CompletedProcess[str]:
         assert argv[argv.index("--cache-dir") + 1] == os.devnull
         assert env is not None and str(tmp_path / "helpers") in env["MYPYPATH"]
-        assert Path(argv[-1][1:]).read_text(encoding="utf-8") == "sample.py\n"
-        assert Path(argv[argv.index("--config-file") + 1]).read_text(encoding="utf-8") == "[mypy]\n"
         calls.append((argv[argv.index("--python-version") + 1], argv[argv.index("--platform") + 1]))
         if mutate and len(calls) == 3:
             helper.write_text("value: str = 'wrong'\n", encoding="utf-8")
@@ -489,7 +468,8 @@ def test_combined_matrix_preserves_import_custody_and_failure_collection(
         ) == 7
         assert calls == [("3.10", "linux"), ("3.10", "win32"), ("3.11", "linux"), ("3.11", "win32")]
     assert lease.released
-    assert all(path.read_bytes() == content for path, content in retained.items())
+    assert not (tmp_path / "typecheck-targets.txt").exists()
+    assert not (tmp_path / "typecheck-mypy.ini").exists()
 
 
 def _matrix_git(root: Path, *arguments: str) -> str:
@@ -989,7 +969,7 @@ def test_import_roots_are_ordered_project_local_and_lease_cleaned(
         assert env is not None and "PYTHONPATH" not in env and "PYTHONHOME" not in env
         baseline = sorted([str(tmp_path), str(tmp_path / "libs/installer-engine")])
         assert env["MYPYPATH"].split(os.pathsep) == baseline + [str(tmp_path / name) for name in roots]
-        assert Path(argv[-1][1:]).read_text(encoding="utf-8") == "sample.py\n"
+        assert (tmp_path / "typecheck-targets.txt").read_text(encoding="utf-8") == "sample.py\n"
         assert argv[argv.index("--follow-imports") + 1] == "silent"
         assert argv[argv.index("--cache-dir") + 1] == (
             os.devnull if roots else str(tmp_path / "mypy-cache/linux/3.10")

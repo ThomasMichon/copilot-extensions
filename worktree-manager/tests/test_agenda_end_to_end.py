@@ -118,10 +118,6 @@ def widget(app: mux_companion.MuxCompanionApp) -> str:
     return content.plain if isinstance(content, Text) else content.label.plain
 
 
-def agenda_tab_hidden(app) -> bool:
-    return app.query_one("#views", TabbedContent).get_tab("agenda-tab").has_class("-hidden")
-
-
 async def eventually(pilot, predicate, *, detail: str) -> None:
     for _ in range(120):
         if predicate():
@@ -323,7 +319,9 @@ def test_actual_commits_publish_to_resident_and_textual_without_replay(chain):
             data, worker = app._data, app._agenda_worker
             assert data.agenda["availability"] == "not-published"
             assert data.agenda["observation"] is None
-            assert agenda_tab_hidden(app), "unpublished head still offered an Agenda tab"
+            app.query_one("#views", TabbedContent).active = "agenda-tab"
+            await pilot.pause()
+            assert app.query_one("#agenda", Static).region.height > 0
 
             accepted, newly_accepted = store.mutate(home, initial, **identity)
             original = deepcopy(accepted)
@@ -337,10 +335,6 @@ def test_actual_commits_publish_to_resident_and_textual_without_replay(chain):
             )
             await receive(pilot, app, 1)
             assert "Parked: 0" in widget(app)
-            assert not agenda_tab_hidden(app)
-            app.query_one("#views", TabbedContent).active = "agenda-tab"
-            await pilot.pause()
-            assert app.query_one("#agenda", Static).region.height > 0
 
             parked = request(
                 {"operation": "park", "ref": "fixture-follow-up", "reason": "nonblocking"},
@@ -937,15 +931,10 @@ def test_context_qualified_reconnect_reads_current_body_and_rejects_stale_public
                     "expected_generation": owner.store.generation, "observation": original_body,
                 })
                 assert rejected["ok"] is False and rejected["error"]["code"] == "stale-revision"
-                selected = {
+                assert owner.agendas.read({
                     "contract_version": 2, "project": "example",
                     "worktree_id": "selected", "session_id": "head-a",
-                }
-                assert owner.agendas.read({**selected, "graph": 1})["observation"] == current_body
-                # Without the opt-in, the optional display graph is stripped.
-                assert owner.agendas.read(selected)["observation"] == {
-                    key: value for key, value in current_body.items() if key != "graph"
-                }
+                })["observation"] == current_body
                 assert len(store.history(home)) == 2
                 await pilot.press("escape")
                 await eventually(

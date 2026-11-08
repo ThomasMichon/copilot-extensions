@@ -29,12 +29,6 @@ Linked/nonregular lock files are refused, `assert_owned()` verifies the
 opened file still occupies that path, and only the acquiring process and
 thread may assert or release custody. Separate handles in the same process
 also exclude one another on Windows.
-For an existing peer whose Windows lock contract uses byte zero, explicitly
-pass `byte_zero=True` to acquire that same byte; an empty file is initialized
-with one byte. The default retains the high-offset protocol, including the
-PowerShell helper's interoperability. POSIX uses the same whole-file lock in
-either mode. This option does not establish a peer's identity or authorize its
-service effects.
 Acquisition publication and release use the same process-local guard, so a
 losing concurrent attempt on one instance cannot clear its successful owner.
 Fork preparation serializes descriptor setup/close; the child closes inherited

@@ -68,19 +68,6 @@ def _plain_file(path: Path) -> os.stat_result:
     return info
 
 
-def _acquire_byte_zero(stream: BinaryIO) -> None:
-    if sys.platform == "win32":
-        import msvcrt
-
-        stream.seek(0)
-        msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
-        if os.fstat(stream.fileno()).st_size == 0:
-            stream.seek(0)
-            stream.write(b"\0")
-    else:
-        _acquire_os_lock(stream)
-
-
 def _assert_linux_flock(stream: BinaryIO) -> None:
     if sys.platform != "linux":
         raise OperationOwnershipError("inherited native custody requires Linux descriptor evidence")
@@ -117,11 +104,8 @@ class OperationLock:
     Callers must separately journal any work that outlives that custody.
     """
 
-    def __init__(self, path: Path, *, byte_zero: bool = False) -> None:
-        if type(byte_zero) is not bool:
-            raise ValueError("byte_zero must be a boolean")
+    def __init__(self, path: Path) -> None:
         self.path = Path(path)
-        self._byte_zero = byte_zero
         self._file: BinaryIO | None = None
         self._owner: tuple[int, threading.Thread] | None = None
         self._key: tuple[int, int, int] | None = None
@@ -187,10 +171,7 @@ class OperationLock:
                 self._key = key
                 self._owner = (os.getpid(), threading.current_thread())
                 try:
-                    if self._byte_zero:
-                        _acquire_byte_zero(stream)
-                    else:
-                        _acquire_os_lock(stream)
+                    _acquire_os_lock(stream)
                 except OSError as error:
                     if error.errno in (errno.EACCES, errno.EAGAIN):
                         raise OperationLockedError(f"another process holds {self.path}") from error

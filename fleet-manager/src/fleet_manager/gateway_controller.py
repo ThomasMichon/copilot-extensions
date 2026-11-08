@@ -13,10 +13,7 @@ from jwcrypto import jwe, jwk
 
 from .gateway_auth import Signer, thumbprint, verify
 from .gateway_client import CredentialMaterial, GatewayClient
-from .gateway_contract import (
-    CREDENTIAL_ACTIONS, REVIEW_CREDENTIAL_CONTRACT, ForgeScope, GatewayError, ReviewScope,
-    credential, encode, number, require,
-)
+from .gateway_contract import CREDENTIAL_ACTIONS, ForgeScope, GatewayError, encode, number, require
 from .planning import digest
 
 
@@ -45,7 +42,6 @@ class RelayPolicy:
     action: str
     fields: dict[str, str]
     forge: ForgeScope | None = None
-    review: ReviewScope | None = None
 
 
 class RelayCredentialProvider:
@@ -60,19 +56,13 @@ class RelayCredentialProvider:
             require(policy.action in CREDENTIAL_ACTIONS, "unsupported-action")
             require(set(policy.fields) <= {"host", "resource", "tenant", "scope"}, "invalid-relay-fields")
             require(policy.forge is None or type(policy.forge) is ForgeScope, "invalid-forge-binding")
-            require(policy.review is None or type(policy.review) is ReviewScope, "invalid-review-binding")
-            require(policy.forge is None or policy.review is None, "invalid-review-binding")
         self.source, self.policies, self.verify_material = source, policies, verify_material
-        self.review_contract = (
-            REVIEW_CREDENTIAL_CONTRACT if any(policy.review is not None for policy in policies) else None
-        )
 
     async def acquire(self, request: dict, *, timeout: float) -> CredentialMaterial | None:
         policy = next((p for p in self.policies if all(
             getattr(p, k) == (tuple(request[k]) if k == "scopes" else request[k])
             for k in ("source", "account", "audience", "scopes", "action"))
-            and (p.forge.to_dict() if p.forge is not None else None) == request.get("forge")
-            and (p.review.to_dict() if p.review is not None else None) == request.get("review")), None)
+            and (p.forge.to_dict() if p.forge is not None else None) == request.get("forge")), None)
         if policy is None or not self.source.supports(policy.action, policy.fields):
             return None
         raw = await self.source.resolve(policy.action, dict(policy.fields), timeout=timeout)
@@ -90,31 +80,19 @@ async def _provider_result(provider: CredentialProvider, parameters: dict,
 class Controller:
     """Blocking/foreground resident loop; deployment/lifetime belongs to the custodian."""
     def __init__(self, client: GatewayClient, provider: CredentialProvider, signer: Signer,
-                 *, fleet: str, generation: int, lease_seconds: int = 10,
-                 protected_review: bool = False):
+                 *, fleet: str, generation: int, lease_seconds: int = 10):
         require(2 <= lease_seconds <= 60)
-        require(type(protected_review) is bool, "unsupported-review-contract")
-        require(not protected_review
-                or getattr(provider, "review_contract", None) == REVIEW_CREDENTIAL_CONTRACT,
-                "unsupported-review-contract")
         self.client, self.provider, self.signer = client, provider, signer
         self.fleet, self.generation, self.lease_seconds = fleet, generation, lease_seconds
         self.subscription: str | None = None
-        self.contracts = (REVIEW_CREDENTIAL_CONTRACT,) if protected_review else ()
 
     def start(self) -> None:
-        supported = self.client.connect()
-        require(not self.contracts or REVIEW_CREDENTIAL_CONTRACT in supported.get("contracts", []),
-                "unsupported-review-contract")
-        self.subscription = self._subscribe()["subscription"]
-
-    def _subscribe(self) -> dict:
-        return (self.client.subscribe(self.lease_seconds, self.subscription, contracts=self.contracts)
-                if self.contracts else self.client.subscribe(self.lease_seconds, self.subscription))
+        self.client.connect()
+        self.subscription = self.client.subscribe(self.lease_seconds)["subscription"]
 
     def step(self) -> str:
         require(self.subscription is not None, "subscription-required")
-        self._subscribe()
+        self.client.subscribe(self.lease_seconds, self.subscription)
         result = self.client.poll(self.subscription)
         if result["state"] == "IDLE":
             return "IDLE"
@@ -133,16 +111,10 @@ class Controller:
         require(thumbprint(recipient) == binding["recipient_jkt"], "recipient-mismatch")
         remaining = dispatch_deadline - time.time()
         require(remaining > 0, "dispatch-expired")
-        review_selected = binding["operation"] == "credential.review"
-        parameters = credential(binding["parameters"], protected_review=review_selected)
-        review_supported = not review_selected or (
-            bool(self.contracts)
-            and getattr(self.provider, "review_contract", None) == REVIEW_CREDENTIAL_CONTRACT
-        )
         try:
-            material = (asyncio.run(asyncio.wait_for(
-                _provider_result(self.provider, dict(parameters), remaining),
-                timeout=remaining)) if review_supported else None)
+            material = asyncio.run(asyncio.wait_for(
+                _provider_result(self.provider, dict(binding["parameters"]), remaining),
+                timeout=remaining))
         except (asyncio.TimeoutError, TimeoutError):
             # The acquisition budget is exhausted even if wall time moved back.
             return "UNKNOWN"
@@ -163,12 +135,9 @@ class Controller:
             require(isinstance(material, CredentialMaterial), "provider-contract-invalid")
             parameters = binding["parameters"]
             forge = ForgeScope.load(parameters["forge"]) if "forge" in parameters else None
-            review = ReviewScope.load(parameters["review"]) if review_selected else None
             supported = (all(getattr(material, k) == parameters[k] for k in ("source", "account", "audience"))
                          and material.scopes == tuple(parameters["scopes"])
-                         and material.forge == forge and material.review == review
-                         and (not review_selected
-                              or getattr(self.provider, "review_contract", None) == REVIEW_CREDENTIAL_CONTRACT)
+                         and material.forge == forge
                          and type(material.expires_at) is int and time.time() < material.expires_at)
             if not supported:
                 receipt = self.signer.sign({"binding": binding, "state": "UNSUPPORTED"}, binding["worker"], ttl,
@@ -184,8 +153,7 @@ class Controller:
             plain = encode({"binding": binding, "token": material.token, "expires_at": effective_expiry,
                             "source": material.source, "account": material.account,
                             "audience": material.audience, "scopes": list(material.scopes),
-                            **({"forge": forge.to_dict()} if forge is not None else {}),
-                            **({"review": review.to_dict()} if review is not None else {})})
+                            **({"forge": forge.to_dict()} if forge is not None else {})})
             envelope = jwe.JWE(plain, protected=protected, algs=["RSA-OAEP-256", "A256GCM"])
             envelope.add_recipient(jwk.JWK(**recipient))
             sealed = envelope.serialize(compact=True)

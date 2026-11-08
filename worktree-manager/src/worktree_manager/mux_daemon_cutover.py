@@ -3,17 +3,16 @@
 from __future__ import annotations
 
 import os
-import math
 import secrets
 import shlex
 import socket
 import subprocess
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 from urllib.parse import urlparse
 
-from agent_procutil import no_window_kwargs, spawn_daemon
+from agent_procutil import spawn_daemon
 from agent_procutil.daemon_instances import DaemonInstanceSpec
 from zdd import breadcrumb, diagnostics, routing
 
@@ -31,10 +30,6 @@ _DRAIN_KIND = "mux-cutover-drain-v1"
 _UNDRAIN_KIND = "mux-cutover-undrain-v1"
 _SHUTDOWN_KIND = "mux-cutover-shutdown-v1"
 _ADOPT_KIND = "mux-cutover-adopt-v1"
-
-
-class _CandidateActivityUnconfirmed(RuntimeError):
-    """A candidate may have admitted work and must not be retired."""
 
 
 def routing_dir(root: Path | None = None) -> Path:
@@ -145,9 +140,7 @@ def _pid_matches_root(pid: int, *, root: Path) -> bool:
             "Get-CimInstance Win32_Process -Filter \"ProcessId=%d\" | "
             "ForEach-Object { $_.CommandLine }" % pid,
         ]
-        out = subprocess.run(  # noqa: S603
-            argv, capture_output=True, text=True, timeout=10, check=False, **no_window_kwargs(),
-        )
+        out = subprocess.run(argv, capture_output=True, text=True, timeout=10, check=False)  # noqa: S603
         cmdline = (out.stdout or "").strip()
         if not cmdline:
             return False
@@ -172,7 +165,6 @@ def _pid_matches_root(pid: int, *, root: Path) -> bool:
         text=True,
         timeout=5,
         check=False,
-        **no_window_kwargs(),
     )  # noqa: S603
     cmdline = (out.stdout or "").strip()
     if not cmdline:
@@ -186,39 +178,26 @@ def _pid_matches_root(pid: int, *, root: Path) -> bool:
 class ControlClient:
     def __init__(
         self, base_url: str, *, root: Path | None = None, timeout: float = 5.0,
-        token: str | None = None, completion_timeout_s: float | None = None,
+        token: str | None = None,
     ):
         parsed = urlparse(base_url)
         if parsed.scheme not in ("http", "") or not parsed.hostname or parsed.port is None:
             raise ValueError(f"invalid mux-daemon cutover URL: {base_url!r}")
         if token is not None and (not isinstance(token, str) or not token.strip()):
             raise ValueError("invalid mux-daemon control credential")
-        if completion_timeout_s is not None and (
-            type(completion_timeout_s) not in (int, float)
-            or not math.isfinite(completion_timeout_s) or completion_timeout_s <= 0
-        ):
-            raise ValueError("invalid mux-daemon completion timeout")
         self.host = parsed.hostname
         self.port = int(parsed.port)
         self.base_url = base_url
         self.token = token if token is not None else load_or_create_control_token(root)
         self.root = root if root is not None else default_root()
         self.timeout = timeout
-        self.completion_timeout_s = completion_timeout_s
 
     def _request(self, kind: str, payload: dict | None = None, *, key: str = "control") -> dict:
         from work_coalescing_singleton import client as wcs_client
 
         client_id = wcs_client.new_client_id()
-        deadline = (
-            time.monotonic() + self.completion_timeout_s
-            if self.completion_timeout_s is not None else None
-        )
         try:
-            remaining = None if deadline is None else deadline - time.monotonic()
-            if remaining is not None and remaining <= 0:
-                raise TimeoutError("mux-daemon request completion deadline expired")
-            result = wcs_client.request(
+            return wcs_client.request(
                 self.host,
                 self.port,
                 self.token,
@@ -227,19 +206,11 @@ class ControlClient:
                 payload=payload or {},
                 request_deadline_s=self.timeout,
                 client_id=client_id,
-                **({"completion_timeout_s": remaining} if remaining is not None else {}),
             )
-            if deadline is not None and time.monotonic() >= deadline:
-                raise TimeoutError("mux-daemon request completion deadline expired")
-            return result
         finally:
-            remaining = None if deadline is None else deadline - time.monotonic()
-            if remaining is None or remaining > 0:
-                wcs_client.release(
-                    self.host, self.port, self.token, client_id,
-                    timeout=self.timeout if remaining is None else min(self.timeout, remaining),
-                    **({"completion_timeout_s": remaining} if remaining is not None else {}),
-                )
+            wcs_client.release(
+                self.host, self.port, self.token, client_id, timeout=self.timeout
+            )
 
     def health(self) -> dict[str, Any]:
         # A request-unique key (never the shared "control" default) so
@@ -331,35 +302,13 @@ def spawn_passive(slot: Path, *, root: Path, port: int):
     )
 
 
-def _health_check(
-    host: str, port: int, *, root: Path, generation: str | None = None,
-    expected_pid: int | None = None, expected_birth: str | None = None,
-    timeout: float = _READ_TIMEOUT_S,
-) -> bool:
+def _health_check(host: str, port: int, *, root: Path, generation: str | None = None) -> bool:
     try:
-        from .mux_serving_observation import _existing_token
-
-        token, _identity = _existing_token(root)
-        status = ControlClient(
-            f"http://{routing.format_authority(host, port)}", root=root, token=token, timeout=timeout,
-            **({"completion_timeout_s": timeout} if expected_pid is not None else {}),
-        ).health()
-        if (
-            expected_pid is not None and type(status.get("pid")) is int
-            and status["pid"] == expected_pid and status.get("process_start_time") == expected_birth
-            and status.get("active") is not False
-        ):
-            raise _CandidateActivityUnconfirmed("Manager candidate activity is unconfirmed")
+        status = ControlClient(f"http://{routing.format_authority(host, port)}", root=root).health()
         return (
             (status.get("status") == "ready" if generation is not None else status.get("status") != "draining")
             and (generation is None or status.get("runtime_generation") == generation)
-            and (expected_pid is None or (
-                type(status.get("pid")) is int and status["pid"] == expected_pid
-                and status.get("process_start_time") == expected_birth
-            ))
         )
-    except _CandidateActivityUnconfirmed:
-        raise
     except Exception:
         return False
 
@@ -389,9 +338,7 @@ def _iter_mux_daemon_pids() -> set[int]:
             "Get-CimInstance Win32_Process -ErrorAction Stop | "
             "ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }",
         ]
-        out = subprocess.run(  # noqa: S603
-            argv, capture_output=True, text=True, timeout=10, check=False, **no_window_kwargs(),
-        )
+        out = subprocess.run(argv, capture_output=True, text=True, timeout=10, check=False)  # noqa: S603
         if out.returncode != 0:
             raise OSError(f"native mux process census failed (exit {out.returncode})")
         hits: set[int] = set()
@@ -412,7 +359,6 @@ def _iter_mux_daemon_pids() -> set[int]:
         text=True,
         timeout=5,
         check=False,
-        **no_window_kwargs(),
         env=_ps_env_without_width_override(),
     )
     if out.returncode != 0:
@@ -536,16 +482,14 @@ def _acquire_cutover_lock(root: Path, *, timeout_s: float = _CUTOVER_LOCK_TIMEOU
             if _try_lock_file_once(handle):
                 return _CutoverLease(handle)
             handle.close()
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
+            if time.monotonic() >= deadline:
                 raise TimeoutError("mux-daemon cutover lock busy")
-            time.sleep(min(poll_s, remaining))
+            time.sleep(poll_s)
         except OSError:
             handle.close()
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
+            if time.monotonic() >= deadline:
                 raise
-            time.sleep(min(poll_s, remaining))
+            time.sleep(poll_s)
 
 
 def _lock_data_is_live(lock_data: dict | None) -> bool:
@@ -564,21 +508,13 @@ def _lock_data_is_live(lock_data: dict | None) -> bool:
 
 def _await_health(
     host: str, port: int, *, root: Path, timeout: float, poll: float = 0.5,
-    generation: str | None = None, expected_pid: int | None = None, expected_birth: str | None = None,
+    generation: str | None = None,
 ) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        options = {}
-        if expected_pid is not None:
-            options = {
-                "expected_pid": expected_pid, "expected_birth": expected_birth,
-                "timeout": min(_READ_TIMEOUT_S, max(0.001, deadline - time.monotonic())),
-            }
-        if _health_check(host, port, root=root, generation=generation, **options):
-            return expected_pid is None or time.monotonic() <= deadline
-        time.sleep(min(poll, max(0.0, deadline - time.monotonic())))
-    if expected_pid is not None:
-        return False
+        if _health_check(host, port, root=root, generation=generation):
+            return True
+        time.sleep(poll)
     return _health_check(host, port, root=root, generation=generation)
 
 
@@ -659,39 +595,6 @@ def _stale_cutover_in_progress(root: Path) -> bool:
     )
 
 
-def _retire_unpublished(root: Path, witness: str, incoming, port: int, birth: str | None, timeout: float) -> bool:
-    from zdd import publication_history
-
-    try:
-        directory = routing_dir(root)
-        deadline = time.monotonic() + min(5.0, timeout)
-        with routing.routing_lock(directory, deadline=deadline):
-            table = routing.read_table(directory, strict=True) or {}
-            for name in ("active", "previous"):
-                raw = table.get(name)
-                endpoint = routing.Endpoint.from_dict(raw) if isinstance(raw, dict) else None
-                if raw is not None and (
-                    endpoint is None or endpoint.pid == incoming.pid or endpoint.port == port
-                ):
-                    return False
-            if not publication_history.never_published(table, witness, pid=incoming.pid, port=port):
-                return False
-            if incoming.poll() is not None:
-                return True
-            remaining = deadline - time.monotonic()
-            if not birth or remaining <= 0:
-                return False
-            result = diagnostics.terminate_pid_if_identity(
-                incoming.pid, birth, exit_timeout=remaining,
-            )
-            if not all(result.get(key) is True for key in ("killed", "identity_verified", "exit_confirmed")):
-                return False
-            incoming.wait(timeout=max(0.0, deadline - time.monotonic()))
-            return incoming.poll() is not None
-    except (AttributeError, OSError, RuntimeError, ValueError, subprocess.TimeoutExpired):
-        return False
-
-
 def activate_after_update(
     *,
     root: Path | None = None,
@@ -699,9 +602,6 @@ def activate_after_update(
     version: str,
     health_timeout: float = 60.0,
     drain_timeout: float = 30.0,
-    expected_active: dict | None = None,
-    verify_selected: Callable[[], object] | None = None,
-    lock_timeout: float | None = None,
 ) -> dict[str, object]:
     """Start a healthy successor; incumbents observe routing and retire themselves.
 
@@ -711,132 +611,39 @@ def activate_after_update(
     """
     resolved_root = root if root is not None else default_root()
     summary: dict[str, object] = {"action": "noop", "root": str(resolved_root)}
-    guarded = expected_active is not None
-    if guarded != (verify_selected is not None) or (
-        guarded and (
-            not isinstance(expected_active, dict) or not callable(verify_selected)
-            or type(health_timeout) not in (int, float)
-            or not math.isfinite(health_timeout) or health_timeout <= 0
-            or type(lock_timeout) not in (int, float)
-            or not math.isfinite(lock_timeout) or lock_timeout < 0
-        )
-    ):
-        raise ValueError("guarded Manager reconcile inputs are invalid")
-    expected = routing.Endpoint.from_dict(expected_active) if guarded else None
-    if guarded and expected is None:
-        raise ValueError("guarded Manager incumbent is invalid")
 
-    if not guarded:
-        pre_route = routed_endpoint(resolved_root)
-        if _already_at_version(pre_route, version, root=resolved_root):
-            summary["reason"] = "already-active-version"
-            summary["route"] = {
-                "port": pre_route.port, "pid": pre_route.pid, "version": pre_route.version,
-            }
-            return summary
+    pre_route = routed_endpoint(resolved_root)
+    if _already_at_version(pre_route, version, root=resolved_root):
+        summary["reason"] = "already-active-version"
+        summary["route"] = {
+            "port": pre_route.port, "pid": pre_route.pid, "version": pre_route.version,
+        }
+        return summary
 
-    lease = _acquire_cutover_lock(
-        resolved_root, **({"timeout_s": lock_timeout} if guarded else {}),
-    )
+    lease = _acquire_cutover_lock(resolved_root)
     try:
-        if guarded:
-            from . import mux_serving_observation
-
-            def admit():
-                verify_selected()
-                table = routing.read_table(routing_dir(resolved_root), strict=True)
-                if table is None or table.get("active") != expected_active:
-                    raise RuntimeError("Manager incumbent route changed")
-                observed = mux_serving_observation.observe(resolved_root, timeout=health_timeout)
-                if observed != {"state": "ready", "generation": expected.version}:
-                    raise RuntimeError("Manager incumbent readiness is unconfirmed")
-                if routing.read_table(routing_dir(resolved_root), strict=True) != table:
-                    raise RuntimeError("Manager incumbent route changed")
-
-            admit()
-            credential = mux_serving_observation._existing_token(resolved_root)
-        else:
-            load_or_create_control_token(resolved_root)
+        load_or_create_control_token(resolved_root)
         route = routed_endpoint(resolved_root)
-        if (
-            guarded and route is not None and route.version == version
-            or not guarded and _already_at_version(route, version, root=resolved_root)
-        ):
-            if guarded:
-                admit()
+        if _already_at_version(route, version, root=resolved_root):
             summary["reason"] = "already-active-version"
             summary["route"] = {"port": route.port, "pid": route.pid, "version": route.version}
             return summary
 
-        if guarded:
-            witness = routing.publication_witness(
-                routing_dir(resolved_root), deadline=time.monotonic() + min(5.0, health_timeout),
-            )
         port = pick_free_port()
-        if guarded:
-            admit()
         incoming = spawn_passive(slot, root=resolved_root, port=port)
-        birth = None
-        published = False
-        uncertain_activity = False
         try:
-            if guarded:
-                birth = diagnostics.process_start_time(incoming.pid)
-                if type(incoming.pid) is not int or incoming.pid <= 0 or not birth or incoming.poll() is not None:
-                    raise RuntimeError("Manager candidate native identity is unconfirmed")
             if not _await_health(
                 _BIND, port, root=resolved_root, timeout=health_timeout, generation=version,
-                **({"expected_pid": incoming.pid, "expected_birth": birth} if guarded else {}),
             ):
                 summary.update(action="cutover", result={
                     "ok": False, "new_port": port, "error": "health-timeout",
                 })
                 return summary
-            if guarded:
-                admit()
-
-                def refuse_current(raw):
-                    try:
-                        from zdd import publication_history
-
-                        verify_selected()
-                        if (
-                            raw != expected_active or not mux_serving_observation._live_owner(expected)
-                            or mux_serving_observation._existing_token(resolved_root) != credential
-                            or incoming.poll() is not None
-                            or diagnostics.process_start_time(incoming.pid) != birth
-                            or not publication_history.never_published(
-                                routing.read_table(routing_dir(resolved_root), strict=True) or {},
-                                witness, pid=incoming.pid, port=port,
-                            )
-                        ):
-                            return "Manager incumbent or control credential changed"
-                    except (OSError, RuntimeError, ValueError):
-                        return "Manager incumbent or selection is unconfirmed"
-                    return None
-
-                routing.publish_active_with_previous_guarded(
-                    routing_dir(resolved_root), bind=_BIND, port=port, pid=incoming.pid,
-                    version=version, demote_existing=True, expected_active=expected,
-                    refuse_current=refuse_current, process_start_time=birth,
-                    lock_deadline=time.monotonic() + min(5.0, health_timeout),
-                )
-                published = True
-            else:
-                publish_route(port, root=resolved_root, pid=incoming.pid, version=version)
-        except _CandidateActivityUnconfirmed:
-            uncertain_activity = True
-            raise
+            publish_route(port, root=resolved_root, pid=incoming.pid, version=version)
         finally:
-            if guarded:
-                if not published and not uncertain_activity and not _retire_unpublished(
-                    resolved_root, witness, incoming, port, birth, health_timeout,
-                ):
-                    raise RuntimeError("Manager candidate publication or exit is unconfirmed")
-            else:
-                selected = routing.read_active_endpoint(routing_dir(resolved_root), verify_listener=False)
-                if selected is None or selected.pid != incoming.pid:
-                    incoming.terminate()
+            selected = routing.read_active_endpoint(routing_dir(resolved_root), verify_listener=False)
+            if selected is None or selected.pid != incoming.pid:
+                incoming.terminate()
         summary.update(action="cutover", result={
             "ok": True, "new_port": port, "new_pid": incoming.pid,
             "retirement": "self-observed",

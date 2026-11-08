@@ -18,39 +18,24 @@ def _publish(tmp_path, plugin, *, host=None, locked=False, failed_stage=False):
     payload, fixtures = _small_stage(tmp_path, plugin)
     if failed_stage:
         core = payload / "scripts" / "versioned_runtime_source.py"
-        # Redirect stages are created by the publication component's private
-        # temporary-file primitive (not tempfile.mkstemp on Windows), so the
-        # failure is injected there: the second stamped-version stage (the new
-        # value, after its backup) gets a read-only descriptor.
         core.write_text(core.read_text(encoding="utf-8") + """
 
 if "publish-redirects" in sys.argv:
+    _fixture_real_mkstemp = tempfile.mkstemp
     _fixture_second_marker_calls = 0
-    _fixture_real_stage_redirect = _stage_redirect
 
-    def _fixture_install_readonly_stage():
-        publication = _runtime()._runtime_component("versioned_runtime_publication")
-        real_temporary_file = publication._temporary_file
-        if getattr(real_temporary_file, "_fixture_readonly", False):
-            return
+    def _fixture_readonly_stage(*args, **kwargs):
+        global _fixture_second_marker_calls
+        fd, path = _fixture_real_mkstemp(*args, **kwargs)
+        if kwargs.get("prefix") == ".stamped-version.redirect-":
+            _fixture_second_marker_calls += 1
+            if _fixture_second_marker_calls == 2:
+                os.close(fd)
+                fd = os.open(path, os.O_RDONLY)
+                print("STAGE_WRITE_FD_READ_ONLY=stamped-version", file=sys.stderr)
+        return fd, path
 
-        def _fixture_readonly_stage(parent, prefix):
-            global _fixture_second_marker_calls
-            fd, path = real_temporary_file(parent, prefix)
-            if prefix == ".stamped-version.redirect-":
-                _fixture_second_marker_calls += 1
-                if _fixture_second_marker_calls == 2:
-                    os.close(fd)
-                    fd = os.open(path, os.O_RDONLY)
-                    print("STAGE_WRITE_FD_READ_ONLY=stamped-version", file=sys.stderr)
-            return fd, path
-
-        _fixture_readonly_stage._fixture_readonly = True
-        publication._temporary_file = _fixture_readonly_stage
-
-    def _stage_redirect(*args, **kwargs):
-        _fixture_install_readonly_stage()
-        return _fixture_real_stage_redirect(*args, **kwargs)
+    tempfile.mkstemp = _fixture_readonly_stage
 """, encoding="utf-8")
     identity = _receipt(payload, plugin)
     root = tmp_path / "runtime"
@@ -68,15 +53,13 @@ if "publish-redirects" in sys.argv:
         path = REPOSITORY / "plugins" / plugin / "scripts" / "install.ps1"
         names = ("Get-GitInfo",)
         if plugin == "agent-logger":
-            names += ("Publish-PayloadSnapshot", "Publish-SnapshotSource")
+            names += ("Publish-PayloadSnapshot",)
         functions = _powershell_functions(
             plugin, names, path.stat().st_mtime_ns,
         ).replace("$PSScriptRoot", "$ScriptDir")
         body = f"""
 $ErrorActionPreference = 'Stop'
 $PluginDir = {_ps(payload)}
-$publicationSource = $PluginDir
-$publicationProject = {_ps(tmp_path)}
 $ScriptDir = Join-Path $PluginDir 'scripts'
 $InstallDir = {_ps(root)}
 $SrcVersion = '1.2.3'
@@ -143,12 +126,9 @@ exit $code
         functions = _function(plugin, "_git_info", "sh")
         if plugin == "agent-logger":
             functions += "\n" + _function(plugin, "publish_payload_snapshot", "sh")
-            functions += "\n" + _function(plugin, "_publish_snapshot_source", "sh")
         body = f"""
 set -euo pipefail
 PLUGIN_DIR={shlex.quote(str(payload))}
-__publication_payload="$PLUGIN_DIR"
-__publication_project={shlex.quote(str(tmp_path))}
 SCRIPT_DIR="$PLUGIN_DIR/scripts"
 INSTALL_DIR={shlex.quote(str(root))}
 SRC_VERSION=1.2.3

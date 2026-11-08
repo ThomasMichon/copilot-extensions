@@ -1,9 +1,0 @@
-{
-  "comment": "Delegate selected Windows and POSIX mux creation to the shared core with pre-effect support selection and unknown-outcome retention",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

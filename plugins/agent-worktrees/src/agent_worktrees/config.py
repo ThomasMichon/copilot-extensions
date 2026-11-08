@@ -511,9 +511,6 @@ class RepoConfig:
     :attr:`stateless` (a repo can require external state without being a
     fully guarded stateless harness), but ``stateless: true`` **implies** it.
     **Default false**. Declared in ``<anchor>/.agent-worktrees/config.yaml``."""
-    require_application_readiness: bool = field(default=False, kw_only=True)
-    """Require the selected Machines owner's read-only required-module observation
-    before ordinary New authoring. Does not install or acquire authentication."""
     compose_knowledge_plugins: bool = True
     """Opt out of personal plugin composition without disabling state pairing."""
     copilot_plugin_profile: str | None = field(default=None, kw_only=True)
@@ -1504,10 +1501,6 @@ def _build_repo_config(
         if isinstance(cmd_list, list):
             post_install_hook[plat_key] = [str(c) for c in cmd_list]
 
-    require_application_readiness = data.get("require_application_readiness", False)
-    if type(require_application_readiness) is not bool:
-        raise ValueError("require_application_readiness must be a boolean")
-
     return RepoConfig(
         anchor=str(anchor),
         worktree_root=str(worktree_root or derive_worktree_root(anchor)),
@@ -1533,7 +1526,6 @@ def _build_repo_config(
         requires_external_state_root=bool(
             data.get("requires_external_state_root", False)
         ),
-        require_application_readiness=require_application_readiness,
         compose_knowledge_plugins=bool(data.get("compose_knowledge_plugins", True)),
         copilot_plugin_profile=parse_plugin_profile(data.get("copilot_plugin_profile")),
         knowledge_only=bool(data.get("knowledge_only", False)),

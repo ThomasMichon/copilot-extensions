@@ -9,7 +9,6 @@ import json
 import os
 from pathlib import Path
 import shutil
-import stat
 import subprocess
 import sys
 import time
@@ -53,77 +52,6 @@ def plugin(tmp_path, engine):
         encoding="utf-8",
     )
     return plugin
-
-
-@pytest.fixture
-def negative_source_plugin(tmp_path):
-    root = tmp_path / "negative-sources"
-    declarations = (
-        ("plugin", "demo-pkg", "demo_pkg", "fixture-middle", "../middle"),
-        ("middle", "fixture-middle", "fixture_middle", "fixture-leaf", "../leaf"),
-        ("leaf", "fixture-leaf", "fixture_leaf", None, None),
-    )
-    for directory, name, package, dependency, relative in declarations:
-        project = root / directory
-        data = project / "src" / package / "data"
-        data.mkdir(parents=True)
-        metadata = (
-            '[project]\nname=' + json.dumps(name) + '\nversion="1.0"\ndependencies=[]\n'
-        )
-        if dependency is not None:
-            metadata += (
-                '[project.optional-dependencies]\nbootstrap=[' + json.dumps(dependency) + ']\n'
-                '[tool.uv.sources]\n' + dependency + '={path=' + json.dumps(relative)
-                + ',editable=true}\n'
-            )
-        metadata += (
-            '[tool.setuptools.package-data]\n' + package + '=["data/*"]\n'
-        )
-        (project / "pyproject.toml").write_text(metadata, encoding="utf-8")
-        (data.parent / "__init__.py").write_text("VALUE = 1\n", encoding="utf-8")
-        (data / "payload.bin").write_bytes(b"source resource\x00" + name.encode())
-        (data / "mode.txt").write_text("ordinary source mode\n", encoding="utf-8")
-    return root / "plugin"
-
-
-def test_negative_source_graph_freezes_complete_transitive_resources(
-    tmp_path, engine, negative_source_plugin,
-):
-    plugin = negative_source_plugin
-    roots = engine._package_roots(plugin)
-    assert {engine._package_name(root) for root in roots} == {
-        "demo-pkg", "fixture-middle", "fixture-leaf",
-    }
-    common = plugin.parent
-    mode_resource = common / "leaf/src/fixture_leaf/data/mode.txt"
-    mode_resource.chmod(0o444)
-    files = engine._source_files(roots)
-    original = {path.relative_to(common): path.read_bytes() for path in files}
-    modes = {path.relative_to(common): stat.S_IMODE(path.stat().st_mode) for path in files}
-    first = engine.freeze_inputs(plugin, tmp_path / "first-snapshot")
-    assert first.plugin == tmp_path / "first-snapshot/plugin"
-    assert engine._package_roots(first.plugin) == first.packages
-    assert len(first.packages) == 3
-    copied = engine._source_files(first.packages)
-    assert {
-        path.relative_to(tmp_path / "first-snapshot"): path.read_bytes() for path in copied
-    } == original
-    assert {
-        path.relative_to(tmp_path / "first-snapshot"): stat.S_IMODE(path.stat().st_mode)
-        for path in copied
-    } == modes
-    assert {path.relative_to(common): path.read_bytes() for path in files} == original
-    leaf_resource = common / "leaf/src/fixture_leaf/data/payload.bin"
-    original_leaf = leaf_resource.read_bytes()
-    leaf_resource.write_bytes(original_leaf + b"changed")
-    second = engine.freeze_inputs(plugin, tmp_path / "second-snapshot")
-    assert second.payload_hash != first.payload_hash
-    assert (
-        tmp_path / "first-snapshot/leaf/src/fixture_leaf/data/payload.bin"
-    ).read_bytes() == original_leaf
-    assert (
-        tmp_path / "second-snapshot/leaf/src/fixture_leaf/data/payload.bin"
-    ).read_bytes() == leaf_resource.read_bytes()
 
 
 def inspected(retained, **changes):
@@ -754,15 +682,10 @@ def test_prepared_closed_child_uses_actual_remaining_deadline(tmp_path, engine, 
 
 
 def test_freeze_deadline_expiry_during_copy_removes_only_owned_partial_inputs(
-    tmp_path, engine, negative_source_plugin, monkeypatch,
+    tmp_path, engine, plugin, monkeypatch,
 ):
-    plugin = negative_source_plugin
     destination = tmp_path / "partial"
     before = (plugin / "pyproject.toml").read_bytes()
-    source_files = engine._source_files(engine._package_roots(plugin))
-    original = {path: path.read_bytes() for path in source_files}
-    sentinel = tmp_path / "unrelated.txt"
-    sentinel.write_bytes(b"preserved")
     deadline = time.monotonic() + 60
     check_deadline = engine._check_deadline
     copy_mode = engine.shutil.copymode
@@ -783,18 +706,14 @@ def test_freeze_deadline_expiry_during_copy_removes_only_owned_partial_inputs(
         engine.freeze_inputs(plugin, destination, deadline=deadline)
     assert calls and not destination.exists()
     assert (plugin / "pyproject.toml").read_bytes() == before
-    assert {path: path.read_bytes() for path in source_files} == original
-    assert sentinel.read_bytes() == b"preserved"
 
 
 @pytest.mark.parametrize("deadline", [0, float("inf"), True])
-def test_invalid_freeze_deadline_refuses_before_creating_inputs(tmp_path, engine, deadline):
-    plugin = tmp_path / "absent-source"
+def test_invalid_freeze_deadline_refuses_before_creating_inputs(tmp_path, engine, plugin, deadline):
     destination = tmp_path / "must-not-exist"
     with pytest.raises(WheelError, match="deadline"):
         engine.freeze_inputs(plugin, destination, deadline=deadline)
     assert not destination.exists()
-    assert not plugin.exists()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native Windows absolute-deadline guardian")

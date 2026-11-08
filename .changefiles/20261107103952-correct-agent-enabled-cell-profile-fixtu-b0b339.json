@@ -1,9 +1,0 @@
-{
-  "comment": "Correct agent-enabled cell profile fixture",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

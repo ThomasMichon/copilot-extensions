@@ -1,9 +1,0 @@
-{
-  "comment": "Keep a truthful session-guidance floor when sessionStart enrichment fails, and prefer Python 3.10+ for the Windows sessionStart hook",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

@@ -35,10 +35,7 @@ def verify_liveness(rec, source, project):
         batch = engine_group_c.picker_reconcile_local(project, worktree_ids=[wt_id])
         for row in batch.rows:
             if isinstance(row, dict) and row.get("id") == wt_id:
-                return {
-                    **row,
-                    "mux_observation_unavailable": not bool(batch.summary.get("mux_scan_ok", True)),
-                }, is_local
+                return row, is_local
         return None, is_local
     except Exception:
         return None, None

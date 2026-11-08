@@ -27,7 +27,6 @@ status alone, so read the history before diagnosing.
 | Unreconciled existing architecture | New mechanism built beside an existing owner, contract or adapter that already serves the purpose, without reading or reconciling it | Read the existing owner's contract; extend or reuse it, or record why it cannot serve |
 | Implementation fixation despite measurements | Repeated tuning of one design after measurements show it cannot plausibly meet the declared budget or contract | Compare one other viable design before another broad qualification; required outcome changes need its owner |
 | Unchanged repetition | Same command, source, environment and hypothesis rerun with the same result, or an identical review verdict republished on an unchanged head | One discriminating control at the failing boundary; see [interventions](interventions.md). For review rounds, keep the standing verdict until a qualifying trigger |
-| Reported failure ends the turn | The agent reports a failure or blocker and then ends its turn, with no diagnosis, retry, recorded default or handoff, while other authorized work or a next diagnostic step remains | A reported failure does not finish the turn: diagnose within scope, take the next discriminating step or a recorded default, or hand off with the failure named |
 
 The [watchdog checks](watchdog-checks.md) map each pattern to a per-agent
 inspection, a wait class and an escalation rule.

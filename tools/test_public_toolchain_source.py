@@ -406,8 +406,7 @@ def test_ci_artifact_scope_covers_declared_canonical_copies() -> None:
     sources: set[str] = set()
     for declaration in (root / "plugins").rglob("*assets.json"):
         manifest = json.loads(declaration.read_text(encoding="utf-8"))
-        for group in manifest.get("groups", [manifest]):
-            sources.update(f"{group['canonicalDir']}/{name}" for name in group["files"])
+        sources.update(f"{manifest['canonicalDir']}/{name}" for name in manifest["files"])
     for path in (root / "plugins").rglob("*.md"):
         with path.open(encoding="utf-8") as stream:
             pointer = re.match(r"<!--\s*VENDOR_POINTER:\s*source=(\S+)\s+kind=file\s*-->", stream.readline())

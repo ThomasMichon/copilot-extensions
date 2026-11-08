@@ -269,32 +269,10 @@ class WatchGateway:
             if self._binding(request, target) != expected:
                 raise ReplayBindingMismatch
 
-        def validate_selection(intent: dict) -> None:
-            from .workspace_operations import PROTOCOL, encoded
-            from .workspace_selection import selection_preview
-
-            preview = {
-                "protocol": PROTOCOL, "binding": expected.document(), "scope": intent["scope"],
-                "result": selection_preview(intent),
-            }
-            submission = {
-                "binding": expected.document(), "request": {
-                    "number": payload["number"], "intent": intent,
-                    "source_attachment": payload["source_attachment"],
-                    "budget_seconds": payload["budget_seconds"],
-                },
-            }
-            if (
-                len(json.dumps(preview, allow_nan=False).encode("utf-8")) > BODY_BYTES
-                or len(encoded(submission)) > BODY_BYTES
-            ):
-                raise OwnerReadResponseTooLarge("prepared preview or submission exceeds transport limit")
-
         try:
             value = await asyncio.to_thread(
                 workspace.execute, operation, payload,
                 expires_at=request.context.expires_at, checkpoint=checkpoint,
-                **({"selection_validator": validate_selection} if operation == "allocate" else {}),
             )
             checkpoint()
             value = dict(value, binding=expected.document())

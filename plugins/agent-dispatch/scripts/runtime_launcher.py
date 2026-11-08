@@ -62,8 +62,8 @@ def main() -> None:
             raise ValueError("Runtime retention bootstrap requires a selected build identity")
         expected_identity = arguments[1]
         arguments = arguments[2:]
-    if not arguments or (arguments[0] == "-m" and len(arguments) < 2):
-        raise ValueError("Runtime retention bootstrap requires a module or absolute script")
+    if len(arguments) < 2 or arguments[0] != "-m":
+        raise ValueError("Runtime retention bootstrap requires a module invocation")
     spec = importlib.util.spec_from_file_location(
         "_retained_versioned_runtime", bootstrap / "versioned_runtime.py",
     )
@@ -84,19 +84,9 @@ def main() -> None:
         python = runtime.slot_python(root, slot.name)
         if python is None or not Path(sys.prefix).samefile(python.parent.parent):
             raise RuntimeError("Retained runtime interpreter resolved outside its slot")
-        if arguments[0] == "-m":
-            module = arguments[1]
-            sys.argv = arguments[1:]
-            runpy.run_module(module, run_name="__main__", alter_sys=True)
-        else:
-            path = arguments[0]
-            if (
-                any(character in path for character in "\0\r\n")
-                or not Path(path).is_absolute() or not Path(path).is_file()
-            ):
-                raise ValueError("Runtime retention bootstrap requires an absolute script file")
-            sys.argv = arguments
-            runpy.run_path(path, run_name="__main__")
+        module = arguments[1]
+        sys.argv = arguments[1:]
+        runpy.run_module(module, run_name="__main__", alter_sys=True)
 
 
 if __name__ == "__main__":

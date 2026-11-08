@@ -101,8 +101,8 @@ def _parse_pulse_ts(ts):
     if not ts or not isinstance(ts, str):
         return None
     try:
-        dt = _dt.datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except (ValueError, TypeError, OverflowError):
+        dt = _dt.datetime.fromisoformat(ts)
+    except (ValueError, TypeError):
         return None
     if dt.tzinfo is not None:
         dt = dt.astimezone().replace(tzinfo=None)
@@ -126,13 +126,11 @@ _STATE_LABEL = {
 def _age(ts):
     if not ts:
         return "-"
-    t = _parse_pulse_ts(ts)
-    if t is None:
+    try:
+        t = _dt.datetime.fromisoformat(ts)
+    except ValueError:
         return "?"
-    return _relative_age(max(0, (NOW - t).total_seconds()))
-
-
-def _relative_age(s):
+    s = (NOW - t).total_seconds()
     if s < 3600:
         return f"{int(s // 60)}m"
     if s < 86400:
@@ -396,15 +394,6 @@ def status_line_segments(markers, asset_hints, overflow, width):
     return segments
 
 
-def _mux_observation_unknown(w):
-    evidence = (w.get("fact_provenance") or {}).get("mux") or {}
-    return (
-        w.get("mux_observation_unavailable") is True
-        or evidence.get("quality") in {"unavailable", "stale"}
-        or (w.get("_availability") or {}).get("status") in {"stale", "advisory"}
-    )
-
-
 def _sess(w):
     """LIVE column value (operator feedback, 2026-09-29): ``MUX``/``ACP``/
     ``PROC``/``LOCK``/``-``, replacing the prior glyph set (``●N``/``○``).
@@ -413,22 +402,6 @@ def _sess(w):
     analogous ``ACP(n)`` count exists yet (deferred, not fabricated).
     ``PROC`` (live, bound, but neither muxed nor ACP-hosted) stays distinct
     -- a genuinely different hosting mechanism."""
-    if _mux_observation_unknown(w):
-        if (w.get("mux_last_known") or {}).get("present") or w.get("mux_session") or w.get("mux_attached"):
-            return "MUX(?)"
-        stale = bool(w.get("_availability"))
-        if w.get("interface") == "acp" and (
-            w.get("session_bridge_live") or w.get("session_ahp_live")
-            or w.get("session_bound_live") or w.get("execution_leg_live")
-        ):
-            return "ACP(?)" if stale else "ACP"
-        if w.get("session_bare_orphan"):
-            return "PROC(?)" if stale else "PROC"
-        return "HOST(?)" if (
-            w.get("session_lock_live") or w.get("session_bound_live")
-            or w.get("session_bridge_live") or w.get("session_ahp_live")
-            or w.get("execution_leg_live")
-        ) else "?"
     if w.get("mux_attached"):
         return f"MUX({w.get('mux_clients', 1)})"
     if w.get("mux_session"):
@@ -458,44 +431,46 @@ def _length_display(w):
 def _age_secs(w):
     ts = (w.get("completed_at") if w.get("status") == "finalized"
           else w.get("started_at"))
-    dt = _parse_pulse_ts(ts)
-    return max(0, (NOW - dt).total_seconds()) if dt else 1 << 40
+    if not ts:
+        return 1 << 40
+    try:
+        return (NOW - _dt.datetime.fromisoformat(ts)).total_seconds()
+    except ValueError:
+        return 1 << 40
 
 
 def _last_active_secs(w):
-    """Use exactly the USED instant, including the documented legacy fallback."""
-    dt = _activity_instant(w.get("used_at") or _last_active_timestamp(w))
-    return max(0, (NOW.astimezone(_dt.timezone.utc) - dt).total_seconds()) if dt else w.get("age_secs", 1 << 40)
-
-
-def _activity_instant(ts):
-    if not isinstance(ts, str) or not ts:
-        return None
+    """Seconds since the worktree was last GENUINELY used, for the Recent
+    section's sort order (#3307 Phase 3) -- distinct from ``_age_secs``
+    (creation/status-transition age, still used for the displayed AGE
+    column). Prefers ``last_resumed_at`` (set on every real resume); a
+    worktree that has never been resumed since creation falls back to the
+    record's own already-computed ``age_secs`` (this function receives
+    NORMALIZED records -- ``norm()`` never emits a bare ``started_at`` key,
+    only the derived ``age``/``age_secs`` pair). A long-running but
+    recently-resumed worktree therefore sorts by when it was last touched,
+    not by how long ago it was first created."""
+    ts = w.get("last_resumed_at")
+    if not ts:
+        return w.get("age_secs", 1 << 40)
     try:
-        return _dt.datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(_dt.timezone.utc)
-    except (ValueError, OverflowError, OSError):
-        return None
-
-
-def _last_active_timestamp(w):
-    activity = w.get("message_activity")
-    if isinstance(activity, dict) and type(activity.get("version")) is int and activity["version"] == 1:
-        message_at = activity.get("last_message_at")
-        if _activity_instant(message_at) is not None:
-            return message_at
-    for candidate in (
-        w.get("last_resumed_at"),
-        w.get("completed_at") if w.get("status") == "finalized" else w.get("started_at"),
-    ):
-        if _activity_instant(candidate) is not None:
-            return candidate
-    return None
+        return (NOW - _dt.datetime.fromisoformat(ts)).total_seconds()
+    except ValueError:
+        return w.get("age_secs", 1 << 40)
 
 
 def _last_active_display(w):
-    """Relative USED age from the same message/legacy instant as its sort key."""
-    dt = _activity_instant(_last_active_timestamp(w))
-    return _relative_age(max(0, (NOW.astimezone(_dt.timezone.utc) - dt).total_seconds())) if dt else "-"
+    """Human-relative ``USED`` column string (#3307 follow-up): recency of
+    the worktree's last real interaction, distinct from AGE (how long the
+    worktree has EXISTED). Same signal sort order already prefers
+    (:func:`_last_active_secs`, Phase 3), now visible without opening the
+    row. Operates on the RAW dict, reaching ``started_at`` directly rather
+    than through the already-collapsed ``age_secs``."""
+    ts = w.get("last_resumed_at") or (
+        w.get("completed_at") if w.get("status") == "finalized"
+        else w.get("started_at")
+    )
+    return _age(ts)
 
 
 def time_fields(w):
@@ -507,7 +482,6 @@ def time_fields(w):
         ),
         "age_secs": _age_secs(w),
         "used": _last_active_display(w),
-        "used_at": _last_active_timestamp(w),
     }
 
 
@@ -616,9 +590,16 @@ BUCKET_REASON = {
 }
 
 
-#: Client-side ordering for every section; USED is recency, not creation age.
+#: (label, key_fn) pairs the Worktrees list's `s` cycles through (#2228
+#: Phase 4). "age" (default, index 0 so cycling always starts from the
+#: familiar order) is every section's own most-recently-used-first order
+#: (``_last_active_secs``, #3307 Phase 3) -- NOT raw creation age, since
+#: ``current_list_visible()`` applies this key unconditionally to every
+#: render (not just an operator-engaged "/" cycle), so it IS the section's
+#: at-rest order, and ``bucket()``'s own internal per-section sort is
+#: otherwise immediately overridden by it.
 WT_SORT_KEYS = [
-    ("used", _last_active_secs),
+    ("age", _last_active_secs),
     ("title", lambda w: (w.get("title") or "").casefold()),
     ("state", lambda w: w.get("state") or ""),
 ]
@@ -812,9 +793,8 @@ def norm(
             and _state(w, relation_label) != "ACTIVE"
             and w.get("dirty") == 0 and w.get("ahead") == 0
         ),
-        "attached": bool(w.get("mux_attached")) and not _mux_observation_unknown(w),
-        "mux_live": bool(w.get("mux_session") or w.get("mux_attached")) and not _mux_observation_unknown(w),
-        "mux_observation_unknown": _mux_observation_unknown(w),
+        "attached": bool(w.get("mux_attached")),
+        "mux_live": bool(w.get("mux_session") or w.get("mux_attached")),
         "active": w.get("status") == "active",
         # two-step-restore: the most-recent session id (shown in the row
         # sub-menu so the operator can ``/resume`` it), and whether a live

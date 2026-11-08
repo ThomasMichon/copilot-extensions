@@ -9,10 +9,6 @@ from datetime import datetime, timedelta
 
 CAPABILITY = "worktree-agendas-v1"
 V2_CAPABILITY = "worktree-agendas-v2"
-GRAPH_CAPABILITY = "worktree-agendas-graph-v1"
-GRAPH_VERSIONS = (1,)
-GRAPH_FRAME_STATES = frozenset({"active", "deferred", "closed", "idle"})
-GRAPH_ITEM_STATES = frozenset({"done", "queued", "running", "replanning", "waiting", "closed"})
 CONTRACT_VERSIONS = (1, 2)
 BODY_BYTES = 32 * 1024
 FRAME_BYTES = 35 * 1024
@@ -144,23 +140,11 @@ def exact(value, fields) -> None:
         raise AgendaError("invalid agenda fields")
 
 
-def graph_requested(payload) -> bool:
-    """Whether a request opted in to the optional display graph (contract v2 only)."""
-    return isinstance(payload, dict) and payload.get("graph") in GRAPH_VERSIONS
-
-
 def selection(payload: dict) -> tuple[str, str, str | None]:
     from . import config as cfg
 
-    fields = {"contract_version", "project", "worktree_id", "session_id"}
-    if isinstance(payload, dict) and "graph" in payload:
-        fields.add("graph")
-    exact(payload, fields)
-    version = contract_version(payload["contract_version"])
-    if "graph" in payload and (
-        version != 2 or type(payload["graph"]) is not int or payload["graph"] not in GRAPH_VERSIONS
-    ):
-        raise AgendaError("unsupported agenda graph version")
+    exact(payload, {"contract_version", "project", "worktree_id", "session_id"})
+    contract_version(payload["contract_version"])
     project = identity(payload["project"], "project")
     if cfg._PROJECT_NAME_RE.fullmatch(project) is None:
         raise AgendaError("invalid project")
@@ -193,92 +177,9 @@ def _revisit_timestamp(value) -> None:
         raise AgendaError("next revisit timestamp must include a timezone")
 
 
-def _text(value, name: str, *, optional: bool = False) -> None:
-    if value is None and optional:
-        return
-    if not isinstance(value, str) or not value:
-        raise AgendaError(f"invalid agenda graph {name}")
-
-
-def _member(value, known) -> bool:
-    # Only strings can name a state or reference; containers must not reach hash lookups.
-    return isinstance(value, str) and value in known
-
-
-def _count(value, name: str) -> None:
-    if type(value) is not int or not 0 <= value <= MAX_SEQUENCE:
-        raise AgendaError(f"invalid agenda graph {name}")
-
-
-def graph(value, revision: int) -> None:
-    """Validate the optional display graph: frame tree, item queues, stack, cursor, history."""
-    exact(value, {"version", "revision", "cursor", "frames", "items", "history", "omitted"})
-    if type(value["version"]) is not int or value["version"] not in GRAPH_VERSIONS:
-        raise AgendaError("unsupported agenda graph version")
-    if value["revision"] != revision or type(value["revision"]) is not int:
-        raise AgendaError("agenda graph revision mismatch")
-    frames, items, history = value["frames"], value["items"], value["history"]
-    if not all(isinstance(entry, list) for entry in (frames, items, history)):
-        raise AgendaError("invalid agenda graph collections")
-    known: dict[str, dict] = {}
-    for frame in frames:
-        exact(frame, {"id", "parent", "via", "state", "label", "returns"})
-        _text(frame["id"], "frame id")
-        if frame["id"] in known:
-            raise AgendaError("duplicate agenda graph frame")
-        _text(frame["label"], "frame label")
-        if not _member(frame["state"], GRAPH_FRAME_STATES):
-            raise AgendaError("invalid agenda graph frame state")
-        root = frame["parent"] is None
-        if root != (frame["via"] is None) or root != (frame["returns"] is None):
-            raise AgendaError("agenda graph root and child links disagree")
-        if not root:
-            if not _member(frame["parent"], known):
-                raise AgendaError("agenda graph frame precedes or lacks its parent")
-            _text(frame["via"], "expanding item")
-            _text(frame["returns"], "return action")
-        known[frame["id"]] = frame
-    seen: dict[str, str] = {}
-    for item in items:
-        exact(item, {"id", "frame", "label", "state", "attempts"})
-        _text(item["id"], "item id")
-        _text(item["label"], "item label")
-        if item["id"] in seen or not _member(item["frame"], known):
-            raise AgendaError("agenda graph item is duplicated or orphaned")
-        if not _member(item["state"], GRAPH_ITEM_STATES):
-            raise AgendaError("invalid agenda graph item state")
-        _count(item["attempts"], "attempt count")
-        seen[item["id"]] = item["frame"]
-    cursor = value["cursor"]
-    exact(cursor, {"frame", "item", "stack"})
-    stack = cursor["stack"]
-    if not isinstance(stack, list) or any(not _member(frame, known) for frame in stack):
-        raise AgendaError("agenda graph stack names an unknown frame")
-    if (cursor["frame"] is None) != (not stack) or (stack and cursor["frame"] != stack[-1]):
-        raise AgendaError("agenda graph cursor is not the top of the stack")
-    if cursor["item"] is not None and (
-        not _member(cursor["item"], seen) or seen[cursor["item"]] != cursor["frame"]
-    ):
-        raise AgendaError("agenda graph cursor names an omitted or other-frame item")
-    for entry in history:
-        exact(entry, {"at", "kind", "frame", "item", "text"})
-        _utc(entry["at"], "agenda graph history")
-        _text(entry["kind"], "history kind")
-        _text(entry["text"], "history text")
-        _text(entry["frame"], "history frame", optional=True)
-        _text(entry["item"], "history item", optional=True)
-    omitted = value["omitted"]
-    exact(omitted, {"frames", "items", "history"})
-    for key in ("frames", "items", "history"):
-        _count(omitted[key], f"omitted {key}")
-
-
 def observation(body: dict, *, version: int | None = None) -> str:
     bounded(body, depth=4)
-    fields = {"schema", "version", "source", "revision", "committed_at", "snapshot"}
-    if isinstance(body, dict) and "graph" in body and body.get("version") == 2:
-        fields.add("graph")
-    exact(body, fields)
+    exact(body, {"schema", "version", "source", "revision", "committed_at", "snapshot"})
     if body["schema"] != "efforts.agenda-observation" or (
         type(body["version"]) is not int or body["version"] not in (1, 2)
     ):
@@ -328,21 +229,10 @@ def observation(body: dict, *, version: int | None = None) -> str:
             raise AgendaError(f"invalid snapshot {field}")
     if snapshot["next_revisit_at"] is not None:
         _revisit_timestamp(snapshot["next_revisit_at"])
-    if "graph" in body:
-        graph(body["graph"], revision)
     encoded = encode(body, BODY_BYTES)
     if version is not None and contract_version(version) == 1 and body["version"] != 1:
         raise AgendaError("cursor-4 observation requires worktree-agendas-v2", "unsupported")
     return encoded
-
-
-def revision_identity(body: dict) -> str:
-    """Canonical committed-revision identity, excluding the negotiated display graph.
-
-    The graph is a deterministic projection of the same revision; a peer may receive it
-    or not depending on capabilities, so it must not split one revision into two.
-    """
-    return observation({key: value for key, value in body.items() if key != "graph"})
 
 
 def validate_reply(result: dict, request: dict, generation: str) -> dict:
@@ -373,8 +263,6 @@ def validate_reply(result: dict, request: dict, generation: str) -> dict:
         raise AgendaError("invalid agenda availability", "invalid-response")
     if availability == "observed":
         observation(body, version=version)
-        if "graph" in body and not graph_requested(request):
-            raise AgendaError("agenda graph was not requested", "invalid-response")
         if body["source"]["worktree"] != request["worktree_id"] or (
             body["source"]["session"] != request["session_id"] or request["session_id"] is None
         ):

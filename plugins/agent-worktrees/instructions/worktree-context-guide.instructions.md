@@ -52,16 +52,6 @@ registered home. Instead:
 
 Unregistered? Fix the registry or ask the operator.
 
-## Keep anchor checkouts clean
-
-An anchor is shared infrastructure: creation starts from it and fast-forwards
-it only when clean on its default branch. Read it freely; never edit,
-generate, build, stage or leave files there -- use
-`agent-worktrees -p <name> create --json`. To recover a dirty, ahead,
-diverged or off-default anchor, follow the `worktree` skill's
-`references/anchor-recovery.md`; never discard anything there without
-operator approval.
-
 ## Diagnosing across entities (worktree, session, task, bridge, ...)
 
 To resolve a chain from a session/worktree/task id, read the suite-wide

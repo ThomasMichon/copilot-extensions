@@ -1,7 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $env:PYTHONUTF8 = '1'
 $forwardArgs = @($args)
-$configurationEntry = $forwardArgs.Count -gt 0 -and $forwardArgs[0] -ceq 'installation-configuration'
 
 $payloadRoot = [Environment]::GetEnvironmentVariable(
     'AGENT_MACHINES_PAYLOAD_ROOT',
@@ -174,8 +173,7 @@ if (-not $hostExe) {
 function Resolve-AgentMachinesRuntime {
     $AgentRtPy = $null
     $env:AGENT_RT_ROOT = $runtimeRoot
-    if ($configurationEntry) { . $runtimeResolver -TraceMode read-only }
-    else { . $runtimeResolver }
+    . $runtimeResolver
     return $AgentRtPy
 }
 
@@ -355,12 +353,6 @@ function Invoke-AgentMachinesInstaller([string]$InstallerPath, [string]$Action) 
 
 $python = Resolve-AgentMachinesRuntime
 if ($python) { Invoke-AgentMachinesRuntime $python }
-if ($configurationEntry) {
-    [Console]::Error.WriteLine(
-        '[agent-machines] Configuration requires an already provisioned runtime; use the native setup owner.'
-    )
-    exit 1
-}
 if ($env:AGENT_MACHINES_NO_SELFPROVISION) {
     [Console]::Error.WriteLine(
         '[agent-machines] runtime not provisioned ' +

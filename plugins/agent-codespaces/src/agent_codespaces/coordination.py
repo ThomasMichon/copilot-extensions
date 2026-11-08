@@ -42,8 +42,6 @@ _EXIT_OK = 0
 _EXIT_CONFLICT = 3  # LeaseConflict / LeaseLost
 _EXIT_COORDINATION_REJECTED = 5
 _PREFLIGHT_VERSION = 1
-RELEASED_ONLY_CAPABILITY = "lease-acquire-released-only-v1"
-RETURN_PROOF_CAPABILITY = "lease-return-proof-v1"
 _PREFLIGHT_REJECTION_CODES = frozenset({
     "knowledge_binding_required",
     "state_root_resolution_failed",
@@ -114,7 +112,6 @@ class PreflightResult:
     status: str
     code: str = ""
     detail: str = ""
-    capabilities: frozenset[str] = frozenset()
 
     @property
     def ready(self) -> bool:
@@ -145,7 +142,6 @@ class L2Lease:
     live: bool
     expires_at: str = ""
     token: str = ""
-    state: str = ""
 
 
 def _aw() -> str | None:
@@ -249,11 +245,7 @@ def preflight(holder_ref: str) -> PreflightResult:
                 "rejected", code="context-refused", detail="Same-cell readiness probe failed",
             )
         return PreflightResult("absent", detail="preflight output is not JSON")
-    if (
-        not isinstance(payload, dict)
-        or type(payload.get("version")) is not int
-        or payload.get("version") != _PREFLIGHT_VERSION
-    ):
+    if not isinstance(payload, dict) or payload.get("version") != _PREFLIGHT_VERSION:
         if explicit_context() and proc.returncode != _EXIT_OK:
             return PreflightResult(
                 "rejected", code="context-refused", detail="Same-cell readiness probe failed",
@@ -265,14 +257,7 @@ def preflight(holder_ref: str) -> PreflightResult:
     code = payload.get("code")
     error = payload.get("error")
     if ready is True and code == "ready" and proc.returncode == _EXIT_OK:
-        capabilities = payload.get("capabilities")
-        supported = (
-            frozenset(capabilities)
-            if isinstance(capabilities, list)
-            and all(isinstance(value, str) for value in capabilities)
-            else frozenset()
-        )
-        return PreflightResult("ready", code="ready", capabilities=supported)
+        return PreflightResult("ready", code="ready")
     if (
         ready is False
         and code in _PREFLIGHT_REJECTION_CODES
@@ -298,33 +283,7 @@ def _bookkeeping_run(args: list[str]) -> subprocess.CompletedProcess[str] | None
         return None
 
 
-def _confirmed_bookkeeping(proc, holder_ref: str, ref: str, **expected) -> bool:
-    try:
-        payload = json.loads(proc.stdout)
-    except (TypeError, ValueError):
-        return False
-    if not isinstance(payload, dict):
-        return False
-    history = payload.get("released_by_earlier_finalize", [])
-    if not isinstance(history, list) or any(
-        not isinstance(item, dict)
-        or not isinstance(item.get("kind"), str) or not item["kind"]
-        or not isinstance(item.get("ref"), str) or not item["ref"]
-        or not isinstance(item.get("note", ""), str)
-        for item in history
-    ):
-        return False
-    parts = holder_ref.split("#", 1)[0].split("/")
-    return (
-        len(parts) == 3 and all(parts) and not payload.get("deferred")
-        and payload.get("worktree_id") == parts[2] and payload.get("ref") == ref
-        and all(payload.get(key) == value for key, value in expected.items())
-    )
-
-
-def journal_claim(
-    kind: str, ref: str, holder_ref: str | None, *, confirmed: bool = False,
-) -> bool:
+def journal_claim(kind: str, ref: str, holder_ref: str | None) -> bool:
     """Journal any existing agent-worktrees claim kind onto ``holder_ref``.
 
     Best-effort + degrade-safe, matching :func:`journal_obligation`: no
@@ -343,14 +302,10 @@ def journal_claim(
         log.debug("claims add %s %s degraded (exit %s): %s",
                   kind, ref, proc.returncode, (proc.stderr or "").strip())
         return False
-    return not confirmed or _confirmed_bookkeeping(
-        proc, holder_ref, ref, kind=kind, state="active",
-    )
+    return True
 
 
-def journal_obligation(
-    name: str, holder_ref: str | None, *, confirmed: bool = False,
-) -> bool:
+def journal_obligation(name: str, holder_ref: str | None) -> bool:
     """Journal a CodeSpace obligation onto the BORROWING worktree's ledger.
 
     On borrow, shells ``agent-worktrees claims add codespace <name> --owner-ref
@@ -364,11 +319,11 @@ def journal_obligation(
     (deferred to the lease mirror), or any error -> ``False`` (never raises,
     never blocks the connect). Idempotent (``claims add`` dedups by ref).
     """
-    return journal_claim(KIND, name, holder_ref, confirmed=confirmed)
+    return journal_claim(KIND, name, holder_ref)
 
 
 def settle_obligation(
-    name: str, holder_ref: str | None, *, released: bool = False, confirmed: bool = False,
+    name: str, holder_ref: str | None, *, released: bool = False,
 ) -> bool:
     """Settle the borrowing worktree's CodeSpace obligation to ``at-rest``.
 
@@ -391,9 +346,7 @@ def settle_obligation(
         log.debug("claims settle for %s degraded (exit %s): %s",
                   name, proc.returncode, (proc.stderr or "").strip())
         return False
-    return not confirmed or _confirmed_bookkeeping(
-        proc, holder_ref, name, disposition="released" if released else "at-rest",
-    )
+    return True
 
 
 def mirror_disposition(
@@ -458,8 +411,7 @@ def _parse_token(proc: subprocess.CompletedProcess[str]) -> str:
         data = json.loads(proc.stdout)
     except (ValueError, TypeError):
         return ""
-    token = data.get("token") if isinstance(data, dict) else None
-    return token if isinstance(token, str) else ""
+    return str(data.get("token", "")) if isinstance(data, dict) else ""
 
 
 def inspect(key: str, *, origin: str | None = None) -> dict | None:
@@ -480,7 +432,7 @@ def inspect(key: str, *, origin: str | None = None) -> dict | None:
 
 
 def list_leases(
-    *, kind: str = KIND, origin: str | None = None, strict: bool = False,
+    *, kind: str = KIND, origin: str | None = None
 ) -> dict[str, L2Lease] | None:
     """Read every cross-machine L2 lease of a kind, keyed by resource key.
 
@@ -504,23 +456,9 @@ def list_leases(
     result: dict[str, L2Lease] = {}
     for rec in data:
         if not isinstance(rec, dict):
-            if strict:
-                return None
             continue
         res = rec.get("resource")
         key = str(res.get("key", "")) if isinstance(res, dict) else ""
-        if strict and (
-            not isinstance(res, dict)
-            or not isinstance(res.get("key"), str) or not key or key in result
-            or res.get("kind") != kind
-            or not isinstance(rec.get("state"), str)
-            or rec.get("state") not in {"leased", "released"}
-            or type(rec.get("live")) is not bool
-            or not isinstance(rec.get("holder"), str) or not rec["holder"]
-            or not isinstance(rec.get("token"), str) or not rec["token"]
-            or (rec["state"] == "released" and rec["live"])
-        ):
-            return None
         if not key:
             continue
         result[key] = L2Lease(
@@ -529,21 +467,8 @@ def list_leases(
             live=bool(rec.get("live", False)),
             expires_at=str(rec.get("expires_at", "")),
             token=str(rec.get("token", "")),
-            state=str(rec.get("state", "")),
         )
     return result
-
-
-def _lease_conflict(key: str, proc, origin: str | None) -> L2Result:
-    record = inspect(key, origin=origin)
-    held = record if record and record.get("state") == "leased" and record.get("live") is not False else {}
-    token = held.get("token", "")
-    if not isinstance(token, str) or len(token) not in (40, 64) or any(c not in "0123456789abcdef" for c in token):
-        token = ""
-    return L2Result(
-        "conflict", holder=str(held.get("holder", "")), token=token,
-        detail=(proc.stderr or "").strip(),
-    )
 
 
 def acquire(
@@ -552,24 +477,13 @@ def acquire(
     *,
     ttl: int | None = DEFAULT_L2_TTL,
     origin: str | None = None,
-    released_only: bool = False,
-    preflight_result: PreflightResult | None = None,
 ) -> L2Result:
     """Attempt an atomic cross-machine acquire of the CodeSpace lease.
 
     Returns ``ok``, ``conflict``, ``rejected`` (binding unavailable), or
     ``unavailable`` (optional peer not wired/reachable).
     """
-    if released_only:
-        readiness = preflight_result or preflight(holder)
-        if not readiness.ready or RELEASED_ONLY_CAPABILITY not in readiness.capabilities:
-            return L2Result(
-                "rejected",
-                detail=readiness.detail or "Selected lease receiver does not support released-only acquisition",
-            )
     args = ["lease", "acquire", KIND, key, "--holder", holder]
-    if released_only:
-        args.append("--released-only")
     if ttl is not None:
         args += ["--ttl", str(ttl)]
     if origin:
@@ -578,14 +492,11 @@ def acquire(
     if proc is None:
         return L2Result("unavailable", detail="agent-worktrees lease not available")
     if proc.returncode == _EXIT_OK:
-        token = _parse_token(proc)
-        if released_only and (
-            len(token) not in (40, 64) or any(character not in "0123456789abcdef" for character in token)
-        ):
-            return L2Result("unavailable", detail="Receiver did not confirm a valid fencing token")
-        return L2Result("ok", token=token)
+        return L2Result("ok", token=_parse_token(proc))
     if proc.returncode == _EXIT_CONFLICT:
-        return _lease_conflict(key, proc, origin)
+        rec = inspect(key, origin=origin)
+        holder_of = str(rec.get("holder", "")) if rec else ""
+        return L2Result("conflict", holder=holder_of, detail=(proc.stderr or "").strip())
     if proc.returncode == _EXIT_COORDINATION_REJECTED:
         try:
             payload = json.loads(proc.stderr)
@@ -621,25 +532,15 @@ def renew(
     if proc.returncode == _EXIT_OK:
         return L2Result("ok", token=_parse_token(proc))
     if proc.returncode == _EXIT_CONFLICT:
-        return _lease_conflict(key, proc, origin)
+        return L2Result("conflict", detail=(proc.stderr or "").strip())
     return L2Result("unavailable", detail=(proc.stderr or "").strip())
 
 
-def release(
-    key: str, token: str, *, origin: str | None = None,
-    retain_return_proof: bool = False, preflight_result: PreflightResult | None = None,
-) -> L2Result:
+def release(key: str, token: str, *, origin: str | None = None) -> L2Result:
     """Release (tombstone) the L2 lease with its current token; best-effort."""
     if not token:
         return L2Result("unavailable", detail="no L2 token")
-    if retain_return_proof and (
-        preflight_result is None or not preflight_result.ready
-        or RETURN_PROOF_CAPABILITY not in preflight_result.capabilities
-    ):
-        return L2Result("rejected", detail="Selected lease receiver has not confirmed return-proof support")
     args = ["lease", "release", KIND, key, "--token", token]
-    if retain_return_proof:
-        args.append("--retain-return-proof")
     if origin:
         args += ["--origin", origin]
     proc = _run(args)

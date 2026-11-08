@@ -498,7 +498,6 @@ Copilot CLI session
 - [references/pr-attribution.md](references/pr-attribution.md) -- identifying a PR's source worktree from the marker (reviewer/maintainer perspective, not the author's)
 - [references/obligations.md](references/obligations.md) -- finalize's outbound-resource obligation gate
 - [references/cleanup-details.md](references/cleanup-details.md) -- per-worktree dirty resolution and cleanup safety guarantees
-- [references/anchor-recovery.md](references/anchor-recovery.md) -- restoring a dirty, ahead, diverged or off-default anchor without losing work
 - [references/fleet-sweep.md](references/fleet-sweep.md) -- investigating a fleet-wide backlog of stale/`active` worktrees (claims release + session-content verification)
 - [references/leases.md](references/leases.md) -- the resource-lease primitive
 - [references/reference.md](references/reference.md) -- payload-command resolution, cross-machine inspection, finalization merge mechanics, session detection, titles
