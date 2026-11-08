@@ -341,7 +341,7 @@ class PickerScreenInputMixin:
                 self.executor = None
                 self.debug = f"{p['verb'].lower()} cancelled · 0 worktrees"
             return
-        if p.get("op") == "sync" and p["done"]:
+        if p.get("op") in ("sync", "finalize") and p["done"]:
             last = max(0, len(p["items"]) - 3)
             top = p.get("result_top", 0)
             offsets = {"up": -1, "down": 1, "pageup": -3, "pagedown": 3}
