@@ -1259,6 +1259,17 @@ retirement removal) and mux lifecycle changes (a managed-mux session's live or
 attached-client change, or a registered session vanishing from the mux listing)
 wake the resident and republish the affected project on the next sweep without
 renewing its demand.
+These events reuse the existing push wake, whose single flag coalesces a burst
+into at most one immediate follow-up sweep. Changed paths are deduplicated, up
+to 256 per sweep; an overflow or an unresolvable path republishes every project
+the resident has published rather than growing a queue. Resolving a path uses
+only in-memory caches and the projects registry (no Git or subprocess). Each
+affected project is then published at most once per sweep through the same
+sequential, project-locked path as a demand-driven publication, with the same
+cost and governance re-check before each project. While the resident drains or
+is superseded, it drops events and refuses publications; a successor vouches
+only for its own publications, so a project whose event was dropped at cutover
+reads stale until it is republished.
 A resident that predates the marker rejects it as an invalid request; the
 passive read then also returns the labeled saved roster, never a demand read. It
 cannot be combined with `--follow`, `--glance` or `--refresh`, and the feed
