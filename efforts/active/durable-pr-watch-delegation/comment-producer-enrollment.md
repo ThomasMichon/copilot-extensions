@@ -310,6 +310,60 @@ capability selection and provider rollback; and refusal of submission even
 when a valid prepared preview exists. Preparation-only proof closes only that
 finite source leaf, not normal protected submission or all-publisher adoption.
 
+#### Canonical helper delivery and native source discovery
+
+The next **agent-recommended, review-first source prerequisite** separates
+independently installed preparation from test-only script imports. Keep the
+attribution plugin payload-only. Deliver its canonical profile/preparation
+implementation as self-contained service package assets through the existing
+explicit build/resource and packaged-asset owners, not a second preparer or a
+new attribution runtime. A declaration used only by release materialization
+does not make an ordinary development wheel build complete.
+
+Keep the direct wheel, sdist rebuild, development test snapshot and release
+artifact input closures consistent. Include only the selected canonical
+helpers and required notices; retain byte-identical source ownership rather
+than hand-maintained copies. Package-local imports must not depend on sibling
+plugin installation, an ambient top-level module, a checkout on `sys.path` or
+global import-path mutation. Preserve the existing direct-script use of the
+attribution helpers. The service's Python dependencies must not select or
+replace its separately selected native Worktrees installation.
+
+Expand the existing native `attribution-prepare` comment-origin operation
+provider-first. Add an explicitly selected absolute producer root resolved by
+the current exact-root source owner, plus versioned no-effect discovery from
+the actual executing installation. Discovery must require neither a managed
+CWD nor source/profile resolution, credentials or forge access. It does not
+allocate identity, prepare a body or grant publication authority. Preserve the
+existing PR-body and CWD-based comment-origin callers and their meanings.
+
+The later host consumer selects the immutable native invocation and its
+trusted configuration, resolves supported behavior once for that selected
+generation, and requests origin for the actual producer root before the
+replay transaction. It must not import Worktrees into the service, select a
+command through `PATH`, or fall back to the service CWD, an enclosing tracked
+root, the PR author or remote source labels. Missing/ambiguous managed mapping,
+privacy refusal or source withdrawal refuses new preparation. Retain the
+current finite captured-output, deadline, cancellation and cleanup owners;
+no external command runs while the replay lock is held.
+
+Old parsers may reject the new optional selection/discovery form. Treat that
+as unsupported preparation, not permission to guess support or retry a
+different identity path. Old commands remain usable, and a provider rollback
+disables only the unsupported optional route without changing original-preview
+recovery or storage. Deliver and qualify this provider before adding the
+strict host option that consumes it.
+
+Focused source controls must build and consume the real wheel outside a
+checkout, rebuild its sdist without canonical siblings, compare the selected
+helper bytes, and reject ambient-module substitution. Exercise actual native
+parsing/discovery with no source CWD, unique exact-root resolution, ambiguous/
+wrong roots, privacy failure, unchanged old calls, missing/prior providers and
+rollback. Prove no credential acquisition, forge call, allocation or write
+during discovery/origin resolution. These packaging/provider exits precede
+normal-host qualification; they do not prove installed enrollment, protected
+submission, all-publisher adoption or either parent's completion.
+
 ### Remaining writer and host qualification
 
 1. Review this enrollment contract before changing normal-host behavior.

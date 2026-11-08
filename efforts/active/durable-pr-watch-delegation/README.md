@@ -402,8 +402,12 @@ _Operator-required outcome; agent-recommended slices and validation._
   through the existing allocation and trusted source/profile owners (#11471).
   Retain exact selection contracts and original previews without a writer;
   submission remains independently unavailable.
-- [ ] Supply actual source/profile packaging and explicitly selected
-  standalone preparation-only hosting. Qualify the executing provider before
+- [ ] Deliver the [canonical helper and native source-discovery prerequisites](comment-producer-enrollment.md#canonical-helper-delivery-and-native-source-discovery)
+  before expanding strict standalone configuration. Direct wheel/sdist/release
+  delivery and actual executing exact-root discovery are separate from
+  fixture imports or installed enrollment.
+- [ ] Supply explicitly selected standalone preparation-only hosting using
+  those actual source/profile dependencies. Qualify the executing provider before
   advertising support; no preview verifies protected-source grants or
   closes writer enrollment.
 - [ ] Deliver the actual protected write-owner prerequisite through its
@@ -970,6 +974,10 @@ or silently expanding a bounded source claim.
   recovery with the actual preparer, zero protected acquisitions/sends,
   independent submission refusal, unchanged writer/default behavior and
   current/prior receiver rollback (#11471; 107 coupled source cases).
+- [ ] Qualify the [canonical helper delivery and native discovery controls](comment-producer-enrollment.md#canonical-helper-delivery-and-native-source-discovery):
+  outside-checkout wheel consumption, sibling-free sdist rebuild, canonical
+  bytes/import isolation and actual exact-root current/prior parser/discovery
+  refusal, with no credential or forge effects.
 - [ ] Verify actual executing source/profile packaging and the strict
   current/prior standalone-host configuration/process seam before
   preparation-only hosting is advertised. Preserve the separately open
