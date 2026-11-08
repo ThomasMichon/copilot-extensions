@@ -1092,14 +1092,14 @@ def _load_versioned_runtime(payload_root: Path):
     )
 
 
-def _reconcile_installer_instances() -> None:
+def _reconcile_installer_instances(runtime_root: Path) -> None:
     source = Path(__file__).with_name("installer_instance_reconcile.py")
     spec = importlib.util.spec_from_file_location("cell_installer_reconcile", source)
     if spec is None or spec.loader is None:
         raise CellError("installer reconciliation adapter cannot be loaded")
     component = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(component)
-    component.reconcile_installer_instances(source.parent)
+    component.reconcile_installer_instances(source.parent, runtime_root=runtime_root)
 
 
 def _install_runtime_dependency(
@@ -4300,10 +4300,10 @@ def provision(args: argparse.Namespace, payload_root: Path) -> dict[str, Any]:
                 payload_root, *context_identity, validated, lock_token, pending,
             )
             if result["status"] == "ready":
-                _reconcile_installer_instances()
+                _reconcile_installer_instances(plugin_root)
             return result
         _governance_mode(status, operation="cell-provision")
-        _reconcile_installer_instances()
+        _reconcile_installer_instances(plugin_root)
         return _provision_locked(
             payload_root, origin_payload_root, *context_identity,
             version, validated, lock_token,

@@ -10,13 +10,16 @@ import sys
 
 
 def reconcile_installer_instances(
-    helper_root: Path, *, registry_root: Path | None = None,
+    helper_root: Path, *, registry_root: Path | None = None, runtime_root: Path | None = None,
 ) -> bool:
     """Use this adapter's wrapper and the caller's explicit native binding root."""
     if registry_root is None and (
         os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") == "1"
         or os.environ.get("PYTEST_CURRENT_TEST")
     ):
+        return True
+    if runtime_root is None:
+        print("[installer-instance-gc] deferred: runtime-scope-unavailable", file=sys.stderr)
         return True
     try:
         adapter_root = Path(__file__).resolve().parent
@@ -27,7 +30,7 @@ def reconcile_installer_instances(
                 return "'" + str(value).replace("'", "''") + "'"
             command = (
                 f". {quote(helper)}; Invoke-InstallerInstanceReconcile "
-                f"-HelperRoot {quote(helper_root)}"
+                f"-HelperRoot {quote(helper_root)} -RuntimeRoot {quote(runtime_root)}"
             )
             if registry_root is not None:
                 command += f" -RegistryRoot {quote(registry_root)}"
@@ -38,9 +41,10 @@ def reconcile_installer_instances(
                 raise RuntimeError("Native installer reconciliation requires Bash")
             helper = adapter_root / "installer-instance-reconcile.sh"
             argv = [
-                shell, "-c", '. "$1"; reconcile_installer_instances "$2" "$3"',
+                shell, "-c", '. "$1"; reconcile_installer_instances "$2" "$3" "$4"',
                 "installer-instance-reconcile", str(helper), str(helper_root),
                 str(registry_root) if registry_root is not None else "",
+                str(runtime_root),
             ]
         if helper.is_symlink() or not helper.is_file():
             raise FileNotFoundError("The installer adapter's own native wrapper is unavailable")

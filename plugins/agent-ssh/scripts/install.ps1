@@ -1116,7 +1116,7 @@ try {
 Assert-SourceRuntimeIdentity
 if ($Action -in @('install', 'update', 'provision') -and -not $DryRun) {
     . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
-    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot -RuntimeRoot $InstallDir
 }
 if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
 

@@ -4820,7 +4820,7 @@ if ($Action -in @('install', 'update', 'provision', 'stamp', 'prepare')) {
 }
 if ($Action -in @('install', 'update', 'provision') -and -not $PreserveSupervisors) {
     . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
-    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot -RuntimeRoot $InstallDir
 }
 switch ($Action) {
     'install'   { Invoke-Install }

@@ -307,6 +307,12 @@ and its acknowledged `COMPLETED` closure after the three standing final checks.
 Four other admitted contracts remain independent and #11600 stays metadata-only.
 The later census is 852 whole OPEN, 123 above fixed 729, with 1,043 audited
 dispositions; no campaign completion checkbox changes.
+The first source follow-through keeps the two installer-fixture reports related
+but distinct, retains #11595's unresolved managed caller boundary, and credits
+only the older #11601 loader candidate actually inspected. Its newer OPEN PR
+head is not qualified delivery. Ten source attempts yield eight complete
+objects and two whole refusals, no implementation or closure. The later dated
+census remains 852 whole OPEN and 123 above target.
 
 The [fulfilled-request and bridge-identity checkpoint](<journal/2026/11.07 fulfilled-requests-and-bridge-identity.md>)
 records the campaign-wide standing completion-check approval, #11445's audited
@@ -3092,6 +3098,10 @@ The subsequent #11580 closure retains the complete six-source requirement
 crosswalk, successful final metadata checks and live acknowledgment readback.
 It authorizes no queue reconciliation, native absence attestation or custody
 transfer. The other inflow studies renew no source or roster allowance.
+The subsequent fixture/provider/loader studies distinguish complete inspected
+definitions from reported failures, withheld orchestration and a newer unstudied
+candidate head. Their closed source scopes and unchanged original allowances
+authorize no reproduction, transfer, closure or campaign completion.
 
 The [serving-owner and attribution-event study](<journal/2026/11.07 serving-owner-and-attribution-events.md>)
 distinguishes guarded source inspection, attributed native witness results,

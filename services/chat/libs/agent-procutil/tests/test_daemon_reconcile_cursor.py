@@ -88,12 +88,14 @@ def test_time_budget_resumes_past_every_visited_unknown_row(inventory, monkeypat
 
 
 @pytest.mark.parametrize("contents", [b"", b"garbage\n", b"copilot-daemon-reconcile-v1\nUPPER\n"])
-def test_bad_cursor_is_visible_and_untouched_even_empty(inventory, contents):
-    root, _, _ = inventory
-    marker = root / ".reconcile.cursor"
+@pytest.mark.parametrize("scoped", [False, True])
+def test_bad_cursor_is_visible_and_untouched_even_empty(inventory, contents, scoped):
+    root, template, _ = inventory
+    scope = Path(template["runtime_root"]) if scoped else None
+    marker = store._cursor_path(root, scope)
     marker.write_bytes(contents)
     with pytest.raises(ValueError):
-        store.reconcile(root, 128, 5)
+        store.reconcile(root, 128, 5, runtime_root=scope)
     assert marker.read_bytes() == contents
 
 
@@ -166,43 +168,50 @@ def test_concurrent_collectors_do_not_regress_cursor(inventory, monkeypatch):
     os.name != "nt" or os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1",
     reason="actual Windows binding parity requires canonical containment",
 )
-def test_python_powershell_share_cursor_and_unknown_row_progress(inventory):
+@pytest.mark.parametrize("scoped", [False, True])
+def test_python_powershell_share_cursor_and_unknown_row_progress(inventory, scoped):
     import agent_procutil
     from agent_procutil import no_window_kwargs
 
-    root, _, populate = inventory
+    root, template, populate = inventory
+    scope = Path(template["runtime_root"]) if scoped else None
+    options = f" -RuntimeRoot '{scope}'" if scoped else ""
     paths = populate(4)
     paths[2].write_text("unknown owned record")
     helper = Path(agent_procutil.__file__).parent / "daemon_instances.ps1"
     shell = Path(os.environ["SystemRoot"]) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
-    store.reconcile(root, 1, 5)
-    assert store._read_cursor(root) == paths[0].stem
+    store.reconcile(root, 1, 5, runtime_root=scope)
+    assert store._read_cursor(root, scope) == paths[0].stem
     result = subprocess.run(
         [str(shell), "-NoProfile", "-NonInteractive", "-Command",
-         f"$ErrorActionPreference='Stop'; . '{helper}'; Invoke-DaemonInstanceReconcile -RegistryRoot '{root}' -Limit 1"],
+         f"$ErrorActionPreference='Stop'; . '{helper}'; Invoke-DaemonInstanceReconcile -RegistryRoot '{root}' -Limit 1{options}"],
         capture_output=True, text=True, timeout=10, **no_window_kwargs(),
     )
     assert result.returncode == 0, result.stderr
-    assert store._read_cursor(root) == paths[1].stem
-    assert store.reconcile(root, 1, 5)[0].status == "held"
-    assert store._read_cursor(root) == paths[2].stem
+    assert store._read_cursor(root, scope) == paths[1].stem
+    assert store.reconcile(root, 1, 5, runtime_root=scope)[0].status == "held"
+    assert store._read_cursor(root, scope) == paths[2].stem
     result = subprocess.run(
         [str(shell), "-NoProfile", "-NonInteractive", "-Command",
-         f"$ErrorActionPreference='Stop'; . '{helper}'; Invoke-DaemonInstanceReconcile -RegistryRoot '{root}' -Limit 1"],
+         f"$ErrorActionPreference='Stop'; . '{helper}'; Invoke-DaemonInstanceReconcile -RegistryRoot '{root}' -Limit 1{options}"],
         capture_output=True, text=True, timeout=10, **no_window_kwargs(),
     )
     assert result.returncode == 0, result.stderr
-    assert store._read_cursor(root) == paths[3].stem
+    assert store._read_cursor(root, scope) == paths[3].stem
+    if scoped:
+        assert not (root / ".reconcile.cursor").exists()
 
 
 @pytest.mark.skipif(
     sys.platform != "linux" or os.environ.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1",
     reason="actual Linux binding parity requires canonical containment",
 )
-def test_python_bash_share_bounded_progress_and_wrap(inventory):
+@pytest.mark.parametrize("scoped", [False, True])
+def test_python_bash_share_bounded_progress_and_wrap(inventory, scoped):
     import agent_procutil
 
-    root, _, populate = inventory
+    root, template, populate = inventory
+    scope = Path(template["runtime_root"]) if scoped else None
     paths = populate(130)
     paths[-1].write_text("unknown owned record")
     production = {path: path.read_bytes() for path in paths[:-1]}
@@ -210,23 +219,25 @@ def test_python_bash_share_bounded_progress_and_wrap(inventory):
 
     def collect(limit):
         return subprocess.run(
-            ["bash", "-c", 'source "$1"; reconcile_daemon_instances "$3" 5 "$2"',
-             "cursor-test", str(helper), str(root), str(limit)],
+            ["bash", "-c", 'source "$1"; reconcile_daemon_instances "$3" 5 "$2" "$4"',
+             "cursor-test", str(helper), str(root), str(limit), str(scope) if scoped else ""],
             capture_output=True, text=True, timeout=10,
         )
 
-    store.reconcile(root, 128, 5)
-    assert store._read_cursor(root) == paths[127].stem
+    store.reconcile(root, 128, 5, runtime_root=scope)
+    assert store._read_cursor(root, scope) == paths[127].stem
     result = collect(2)
     assert result.returncode == 0, result.stderr
     assert paths[-1].stem in result.stdout and "held" in result.stdout
-    assert store._read_cursor(root) == paths[-1].stem
+    assert store._read_cursor(root, scope) == paths[-1].stem
     result = collect(1)
     assert result.returncode == 0, result.stderr
-    assert store._read_cursor(root) == paths[0].stem
+    assert store._read_cursor(root, scope) == paths[0].stem
     assert all(path.read_bytes() == data for path, data in production.items())
-    assert store.reconcile(root, 1, 5) == []
-    assert store._read_cursor(root) == paths[1].stem
+    assert store.reconcile(root, 1, 5, runtime_root=scope) == []
+    assert store._read_cursor(root, scope) == paths[1].stem
+    if scoped:
+        assert not (root / ".reconcile.cursor").exists()
 
 
 @pytest.mark.skipif(
