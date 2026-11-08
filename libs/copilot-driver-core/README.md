@@ -70,6 +70,8 @@ snapshot within their finite budget; live positive rows use their own reads.
 Selected-namespace absence uses qualified registration identities while still
 covering every native server. The legacy name-only inventory API retains its
 ambiguity refusal for duplicate logical names across namespaces.
+Catalog discovery unions confirmed inventory identities with directory hints
+before namespace filtering, including registrations published between the reads.
 Stale, partial, unreadable, changed, malformed or timed-out observations remain unknown.
 Client counts come from client rows, not PSMux's boolean `session_attached`.
 

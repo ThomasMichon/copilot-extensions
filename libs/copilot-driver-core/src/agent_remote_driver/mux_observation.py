@@ -242,17 +242,21 @@ def list_psmux() -> dict[str, Observation] | None:
                     return None
                 if path.suffix not in {".port", ".key", ".sid", ".pid"}:
                     continue
-                name = path.stem
-                if prefix and name.startswith(prefix):
-                    names.add(name[len(prefix):])
-                elif not prefix and "__" not in name:
-                    names.add(name)
+                names.add(path.stem)
         except FileNotFoundError:
             pass
         from agent_remote_driver import mux_inventory
 
-        mux_inventory.observe(timeout=_remaining(deadline), data_dir=root, qualified=True)
-        return observe_psmux_many(sorted(names), timeout=_remaining(deadline))
+        names.update(mux_inventory.observe(
+            timeout=_remaining(deadline), data_dir=root, qualified=True,
+        ))
+        selected = []
+        for name in sorted(names):
+            if prefix and name.startswith(prefix):
+                selected.append(name[len(prefix):])
+            elif not prefix and "__" not in name:
+                selected.append(name)
+        return observe_psmux_many(selected, timeout=_remaining(deadline))
     except (OSError, ValueError, ObservationUnavailable):
         return None
 

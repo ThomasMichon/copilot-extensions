@@ -1,6 +1,6 @@
 """Exercise the native wire boundary against a private synthetic session."""
 
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 import io
 import json
 import os
@@ -128,6 +128,29 @@ def test_explicit_namespace_scopes_listing_and_keeps_logical_identity(tmp_path, 
     monkeypatch.setenv("COPILOT_DRIVER_PSMUX_NAMESPACE", "../invalid")
     assert mux.list_psmux() is None
     assert mux.observe_psmux("wt-fixture").status == "unknown"
+
+
+@pytest.mark.parametrize("namespace", ["", "private-fixture"])
+def test_catalog_includes_live_inventory_published_after_the_directory_scan(
+    tmp_path, monkeypatch, namespace,
+):
+    monkeypatch.setenv("PSMUX_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("COPILOT_DRIVER_PSMUX_NAMESPACE", namespace)
+    base = namespace + "__wt-fixture" if namespace else "wt-fixture"
+    with ExitStack() as endpoints:
+        def publish(**kwargs):
+            assert kwargs["qualified"] is True
+            assert not (tmp_path / (base + ".port")).exists()
+            endpoints.enter_context(native_endpoint(
+                tmp_path, (b"OK\n" + _PANE, b"OK\n" + _CLIENT, b"OK\n" + _IDENTITY),
+                namespace=namespace,
+            ))
+            return {base: 1, "unrelated__wt-other": 2}
+
+        monkeypatch.setattr(mux_inventory, "observe", publish)
+        observed = mux.list_psmux()
+    assert set(observed) == {"wt-fixture"}
+    assert observed["wt-fixture"].presence() and observed["wt-fixture"].clients == 1
 
 
 @pytest.mark.parametrize("response", [

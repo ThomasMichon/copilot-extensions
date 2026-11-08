@@ -151,6 +151,21 @@ implementation proof obligations, not claims that native qualification passed.
 
 ## Journal
 
+### 2026-11-08 - Close the catalog publication race
+
+- Candidate `63d4fef294` passed all eight native cases on PSMux 3.3.8
+  (86.71 seconds) and all eight on PSMux 3.4.0 (76.66 seconds), with required
+  CI green. The subsequent review confirmed the pane, recovery, namespace and
+  Finalize findings resolved.
+- Complete catalog discovery must include live identities confirmed after
+  its initial directory scan. It now unions the qualified inventory with
+  directory hints before namespace filtering, instead of discarding identities
+  published between those reads.
+- Regressions publish a real synthetic endpoint during inventory, after the
+  directory scan, in both default and explicit namespaces. All 29 focused
+  wire cases passed; unrelated namespaces remain excluded. Fresh native/CI
+  evidence and a passing review remain required for the new source.
+
 ### 2026-11-08 - Preserve pane, recovery and namespace boundaries
 
 - The final authenticated identity now names the current pane. Window-local
