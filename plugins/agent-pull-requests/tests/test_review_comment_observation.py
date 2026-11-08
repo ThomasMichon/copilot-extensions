@@ -107,6 +107,9 @@ def test_actual_native_receipt_and_cached_generation_survive_restart_without_io_
     ("actor", "conflict", "native_actor_changed"),
     ("missing-actor", "unavailable", "native_actor_missing"),
     ("system", "conflict", "native_comment_not_text"),
+    ("boolean-type", "conflict", "native_comment_not_text"),
+    ("float-type", "conflict", "native_comment_not_text"),
+    ("string-text", "correlated", "exact_prepared_content_at_retained_native_target"),
     ("parent", "conflict", "native_parent_changed"),
     ("content", "conflict", "native_content_changed"),
     ("duplicate-thread", "unavailable", "discussions_invalid"),
@@ -133,6 +136,12 @@ def test_current_divergence_never_replaces_original_confirmation_or_searches_tag
         comment.pop("author")
     elif change == "system":
         comment["commentType"] = 2
+    elif change == "boolean-type":
+        comment["commentType"] = True
+    elif change == "float-type":
+        comment["commentType"] = 1.0
+    elif change == "string-text":
+        comment["commentType"] = "text"
     elif change == "parent":
         comment["parentCommentId"] = 1
     elif change == "content":
