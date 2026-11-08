@@ -382,7 +382,7 @@ function Test-ManagedWorktreesSession {
             }
         }
         $frame = if ($PSVersionTable.PSVersion.Major -ge 6) {
-            ConvertTo-PreparedWorktreesJson -InputObject $query
+            ConvertTo-PreparedWorktreesJson -InputObject $query -Depth 2
         } else { ConvertTo-Json -InputObject $query -Compress }
         $python = Get-ManagedWorktreesPython
         if (-not $python) { return $false }

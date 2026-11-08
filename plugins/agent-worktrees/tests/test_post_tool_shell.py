@@ -1235,6 +1235,7 @@ def test_prepared_post_entry_baseline_comparison(prepared_read_event, shell, sam
     ("pwsh", False), ("pwsh", True), ("powershell.exe", False),
 ])
 def test_prepared_json_engine_retains_shell_semantics(tmp_path, shell, old_engine):
+    depth_count = 2 if shell == "pwsh" else 1
     from agent_procutil import no_window_kwargs
 
     executable = shutil.which(shell)
@@ -1273,7 +1274,7 @@ def test_prepared_json_engine_retains_shell_semantics(tmp_path, shell, old_engin
         "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false,$true)\n"
         f". '{managed}'\n"
         "function ConvertFrom-Json { throw 'JSON cmdlet initialization was requested' }\n"
-        f"$script:expectedFallbackCalls={len(inputs) * 2 if old_engine else 0}\n"
+        f"$script:expectedFallbackCalls={len(inputs) * depth_count if old_engine and shell == 'pwsh' else 0}\n"
         "$script:preparedJsonFallbackCalls=0\n"
         + r"""
 function ConvertTo-Json {
@@ -1315,7 +1316,7 @@ if ($script:preparedJsonFallbackCalls -ne $script:expectedFallbackCalls) {
     assert result.returncode == 0, result.stderr
     assert result.stderr == ""
     rows = [json.loads(line) for line in result.stdout.splitlines()]
-    assert len(rows) == len(inputs) * (4 if shell == "pwsh" else 2)
+    assert len(rows) == len(inputs) * depth_count * 2
     for actual, expected in zip(rows[::2], rows[1::2]):
         assert actual == expected
 

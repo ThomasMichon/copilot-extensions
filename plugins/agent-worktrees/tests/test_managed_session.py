@@ -710,6 +710,7 @@ def test_registered_pre_tool_entry_reuses_prepared_membership(tmp_path, monkeypa
     shutil.copyfile(SCRIPTS / "hook_policy_process.py", scripts / "hook_policy_process_original.py")
     (scripts / "hook_policy_process.py").write_text(
         "import base64,json,sys\nfrom pathlib import Path\n"
+        + "# Re-export the real admission helper's caller-lifetime watcher without executing policy on import.\n"
         + "from hook_policy_process_original import _watch_caller\n"
         + "if __name__ == '__main__':\n"
         + f"    with Path({str(observed)!r}).open('xb') as output: output.write(base64.b64decode(sys.stdin.readline()))\n"
@@ -1341,12 +1342,14 @@ def test_admission_query_serialization_cold_fallback(tmp_path, shell, old_engine
         original = "$frame = ConvertTo-Json -InputObject $query -Compress"
         candidate = (
             "$frame = if ($PSVersionTable.PSVersion.Major -ge 6) {\n"
-            "            ConvertTo-PreparedWorktreesJson -InputObject $query\n"
+            "            ConvertTo-PreparedWorktreesJson -InputObject $query -Depth 2\n"
             "        } else { ConvertTo-Json -InputObject $query -Compress }"
         )
         assert source.count(candidate) == 1
         if variant == "cmdlet":
             source = source.replace(candidate, original)
+        for token in ("        $frame =", "        $python = Get-ManagedWorktreesPython"):
+            assert source.count(token) == 1
         source = source.replace(
             "        $frame =",
             "        $script:serializationClock = [Diagnostics.Stopwatch]::StartNew()\n        $frame =",
@@ -1394,6 +1397,7 @@ $clock.Stop()
 [Console]::Error.WriteLine(('serialization_seconds='+$script:serializationClock.Elapsed.TotalSeconds))
 if ($script:pythonCalls -ne 1) { throw 'Cold admission did not use the real helper' }
 if ($script:jsonCalls -ne [int]$env:EXPECTED_JSON_CALLS) { throw 'Unexpected JSON cmdlet count' }
+if ($script:queryFrame.Contains("`r") -or $script:queryFrame.Contains("`n")) { throw 'Query framing is not compact' }
 [Console]::Out.WriteLine($script:queryFrame)
 $script:queryFrame=$null
 if (-not (Test-ManagedWorktreesSession $raw)) { throw 'Warm admission failed' }
