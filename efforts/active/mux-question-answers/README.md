@@ -278,3 +278,15 @@ runtime remediation, elevated operation or destructive cleanup is authorized.
   field/value completion and no-replay semantics.
 - Return #11467 to normal review and required CI, then continue ordinary
   promotion, coordinated authorized updates and both installed proofs.
+
+### 2026-11-07 - Reconciled concurrent source
+
+- Current `dev` introduced concurrent configuration, installation-context and
+  receipt changes with its own canonical outputs. The supported reconciliation
+  preserved those sources and all immutable history.
+- Replayed both mux corrections and their tests, keeping upstream current
+  evidence instead of overwriting it with the older capture. Refreshed only
+  current declarations for the combined source.
+- The earlier capture remains historical validation, not qualification of this
+  new source combination. Repeat exact-source capture and independent
+  verification before returning the PR to review readiness.
