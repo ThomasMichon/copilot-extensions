@@ -106,6 +106,9 @@ test("operator inputs and peer steers stay distinct; noise and child instruction
     { ...message("x", "child instructions"), agentId: "child" },
     message("x", '<skill-context name="example">loaded skill</skill-context>'),
     message("x", "<system_notification>task result</system_notification>"),
+    message("x", "<system_reminder>[agent-worktrees] generated status reminder</system_reminder>"),
+    { ...message("x", "Status checkpoint"), data: { content: "Status checkpoint",
+      transformedContent: "<system_reminder>[agent-worktrees] generated status reminder</system_reminder>" } },
     message("x", "generated context", "system"),
     message("x", "unqualified bridge delivery", "agent-bridge"),
     message("x", '<agent-message kind="notify">result</agent-message>', "agent-bridge"),
@@ -181,9 +184,10 @@ test("broken storage cannot prevent facts or manufacture a complete replay", asy
 
 test("mode off retains explicit reads without automatically starting turns", async (t) => {
   const f = fixture(t), c = client(f.a);
+  let allowed = false;
   const observation = registerIntentObservation(c.session, c.state, {
     createCorpus: (cwd) => new IntentCorpus(cwd, f.options),
-    allowAutomaticReplay: () => false,
+    allowAutomaticReplay: () => allowed,
   });
   t.after(() => observation.dispose());
   c.session.emit("user.message", message("one", "Preserve the mission."));
@@ -191,6 +195,10 @@ test("mode off retains explicit reads without automatically starting turns", asy
   await observation.settle();
   assert.equal(c.sent.length, 0);
   assert.equal((await observation.facts()).corpus.count, 1);
+  allowed = true;
+  c.session.emit("tool.execution_start", {});
+  await observation.settle();
+  assert.equal(c.sent.length, 1);
 });
 
 test("immutable records reject conflicting retries and pinned pages detect changed bytes", (t) => {
@@ -356,4 +364,65 @@ test("many short escaped steers respect the complete serialized page budget", (t
   } while (cursor);
   assert.ok(pages > 1);
   assert.equal(count, 128);
+});
+
+test("a known unavailable binding is replayed even when its home cannot be resolved", async (t) => {
+  const f = fixture(t), c = client(f.a);
+  const observation = registerIntentObservation(c.session, c.state, {
+    createCorpus: (cwd) => new IntentCorpus(cwd, f.options),
+    readGoal: () => ({ status: "unavailable", ref: "efforts/active/known/README.md", path: null, goal: null }),
+  });
+  t.after(() => observation.dispose());
+  c.session.emit("session.context_cleared", {});
+  await observation.settle();
+  assert.equal(c.sent.length, 1);
+  assert.match(c.sent[0].prompt, /efforts\/active\/known/u);
+  assert.match(c.sent[0].prompt, /unavailable/u);
+});
+
+test("pending input acquires only its missing session identity at a later lifecycle boundary", async (t) => {
+  const f = fixture(t), c = client(f.a);
+  c.session.sessionId = c.state.sessionId = null;
+  const observation = registerIntentObservation(c.session, c.state, {
+    createCorpus: (cwd) => new IntentCorpus(cwd, f.options),
+  });
+  t.after(() => observation.dispose());
+  c.session.emit("user.message", message("early", "Keep this early instruction exactly."));
+  await observation.settle();
+  assert.equal(observation.pendingInputs, 1);
+  c.state.sessionId = "late-identity";
+  c.session.emit("tool.execution_complete", {});
+  assert.equal(observation.pendingInputs, 0);
+  const facts = await observation.facts();
+  const saved = observation.page(facts.corpus.id).records[0];
+  assert.equal(saved.sessionId, "late-identity");
+  assert.equal(saved.text, "Keep this early instruction exactly.");
+  assert.equal(saved.eventId, "early");
+});
+
+test("CLI paging and consume facts retain the session-bound scope from an unrelated shell directory", (t) => {
+  const f = fixture(t);
+  writeFileSync(join(f.a, "effort.md"), "# Work\n\n## Goal\n\nThe bound mission.\n");
+  writeFileSync(join(f.b, "effort.md"), "# Work\n\n## Goal\n\nAn unrelated mission.\n");
+  const store = new IntentCorpus(f.a, {
+    storageRoot: join(f.root, ".copilot", "context-handoff", "intent"),
+  });
+  store.capture(classifyIntent(message("one", "Preserve the bound instruction."), "root"));
+  const snapshot = store.snapshot();
+  const loader = new URL("./fixtures/intent-cli-loader.mjs", import.meta.url).href;
+  const cli = fileURLToPath(new URL("../extensions/context-handoff/handoff-cli.mjs", import.meta.url));
+  const invoke = (args) => {
+    const result = spawnSync(process.execPath, ["--experimental-loader", loader, cli, ...args,
+      "--cwd", f.b, "--session-id", "fixture-bound-session", "--json"], {
+      cwd: f.b, env: { ...process.env, HOME: f.root, USERPROFILE: f.root, FIXTURE_BOUND_CWD: f.a },
+      encoding: "utf8", windowsHide: true, timeout: 10000,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    return JSON.parse(result.stdout);
+  };
+  const page = invoke(["intent-page", "--snapshot", snapshot.id]);
+  assert.equal(page.records[0].text, "Preserve the bound instruction.");
+  const consumed = invoke(["consume", "--handoff-id", "fixture-handoff"]);
+  assert.equal(consumed.intentContinuity.goal.goal, "The bound mission.");
+  assert.equal(consumed.intentContinuity.corpus.id, snapshot.id);
 });

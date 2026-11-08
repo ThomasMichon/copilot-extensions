@@ -1490,7 +1490,7 @@ handoffConfigPromise.then((resolved) => {
 const promptReceiptObservation = registerNativePromptReceiptObservation(session, state);
 intentObservation = registerIntentObservation(session, state, {
   readGoal: (cwd) => readCanonicalGoal(cwd, runCli),
-  allowAutomaticReplay: async () => (await handoffConfigPromise).mode !== "off",
+  allowAutomaticReplay: async () => (await refreshHandoffConfig()).mode !== "off",
 });
 session.on("session.shutdown", () => {
   void promptReceiptObservation.dispose();

@@ -16,7 +16,9 @@ export function classifyIntent(event, sessionId) {
     ? data.transformedContent ?? data.content : data.content;
   if (typeof text !== "string" || !text.trim()) return null;
   const source = data.source ?? "user";
-  if (/^\s*<(?:skill-context|system_notification|subagent_notification)\b/u.test(text)) return null;
+  const generated = /^\s*<(?:skill-context|system_notification|subagent_notification|system_reminder)\b/u;
+  if ([data.content, data.transformedContent].some((value) =>
+    typeof value === "string" && generated.test(value))) return null;
   let origin;
   if (source === "user") origin = "operator";
   else if (source === "agent-bridge") {
@@ -124,13 +126,14 @@ export class IntentCorpus {
       .map((name) => {
         const text = readRegular(join(records, name));
         const value = JSON.parse(text);
-        return { id: name.slice(0, -5), hash: digest(text), value };
+        return { id: name.slice(0, -5), hash: digest(text),
+          time: value.timestamp ?? value.recordedAt, recordedAt: value.recordedAt,
+          receivedOrder: value.receivedOrder, sessionId: value.sessionId };
       });
-    entries.sort((a, b) => String(a.value.timestamp ?? a.value.recordedAt)
-      .localeCompare(String(b.value.timestamp ?? b.value.recordedAt))
-      || a.value.recordedAt.localeCompare(b.value.recordedAt)
-      || a.value.receivedOrder.padStart(32, "0").localeCompare(b.value.receivedOrder.padStart(32, "0"))
-      || a.value.sessionId.localeCompare(b.value.sessionId)
+    entries.sort((a, b) => String(a.time).localeCompare(String(b.time))
+      || a.recordedAt.localeCompare(b.recordedAt)
+      || a.receivedOrder.padStart(32, "0").localeCompare(b.receivedOrder.padStart(32, "0"))
+      || a.sessionId.localeCompare(b.sessionId)
       || a.id.localeCompare(b.id));
     const body = JSON.stringify(entries.map(({ id, hash }) => ({ id, hash })));
     const id = digest(body);

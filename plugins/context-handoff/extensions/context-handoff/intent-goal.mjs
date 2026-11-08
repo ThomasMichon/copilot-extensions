@@ -1,4 +1,4 @@
-import { readFileSync, realpathSync } from "node:fs";
+import { closeSync, openSync, readSync, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { IntentCorpus, INTENT_RESEARCH_DIRECTIVE } from "./intent-corpus.mjs";
 
@@ -77,10 +77,20 @@ export function readCanonicalGoal(cwd, execute) {
     if (isAbsolute(binding.path) || isAbsolute(inside) || inside === ".." || inside.startsWith(`..${sep}`)) {
       throw new Error("goal-outside-effort-home");
     }
-    const bytes = readFileSync(path);
-    if (bytes.length > 1048576) return { ...reference, status: "oversized", path, goal: null,
+    const buffer = Buffer.alloc(1048577);
+    const fd = openSync(path, "r");
+    let length = 0;
+    try {
+      while (length < buffer.length) {
+        const count = readSync(fd, buffer, length, buffer.length - length, length);
+        if (!count) break;
+        length += count;
+      }
+    }
+    finally { closeSync(fd); }
+    if (length > 1048576) return { ...reference, status: "oversized", path, goal: null,
       instruction: "Read this canonical effort in bounded ranges; no Goal text was truncated." };
-    const text = bytes.toString("utf8").replace(/^\uFEFF/u, "");
+    const text = buffer.subarray(0, length).toString("utf8").replace(/^\uFEFF/u, "");
     const goal = intentSection(text, "Goal");
     const selected = goal || intentSection(text, "Guiding Intent");
     const status = goal ? "goal" : "legacy-guiding-intent";

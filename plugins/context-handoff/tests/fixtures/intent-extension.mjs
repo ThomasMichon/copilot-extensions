@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { pathToFileURL } from "node:url";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 
 await import(pathToFileURL(process.argv[2]).href);
 const session = globalThis.nativeTestSession;
@@ -49,4 +51,15 @@ assert.equal(session.sends.length, before);
 await emit("session.compaction_complete", { success: true });
 await waitFor(() => session.sends.length > before);
 assert.match(session.sends.at(-1).prompt, /compaction-complete/u);
+const config = join(process.cwd(), ".context-handoff", "config.yaml");
+await writeFile(config, "mode: off\n");
+const beforeOff = session.sends.length;
+await emit("session.context_cleared");
+await waitFor(() => session.logs.some((line) => line.includes("Reloaded config") && line.includes("mode off")));
+await new Promise((resolve) => setImmediate(resolve));
+assert.equal(session.sends.length, beforeOff);
+await writeFile(config, "mode: manual-only\n");
+await emit("tool.execution_start", { toolCallId: "mode-enabled", toolName: "view" });
+await waitFor(() => session.sends.length > beforeOff);
+assert.match(session.sends.at(-1).prompt, /intent-continuity/u);
 await emit("session.shutdown");

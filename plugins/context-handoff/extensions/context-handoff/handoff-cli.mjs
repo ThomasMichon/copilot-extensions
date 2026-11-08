@@ -49,7 +49,7 @@ import { readFileSync } from "node:fs";
 import { parseRecoveryLocator } from "./cutover-seed.mjs";
 import { loadContextHandoffConfig } from "./config.mjs";
 import { IntentCorpus } from "./intent-corpus.mjs";
-import { collectLocalIntentFacts } from "./intent-goal.mjs";
+import { collectLocalIntentFacts, resolveIntentCwd } from "./intent-goal.mjs";
 import {
   checkHeadAlignment,
   storeHandoff, buildSeedForStored,
@@ -300,8 +300,8 @@ function resolveHandoffTarget(command, args) {
 }
 
 async function cmdConsume(args) {
-  const cwd = args.cwd || process.cwd();
   const sid = requireSid("consume", args);
+  const cwd = resolveIntentCwd(args.cwd || process.cwd(), sid, runCli);
   const { taskId, handoffId, path, deferComplete } = resolveHandoffTarget("consume", args);
   if (deferComplete && !taskId) {
     process.stderr.write(
@@ -360,7 +360,8 @@ function cmdFacts(args) {
 }
 
 function cmdIntentPage(args) {
-  const store = new IntentCorpus(args.cwd || process.cwd());
+  const cwd = resolveIntentCwd(args.cwd || process.cwd(), resolveSid(args), runCli);
+  const store = new IntentCorpus(cwd);
   const result = store.page(args.snapshot, {
     record: args.record === undefined ? 0 : Number(args.record),
     offset: args.offset === undefined ? 0 : Number(args.offset),

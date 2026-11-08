@@ -27,6 +27,7 @@ export function registerIntentObservation(session, state, {
     for (const [key, item] of pending) {
       if (item.blocked) continue;
       const { cwd, input } = item;
+      if (!input.sessionId) input.sessionId = session.sessionId || state.sessionId || null;
       try { corpus(cwd).capture(input); pending.delete(key); }
       catch (error) {
         if (error.message === "intent-event-identity-conflict") item.blocked = true;
@@ -73,10 +74,11 @@ export function registerIntentObservation(session, state, {
     const cwd = state.cwd || process.cwd();
     delivery = delivery.catch(() => {}).then(async () => {
       if (disposed) return;
-      if (!await allowAutomaticReplay()) return;
+      if (!await allowAutomaticReplay()) { startupPending = true; return; }
       const data = await facts(cwd);
+      const unavailableReference = data.goal?.status === "unavailable" && data.goal?.ref;
       if (disposed || (!data.corpus?.count && !data.goal?.goal && !data.pendingInputs
-          && data.status !== "unavailable" && !data.goal?.path)) return;
+          && data.status !== "unavailable" && !data.goal?.path && !unavailableReference)) return;
       const firstPage = data.page;
       const prompt = [
         `<intent-continuity reason="${reason}">`,
@@ -101,6 +103,9 @@ export function registerIntentObservation(session, state, {
       if (!event.agentId && event.data?.success) void replay("compaction-complete");
     }],
     ["session.idle", () => { if (!disposed && pending.size) retry(); }],
+    ["tool.execution_complete", (event) => {
+      if (!disposed && !event.agentId && pending.size) retry();
+    }],
     ["tool.execution_start", (event) => {
       if (!event.agentId && startupPending) void replay("startup-or-reconnect");
     }],

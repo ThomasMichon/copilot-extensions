@@ -195,3 +195,16 @@ root-goal string. Research may refine these choices within the Request.
   125 passed, 2 platform skips.
 - Extracted durable-intent mechanics into the linked plugin documentation
   rather than expanding the existing README with a standalone deep section.
+- The next current-head review marked those six findings resolved and identified
+  four more: live replay config, CLI scope consistency, generated-reminder
+  provenance and pending input with late session identity. Corrected all four,
+  including the actual worktree-reminder producer and compatibility filtering
+  of both content payload forms. Added the producer's patch changefile.
+- Second-round focused packet: 27 passed, one platform skip; the actual
+  worktree reminder event fixture passed through the bounded plugin runner.
+  CLI paging and consumption are exercised from an unrelated shell directory
+  with an explicitly bound fixture session. Live off/on transitions are
+  exercised through the production extension registration.
+- Goal reads now stop at their declared file bound, and snapshot construction
+  retains sorting metadata rather than all prompt bodies in memory. An
+  unavailable known binding remains visible even without a resolvable home.
