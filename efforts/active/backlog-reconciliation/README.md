@@ -302,6 +302,11 @@ The later retained-supply study demonstrates no qualified continuation from
 without claiming installed-consumer acceptance, and preserves #11570's
 independent Vault profile contract. Its dated census is 847 whole OPEN,
 118 above fixed 729; all campaign completion states remain unchanged.
+The next whole-request crosswalk verifies #11580's delivered feature in #11581
+and its acknowledged `COMPLETED` closure after the three standing final checks.
+Four other admitted contracts remain independent and #11600 stays metadata-only.
+The later census is 852 whole OPEN, 123 above fixed 729, with 1,043 audited
+dispositions; no campaign completion checkbox changes.
 
 The [fulfilled-request and bridge-identity checkpoint](<journal/2026/11.07 fulfilled-requests-and-bridge-identity.md>)
 records the campaign-wide standing completion-check approval, #11445's audited
@@ -3083,6 +3088,10 @@ The later six-object #11565 crosswalk distinguishes static source and test
 definitions from the reported process control and original installed-consumer
 qualification. Retained-supply audit conclusions renew no scope or stale
 worker claim; #11570's profile selection and existing custodians stay separate.
+The subsequent #11580 closure retains the complete six-source requirement
+crosswalk, successful final metadata checks and live acknowledgment readback.
+It authorizes no queue reconciliation, native absence attestation or custody
+transfer. The other inflow studies renew no source or roster allowance.
 
 The [serving-owner and attribution-event study](<journal/2026/11.07 serving-owner-and-attribution-events.md>)
 distinguishes guarded source inspection, attributed native witness results,
