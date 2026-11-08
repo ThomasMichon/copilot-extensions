@@ -87,7 +87,7 @@ def test_engine_management_and_explicit_engine_lifecycle_remain_separate():
     restart = function("Restart-EngineDaemon")
     assert "$managePy = Get-ActiveSlotPython" in restart
     assert re.search(
-        r"\$cacheArgs\s*=\s*@\(Get-IndexPythonCacheArgs\s+-Root\s+\$InstallDir\)",
+        r"\$cacheArgs\s*=\s*@\(Get-IndexPythonCacheArgs\s+-Root\s+\$InstallDir\s+-Python\s+\$managePy\)",
         restart,
     )
     commands = [
