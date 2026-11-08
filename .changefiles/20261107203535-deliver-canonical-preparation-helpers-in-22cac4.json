@@ -1,0 +1,13 @@
+{
+  "comment": "Deliver canonical preparation helpers in independent PR service artifacts without runtime coupling",
+  "changes": [
+    {
+      "plugin": "ai-attribution",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}
