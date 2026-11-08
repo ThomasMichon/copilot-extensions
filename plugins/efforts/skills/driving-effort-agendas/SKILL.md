@@ -16,6 +16,9 @@ description: >
   - 'return from a child effort'
   - 'park a blocked agenda branch'
   - 'revisit a deferred agenda node'
+  - 'backfill an agenda for this session'
+  - 'derive an agenda from the rest of the effort'
+  - 'preview an agenda outline'
 ---
 
 # Driving Effort Agendas
@@ -81,6 +84,22 @@ The [format and worked return](references/agenda-format.md) define the small
 manual JSON convention. The examples require adaptation to actual plan
 references and exit criteria. No shell expressions or automatic effects are
 embedded in the data.
+
+### Shortcuts: outlines, effort remainders and session backfill
+
+Instead of hand-writing a verbose request-v2 `init`, author a compact
+**outline** (items with `action`, optional `exit`, `status` and nested
+`children`) and let `scripts/agenda_outline.py expand` produce the request.
+`from-effort <README>` derives an outline from the effort's open Plan and
+Validation Plan items; `scripts/agenda_backfill.py outline <session-folder>`
+reconstructs one from a session's operator requests and todos so a
+long-running session can adopt an agenda midstream. `preview` (either script)
+replays an outline into a throwaway store and prints the same tree the
+Companion renders, without touching any lane. `agenda_outline.py adopt` initializes a
+new explicit state home from a reviewed outline, keeping its progress. Derived and reconstructed
+outlines are starting points: review and edit them before adopting, and you
+remain free to reshape the agenda afterwards through the normal commands. See
+[outlines and backfill](references/outlines-and-backfill.md).
 
 ## 2. Answer "what next?" before each work unit
 
@@ -285,6 +304,13 @@ Optional trusted publisher argv receives only a bounded committed observation.
 Persisted success and pending/not-configured/delivered notification are distinct;
 delivery failure calls for `publish`, not replaying a mutation. Manager/head/
 generation fencing and actual presentation remain the adapter's responsibility.
+Each committed observation also carries an optional display `graph`. It is
+built by `scripts/agenda_v2_graph.py` and holds the frame tree, the queued items
+per frame, the cursor, its frame stack and recent history, kept within the
+observation's size limit. The bundled provider sends that graph only to a
+resident that admits `worktree-agendas-graph-v1`. Consumers render it, for
+example as Companion's git-graph view. The graph is display-only and is never
+planning authority.
 No agenda command executes work, proves external approval, starts a service or
 changes the canonical completion gate.
 
@@ -332,5 +358,6 @@ the safety of a later write or the authority of its caller.
 - [Explicit new managed placement](references/managed-placement.md)
 - [Complete consistent export and local readback](references/agenda-export.md)
 - [Deferred branches, decision packets and revisit points](references/deferred-branches.md)
+- [Outlines, effort remainders and session backfill](references/outlines-and-backfill.md)
 - [Deferred board example](assets/agenda.deferred.example.json)
 - [Version-2 deferred cursor example](assets/cursor.deferred.example.json)

@@ -11,8 +11,10 @@ from fleet_manager.gateway_service_channel import BODY_BYTES, CONTROL_RATE, Tran
 from .watch_replay_binding import ReplayBinding
 from .watch_replay_client import ReplayClient, ReplayClientError
 from .watch_replay_store import json_object
+from .workspace_selection import needs_owned_edits, selection_contract, supports_owned_edits, supports_selection
 from .workspace_operations import (
     CHUNK_BYTES, MAX_GENERATION_BYTES, PROTOCOL, NativeWorkspaceClient, encoded, materialize,
+    needs_prepared_review, prepared_review_contract, supports_prepared_review,
     _stock_preparation,
 )
 
@@ -64,13 +66,14 @@ class WorkspaceClient:
             )
         except TransportError as error:
             raise WorkspaceClientError(error.code, http_status=error.status,
-                                       outcome_unknown=operation == "submit" and error.code == "outcome-unknown") from None
+                                       outcome_unknown=operation in ("submit", "allocate")
+                                       and error.code == "outcome-unknown") from None
         if response.status != 200:
             raise WorkspaceClientError(
                 "workspace_unsupported" if response.status == 404 else (
                     "workspace_access_refused" if response.status == 403 else "workspace_unavailable"
                 ),
-                http_status=response.status, outcome_unknown=operation == "submit",
+                http_status=response.status, outcome_unknown=operation in ("submit", "allocate"),
             )
         try:
             types = [value for key, value in response.headers if key.lower() == "content-type"]
@@ -82,7 +85,9 @@ class WorkspaceClient:
             value.pop("binding")
             return value
         except (ValueError, UnicodeError, RecursionError):
-            raise WorkspaceClientError("invalid_workspace_response", outcome_unknown=operation == "submit") from None
+            raise WorkspaceClientError(
+                "invalid_workspace_response", outcome_unknown=operation in ("submit", "allocate"),
+            ) from None
 
     async def capabilities(self, *, checkpoint=None):
         self._discovery_epoch += 1
@@ -106,6 +111,20 @@ class WorkspaceClient:
             }:
                 value["operations"] = [name for name in value["operations"] if name != "events"]
                 value["unavailable_operations"] = {"events": "unsupported_conversation_contract"}
+        if "receipt" in value["operations"] and not supports_prepared_review(value.get("prepared_review_contract")):
+            value["operations"] = [name for name in value["operations"] if name != "receipt"]
+            unavailable = value.get("unavailable_operations")
+            value["unavailable_operations"] = {
+                **(unavailable if isinstance(unavailable, dict) else {}),
+                "receipt": "unsupported_prepared_review_contract",
+            }
+        if "allocate" in value["operations"] and not supports_selection(value.get("selection_contract")):
+            value["operations"] = [name for name in value["operations"] if name != "allocate"]
+            unavailable = value.get("unavailable_operations")
+            value["unavailable_operations"] = {
+                **(unavailable if isinstance(unavailable, dict) else {}),
+                "allocate": "unsupported_selection_contract",
+            }
         if epoch != self._discovery_epoch:
             raise WorkspaceClientError("workspace_discovery_superseded")
         self._capabilities = copy.deepcopy(value)
@@ -130,13 +149,47 @@ class WorkspaceClient:
             return await self.capabilities(**({"checkpoint": checkpoint} if checkpoint is not None else {}))
         if self._capabilities is None or operation not in self._capabilities["operations"]:
             raise WorkspaceClientError("workspace_capability_required", outcome_unknown=False)
+        if needs_prepared_review(operation, payload):
+            if checkpoint is not None:
+                checkpoint()
+            if not supports_prepared_review(self._capabilities.get("prepared_review_contract")):
+                raise WorkspaceClientError("prepared_review_contract_required", outcome_unknown=False)
+        if operation == "allocate" and not supports_selection(self._capabilities.get("selection_contract")):
+            raise WorkspaceClientError("selection_contract_required", outcome_unknown=False)
+        if needs_owned_edits(operation, payload) and not supports_owned_edits(
+            self._capabilities.get("owned_edit_selection_contract"),
+        ):
+            raise WorkspaceClientError("owned_edit_selection_contract_required", outcome_unknown=False)
         value = await self._exchange(operation, payload, **(
             {"checkpoint": checkpoint} if checkpoint is not None else {}))
         if (
             value.get("scope") != {**self._scope, "number": payload.get("number")}
             or not isinstance(value.get("result"), dict)
         ):
-            raise WorkspaceClientError("workspace_scope_changed", outcome_unknown=operation == "submit")
+            raise WorkspaceClientError(
+                "workspace_scope_changed", outcome_unknown=operation in ("submit", "allocate"),
+            )
+        if operation == "receipt" and (
+            value["result"].get("protocol") != prepared_review_contract()["receipt_protocol"]
+            or value["result"].get("scope") != value["scope"]
+            or value["result"].get("operation_id") != payload.get("operation_id")
+            or value["result"].get("action_id") != payload.get("action_id")
+        ):
+            raise WorkspaceClientError("invalid_prepared_receipt_response", outcome_unknown=False)
+        if operation == "allocate":
+            from .review_selection_store import ReviewSelectionStore
+            try:
+                result = value["result"]
+                if (
+                    set(result) != {"protocol", "intent", "effects", "approval_required"}
+                    or result["protocol"] != selection_contract()["protocol"]
+                    or result["effects"] != "none" or result["approval_required"] is not True
+                ):
+                    raise ValueError
+                from .review_intent import intent
+                ReviewSelectionStore._prepared(intent(payload["intent"]), result["intent"])
+            except (ValueError, KeyError, TypeError):
+                raise WorkspaceClientError("invalid_selection_response", outcome_unknown=True) from None
         return value
 
     def preparation_contract(self):

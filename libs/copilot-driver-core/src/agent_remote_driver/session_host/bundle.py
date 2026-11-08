@@ -15,9 +15,18 @@ _LEGACY_MAIN = "agent_remote_driver.session_host.legacy_launcher:main"
 _DRIVER_MODULES = (
     "__init__.py",
     "winjob.py",
+    "native_arguments.py",
     "session_preferences.py",
     "preference_attestation.py",
     "preference_exec.py",
+    "headed/__init__.py",
+    "headed/backend.py",
+    "headed/staging.py",
+    "headed/launcher.py",
+    "headed/receipt.py",
+    "headed/extension.mjs",
+    "headed/acp-adapter.mjs",
+    "headed/host-client.mjs",
     "session_host/__init__.py",
     "session_host/__main__.py",
     "session_host/protocol.py",
@@ -98,9 +107,13 @@ def _legacy_sources() -> tuple[tuple[str, bytes], ...]:
 
 
 def _sources(legacy: bool) -> tuple[tuple[str, bytes], ...]:
+    module, function = (_LEGACY_MAIN if legacy else _MAIN).split(":")
+    entrypoint = f"import sys\nfrom {module} import {function}\nsys.exit({function}())\n"
     return tuple(
         (relative, path.read_bytes()) for relative, path in _bundle_sources()
-    ) + _policy_sources() + (_legacy_sources() if legacy else ())
+    ) + _policy_sources() + (_legacy_sources() if legacy else ()) + (
+        ("__main__.py", entrypoint.encode("utf-8")),
+    )
 
 
 def bundle_source_hash(*, legacy: bool = False) -> str:
@@ -151,7 +164,7 @@ def build_session_host_bundle(
         tmp_out = Path(td) / "bundle.pyz"
         # A shebang so the far side can also run ``./bundle.pyz`` directly.
         zipapp.create_archive(
-            stage, target=str(tmp_out), main=_LEGACY_MAIN if legacy else _MAIN,
+            stage, target=str(tmp_out),
             interpreter="/usr/bin/env python3",
         )
         os.replace(tmp_out, out)

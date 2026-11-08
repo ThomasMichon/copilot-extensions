@@ -152,7 +152,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     mux_map: dict[str, sessions.MuxInfo] = {}
     if getattr(args, "mux_details", False):
         wt_ids = [rec.worktree_id for rec in records]
-        mux_map = sessions.mux_status_many(wt_ids)
+        mux_map = sessions.mux_status_for_display(wt_ids)
 
     # worktree-status-core / #3070: this fleet-wide read used to fetch once PER
     # WORKTREE via `classify_worktree(..., fetch=True, ...)` -- N real, sequential

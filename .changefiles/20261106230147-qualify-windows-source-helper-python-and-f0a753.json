@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify Windows source-helper Python and retain admission through runtime and engine venv fallbacks",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

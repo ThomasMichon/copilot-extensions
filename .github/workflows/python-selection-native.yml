@@ -1,0 +1,77 @@
+name: Actual mixed-Python native selection
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [dev]
+    paths:
+      - .github/workflows/python-selection-native.yml
+      - libs/agent-procutil/src/agent_procutil/daemon_instances.ps1
+      - libs/agent-procutil/src/agent_procutil/daemon_instance_runtime.pyz
+      - libs/agent-procutil/tests/test_daemon_python_selection.py
+      - libs/versioned-runtime/versioned_runtime_native.ps1
+      - plugins/agent-worktrees/scripts/install.ps1
+      - plugins/agent-worktrees/tests/test_installer_admission_python.py
+
+permissions:
+  contents: read
+
+jobs:
+  mixed-python:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    env:
+      UV_PYTHON: "3.12"
+      QUALIFICATION_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Supply a real unsupported interpreter only on this disposable runner
+        id: old
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+          update-environment: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Bind source and actual interpreter prerequisites
+        shell: pwsh
+        env:
+          TEST_PYTHON39: ${{ steps.old.outputs.python-path }}
+        run: |
+          python -c "import os,subprocess; actual=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(); assert actual == os.environ['QUALIFICATION_SHA']; print('source='+actual)"
+          & $env:TEST_PYTHON39 -I -S -B -c "import sys; assert sys.version_info[:2] == (3,9); print('old='+sys.version)"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Qualify real old-first installer admission on PS5.1 and pwsh
+        env:
+          TEST_PYTHON39: ${{ steps.old.outputs.python-path }}
+          PYTEST_ADDOPTS: "-rP"
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_installer_admission_python.py
+          --junit-dir qualification-evidence/admission
+          -k real_python39
+      - name: Qualify real daemon-helper selection and original Job cleanup
+        env:
+          TEST_PYTHON39: ${{ steps.old.outputs.python-path }}
+          PYTEST_ADDOPTS: "-rP"
+        run: >-
+          python tools/run-plugin-tests.py agent-procutil
+          --test-file tests/test_daemon_python_selection.py
+          --junit-dir qualification-evidence/daemon
+          --allow-explicit-tiers -k real_python39
+      - name: Require all six actual-interpreter controls without prerequisite skips
+        run: >-
+          python -c "from pathlib import Path; import xml.etree.ElementTree as ET;
+          groups={name:[case for file in Path('qualification-evidence',name).rglob('*.xml')
+          for case in ET.parse(file).iter('testcase')] for name in ('admission','daemon')};
+          assert {name:len(cases) for name,cases in groups.items()}=={'admission':2,'daemon':4};
+          assert all(case.find(tag) is None for cases in groups.values() for case in cases
+          for tag in ('error','failure','skipped'));
+          print('Six actual-interpreter controls passed without skips')"

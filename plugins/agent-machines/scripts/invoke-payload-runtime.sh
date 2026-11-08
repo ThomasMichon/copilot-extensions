@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
+CONFIGURATION_ENTRY=0
+if [[ "${1:-}" == installation-configuration ]]; then
+    CONFIGURATION_ENTRY=1
+    export AGENT_RT_RESOLVE_TRACE_MODE=read-only
+fi
 
 PAYLOAD_ROOT="${AGENT_MACHINES_PAYLOAD_ROOT:-}"
 [[ "$PAYLOAD_ROOT" == /* && -d "$PAYLOAD_ROOT" ]] || {
@@ -175,6 +180,10 @@ DESIRED_MODE=legacy
 resolve_runtime
 if [[ -n "${AGENT_RT_PY:-}" ]]; then
     run_runtime "$@"
+fi
+if [[ "$CONFIGURATION_ENTRY" == 1 ]]; then
+    printf '[agent-machines] Configuration requires an already provisioned runtime; use the native setup owner.\n' >&2
+    exit 1
 fi
 if [[ -n "${AGENT_MACHINES_NO_SELFPROVISION:-}" ]]; then
     printf '[agent-machines] runtime not provisioned (AGENT_MACHINES_NO_SELFPROVISION set).\n' >&2

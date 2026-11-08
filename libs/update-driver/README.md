@@ -46,7 +46,9 @@ of independently owned service daemons. There is no Task, COM or UAC fallback.
 
 The private executor shim places generated Python bytecode beneath the existing
 driver root's `cache/python`, outside the invoking runtime's immutable slot.
-Its pinned product invocation and installation custody remain unchanged.
+It skips `site` initialization: the shim uses only the standard library and
+explicitly located participant/procutil modules. The pinned product invocation,
+its normal interpreter behavior and installation custody remain unchanged.
 
 New Windows queue directories are created atomically with the actual process
 TokenUser as owner and protected, inheritable FullControl for that account,
@@ -104,6 +106,16 @@ creation, not an implicit permission migration or a read-only status side effect
   A completion marker, managed `versions` slot, or bootstrap directory makes
   a missing retention launcher an explicit failure. Linked/reparse-point
   bootstraps refuse rather than degrading to an unretained launch.
+- `runtime_script_command(path, args=()) -> (argv, env)` shares the same retained
+  runtime selection and refusal rules for an absolute script path. Installed
+  launchers validate completion, retain the generation and verify the interpreter
+  before dispatching the script with `runpy.run_path(..., run_name="__main__")`.
+  The script receives its absolute path as `sys.argv[0]` and unchanged arguments;
+  nonzero exits propagate. Relative paths and non-file targets refuse. This is a
+  trusted-adapter primitive, not an arbitrary-command submission interface.
+  Older immutable generations with module-only launchers do not gain path
+  dispatch retroactively; rebuild through the owning installer rather than
+  editing a sealed slot or falling back to an unretained invocation.
 - `enqueue(spec, *, runner, root=None, coalesce_running=False) -> Request` commits acceptance using
   SQLite `synchronous=FULL`. Only byte-equivalent normalized **pending**
   requests coalesce; runner and source/provenance participate in identity.

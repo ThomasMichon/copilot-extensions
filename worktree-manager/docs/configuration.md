@@ -63,6 +63,29 @@ machine scope. Browsing and refreshing are read-only and run off the UI thread:
 they do not install prerequisites, start services/workers, request credentials
 or enroll automatic maintenance.
 
+The **Worktree Manager** row also offers **Inspect Manager setup (read-only)**.
+Only explicit activation runs the existing native doctor text report, off the
+UI thread. The result retains its output and success/failure status; closing it
+returns to Configuration and refreshes the originating view. It never requests
+daemon repair, setup, an update or authentication. The report covers Manager's
+existing prerequisite, core, daemon, catalog and registration observations;
+command completion is not proof of every application's health or first-task
+readiness. Other components retain their own diagnostic owners, and the
+standalone observation-only `doctor --json` behavior is unchanged.
+Read-only health probes use existing control credentials without creating or
+replacing them; unavailable credential observations remain explicit findings,
+not proof that an endpoint is healthy. Inactive services do not acquire a new
+credential prerequisite. Captured Windows Git and PowerShell probes stay
+windowless.
+Captured command stdout and stderr are decoded as UTF-8 even when the
+Manager parent's Windows locale is ANSI. Synchronous commands receive an
+explicit UTF-8 Python stream setting; invalid bytes from other commands remain
+visible as replacement characters without losing the completed command's
+output or exit status.
+Report mode neither creates a cutover lock nor initializes an existing empty
+one. It observes an existing lock without writing it and reports a busy cutover
+without running a census; explicitly requested repair retains its writer lock.
+
 ### Automatic update controls
 
 The same workspace has two independently confirmed local controls:
@@ -83,6 +106,8 @@ control never clears the other, starts an update, enrolls recurring maintenance
 or stops work already admitted. Missing/unreadable/invalid controller state is
 visible; an invalid legacy switch retains its documented fail-open reader
 semantics rather than being presented as a reliable pause.
+The canonical controller comes from the running Manager's runtime resources;
+retained-payload scripts remain the fallback for older source layouts.
 
 Confirmations compare the exact viewed bytes inside a bounded writer lock.
 The switch's canonical Bash, PowerShell and optional Machines CLI writers
@@ -128,6 +153,13 @@ running-service proof. Manager's running version describes the querying process,
 not its independently running mux daemon. Unknown, missing, payload-only and
 machine-policy outcomes remain explicit in details. Unavailable catalog or
 engine metadata is a finding, not an empty healthy installation.
+
+The optional Machines-owned **Application Readiness** section complements this
+version inventory with declared required-module observations and explicitly
+confirmed repair. Its [native owner](../../plugins/agent-machines/README.md#application-readiness-in-configuration)
+retains selection, installers, plan validation, post-readiness and restart
+obligations. Manager does not infer authentication or first-task admission from
+these rows, and visiting the section does not install a missing Machines runtime.
 
 Updating submits a durable request through the existing installation driver.
 Acceptance is not completion: return to the list and refresh to see queued,

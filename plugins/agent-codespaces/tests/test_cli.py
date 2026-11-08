@@ -56,7 +56,7 @@ class TestCLI:
             lifecycle, "get_codespace_status_with_account", lambda name: (True, "Shutdown", "owner"),
         )
         monkeypatch.setattr(
-            activation_cli.gh_account, "token_for_account",
+            "agent_codespaces.gh_account.token_for_account",
             lambda account: None if outcome == "owner-unavailable" else "fixture-token",
         )
 
@@ -100,7 +100,7 @@ class TestCLI:
         monkeypatch.setattr(account_binding, "bound_account_or_raise", lambda name: "exact-owner")
         monkeypatch.setattr(lifecycle, "list_codespaces", lambda: pytest.fail("unscoped listing selected"))
         monkeypatch.setattr(
-            activation_cli.gh_account, "token_for_account",
+            "agent_codespaces.gh_account.token_for_account",
             lambda account: "fixture-token" if account == "exact-owner" else pytest.fail("wrong account"),
         )
 
@@ -141,9 +141,9 @@ class TestCLI:
         monkeypatch.setattr(activation_cli.launch_policy, "refused_exit_code", lambda name: None)
         monkeypatch.setattr(account_binding, "bound_account_or_raise", lambda name: None)
         monkeypatch.setattr(account_binding, "bound_accounts_or_raise", lambda: ())
-        monkeypatch.setattr(activation_cli.gh_account, "mapped_accounts", lambda: ())
+        monkeypatch.setattr("agent_codespaces.gh_account.mapped_accounts", lambda: ())
         monkeypatch.setattr(
-            activation_cli.gh_account, "token_for_account",
+            "agent_codespaces.gh_account.token_for_account",
             lambda account: None if outcome == "token-failed" else "fixture-token",
         )
 
@@ -581,30 +581,62 @@ class TestCreateScopeGate:
     `codespace` scope, before any create work -- rather than 403/404-ing minutes
     in after provisioning starts."""
 
+    @pytest.fixture(autouse=True)
+    def selected_account(self, monkeypatch):
+        monkeypatch.setattr(
+            "agent_codespaces.allocation.allocation_context",
+            lambda repo: ("selected-owner", {"GH_TOKEN": "selected-fixture-token"}),
+        )
+
     def test_create_blocked_when_scope_missing(self, capsys):
         import agent_codespaces.__main__ as m
         with patch.object(m, "_ambient_codespace_scope",
                           return_value=(False, "run: gh auth refresh -s codespace")), \
              patch.object(m, "create_codespace") as create:
-            rc = main(["create", "owner/repo"])
+            rc = main(["create", "owner/repo", "--force-create"])
         assert rc == 3
         create.assert_not_called()          # gated BEFORE any create work
         assert "Refusing to create" in capsys.readouterr().err
 
     def test_create_proceeds_when_scope_ok(self):
         import agent_codespaces.__main__ as m
+        from agent_codespaces.config import CodespacesConfig
         from agent_codespaces.pool import build_pool
         # Scope OK + an empty pool -> the planner returns CREATE, so `create`
         # proceeds. Stub create so we only prove neither gate blocks (--no-wait).
         info = type("I", (), {"name": "cs-new"})()
         empty = build_pool(budget_cores=64, codespaces=[], leases=[], markers={})
         with patch.object(m, "_ambient_codespace_scope", return_value=(True, "")), \
-             patch.object(m, "load_merged_config", return_value={}), \
+             patch.object(m, "load_merged_config", return_value=CodespacesConfig()), \
              patch.object(m.pool_mod, "build_pool", return_value=empty), \
              patch.object(m, "create_codespace", return_value=info) as create:
             rc = main(["create", "owner/repo", "--no-wait"])
         assert rc == 0
         create.assert_called_once()
+
+    @pytest.mark.parametrize("allowed", [True, False])
+    def test_creation_scope_uses_selected_not_ambient_credential(self, monkeypatch, allowed):
+        from types import SimpleNamespace
+        from agent_codespaces import __main__ as cli
+        from agent_codespaces.config import CodespacesConfig
+
+        monkeypatch.delenv("AGENT_CODESPACES_SKIP_SCOPE_CHECK", raising=False)
+        monkeypatch.setenv("GH_TOKEN", "ambient-without-scope")
+        monkeypatch.setattr(cli, "load_merged_config", CodespacesConfig)
+        observed = []
+
+        def run(argv, **kwargs):
+            assert argv == ["gh", "auth", "status", "--active", "--hostname", "github.com"]
+            observed.append(kwargs.get("env"))
+            return SimpleNamespace(
+                returncode=0, stdout="codespace" if allowed else "repo", stderr="",
+            )
+
+        monkeypatch.setattr("subprocess.run", run)
+        with patch.object(cli, "create_codespace", return_value=SimpleNamespace(name="new-venue")) as create:
+            assert main(["create", "example/project", "--no-wait", "--force-create"]) == (0 if allowed else 3)
+        assert observed == [{"GH_TOKEN": "selected-fixture-token"}]
+        assert create.call_count == int(allowed)
 
     def test_create_provisioning_shares_launch_environment(self, monkeypatch):
         from types import SimpleNamespace
@@ -624,7 +656,7 @@ class TestCreateScopeGate:
         async def record(kind, *args, **kwargs):
             environments[kind] = kwargs
 
-        monkeypatch.setattr(m, "_require_codespace_scope", lambda *a: None)
+        monkeypatch.setattr(m, "_require_codespace_scope", lambda *a, **kw: None)
         monkeypatch.setattr(m, "load_merged_config", lambda: config)
         monkeypatch.setattr(m, "create_codespace", lambda *a, **kw: SimpleNamespace(
             name="synthetic-created", account="synthetic-owner",
@@ -663,6 +695,13 @@ class TestCreateReuseGuard:
     #708) before spending an account slot: it declines to create when a suitable
     idle box exists or the pool is at budget, and `--force-create` bypasses it."""
 
+    @pytest.fixture(autouse=True)
+    def selected_account(self, monkeypatch):
+        monkeypatch.setattr(
+            "agent_codespaces.allocation.allocation_context",
+            lambda repo: ("selected-owner", {"GH_TOKEN": "selected-fixture-token"}),
+        )
+
     def _decision(self, **kw):
         from agent_codespaces.pool import AllocationDecision
         return AllocationDecision(**kw)
@@ -697,6 +736,28 @@ class TestCreateReuseGuard:
         create.assert_not_called()
         assert "pool full" in capsys.readouterr().err
 
+    def test_recycle_advice_cannot_spend_cores_before_recycling(self, monkeypatch):
+        from types import SimpleNamespace
+        from agent_codespaces import __main__ as cli
+        from agent_codespaces.config import CodespacesConfig
+        from agent_codespaces.lifecycle import CodespaceInfo
+        from agent_codespaces.pool import build_pool
+        from agent_codespaces.status import STATE_PRUNABLE
+
+        view = build_pool(
+            codespaces=[CodespaceInfo(
+                "old", "old", "other/project", "main", "Available", "custom64core", "selected-owner",
+            )],
+            leases=[], markers={"old": STATE_PRUNABLE}, l2_leases={}, clean_records={}, live={},
+        )
+        monkeypatch.setattr(cli, "load_merged_config", CodespacesConfig)
+        monkeypatch.setattr(cli.pool_mod, "build_pool", lambda **kw: view)
+        monkeypatch.setattr("agent_codespaces.driving_worktrees.resolve_current_workstream_box", lambda *a: None)
+        monkeypatch.setattr(cli, "_require_codespace_scope", lambda *a, **kw: None)
+        with patch.object(cli, "create_codespace", return_value=SimpleNamespace(name="over-budget")) as create:
+            assert main(["create", "example/project", "--no-wait"]) == 4
+        create.assert_not_called()
+
     def test_force_create_bypasses_the_guard(self):
         import agent_codespaces.__main__ as m
         from agent_codespaces.pool import ALLOC_REUSE
@@ -713,22 +774,44 @@ class TestCreateReuseGuard:
         create.assert_called_once()
         plan.assert_not_called()                      # guard skipped entirely
 
-    def test_planner_failure_degrades_to_plain_create(self):
+    def test_planner_failure_refuses_plain_create(self, capsys):
         import agent_codespaces.__main__ as m
-        # Any planner error must not wedge a legit create -- it proceeds.
         info = type("I", (), {"name": "cs-new"})()
         with patch.object(m, "_ambient_codespace_scope", return_value=(True, "")), \
              patch.object(m, "load_merged_config", return_value={}), \
              patch.object(m.pool_mod, "build_pool", side_effect=RuntimeError("gh down")), \
              patch.object(m, "create_codespace", return_value=info) as create:
             rc = main(["create", "owner/repo", "--no-wait"])
-        assert rc == 0
-        create.assert_called_once()
+        assert rc == 4
+        create.assert_not_called()
+        assert "gh down" in capsys.readouterr().err
+
+
+    @pytest.mark.parametrize("command", ["create", "allocate"])
+    def test_capacity_read_preserves_context_refusal(self, command, monkeypatch, capsys):
+        from agent_codespaces import __main__ as cli
+        from agent_codespaces.worktrees import ContextRefused
+
+        monkeypatch.setattr(cli, "load_merged_config", lambda: {})
+        monkeypatch.setattr(cli, "_require_codespace_scope", lambda operation, **kwargs: None)
+        monkeypatch.setattr(
+            cli.pool_mod, "build_pool",
+            lambda **kwargs: (_ for _ in ()).throw(ContextRefused("fixture context refused")),
+        )
+        assert main([command, "example/project"]) == cli._COORDINATION_EXIT
+        assert "context refused" in capsys.readouterr().err
 
 
 class TestAllocateCommand:
     """`agent-codespaces allocate <repo>` surfaces the venue-request decision
     (Phase 2 / #708) -- advisory, JSON or human, exit 4 on pressure."""
+
+    @pytest.fixture(autouse=True)
+    def selected_account(self, monkeypatch):
+        monkeypatch.setattr(
+            "agent_codespaces.allocation.allocation_context",
+            lambda repo: ("selected-owner", {"GH_TOKEN": "selected-fixture-token"}),
+        )
 
     def test_allocate_json_emits_decision(self, capsys):
         import agent_codespaces.__main__ as m
@@ -755,6 +838,513 @@ class TestAllocateCommand:
             rc = main(["allocate", "owner/repo"])
         assert rc == 4
         assert "pressure" in capsys.readouterr().out
+
+
+    def test_allocate_unknown_inventory_is_actionable_json(self, monkeypatch, capsys):
+        from agent_codespaces import __main__ as cli
+
+        monkeypatch.setattr(cli, "load_merged_config", lambda: {})
+        monkeypatch.setattr(
+            cli.pool_mod, "build_pool",
+            lambda **kwargs: (_ for _ in ()).throw(RuntimeError("selected account listing failed")),
+        )
+        assert main(["allocate", "owner/repo", "--json"]) == 4
+        decision = json.loads(capsys.readouterr().out)
+        assert decision["action"] == "pressure"
+        assert decision["reason"] == "selected account listing failed"
+
+
+@pytest.mark.parametrize("variable", ["GH_TOKEN", "GITHUB_TOKEN"])
+@pytest.mark.parametrize("bound", [None, "environment-owner"])
+def test_environment_only_credentials_reach_inventory_and_creation(monkeypatch, capsys, variable, bound):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    from agent_codespaces import __main__ as cli, allocation, coordination, gh_account, lifecycle
+    from agent_codespaces.config import CodespacesConfig
+
+    for name in ("GH_TOKEN", "GITHUB_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv(variable, "environment-fixture-token")
+    monkeypatch.setenv("GH_HOST", "github.example.com")
+    monkeypatch.setattr(gh_account, "account_for_repo", lambda repo: None)
+    monkeypatch.setattr("agent_codespaces.driving_worktrees.current_workstream_account", lambda repo: bound)
+    monkeypatch.setattr(
+        gh_account, "active_account",
+        lambda: pytest.fail("environment credential used a saved active identity"),
+    )
+    monkeypatch.setattr(
+        "agent_codespaces.owner_inventory.qualified_environment",
+        lambda account: pytest.fail("environment credential became a named saved-token lookup"),
+    )
+    monkeypatch.setattr(cli, "load_merged_config", CodespacesConfig)
+    monkeypatch.setattr(cli, "_require_codespace_scope", lambda operation, **kwargs: None)
+    monkeypatch.setattr("agent_codespaces.activation_cli.launch_policy.refused_exit_code", lambda name: None)
+    monkeypatch.setattr(cli, "_gh_binary_available", lambda: True)
+    monkeypatch.setattr(cli, "validate_context", lambda: None)
+    monkeypatch.setattr(lifecycle, "validate_context", lambda: None)
+    monkeypatch.setattr(lifecycle, "list_codespaces", lambda: pytest.fail("qualified consumer used merged discovery"))
+    monkeypatch.setattr(cli.pool_mod, "list_leases", lambda: [])
+    monkeypatch.setattr(cli.pool_mod, "list_status", lambda: [])
+    monkeypatch.setattr(cli.pool_mod, "codespaces_in_use", lambda names: {})
+    monkeypatch.setattr(coordination, "list_leases", lambda **kwargs: {})
+    monkeypatch.setattr(coordination, "list_cleanliness", lambda: {})
+    monkeypatch.setattr("agent_codespaces.driving_worktrees.resolve_current_workstream_box", lambda *args: None)
+    bindings = []
+    bound_accounts = {}
+    def bind(name, account, repo):
+        bindings.append(account)
+        bound_accounts[name] = account
+    monkeypatch.setattr(
+        "agent_codespaces.account_binding.bind",
+        bind,
+    )
+    monkeypatch.setattr(
+        "agent_codespaces.account_binding.bound_account_or_raise",
+        lambda name: bound_accounts.get(name),
+    )
+    monkeypatch.setattr(gh_account, "token_for_account", lambda account: None)
+    observed = []
+    state = "Available"
+    connections = []
+
+    async def connect(name, source, forwards):
+        assert source.gh_env["GH_HOST"] == "github.com"
+        assert source.gh_env["GH_TOKEN"] == "environment-fixture-token"
+        connections.append(name)
+        return SimpleNamespace(config=object())
+
+    manager = SimpleNamespace(ensure_connected=AsyncMock(side_effect=connect), disconnect=AsyncMock())
+    relay = SimpleNamespace(stop=AsyncMock())
+    monkeypatch.setattr("ssh_manager.ConnectionManager", lambda: manager)
+    monkeypatch.setattr(cli.relay_launch, "effective_relay_port", lambda config: 19857)
+    monkeypatch.setattr(cli.relay_launch, "build_relay_launch_env", lambda *a: ("", 19857))
+    monkeypatch.setattr(cli, "_start_supervised_relay", AsyncMock(return_value=relay))
+    for helper in ("_provision_relay_helpers", "_provision_dotfiles", "_provision_harness", "_provision_repo_hooks"):
+        monkeypatch.setattr(cli, helper, AsyncMock())
+
+    def run(argv, **kwargs):
+        nonlocal state
+        environment = kwargs["env"]
+        observed.append((argv[1:3], environment.get("GH_TOKEN"), environment.get("GITHUB_TOKEN")))
+        assert environment.get("GH_HOST") == "github.com"
+        if argv[1:3] == ["api", "user"]:
+            value = json.dumps({"login": "environment-owner"})
+        elif argv[1:3] == ["codespace", "list"]:
+            value = "[]"
+        elif argv[1:3] == ["codespace", "create"]:
+            assert argv[argv.index("--devcontainer-path") + 1] == ".devcontainer/devcontainer.json"
+            value = "fixture-created"
+        elif argv[1:3] == ["api", "repos/example/project/codespaces/devcontainers"]:
+            value = ".devcontainer/devcontainer.json\n.devcontainer/alternate/devcontainer.json"
+        elif argv[1:4] == ["api", "--method", "POST"]:
+            state = "Available"
+            value = "{}"
+        elif argv[1:3] == ["api", "/user/codespaces/fixture-created"]:
+            value = json.dumps({"state": state})
+        else:
+            pytest.fail(f"unexpected credential rediscovery or provider operation: {argv[:3]}")
+        return SimpleNamespace(returncode=0, stdout=value, stderr="")
+
+    monkeypatch.setattr(allocation.subprocess, "run", run)
+    assert main(["allocate", "example/project", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["action"] == "create"
+    assert main(["create", "example/project"]) == 0
+    assert main(["create", "example/project", "--no-wait", "--force-create"]) == 0
+    assert connections == ["fixture-created"]
+    relay.stop.assert_awaited_once()
+    manager.disconnect.assert_awaited_once()
+    state = "Shutdown"
+    capsys.readouterr()
+    assert main(["claim-status", "fixture-created"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"exists": True, "state": "Shutdown"}
+    assert main(["start", "fixture-created"]) == 0
+    assert state == "Available"
+    assert bindings == ["environment-owner", "environment-owner"]
+    assert observed[0][0] == ["api", "user"]
+    assert all(token == "environment-fixture-token" and alternate is None for _, token, alternate in observed)
+
+
+@pytest.mark.parametrize("command,extra,expected", [
+    ("create", [], 4), ("allocate", [], 4), ("create", ["--force-create"], 1),
+])
+def test_account_resolution_failure_uses_admission_exit(monkeypatch, command, extra, expected):
+    def unavailable(repo):
+        raise RuntimeError("selected credentials unavailable")
+    monkeypatch.setattr("agent_codespaces.allocation.allocation_context", unavailable)
+    assert main([command, "example/project", *extra]) == expected
+
+
+@pytest.mark.parametrize("command", ["create", "allocate"])
+@pytest.mark.parametrize("inventory_count", [1, 50])
+def test_unmapped_workstream_reuses_bound_account_after_active_switch(monkeypatch, capsys, command, inventory_count):
+    import sys
+    import time
+    from types import ModuleType, SimpleNamespace
+
+    from agent_codespaces import __main__ as cli, account_binding, coordination, gh_account, lifecycle
+    from agent_codespaces.config import CodespacesConfig
+    from agent_codespaces import lease, reuse
+
+    claims = SimpleNamespace(claims_of_owner=lambda owner, kind: ["retained-venue"])
+    peer = ModuleType("agent_worktrees")
+    peer.claims_owner = claims
+    monkeypatch.setitem(sys.modules, "agent_worktrees", peer)
+    monkeypatch.setattr("agent_codespaces.lease.resolve_owner_worktree", lambda: "fixture-worktree")
+    now = time.time()
+    monkeypatch.setattr(reuse, "local_custody_snapshot", lambda: ({
+        "retained-venue": lease.Lease(
+            "retained-venue", "", 1, lease._this_host(), now, now,
+            worktree="fixture-worktree",
+        ),
+    }, {}))
+    monkeypatch.setattr(account_binding, "list_bindings", lambda **kw: [
+        account_binding.AccountBinding("retained-venue", "original-owner", 0, "example/project"),
+    ])
+    for name in ("GH_TOKEN", "GITHUB_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(gh_account, "account_for_repo", lambda repo: None)
+    monkeypatch.setattr(gh_account, "active_account", lambda: "new-active-owner")
+    monkeypatch.setattr(
+        "agent_codespaces.owner_inventory.qualified_environment",
+        lambda account: {"GH_TOKEN": f"fixture-{account}"},
+    )
+    monkeypatch.setattr(cli, "load_merged_config", CodespacesConfig)
+    monkeypatch.delenv("AGENT_CODESPACES_SKIP_SCOPE_CHECK", raising=False)
+    monkeypatch.setattr(cli, "_gh_auth_status", lambda *a, **kw: pytest.fail("reuse checked creation scope"))
+    monkeypatch.setattr(cli, "_gh_binary_available", lambda: True)
+    monkeypatch.setattr(cli, "validate_context", lambda: None)
+    monkeypatch.setattr(cli.pool_mod, "list_leases", lambda: [])
+    monkeypatch.setattr(cli.pool_mod, "list_status", lambda: [])
+    monkeypatch.setattr(cli.pool_mod, "codespaces_in_use", lambda names: {})
+    monkeypatch.setattr(coordination, "list_leases", lambda **kwargs: {})
+    monkeypatch.setattr(coordination, "list_cleanliness", lambda: {})
+    selected = []
+
+    def listing(account, *, qualified, environment):
+        selected.append(account)
+        assert environment == {"GH_TOKEN": f"fixture-{account}"}
+        return [
+            lifecycle.CodespaceInfo(
+                name="retained-venue", repository="example/project",
+                display_name="", branch="main",
+                state="Available", machine="basicLinux32gb", account=account,
+            ),
+            *[
+                lifecycle.CodespaceInfo(
+                    name=f"stopped-{index}", display_name="", repository="other/project", branch="main",
+                    state="Shutdown", machine="basicLinux32gb", account=account,
+                ) for index in range(inventory_count - 1)
+            ],
+        ] if account == "original-owner" else []
+
+    monkeypatch.setattr(lifecycle, "_list_codespaces_under", listing)
+    monkeypatch.setattr(cli, "create_codespace", lambda *a, **kw: pytest.fail("lost own venue"))
+    args = ["--json"] if command == "allocate" else ["--no-wait"]
+    assert main([command, "example/project", *args]) == 0
+    output = capsys.readouterr().out
+    if command == "allocate":
+        assert json.loads(output)["action"] == "reuse"
+    assert "retained-venue" in output
+    assert selected == ["original-owner"]
+
+
+def test_owned_capacity_real_cli_process_preserves_override(tmp_path):
+    import subprocess
+    import sys
+
+    from agent_procutil import no_window_kwargs
+
+    script = r'''
+import contextlib
+import io
+import json
+import os
+import subprocess
+import sys
+import builtins
+from pathlib import Path
+from agent_codespaces import __main__ as cli, lifecycle, pool, coordination, allocation, lease
+from agent_codespaces import account_binding, driving_worktrees, status, worktrees
+from agent_codespaces.config import CodespacesConfig
+from agent_codespaces.lifecycle import CodespaceInfo
+
+native_list = coordination.list_leases
+native_context = allocation.allocation_context
+original_import = builtins.__import__
+def without_worktrees_package(name, *args, **kwargs):
+    if name == "agent_worktrees" or name.startswith("agent_worktrees."):
+        raise ImportError("separate runtime")
+    return original_import(name, *args, **kwargs)
+builtins.__import__ = without_worktrees_package
+cli.load_merged_config = CodespacesConfig
+cli._require_codespace_scope = lambda operation, **kwargs: None
+cli.validate_context = lambda: None
+cli._gh_binary_available = lambda: True
+allocation.allocation_context = lambda repo: ("fixture-owner", {"GH_TOKEN": "fixture-token"})
+pool.list_leases = lambda: []
+pool.list_status = lambda: []
+pool.codespaces_in_use = lambda names: {}
+coordination.list_leases = lambda **kwargs: {}
+coordination.list_cleanliness = lambda: {}
+coordination.owner_ref = lambda: None
+lease.resolve_owner_worktree = lambda: None
+created = []
+cli.create_codespace = lambda *args, **kwargs: (
+    created.append(kwargs["account"]) or
+    type("Created", (), {"name": "fixture-created"})()
+)
+results = []
+for count, force, failed in ((29, False, False), (30, False, False), (31, False, False),
+                             (30, True, False), (0, False, True)):
+    def listing(account, **kwargs):
+        if failed:
+            raise RuntimeError("fixture inventory unavailable")
+        return [CodespaceInfo(
+            name=f"venue-{index}", display_name="", repository="example/project",
+            branch="main", state="Shutdown", machine="premiumLinux", account=account,
+        ) for index in range(count)]
+    allocation.list_account_codespaces = listing
+    argv = ["create", "example/project", "--no-wait"]
+    if force:
+        argv.append("--force-create")
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        create_result = cli.main(argv)
+        allocate_result = cli.main(["allocate", "example/project", "--json"])
+    results.append([create_result, allocate_result])
+root = Path(sys.argv[1])
+from ssh_manager import locks
+locks.locks_dir = lambda: root / "target-locks"
+lease.LEASE_FILE = root / "leases.json"
+lease._LOCK_FILE = root / "leases.lock"
+lease._DEPLOY_HOLDS_FILE = root / "holds.json"
+lease.ensure_runtime_dir = lambda: None
+lease.resolve_owner_worktree = lambda: "current-worktree"
+account_binding.BINDINGS_FILE = root / "bindings.json"
+account_binding._LOCK_FILE = root / "bindings.lock"
+account_binding.ensure_runtime_dir = lambda: None
+worktrees.validate_context = lambda: None
+status.clear_status = lambda name: None
+os.environ.pop("AGENT_CODESPACES_DISABLE_CLAIM", None)
+coordination.owner_ref = lambda: "machine/project/current-worktree"
+coordination.list_leases = native_list
+cli.load_merged_config = lambda: CodespacesConfig(default_machine_type="premiumLinux")
+pool_rows = [CodespaceInfo(
+    name=f"venue-{index}", display_name="", repository="example/project",
+    branch="retained-feature", state="Shutdown", machine="premiumLinux", account="fixture-owner",
+) for index in range(30)]
+allocation.list_account_codespaces = lambda *args, **kwargs: pool_rows
+record = {"resource": {"kind": "codespace", "key": "venue-0"},
+          "holder": "machine/project/previous", "token": "a" * 40,
+          "state": "released", "live": False}
+calls = []
+obligations = []
+uncertain = False
+settlement_unknown = False
+def transport(args, **kwargs):
+    calls.append(args)
+    if args == ["--project", "project", "coordination-readiness"]:
+        data = {"version": 1, "ready": True, "code": "ready",
+                "capabilities": [coordination.RELEASED_ONLY_CAPABILITY]}
+    elif args == ["--project", "project", "claims", "current-worktree", "--json"]:
+        data = {"version": 1, "machine": "machine", "repo": "project",
+                "worktree_id": "current-worktree", "outbound": obligations}
+    elif args[:2] == ["lease", "list"]:
+        data = [record]
+    elif args[:2] == ["lease", "inspect"]:
+        data = record
+    elif args[:2] == ["lease", "acquire"]:
+        assert "--released-only" in args and record["state"] == "released"
+        record.update(state="leased", live=True, token="b" * 40,
+                      holder="machine/project/current-worktree")
+        if uncertain:
+            return subprocess.CompletedProcess(args, 4, "", "response lost")
+        data = record
+    elif args[:2] == ["lease", "renew"]:
+        data = record
+    elif args[:2] == ["lease", "release"]:
+        record.update(state="released", live=False, token="c" * 40)
+        data = record
+    elif args[:2] == ["claims", "add"]:
+        if not obligations:
+            obligations.append({"kind": "codespace", "ref": "venue-0", "state": "active"})
+        data = {"worktree_id": "current-worktree", "kind": "codespace",
+                "ref": "venue-0", "state": "active"}
+    elif args[:2] == ["claims", "settle"]:
+        assert "--released" in args
+        if settlement_unknown:
+            return subprocess.CompletedProcess(args, 4, "", "settlement unavailable")
+        obligations.clear()
+        data = {"worktree_id": "current-worktree", "ref": "venue-0", "disposition": "released"}
+    else:
+        raise AssertionError(args)
+    return subprocess.CompletedProcess(args, 0, json.dumps(data), "")
+coordination._run = transport
+from agent_codespaces import live_users
+live_users.codespaces_in_use = lambda names: {}
+retained = root / "retained.txt"
+retained.write_bytes(b"prior effort work")
+with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+    reused = cli.main(["create", "example/project", "--no-wait"])
+    connected = lease.claim("venue-0", "current-worktree", holder_ref="machine/project/current-worktree")
+    settlement_unknown = True
+    try:
+        lease.release_claim("venue-0", "current-worktree")
+    except RuntimeError as error:
+        assert "settlement" in str(error)
+    else:
+        raise AssertionError("unconfirmed settlement")
+    record.update(state="leased", live=True, token="d" * 40,
+                  holder="other-machine/project/next-worktree")
+    later = dict(record)
+    settlement_unknown = False
+    write = lease._write_private_json
+    def fail_final_cleanup(path, payload):
+        if path == lease.LEASE_FILE and "venue-0" not in payload:
+            raise OSError("final cleanup publication unavailable")
+        write(path, payload)
+    lease._write_private_json = fail_final_cleanup
+    try:
+        lease.release_claim("venue-0", "current-worktree")
+    except OSError as error:
+        assert "cleanup" in str(error)
+    else:
+        raise AssertionError("unconfirmed local cleanup")
+    lease._write_private_json = write
+    assert not obligations and lease.get_lease("venue-0") is not None
+    from agent_codespaces import gh_account, owner_inventory
+    pinned_context = allocation.allocation_context
+    config_factory = cli.load_merged_config
+    allocation.allocation_context = native_context
+    gh_account.account_for_repo = lambda repo: None
+    gh_account.active_account = lambda: "new-active-owner"
+    for variable in ("GH_TOKEN", "GITHUB_TOKEN"):
+        os.environ.pop(variable, None)
+    retained_accounts = []
+    owner_inventory.qualified_environment = lambda account: (
+        retained_accounts.append(account) or {"GH_TOKEN": "fixture-" + account}
+    )
+    cli.load_merged_config = lambda: CodespacesConfig(
+        default_machine_type="premiumLinux", max_owned_codespaces=31,
+    )
+    assert cli.main(["allocate", "example/project", "--json"]) == 4
+    assert cli.main(["create", "example/project", "--no-wait"]) == 4
+    assert retained_accounts == ["fixture-owner", "fixture-owner"]
+    assert record == later
+    allocation.allocation_context = pinned_context
+    cli.load_merged_config = config_factory
+    returned = lease.release_claim("venue-0", "current-worktree")
+assert reused == 0 and connected.lease_token == "b" * 40 and returned
+assert record == later
+assert len([args for args in calls if args[:2] == ["lease", "release"]]) == 1
+assert retained.read_bytes() == b"prior effort work"
+assert pool_rows[0].branch == "retained-feature"
+assert account_binding.bound_account("venue-0") == "fixture-owner"
+assert len([args for args in calls if args[:2] == ["lease", "acquire"]]) == 1
+record.update(state="released", live=False)
+uncertain = True
+with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+    assert cli.main(["create", "example/project", "--no-wait"]) == 4
+assert record["state"] == "leased" and lease.get_lease("venue-0") is None
+allocation.allocation_context = native_context
+from agent_codespaces import gh_account, owner_inventory
+gh_account.account_for_repo = lambda repo: None
+gh_account.active_account = lambda: "new-active-owner"
+for variable in ("GH_TOKEN", "GITHUB_TOKEN"):
+    os.environ.pop(variable, None)
+selected = []
+owner_inventory.qualified_environment = lambda account: (
+    selected.append(account) or {"GH_TOKEN": "fixture-" + account}
+)
+cli.load_merged_config = lambda: CodespacesConfig(
+    default_machine_type="premiumLinux", max_owned_codespaces=31,
+)
+with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+    retried = cli.main(["create", "example/project", "--no-wait"])
+assert retried == 4 and selected == ["fixture-owner"]
+assert len([args for args in calls if args[:2] == ["lease", "acquire"]]) == 2
+import base64
+proof_record = {
+    "schema_version": 1,
+    "resource": {"kind": "codespace", "key": "venue-1",
+                 "identity": "codespace:" + base64.urlsafe_b64encode(b"venue-1").decode().rstrip("=")},
+    "state": "released", "event": "release", "lease_id": "4" * 32,
+    "holder": "machine/project/previous", "token": "e" * 40, "live": False,
+    "issued_at": "2026-11-07T12:00:00Z", "renewed_at": "2026-11-07T12:00:00Z",
+    "expires_at": "2026-11-07T12:00:00Z", "ttl_seconds": 0, "context": {},
+}
+old_transport = coordination._run
+def proof_transport(args, **kwargs):
+    calls.append(["proof", *args])
+    if args == ["--project", "project", "coordination-readiness"]:
+        data = {"version": 1, "ready": True, "code": "ready",
+                "capabilities": [coordination.RELEASED_ONLY_CAPABILITY, coordination.RETURN_PROOF_CAPABILITY]}
+    elif args[:2] == ["claims", "add"] and args[3] == "venue-1":
+        obligations.append({"kind": "codespace", "ref": "venue-1", "state": "active"})
+        data = {"worktree_id": "current-worktree", "kind": "codespace", "ref": "venue-1", "state": "active"}
+    elif args[:2] == ["claims", "settle"] and args[2] == "venue-1":
+        obligations[:] = [item for item in obligations if item["ref"] != "venue-1"]
+        data = {"worktree_id": "current-worktree", "ref": "venue-1", "disposition": "released"}
+    elif args[:2] == ["lease", "inspect"] and args[3] == "venue-1":
+        data = proof_record
+    elif args[:2] == ["lease", "acquire"] and args[3] == "venue-1":
+        proof_record.update(state="leased", event="acquire", live=True,
+                            holder="machine/project/current-worktree",
+                            expires_at="2026-11-07T13:00:00Z", ttl_seconds=3600)
+        data = proof_record
+    elif args[:2] == ["lease", "release"] and args[3] == "venue-1":
+        assert "--retain-return-proof" in args
+        pending = json.loads(lease.LEASE_FILE.read_text())["__agent_codespaces_returns_v1__"]["returns"]
+        assert pending["venue-1"]["lease_id"] == "4" * 32
+        proof = {"lease_id": "4" * 32, "holder": "machine/project/current-worktree",
+                 "released_at": "2026-11-07T12:01:00Z"}
+        proof_record.update(schema_version=2, state="released", event="release", live=False,
+                            token="f" * 40, renewed_at=proof["released_at"],
+                            expires_at=proof["released_at"], ttl_seconds=0, returned_generations=[proof])
+        data = proof_record
+    else:
+        return old_transport(args, **kwargs)
+    return subprocess.CompletedProcess(args, 0, json.dumps(data), "")
+coordination._run = proof_transport
+with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+    lease.claim("venue-1", "current-worktree", holder_ref="machine/project/current-worktree")
+    from agent_codespaces.claim_return import RETURN_KEY
+    def lose_return_confirmation(path, payload):
+        progress = payload.get(RETURN_KEY, {}).get("returns", {}).get("venue-1")
+        if path == lease.LEASE_FILE and (progress and progress["phase"] == "released" or "venue-1" not in payload):
+            raise OSError("return confirmation unavailable")
+        write(path, payload)
+    lease._write_private_json = lose_return_confirmation
+    try:
+        lease.release_claim("venue-1", "current-worktree")
+    except OSError:
+        pass
+    else:
+        raise AssertionError("return confirmation unexpectedly durable")
+    lease._write_private_json = write
+    proof_record.update(state="leased", event="acquire", live=True, lease_id="5" * 32,
+                        holder="other-machine/project/successor", token="a" * 40,
+                        issued_at="2026-11-07T12:02:00Z", renewed_at="2026-11-07T12:02:00Z",
+                        expires_at="2026-11-07T13:02:00Z", ttl_seconds=3600)
+    successor_wire = json.dumps(proof_record, sort_keys=True)
+    proof_returned = lease.release_claim("venue-1", "current-worktree")
+assert proof_returned and lease.get_lease("venue-1") is None
+assert json.dumps(proof_record, sort_keys=True) == successor_wire
+assert obligations == [{"kind": "codespace", "ref": "venue-0", "state": "active"}]
+assert len([args for args in calls if args[:4] == ["proof", "lease", "release", "codespace"]]) == 1
+print(json.dumps({"results": results, "created": created, "reused": reused,
+                  "returned": returned, "uncertain_retry": retried, "proof_returned": proof_returned}))
+'''
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(tmp_path)], capture_output=True, text=True,
+        timeout=30, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    observed = json.loads(result.stdout)
+    assert observed["results"] == [[0, 0], [4, 4], [4, 4], [0, 4], [4, 4]]
+    assert observed["created"] == ["fixture-owner", "fixture-owner"]
+    assert observed["reused"] == 0 and observed["returned"] is True
+    assert observed["uncertain_retry"] == 4
+    assert observed["proof_returned"] is True
 
 
 # --- Top-level --project (command-surface <repo> <slug> surface) ---

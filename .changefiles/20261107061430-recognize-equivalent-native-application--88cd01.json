@@ -1,0 +1,9 @@
+{
+  "comment": "Recognize equivalent native application root and package paths during self-install and activation",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

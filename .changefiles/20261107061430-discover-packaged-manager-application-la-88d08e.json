@@ -1,0 +1,9 @@
+{
+  "comment": "Discover packaged Manager application launchers through their retained health and resource owner",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

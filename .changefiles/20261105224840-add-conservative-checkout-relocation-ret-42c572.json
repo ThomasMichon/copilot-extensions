@@ -1,0 +1,9 @@
+{
+  "comment": "Add conservative checkout relocation, retained-root authority and original companion allocation intent",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

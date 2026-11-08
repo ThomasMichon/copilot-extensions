@@ -5,8 +5,16 @@ from __future__ import annotations
 import json
 import sys
 
-from . import claims_cli, config as cfg, output, resource_producer as producer
-from . import tracking, worktree_ops_cli
+from . import config as cfg, output, resource_producer as producer
+from . import tracking
+
+
+def add_relationship_parser(sub) -> None:
+    relationship = sub.add_parser("resource-relationship", help="Reserve/bind/inspect/verify-retire a retained relationship; JSON stdin/stdout")
+    relationship.add_argument("operation", choices=("capabilities", "reserve", "bind", "inspect", "close"))
+    relationship.add_argument("--json", action="store_true", required=True)
+    relationship.add_argument("--owner-ref", help="Qualified local worktree owner; required except for capabilities")
+    relationship.add_argument("--resident-only", action="store_true", help="Inspect the selected resident without bootstrap or direct fallback; requires expected_creation_nonce")
 
 
 def add_parsers(sub) -> None:
@@ -18,11 +26,7 @@ def add_parsers(sub) -> None:
     parser.add_argument("operation", choices=("capabilities", "reserve", "begin", "complete", "bind", "inspect", "close"))
     parser.add_argument("--json", action="store_true", required=True)
     parser.add_argument("--owner-ref", help="Qualified local owner; omitted, resolve current worktree/supported anchor")
-    relationship = sub.add_parser("resource-relationship", help="Reserve/bind/inspect/verify-retire a retained relationship; JSON stdin/stdout")
-    relationship.add_argument("operation", choices=("capabilities", "reserve", "bind", "inspect", "close"))
-    relationship.add_argument("--json", action="store_true", required=True)
-    relationship.add_argument("--owner-ref", help="Qualified local worktree owner; required except for capabilities")
-    relationship.add_argument("--resident-only", action="store_true", help="Inspect the selected resident without bootstrap or direct fallback; requires expected_creation_nonce")
+    add_relationship_parser(sub)
 
 
 def read_input(label: str = "producer") -> dict:
@@ -72,6 +76,8 @@ def cmd_resource_producer(args) -> int:
                 "max_ref_bytes": producer.MAX_REF_BYTES, "max_input_bytes": producer.MAX_INPUT_BYTES,
             })
             return 0
+        from . import claims_cli, worktree_ops_cli
+
         payload = read_input()
         owner_ref = args.owner_ref or worktree_ops_cli._resolve_owner_ref()
         if not owner_ref:

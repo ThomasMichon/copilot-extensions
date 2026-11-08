@@ -388,6 +388,77 @@ resolve_runtime_python() {
     printf '%s\n' "$AW_PY"
 }
 
+_aw_mux_core() {
+    local mode="$1"
+    shift
+    local -a command=("$PYTHON" -I -X utf8 -c '
+import json, sys
+from pathlib import Path
+try:
+    from agent_procutil.owned_process import run_caller_owned
+except ImportError:
+    raise SystemExit(4 if sys.argv[1] == "select" else 3)
+
+def unique(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("Duplicate mux reply property")
+        value[key] = item
+    return value
+
+try:
+    if sys.argv[1] == "select":
+        reply = run_caller_owned(
+            [sys.executable, "-I", "-X", "utf8", "-m", "agent_remote_driver.mux_creation", "--describe-contract"],
+            timeout=10, max_stdout_bytes=65536, max_stderr_bytes=4096,
+        )
+        if reply.returncode != 0:
+            raise SystemExit(4)
+        core = json.loads(reply.stdout, object_pairs_hook=unique)
+        if (
+            not isinstance(core, dict) or core.get("contract") != "copilot-driver.mux-creation"
+            or type(core.get("version")) is not int or core["version"] != 1
+            or not isinstance(core.get("operations"), list)
+            or "posix-tmux-create-or-join" not in core["operations"]
+        ):
+            raise SystemExit(4)
+        for name in ("python", "entrypoint"):
+            path = Path(core[name])
+            if not path.is_absolute() or not path.is_file():
+                raise ValueError("Selected mux runtime is unavailable")
+        print(json.dumps(core))
+    elif sys.argv[1] == "create":
+        core = json.loads(sys.argv[2], object_pairs_hook=unique)
+        request = {"version": 1, "binary": sys.argv[3], "session": sys.argv[4], "argv": sys.argv[5:]}
+        reply = run_caller_owned(
+            [core["python"], "-I", "-X", "utf8", core["entrypoint"], "--create"],
+            input_text=json.dumps(request), timeout=40, max_stdout_bytes=65536, max_stderr_bytes=4096,
+        )
+        result = json.loads(reply.stdout, object_pairs_hook=unique)
+        if (
+            not isinstance(result, dict) or set(result) != {"contract", "version", "status"}
+            or result["contract"] != "copilot-driver.mux-creation"
+            or type(result["version"]) is not int or result["version"] != 1
+            or result["status"] not in ("created", "joined", "rejected", "unknown")
+            or (reply.returncode == 0) != (result["status"] in ("created", "joined"))
+        ):
+            raise ValueError("Mux result is unconfirmed")
+        print(result["status"])
+        raise SystemExit(reply.returncode)
+    else:
+        raise ValueError("Unknown mux operation")
+except Exception:
+    raise SystemExit(3)
+' "$mode" "$@")
+    if [[ "${_AHP_RESUME_AVAILABLE:-0}" == 1 ]]; then
+        env -u GH_TOKEN -u GITHUB_TOKEN -u AGENT_WORKTREES_AHP_AUTH_TOKEN \
+            -u COPILOT_CLI_ENABLED_FEATURE_FLAGS "${command[@]}"
+    else
+        "${command[@]}"
+    fi
+}
+
 # Runs a best-effort `agent_worktrees` preflight subcommand (knowledge
 # composition, marketplace overrides, ...) with retry-and-reresolve.
 #
@@ -998,33 +1069,12 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
     fi
 
     if [[ "$_AHP_RESUME_AVAILABLE" == "1" ]]; then
-        _FILTERED_CMD=()
-        _SKIP_NEXT=0
-        _HAS_EXPERIMENTAL=0
-        for _ARG in "${CMD_ARRAY[@]}"; do
-            if [[ "$_SKIP_NEXT" == "1" ]]; then
-                _SKIP_NEXT=0
-                continue
-            fi
-            case "$_ARG" in
-                --ahp)
-                    _SKIP_NEXT=1
-                    ;;
-                --ahp=*|--resume=*)
-                    ;;
-                --experimental)
-                    _HAS_EXPERIMENTAL=1
-                    _FILTERED_CMD+=("$_ARG")
-                    ;;
-                *)
-                    _FILTERED_CMD+=("$_ARG")
-                    ;;
-            esac
-        done
-        CMD_ARRAY=("${_FILTERED_CMD[@]}")
-        [[ "$_HAS_EXPERIMENTAL" == "1" ]] \
-            || CMD_ARRAY+=(--experimental)
-        CMD_ARRAY+=(--ahp "$_AHP_ENDPOINT" "--resume=$_AHP_SESSION")
+        _AHP_HELPER="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-launch-session.sh}")" && pwd)/ahp-command.py"
+        if ! _AHP_COMMAND=$("$PYTHON" "$_AHP_HELPER" bash "$_AHP_ENDPOINT" "$_AHP_SESSION" -- "${CMD_ARRAY[@]}"); then
+            setup_log ERROR "Could not rebind the prepared native AHP command."
+            exit 3
+        fi
+        eval "CMD_ARRAY=( $_AHP_COMMAND )"
     fi
 
     # Identity vars are stripped from the CHILD Copilot process so the session
@@ -1051,6 +1101,26 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
         "${CMD_ARRAY[1]:-}" == "-m" &&
         "${CMD_ARRAY[2]:-}" == "agent_worktrees.launch_seed_exec" ]]; then
         CMD_ARRAY[0]="$PYTHON"
+    fi
+    _HEADED_SHELL_INDEX=0
+    if [[ "${CMD_ARRAY[0]##*/}" == "env" && "${CMD_ARRAY[1]:-}" == "BASH_ENV=" ]]; then
+        _HEADED_SHELL_INDEX=2
+    fi
+    _HEADED_SHELL="${CMD_ARRAY[$_HEADED_SHELL_INDEX]:-}"
+    _HEADED_WRAPPER="${CMD_ARRAY[$((_HEADED_SHELL_INDEX + 1))]:-}"
+    _HEADED_OWNER_INDEX=$((_HEADED_SHELL_INDEX + 3))
+    if [[ "${CMD_ARRAY[$((_HEADED_SHELL_INDEX + 2))]:-}" == "--recovery" ]]; then
+        _HEADED_OWNER_INDEX=$((_HEADED_OWNER_INDEX + 1))
+    fi
+    if [[ "${_HEADED_SHELL##*/}" == "bash" && "${_HEADED_WRAPPER##*/}" == "launch-command.sh" &&
+        "${CMD_ARRAY[$((_HEADED_OWNER_INDEX - 1))]:-}" == "--" &&
+        "${CMD_ARRAY[$((_HEADED_OWNER_INDEX + 1))]:-}" == "-m" &&
+        "${CMD_ARRAY[$((_HEADED_OWNER_INDEX + 2))]:-}" == "agent_worktrees.launch_seed_exec" ]]; then
+        case "${CMD_ARRAY[$_HEADED_OWNER_INDEX]##*/}" in
+            python|python[0-9]|python[0-9].[0-9]*)
+                CMD_ARRAY[$_HEADED_OWNER_INDEX]="$PYTHON"
+                ;;
+        esac
     fi
 
     # Patch a stale `--runtime-python` embedded in CMD_ARRAY (#stale-venv).
@@ -1090,6 +1160,15 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
             activity_log mux_failed "$WORKTREE_ID" mux=tmux reason=not_found exit_code=1
             echo "ERROR: tmux is required for interactive sessions but was not found. Use --no-mux to request a direct session explicitly." >&2
             exit 1
+        fi
+        AW_MUX_CORE=""
+        AW_MUX_CORE_SELECTION=0
+        AW_MUX_CORE="$(_aw_mux_core select)" || AW_MUX_CORE_SELECTION=$?
+        if [[ "$AW_MUX_CORE_SELECTION" == 4 ]]; then
+            AW_MUX_CORE=""
+        elif [[ "$AW_MUX_CORE_SELECTION" != 0 ]]; then
+            setup_log ERROR "Selected mux core support is unconfirmed; no creation attempted"
+            exit 3
         fi
 
         # tmux/psmux parse `.` in a target spec as the `window.pane` separator,
@@ -1195,7 +1274,7 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
 
         # If a tmux session already exists for this worktree, join it.
         # The attacher gets the shared view; no post-exit responsibility.
-        if tmux has-session -t "=$TMUX_SESS" 2>/dev/null; then
+        _aw_join_existing_tmux() {
             aw_assert_cold_resume live-known
             echo "Joining existing session: $TMUX_SESS"
             activity_log mux_attached "$WORKTREE_ID" mux=join
@@ -1217,6 +1296,9 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
                 echo "ERROR: Failed to attach to existing tmux session '$TMUX_SESS' (exit code $TMUX_ATTACH_EXIT)." >&2
             fi
             exit "$TMUX_ATTACH_EXIT"
+        }
+        if tmux has-session -t "=$TMUX_SESS" 2>/dev/null; then
+            _aw_join_existing_tmux
         fi
 
         # Create a new tmux session for this worktree.
@@ -1290,6 +1372,7 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
             [[ -r "$PANE_WRAPPER" ]] || exit 3
         fi
         AHP_TOKEN_FILE=""
+        TMUX_CREATION_UNCERTAIN=0
         if [[ "$_AHP_RESUME_AVAILABLE" == "1" ]]; then
             if [[ ! -r "$PANE_WRAPPER" ]]; then
                 setup_log ERROR "AHP tmux launch requires the pane wrapper at $PANE_WRAPPER"
@@ -1309,8 +1392,10 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
                 exit 3
             fi
             trap '
-                [[ -z "${AHP_TOKEN_FILE:-}" ]] || rm -f -- "$AHP_TOKEN_FILE"
-                [[ -z "${AHP_TOKEN_DIR:-}" ]] || rmdir "$AHP_TOKEN_DIR" 2>/dev/null || true
+                if [[ "${TMUX_CREATION_UNCERTAIN:-0}" != 1 ]]; then
+                    [[ -z "${AHP_TOKEN_FILE:-}" ]] || rm -f -- "$AHP_TOKEN_FILE"
+                    [[ -z "${AHP_TOKEN_DIR:-}" ]] || rmdir "$AHP_TOKEN_DIR" 2>/dev/null || true
+                fi
             ' EXIT
         fi
         if [[ -r "$PANE_WRAPPER" ]]; then
@@ -1352,6 +1437,28 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
         for _copilot_arg in "${COPILOT_PASSTHROUGH[@]+"${COPILOT_PASSTHROUGH[@]}"}"; do
             [[ "$_copilot_arg" == "--stdio" ]] && TMUX_RETRY_PROMPT=0
         done
+        if [[ -n "$AW_MUX_CORE" ]]; then
+            aw_assert_cold_resume
+            TMUX_CREATE_TOTAL_ATTEMPTS=1
+            TMUX_RETRY_CYCLE=0
+            TMUX_CREATION_UNCERTAIN=1
+            TMUX_CORE_STATUS="$(_aw_mux_core create "$AW_MUX_CORE" "$(type -P tmux)" "$TMUX_SESS" \
+                new-session -d -s "$TMUX_SESS" -c "${WORK_DIR:-.}" \
+                "${TMUX_ENV_FLAGS[@]+"${TMUX_ENV_FLAGS[@]}"}" "${PANE_CMD[@]}")"
+            TMUX_CREATE_EXIT=$?
+            if [[ "$TMUX_CREATE_EXIT" == 0 ]]; then
+                TMUX_CREATION_UNCERTAIN=0
+                if [[ "$TMUX_CORE_STATUS" == joined ]]; then
+                    if [[ -n "$AHP_TOKEN_FILE" ]]; then
+                        rm -f -- "$AHP_TOKEN_FILE"
+                        rmdir "$AHP_TOKEN_DIR" 2>/dev/null || true
+                    fi
+                    _aw_join_existing_tmux
+                fi
+            elif [[ "$TMUX_CORE_STATUS" == rejected ]]; then
+                TMUX_CREATION_UNCERTAIN=0
+            fi
+        fi
         while [[ "$TMUX_RETRY_CYCLE" == "1" ]]; do
             TMUX_RETRY_CYCLE=0
             for ((TMUX_CREATE_ATTEMPT=1;
@@ -1388,6 +1495,13 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
         done
         if [[ "$TMUX_CREATE_EXIT" -ne 0 ]]; then
             set -e
+            if [[ "$TMUX_CREATION_UNCERTAIN" == 1 ]]; then
+                setup_log ERROR "tmux creation outcome is unconfirmed; original handoffs retained without retry"
+                activity_log mux_failed "$WORKTREE_ID" mux=tmux reason=create_uncertain \
+                    "exit_code=$TMUX_CREATE_EXIT"
+                echo "ERROR: tmux creation outcome is unconfirmed. The worktree and original handoffs are retained; inspect them before retrying." >&2
+                exit "$TMUX_CREATE_EXIT"
+            fi
             RECOVERY_PROJECT="${LAUNCH_PROJECT:-agent-worktrees}"
             RECOVERY_COMMAND="$RECOVERY_PROJECT --worktree-id $WORKTREE_ID"
             PRESERVED_PATH="${STATUS_PATH:-${WORK_DIR:-.}}"

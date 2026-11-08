@@ -363,6 +363,17 @@ jobs:
           name: vault-configuration-critical-${{ runner.os }}-${{ github.sha }}
           path: vault-configuration-critical-junit
           if-no-files-found: warn
+      - name: Measure isolated Vault bootstrap cold and current metadata
+        run: >-
+          python tools/run-plugin-tests.py agent-vault --allow-explicit-tiers
+          --test-file tests/test_bootstrap_driver.py
+          -k native_bootstrap_performance_samples
+          --plugin-timeout 180 --timeout 120 --test-timeout 60
+      - name: Qualify Vault public pin before native key publication
+        run: >-
+          python tools/run-plugin-tests.py agent-vault --allow-explicit-tiers
+          --test-file tests/test_ssh_key_install.py
+          --plugin-timeout 180 --timeout 120 --test-timeout 60
       - name: Qualify inactive first touch and configured consumers
         run: >-
           python tools/run-plugin-tests.py agent-vault --max-files-per-sub-suite 2

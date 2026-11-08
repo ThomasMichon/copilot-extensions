@@ -9,6 +9,7 @@ import sys
 from datetime import datetime, timezone
 from itertools import count
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import agent_procutil
@@ -52,6 +53,59 @@ def test_native_repair_lifecycle_starts_without_site_packages(monkeypatch, tmp_p
     assert "--runtime-publication-python" not in native
     assert cwd == installation.payload
     assert environment["COPILOT_PLUGIN_STAGED_FROM"] == str(installation.payload)
+
+
+@pytest.mark.parametrize("platform", ["windows", "posix"])
+@pytest.mark.parametrize("declared", [True, False], ids=["custom-entry", "missing-entry"])
+def test_prepared_repair_uses_declared_installer_entry(tmp_path, monkeypatch, platform, declared):
+    from worktree_manager import runtime_source_repair
+
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "plugins/agent-worktrees/src"))
+    artifact = tmp_path / "prepared"
+    scripts = artifact / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "versioned_runtime_source.py").write_text(
+        f"SOURCE_PIN_ENV = {runtime_source_repair.PIN_ENV!r}\n", encoding="utf-8",
+    )
+    entries = {
+        "windows": {"script": "scripts/construct.ps1", "argument": "-FromBundle"},
+        "posix": {"script": "scripts/construct.sh", "argument": "--from-bundle"},
+    }
+    if declared:
+        for entry in entries.values():
+            path = artifact / entry["script"]
+            path.parent.mkdir(exist_ok=True)
+            path.write_text("# repair AGENT_WORKTREES_TARGETED_UPDATE\n", encoding="utf-8")
+        (artifact / "source-install.json").write_text(json.dumps({
+            "schema": "copilot-extensions.native-source-install", "version": 1, **entries,
+        }), encoding="utf-8")
+        runtime_source_repair.qualify_engine(artifact, prepared=True)
+    installation = update_bootstrap._Installation(
+        root=tmp_path / "runtime", payload=tmp_path / "incumbent", identity={},
+        sdk=tmp_path / "sdk", artifact=artifact,
+        source_pin="selected-source", source_snapshot=tmp_path / "snapshot",
+    )
+    observed = []
+    monkeypatch.setattr(update_bootstrap, "os", SimpleNamespace(
+        name="nt" if platform == "windows" else "posix", pathsep=os.pathsep,
+    ))
+    monkeypatch.setattr(update_bootstrap.shutil, "which", lambda name: name)
+    monkeypatch.setattr(update_bootstrap, "_wait", lambda *args: observed.append(args) or 17)
+    if not declared:
+        with pytest.raises(ValueError, match="no native installation-source capability"):
+            update_bootstrap._invoke(installation, "update", {})
+        assert not observed
+        return
+    assert update_bootstrap._invoke(installation, "update", {}) == 17
+    command, environment, cwd = observed[0]
+    native = command[command.index("--") + 1:]
+    entry = entries[platform]
+    assert str(artifact / entry["script"]) in native
+    assert native[native.index(entry["argument"]) + 1] == str(installation.source_snapshot)
+    assert "-InstallSource" not in native and "--install-source" not in native
+    assert environment["COPILOT_PLUGIN_STAGED_FROM"] == str(installation.payload)
+    assert environment["AGENT_WORKTREES_TARGETED_UPDATE"] == "1"
+    assert cwd == artifact
 
 
 @pytest.mark.parametrize(

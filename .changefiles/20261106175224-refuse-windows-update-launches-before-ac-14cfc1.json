@@ -1,0 +1,9 @@
+{
+  "comment": "Refuse Windows update launches before acquisition or request submission when the shell cannot create a durable breakaway process, with explicit detached-shell remediation.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

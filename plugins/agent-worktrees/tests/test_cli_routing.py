@@ -2349,6 +2349,13 @@ def test_update_hands_off_to_usable_manager(monkeypatch, tmp_path):
     monkeypatch.delenv(m._UPDATE_CONTEXT_ENV, raising=False)
     monkeypatch.setattr(m, "_usable_worktree_manager", lambda: ("/usr/bin/worktree-manager",))
     monkeypatch.setattr(m.cfg, "active_project", lambda: "demo")
+    # The active project configures no update controller, so the ordinary
+    # Manager seam owns the update.
+    monkeypatch.setattr(
+        m.cfg, "load_config", lambda **_kwargs: SimpleNamespace(default_repo=m.cfg.RepoConfig(
+            anchor=str(tmp_path / "anchor"), worktree_root=str(tmp_path / "worktrees"),
+        )),
+    )
     seam = {}
 
     def fake_exec(mgr, project, *, subcommand=None):

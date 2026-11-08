@@ -44,7 +44,9 @@ back to ordinary watches or another provider.
 | `lookup` | `number`; optional exact `generation_id` |
 | `chunk` | `number`, exact `generation_id`, `offset` |
 | `inspect` | `number`, original `operation_id` |
+| `receipt` (optional prepared contract) | `number`, original `operation_id`, `action_id` |
 | `submit` | `number`, immutable `intent`, separate `source_attachment`, `budget_seconds` |
+| `allocate` (optional selection contract) | `number`, original v1 `intent`, `source_attachment`, `budget_seconds` |
 
 Load/sync use the current protected read owner and explicit expected-current
 cache CAS. Sync is a full section refresh plus the existing normalized comparison,
@@ -94,8 +96,8 @@ An explicit caller prepares it before final preview/approval and intent
 admission; submission preserves those exact bytes rather than invoking a
 decorator or minting IDs. Focused source fixtures qualify create/reply/owned-edit
 serialization, retained intent after owner restart and confirmed retry without
-another send. Automatic preparation, GUID allocation and native correlation
-remain unimplemented; this is not all-publisher or installed/provider adoption.
+another send. The optional receiver-owned allocation path below adds durable fresh-comment
+preparation; this is not all-publisher or installed/provider adoption.
 The existing SDK's explicit pre-dispatch credential/challenge failures retain
 their known-no-send classification. Only its `outcome-unknown` transport error
 marks a possibly dispatched submit; ordinary post-dispatch HTTP/response failures
@@ -122,6 +124,165 @@ Oversized submit envelopes refuse locally before dispatch. Large immutable read
 generations are framed, but this first wire does **not** upload arbitrarily large
 intents/source manifests. An oversized result remains unavailable/unknown with
 durable receipts retained; it is not truncated to claim success.
+
+## Optional prepared review receiver
+
+The existing trusted embedding may construct `WorkspaceOperations` with
+`prepared_reviews=True` after the current lifecycle owner has adopted
+[prepared review storage](review-owner-store.md#optional-prepared-intent-storage-extension).
+This is not a request field, owner loader or permission grant. Default bindings
+retain v1 and do not advertise the optional operation.
+
+The actual executing receiver reads its current adopted intent versions through
+the same owner. Only a selected, adopted receiver advertises this additive
+`prepared_review_contract` in the existing workspace/v1 capability response:
+
+```json
+{
+  "protocol": "agent-pull-requests.prepared-review/v1",
+  "intent_versions": [2],
+  "receipt_protocol": "agent-pull-requests.prepared-comment-receipt/v1"
+}
+```
+
+Its existing `submit` request then accepts v2 prepared intent through the
+[same protected native executor](protected-review-executor.md#prepared-native-intent-and-original-receipt-projection).
+The `receipt` operation delegates to the original scoped receipt projection;
+it performs no fresh native read or handled/echo/ACK update. A read-only binding
+can advertise receipt support without advertising `submit`. Capability support
+does not establish native write permission or current eligibility.
+
+Native/Fleet clients and the CLI/tool façade require that exact supported
+contract before selecting v2 or receipt. Missing/malformed support refuses
+locally without a mutation or a legacy-send fallback; ordinary v1 metadata and
+operations remain usable. The existing capability exchange is reused, not a
+second transport or per-comment forge query. Older clients may ignore the
+additive metadata and keep using v1; older receivers do not acquire new fields
+or operations from a package-version assumption.
+
+## Optional pre-approval selection receiver
+
+After explicit prepared-intent and
+[selection storage adoption](review-owner-store.md#optional-pre-approval-selection-retention),
+the existing host may supply `selection_preparer` alongside `prepared_reviews=True`
+and its normal `write_context`. This trusted synchronous resolver receives the
+selected cached generation and `checkpoint` keyword; it resolves actual current
+destination policy, AI profile and producer origin outside the replay lock,
+then returns bounded pure synchronous composition with the existing
+`comment_preparer(kind, body, scope=..., comment_id=..., write_id=..., previous=...)`
+signature. That returned composer must do no native or external policy IO.
+No callback loader, credential input, storage adoption or new owner is exposed
+through request JSON.
+
+Only that configured receiver with currently adopted storage advertises
+`allocate` plus this additive `selection_contract`:
+
+```json
+{
+  "protocol": "agent-pull-requests.preapproval-selection/v1",
+  "input_versions": [1],
+  "intent_versions": [2],
+  "effects": "none",
+  "approval_required": true,
+  "owned_edits": false
+}
+```
+
+Native/Fleet clients and the source CLI/tool façade negotiate this exact
+contract before sending allocation. Default, missing, malformed or withdrawn
+support refuses the new path without fallback; existing v1 submission, v2
+submission/receipts and explicit-ID local preparation keep their prior semantics.
+The existing Gateway binding, finite deadline, checkpoint, transaction,
+capacity and request/drain owners remain unchanged.
+
+Before first retention the receiver reuses the protected executor's pure
+static selection checks, including complete generation evidence and the full
+source/generation revision (both target-tip fields as well as head/common/iteration),
+then commits fresh comment/reply GUIDs and exact final v2 bytes through
+`ReviewSelectionStore.allocate` before returning a preview. Bodyless votes
+receive no comment identity. Owned/legacy edits remain unsupported on this
+baseline path unless the separate selected-edit extension below is enabled.
+Selected reply targets must exist and not be deleted in that exact baseline;
+invalid targets refuse before composition. Fleet validates returned previews
+against the same normalized v1 original as the receiver, so accepted endpoint
+aliases recover the original selection rather than rejecting retained output.
+Recovery with the same original selection returns the first committed bytes,
+including after restart, lost responses, later profile/origin changes or
+execution admission; it does not resolve a new composer or require the old
+cache entry again. Changed original input refuses. Storage contention keeps
+the existing nonblocking refusal and is retried only through that same key.
+Current owner/expiry checkpoints remain mandatory even on recovery.
+
+The Gateway's trusted transport validator measures its complete serialized
+preview response and the exact submission request (including binding and source
+attachment) before the selection transaction commits. Either frame exceeding
+the existing transport limit refuses without retaining an unrecoverable
+preview. This pure validation performs no native or policy IO under the lock.
+Recovery rechecks the current transport's limits without rewriting retained
+bytes. Native-only larger selections are not implicitly transferable through
+a smaller Fleet frame.
+Post-dispatch failures or malformed allocation responses conservatively report
+`outcome_unknown` for the possible selection commit, not a native effect.
+Always reconcile the original selection key; no error authorizes a fresh key.
+
+Preparation performs no native reads/writes, execution admission, feedback,
+echo, ACK or DB object mapping. Preview approval remains external to this data
+operation. Only explicit exact-intent submission through the existing protected
+executor can advance admission and native effects; its current source,
+principal, ownership and policy checks still apply. The original receipt
+projection preserves those same allocated IDs after native execution.
+These are finite source bindings and synthetic conformance tests, not installed
+producer adoption, live service activation, all-provider proof or rollout.
+
+Support is rechecked by the receiver's actual mode, adopted owner and normal
+request lifetime at use. Cached discovery cannot authorize a withdrawn receiver.
+Overlapping discovery cannot restore stale support after newer withdrawal.
+After a dispatched failure or lost result, retain the original intent/IDs and
+reconcile its original receipt through the same owner; no automatic retry,
+replacement GUID or native-object/DB merge is introduced.
+
+Without an explicit `selection_preparer`, the prepared-review receiver still
+requires caller-prepared exact source/profile/identity before final approval;
+prepared v2 submission alone cannot allocate or turn legacy tagged text into
+structured preparation. Wire byte limits,
+credentials, caller/native-principal separation and writer/drain custody are
+unchanged. Source fixtures qualify the actual CLI -> client -> Gateway ->
+protected synthetic native owner, not a live provider or installed host.
+
+### Optional selected edits
+
+A trusted embedding may additionally select `selection_owned_edits=True`,
+default false, with its existing prepared mode, resolver and write context.
+The exact baseline capability above remains unchanged. Only a currently
+supported opted-in receiver adds `owned_edit_selection_contract`:
+
+```json
+{
+  "protocol": "agent-pull-requests.owned-edit-selection/v1",
+  "selection_protocol": "agent-pull-requests.preapproval-selection/v1",
+  "effects": "none",
+  "approval_required": true
+}
+```
+
+New native/Fleet clients require this exact additive declaration before
+dispatching an edit allocation; missing/malformed support is unavailable,
+not invalid selected content or a reason to probe/fall back. Fresh allocations
+remain usable by prior clients that ignore the extra capability field.
+Refreshing discovery clears withdrawn edit support. The receiver separately
+rechecks its current opt-in before lookup, composition or retention, including
+requests sent using stale cached support.
+
+The existing request shape and `allocate` verb are unchanged. The receiver
+supplies its actual validated generation/source to the
+[same-owner selected-edit binding](review-owner-store.md#optional-pre-approval-selection-retention).
+That binding owns stable logical identity, fresh write identity, selected
+legacy classification and unknown/conflicting history refusal. Full frame
+limits, original-key/cache-independent recovery and explicit exact approval/
+submission/native receipts retain the semantics above. Withdrawing support
+refuses new edit allocations without rewriting or deleting retained previews.
+No normal read-only host configuration, installed consumer or other publisher
+is enrolled by this source opt-in.
 
 ## Lifetime, compatibility and limits
 

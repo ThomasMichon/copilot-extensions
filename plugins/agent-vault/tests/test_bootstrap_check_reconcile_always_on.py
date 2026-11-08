@@ -87,6 +87,7 @@ def _make_fake_plugin(root: Path, name: str) -> Path:
         "runtime-environment.sh", "runtime-environment.ps1",
         "bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1",
         "runtime-activation.sh", "runtime-activation.ps1", "runtime-activation.py",
+        "versioned_runtime_native.ps1",
     ):
         shutil.copyfile(_PLUGIN_ROOT / "scripts" / filename, scripts_dir / filename)
     shutil.copytree(
@@ -150,7 +151,11 @@ def _clean_env(overrides: dict[str, str]) -> dict[str, str]:
     can shadow the real interpreter ahead of it, which would make bash's
     ``command -v python3`` resolve to a dud and silently short-circuit this
     hook before it ever reaches the gate under test."""
-    env = dict(os.environ)
+    env = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith(("AGENT_VAULT_", "VAULT_"))
+        and key not in ("KPDB", "AGENT_VAULT")
+    }
     for key in (
         "COPILOT_EXTENSIONS_CONTEXT", "AGENT_VAULT_NO_SELFPROVISION",
         "AGENT_VAULT_PINNED_CONTEXT", "UPDATE_DRIVER_WITNESS", "BOOTSTRAP_TEST_DRIVER_EXIT_CODE",
@@ -165,6 +170,16 @@ def _clean_env(overrides: dict[str, str]) -> dict[str, str]:
     env.update(overrides)
     env.setdefault("AGENT_VAULT_CONFIG", str(Path(env["HOME"]) / "absent-global.json"))
     return env
+
+
+def test_clean_environment_retains_only_explicit_vault_inputs(tmp_path, monkeypatch):
+    for key in ("KPDB", "VAULT_GROUP", "AGENT_VAULT", "AGENT_VAULT_ENDPOINT"):
+        monkeypatch.setenv(key, "foreign-fixture-selection")
+    environment = _clean_env({"HOME": str(tmp_path)})
+    assert not {"KPDB", "VAULT_GROUP", "AGENT_VAULT", "AGENT_VAULT_ENDPOINT"} & environment.keys()
+    assert _clean_env({"HOME": str(tmp_path), "KPDB": "selected-fixture.kdbx"})["KPDB"] == (
+        "selected-fixture.kdbx"
+    )
 
 
 @pytest.mark.skipif(os.name == "nt" or _BASH is None, reason="POSIX bootstrap; Windows uses PowerShell")

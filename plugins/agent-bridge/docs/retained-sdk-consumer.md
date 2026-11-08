@@ -9,6 +9,23 @@ Omitting the setting preserves ordinary legacy delivery, including its existing
 default-on behavior. This source integration is not native-platform,
 installed-cohort or guarded-restoration qualification.
 
+An original Copilot Driver headed launch supplies the versioned private
+`COPILOT_DRIVER_HEADED_CLIENT` declaration and thereby selects retained
+delivery for that launch. The extension loads the client from the retained
+core assets and sends through the same Session Host/native SDK edge. It
+does not call its own SDK handle's `send` or fall back to the old standalone
+driver. Missing or unsupported selected support remains held.
+
+That client preserves queue/steer urgency and the actual native message ID;
+it never authorizes abort or mutable session controls. The original state,
+nonce, native session/PID and first-controller support must match. A previous
+controller's buffered RPCs, changed state or lost acceptance do not permit
+reconnection or re-hooking. Native user input revokes control. A portable
+selection retains the existing exact native loadout checks before the common
+send; the new path does not waive duplicate/missing-root refusal. Read-only
+SDK metadata and history still serve original consumption recovery. Full
+controller restoration is a separate qualification, not an inferred grant.
+
 ## Prerequisites and unsupported cases
 
 The selected consumer requires an advertised HTTP protocol of at least **50**,
@@ -62,7 +79,8 @@ context, the consumer requests one-shot final admission and checks the context
 again immediately before invoking the SDK. Only that invocation's true reply
 permits a send. A lost reply, false result or changed context grants no retry.
 
-SDK sends retain `source: "agent-bridge"` and a root envelope carrying the exact
+Direct SDK sends retain `source: "agent-bridge"`; selected driver sends use their
+explicit `agent-remote-driver-<uuid>` source. Both retain a root envelope carrying the exact
 native session, consumer incarnation, original handoff and message ID.
 SDK admission records `sdk_accepted`, not consumption or semantic completion.
 An ambiguous exception, missing SDK message ID or timeout records/retains
@@ -114,3 +132,12 @@ execution evidence; use a Node-equipped isolated runner for these cases.
 Full native Linux/Windows behavior, secured proxy ingress, remaining custody
 cohorts, installer restoration and authorized running adoption remain separate
 gates in the [restoration effort](../../../efforts/active/bridge-retained-runtime-restoration/README.md).
+
+`tests/headed-client.test.mjs` exercises the common framed broker client and
+native SDK adapter, including urgency, actual acceptance, unknown holds,
+prior-controller refusal and portable loadout checks. The core's staged Node
+client also runs against the real Python Session Host. The isolated Windows
+native headed fixture additionally proves one same-conversation Bridge
+connector send through retained assets and actual Copilot SDK code, detach
+survival and exact private mux cleanup. It does not qualify the full Bridge
+acquisition/UI or restoration cohorts.

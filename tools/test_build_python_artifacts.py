@@ -1502,6 +1502,157 @@ def test_resolve_toolchain_lock_creates_venv_and_installs(
     assert any(cmd[:3] == ["uv", "pip", "install"] for cmd in calls)
 
 
+@pytest.mark.parametrize(
+    "mode", ["cold", "warm", "expired-retention", "expired-query", "install-timeout"],
+)
+def test_toolchain_selected_uv_retains_one_deadline_through_preparation(
+    tmp_path, monkeypatch, mode,
+):
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+
+    uv = tmp_path / "selected-uv"
+    uv.write_bytes(b"fixture executable, never run")
+    python = str(tmp_path / "selected-python")
+    target = tmp_path / "toolchain"
+    packages = {"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"}
+    clock, calls, retained = [100.0], [], []
+    monkeypatch.setattr(btl.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(btl, "_restrict_file_to_owner", lambda path: None)
+    monkeypatch.setattr(gft, "_restrict_file_to_owner", lambda path: None)
+    monkeypatch.setattr(
+        btl, "_validated_trusted_index_url", lambda env: ("https://example.internal/simple/", None),
+    )
+    if mode == "warm":
+        image = btl._venv_python_path(target)
+        image.parent.mkdir(parents=True)
+        image.write_bytes(b"existing fixture")
+        btl._write_provenance_marker(target, "https://example.internal/simple/", python)
+
+    @contextmanager
+    def retain(selected, arguments, *, env, deadline):
+        retained.append((selected, deadline))
+        clock[0] = 121.0 if mode == "expired-retention" else clock[0] + 3
+        yield SimpleNamespace(
+            argv=[selected, "pip", "install", *arguments], environment=env, cwd=tmp_path,
+        )
+
+    def run(command, **options):
+        calls.append((command, options["timeout"]))
+        assert options["timeout"] == 120.0 - clock[0]
+        clock[0] += 2
+        if command[1:3] == ["python", "find"]:
+            output = python
+        elif command[1] == "venv":
+            image = btl._venv_python_path(Path(command[3]))
+            image.parent.mkdir(parents=True)
+            image.write_bytes(b"constructed fixture")
+            output = ""
+        elif command[1] == "pip" and mode == "install-timeout":
+            raise subprocess.TimeoutExpired(command, options["timeout"])
+        else:
+            output = json.dumps(packages)
+            if command[0] != str(uv) and mode == "expired-query":
+                clock[0] = 121.0
+        return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+
+    monkeypatch.setattr(btl, "retain_uv_install", retain)
+    monkeypatch.setattr(btl.subprocess, "run", run)
+    monkeypatch.setattr(
+        btl, "run_uv_install", lambda *a, **k: pytest.fail("bounded install bypassed retention deadline"),
+    )
+    if mode.startswith("expired") or mode == "install-timeout":
+        error = subprocess.TimeoutExpired if mode == "install-timeout" else bpa.ArtifactBuildError
+        with pytest.raises(error):
+            btl.resolve_toolchain_lock(target, python=python, uv=uv, deadline=120.0)
+        assert not target.exists()
+        assert not list(tmp_path.glob(".toolchain.staging-*"))
+    else:
+        lock = btl.resolve_toolchain_lock(target, python=python, uv=uv, deadline=120.0)
+        assert lock.packages == packages and lock.venv_python == btl._venv_python_path(target)
+        assert [timeout for _command, timeout in calls] == (
+            [20.0, 18.0] if mode == "warm" else [20.0, 18.0, 13.0, 11.0]
+        )
+    assert calls[0][0][0] == str(uv)
+    assert all(
+        command[0] == str(uv)
+        for command, _timeout in calls if command[1] in ("python", "venv", "pip")
+    )
+    assert retained == ([] if mode == "warm" else [(str(uv), 120.0)])
+
+
+def test_toolchain_absolute_uv_without_deadline_keeps_existing_install_policy(tmp_path, monkeypatch):
+    uv = tmp_path / "selected-uv"
+    uv.write_bytes(b"fixture executable, never run")
+    target = tmp_path / "toolchain"
+    calls = []
+    monkeypatch.setattr(btl, "_restrict_file_to_owner", lambda path: None)
+    monkeypatch.setattr(gft, "_restrict_file_to_owner", lambda path: None)
+    monkeypatch.setattr(
+        btl, "_validated_trusted_index_url", lambda env: ("https://example.internal/simple/", None),
+    )
+    monkeypatch.setattr(
+        btl, "_resolve_interpreter_identity", lambda python, env, **kw: str(tmp_path / "python"),
+    )
+
+    def run(command, **options):
+        calls.append(command)
+        assert "timeout" not in options
+        if command[1] == "venv":
+            image = btl._venv_python_path(Path(command[3]))
+            image.parent.mkdir(parents=True)
+            image.write_bytes(b"fixture")
+        return subprocess.CompletedProcess(
+            command, 0,
+            stdout=json.dumps({"setuptools": "84.1.0", "wheel": "0.44.0", "packaging": "24.0"}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(btl.subprocess, "run", run)
+    lock = btl.resolve_toolchain_lock(target, uv=uv)
+    assert lock.venv_python == btl._venv_python_path(target)
+    assert any(command[:3] == [str(uv), "pip", "install"] for command in calls)
+    assert all(command[0] != "uv" for command in calls)
+
+
+@pytest.mark.parametrize("selection", ["relative", "missing", "directory"])
+def test_toolchain_explicit_uv_refuses_before_feed_or_path_substitution(
+    tmp_path, monkeypatch, selection,
+):
+    selected = {
+        "relative": "uv",
+        "missing": tmp_path / "absent",
+        "directory": tmp_path,
+    }[selection]
+    monkeypatch.setattr(
+        btl, "_validated_trusted_index_url", lambda *a: pytest.fail("invalid UV queried feed"),
+    )
+    with pytest.raises(bpa.ArtifactBuildError, match="absolute executable"):
+        btl.resolve_toolchain_lock(tmp_path / "toolchain", uv=selected)
+
+
+@pytest.mark.parametrize("deadline", [True, float("nan"), float("inf"), 99.0])
+def test_toolchain_invalid_or_expired_budget_refuses_before_effects(tmp_path, monkeypatch, deadline):
+    monkeypatch.setattr(btl.time, "monotonic", lambda: 100.0)
+    monkeypatch.setattr(
+        btl, "_validated_trusted_index_url", lambda *a: pytest.fail("expired caller queried feed"),
+    )
+    with pytest.raises(bpa.ArtifactBuildError, match="deadline"):
+        btl.resolve_toolchain_lock(tmp_path / "toolchain", deadline=deadline)
+    assert not (tmp_path / "toolchain").exists()
+
+
+def test_toolchain_bounded_public_discovery_is_explicitly_unavailable(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        btl, "resolve_public_source", lambda *a: pytest.fail("unbounded public discovery ran"),
+    )
+    with pytest.raises(bpa.ArtifactBuildError, match="deadline-bound public"):
+        btl.resolve_toolchain_lock(
+            tmp_path / "toolchain", source_policy="seasoned-public",
+            deadline=time.monotonic() + 10,
+        )
+
+
 def test_resolve_toolchain_lock_version_query_uses_isolated_mode(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

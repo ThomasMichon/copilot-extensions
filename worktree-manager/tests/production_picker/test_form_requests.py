@@ -294,6 +294,7 @@ def provider(tmp_path, *, view=False):
         "from pathlib import Path\n"
         "root=Path(sys.argv[1]);op=sys.argv[2]\n"
         "if op=='prepare':\n"
+        " (root/'prepared').write_text('prepared')\n"
         " print(json.dumps({'id':sys.argv[4],'scope':json.loads(sys.argv[5]),"
         "'fields':sys.argv[6:],'sender':'original sender','wake':False}));sys.exit(0)\n"
         "request=json.loads(sys.argv[3]);path=root/'accepted.json'\n"
@@ -414,6 +415,133 @@ def test_native_prepare_persists_before_submit_and_global_recovery_cancel_never_
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("stage", ["prepare", "submit"])
+@pytest.mark.parametrize("state", ["pending", "error"])
+def test_new_request_rechecks_source_but_retained_recovery_stays_independent(
+    tmp_path, monkeypatch, stage, state,
+):
+    from test_config_actions import _wait
+    from test_picker_tui import _fixture_source, _wait_for_initial_setup
+    from worktree_manager.production_picker.picker_tui.engine import PickerApp, PickerScreen
+    from worktree_manager.production_picker.picker_tui.configuration_form import CommandResultScreen
+    from worktree_manager.production_picker.picker_tui.steering import SubmitErrorScreen
+
+    directory = tmp_path / "drafts"
+    monkeypatch.setenv("AGENT_WORKTREES_STEER_DRAFTS", str(directory))
+    reg = provider(tmp_path)
+    action = form_action(reg)
+    monkeypatch.setattr(requests, "current_request_registrations", lambda: [reg])
+    draft = tmp_path / "local-response.json"
+    draft.write_text('{"answer":"original"}', encoding="utf-8")
+
+    async def run():
+        app = PickerApp(_fixture_source(), live=False)
+        async with app.run_test() as pilot:
+            picker = app.query_one(PickerScreen)
+            await _wait_for_initial_setup(pilot, picker)
+            runtime = picker._pivot_runtime(reg)
+            runtime._cache["host"] = ("ready", [], "")
+            monkeypatch.setattr(runtime, "ensure", lambda *_args: None)
+            held = []
+            run_background = picker._run_bg
+
+            def enqueue(label, work, done=None, **kwargs):
+                if label == ("Preparing original request" if stage == "prepare" else action.label):
+                    held.append((label, work, done, kwargs))
+                else:
+                    run_background(label, work, done, **kwargs)
+
+            monkeypatch.setattr(picker, "_run_bg", enqueue)
+            picker._run_pivot_form_submit(
+                reg, action, {**context(), "_manager_scope": "host"}, "Original question",
+                {"answer": "original"}, draft_path=draft,
+            )
+            await _wait(pilot, lambda: bool(held))
+            if state == "pending":
+                runtime._inflight.add("host")
+            else:
+                runtime._cache["host"] = ("error", [], "replacement failed")
+            label, work, done, kwargs = held.pop()
+            monkeypatch.setattr(picker, "_run_bg", run_background)
+            run_background(label, work, done, **kwargs)
+            if stage == "prepare":
+                await _wait(pilot, lambda: isinstance(app.screen, SubmitErrorScreen))
+                await _wait(pilot, lambda: bool(app.screen.query("#submit-error-body")))
+                text = str(app.screen.query_one("#submit-error-body", Static).content)
+                assert "Source read is not current" in text and "No submit invoked" in text
+                assert not (tmp_path / "prepared").exists()
+                assert recovery_records(directory) == []
+            else:
+                await _wait(pilot, lambda: isinstance(app.screen, CommandResultScreen) and not app.screen.pending)
+                assert "Source read is not current" in str(app.screen.query_one("#command-result", Static).content)
+                assert (tmp_path / "prepared").exists()
+                path, record, diagnostic = recovery_records(directory)[0]
+                assert not diagnostic and record["values"] == {"answer": "original"}
+                assert not (tmp_path / "accepted.json").exists()
+                app.screen.action_close()
+                await pilot.pause()
+                picker._run_form_recovery(path, record)
+                await _wait(pilot, lambda: isinstance(app.screen, CommandResultScreen) and not app.screen.pending)
+                assert "accepted response lost" in str(app.screen.query_one("#command-result", Static).content)
+                assert path.exists()
+                assert json.loads((tmp_path / "accepted.json").read_text()) == record["prepared_request"]
+            assert draft.read_text() == '{"answer":"original"}'
+            assert stage == "submit" or not (tmp_path / "accepted.json").exists()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("read_state", ["loading", "error", "replacement"])
+def test_native_recovery_view_action_does_not_depend_on_board_read(
+    tmp_path, monkeypatch, read_state,
+):
+    from test_config_actions import _wait
+    from test_picker_tui import _fixture_source, _wait_for_initial_setup
+    from worktree_manager.production_picker.picker_tui.engine import PickerApp, PickerScreen
+    from worktree_manager.production_picker.picker_tui.engine_form_requests import RetainedResponsesMenu
+
+    directory = tmp_path / "drafts"
+    monkeypatch.setenv("AGENT_WORKTREES_STEER_DRAFTS", str(directory))
+    retained = retain_request(directory, original())
+    raw = manifest()
+    raw.update(scope="global", list=["provider", "list"])
+    raw["view_actions"].append({
+        "key": "refresh", "label": "Provider command", "run": ["provider", "refresh"],
+    })
+    reg = registered(raw)
+
+    async def run():
+        app = PickerApp(_fixture_source(), live=False)
+        async with app.run_test() as pilot:
+            picker = app.query_one(PickerScreen)
+            await _wait_for_initial_setup(pilot, picker)
+            runtime = picker._pivot_runtime(reg)
+            monkeypatch.setattr(runtime, "ensure", lambda *_args: None)
+            runtime._cache[""] = (
+                "ready" if read_state == "replacement" else read_state, [], "board unavailable",
+            )
+            if read_state == "replacement":
+                runtime._inflight.add("")
+            monkeypatch.setattr(runtime, "run_action", lambda *_args: pytest.fail("no provider command"))
+            monkeypatch.setattr(
+                runtime, "run_resolved", lambda *_args, **_kwargs: pytest.fail("no provider query"),
+            )
+            picker.pivots = [{"kind": "registered", "label": reg.label, "pivot": reg}]
+            picker.htab = 0
+            action = reg.view_actions[0]
+            assert not runtime.actions_ready(("",))
+            assert picker._pivot_view_actions() == [action]
+            picker._run_view_action(action)
+            await _wait(pilot, lambda: isinstance(app.screen, RetainedResponsesMenu))
+            assert app.screen.query_one(OptionList).option_count == 1
+            assert retained.exists()
+            app.screen.dismiss(None)
+            await pilot.pause()
+            assert retained.exists()
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("failure", ["write", "publication", "directory"])
 def test_local_request_write_failure_prevents_any_submit(tmp_path, monkeypatch, failure):
     from worktree_manager import form_draft_storage as storage
@@ -443,6 +571,10 @@ def test_local_request_write_failure_prevents_any_submit(tmp_path, monkeypatch, 
 
     class Picker(PivotFormRequestActionsMixin):
         app = type("Screens", (), {"push_screen": lambda _self, screen: screens.append(screen)})()
+
+        def _pivot_runtime(self, selected):
+            from worktree_manager.production_picker.picker_tui import tasks
+            return tasks.RegisteredPivotRuntime(selected)
 
         def _run_bg(self, label, work, done, **_kwargs):
             done(work())
@@ -574,7 +706,7 @@ def test_prepared_submit_refreshes_original_scope_and_retains_path_even_on_resol
     path = retain_request(tmp_path, record)
     refreshed = []
 
-    def execute(*_args):
+    def execute(*_args, **_kwargs):
         if failure:
             raise ValueError("provider changed")
         return True, "original receipt"

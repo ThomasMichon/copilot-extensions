@@ -695,13 +695,6 @@ recalculates it before the atomic no-replace write; any add, remove, rename,
 type change, directory replacement, or content change fails before a completion
 marker can appear.
 
-The Python path-based walker overlaps at most eight regular-file reads per
-batch, preserving the caller's context in each worker. Every batch joins before
-traversal advances or directory state is rechecked, including on failure.
-This does not cache content proofs or relax any later validation.
-Link/reparse rejection uses each boundary's captured native stat attributes,
-without repeating separate path queries for the same observation.
-
 `slot-complete` and Python's `complete_runtime_slot` API require explicit
 context, marketplace/plugin identity, exact expected payload root/version,
 snapshot id, and runtime version. Under the genesis and installation locks they

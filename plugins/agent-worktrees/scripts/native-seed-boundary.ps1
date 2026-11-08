@@ -9,7 +9,10 @@ function Get-AwNativeSeedRuntime {
         $version = [IO.File]::ReadAllText((Join-Path $Root 'current-version')).Trim()
         if ($version -notmatch '^[A-Za-z0-9][A-Za-z0-9._+-]{0,255}$') { return $null }
         $slot = Join-Path (Join-Path $Root 'versions') $version
-        $python = Join-Path $slot 'Scripts\python.exe'
+        $environment = if (Test-Path -LiteralPath (Join-Path $slot 'application.json') -PathType Leaf) {
+            Join-Path $slot '.venv'
+        } else { $slot }
+        $python = Join-Path $environment 'Scripts\python.exe'
         $bootstrap = Join-Path $slot '.runtime-bootstrap\runtime_launcher.py'
         foreach ($file in @($python, $bootstrap, (Join-Path $slot '.install-complete.json'))) {
             if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { return $null }
@@ -83,8 +86,8 @@ function Register-AwNativeSeedConsoleControl {
 }
 
 function Invoke-AwNativeSeedPhase {
-    param([string]$Root, [string[]]$Arguments)
-    $runtime = Get-AwNativeSeedRuntime $Root
+    param([string]$Root, [string[]]$Arguments, [hashtable]$Runtime, [hashtable]$Environment)
+    $runtime = if ($Runtime) { $Runtime } else { Get-AwNativeSeedRuntime $Root }
     if (-not $runtime) { return $null }
     $process = $null
     try {
@@ -97,6 +100,9 @@ function Invoke-AwNativeSeedPhase {
         $info.RedirectStandardError = $true
         $info.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
         $info.StandardErrorEncoding = [Text.UTF8Encoding]::new($false)
+        if ($Environment) {
+            foreach ($key in $Environment.Keys) { $info.Environment[$key] = $Environment[$key] }
+        }
         foreach ($argument in (@(
             '-I', '-S', '-B', '-X', 'utf8', $runtime.Bootstrap,
             '-m', 'agent_worktrees.launch_seed_native',
@@ -140,6 +146,17 @@ function Invoke-AwNativeSeedPhase {
                 }
                 $reply.environment = [pscustomobject]$environment
             }
+            if ($document.RootElement.TryGetProperty('headed', [ref]$element)) {
+                $literalArgv = [Collections.Generic.List[string]]::new()
+                foreach ($argument in $element.GetProperty('argv').EnumerateArray()) {
+                    if ($argument.ValueKind -ne [System.Text.Json.JsonValueKind]::String) { return $null }
+                    $literalArgv.Add($argument.GetString())
+                }
+                $reply.headed.argv = $literalArgv.ToArray()
+                foreach ($name in @('session_id', 'state_file', 'cwd')) {
+                    $reply.headed.$name = $element.GetProperty($name).GetString()
+                }
+            }
             return $reply
         } finally { $document.Dispose() }
     } catch {
@@ -150,6 +167,113 @@ function Invoke-AwNativeSeedPhase {
     }
     finally {
         if ($process) { $process.Dispose() }
+    }
+}
+
+function Test-AwHeadedPreparation {
+    param([string]$Root, [hashtable]$Runtime)
+    if (-not $Runtime) { return $false }
+    if (-not $script:AwNativeSeedContracts) { $script:AwNativeSeedContracts = @{} }
+    $key = $Runtime.Python + '|' + $Runtime.Bootstrap
+    if (-not $script:AwNativeSeedContracts.ContainsKey($key)) {
+        $contract = Invoke-AwNativeSeedPhase $Root @('--describe-contract') -Runtime $Runtime
+        $script:AwNativeSeedContracts[$key] = [bool](
+            $contract -and $contract.contract -ceq 'agent-worktrees.native-seed' -and
+            ($contract.version -is [int] -or $contract.version -is [long]) -and $contract.version -eq 1 -and
+            $contract.backend_preparation_modes -is [array] -and
+            $contract.backend_process_receipts -is [array] -and
+            $contract.backend_preparation_modes -ccontains 'headed-live-owner-v1' -and
+            $contract.backend_process_receipts -ccontains 'headed-native-child-v1'
+        )
+    }
+    return $script:AwNativeSeedContracts[$key]
+}
+
+function Read-AwAdmissionBytes {
+    param([IO.Stream]$Stream, [int]$Size, [Diagnostics.Stopwatch]$Clock)
+    $bytes = [byte[]]::new($Size)
+    $offset = 0
+    while ($offset -lt $Size) {
+        $remaining = 30000 - [int]$Clock.ElapsedMilliseconds
+        if ($remaining -le 0) { throw 'Original admission deadline expired.' }
+        $Stream.ReadTimeout = $remaining
+        $read = $Stream.Read($bytes, $offset, $Size - $offset)
+        if ($read -eq 0) { throw 'Original admission channel closed.' }
+        $offset += $read
+    }
+    return ,$bytes
+}
+
+function Invoke-AwHeadedAdmission {
+    param(
+        [Net.Sockets.TcpListener]$Listener, [Diagnostics.Process]$Process,
+        [string]$Birth, [string]$Nonce, [object]$Headed,
+        [string]$Root, [string[]]$Callback, [hashtable]$Runtime,
+        [string[]]$AdmissionArguments
+    )
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    $client = $null
+    $document = $null
+    try {
+        $accept = $Listener.AcceptTcpClientAsync()
+        while (-not $accept.Wait(50)) {
+            if ($Process.HasExited -or $clock.ElapsedMilliseconds -ge 30000) { return $false }
+        }
+        $client = $accept.GetAwaiter().GetResult()
+        $stream = $client.GetStream()
+        $header = Read-AwAdmissionBytes $stream 4 $clock
+        if ([BitConverter]::IsLittleEndian) { [Array]::Reverse($header) }
+        $size = [BitConverter]::ToUInt32($header, 0)
+        if ($size -lt 1 -or $size -gt 1048576) { return $false }
+        $bytes = Read-AwAdmissionBytes $stream ([int]$size) $clock
+        $document = [System.Text.Json.JsonDocument]::Parse([Text.Encoding]::UTF8.GetString($bytes))
+        $request = $document.RootElement
+        $keys = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        foreach ($property in $request.EnumerateObject()) {
+            if (-not $keys.Add($property.Name)) { return $false }
+        }
+        if (-not $keys.SetEquals([string[]]@(
+            'version', 'nonce', 'host_pid', 'parent_pid', 'argv', 'cwd', 'session_id', 'environment'
+        ))) { return $false }
+        $nativeArguments = $request.GetProperty('argv')
+        $environment = $request.GetProperty('environment')
+        if (
+            $request.GetProperty('version').GetInt32() -ne 1 -or
+            $request.GetProperty('nonce').GetString() -cne $Nonce -or
+            $request.GetProperty('host_pid').GetInt32() -ne $Process.Id -or
+            $request.GetProperty('parent_pid').GetInt32() -ne $PID -or
+            $request.GetProperty('cwd').GetString() -cne $Headed.cwd -or
+            $request.GetProperty('session_id').GetString() -cne $Headed.session_id -or
+            $environment.ValueKind -ne [System.Text.Json.JsonValueKind]::Object -or
+            @($environment.EnumerateObject()).Count -ne 0 -or
+            $nativeArguments.GetArrayLength() -ne @($Headed.argv).Count -or
+            $Process.HasExited -or
+            $Process.StartTime.ToUniversalTime().ToFileTimeUtc().ToString(
+                [Globalization.CultureInfo]::InvariantCulture
+            ) -cne $Birth
+        ) { return $false }
+        $index = 0
+        foreach ($argument in $nativeArguments.EnumerateArray()) {
+            if ($argument.GetString() -cne $Headed.argv[$index++]) { return $false }
+        }
+        $admitted = Invoke-AwNativeSeedPhase $Root (
+            @('--phase', 'admit') + $Callback + $AdmissionArguments
+        ) -Runtime $Runtime
+        $accepted = [bool]($admitted -and $admitted.recorded -eq $true -and -not $Process.HasExited)
+        $reply = [Text.Encoding]::UTF8.GetBytes(
+            '{"version":1,"accepted":' + $accepted.ToString().ToLowerInvariant() + '}'
+        )
+        $header = [BitConverter]::GetBytes([uint32]$reply.Length)
+        if ([BitConverter]::IsLittleEndian) { [Array]::Reverse($header) }
+        $stream.WriteTimeout = 1000
+        $stream.Write($header, 0, 4)
+        $stream.Write($reply, 0, $reply.Length)
+        return $accepted
+    } catch { return $false }
+    finally {
+        if ($document) { $document.Dispose() }
+        if ($client) { $client.Dispose() }
+        $Listener.Stop()
     }
 }
 
@@ -204,9 +328,26 @@ function Invoke-AwNativeSeedBackend {
         [string[]]$Command,
         [string]$LaunchAttemptId,
         [string]$LaunchResolutionId,
-        [string]$LaunchParentId
+        [string]$LaunchParentId,
+        [switch]$AdmissionOnly,
+        [string]$PreserveSeedId,
+        [string]$NativeResumeSession
     )
+    $runtime = Get-AwNativeSeedRuntime $Root
     $prepareArgs = @('--phase', 'prepare', '--record', $Record)
+    $admissionArgs = @()
+    if ($AdmissionOnly) { $admissionArgs += '--admission-only' }
+    foreach ($pair in @(
+        @('--preserve-seed-id', $PreserveSeedId),
+        @('--native-resume-session', $NativeResumeSession)
+    )) {
+        if ($pair[1]) { $admissionArgs += @($pair[0], $pair[1]) }
+    }
+    $prepareArgs += $admissionArgs
+    $headedSupported = Test-AwHeadedPreparation $Root $runtime
+    if ($headedSupported) {
+        $prepareArgs += @('--backend-mode', 'headed-live-owner-v1')
+    }
     if ($SeedId) { $prepareArgs += @('--seed-id', $SeedId) }
     foreach ($pair in @(
         @('--launch-attempt-id', $LaunchAttemptId),
@@ -215,7 +356,7 @@ function Invoke-AwNativeSeedBackend {
     )) {
         if ($pair[1]) { $prepareArgs += @($pair[0], $pair[1]) }
     }
-    $prepared = Invoke-AwNativeSeedPhase $Root ($prepareArgs + @('--') + $Command)
+    $prepared = Invoke-AwNativeSeedPhase $Root ($prepareArgs + @('--') + $Command) -Runtime $runtime
     if (
         -not $prepared -or $prepared.version -ne 1 -or
         @($prepared.argv).Count -lt 1 -or
@@ -248,6 +389,34 @@ function Invoke-AwNativeSeedBackend {
         foreach ($property in $prepared.environment.PSObject.Properties) {
             $info.Environment[$property.Name] = [string]$property.Value
         }
+        $listener = $null
+        $admissionNonce = $null
+        if ($prepared.headed) {
+            if (
+                -not $headedSupported -or $prepared.headed.version -ne 1 -or -not $prepared.headed.session_id -or
+                -not [IO.Path]::IsPathRooted($prepared.headed.state_file) -or
+                $prepared.headed.cwd -cne $PWD.ProviderPath -or
+                @($prepared.headed.argv).Count -lt 1 -or
+                $info.Environment['AGENT_BRIDGE_SESSION_HOST_NONCE'] -notmatch '^[a-f0-9]{64}$'
+            ) {
+                [Console]::Error.WriteLine('Headed preparation is unconfirmed; no backend started.')
+                return 3
+            }
+            $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+            $listener.Start(1)
+            $admissionNonce = [Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32)).ToLowerInvariant()
+            $owner = [Diagnostics.Process]::GetCurrentProcess()
+            try {
+                $info.Environment['AGENT_DRIVER_STARTUP_ADMISSION'] = ConvertTo-Json -Compress -InputObject @{
+                    version = 1; port = $listener.LocalEndpoint.Port; nonce = $admissionNonce
+                    parent_pid = $PID
+                    parent_birth = $owner.StartTime.ToUniversalTime().ToFileTimeUtc().ToString(
+                        [Globalization.CultureInfo]::InvariantCulture
+                    )
+                    environment_keys = @()
+                }
+            } finally { $owner.Dispose() }
+        }
     }
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = $info
@@ -262,7 +431,7 @@ function Invoke-AwNativeSeedBackend {
                 return 3
             }
         } catch [ComponentModel.Win32Exception] {
-            $null = Invoke-AwNativeSeedPhase $Root (@('--phase', 'spawn-failed') + $callbackArgs)
+            $null = Invoke-AwNativeSeedPhase $Root (@('--phase', 'spawn-failed') + $callbackArgs) -Runtime $runtime
             [Console]::Error.WriteLine('Native backend could not start; inspect its retained launch outcome.')
             return 3
         }
@@ -286,10 +455,27 @@ function Invoke-AwNativeSeedBackend {
             $birth = $process.StartTime.ToUniversalTime().ToFileTimeUtc().ToString(
                 [Globalization.CultureInfo]::InvariantCulture
             )
-            $spawned = Invoke-AwNativeSeedPhase $Root (
-                @('--phase', 'spawned', '--pid', [string]$process.Id, '--process-start-time', $birth) +
-                $callbackArgs
-            )
+            $spawnArgs = @('--phase', 'spawned', '--pid', [string]$process.Id, '--process-start-time', $birth) + $callbackArgs
+            $callbackEnvironment = @{}
+            $canRecord = $true
+            if ($prepared.headed) {
+                $canRecord = Invoke-AwHeadedAdmission $listener $process $birth $admissionNonce `
+                    $prepared.headed $Root $callbackArgs $runtime $admissionArgs
+                $deadline = [Diagnostics.Stopwatch]::StartNew()
+                while (
+                    $canRecord -and -not $process.HasExited -and $deadline.ElapsedMilliseconds -lt 30000 -and
+                    -not (Test-Path -LiteralPath $prepared.headed.state_file -PathType Leaf)
+                ) { [Threading.Thread]::Sleep(20) }
+                $canRecord = $canRecord -and (Test-Path -LiteralPath $prepared.headed.state_file -PathType Leaf)
+                $spawnArgs += @(
+                    '--headed-state-file', [string]$prepared.headed.state_file,
+                    '--headed-session-id', [string]$prepared.headed.session_id
+                )
+                $callbackEnvironment['AGENT_BRIDGE_SESSION_HOST_NONCE'] = $info.Environment['AGENT_BRIDGE_SESSION_HOST_NONCE']
+            }
+            $spawned = if ($canRecord) {
+                Invoke-AwNativeSeedPhase $Root $spawnArgs -Runtime $runtime -Environment $callbackEnvironment
+            } else { $null }
             $receiptUncertain = -not ($spawned -and $spawned.recorded -eq $true)
         } catch { $receiptUncertain = $true }
         # Keep the actual child handle until exit; detaching the mux is not exit.
@@ -297,10 +483,11 @@ function Invoke-AwNativeSeedBackend {
         $code = $process.ExitCode
         $returnedArgs = @('--phase', 'returned', '--exit-code', [string]$code) + $callbackArgs
         if ($receiptUncertain) { $returnedArgs += '--receipt-uncertain' }
-        $null = Invoke-AwNativeSeedPhase $Root $returnedArgs
+        $null = Invoke-AwNativeSeedPhase $Root $returnedArgs -Runtime $runtime
         if ($code -eq 0 -and $receiptUncertain) { return 3 }
         return $code
     } finally {
+        if ($listener) { $listener.Stop() }
         if ($consoleControl) {
             $null = [AwNativeSeed.ConsoleControl]::SetConsoleCtrlHandler($consoleControl.Pointer, $false)
             [GC]::KeepAlive($consoleControl.Callback)

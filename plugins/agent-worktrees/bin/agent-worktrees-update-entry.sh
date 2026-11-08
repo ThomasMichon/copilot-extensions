@@ -251,7 +251,12 @@ case "${1-}:${3-}" in
                     --phase|--phase=*|--plugin|--plugin=*|--inventory|--target|--target=*)
                         _aw_bypass=1
                         _aw_update_diagnostic=1 ;;
-                    --no-manager|--auth-report|--help|-h|--request-status|--request-status=*|--recovery-status|--recover-after-restart|--recover-for-repair)
+                    --no-manager)
+                        case "$(uname -s 2>/dev/null)" in
+                            MINGW*|MSYS*|CYGWIN*) ;;
+                            *) _aw_bypass=1 ;;
+                        esac ;;
+                    --auth-report|--help|-h|--request-status|--request-status=*|--recovery-status|--recover-after-restart|--recover-for-repair)
                         _aw_bypass=1 ;;
                 esac
             done

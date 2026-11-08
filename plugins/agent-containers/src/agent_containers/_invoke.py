@@ -12,6 +12,7 @@ from urllib.request import url2pathname
 
 _PACKAGE = "agent_containers"
 _DIST_NAME = "agent-containers"
+_PAYLOAD_ROOT_ENV = "AGENT_CONTAINERS_PAYLOAD_ROOT"
 
 
 def runtime_root() -> Path:
@@ -76,6 +77,13 @@ def _path_from_file_url(url: str) -> Path | None:
 
 
 def payload_root() -> Path:
+    """Prefer the owning front door, retaining legacy discovery when undeclared."""
+    declared = os.environ.get(_PAYLOAD_ROOT_ENV, "").strip()
+    if declared:
+        candidate = Path(declared).expanduser()
+        if not candidate.is_dir() or not (candidate / "plugin.json").is_file():
+            raise RuntimeError("Declared agent-containers payload root is unavailable")
+        return candidate.resolve()
     env_payload = os.environ.get("COPILOT_PLUGIN_ROOT", "").strip()
     if env_payload:
         candidate = Path(env_payload).expanduser()
@@ -100,9 +108,12 @@ def payload_binstub() -> Path | None:
 
 
 def payload_command_argv() -> list[str]:
+    """Use module fallback only when no provider payload was explicitly declared."""
     shim = payload_binstub()
     if shim is not None:
         return [str(shim)]
+    if os.environ.get(_PAYLOAD_ROOT_ENV, "").strip():
+        raise RuntimeError("Declared agent-containers payload command is unavailable")
     return module_argv()
 
 

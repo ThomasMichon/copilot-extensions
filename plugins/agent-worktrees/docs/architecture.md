@@ -1,5 +1,47 @@
 # Agent Worktrees -- Architecture
 
+## Required-application New admission
+
+An opted-in repository's `require_application_readiness` extends the existing
+native New preflight after knowledge coordination readiness, before allocation
+and initial structured-request admission. Creation-time rechecking precedes the
+started marker, preserving retained request/allocation identity through refusal.
+Source-only allocation, existing-session and recovery paths remain unchanged.
+
+For repositories with a native tool profile, admission uses the profile owner's
+same prospective settings projection read-only. The anchor must already expose
+that roster before Machines observes applications. A changed projection or
+profile input refuses; native project registration remains the settings writer.
+The checked input travels in the internal launch preflight through New's later
+tool staging and projection refresh, which reject drift before settings writes.
+An absent profile is also retained without introducing a registry/Git scan.
+
+After New prepares the actual checkout, a second owner observation checks that
+checkout's effective required roster before constructing a launch plan, retaining
+the original checked profile input. This covers differences introduced by the
+selected Git tree, local settings or paired preparation, including deferred
+instruction projection. Refusal preserves the allocated worktree and existing
+recovery protocol rather than allocating another New identity. Each observation
+has its own bounded selection/read/cleanup budget; allocation and preparation
+are not claimed to fit inside either observation's deadline.
+Unconfirmed native cleanup is not an ordinary recoverable preparation refusal:
+the original `OwnedCleanupError` escapes with its process/Job custody and retry
+operation intact, annotated with the already-allocated worktree identity.
+
+`application_admission` selects the existing Machines owner through validated
+same-cell peer launch with retained build identity or the legacy owner's exact
+completed interpreter. It reads support from that selected runtime, then
+consumes only the existing read-only required-module conductor result for the
+exact source repository. Caller-owned timeout/stream/cleanup bounds apply;
+unavailable, malformed, incomplete or changed observations refuse. No payload
+version or PATH command certifies support, and no repair or authentication
+operation runs. The [configuration contract](config-reference.md#required-applications-before-new-authoring)
+owns adoption, rollback and remediation; Machines retains inventory, module
+classification, readiness and restart truth. The capability-qualified
+caller-owned read keeps POSIX probes in the enclosing native group rather than
+separate sessions; the outer owner settles that complete lifetime before return.
+Standalone Machines observation and explicit repair retain their existing owners.
+
 ## Related/config acquisition reports
 
 The existing value APIs retain their signatures, return shapes and fallback
@@ -717,6 +759,64 @@ Only definite spawn failure restores a claim. Actual spawn finishes it, while
 terminal or unknown outcomes never authorize automatic replay. Return records
 the actual child code separately from uncertain bookkeeping.
 
+The provider also advertises `backend_process_receipts` with `direct-v1` and
+`headed-native-child-v1`. The additive headed spawn callback accepts
+`--headed-state-file` and `--headed-session-id`, with the original private
+nonce inherited through `AGENT_BRIDGE_SESSION_HOST_NONCE`, never a token on
+the command line. The caller still supplies its retained coordinator PID/birth.
+The core resolves the distinct live native PID/birth from a bounded,
+duplicate-refusing state read only when the nonce, session, mode, receipt
+capability and both process identities match. Unknown, exited or replaced
+processes cannot finish the seed. Old direct callbacks and the version-1 JSON
+and NUL preparation replies retain their meaning.
+
+The separately advertised `backend_preparation_modes` adds
+`headed-live-owner-v1`. Full JSON backend preparation accepts
+`--backend-mode headed-live-owner-v1`; setup, NUL preparation replies and
+callbacks reject it before effects. Eligible local interactive native commands retain
+the selected core executable under the original operation and return a typed
+headed descriptor with the original native argv, session, state path and cwd.
+An unambiguous fresh launch selects one native session ID before creation;
+explicit resume preserves its ID. ACP, AHP/remote-connect, ambiguous selectors,
+subcommands and custom launchers stay direct. No effectful new-syntax probe or
+fallback replay is used.
+
+The Python invocation boundary selects the retained core for a direct
+`copilot` executable with one explicit `--session-id` or valued `--resume`.
+Its original execution attempt retains seed custody and performs a live
+pre-native admission check, including incarnation, pending intent and cold
+worktree checks. The native callback, not coordinator creation, records the
+backend PID and finishes the seed. Receipt uncertainty keeps the handoff and
+actual wait; it does not restore or replay. Custom/intermediary commands,
+ACP and unselected sessions retain their existing Python execution paths.
+Full caller convergence is still in progress.
+
+The selected POSIX provider separately advertises `posix-headed-env-v1` in
+`backend_execution_modes`. A copied seeded setup discovers it before
+preparation and may supply `--backend-mode headed-live-owner-v1` to its
+long-lived `exec` owner. The unchanged NUL preparation format still carries
+only the original backend argv and execution hint. That original owner
+uses the retained core caller, rechecks admission immediately before native
+creation and records Copilot's distinct PID/birth, not the coordinator's.
+Its actual exit remains independent of receipt certainty. An uncertain
+receipt retains the seed handoff and reports an unconfirmed outcome without
+replay. Unsupported commands and older providers retain direct exec.
+This does not qualify native POSIX terminal/SDK behavior on a Windows host.
+
+Admission-only/no-seed setup additionally requires the selected provider's
+`setup_admission_modes: ["posix-live-owner-v1"]`. The planner checks it before
+copying assets; the copied shell checks again before setup or backend preparation.
+Both preparation phases carry `--admission-only`, plus any preserved seed or
+native-resume selection, and cannot claim a seed. The exec phase retains those
+constraints through a final intent, incarnation, liveness and cold-worktree check.
+For eligible headed commands, the original owner holds the creation lease across
+the retained core wait, including its pre-native callback. For direct/custom
+backends, it acquires the lease after inherited-descriptor scrubbing and holds it
+through kernel exec; the non-inheritable descriptor closes only on successful exec
+or unwind. A late seed or changed resume selection refuses creation, not a retry
+that claims the new intent. Providers without this capability retain the legacy
+admission owner before effects; custom backend syntax does not bypass the fence.
+
 The provider's read-only `--describe-contract` reports
 `agent-worktrees.native-seed` version 1 and its supported preparation output
 formats from the executing runtime. JSON remains the default, with unchanged
@@ -849,14 +949,14 @@ uses `getconf PATH`; stock macOS Bash's `command -p -v` does not reliably locate
 utilities under a restricted caller PATH.
 Validation uses neither shell evaluation nor a second identity RPC. Effect-side current-runtime
 validation remains authoritative across a selector race. Admission-only launches,
-including native resume, retain the legacy owner and its launch fence: finite
-copied setup does not supply equivalent exclusion through child startup.
+including native resume, migrate only when the separate live-owner capability
+above is available; finite setup alone is not equivalent exclusion through startup.
 Copy-only relocation
 does not query capabilities or add admission flags: cold `embody` retains its
 existing prompt owner. Custom setup and unsupported runtimes keep their
 legacy path; no effectful invocation is retried in another mode.
 After setup admission, the copied shell clears an inherited backend execution
-hint. The actual seeded backend receives only its own new hint. POSIX
+hint. The actual backend receives only its own new hint. POSIX
 `env_script` launches and a nonempty effective `BASH_ENV` retain the legacy owner before capability discovery or
 asset copying: arbitrary sourced early exits and replacement EXIT traps cannot
 share the native setup's sole EXIT callback without changing shell semantics.
@@ -1050,8 +1150,22 @@ leases, seed correlation and native process custody remain with their existing
 owners.
 
 The Windows `scripts/native-seed-boundary.ps1` adapter is dot-sourced
-into that existing setup owner. It retains the actual child handle and wait, selecting
-the current completed runtime from the original root for each finite callback.
+into that existing setup owner. It retains the actual child handle and wait.
+The headed path discovers preparation/receipt support against one captured,
+completed immutable runtime slot and uses that slot throughout; each finite
+call independently refuses a changed current selection before effects.
+Older providers retain direct execution without receiving new syntax.
+Before coordinator creation the shell opens a bounded private loopback
+admission channel. It verifies the retained coordinator, exact native argv,
+cwd and selected session, then calls the finite `admit` recheck before granting
+native creation. Its headed spawn callback supplies the actual retained
+coordinator identity and private environment binding to resolve Copilot's
+distinct PID. The shell still waits for the coordinator's actual exit;
+missing admission or native receipts never restore or replay the seed.
+Uncertain return observations retain the actual exit code independently.
+Ordinary no-seed native setup uses its retained setup record for this same
+backend path when the selected provider advertises support; custom no-seed
+commands retain their original direct invocation.
 Each native setup/seed/execution phase allows ten seconds for the current
 runtime call, then kills its child tree and retains unconfirmed state without
 retry. This does not change the separate pane lifecycle or mux-query deadlines.

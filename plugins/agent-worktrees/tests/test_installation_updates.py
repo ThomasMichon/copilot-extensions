@@ -52,6 +52,7 @@ def test_inventory_is_read_only_and_does_not_confuse_versions(installed, monkeyp
     facts = owner.inventory()
     assert facts["runtime_sources"] == {
         "schema": "copilot-extensions.prepared-runtime-sources", "version": 1,
+        "prepared_install_source": 1,
         "target_contract": {"schema": "copilot-extensions.runtime-source-target", "version": 1},
     }
     rows = {row["id"]: row for row in facts["entries"]}
@@ -94,8 +95,48 @@ def test_inventory_advertises_delegation_only_with_a_capable_driver(installed, m
     assert capability == ({
         "schema": "copilot-extensions.project-update-delegation",
         "version": 1, "engine_fallback": True, "isolated_runtime_phase": True,
-        "targeted_payload_install": False,
+        "targeted_payload_install": False, "project_integration": False,
     } if capable else None)
+
+
+@pytest.mark.parametrize("foreign", [False, True])
+def test_project_integration_capability_requires_selected_runtime(installed, monkeypatch, tmp_path, foreign):
+    from agent_worktrees import manager_launch_cli, manager_recovery, picker_profiles_cli, update_integration
+
+    prefix = installed_capability_runtime(tmp_path, monkeypatch)
+    for module in (update_cli, update_integration, manager_launch_cli, manager_recovery, picker_profiles_cli):
+        root = tmp_path / "foreign" if foreign and module is update_integration else prefix / "site"
+        monkeypatch.setattr(
+            module, "__file__", str(root / "agent_worktrees" / f"{module.__name__.split('.')[-1]}.py"),
+        )
+    driver = SimpleNamespace(
+        __file__=str(prefix / "site" / "update_driver" / "__init__.py"),
+        UPDATE_AUTHORITY_CAPABILITY="suite-update-authority/v1",
+        current_authority=lambda **_kwargs: None, borrowed_custody=lambda: None,
+        participant_environment=lambda: {}, status=lambda *_a, **_k: None,
+        runtime_command=lambda *_a, **_k: None,
+    )
+    monkeypatch.setitem(sys.modules, "update_driver", driver)
+    capability = owner.inventory()["project_controller_delegation"]
+    assert capability["project_integration"] is not foreign
+
+
+@pytest.mark.parametrize("missing", ["foreign-profile", "profile-binding", "controller-selection"])
+def test_project_integration_requires_verified_profile_owner(monkeypatch, tmp_path, missing):
+    from agent_worktrees import (
+        manager_launch_cli, manager_recovery, picker_profiles_cli,
+        project_update_controller, update_integration,
+    )
+
+    prefix = installed_capability_runtime(tmp_path, monkeypatch)
+    for module in (update_cli, update_integration, manager_launch_cli, manager_recovery, picker_profiles_cli):
+        root = tmp_path / "foreign" if missing == "foreign-profile" and module is picker_profiles_cli else prefix
+        monkeypatch.setattr(module, "__file__", str(root / "site" / f"{module.__name__.split('.')[-1]}.py"))
+    if missing == "profile-binding":
+        monkeypatch.setattr(picker_profiles_cli, "CONTROLLER_PROFILE_REFRESH_CAPABILITY", None, raising=False)
+    elif missing == "controller-selection":
+        monkeypatch.setattr(manager_recovery, "controller_selection", None)
+    assert not project_update_controller._project_integration_capability(prefix)
 
 
 @pytest.mark.parametrize("foreign", [False, True])
@@ -238,17 +279,24 @@ def test_old_engine_installer_cannot_recover_manager_as_target_effect(tmp_path, 
 
 
 @pytest.mark.parametrize("prepared_supported", [False, True])
-def test_isolated_engine_checks_execution_artifact_not_authority(tmp_path, prepared_supported):
+@pytest.mark.parametrize("declared", [False, True])
+def test_isolated_engine_checks_execution_artifact_not_authority(tmp_path, prepared_supported, declared):
     authority, prepared = tmp_path / "authority", tmp_path / "prepared"
     for payload, supported in ((authority, not prepared_supported), (prepared, prepared_supported)):
         (payload / "scripts").mkdir(parents=True)
         for extension in ("sh", "ps1"):
-            (payload / "scripts" / f"install.{extension}").write_text(
+            (payload / "scripts" / f"{'construct' if declared else 'install'}.{extension}").write_text(
                 "AGENT_WORKTREES_TARGETED_UPDATE" if supported else "old installer",
             )
+        if declared:
+            (payload / "source-install.json").write_text(json.dumps({
+                "schema": "copilot-extensions.native-source-install", "version": 1,
+                "windows": {"script": "scripts/construct.ps1", "argument": "-FromBundle"},
+                "posix": {"script": "scripts/construct.sh", "argument": "--from-bundle"},
+            }))
     step = update_runtime_plan.RuntimeUpdateStep(
         "agent-worktrees", "engine_runtime", authority,
-        source=SimpleNamespace(payload=prepared),
+        source=SimpleNamespace(payload=prepared, install_source=tmp_path / "inputs" if declared else None),
     )
     if prepared_supported:
         assert owner.isolated_engine_step(step).environment["AGENT_WORKTREES_TARGETED_UPDATE"] == "1"

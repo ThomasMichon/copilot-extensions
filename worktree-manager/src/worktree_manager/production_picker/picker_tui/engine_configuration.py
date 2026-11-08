@@ -79,22 +79,27 @@ class PickerConfigurationMixin:
 
     def _submit_configuration_form(self, reg, action, ctx, values):
         from .pivot_actions import format_form_template
+        from .registered_scopes import action_scopes
         runtime = self._pivot_runtime(reg)
         scope = self._pivot_scope_key()
         argv = format_form_template(action.run, ctx, values)
 
         def work():
-            return runtime.run_resolved(argv, preserve_output=True)
+            return runtime.run_resolved(argv, preserve_output=True, scopes=action_scopes(ctx))
 
         def reload():
             # Reload the originating scope, never the newly selected section.
             runtime.repoll(scope)
             self._refresh_knowledge_readiness()
 
-        from worktree_manager.installation_updates import PIVOT_NAME, request_result_screen
+        from worktree_manager.installation_updates import (
+            PIVOT_NAME, diagnostic_result_screen, request_result_screen,
+        )
 
         if reg.name == PIVOT_NAME and action.key == "update":
             self._run_command_result(action.label, work, reload, request_result_screen(action.label))
+        elif reg.name == PIVOT_NAME and action.key == "doctor":
+            self._run_command_result(action.label, work, reload, diagnostic_result_screen(action.label))
         else:
             self._run_configuration_command(action.label, work, reload)
 

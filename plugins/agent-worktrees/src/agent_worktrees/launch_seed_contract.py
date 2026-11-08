@@ -11,13 +11,14 @@ import subprocess
 from agent_procutil.owned_process import run_caller_owned
 
 
-def supports_posix_setup(root: Path) -> bool:
+def supports_posix_setup(root: Path, *, admission_only: bool = False) -> bool:
     try:
         version = (root / "current-version").read_text(encoding="utf-8").strip()
         if not root.is_absolute() or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,255}", version) is None:
             return False
         slot = root / "versions" / version
-        python = slot / "bin" / "python"
+        environment_root = slot / ".venv" if (slot / "application.json").is_file() else slot
+        python = environment_root / "bin" / "python"
         bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
         if not python.is_file() or not bootstrap.is_file() or not (slot / ".install-complete.json").is_file():
             return False
@@ -46,6 +47,10 @@ def supports_posix_setup(root: Path) -> bool:
                     ("preparation_environment_modes", "execution-hint"),
                 )
             )
+            and (not admission_only or (
+                isinstance(descriptor.get("setup_admission_modes"), list)
+                and "posix-live-owner-v1" in descriptor["setup_admission_modes"]
+            ))
             and (root / "current-version").read_text(encoding="utf-8").strip() == version
         )
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):

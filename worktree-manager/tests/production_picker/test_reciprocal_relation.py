@@ -6,6 +6,7 @@ import pytest
 
 from worktree_manager.production_picker.picker_tui import derive
 from worktree_manager.production_picker.picker_tui.engine import PickerScreen
+from worktree_manager.production_picker.picker_tui.listview import ListView
 
 
 def _raw(**values):
@@ -32,6 +33,7 @@ def test_sessionless_owned_workspace_is_not_an_ordinary_resume_target(ownership)
         src=types.SimpleNamespace(bucket=derive.bucket),
         is_all=lambda: False,
         _visible_scope_data=lambda: [row],
+        list_view=ListView(),
     )
     _cols, sections = PickerScreen.current_list(screen)
     assert all(row not in rows for label, rows in sections if label in ("Active", "Recent", "Completed"))
@@ -48,6 +50,7 @@ def test_picker_status_counts_owned_workspaces_in_full_and_compact_headers(compa
         src=types.SimpleNamespace(bucket=derive.bucket),
         is_all=lambda: False,
         _visible_scope_data=lambda: [row],
+        list_view=ListView(),
         _kind=lambda: "worktrees",
         pulse=0, live=False, loader=None, _orphans=[],
     )
@@ -193,7 +196,7 @@ def test_successful_embodiment_can_attach_despite_stale_sessionless_snapshot(emb
     )
     assert ok is embodied
     if embodied:
-        assert decisions == [{"action": "resume", "worktree_id": row["id"]}]
+        assert decisions == [{"action": "resume", "worktree_id": row["id"], "journal_action": "open"}]
     else:
         assert not decisions
         assert "no session here" in message

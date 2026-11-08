@@ -1,0 +1,9 @@
+{
+  "comment": "Declare required-observation support and include the exact project and selection in installation-repair results.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

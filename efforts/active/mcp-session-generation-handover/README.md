@@ -1371,3 +1371,26 @@ migration already works.
   original assertions. New-source formal validation and current review/CI
   remain pending. Neither finding establishes the cause of the historical
   warm PID mismatch; that finding remains not reproduced with unknown cause.
+
+### 2026-11-07: Corrective serving recovery and update transaction work
+
+- #11333 reproduced a retained endpoint without an active route or native
+  listener. The admission guard had treated endpoint presence alone as a live
+  owner. Startup now consults the native listener owner first and retains the
+  original handle until guarded incoming publication. Live foreign owners,
+  unavailable native inspection and listeners appearing during readiness still
+  refuse without incumbent termination.
+- Two dead-handle controls failed before correction. Thirty focused startup
+  controls and a private ordinary Windows install plus literal tool call passed
+  afterward, with verified cleanup under the existing bounds. This source
+  result does not substitute for release, installed acceptance or the complete
+  adopted-wrapper reattachment gate.
+- Retained phase timings also exposed repeated local-library UV transactions
+  before root package installation. Dispatch and Machines now resolve their
+  UV workspace closure once, retaining reinstall/refresh inputs, governed
+  dependency policy and their non-UV fallback. An already-enabled supervisor
+  task is left enabled without a redundant enable mutation; disabled-task
+  permission failures remain failures.
+- Current review/CI, promotion, owned installed repair and a clean measured
+  sweep remain the corrective slice's completion gates. Cold-update performance
+  is not declared qualified merely because source regression controls passed.

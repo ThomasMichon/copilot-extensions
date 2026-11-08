@@ -302,7 +302,8 @@ def test_native_open_restores_shared_answer_and_reset_rebases_only_its_draft_rev
     calls = []
 
     class Runtime:
-        def run_json_resolved(self, argv):
+        def run_json_resolved(self, argv, *, scopes=None):
+            assert scopes is None
             calls.append(argv)
             if fails:
                 return False, "card or shared draft changed; refresh"
@@ -337,6 +338,41 @@ def test_native_open_restores_shared_answer_and_reset_rebases_only_its_draft_rev
                 assert form._draft_binding["revision_from"] == "absent"
             assert rec["revision"] == "draft-v1"
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("clear", [False, True])
+def test_queued_shared_draft_command_refuses_a_replacement_read(tmp_path, clear):
+    from worktree_manager.production_picker.picker_tui import tasks
+    from worktree_manager.production_picker.picker_tui.engine_form_drafts import PivotFormDraftActionsMixin
+
+    canary = tmp_path / "ran"
+    raw = manifest()
+    raw["actions"][0]["draft"]["clear" if clear else "save"] = [
+        sys.executable, "-c", f"from pathlib import Path; Path({str(canary)!r}).touch()",
+    ]
+    reg = registered(raw)
+    runtime = tasks.RegisteredPivotRuntime(reg)
+    runtime._cache["host"] = ("ready", [], "")
+    queued = []
+
+    class Picker(PivotFormDraftActionsMixin):
+        def _pivot_runtime(self, _reg):
+            return runtime
+
+        def _run_bg(self, _label, work, _done, **_kwargs):
+            queued.append(work)
+
+    try:
+        Picker()._run_pivot_form_draft(
+            reg, reg.actions[0], {**record(), "_manager_scope": "host"},
+            "Example", {"answer": "retained"}, None, clear=clear,
+        )
+        runtime._inflight.add("host")
+        ok, message, result = queued[0]()
+        assert not ok and "Source read is not current" in message and result is None
+        assert not canary.exists()
+    finally:
+        runtime.close()
 
 
 @pytest.mark.parametrize("action", ["save", "confirm", "escape", "reset"])
@@ -399,7 +435,8 @@ def test_verified_save_then_two_resets_and_restart_never_revive_cleared_answers(
     monkeypatch.setattr(Path, "unlink", fail_first_unlink)
 
     class Runtime:
-        def run_json_resolved(self, argv):
+        def run_json_resolved(self, argv, *, scopes=None):
+            assert scopes is None
             assert argv[-1] == owner["revision"]
             calls.append(argv[1])
             if argv[1] == "save":

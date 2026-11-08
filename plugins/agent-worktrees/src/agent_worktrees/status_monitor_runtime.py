@@ -21,6 +21,7 @@ from . import activity, locks, output, sessions_pane_retire, stale_runtime_reap,
 from . import config as cfg
 from . import status_updater_cli
 from .mux_list_result import is_empty_tmux_listing, parse_monitor_sessions
+from .mux_creation import is_psmux
 from .status_monitor_python import direct_monitor_python as direct_monitor_python
 from .status_monitor_spawn import _spawn_detached as _spawn_detached
 
@@ -785,19 +786,18 @@ def _monitor_mux_set(mux_bin: str, sess: str, opt: str, val: str) -> bool:
 def _monitor_list_sessions(
     mux_bin: str,
 ) -> dict[str, tuple[int, str]] | None:
-    """Enumerate mux sessions with the monitor's OWN selected binary.
+    """Observe the monitor's selected binary, not a platform-default mux.
 
-    ``sessions._list_mux_sessions`` chooses tmux/psmux by *platform*, which can
-    disagree with the binary ``cmd_status_monitor`` actually resolved
-    (psmux-if-present) -- a mismatch would enumerate the wrong multiplexer and
-    return nothing every sweep, so the monitor neither serves nor idle-exits.
-    Query ``mux_bin`` directly instead. Returns
-    ``{session_name: (attached, incarnation)}`` or ``None`` on a transient
-    failure (so the caller neither prunes nor exits).
+    PSMux CLI observation is unsupported because startup can reap live servers.
+    TMux returns ``{session_name: (attached, incarnation)}``; incomplete or
+    unavailable evidence returns ``None`` so the caller neither prunes nor exits.
     """
     override = _core_helper("_monitor_list_sessions", _monitor_list_sessions)
     if override is not _monitor_list_sessions:
         return override(mux_bin)
+    if is_psmux(mux_bin):
+        # Even read-only PSMux CLI commands can reap other running servers.
+        return None
     try:
         r = subprocess.run(
             [
@@ -815,7 +815,12 @@ def _monitor_list_sessions(
         return None
     if r.returncode != 0:
         return {} if is_empty_tmux_listing(mux_bin, r) else None
-    return parse_monitor_sessions(r.stdout)
+    if (r.stderr or "").strip():
+        return None
+    try:
+        return parse_monitor_sessions(r.stdout, strict=True)
+    except ValueError:
+        return None
 
 
 def _monitor_managed_session_union(

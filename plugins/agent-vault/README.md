@@ -56,7 +56,12 @@ Missing/older driver support refuses without an inline installer.
 The POSIX hook retains its existing metadata-Python prerequisite and no-Python
 no-op. Activation reads use the payload's bundled configuration SDK and the
 selected completed runtime interpreter when available, retaining ambient
-Python discovery for cold payloads. The canonical installation-context
+Python discovery for cold payloads. Cold activation qualifies an existing
+Python 3.10+ reader rather than accepting the first unsupported PATH winner;
+Windows reuses read-only canonical native discovery and headless capture.
+This neither raises Vault's floor to the installer's 3.11 tooling floor nor
+installs Python, changes PATH or invokes an installer to select the reader.
+The canonical installation-context
 bootstrap keeps its independent platform prerequisites (currently Python
 on PATH on Windows). No Vault runtime or backend is installed for this read. Cold
 bootstrap requires the qualified Windows or Linux native driver, not stock
@@ -289,6 +294,9 @@ enrollment or automatic mesh setup; attachment import/export remains unchanged.
 selected owner-private local directory. It never initializes a missing record,
 overwrites a different key or repairs existing permissions. Both commands support
 `--require-running` to prohibit service activation and first-touch provisioning.
+Selected setup consumers can require `ssh-key-install-pin-v1` from the owning
+invocation contract and pass `--expected-fingerprint` to refuse a changed public
+identity before local key publication; existing unpinned callers are unchanged.
 
 ## Shared owner-key setup
 

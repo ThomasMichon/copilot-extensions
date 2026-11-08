@@ -1,0 +1,9 @@
+{
+  "comment": "Bind selected owned and legacy edit identities through protected source and original native receipts under existing allocation custody",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

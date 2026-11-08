@@ -157,6 +157,15 @@ sizing, readiness and the coordination-layer resolver, and routes dispatch
 through the driver. Fleet keys that only the built-in runtime understands are
 rejected for a driver fleet instead of being silently ignored.
 
+### configured-image-sources
+An image-backed fleet can acquire its selected image from already-configured
+container package sources through its runtime's existing provisioning owner.
+Source and credential configuration stay with their existing owners rather
+than a second provider-owned registry or credential store. Selection remains
+non-interactive and explicit about unavailable or ambiguous images and required
+authentication; a failed pull is not a ready venue or permission to substitute
+another runtime.
+
 ### interactive-venue-reach-trusted
 A trusted venue is reachable as an attended, muxed, interactive Copilot CLI
 session — or its detached, orchestrator-facing counterpart — under the exact

@@ -428,14 +428,30 @@ def _cmd_handoff_check(args: argparse.Namespace) -> None:
     sys.exit(result.returncode)
 
 
+def _cmd_questions(args: argparse.Namespace) -> None:
+    from .client import BridgeClientError
+
+    core = _core()
+    try:
+        result = core._get_client(ensure=False).live_questions(args.session_id)
+    except BridgeClientError as exc:
+        print(f"[FAIL] {exc.detail}", file=sys.stderr)
+        raise SystemExit(1) from exc
+    core._json_out(result)
+
+
 def _cmd_answer(args: argparse.Namespace) -> None:
     from .client import BridgeClientError
 
     core = _core()
-    client = core._get_client()
+    generation = getattr(args, "generation", None)
+    client = core._get_client(**({"ensure": False} if generation is not None else {}))
     caller_id = core._caller_id_for(args)
     sid = args.session_id
     option_id = getattr(args, "option_id", None)
+    if generation is not None and (not args.request_id or option_id is not None or args.tool_call_id):
+        print("[FAIL] --generation requires --request-id and no permission/tool-call selector.", file=sys.stderr)
+        raise SystemExit(2)
     if option_id is not None:
         request_id = getattr(args, "request_id", None)
         if (
@@ -476,6 +492,26 @@ def _cmd_answer(args: argparse.Namespace) -> None:
                 content[key.strip()] = value
 
     request_id = getattr(args, "request_id", None)
+    if generation is not None:
+        try:
+            snapshot = client.live_questions(sid)
+            pending = [
+                q for q in snapshot.get("requests", [])
+                if q.get("request_id") == request_id
+            ] if snapshot.get("generation") == generation else []
+            if len(pending) != 1:
+                raise BridgeClientError(409, "the exact native question/generation is not pending")
+            result = client.answer_live_question(
+                sid, request_id, generation, content, family=pending[0]["family"],
+                sender=core._live_sender_label(args), action=action,
+            )
+        except BridgeClientError as exc:
+            print(f"[FAIL] {exc.detail}", file=sys.stderr)
+            raise SystemExit(1) from exc
+        core._json_out(result)
+        if result.get("accepted") is not True:
+            raise SystemExit(1)
+        return
     tool_call_id = args.tool_call_id
     if not tool_call_id:
         try:
@@ -607,12 +643,17 @@ def register_session_lifecycle_commands(sub: argparse._SubParsersAction) -> None
     handoff_check_p.add_argument("--json", action="store_true", help="Emit JSON.")
     handoff_check_p.set_defaults(func=_cmd_handoff_check)
 
-    answer_p = sub.add_parser("answer", help="Answer a dispatched agent's parked ask_user question (the elicitation backstop) so its turn continues")
+    questions_p = sub.add_parser("questions", help="Inspect fresh native questions in an exact live interactive session (JSON)")
+    questions_p.add_argument("session_id", help="Exact native session ID, not a worktree/alias")
+    questions_p.set_defaults(func=_cmd_questions)
+
+    answer_p = sub.add_parser("answer", help="Answer an owned ask_user or an exact live interactive question")
     answer_p.add_argument("session_id", help="Session ID")
     answer_p.add_argument("--field", dest="fields", action="append", default=[], metavar="KEY=VALUE", help="A form field answer (repeatable). Values are strings; use --json for numbers/booleans/complex values.")
     answer_p.add_argument("--json", dest="content_json", default=None, help="Full answer content as a JSON object (overrides --field).")
     answer_p.add_argument("--tool-call-id", dest="tool_call_id", default=None, help="Which parked question to answer (defaults to the sole pending one; required when more than one is outstanding -- see `status`).")
     answer_p.add_argument("--request-id", default=None, help="Exact live answer token from a remote approval event/status; required for remote forms.")
+    answer_p.add_argument("--generation", default=None, help="Live interactive extension generation from questions; requires its exact --request-id. Never approves tool permissions.")
     answer_p.add_argument("--option-id", default=None, help="Select one exact offered permission option instead of answering a form; requires --request-id.")
     answer_p.add_argument("--decline", action="store_true", help="Decline the question instead of submitting an answer.")
     answer_p.add_argument("--cancel", action="store_true", help="Cancel the question instead of submitting an answer.")

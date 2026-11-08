@@ -34,6 +34,7 @@ from ..acquisition_writer_inspection import CAPABILITY as WRITER_INSPECTION_CAPA
 from ..creation_worktree_writer import CAPABILITY as CREATION_WRITER_CAPABILITY
 from ..creation_worktree_writer import RESUME_CAPABILITY as CREATION_WRITER_RESUME_CAPABILITY
 from ..creation_writer_inspection import CAPABILITY as CREATION_WRITER_INSPECTION_CAPABILITY
+from ..live_questions import CAPABILITY as LIVE_QUESTION_ANSWERS_CAPABILITY
 
 router = APIRouter()
 
@@ -80,6 +81,7 @@ async def health(request: Request) -> dict:
             CREATION_WRITER_CAPABILITY: 1,
             CREATION_WRITER_RESUME_CAPABILITY: 1,
             CREATION_WRITER_INSPECTION_CAPABILITY: 1,
+            LIVE_QUESTION_ANSWERS_CAPABILITY: 1,
         },
         "drain_contract": {"minimum": DRAIN_CONTRACT_VERSION, "maximum": DRAIN_CONTRACT_VERSION},
         "ssh_carriers": get_default_manager().carrier_diagnostics(),

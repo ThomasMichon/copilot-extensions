@@ -1,6 +1,10 @@
 {
-  "comment": "Reduce snapshot validation overhead while retaining fresh lifecycle and custody checks",
+  "comment": "Add bounded native recovery custody and profile-aware application launchers",
   "changes": [
+    {
+      "plugin": "libs/update-driver",
+      "type": "patch"
+    },
     {
       "plugin": "agent-bridge",
       "type": "patch"
@@ -10,15 +14,7 @@
       "type": "patch"
     },
     {
-      "plugin": "agent-containers",
-      "type": "patch"
-    },
-    {
       "plugin": "agent-dispatch",
-      "type": "patch"
-    },
-    {
-      "plugin": "agent-machines",
       "type": "patch"
     },
     {
@@ -43,22 +39,6 @@
     },
     {
       "plugin": "agent-vault",
-      "type": "patch"
-    },
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    },
-    {
-      "plugin": "budget-guidance",
-      "type": "patch"
-    },
-    {
-      "plugin": "agent-conduct-guidance",
-      "type": "patch"
-    },
-    {
-      "plugin": "worktree-manager",
       "type": "patch"
     }
   ]

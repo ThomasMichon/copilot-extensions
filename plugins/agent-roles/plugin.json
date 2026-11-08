@@ -1,6 +1,6 @@
 {
   "name": "agent-roles",
-  "description": "Sustained agent role charters over existing owners: a fleet monitor (task master) that audits whether agents advance their root goals, diagnoses misdirection and sends separately authorized, deduplicated corrective steers; and a sustained pull-request reviewer role with independent lanes. Guidance-only: no task queue, daemon, scheduler, watcher or grant of authority, and no required companion plugin.",
+  "description": "Sustained role charters over existing owners: fleet monitoring, independent pull-request review, and persistent scoped issue-backlog triage with durable harness/knowledge addenda. Guidance-only: no task queue, daemon, scheduler, watcher or grant of authority, and no required companion plugin.",
   "version": "0.1.0-dev1",
   "runtimeScope": "none",
   "author": {
@@ -17,6 +17,7 @@
     "progress",
     "steering",
     "pull-request-review",
+    "issue-triage",
     "coordination",
     "copilot-extension"
   ],

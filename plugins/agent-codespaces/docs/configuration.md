@@ -58,6 +58,7 @@ does not become valid merely because composition accepts JSON mappings.
 |---|---|
 | `schema_version` | Migration-owned integer |
 | `defaults.machine_type`, `defaults.location` | String; `largePremiumLinux`, `EastUs` |
+| `defaults.max_owned_codespaces` | Positive integer; 30; conservative per-account allocation policy, not an immutable provider quota |
 | `defaults.devcontainer_path` | String; `.devcontainer/devcontainer.json`; used only by native multiple-config selection |
 | `defaults.dotfiles_repo`, `defaults.harness_repo` | String/null; null; distinct purposes |
 | `defaults.ssh_user` | String; `vscode` |
@@ -86,6 +87,25 @@ adoption receipts select runtime/ownership, not ordinary preference tiers.
 Use the existing `config migrate` command for canonical relocation; ordinary
 reads never rewrite config. Reads reload live, while existing connections and
 created venues change only through their admitted owner operations.
+
+Owned-venue admission counts stopped as well as running venues under the
+target repository's selected account. `allocate` and ordinary `create` require
+credential-pinned complete inventory; a failed/malformed read or the 50-row
+listing bound is unknown capacity, not an empty account. The policy can be
+raised or lowered through the normal preference layers without changing the
+provider's actual quota. Running-core headroom is independent; unknown machine
+costs refuse additional compute, including a stopped venue's wake.
+
+The same native preferences govern sequential reuse: configured machine cores
+are a minimum for a newly borrowed venue, while its actual wake cost must fit
+known headroom. There is no new reuse YAML switch. Compatible explicitly
+returned stopped venues are considered before creating another owned slot;
+existing workstream reuse retains its prior behavior. The
+[creation/reuse contract](../README.md#create-options) describes
+selected-runtime capability discovery, ownership and retained-state limits.
+Explicit repository or non-default global devcontainer/location preferences
+are not qualified by the current pool metadata, so they do not silently select
+a cross-effort venue.
 
 Exclude secrets, SSH masters/sockets, lease/adoption/activation receipts,
 credential cache, logs and installed generations from portable YAML. Credential

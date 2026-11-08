@@ -15,6 +15,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
+from agent_procutil.owned_process import (
+    OutputLimitExceeded, OwnedCleanupError, OwnedExecutionBudget,
+    require_contained_worker, run_caller_owned,
+)
 
 MAX_OUTPUT = 64 * 1024
 _termination = threading.local()
@@ -59,6 +63,25 @@ def cancel_on_termination():
     finally:
         for signum, handler in reversed(tuple(previous.items())):
             signal.signal(signum, handler)
+
+
+@contextmanager
+def caller_owned_readiness(enabled: bool):
+    """Borrow only an explicit caller's native containment, never an installer scope."""
+    previous = getattr(_termination, "caller_owned_readiness", False)
+    if enabled:
+        if os.name == "nt":
+            try:
+                require_contained_worker()
+            except (OSError, RuntimeError) as error:
+                raise ValueError("caller-owned readiness requires an enclosing native Job") from error
+        elif os.getpgrp() != os.getppid() or os.getsid(0) != os.getppid():
+            raise ValueError("caller-owned readiness requires its enclosing parent's native group")
+    _termination.caller_owned_readiness = enabled
+    try:
+        yield
+    finally:
+        _termination.caller_owned_readiness = previous
 
 
 @dataclass(frozen=True)
@@ -109,6 +132,23 @@ def run_action(
             raise ValueError("invalid admitted CMD invocation")
         # CMD's already-quoted tail is not a CRT argument; do not escape it again.
         command = subprocess.list2cmdline(argv[:4]) + " " + argv[4]
+    if readonly and os.name != "nt" and getattr(_termination, "caller_owned_readiness", False):
+        try:
+            result = run_caller_owned(
+                list(argv), cwd=cwd, env=dict(environment), timeout=timeout,
+                max_stdout_bytes=MAX_OUTPUT, max_stderr_bytes=MAX_OUTPUT,
+                binary=True, borrow_parent_scope=True,
+                budget=OwnedExecutionBudget.from_timeout(timeout + 2, cleanup_reserve=2),
+            )
+            return ActionResult("exited", result.returncode, result.stdout)
+        except OwnedCleanupError:
+            raise
+        except subprocess.TimeoutExpired:
+            return ActionResult("timeout", None)
+        except OutputLimitExceeded:
+            return ActionResult("output-limit", None)
+        except (OSError, RuntimeError):
+            return ActionResult("launch-failed", None)
     if os.name != "nt":
         kwargs["start_new_session"] = True
     # Defer in Python rather than masking signals, which a spawned service would inherit.

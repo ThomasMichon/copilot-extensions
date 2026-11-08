@@ -7,6 +7,13 @@ publication authority. Manager owns only process lifetime, wire admission and
 presentation. No plugin package is imported and Manager reads no agenda file,
 resident route, token or socket directly.
 
+The tab is offered only for heads that produced an agenda. It starts hidden,
+appears once an `observed` frame is admitted, and hides again on
+`not-published`. `head-changed`, loading, reconnects and errors keep the last
+settled visibility: a head change never reveals an empty tab, and a transient
+failure never flickers it away. Manager infers no fallback agenda from
+conversation history.
+
 After the ordinary current-worktree reload, project comes from `worktree.repo`.
 When that is absent, the constructor's observer project is usable only if its
 worktree ID matches the selected worktree. Exactly one `is_head: true` session
@@ -158,6 +165,32 @@ executes, accepts, approves or changes planning state.
 Cancellation after a health child completes is a normal subscription return,
 so Refresh can join that worker. An unexpected interruption without a cancelled
 owner is an explicit unavailable error, not a silent cancellation.
+
+## Git-graph agenda rendering
+
+When the selected CLI reports `cli_graph_versions` and the authenticated
+resident advertises `worktree-agendas-graph-v1` on contract version 2,
+`require_capability` reports the highest shared graph version. The feed then
+requests it with `--agenda-graph`. Each admitted graph is validated
+(`validate_graph`) before display. A missing or unsupported graph falls back to
+the flat field listing.
+
+`agenda_graph_render.render` draws the graph like `git log --graph`:
+
+- A header shows the revision, the commit time and the status counts, then
+  the Goal, Next action, Exit criteria, Stack, and recheck rows.
+- Each frame is a lane. Root frames run down the left edge. A subqueue forks
+  right (`├─╮`) under the item that expanded it, and shows its continuation
+  (`↩ then …`). When it closes, it merges back (`╰─╯`).
+- Items are nodes on their lane, in queue order: `●` done, `○` queued,
+  `◐` running, `◇` waiting, `↻` replanning and `⊘` closed. The cursor is the
+  highlighted `◉ … ◀ cursor` node.
+- A History section lists the most recent events, newest first, and counts
+  any earlier ones.
+
+Lanes only line up unwrapped. While a graph is shown, the Agenda widget gets
+the `agenda-graph` class, which disables wrapping and ends long rows with an
+ellipsis. Rendering is pure and display-only.
 
 ## Optional rich Timeline history
 

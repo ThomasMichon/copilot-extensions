@@ -1,0 +1,9 @@
+{
+  "comment": "Delegate canonical mux creation and eligible native headed setup to the independent Copilot Driver core, preserving seed custody and POSIX admission fences",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

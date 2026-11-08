@@ -10,8 +10,33 @@ import sys
 from pathlib import Path
 
 import pytest
+from agent_procutil import no_window_kwargs
 
 PLUGIN = Path(__file__).resolve().parents[1]
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell is unavailable")
+@pytest.mark.parametrize("enabled", [False, True])
+def test_powershell_enable_only_changes_disabled_tasks(tmp_path, enabled):
+    helper = PLUGIN / "scripts/supervisor-lifecycle.ps1"
+    script = "\n".join([
+        "$ErrorActionPreference='Stop'",
+        f". '{helper}'",
+        "function Invoke-SupervisorAudit { param($Event,$Reason,$Name,$Outcome) }",
+        "function Write-Warn { param($Message) }",
+        f"function Get-ScheduledTask {{ param($TaskName) [pscustomobject]@{{Settings=[pscustomobject]@{{Enabled=${str(enabled).lower()}}}}} }}",
+        "function Enable-ScheduledTask { param($TaskName) throw 'fixture Access is denied' }",
+        "Invoke-SupervisorTaskAction -Operation enable -Name fixture -Reason configured-opt-in",
+        f"if ($script:SupervisorActionSucceeded -ne ${str(enabled).lower()}) {{ throw 'incorrect enable outcome' }}",
+        f"if ($script:SupervisorReconcileFailed -eq ${str(enabled).lower()}) {{ throw 'incorrect reconciliation state' }}",
+    ])
+    path = tmp_path / "fixture.ps1"
+    path.write_text(script, encoding="utf-8")
+    result = subprocess.run(
+        [shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-File", str(path)],
+        capture_output=True, text=True, timeout=20, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def _shell_function(name: str) -> str:

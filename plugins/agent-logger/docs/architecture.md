@@ -350,6 +350,26 @@ qualified agent handles, trailing dots/spaces, and reserved Windows device names
 return the documented not-found exit code `3` with no payload rather than raising
 an archive-path validation error.
 
+Transcripts can be very large, so the provider keeps bounded memory: it reads
+`events.jsonl` line by line through `sessions.open_events_stream` (a live file,
+or a streamed tar.gz/zip archive member via the codec's `open_member`) and
+writes the `{"session": ..., "events": [...]}` payload to stdout one event at a
+time. A tar.gz member is found in one forward pass over the headers and
+streamed from there, so the archive is decompressed once; if a name repeats,
+the first entry wins (the archive writer never repeats one, and the strict
+member scan used for archive comparison and bounded reads rejects repeats).
+The bytes are identical to serializing the whole payload at once. The
+not-found decision is made before anything is written; a read error discovered
+mid-stream (for example a corrupt archive) exits nonzero after partial output,
+which callers already discard. `collate-session` and `ramp-up-session` stream
+the same way: turns are written to segment files as they are parsed, the stdout
+digest stops retaining turn text once it passes its size cap, and `read_member`
+is reserved for small sidecar members. If collation fails or is interrupted
+part-way, segment files already closed are kept as partial progress, the
+unfinished segment is removed, and neither `00-context.md` nor the
+`manifest.yaml`/`index.yaml` entry is written, so the run is never presented as
+a complete digest.
+
 The registration side (`scripts/register-cold-store-provider.sh` /
 `.ps1`, run from `sessionStart`) drops
 `~/.agent-bridge/cold-store-providers.d/agent-logger.json` following the same

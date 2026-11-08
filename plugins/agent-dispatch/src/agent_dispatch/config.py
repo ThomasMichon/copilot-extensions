@@ -159,6 +159,12 @@ def routing_dir() -> Path:
         os.environ.get(ROUTING_DIR_ENV) or install_dir()
     )
 
+
+def coordinator_start_lock_path(root: Path | None = None) -> Path:
+    """Resolve the coordinator's existing start/cutover lock without acquiring it."""
+    return (Path(root) if root is not None else routing_dir()) / "serve-start.lock"
+
+
 #: Wildcard bind addresses that expose the coordinator on **every** interface
 #: (including the LAN). Binding one of these without a bearer token would put the
 #: powerful task-control API on the network unauthenticated, so it is guarded

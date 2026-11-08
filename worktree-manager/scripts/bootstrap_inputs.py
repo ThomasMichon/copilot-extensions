@@ -20,29 +20,55 @@ def _preparation_assets(payload: Path) -> dict[Path, Path]:
     if (
         not isinstance(declaration, dict)
         or declaration.get("schema") != "copilot-extensions.packaged-assets"
-        or type(declaration.get("version")) is not int or declaration["version"] != 1
-        or declaration.get("canonicalDir") != "tools"
-        or declaration.get("payloadDir") != "scripts/runtime-source-tools"
-        or not isinstance(declaration.get("files"), list) or not declaration["files"]
+        or type(declaration.get("version")) is not int
     ):
         raise ValueError("Unsupported Manager source preparation assets")
+    legacy = declaration["version"] == 1
+    if legacy:
+        if (
+            declaration.get("canonicalDir") != "tools"
+            or declaration.get("payloadDir") != "scripts/runtime-source-tools"
+        ):
+            raise ValueError("Unsupported Manager source preparation assets")
+        groups = [declaration]
+    elif (
+        declaration["version"] == 2 and set(declaration) == {"schema", "version", "groups"}
+        and isinstance(declaration["groups"], list) and 1 <= len(declaration["groups"]) <= 32
+    ):
+        groups = declaration["groups"]
+    else:
+        raise ValueError("Unsupported Manager source preparation assets")
+
+    def relative(value):
+        if (
+            not isinstance(value, str) or not value or "\\" in value or ":" in value
+            or any(part in {"", ".", ".."} for part in value.split("/"))
+        ):
+            raise ValueError("Invalid Manager source preparation asset name")
+        return Path(value)
+
     assets = {}
-    names = set()
-    for name in declaration["files"]:
-        if not isinstance(name, str) or name in {"", ".", ".."} or Path(name).name != name:
-            raise ValueError("Invalid Manager source preparation asset name")
-        if "/" in name or "\\" in name or ":" in name:
-            raise ValueError("Invalid Manager source preparation asset name")
-        if name in names:
-            raise ValueError("Duplicate Manager source preparation asset name")
-        names.add(name)
-        target = Path(declaration["payloadDir"]) / name
-        if (payload / target).is_file():
-            continue
-        source = payload.parent / "tools" / name
-        if source.resolve() != source or not source.is_file():
-            raise ValueError(f"Manager source preparation asset is unavailable: {name}")
-        assets[target] = source
+    targets = set()
+    directories = set()
+    for group in groups:
+        if not isinstance(group, dict) or not isinstance(group.get("files"), list) or not group["files"]:
+            raise ValueError("Unsupported Manager source preparation assets")
+        canonical, destination = relative(group.get("canonicalDir")), relative(group.get("payloadDir"))
+        for name in group["files"]:
+            member = relative(name)
+            if legacy and member.name != name:
+                raise ValueError("Invalid Manager source preparation asset name")
+            target = destination / member
+            if target in targets or target in directories or any(parent in targets for parent in target.parents):
+                raise ValueError("Duplicate Manager source preparation asset name or overlapping targets")
+            targets.add(target)
+            directories.update(target.parents)
+            if (payload / target).is_file():
+                continue
+            source = payload.parent / canonical / member
+            if source.resolve() != source or not source.is_file():
+                raise ValueError(f"Manager source preparation asset is unavailable: {name}")
+            assets[target] = source
     return assets
 
 
@@ -85,12 +111,41 @@ def retain(
     create_queue_directory(directory)
     destination = directory / key
     relative = tuple(application.relative_to(common) for application in applications)
+
+    def verify_retained(root: Path) -> tuple[Path, ...]:
+        retained = tuple(root / path for path in relative)
+        retained_roots = tuple(sorted({
+            package for application in retained for package in engine._package_roots(application)
+        }))
+        native_roots = tuple(Path(engine._native_retained_path(root)) for root in retained_roots)
+        added = {Path(engine._native_retained_path(retained[0] / path)) for path in assets}
+        if runtime.fingerprint_source(tuple(
+            path for path in engine._source_files(native_roots) if path not in added
+        )) != digest:
+            raise RuntimeError("Retained bootstrap inputs differ from their addressed source")
+        for relative_asset, source_asset in assets.items():
+            asset = Path(engine._native_retained_path(retained[0] / relative_asset))
+            if asset.read_bytes() != asset_bytes[source_asset]:
+                raise RuntimeError("Retained source preparation assets differ from their addressed source")
+        return retained
+
+    def verify_prepared(root: Path) -> None:
+        if runtime.fingerprint_source(engine._source_files(roots)) != digest:
+            raise RuntimeError("Bootstrap source changed during retention")
+        if assets and runtime.fingerprint_source(tuple(assets.values())) != asset_digest:
+            raise RuntimeError("Manager source preparation assets changed during retention")
+        if revision is not None and _git(source, "rev-parse", "--verify", "HEAD") != revision:
+            raise RuntimeError("Bootstrap revision changed during retention")
+        verify_retained(root)
+
     with runtime.construction_lease(directory, key):
         if destination.resolve() != destination:
             raise RuntimeError("Bootstrap snapshot must not be indirect")
         if not destination.exists():
-            with tempfile.TemporaryDirectory(prefix=".prepare-", dir=directory) as temporary:
-                prepared = Path(temporary) / "inputs"
+            with tempfile.TemporaryDirectory(
+                prefix=".prepare-", dir=engine._native_retained_path(directory),
+            ) as temporary:
+                prepared = Path(runtime._normalize_windows_extended_path(temporary)) / "inputs"
                 frozen = engine.freeze_inputs(
                     payload, prepared, additional_plugins=(sdk,) if include_sdk else (),
                 )
@@ -98,25 +153,14 @@ def retain(
                     raise RuntimeError("Bootstrap source changed before retention")
                 for relative_asset, source_asset in assets.items():
                     target = frozen.plugin / relative_asset
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    target.write_bytes(asset_bytes[source_asset])
-                if assets and runtime.fingerprint_source(tuple(assets.values())) != asset_digest:
-                    raise RuntimeError("Manager source preparation assets changed during retention")
-                if revision is not None and _git(source, "rev-parse", "--verify", "HEAD") != revision:
-                    raise RuntimeError("Bootstrap revision changed during retention")
-                prepared.rename(destination)
+                    Path(engine._native_retained_path(target.parent)).mkdir(parents=True, exist_ok=True)
+                    Path(engine._native_retained_path(target)).write_bytes(asset_bytes[source_asset])
+                runtime._runtime_component("versioned_runtime_construction").publish_prepared_snapshot(
+                    Path(engine._native_retained_path(prepared)),
+                    Path(engine._native_retained_path(destination)),
+                    runtime=runtime, verify=verify_prepared,
+                )
         if destination.resolve() != destination:
             raise RuntimeError("Bootstrap snapshot must not be indirect")
-        retained = tuple(destination / path for path in relative)
-        retained_roots = tuple(sorted({
-            package for application in retained for package in engine._package_roots(application)
-        }))
-        added = {retained[0] / path for path in assets}
-        if runtime.fingerprint_source(tuple(
-            path for path in engine._source_files(retained_roots) if path not in added
-        )) != digest:
-            raise RuntimeError("Retained bootstrap inputs differ from their addressed source")
-        for relative_asset, source_asset in assets.items():
-            if (retained[0] / relative_asset).read_bytes() != asset_bytes[source_asset]:
-                raise RuntimeError("Retained source preparation assets differ from their addressed source")
+        retained = verify_retained(destination)
     return retained[0], share

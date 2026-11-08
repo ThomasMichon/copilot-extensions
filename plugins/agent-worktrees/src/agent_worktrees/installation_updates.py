@@ -30,8 +30,16 @@ def _target_scope(payload, *, manifest=None):
 
 def isolated_engine_step(step):
     # The actual execution source may be a separately prepared payload.
-    for extension in ("sh", "ps1"):
-        script = step.artifact / "scripts" / f"install.{extension}"
+    for platform, extension in (("posix", "sh"), ("windows", "ps1")):
+        if step.source is not None and step.source.install_source is not None:
+            from .update_runtime_source import source_install_entry
+
+            entry = source_install_entry(step.artifact, platform)
+            if entry is None:
+                raise ValueError("Prepared engine has no native installation-source capability")
+            script = step.artifact / entry["script"]
+        else:
+            script = step.artifact / "scripts" / f"install.{extension}"
         if not script.is_file() or "AGENT_WORKTREES_TARGETED_UPDATE" not in script.read_text("utf-8"):
             raise ValueError("Installed engine installer lacks targeted-update support; update the suite first")
     return dataclasses.replace(step, environment={
@@ -130,6 +138,7 @@ def inventory():
         "project_controller_delegation": delegation_capability(),
         "runtime_sources": {
             "schema": SOURCES_SCHEMA, "version": SOURCES_CONTRACT,
+            "prepared_install_source": 1,
             "target_contract": {"schema": TARGET_SCHEMA, "version": TARGET_CONTRACT},
         },
     }

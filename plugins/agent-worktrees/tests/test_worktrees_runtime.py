@@ -28,6 +28,7 @@ def request(**selection):
         request(contract_version=3),
         request(project="../project"),
         request(include_missing=1),
+        request(passive=1),
         request(worktree_id=""),
         request(history=True),
     ],
@@ -182,6 +183,22 @@ def test_unavailable_read_retries_renew_demand_without_repeating_wakes(demand_ow
     assert owner.demand_projects() == set()
     owner.handle(request())
     assert len(wakes) == 3
+
+
+def test_passive_reads_never_record_demand_or_wake_the_producer(demand_owner):
+    owner, clock, wakes = demand_owner
+    for _ in range(5):
+        result = owner.handle(request(passive=True))
+        assert result["ok"] is False and result["error"]["code"] == "unready"
+        clock[0] += 1
+    assert wakes == [] and owner.demand_projects() == set()
+
+    owner.publish("project", [{"id": "first"}], observed_at=1)
+    assert owner.handle(request(passive=True))["worktrees"] == [{"id": "first"}]
+    assert owner.demand_projects() == set()
+
+    assert owner.handle(request(project="other"))["error"]["code"] == "unready"
+    assert wakes == [1] and owner.demand_projects() == {"other"}
 
 
 def test_concurrent_unavailable_readers_coalesce_per_project_and_reactivate(demand_owner):

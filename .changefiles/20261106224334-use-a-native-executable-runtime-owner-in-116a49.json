@@ -1,0 +1,9 @@
+{
+  "comment": "Keep native Windows Resume qualification on an executable owner and preserve BOM-free stdin across mux console-encoding changes",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
