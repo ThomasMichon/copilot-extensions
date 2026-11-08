@@ -46,7 +46,9 @@ of independently owned service daemons. There is no Task, COM or UAC fallback.
 
 The private executor shim places generated Python bytecode beneath the existing
 driver root's `cache/python`, outside the invoking runtime's immutable slot.
-Its pinned product invocation and installation custody remain unchanged.
+It skips `site` initialization: the shim uses only the standard library and
+explicitly located participant/procutil modules. The pinned product invocation,
+its normal interpreter behavior and installation custody remain unchanged.
 
 New Windows queue directories are created atomically with the actual process
 TokenUser as owner and protected, inheritable FullControl for that account,
