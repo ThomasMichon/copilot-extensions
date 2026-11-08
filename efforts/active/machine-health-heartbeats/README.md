@@ -127,6 +127,8 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
   without provisioning, activation or projected-task authority bypass.
 - [x] Prove capability-selected telemetry adoption with accepted-input
   revalidation at the producer's write boundary, preserving custom sinks.
+- [x] Prove configured local-replica preference exchange through the normal
+  CLI and existing transaction, without claiming selected-provider delivery.
 - [ ] Extend the existing Agent Machines configuration owner to publish and
   receive explicitly supported nonsecret core preferences through the selected
   carrier, not through the health-record parser.
@@ -138,7 +140,7 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
 ### Phase 5 - Hourly health engine and carrier qualification
 - [x] Prove explicit typed observation -> local hourly slot -> age-qualified
   reader through the normal CLI (#11119), without claiming probe execution.
-- [ ] Prove the first passive local owner-listener observation through the
+- [x] Prove the first passive local owner-listener observation through the
   normal CLI and existing local record/reader flow (#11157), keeping all other
   domains unknown and installed-provider qualification separate.
 - [ ] Refine diagnosed-outage controls with operator input; retain symptoms,
@@ -738,3 +740,71 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   controls, overflow/trickle limits, source CLI/store readback and output
   failure. Fresh current-head review and CI remain required. No operational
   activation or carrier effect occurred.
+
+### 2026-11-06 - Passive listener merged; parent continues
+- #11163 merged as `c0d31cd50161e93ec2c231111bdb310b571892a4`
+  after actual current-head Copilot approval, all three findings resolved and
+  required green CI. A transient provider merge error was reconciled as
+  unmerged before one successful supported retry; success was verified.
+- The completed checkpoint is listener-only source collection through the
+  local record/reader flow. No installed daemon, SSH authentication, Gateway,
+  credential provider or logical-agent census is qualified by that result.
+  Bridge's known-session observation contract explicitly does not establish
+  a current actor census; host/process counts remain unusable substitutes.
+- Every owned file matched the confirmed merge and the fetched base before
+  non-destructive history reconciliation, with a retained backup. No unmerged
+  source delta was discarded.
+- Continue the still-open core-preference carrier phase through the existing
+  Agent Machines configuration/exchange owner, deduplicating the next bounded
+  source objective first. Preserve native adoption, local overrides and
+  existing binding authority. Source tests must not become real carrier writes.
+- Other domain observations, diagnosed-outage qualification, Linux/installed
+  evidence, native scheduling, carrier delivery, enrollment and activation
+  remain open. No runtime was updated, job enrolled or service activated;
+  the parent remains Active and its worktree must not be finalized.
+
+### 2026-11-07 - Selected local preference-carrier adapter
+- Continued #10928 with an explicit local OneDrive replica adapter under
+  `preferences carrier publish|receive`. It reuses the existing policy,
+  revision/withdrawal rules, local watermarks and confirmed atomic exchange.
+  The strict local carrier configuration selects a preprovisioned dedicated
+  namespace, account label and participant list; it grants no native adoption.
+- A bounded nonrecursive namespace census blocks every unexpected entry.
+  Configuration, census, candidate and local state are rechecked under the
+  existing local writer lock. Local policy, watermarks, candidates and overrides
+  remain outside the synchronized namespace; only the admitted snapshot leaves.
+  No discovery, account login, provider API, watcher or enrollment is added.
+- The initial codec/exchange packet passed 96 tests. The final carrier/native
+  packet passed 35 tests without skips, including fresh separate CLI processes,
+  two fixture-owned replicas, shared-knowledge mappings, local overrides,
+  withdrawal, offline use, older replicas and closed-output unknown
+  acknowledgement. Earlier oversized aggregate tests were split into bounded
+  first-use and reconcile controls without increasing deadlines.
+- A preceding run passed its tests but failed the host-environment drift audit.
+  No host state was rolled back and the audit was not relaxed; the final
+  unchanged-audit run passed. This does not establish the drift's cause.
+- The fixture explicitly copies local replicas. It is not OneDrive delivery,
+  authenticated audience, cloud-placeholder, installed-runtime or native Linux
+  qualification. Runtime rollout, real carrier writes and activation remain
+  separately held. Other native domains, health probes and scheduling remain
+  open; this is a source slice, not completion of Phase 4 or the parent effort.
+- Documentation, Ruff, installation contracts and whitespace passed.
+  Required exact-source CI, review and source merge still gate this slice.
+
+### 2026-11-07 - Local carrier source merged; qualification remains open
+- #11438 merged as `515275f8507609fd48a27dcaae5bf7dcffa36fdb`
+  after actual current-head Copilot approval with no findings and green
+  required checks. The published description preserved source attribution
+  and contained no closing reference to #10928 or the parent #10873.
+- Completed only the new local-replica source checkpoint. The selected
+  provider's actual publication, synchronization and peer receipt remain
+  unqualified. Receiving preferences still does not apply them; native
+  maintenance/venue adoption, other domain observations, diagnosis, scheduling
+  and platform/installed validation remain open.
+- The earlier source and adopter PR claims are terminal. The retained source
+  and controller worktrees still own the active parent effort and its
+  configuration-only scope. No updater, carrier write, schedule enrollment
+  or service activation occurred.
+- Next source work is native maintenance-preference preview, using the existing
+  resource/authority owner without turning `automatic` data into execution
+  consent. The existing independent live-carrier and activation holds remain.
