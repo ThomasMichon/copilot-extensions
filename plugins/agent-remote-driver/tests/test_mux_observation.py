@@ -138,6 +138,21 @@ def test_missing_registration_does_not_hide_a_surviving_server(tmp_path, monkeyp
     assert mux.observe_psmux("wt-fixture", data_dir=tmp_path).status == "unknown"
 
 
+def test_missing_target_waits_for_another_servers_partial_publication_within_budget(tmp_path, monkeypatch):
+    calls = []
+
+    def publishing(**kwargs):
+        calls.append(kwargs["timeout"])
+        if len(calls) == 1:
+            raise mux.ObservationUnavailable("A warm server is publishing")
+        return {}
+
+    monkeypatch.setattr(mux_inventory, "observe", publishing)
+    monkeypatch.setattr(mux.time, "sleep", lambda delay: None)
+    assert mux.observe_psmux("wt-fixture", data_dir=tmp_path).status == "absent"
+    assert len(calls) == 2 and 0 < calls[1] <= calls[0] <= 1
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows process identity")
 def test_native_coverage_identity_reads_its_own_process_without_a_subprocess(monkeypatch):
     from agent_remote_driver import mux_process_identity

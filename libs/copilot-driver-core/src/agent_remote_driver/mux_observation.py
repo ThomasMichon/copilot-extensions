@@ -121,6 +121,17 @@ def _parse(body: str, session: str) -> Observation:
     return Observation("present", incarnation=identities.pop(), clients=clients, panes=tuple(panes))
 
 
+def _settled_inventory(root: Path, deadline: float) -> dict[str, int]:
+    from agent_remote_driver import mux_inventory
+
+    while True:
+        try:
+            return mux_inventory.observe(timeout=_remaining(deadline), data_dir=root)
+        except ObservationUnavailable:
+            # Warm/cold servers publish several rendezvous files before readiness.
+            time.sleep(min(0.05, _remaining(deadline)))
+
+
 def observe_psmux(
     session: str, *, timeout: float = 1.0, data_dir: Path | None = None,
     _inventory=None,
@@ -146,11 +157,9 @@ def observe_psmux(
         try:
             port_raw = _read(paths["port"])
         except FileNotFoundError:
-            from agent_remote_driver import mux_inventory
-
             inventory = (
                 _inventory() if _inventory is not None
-                else mux_inventory.observe(timeout=_remaining(deadline), data_dir=root)
+                else _settled_inventory(root, deadline)
             )
             return (
                 Observation("absent") if session not in inventory
