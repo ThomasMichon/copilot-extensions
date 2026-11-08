@@ -12,6 +12,8 @@ import time
 
 from agent_procutil import no_window_kwargs
 from agent_procutil._interpreter import physical_executable
+from agent_procutil.daemon_instances import daemon_test_lifecycle
+from agent_procutil.owned_process import run_caller_owned
 import pytest
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -34,12 +36,29 @@ def _literal(value):
 
 @pytest.mark.timeout(300)
 def test_fresh_application_admits_its_current_native_runtime(tmp_path, monkeypatch):
+    _qualify_native_application(tmp_path, monkeypatch)
+
+
+@pytest.mark.timeout(480)
+@pytest.mark.skipif(
+    os.name != "nt" or os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1",
+    reason="Explicitly select the installed native Windows Copilot broker lane",
+)
+def test_fresh_application_owns_native_broker_fresh_and_resume(tmp_path, monkeypatch):
+    _qualify_native_application(tmp_path, monkeypatch, broker=True)
+
+
+def _qualify_native_application(tmp_path, monkeypatch, *, broker=False):
+    started = time.monotonic()
+    deadline = started + 300
+    print("Application construction starting", flush=True)
     sys.path.insert(0, str(ROOT / "tools"))
     import build_python_artifacts as builder
     import materialize_main as materializer
     import local_install_profile as profiles
     from governed_feed_trust import _governed_feed_configured
 
+    print("Application build/profile owners imported", flush=True)
     if not _governed_feed_configured():
         pytest.skip("native application construction requires the configured governed feed")
     assert os.environ.get("PYTEST_CURRENT_TEST")
@@ -48,27 +67,34 @@ def test_fresh_application_admits_its_current_native_runtime(tmp_path, monkeypat
     assert uv and (os.name != "nt" or shell)
     interpreter = physical_executable(getattr(sys, "_base_executable", sys.executable))
     assert interpreter is not None
-    deadline = time.monotonic() + 300
-    started = time.monotonic()
     inputs = tmp_path / "source-inputs"
     source, artifacts = inputs / "plugins" / "agent-worktrees", inputs / "wheels"
     source.mkdir(parents=True)
     artifacts.mkdir()
-    shutil.copytree(
-        SOURCE, source, dirs_exist_ok=True,
-        ignore=shutil.ignore_patterns(
-            ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "build", "*.egg-info",
-        ),
-    )
+    for entry in SOURCE.iterdir():
+        if entry.is_file():
+            shutil.copyfile(entry, source / entry.name)
+        elif entry.name in {"src", "scripts"}:
+            shutil.copytree(
+                entry, source / entry.name,
+                ignore=shutil.ignore_patterns(
+                    ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "build", "*.egg-info",
+                ),
+            )
     materializer.materialize_uv_editable_ref_into(
         source_consumer_dir=SOURCE, dest_consumer_dir=source, canonical_root=ROOT,
     )
+    dependencies = builder.resolve_vendored_libs(source)
+    for _, directory in dependencies:
+        tests = directory / "tests"
+        if tests.is_dir():
+            shutil.rmtree(tests)
     print(f"Application inputs materialized: {time.monotonic() - started:.2f}s", flush=True)
     with monkeypatch.context() as patch:
         patch.setattr(builder, "REPO", inputs)
         artifact = builder.build_source_artifacts(
             identity={"plugin": "agent-worktrees"}, source_dir=source,
-            dependencies=builder.resolve_vendored_libs(source),
+            dependencies=dependencies,
             out_dir=artifacts, python=interpreter, toolchain=None,
         )
     print(f"Application wheels built: {time.monotonic() - started:.2f}s", flush=True)
@@ -127,6 +153,8 @@ def test_fresh_application_admits_its_current_native_runtime(tmp_path, monkeypat
     assert (root / "projects.yaml").read_text() == "projects: {}\n"
     completion = (slot / engine.runtime.COMPLETE_MARKER).read_bytes()
     shutil.rmtree(inputs)
+    assert not inputs.exists()
+    print(f"Application source inputs removed: {time.monotonic() - started:.2f}s", flush=True)
     python = slot / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     checked = _run([
         python, "-I", "-B", "-c",
@@ -166,7 +194,41 @@ def test_fresh_application_admits_its_current_native_runtime(tmp_path, monkeypat
             "application", boundary, root,
         ], cwd=caller, env=environment, deadline=deadline)
     assert json.loads(described.stdout)["contract"] == "agent-worktrees.native-seed"
-    if os.environ.get("COPILOT_NATIVE_TEST_EXECUTABLE"):
+    print(f"Application packaged admission checked: {time.monotonic() - started:.2f}s", flush=True)
+    if broker:
+        assert time.monotonic() < deadline, "Application construction exceeded 300 seconds"
+        native_root = tmp_path / "native-flow"
+        native_root.mkdir()
+        cleanup = []
+        try:
+            with daemon_test_lifecycle(
+                owner="worktrees-application-broker-fixture",
+                registry_root=tmp_path / "daemon-instances", deadline=time.monotonic() + 180,
+                cleanup_results=cleanup,
+            ) as lifecycle:
+                qualified = run_caller_owned(
+                    [sys.executable, "-I", "-B", "-X", "utf8", "-c",
+                     "import os,sys;from pathlib import Path;"
+                     "sys.path[:0]=sys.argv[1:3];"
+                     "from test_headed_worktrees_copilot import _qualify_native_worktrees;"
+                     "_qualify_native_worktrees(Path(sys.argv[3]),'broker',"
+                     "worktrees_python=Path(sys.argv[4]),worktrees_root=Path(sys.argv[5]),"
+                     "worktrees_environment=dict(os.environ))",
+                     str(Path(__file__).parent), str(ROOT / "tools"),
+                     str(native_root), str(python), str(root)],
+                    env={
+                        **environment, **lifecycle,
+                        "COPILOT_EXTENSIONS_TEST_SANDBOX": os.environ["COPILOT_EXTENSIONS_TEST_SANDBOX"],
+                    },
+                    cwd=caller, timeout=180,
+                    max_stdout_bytes=65536, max_stderr_bytes=65536,
+                )
+                print(qualified.stdout, flush=True)
+                assert qualified.returncode == 0, qualified.stdout + qualified.stderr
+        finally:
+            assert all(result.status == "settled" for result in cleanup), cleanup
+        assert cleanup, "The installed broker did not admit its owned native processes"
+    elif os.environ.get("COPILOT_NATIVE_TEST_EXECUTABLE"):
         from test_native_startup_prompt import _qualify_native_startup
 
         def packaged_command(native, native_environment, directory):
