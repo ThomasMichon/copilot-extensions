@@ -402,6 +402,7 @@ _Operator-required outcome; agent-recommended slices and validation._
   through the existing allocation and trusted source/profile owners. Qualify
   the preparation-only receiver before explicit standalone-host adoption;
   no preview implies protected submission or verifies the raw Azure source.
+  The sequencing refinement cleared review in #11469.
 - [ ] Deliver the actual protected write-owner prerequisite through its
   existing owners, then bind one explicitly selected authenticated host route.
   Injected factories and observation credentials do not satisfy these exits;

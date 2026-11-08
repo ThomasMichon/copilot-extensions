@@ -101,7 +101,7 @@ class WorkspaceOperations:
             or selection_owned_edits and selection_preparer is None
             or selection_preparer is not None and (
                 not callable(selection_preparer) or iscoroutinefunction(selection_preparer)
-                or not prepared_reviews or not write_available
+                or not prepared_reviews
             )
             or attention_owner is not None and (not callable(attention_owner) or not conversations)
             or feedback_owner is not None and (
@@ -227,7 +227,7 @@ class WorkspaceOperations:
             ) == (1, 2)
             from .review_selection_store import ReviewSelectionStore
             selection = (
-                prepared and self.selection_preparer is not None and self.write_available
+                prepared and self.selection_preparer is not None
                 and ReviewSelectionStore(self.store).supported(expires_at=expires_at, checkpoint=check)
             )
             return {
