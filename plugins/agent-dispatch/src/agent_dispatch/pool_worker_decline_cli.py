@@ -214,7 +214,8 @@ def cmd_decline(args: argparse.Namespace) -> int:
                     client.record_pool_decline_blocker(
                         args.task_id, worker, **binding, detail=str(exc)[:4096],
                     )
-                except DispatchError:
+                except (DispatchError, httpx.TransportError, ValueError):
+                    # Keep the custody-retained wait outcome visible to the caller.
                     pass
                 raise
             if not _finish(client, args.task_id, decline, worktree):

@@ -316,7 +316,10 @@ def test_unconfirmed_disposition_reads_keep_polling_until_requeue(governed_cli, 
 
 
 @pytest.mark.parametrize("governed", [False], indirect=True)
-def test_persistently_lost_disposition_reads_record_blocker_and_retain_claim(governed_cli, monkeypatch):
+@pytest.mark.parametrize("blocker_lost", [False, True])
+def test_persistently_lost_disposition_reads_record_blocker_and_retain_claim(
+    governed_cli, monkeypatch, blocker_lost,
+):
     g, args, order, requests, _ = governed_cli
     monkeypatch.setattr(worker, "DISPOSITION_WAIT_SECONDS", 0)
     await_disposition = worker._await_disposition
@@ -325,7 +328,12 @@ def test_persistently_lost_disposition_reads_record_blocker_and_retain_claim(gov
         def get(identifier, **kwargs):
             raise httpx.ReadTimeout("observation lost")
 
+        def unreachable(*a, **k):
+            raise httpx.ConnectError("coordinator unreachable")
+
         monkeypatch.setattr(client, "get", get)
+        if blocker_lost:
+            monkeypatch.setattr(client, "record_pool_decline_blocker", unreachable)
         await_disposition(client, task_id, decline)
 
     monkeypatch.setattr(worker, "_await_disposition", lost_observation)
@@ -333,7 +341,8 @@ def test_persistently_lost_disposition_reads_record_blocker_and_retain_claim(gov
         args.func(args)
     assert not order and g.q.get(g.task_id).status == Status.CLAIMED
     assert g.q.task_relationship(g.task_id)["state"] == "bound"
-    assert "observation lost" in g.q.pool_worker_decline(g.task_id).blocker
+    blocker = g.q.pool_worker_decline(g.task_id).blocker
+    assert blocker is None if blocker_lost else "observation lost" in blocker
 
 
 @pytest.mark.parametrize("governed", [False], indirect=True)
