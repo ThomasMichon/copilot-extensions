@@ -124,6 +124,9 @@ service, even if unit files have disappeared. Pending or unverifiable job state
 blocks enrollment; it is not evidence that an inactive service has finished.
 An unavailable unit-inventory client is likewise unverified, not optional
 absence. This enrollment check does not block explicit manual updates.
+A nonzero unit-query exit is accepted only with complete, consistent
+`LoadState=not-found`, `ActiveState=inactive` and zero-job evidence. The exit
+code alone neither proves absence nor invalidates that explicit response.
 
 ## Startup and platform lifetime
 

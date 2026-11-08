@@ -203,6 +203,76 @@ def test_known_inactive_cached_units_allow_adoption(
     assert calls == list(replies)
 
 
+def test_nonzero_absent_unit_response_still_proves_no_legacy_work(
+    native_inventory, tmp_path: Path,
+) -> None:
+    calls, replies = native_inventory
+    for reply in replies.values():
+        reply.returncode = 1
+        reply.stderr = "Unit could not be found."
+    before = list(tmp_path.rglob("*"))
+    legacy.require_legacy_retired()
+    assert calls == list(replies)
+    assert list(tmp_path.rglob("*")) == before
+
+
+@pytest.mark.parametrize("stdout", [
+    "LoadState=loaded\nActiveState=inactive\nJob=0\n",
+    "LoadState=masked\nActiveState=inactive\nJob=0\n",
+    "LoadState=not-found\nActiveState=failed\nJob=0\n",
+    "LoadState=not-found\nActiveState=inactive\nJob=42\n",
+    "LoadState=not-found\nActiveState=inactive\n",
+    "LoadState=not-found\nActiveState=inactive\nJob=0\nJob=0\n",
+])
+def test_nonzero_query_needs_complete_consistent_absence(native_inventory, stdout: str) -> None:
+    calls, replies = native_inventory
+    unit = f"{legacy.LEGACY_NAME}.timer"
+    replies[unit].returncode = 1
+    replies[unit].stdout = stdout
+    with pytest.raises(PolicyError):
+        legacy.require_legacy_retired()
+    assert calls == [unit]
+
+
+@pytest.mark.parametrize("action", ["enable", "enroll"])
+def test_absent_units_allow_explicit_enrollment(
+    native_inventory, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys, action: str,
+) -> None:
+    from worktree_manager import automatic_updates_autostart as startup
+    from worktree_manager import automatic_updates_cli as cli, automatic_updates_process as process
+    from worktree_manager import automatic_updates_policy as policy
+
+    calls, replies = native_inventory
+    for reply in replies.values():
+        reply.returncode = 1
+    monkeypatch.setattr(cli, "require_legacy_root_binding", lambda root: None)
+    monkeypatch.setattr(cli, "require_registered_project", lambda name: None)
+    monkeypatch.setattr(process, "selected_slot", lambda root: tmp_path / "slot")
+    activations = []
+
+    def register(root: Path) -> dict:
+        assert calls == list(replies)
+        assert policy.load_policy(root).owner == "manager"
+        activations.append("startup")
+        return {"registered": True}
+
+    def ensure(root: Path) -> dict:
+        activations.append("worker")
+        return {"running": True}
+
+    monkeypatch.setattr(startup, "register_autostart", register)
+    monkeypatch.setattr(process, "ensure_worker", ensure)
+    root = tmp_path / "manager"
+    flags = ["--harness", "example"] if action == "enroll" else []
+    assert cli.main([
+        action, *flags, "--project", "example", "--root", str(root), "--apply", "--json",
+    ]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["policy"]["owner"] == "manager"
+    assert result["startup"]["worker_readiness"] == "verified"
+    assert activations == ["startup", "worker"]
+
+
 @pytest.mark.parametrize("unit", [
     f"{legacy.LEGACY_NAME}.timer", f"{legacy.LEGACY_NAME}.service", f"{legacy.SELF_NAME}.service",
 ])

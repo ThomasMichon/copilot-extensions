@@ -129,7 +129,7 @@ def legacy_triggers() -> list[str]:
             )
         except (OSError, subprocess.SubprocessError) as error:
             raise PolicyError(f"legacy user-unit inventory failed for {unit}: {error}") from error
-        if result.returncode != 0:
+        if result.returncode != 0 and not result.stdout.strip():
             raise PolicyError(
                 f"legacy user-unit inventory is unavailable for {unit}: " + result.stderr.strip()
             )
@@ -144,6 +144,13 @@ def legacy_triggers() -> list[str]:
         job = properties["Job"]
         if not job or not job.isascii() or not job.isdigit():
             raise PolicyError(f"legacy unit job could not be verified: {unit}")
+        if result.returncode != 0 and not (
+            properties["LoadState"] == "not-found"
+            and properties["ActiveState"] == "inactive" and not job.lstrip("0")
+        ):
+            raise PolicyError(
+                f"legacy user-unit inventory is unavailable for {unit}: " + result.stderr.strip()
+            )
         if job.lstrip("0"):
             installed.append(f"{unit} (pending job {job})")
         elif properties.get("ActiveState") in ("active", "activating", "deactivating", "reloading"):
