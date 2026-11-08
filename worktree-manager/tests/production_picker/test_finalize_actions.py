@@ -37,6 +37,8 @@ def test_finalize_is_discoverable_outside_the_empty_worktree_buckets(values):
     {"mux_live": True},
     {"mux_observation_unknown": True},
     {"session_bound_live": True},
+    {"session_ahp_live": True},
+    {"execution_leg_live": True},
     {"session_lock_stale": True},
 ])
 def test_protected_finalize_never_invokes_an_engine(values, monkeypatch):
@@ -72,17 +74,26 @@ def test_finalize_retains_the_real_process_refusal_output(remote, monkeypatch):
     assert not maintenance._result_ok("finalize", result)
 
 
-def test_actual_finalize_confirmation_refusal_and_full_details(monkeypatch):
+@pytest.mark.parametrize("with_reason", [True, False])
+def test_actual_finalize_confirmation_refusal_and_full_details(monkeypatch, with_reason):
     from worktree_manager.production_picker.picker_tui.configuration_form import CommandResultScreen
 
     calls = []
-    detail = "\n".join(f"Held claim: workdir:fixture-child-{index}" for index in range(80))
+    detail = (
+        "Checking worktree fixture-wt...\n"
+        "  \x1b[31m✗\x1b[0m Worktree fixture-wt still owns 80 unsettled resource obligations:\n"
+        + "\n".join(f"Held claim: workdir:fixture-child-{index}" for index in range(80))
+        + "\nClose each resource out, then retry -- or pass --abandon to re-home them."
+    )
 
     def run_json(_project, argv, **_kwargs):
         if argv[0] != "finalize":
             return {}
         calls.append(argv)
-        return {"success": False, "reason": "unsettled obligations", "detail": detail}
+        return {
+            "success": False, "detail": detail,
+            **({"reason": "unsettled obligations"} if with_reason else {}),
+        }
 
     monkeypatch.setattr(maintenance.engine_client, "run_json", run_json)
     monkeypatch.setattr(maintenance.context, "project", lambda: "fixture")
@@ -112,7 +123,8 @@ def test_actual_finalize_confirmation_refusal_and_full_details(monkeypatch):
             assert len(calls) == 1
             assert calls[0] == ["finalize", row["raw"]["id"], "--json"]
             text = app.screen._panel().renderable.plain
-            assert "unsettled obligations" in text
+            assert ("unsettled obligations" if with_reason else "still owns 80 unsettled") in text
+            assert "--abandon" not in text
             assert "help clean up worktree" in text
             await pilot.press("v")
             await pilot.pause()
@@ -128,5 +140,35 @@ def test_actual_finalize_confirmation_refusal_and_full_details(monkeypatch):
             await pilot.pause()
             assert isinstance(app.screen, ProgressScreen)
             assert len(calls) == 1
+
+    asyncio.run(run())
+
+
+def test_bulk_finalize_is_available_without_any_empty_worktree_bucket():
+    async def run():
+        app = PickerApp(_maint_source(), live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            screen = app.query_one(PickerScreen)
+            screen.machine_idx = screen.local_index()
+            await pilot.pause()
+            rows = [
+                next(row for row in screen.list_records() if row["cleanup_bucket"] == bucket)
+                for bucket in ("clean", "active")
+            ]
+            screen.wt_sel.replace({screen._row_key(row) for row in rows})
+            screen._open_wt_action_menu()
+            await pilot.pause()
+            menu = app.screen
+            assert "Finalize" in menu._actions
+            for _ in range(menu._actions.index("Finalize")):
+                await pilot.press("down")
+            await pilot.press("enter")
+            await pilot.pause()
+            assert isinstance(app.screen, ProgressScreen)
+            assert screen.progress["recs"] == rows
+            assert not screen.progress["armed"]
+            await pilot.press("escape")
+            await pilot.pause()
+            assert screen.progress is None
 
     asyncio.run(run())

@@ -17,6 +17,7 @@ from worktree_identity import parse_machine_identity
 
 from . import agent_plugin_runtime, picker_review
 from .engine_sessions import list_worktree_session_snapshot as list_worktree_session_snapshot
+from .engine_progress import error_from_envelope as _error_from_envelope
 from .engine_posix_process import EngineCleanupError as EngineCleanupError
 from .worktree_rows_contract import (
     _int_field as _int_field,
@@ -274,17 +275,6 @@ def _run(
             f"{ENGINE_BIN} {' '.join(args)} failed "
             f"(exit {proc.returncode}): {detail or 'no output'}")
     return proc.stdout
-
-
-def _error_from_envelope(stdout: str) -> str | None:
-    """Pull the ``error`` field out of a JSON error envelope, if stdout is one."""
-    try:
-        obj = json.loads(stdout)
-    except (ValueError, TypeError):
-        return None
-    if isinstance(obj, dict) and obj.get("error"):
-        return str(obj["error"])
-    return None
 
 
 def run_json(project: str | None, args: list[str], *,

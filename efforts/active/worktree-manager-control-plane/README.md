@@ -2921,6 +2921,17 @@ own scopes. No source/resource/physical custody or updater authority transfers.
   typing admission, and no whole-portfolio typing pass is claimed.
   Source review/CI, release and separately authorized installed evidence
   remain distinct; no completion or rollout is claimed here.
+- Review found three real omissions: AHP/execution-leg live signals, the
+  separate bulk-menu predicate and detail-only canonical stderr refusals.
+  Four fail-first cases reproduced all three; the correction passes 179
+  Finalize, custody, Sync and engine-client controls. The normalizer's full
+  live-signal family now refuses, both menu paths agree, and the compact
+  summary retains the first actual refusal rather than trailing abandon
+  advice. Full diagnostics remain available without replay.
+- The required module-size check also refused the expanded engine client.
+  Its existing error-envelope parser now lives in `engine_progress`, which
+  already owns stderr/JSON-boundary handling, with the old private import
+  retained. Engine client is 995 lines; no baseline or guard was weakened.
 
 ### 2026-11-05 - Planned #5898 terminal/mux receiving
 

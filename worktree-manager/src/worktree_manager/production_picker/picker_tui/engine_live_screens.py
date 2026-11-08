@@ -138,14 +138,11 @@ class ProgressScreen(ModalScreen[None]):
             body.append_text(row)
             body.append("\n")
             if sync_details:
-                from .maintenance import sync_diagnostics
+                from .maintenance import finalize_diagnostics, sync_diagnostics
 
                 result = it.get("result")
-                if p.get("op") == "finalize" and result and (result.get("reason") or result.get("error")):
-                    # Long claim ledgers must not push the refusal itself out
-                    # of the compact line; the full viewer retains the ledger.
-                    result = {**result, "detail": ""}
-                for diagnostic in sync_diagnostics(result):
+                diagnostics = finalize_diagnostics if p.get("op") == "finalize" else sync_diagnostics
+                for diagnostic in diagnostics(result):
                     body.append(f"    {diagnostic}\n", style=C_WARN if st == "failed" else C_META)
         if len(items) > maxr:
             body.append(f" … {lo + 1}-{min(lo + maxr, len(items))} of {len(items)}\n", style=C_MUTED)

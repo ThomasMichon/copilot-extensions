@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import threading
 
@@ -120,6 +121,24 @@ def sync_diagnostics(result):
     return lines
 
 
+def finalize_diagnostics(result):
+    """Keep the first actual refusal, not the tail of a long claim ledger."""
+    if not isinstance(result, dict):
+        return []
+    reason = result.get("reason") or result.get("error")
+    if not reason:
+        lines = [
+            re.sub(r"\x1b\[[0-9;]*m", "", line).strip()
+            for line in str(result.get("detail") or "").splitlines() if line.strip()
+        ]
+        reason = next(
+            (line for line in lines if line.startswith(("✗", "[ERROR]", "ERROR:"))),
+            lines[0] if lines else "",
+        )
+    text = " ".join(str(reason or "").split())
+    return [text if len(text) <= 160 else text[:157] + "..."] if text else []
+
+
 def build_tasks(op, items, src, *, project=None, include_unused=False,
                 include_conversations=False,
                 local: tuple[str | None, str | None] | None = None):
@@ -168,6 +187,7 @@ def _finalize_blocker(row):
     if any(row.get(field) for field in (
         "mux_live", "session_bare_orphan", "session_lock_live",
         "session_bound_live", "session_bridge_live", "session_lock_stale",
+        "session_ahp_live", "execution_leg_live",
     )):
         return "live session or lock residue: resolve its lifecycle before finalizing"
     return None

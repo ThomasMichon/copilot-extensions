@@ -3,11 +3,23 @@
 from __future__ import annotations
 
 import os
+import json
 import sys
 import tempfile
 import threading
 from contextlib import contextmanager
 from .engine_posix_process import cleanup_phase
+
+
+def error_from_envelope(stdout: str) -> str | None:
+    """Pull the ``error`` field out of a JSON error envelope, if stdout is one."""
+    try:
+        obj = json.loads(stdout)
+    except (ValueError, TypeError):
+        return None
+    if isinstance(obj, dict) and obj.get("error"):
+        return str(obj["error"])
+    return None
 
 
 @contextmanager

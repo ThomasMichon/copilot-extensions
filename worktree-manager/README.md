@@ -3069,8 +3069,9 @@ normal Finalize can proceed; terminal exit never performs that destruction.
 
 ### Actions dialog refinement
 
-**Finalize** is available on ordinary machine-backed worktree rows regardless
-of cleanup bucket. It opens an explicit confirmation; cancel runs nothing.
+**Finalize** is available on ordinary machine-backed worktree rows and bulk
+selections regardless of cleanup bucket. It opens an explicit confirmation;
+cancel runs nothing.
 Controller-owned children and unsupported sources retain their action boundary.
 Known live sessions, lock residue and unavailable mux observations return a
 visible refusal without invoking the engine. Resolve those lifecycle conditions
