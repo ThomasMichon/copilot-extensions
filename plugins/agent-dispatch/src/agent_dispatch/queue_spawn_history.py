@@ -19,6 +19,7 @@ import collections
 import math
 from typing import Any
 
+from .ordinary_native_bindings import reservation_native_identity
 from .queue_pool_accountability import ReservationAccountability
 from .queue_records import SpawnState, Status, TaskError
 
@@ -42,44 +43,20 @@ class SpawnHistoryMixin:
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             accounting = ReservationAccountability(conn)
-            receipts = accounting.receipts
-            active = tuple(SpawnState.ACTIVE)
-            marks = ",".join("?" * len(active))
-            live_handles: set[str] = set()
-            for row in conn.execute(
-                f"SELECT key, session_handle FROM spawn_reservations WHERE state IN ({marks})"
-                " OR native_release_pending=1", active,
-            ):
-                if row["session_handle"]:
-                    live_handles.add(row["session_handle"])
-                if receipts.get(row["key"]):
-                    live_handles.add(receipts[row["key"]])
-            owners = {
-                row["owner_session_id"] for row in conn.execute(
-                    "SELECT owner_session_id FROM tasks WHERE owner_session_id IS NOT NULL",
-                )
-            }
-            concluded = tuple(Status.CONCLUDED)
-            latest_live = {
-                row["key"] for row in conn.execute(
-                    "SELECT s.key FROM spawn_reservations s JOIN tasks t ON t.id = s.task_id"
-                    f" WHERE t.status NOT IN ({','.join('?' * len(concluded))})"
-                    " AND s.session_handle IS NOT NULL AND s.reserved_at = ("
-                    "  SELECT MAX(o.reserved_at) FROM spawn_reservations o"
-                    "  WHERE o.task_id = s.task_id AND o.session_handle IS NOT NULL)",
-                    concluded,
-                )
-            }
             rows = conn.execute(
-                "SELECT s.* FROM spawn_reservations s"
+                "SELECT s.*, b.reservation_key AS bound_key FROM spawn_reservations s"
                 " LEFT JOIN pool_reservation_bindings b ON b.reservation_key = s.key"
-                " WHERE b.reservation_key IS NULL ORDER BY s.reserved_at",
+                " ORDER BY s.reserved_at, s.key",
             ).fetchall()
+            identities = {row["key"]: self._history_identities(conn, accounting, row) for row in rows}
+            protected = self._protected_identities(conn, rows, identities)
             excluded: collections.Counter[str] = collections.Counter()
             eligible: list[Any] = []
             for row in rows:
+                if row["bound_key"] is not None:
+                    continue
                 reason_key = self._history_exclusion(
-                    row, before, accounting, receipts, live_handles | owners, latest_live,
+                    row, before, accounting, identities[row["key"]], protected,
                 )
                 if reason_key is None:
                     eligible.append(row)
@@ -97,20 +74,31 @@ class SpawnHistoryMixin:
             by_task: dict[str, list[str]] = collections.defaultdict(list)
             for row in eligible:
                 conn.execute(
-                    "UPDATE spawn_reservations SET startup_fenced=1,"
-                    " conversation_retired=CASE WHEN session_handle IS NOT NULL"
-                    " THEN 1 ELSE conversation_retired END, updated_at=? WHERE key=?",
-                    (timestamp, row["key"]),
+                    "UPDATE spawn_reservations SET startup_fenced=1, conversation_retired=?,"
+                    " updated_at=? WHERE key=?",
+                    (1 if identities[row["key"]] else row["conversation_retired"], timestamp, row["key"]),
                 )
                 by_task[row["task_id"]].append(row["key"])
-            for task_id, keys in by_task.items():
+            recheck = ReservationAccountability(conn)
+            keys = [row["key"] for row in eligible]
+            for offset in range(0, len(keys), 500):
+                chunk = keys[offset:offset + 500]
+                for row in conn.execute(
+                    f"SELECT * FROM spawn_reservations WHERE key IN ({','.join('?' * len(chunk))})", chunk,
+                ):
+                    if recheck.accountable(row):
+                        conn.rollback()
+                        raise TaskError(
+                            f"history reconciliation left {row['key']} accountable; nothing was changed",
+                        )
+            for task_id, task_keys in by_task.items():
                 status_row = conn.execute("SELECT status FROM tasks WHERE id=?", (task_id,)).fetchone()
                 status = status_row["status"] if status_row else None
                 self._audit(
                     conn, task_id, ts=timestamp, from_status=status, to_status=status,
                     worker="operator",
                     note=(
-                        f"legacy history reconciled: {len(keys)} reservation(s) fenced before "
+                        f"legacy history reconciled: {len(task_keys)} reservation(s) fenced before "
                         f"{before}; no-live-holder attested; history preserved; reason={reason.strip()}"
                     ),
                 )
@@ -121,14 +109,57 @@ class SpawnHistoryMixin:
         return result
 
     @staticmethod
+    def _history_identities(
+        conn: Any, accounting: ReservationAccountability, row: Any,
+    ) -> frozenset[str] | None:
+        """Every native identity a row may refer to; ``None`` when the evidence conflicts."""
+        history = {**dict(row), "native_session_id": accounting.receipts.get(row["key"])}
+        try:
+            native = reservation_native_identity(conn, history)
+        except (TaskError, ValueError):
+            return None
+        return frozenset({row["session_handle"], native, history["native_session_id"]} - {None})
+
+    @staticmethod
+    def _protected_identities(
+        conn: Any, rows: list[Any], identities: dict[str, frozenset[str] | None],
+    ) -> dict[str, str]:
+        """Identities still owned by live work, a task owner or an open task's latest native."""
+        protected: dict[str, str] = {}
+        for row in conn.execute("SELECT owner_session_id FROM tasks WHERE owner_session_id IS NOT NULL"):
+            protected[row["owner_session_id"]] = "shared_live_native"
+        open_tasks = {
+            row["id"] for row in conn.execute(
+                f"SELECT id FROM tasks WHERE status NOT IN ({','.join('?' * len(Status.CONCLUDED))})",
+                tuple(Status.CONCLUDED),
+            )
+        }
+        latest: dict[str, Any] = {}
+        for row in rows:
+            known = identities[row["key"]]
+            raw = {row["session_handle"]} - {None} if known is None else known
+            if row["state"] in SpawnState.ACTIVE or row["native_release_pending"]:
+                for native in raw:
+                    protected[native] = "shared_live_native"
+            if row["task_id"] in open_tasks and raw:
+                latest[row["task_id"]] = row
+        for row in latest.values():
+            known = identities[row["key"]]
+            for native in ({row["session_handle"]} - {None} if known is None else known):
+                protected.setdefault(native, "resumable_task_native")
+        return protected
+
+    @staticmethod
     def _history_exclusion(
         row: Any, before: float, accounting: ReservationAccountability,
-        receipts: dict[str, Any], live: set[str], latest_live: set[str],
+        identities: frozenset[str] | None, protected: dict[str, str],
     ) -> str | None:
         if row["state"] in SpawnState.ACTIVE:
             return "active"
         if row["native_release_pending"]:
             return "native_release_pending"
+        if identities is None:
+            return "unclassifiable"
         try:
             if not accounting.accountable(row):
                 return "not_accountable"
@@ -138,12 +169,10 @@ class SpawnHistoryMixin:
             return "after_cutoff"
         if row["conclusion_state"] == "pending":
             return "conclusion_pending"
-        history = {**dict(row), "native_session_id": receipts.get(row["key"])}
+        history = {**dict(row), "native_session_id": accounting.receipts.get(row["key"])}
         if accounting.transport.accountable(history):
             return "transport"
-        natives = {row["session_handle"], receipts.get(row["key"])} - {None}
-        if natives & live:
-            return "shared_live_native"
-        if row["key"] in latest_live:
-            return "resumable_task_native"
+        for native in sorted(identities):
+            if native in protected:
+                return protected[native]
         return None

@@ -27,6 +27,17 @@ def _legacy(queue, title, *, handle=None, finish="settle", now=1000.0, concluded
     return task, reservation
 
 
+def _receipt(queue, reservation, native):
+    from agent_dispatch.acquisition_receipts import ensure
+    with queue._connect() as conn:
+        ensure(conn)
+        conn.execute(
+            "INSERT INTO acquisition_receipts VALUES (?,?,?,?,?,?,?,?)",
+            (reservation.key, reservation.task_id, 1, "wt", "s-" + reservation.key, native,
+             "created", "d-" + reservation.key),
+        )
+
+
 def _accountable(queue, key):
     with queue._connect() as conn:
         row = conn.execute("SELECT * FROM spawn_reservations WHERE key=?", (key,)).fetchone()
@@ -77,11 +88,30 @@ def test_live_work_and_shared_natives_are_excluded(queue):
     assert _accountable(queue, shared.key)
 
 
-def test_latest_native_of_open_task_stays_resumable(queue):
-    _, open_row = _legacy(queue, "open", handle="native-open", concluded=False)
+def test_every_attempt_sharing_an_open_tasks_native_stays_resumable(queue):
+    task, first = _legacy(queue, "open", handle="native-open", concluded=False)
+    second, _ = queue.reserve_spawn(task.id, now=1100.0)
+    queue.record_spawn(second.key, session_handle="native-open", now=1100.0)
+    queue.settle_spawn(second.key, detail="historical")
     result = queue.fence_legacy_history(before=2000.0, apply=True, **ATTESTED)
-    assert result["excluded"] == {"resumable_task_native": 1} and result["fenced"] == 0
-    assert _accountable(queue, open_row.key)
+    assert result["excluded"] == {"resumable_task_native": 2} and result["fenced"] == 0
+    assert _accountable(queue, first.key) and _accountable(queue, second.key)
+
+
+def test_receipt_identities_are_retired_and_protected(queue):
+    _, receipt_only = _legacy(queue, "receipt-only")
+    _receipt(queue, receipt_only, "native-receipt")
+    live = queue.create("live")
+    active, _ = queue.reserve_spawn(live.id, now=1000.0)
+    queue.record_spawn(active.key, session_handle="handle-live", now=1000.0)
+    _receipt(queue, active, "native-live")
+    _, shared = _legacy(queue, "shared-receipt", handle="handle-old")
+    _receipt(queue, shared, "native-live")
+    result = queue.fence_legacy_history(before=2000.0, apply=True, **ATTESTED)
+    assert result["fenced"] == 1 and result["excluded"]["shared_live_native"] == 1
+    assert queue.get_reservation(receipt_only.key).conversation_retired
+    assert not _accountable(queue, receipt_only.key)
+    assert _accountable(queue, shared.key)
 
 
 def test_http_requires_control_identity(queue, monkeypatch):
