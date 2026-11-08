@@ -140,6 +140,8 @@ credentials or imply that a running service has adopted the protocol.
 The [workspace tool/CLI façade](docs/workspace-tools.md) uses those same owners,
 with exact retained-source reads and explicit unavailable unbound execution.
 Source declarations do not register operational tools or prepare/fetch a workspace.
+An optional [tracked comment/review embedding](docs/tracked-publication.md)
+uses the same retained selections and outcomes; ordinary CLI publication is unchanged.
 
 ```text
 agent-pull-requests status --repo <owner/repo> --number <n> [--json]

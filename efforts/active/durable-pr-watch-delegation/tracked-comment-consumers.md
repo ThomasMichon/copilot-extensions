@@ -1,9 +1,11 @@
 # Tracked comment consumers through the existing selected-operation owner
 
 Back to the [canonical effort](README.md) and
-[publication inventory](comment-publication-inventory.md). This is an
-**agent-recommended, review-first C2 refinement**, not implemented consumer
-support, a change to ordinary commands or permission to publish native feedback.
+[publication inventory](comment-publication-inventory.md). This is a
+**reviewed C2 refinement**. The optional
+[source embedding](../../../plugins/agent-pull-requests/docs/tracked-publication.md)
+implements the finite tracked consumer without changing ordinary commands.
+Normal/installed-host adoption and permission to publish native feedback remain separate.
 
 ## What the actual tracked path retains
 
