@@ -1,0 +1,17 @@
+{
+  "comment": "Keep canonical standalone build-resource selection synchronized with optional resource-free consumers",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

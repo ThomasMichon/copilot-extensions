@@ -409,14 +409,14 @@ def _source(root, component):
     helper = root / "libs" / "versioned-runtime" / "standalone_build.py"
     helper.parent.mkdir(parents=True, exist_ok=True)
     helper.write_bytes((ROOT / "libs" / "versioned-runtime" / "standalone_build.py").read_bytes())
-    if component in {"fleet-manager", "chat-service", "index-service", "worktree-manager"}:
+    if component in {"fleet-manager", "chat-service", "index-service", "worktree-manager", "pr-service"}:
         (source / "setup.py").write_bytes(
             (ROOT / standalone.COMPONENTS[component] / "setup.py").read_bytes()
         )
         for path in standalone.injected_resources(component, root).values():
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b"# controlled canonical runtime resource\n")
-    if component == "index-service":
+    if component in {"index-service", "pr-service"}:
         (source / "_build_runtime_resource.py").write_bytes(
             (ROOT / standalone.COMPONENTS[component] / "_build_runtime_resource.py").read_bytes()
         )
@@ -574,7 +574,9 @@ def test_standalone_changed_bytes_and_toolchain_refused(tmp_path, monkeypatch, m
         artifacts.validate_bundle(directory / entry["filename"], entry, candidate_root=tmp_path)
 
 
-@pytest.mark.parametrize("component", ["fleet-manager", "chat-service", "index-service", "worktree-manager"])
+@pytest.mark.parametrize("component", [
+    "fleet-manager", "chat-service", "index-service", "worktree-manager", "pr-service",
+])
 @pytest.mark.parametrize("mutation", ["setup", "helper", "alternate", "included"])
 def test_only_trusted_standalone_build_hook_is_admitted(tmp_path, mutation, component):
     source = _source(tmp_path, component)
@@ -582,18 +584,42 @@ def test_only_trusted_standalone_build_hook_is_admitted(tmp_path, mutation, comp
         "setup": source / "setup.py",
         "helper": tmp_path / "libs" / "versioned-runtime" / "standalone_build.py",
         "alternate": source / "setup.cfg",
-        "included": next((source / "src").iterdir()) / "_versioned_runtime.py",
+        "included": next((source / "src").iterdir()) / (
+            "_attribution/comment_preparation.py" if component == "pr-service" else "_versioned_runtime.py"
+        ),
     }[mutation]
+    target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(b"raise RuntimeError('candidate build code must not run')\n")
     with pytest.raises((builder.ArtifactBuildError, artifacts.PromotionArtifactError)):
         standalone.validate_build(source, component=component, root=tmp_path)
 
 
-def test_index_build_selector_substitution_is_refused(tmp_path):
-    source = _source(tmp_path, "index-service")
+@pytest.mark.parametrize("component", ["index-service", "pr-service"])
+def test_standalone_build_selector_substitution_is_refused(tmp_path, component):
+    source = _source(tmp_path, component)
     (source / "_build_runtime_resource.py").write_bytes(b"raise RuntimeError('not canonical')\n")
     with pytest.raises(builder.ArtifactBuildError, match="selector"):
-        standalone.validate_build(source, component="index-service", root=tmp_path)
+        standalone.validate_build(source, component=component, root=tmp_path)
+
+
+def test_pr_release_materializes_only_the_canonical_attribution_helpers(tmp_path):
+    from materialize_launch_wrapper_assets import materialize_all
+
+    source = ROOT / standalone.COMPONENTS["pr-service"]
+    project = tmp_path / standalone.COMPONENTS["pr-service"]
+    project.mkdir(parents=True)
+    shutil.copy2(source / "packaged-assets.json", project)
+    log = materialize_all(tmp_path, canonical_root=ROOT)
+    assert len(log) == 2 and all(line.startswith("OK ") for line in log)
+    canonical = ROOT / "plugins/ai-attribution/scripts"
+    outputs = standalone.injected_resources("pr-service", ROOT)
+    assert set(outputs) == {
+        f"agent_pull_requests_service/_attribution/{name}"
+        for name in ("attribution_profile.py", "comment_preparation.py")
+    }
+    for member, origin in outputs.items():
+        assert origin == canonical / Path(member).name
+        assert (project / "src" / member).read_bytes() == origin.read_bytes()
 
 
 def test_standalone_resource_substitution_refused_even_with_fresh_manifest(tmp_path, monkeypatch):

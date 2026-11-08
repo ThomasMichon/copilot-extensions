@@ -18,7 +18,7 @@ tests select the same checkout's PR and Fleet sources explicitly:
 python tools/run-standalone-tests.py services/pr --prepare --timeout 180
 ```
 
-All nine Python source/test files are admitted to strict MyPy on the Linux and
+All twelve Python source/test files are admitted to strict MyPy on the Linux and
 Windows analysis targets at the declared Python 3.10 minimum:
 `python tools/typecheck.py service-pr --prepare`, then
 `python tools/typecheck.py service-pr --strict`. JSON documents, runtime
@@ -30,6 +30,23 @@ process, image or deployment.
 
 Distribution fixtures retain immutable snapshot inputs and make only their
 owned disposable build directories writable for backend-generated metadata.
+
+### Canonical attribution helpers
+
+The wheel includes the payload-only attribution plugin's canonical profile and
+compact-comment preparation helpers under
+`agent_pull_requests_service._attribution`. Direct checkout builds, archived
+sdist rebuilds, retained development snapshots and release materialization use
+the same bytes. The existing MIT notice ships with the distribution. No
+attribution runtime, Worktrees Python import or global import-path change is
+required; direct-script attribution callers retain their existing behavior.
+Missing canonical inputs or mismatched included helpers refuse construction.
+
+These are preparation-only package assets, not an enabled host route. They do
+not allocate identities, establish native origin or credential authority,
+publish comments or expand the trusted host configuration. The separately
+selected native provider and explicit preparation-host integration remain
+independent prerequisites.
 
 ## Explicit host inputs
 

@@ -12,8 +12,15 @@ import uuid
 from pathlib import Path
 from typing import Mapping, TypedDict, cast
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from attribution_profile import Profile, ProfileError, Signature, _object, decorate, load_profile, resolve
+if __package__:
+    from .attribution_profile import (
+        Profile, ProfileError, Signature, _object, decorate, load_profile, resolve,
+    )
+else:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from attribution_profile import (
+        Profile, ProfileError, Signature, _object, decorate, load_profile, resolve,
+    )
 
 PROTOCOL = "agent-forge-comment.preparation/v1"
 SOURCE_PROTOCOL = "agent-worktrees.comment-origin/v1"
