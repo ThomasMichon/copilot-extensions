@@ -1242,14 +1242,9 @@ class LiveVerdict:
     check this rather than assume every returned verdict is fully probed."""
 
     mux_probe_ok: bool = True
-    """False only when the MUX probe itself (``mux_status_many``) raised --
-    narrower than the aggregate ``probes_ok`` above, which also goes False on
-    an unrelated reclaim/lock-probe failure. A caller deciding whether `a live
-    mux might exist and would reattach instead of exec'ing a fresh command`
-    (e.g. seed-delivery gating) should check THIS, not the aggregate: a
-    reclaim failure with a conclusive "no mux" from the mux probe itself is
-    not mux uncertainty. Cold-start Resume prompts require the aggregate
-    ``probes_ok`` as well, because a live un-muxed Copilot also forbids them."""
+    """False when ``mux_status_many`` failed, independently of lock probes.
+    Cold-start prompts also require aggregate ``probes_ok``: an un-muxed
+    Copilot forbids them even when mux absence is confirmed."""
 
 
 def verify_worktree_active(record) -> LiveVerdict:
@@ -1376,10 +1371,16 @@ def worktree_id_from_mux_session(
 def has_mux_session(
     worktree_id: str, *, strict: bool = False, timeout: float = 5,
 ) -> bool:
-    """Probe mux presence; strict callers retain unavailable evidence."""
+    """Probe mux presence; strict callers retain unavailable evidence.
+
+    Windows strict checks cap the caller's timeout at five seconds in total.
+    """
     import subprocess
     from agent_procutil import no_window_kwargs
 
+    if strict and platform.system() == "Windows":
+        from .psmux_observation import observe
+        return mux_session_name(worktree_id) in observe(timeout=timeout)
     sess_name = mux_session_name(worktree_id)
     if platform.system() == "Windows":
         cmd = ["psmux", "has-session", "-t", sess_name]
@@ -1398,11 +1399,7 @@ def has_mux_session(
 
 
 def _list_mux_sessions(*, strict: bool = False) -> dict[str, int] | None:
-    """Query all mux sessions with their attached client counts.
-
-    Returns a dict of session_name -> attached_client_count, or None if
-    the list-sessions command is unavailable or fails.
-    """
+    """Return client counts, or None when passive listing is unavailable."""
     import subprocess
     from agent_procutil import no_window_kwargs
     from .mux_list_result import is_empty_tmux_listing, parse_session_counts
@@ -1471,6 +1468,13 @@ def mux_status_many(worktree_ids: list[str], *, strict: bool = False) -> dict[st
     if not worktree_ids:
         return result
 
+    if strict and platform.system() == "Windows":
+        from .psmux_observation import observe
+        observed = observe()
+        for wt_id in worktree_ids:
+            name = mux_session_name(wt_id)
+            result[wt_id] = MuxInfo(exists=name in observed, clients=observed.get(name, 0))
+        return result
     all_sessions = _list_mux_sessions(strict=True) if strict else _list_mux_sessions()
     if all_sessions is not None:
         for wt_id in worktree_ids:
