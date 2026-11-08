@@ -82,11 +82,16 @@ def _dependency_entries(name: str, plugin: Path, repo: Path) -> list[tuple[Path,
     return entries
 
 
-def _dependency_sources(name: str, plugin: Path, repo: Path) -> set[Path]:
-    roots = set(
+def retained_build_resources(name: str, repo: Path) -> tuple[Path, ...]:
+    """Share standalone build inputs between preparation and cache freshness."""
+    return (
         standalone_build_resources("fleet-manager", source_root=repo)
         if name in FLEET_TEST_CONSUMERS else ()
     )
+
+
+def _dependency_sources(name: str, plugin: Path, repo: Path) -> set[Path]:
+    roots = set(retained_build_resources(name, repo))
     for entry, _ in _dependency_entries(name, plugin, repo):
         roots.update(_package_roots(entry))
     return roots
