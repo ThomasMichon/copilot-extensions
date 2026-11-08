@@ -1216,6 +1216,54 @@ def test_promotion_materializes_all_declared_installer_consumers_without_source_
     assert before == {path.relative_to(source): path.read_bytes() for path in source.rglob("*") if path.is_file()}
 
 
+def test_hosted_candidate_verifier_uses_candidate_canonical_helpers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ast
+    import yaml
+
+    source, candidate = tmp_path / "source", tmp_path / "candidate"
+    canonical = source / "libs/installer-engine"
+    canonical.mkdir(parents=True)
+    for name in ("installer-engine.ps1", "installer-engine.sh", "installer_engine_process.py"):
+        (canonical / name).write_bytes(b"# fixture\n")
+    helper_name = "installer_engine_commands.py"
+    (canonical / helper_name).write_bytes(b"# canonical helper\n")
+    scripts = _mk_plugin_scripts(source, "agent-python")
+    shutil.copyfile(canonical / helper_name, scripts / helper_name)
+    monkeypatch.setattr(sync_installer_engine, "ADOPTERS", ())
+    monkeypatch.setattr(sync_installer_engine, "PYTHON_ADOPTERS", ("agent-python",))
+    monkeypatch.setattr(sync_installer_engine.ier, "PYTHON_FILES", (helper_name,))
+    monkeypatch.setattr(sync_installer_engine.ier, "SUPPORT_FILES", ())
+    before = {path.relative_to(source): path.read_bytes() for path in source.rglob("*") if path.is_file()}
+    shutil.copytree(source, candidate)
+    monkeypatch.setattr(sync_installer_engine, "CANONICAL_DIR", source / "libs/installer-engine")
+    monkeypatch.setattr(sync_installer_engine, "REPO", source)
+    workflow = yaml.safe_load(
+        (REPO / ".github/workflows/bootstrap-update-native-acceptance.yml").read_text(),
+    )
+    program = workflow["jobs"]["promotion-copies"]["steps"][-1]["run"]
+    program = program.split("python -B - <<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
+    bindings = [
+        node for node in ast.walk(ast.parse(program))
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name)
+            and target.value.id == "sync" and target.attr in {"REPO", "CANONICAL_DIR"}
+            for target in node.targets
+        )
+    ]
+    exec(compile(ast.Module(body=bindings, type_ignores=[]), "<hosted-candidate-bindings>", "exec"), {
+        "sync": sync_installer_engine, "candidate": candidate,
+    })
+    assert sync_installer_engine.verify() == []
+    helper = candidate / "libs/installer-engine" / helper_name
+    helper.write_bytes(helper.read_bytes() + b"\n# candidate canonical drift\n")
+    assert any("differs from canonical Python engine" in problem
+               for problem in sync_installer_engine.verify())
+    assert before == {path.relative_to(source): path.read_bytes() for path in source.rglob("*") if path.is_file()}
+
+
 @pytest.mark.parametrize("change", ["foreign", "directory", "shared-inode"])
 def test_promotion_refuses_foreign_or_nonordinary_derived_slots_before_writes(tmp_path, change):
     import materialize_installer_engine as materializer

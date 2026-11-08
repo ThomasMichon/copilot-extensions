@@ -211,6 +211,19 @@ jobs:
                       root / "tools/sync-installer-engine.py", "_qualified_installer_sync",
                   )
                   sync.REPO = candidate
+                  sync.CANONICAL_DIR = candidate / "libs/installer-engine"
+                  problems = sync.verify()
+                  assert not problems, problems
+                  canonical_helper = sync.CANONICAL_DIR / "installer_engine_commands.py"
+                  assert materialize_main.mie.derived_path_problem(
+                      canonical_helper, candidate, required=True,
+                  ) is None
+                  original = canonical_helper.read_bytes()
+                  try:
+                      canonical_helper.write_bytes(original + b"\n# qualification canonical drift\n")
+                      assert sync.verify(), "candidate canonical drift was not rejected"
+                  finally:
+                      canonical_helper.write_bytes(original)
                   assert not sync.verify()
                   canonical = candidate / "libs/update-driver"
                   consumers = set(candidate.glob("plugins/*/libs/update-driver"))
@@ -234,7 +247,8 @@ jobs:
                   print(json.dumps({
                       "source": source, "main": main, "candidate": record["candidate_sha"],
                       "tree": record["tree"], "invocation_manifests": len(manifests),
-                      "transitive_installer_files": copies, "published": False,
+                      "transitive_installer_files": copies, "canonical_drift_rejected": True,
+                      "published": False,
                   }, sort_keys=True))
               finally:
                   promote_release.remove_scratch_worktree(candidate, repo=repository)
