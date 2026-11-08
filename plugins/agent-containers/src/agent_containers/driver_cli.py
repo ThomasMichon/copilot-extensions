@@ -55,9 +55,11 @@ def cmd_drivers(args: argparse.Namespace) -> int:
                 for s in specs.values()
             ],
             "findings": findings,
+            "bundled_drivers": ["podman"],
         }, indent=2))
         return 0
     print(f"Driver manifests: {drivers_dir()}")
+    print("Bundled fallback: podman (explicit manifest/PATH registration takes precedence).")
     if not specs:
         print(f"No manifest drivers (PATH fallback: {PATH_PREFIX}<name>).")
     for spec in specs.values():

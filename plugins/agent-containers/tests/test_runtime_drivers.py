@@ -182,6 +182,27 @@ def test_drivers_cli_lists_manifests(fake, capsys):
     assert listed["findings"] == []
 
 
+def test_podman_bundled_fallback_preserves_explicit_drivers(fake, monkeypatch):
+    monkeypatch.setattr(external_driver.shutil, "which", lambda _: None)
+    spec = find_driver("podman")
+    assert spec.command == (sys.executable, "-m", "agent_containers.podman_driver")
+    assert spec.source == "bundled"
+    monkeypatch.setattr(external_driver.shutil, "which", lambda _: "/tools/custom-podman")
+    assert find_driver("podman").source == "PATH"
+    (fake.drivers / "podman.json").write_text(json.dumps({
+        "schema_version": 1, "name": "podman", "command": [sys.executable, "custom.py"],
+    }))
+    assert find_driver("podman").command == (sys.executable, "custom.py")
+
+
+@pytest.mark.parametrize("filename", ["podman.json", "PODMAN.json"])
+def test_invalid_explicit_podman_does_not_fall_back(fake, monkeypatch, filename):
+    (fake.drivers / filename).write_text("{broken")
+    monkeypatch.setattr(external_driver.shutil, "which", lambda _: "/tools/custom-podman")
+    with pytest.raises(RuntimeError, match="unreadable manifest"):
+        find_driver("podman")
+
+
 # -- protocol and lifecycle ----------------------------------------------
 
 
