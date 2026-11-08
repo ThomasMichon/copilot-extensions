@@ -89,8 +89,25 @@ print("source" if data.get("runtime_source") is not None else "ordinary")
       -e "$PluginDir/runtime-source.json" || -L "$PluginDir/runtime-source.json" ||
       -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN+x}" ]]; then
     special_selection=1
+    minimum_minor=10
+    if [[ -e "$InstallDir/runtime-profile.json" || -L "$InstallDir/runtime-profile.json" ]]; then
+      minimum_minor=11
+    fi
+    profile_python=""
+    for candidate in python3 python python3.13 python3.12 python3.11; do
+      if command -v "$candidate" >/dev/null 2>&1 &&
+          "$candidate" -I -S -B -c 'import sys; assert sys.version_info >= (3, int(sys.argv[1]))' \
+              "$minimum_minor" 2>/dev/null; then
+        profile_python="$(command -v "$candidate")"
+        break
+      fi
+    done
+    if [[ -z "$profile_python" ]]; then
+      printf '[agent-vault] Runtime publication refused: source/profile inspection requires an existing Python 3.%s+ interpreter.\n' "$minimum_minor" >&2
+      exit 3
+    fi
     profile_code=0
-    "$py" -I -B "$ScriptDir/runtime_profile.py" --root "$InstallDir" \
+    "$profile_python" -I -B "$ScriptDir/runtime_profile.py" --root "$InstallDir" \
         current --package-version "$current" || profile_code=$?
     if [[ "$profile_code" == 0 ]]; then exit 0; fi
     if [[ "$profile_code" != 1 ]]; then

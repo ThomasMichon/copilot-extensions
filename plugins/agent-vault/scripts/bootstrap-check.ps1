@@ -73,7 +73,8 @@ try {
         $expectedRuntime = $current
         if ($profilePresent -or $sourceSelected) {
             . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
-            $profilePython = Resolve-NativeBootstrapPython -MinimumMinor 11
+            $minimumMinor = if ($profilePresent) { 11 } else { 10 }
+            $profilePython = Resolve-NativeBootstrapPython -MinimumMinor $minimumMinor
             if (-not $profilePython) { throw 'Vault source/profile inspection requires a bootstrap Python interpreter.' }
             [void](Invoke-Hidden -FilePath $profilePython -ArgList @(
                 '-I', '-B', (Join-Path $PSScriptRoot 'runtime_profile.py'),

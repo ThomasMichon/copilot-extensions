@@ -698,6 +698,49 @@ def test_native_profile_stamp_persists_selection_without_runtime_or_uv(tmp_path,
     assert _uv_events(env) == []
 
 
+def test_prepared_profile_inputs_preserve_source_and_published_provenance(tmp_path):
+    from .test_payload_invocation import _installer_function
+
+    pwsh = shutil.which("pwsh") or shutil.which("powershell")
+    if not pwsh:
+        pytest.skip("PowerShell is unavailable")
+    snapshot = tmp_path / "source"
+    (snapshot / "tests").mkdir(parents=True)
+    (snapshot / "scripts").mkdir()
+    (snapshot / "tests" / "sentinel.py").write_text("RETAIN = True\n")
+    (snapshot / "scripts" / "runtime_profile.py").write_text("retained helper fixture\n")
+    (snapshot / "runtime-source.json").write_text("retained original identity fixture\n")
+    receipt = snapshot / "snapshot-provenance.json"
+    receipt.write_text("separate source-owner receipt fixture\n")
+    before = {str(p.relative_to(snapshot)): (p.read_bytes(), p.stat().st_mtime_ns)
+              for p in snapshot.rglob("*") if p.is_file()}
+    root = tmp_path / "runtime"
+    root.mkdir()
+    runner = tmp_path / "inputs.ps1"
+    runner.write_text(
+        "param($Source, $Root)\n$ErrorActionPreference='Stop'\n"
+        "$InstallDir=$Root; $script:SourceRuntimeIdentity='prepared'\n"
+        "function Publish-SourceSnapshot { return $Source }\n"
+        + _installer_function("Get-RuntimeProfileHelper")
+        + _installer_function("Remove-RuntimeProfileInputs")
+        + "\n$helper=Get-RuntimeProfileHelper\n"
+        "[Console]::Out.WriteLine($script:RuntimeProfileInputs.Path)\n",
+    )
+    result = subprocess.run(
+        [pwsh, "-NoLogo", "-NoProfile", "-File", str(runner), str(snapshot), str(root)],
+        capture_output=True, text=True, timeout=15, **agent_procutil.no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    inputs = Path(result.stdout.strip())
+    assert inputs.parent == root
+    assert not (inputs / receipt.name).exists()
+    assert {str(p.relative_to(inputs)): p.read_bytes() for p in inputs.rglob("*") if p.is_file()} == {
+        name: value[0] for name, value in before.items() if name != receipt.name
+    }
+    assert {str(p.relative_to(snapshot)): (p.read_bytes(), p.stat().st_mtime_ns)
+            for p in snapshot.rglob("*") if p.is_file()} == before
+
+
 @pytest.mark.timeout(60)
 def test_stamp_snapshot_retains_resources_without_creating_runtime(stamped_snapshot) -> None:
     state = stamped_snapshot

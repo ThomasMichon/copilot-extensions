@@ -905,7 +905,7 @@ function Materialize-SnapshotInstallerEngine {
 function Copy-VaultSnapshotInputs {
     param([Parameter(Mandatory)][string]$Destination)
     [void][IO.Directory]::CreateDirectory($Destination)
-    $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+    $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests', 'snapshot-provenance.json')
     Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $Destination $_.Name) -Recurse -Force
     }
@@ -915,13 +915,25 @@ function Copy-VaultSnapshotInputs {
 
 function Get-RuntimeProfileHelper {
     if ($script:RuntimeProfileHelper) { return $script:RuntimeProfileHelper }
+    $sourceSnapshot = $null
     if ($script:SourceRuntimeIdentity) {
-        $snapshot = Publish-SourceSnapshot
+        $sourceSnapshot = Publish-SourceSnapshot
+    }
+    if ($sourceSnapshot -and -not (Test-Path -LiteralPath (Join-Path $sourceSnapshot 'snapshot-provenance.json'))) {
+        $snapshot = $sourceSnapshot
     } else {
         $snapshot = Join-Path $InstallDir ('.profile-inputs-' + [Guid]::NewGuid().ToString('N'))
         $directory = [IO.Directory]::CreateDirectory($snapshot)
         $script:RuntimeProfileInputs = @{ Path = $directory.FullName; Created = $directory.CreationTimeUtc }
-        Copy-VaultSnapshotInputs -Destination $snapshot
+        if ($sourceSnapshot) {
+            Get-ChildItem -LiteralPath $sourceSnapshot -Force | Where-Object {
+                $_.Name -cne 'snapshot-provenance.json'
+            } | ForEach-Object {
+                Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapshot $_.Name) -Recurse -Force
+            }
+        } else {
+            Copy-VaultSnapshotInputs -Destination $snapshot
+        }
     }
     $script:RuntimeProfileHelper = Join-Path $snapshot 'scripts\runtime_profile.py'
     return $script:RuntimeProfileHelper

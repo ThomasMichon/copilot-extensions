@@ -223,6 +223,38 @@ def test_healthy_bootstrap_never_requires_driver_or_environment_helper(tmp_path)
     assert {str(p.relative_to(home)): p.read_bytes() for p in home.rglob("*") if p.is_file()} == before
 
 
+def test_shell_profile_inspection_selects_supported_existing_python(tmp_path):
+    bash = _BASH
+    if not bash and os.name == "nt" and shutil.which("git"):
+        candidate = Path(shutil.which("git")).parents[1] / "bin" / "bash.exe"
+        bash = str(candidate) if candidate.is_file() else None
+    if not bash:
+        pytest.skip("native Bash is unavailable")
+    script = Path(__file__).resolve().parents[1] / "scripts" / "bootstrap-check.sh"
+    text = script.read_text(encoding="utf-8")
+    start = text.index('    profile_python=""')
+    end = text.index("    profile_code=0", start)
+    probe = tmp_path / "qualified-python.sh"
+    probe.write_text(
+        "set -euo pipefail\nminimum_minor=11\n"
+        "python3() { return 1; }\n"
+        "python() { return 1; }\n"
+        "python3.13() { return 1; }\n"
+        "python3.12() { return 1; }\n"
+        'python3.11() { "$PROFILE_TEST_PYTHON" "$@"; }\n'
+        + text[start:end]
+        + '[[ "$profile_python" == python3.11 ]]\n'
+        + '"$profile_python" -I -S -B -c "import tomllib"\n',
+    )
+    env = os.environ.copy()
+    env["PROFILE_TEST_PYTHON"] = Path(sys._base_executable).as_posix()
+    result = subprocess.run(
+        [bash, str(probe)], env=env, capture_output=True, text=True,
+        timeout=15, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 @pytest.mark.parametrize("condition", ["current", "base-runtime", "malformed-desire", "profile-directory"])
 def test_native_bootstrap_preserves_or_reconciles_selected_ssh_profile(tmp_path, condition):
     home, project = tmp_path / "home", tmp_path / "project"

@@ -320,10 +320,27 @@ def _exercise_native_profile(payload, home, env, pwsh):
     sentinel = payload / "tests" / "assembly-sentinel.py"
     sentinel.parent.mkdir(exist_ok=True)
     sentinel.write_text("STAMP_INPUT_SENTINEL = True\n")
+    owner = home / ".copilot" / "installed-plugins" / "example" / "agent-vault"
+    owner.parent.mkdir(parents=True)
+    shutil.copytree(payload, owner)
+    settings = home / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps({
+        "extraKnownMarketplaces": {
+            "example": {"source": {"source": "github", "repo": "Example/Plugins"}},
+        },
+    }))
+    env.update({
+        "COPILOT_PLUGIN_ROOT": str(owner), "COPILOT_PLUGIN_STAGED_FROM": str(owner),
+        "COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT": str(home),
+    })
     env["AGENT_VAULT_INSTALL_PROFILE"] = "base"
     _run(_no_service_provision_command(home, installer, pwsh, action="stamp"), env, home)
     snapshot = Path((root / "payload-dir").read_text().strip())
     assert not (snapshot / "tests").exists()
+    receipt = snapshot / "snapshot-provenance.json"
+    assert json.loads(receipt.read_text())["schema"] == "copilot-extensions.legacy-snapshot-source"
+    provenance = (receipt.read_bytes(), receipt.stat().st_mtime_ns)
     installed = _run(
         _no_service_provision_command(home, snapshot / "scripts" / "install.ps1", pwsh), env, home,
     )
@@ -337,6 +354,7 @@ def _exercise_native_profile(payload, home, env, pwsh):
     assert {str(p.relative_to(base_slot)): (p.read_bytes(), p.stat().st_mtime_ns)
             for p in base_slot.rglob("*") if p.is_file()} == before
     assert not list(root.glob(".profile-inputs-*"))
+    assert (receipt.read_bytes(), receipt.stat().st_mtime_ns) == provenance
     python_member = "Scripts/python.exe" if os.name == "nt" else "bin/python"
     _run([base_slot / python_member, "-I", "-c",
           "import importlib.util; assert importlib.util.find_spec('cryptography') is None"], env, home)

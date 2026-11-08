@@ -68,6 +68,8 @@ Windows ordinary stamp and direct profile construction share the same
 materialized input assembly; prepared-source profiles use the canonical source
 snapshot. Fingerprinting and construction read that same retained assembly,
 without publishing redirects merely to prepare inputs.
+Snapshot provenance remains owned by its publisher and is omitted only from
+temporary construction inputs, not removed from the retained published snapshot.
 
 ## Configuration model
 
