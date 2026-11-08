@@ -46,7 +46,7 @@ def legacy_controller_error(project: str | None, proc) -> engine_client.EngineEr
 
 def handoff(
     arguments: list[str], *, observer: list[str] | None = None, authority=None,
-    delegated: bool = False,
+    delegated: bool = False, defer_automatic: bool = False,
 ) -> int | None:
     managed = authority is not None and authority.configured and authority.mode == "project"
     if authority is not None and authority.configured and authority.mode == "standalone":
@@ -98,6 +98,8 @@ def handoff(
         admitted = guarded_update(forwarded, admit)
         if admitted:
             return admitted
+        if defer_automatic:
+            return None
         forwarded = normalized
     return engine_client.run_engine_passthrough(
         project, ["update", *forwarded, *(observer or [])],

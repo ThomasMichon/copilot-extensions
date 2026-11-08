@@ -90,16 +90,24 @@ installation work. A queued request does not bypass a later disable or
 ownership change. Explicit foreground updates remain supported. An external
 controller must use this seam rather than another concurrent installer.
 
-For a selected project controller, Manager checks the original automatic owner
-before handing off and translates its private trigger/controller flags to the
-engine's existing `--auto` argument. Selected project authority and observer
-options remain intact. The admission transaction is released before launching
-the engine, which may call Manager back.
-Preserving that original owner through the engine's durable queue and rechecking
-a later disable or ownership change remains an
-[open implementation gate](https://github.com/ThomasMichon/copilot-extensions/issues/11456).
-The initial handoff check does not prove that queued-state requirement or
-complete automatic-update qualification.
+For a selected project controller, automatic submissions stay in the Manager's
+durable queue rather than creating a second engine-owned request. The original
+trigger/controller, absolute Manager policy root and selected project authority
+remain in the existing request. The retained Manager executor rechecks that
+owner before handing off and translates its private flags to the engine's
+existing `--auto` argument. The engine participates in the same transaction;
+Manager callbacks recover the original trigger from that request and recheck
+ownership before Manager installation. A callback cannot relabel its controller.
+Observer options stay with the original queue caller. The brief admission
+transaction is released before launching the engine, avoiding recursive Manager
+lock acquisition. Explicit/manual project updates keep their existing route.
+
+This correction for
+[#11456](https://github.com/ThomasMichon/copilot-extensions/issues/11456)
+uses the existing Manager request and participant contract, with no new CLI
+syntax, context key or queue field sent to another runtime. It does not repair
+previously submitted engine-owned requests whose original trigger was already
+lost, or establish complete native automatic-update qualification.
 
 Agent Machines keeps repository synchronization, maintenance-safe restore and
 host/connectivity maintenance. Its automatic suite-update phase and legacy

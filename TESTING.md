@@ -6559,6 +6559,17 @@ The retained lifecycle deadline and guardian-pair units substitute their native
 Windows path-owner/file-open boundaries, retaining actual cleanup/deadline and
 byte-reader logic. Native ownership and file-sharing custody are not unit evidence.
 
+Manager's separate `test_update_driver_cli.py` packet retains automatic-owner
+identity through a real private SQLite queue and authenticated borrowed custody.
+It pauses after admission, disables or changes the owner, and requires no engine
+dispatch or Manager installation; unchanged-owner controls exercise the callback
+without recursive transaction locking. Later callback disable and trigger
+relabeling refuse before Manager installation. Product bodies remain synthetic,
+so these controls do not qualify installed engine/controller execution or native
+startup. Update-driver's `test_authority.py` holds the first schema publication
+open while a read-only authority inspection observes the pristine database.
+Guarded/incomplete, foreign-table and unsupported-version controls still refuse.
+
 `tools/promotion_unit_tests/test_komodo_repair_authorization.py` exercises the
 repair phase controller with synthetic verified-identity records and the real
 common admission owner. It counts one producer and six current resolutions per

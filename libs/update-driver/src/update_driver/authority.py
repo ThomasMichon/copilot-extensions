@@ -244,7 +244,7 @@ def current(*, root: Path | None = None, context: str = "", cwd: str = "") -> Up
             if marker:
                 raise core.StateError("update authority database is missing")
             return UpdateAuthority()
-        with core._database(root) as db:
+        with core._database(root, allow_pristine=True) as db:
             version = db.execute("PRAGMA user_version").fetchone()[0]
             selected_scope = (
                 _scope(context, root=root, cwd=cwd)

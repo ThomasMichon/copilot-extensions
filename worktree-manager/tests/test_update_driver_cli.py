@@ -529,7 +529,7 @@ def test_automatic_controller_handoff_admits_owner_and_normalizes_engine_flags(
     from worktree_manager import automatic_updates_policy as policy, engine_client
     from zdd.cutover_lock import CutoverLock
 
-    seen, _request = queued
+    seen, request = queued
     root = tmp_path / "manager"
     monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(root))
     if owner is not None:
@@ -557,15 +557,35 @@ def test_automatic_controller_handoff_admits_owner_and_normalizes_engine_flags(
         return 47
 
     monkeypatch.setattr(engine_client, "run_engine_passthrough", execute)
-    monkeypatch.setattr(driver, "_source_key", lambda: pytest.fail("Manager source queried"))
     assert driver.cmd_update_request([
         *trigger, "--project", "example", "--no-anchor-sync", "--detach", "--json",
-    ]) == 47
+    ]) == 0
+    assert calls == []
+    assert seen["spec"].backend == "manager"
+    assert seen["spec"].project == project
+    assert seen["spec"].authority == ("project" if configured else "")
+    assert dict(seen["spec"].context)["WORKTREE_MANAGER_ROOT"] == str(root)
+    retained, _ = driver.parse_options(list(seen["spec"].argv))
+    assert retained.automatic_trigger == ("legacy-agent-machines" if owner is None else owner)
+    assert retained.controller == ("example" if owner == "external" else None)
+
+    class Custody:
+        request_id = request.id
+        root = tmp_path
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+    request.state = "running"
+    monkeypatch.setattr(update_driver, "borrowed_custody", Custody)
+    monkeypatch.setattr(update_driver, "status", lambda *_args, **_kwargs: request)
+    assert driver.cmd_update_request(list(request.spec.argv)) == 47
     assert calls == [(
-        project, ["update", "--auto", "--no-anchor-sync", "--detach", "--json"],
-        {"headless": True},
+        project, ["update", "--no-anchor-sync", "--auto"], {},
     )]
-    assert "spec" not in seen
 
 
 @pytest.mark.parametrize("refusal,code", [
@@ -599,6 +619,96 @@ def test_automatic_controller_handoff_refuses_before_engine_execution(
             "--project", "example",
         ]) == code
     assert "spec" not in seen
+
+
+@pytest.mark.parametrize("configured", [False, True])
+@pytest.mark.parametrize("owner", ["manager", "external", "legacy-agent-machines"])
+@pytest.mark.parametrize("change", [
+    "disabled", "different-owner", "unchanged", "callback-disable", "callback-relabel",
+])
+def test_durable_project_request_rechecks_retained_automatic_owner(
+    queued, monkeypatch, tmp_path, configured, owner, change,
+):
+    import sys
+    import update_driver
+    from update_driver import core
+    from update_driver.authority import UpdateAuthority, selection
+    from update_driver.participant import borrowed_custody
+    from worktree_manager import __main__ as manager, engine_client
+    from worktree_manager import automatic_updates_cli as admission, automatic_updates_policy as policy
+
+    seen, _ = queued
+    root = tmp_path / "manager"
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(root))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_UPDATE_HOME", str(tmp_path / "telemetry"))
+    if owner != "legacy-agent-machines":
+        policy.configure(
+            root, owner=owner, provenance="user", project="example",
+            external_controller="selected" if owner == "external" else None,
+        )
+    selected = selection("project", "example") if configured else UpdateAuthority()
+    monkeypatch.setattr(update_driver, "current_authority", lambda **_kwargs: selected)
+    monkeypatch.setattr(engine_client, "get_value", lambda *_args: "tools/update.py")
+    flags = [
+        "--automatic-trigger", owner, "--project", "example",
+        *(["--controller", "selected"] if owner == "external" else []),
+    ]
+    assert driver.cmd_update_request([*flags, "--detach"]) == 0
+    queue_root = tmp_path / "queue"
+    if configured:
+        update_driver.change_authority(
+            "project", project="example", root=queue_root, timeout=5,
+            verify_capabilities=lambda _deadline: True,
+        )
+    request = core.enqueue(
+        seen["spec"], root=queue_root,
+        runner=update_driver.TrustedRunner((sys.executable, "-c", "pass"), str(tmp_path)),
+    )
+    assert core.status(request.id, root=queue_root).spec == seen["spec"]
+    if change in {"disabled", "different-owner"}:
+        policy.configure(root, owner="disabled", provenance="user")
+        if change == "different-owner":
+            policy.configure(
+                root, owner="external", provenance="user", external_controller="replacement",
+            )
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path / "unrelated-manager"))
+    engine_calls, installs = [], []
+
+    def engine(project, arguments, **_kwargs):
+        assert project == "example" and arguments == ["update", "--auto"]
+        assert driver.os.environ["WORKTREE_MANAGER_ROOT"] == str(root)
+        engine_calls.append(arguments)
+        if change == "callback-disable":
+            policy.configure(root, owner="disabled", provenance="user")
+        return driver.cmd_update_request([
+            "--project", project, "--no-project-controller", "--auto",
+            *(["--automatic-trigger", "external", "--controller", "replacement"]
+              if change == "callback-relabel" else []),
+        ])
+
+    monkeypatch.setattr(engine_client, "run_engine_passthrough", engine)
+    monkeypatch.setattr(
+        manager, "_cmd_update",
+        lambda arguments: admission.guarded_update(
+            arguments,
+            lambda _flags, _trigger, automatic: installs.append(automatic) or 0,
+        ),
+    )
+
+    def execute(transaction):
+        monkeypatch.setattr(
+            update_driver, "borrowed_custody",
+            lambda: borrowed_custody(root=queue_root, environ=transaction.participant_env()),
+        )
+        return driver.cmd_update_request(list(transaction.request.spec.argv))
+
+    assert core.drain(root=queue_root, executor=execute) == 0
+    result = core.status(request.id, root=queue_root)
+    expected = 0 if change == "unchanged" else (1 if change == "callback-relabel" else 3)
+    assert result.state == "completed" and result.exit_code == expected
+    assert len(engine_calls) == (1 if change.startswith("callback-") or change == "unchanged" else 0)
+    assert installs == ([owner] if change == "unchanged" else [])
+    assert driver.os.environ["WORKTREE_MANAGER_ROOT"] == str(tmp_path / "unrelated-manager")
 
 
 @pytest.mark.parametrize("root_form", ["default", "relative"])

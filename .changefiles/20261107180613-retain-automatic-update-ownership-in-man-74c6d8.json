@@ -1,0 +1,13 @@
+{
+  "comment": "Retain automatic update ownership in Manager queue requests and preserve read-only inspection during initial queue publication",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

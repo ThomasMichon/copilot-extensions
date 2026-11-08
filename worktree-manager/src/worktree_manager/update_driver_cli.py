@@ -127,6 +127,8 @@ def parse_options(rest: list[str]) -> tuple[argparse.Namespace, list[str]]:
     canonical.add_argument("--controller")
     parsed = canonical.parse_args(forwarded)
     options.auto = parsed.auto
+    options.automatic_trigger = parsed.automatic_trigger
+    options.controller = parsed.controller
     options.target = parsed.target
     options.repair = bool(
         parsed.force or parsed.force_runtime or parsed.recreate_venv or parsed.repair_engine
@@ -216,6 +218,25 @@ def _unattended_request(request: Request) -> bool:
         request.spec.backend == "manager"
         and ("--unattended" in request.spec.argv or _automatic_arguments(request.spec.argv))
     )
+
+
+def _retained_automatic_trigger(arguments: list[str], spec) -> list[str]:
+    if spec.backend != "manager":
+        return arguments
+    retained, _ = parse_options(list(spec.argv))
+    if not retained.automatic_trigger:
+        return arguments
+    current, _ = parse_options(arguments)
+    if current.automatic_trigger:
+        if (current.automatic_trigger, current.controller) != (
+            retained.automatic_trigger, retained.controller,
+        ):
+            raise ValueError("automatic update trigger differs from its retained request")
+        return arguments
+    return [
+        *arguments, "--automatic-trigger", retained.automatic_trigger,
+        *(["--controller", retained.controller] if retained.controller else []),
+    ]
 
 
 @contextmanager
@@ -433,6 +454,7 @@ def cmd_update_request(rest: list[str]) -> int:
                     if selected.configured and selected.mode == "standalone":
                         if "--no-project-controller" not in forwarded:
                             forwarded = [*forwarded, "--no-project-controller"]
+                    forwarded = _retained_automatic_trigger(forwarded, request.spec)
                     delegated = requested == "project" and not any(
                         flag in {"--phase", "--target", "--repair-engine", "--no-project-controller"}
                         or flag.startswith(("--phase=", "--target=", "--repair-engine="))
@@ -464,7 +486,9 @@ def cmd_update_request(rest: list[str]) -> int:
             if "--no-project-controller" not in forwarded:
                 forwarded = [*forwarded, "--no-project-controller"]
         with _request_environment(context):
-            controlled = handoff(forwarded, observer=observer, authority=selected)
+            controlled = handoff(
+                forwarded, observer=observer, authority=selected, defer_automatic=True,
+            )
         if controlled is not None:
             return controlled
         if options.target is not None and options.target != "worktree-manager":
@@ -472,6 +496,9 @@ def cmd_update_request(rest: list[str]) -> int:
 
             require_marketplace()
         project, _args = extract_project(forwarded)
+        if selected.configured and selected.mode == "project":
+            project = selected.project
+            forwarded = [*_args, "--project", project]
         _update_context_directory(context)
         cwd = Path.cwd().resolve()
         hold_override = os.environ.get("BOOTSTRAP_KILLSWITCH_STATE_FILE", "")
@@ -494,7 +521,7 @@ def cmd_update_request(rest: list[str]) -> int:
             cwd=source_anchor, source=_source_key(), context=tuple(context.items()),
             repair="--auto" not in arguments,
             killswitch_path=hold_path,
-            authority="standalone" if selected.configured and selected.mode == "standalone" else "",
+            authority=selected.mode if selected.configured else "",
         )
         argv, env = driver.runtime_command("worktree_manager", ["update", *arguments])
         request = driver.enqueue(
