@@ -10,6 +10,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 from types import SimpleNamespace
 from typing import Callable, cast
 from uuid import uuid4
@@ -1349,14 +1350,15 @@ def test_missing_preparation_is_actionable_and_does_not_create_environment(
     assert not scratch.exists()
 
 
-@pytest.mark.skipif(os.name == "nt", reason="POSIX fallback ownership contract")
 def test_nonallocating_lookup_still_refuses_unsafe_existing_fallback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    if sys.platform == "win32":
+        pytest.skip("POSIX fallback ownership contract")
     source = tmp_path / "source"
     source.mkdir()
     monkeypatch.delenv("AGENT_SCRATCH_ROOT", raising=False)
-    monkeypatch.setattr(plugin_test_resources.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
     scratch = tmp_path / f"ce-{os.getuid()}"
     scratch.mkdir()
     scratch.chmod(0o755)

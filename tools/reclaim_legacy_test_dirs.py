@@ -191,6 +191,9 @@ def survey(path: Path) -> Survey:
             if _is_link(info, entry_path):
                 result.problem = "contains a link or reparse point"
                 return result
+            if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
+                result.problem = "contains a special file (socket, pipe or device)"
+                return result
             result.newest = max(result.newest, info.st_mtime)
             if stat.S_ISDIR(info.st_mode):
                 rows.append(f"d\0{child}\0{info.st_mtime_ns}")

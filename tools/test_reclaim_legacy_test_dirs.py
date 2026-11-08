@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -95,6 +96,23 @@ def test_apply_requires_explicit_writer_quiescence_confirmation(repo, tmp_path, 
     assert failure.value.code == 2
     assert "--confirm-writers-stopped" in capsys.readouterr().err
     assert target.is_dir()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX Unix socket")
+def test_live_unix_socket_is_refused_even_inside_environment(repo, capsys, monkeypatch):
+    target = _legacy(repo)
+    endpoint = target / "linux" / "plugin" / "lib"
+    endpoint.mkdir()
+    monkeypatch.chdir(endpoint)
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+        server.bind("server.sock")
+        server.listen(1)
+        _age(target)
+        code, report = _run("--repo", repo, capsys=capsys)
+        assert code == 0
+        assert report["candidates"][0]["status"] == "refused"
+        assert "special file" in report["candidates"][0]["reason"]
+        assert (endpoint / "server.sock").exists()
 
 
 def test_environment_only_tree_is_ready_and_reclaimed_from_plan(repo, tmp_path, capsys):

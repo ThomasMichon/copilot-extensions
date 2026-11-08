@@ -8357,7 +8357,8 @@ the runner no longer writes them. Reclaiming them is guided, never a sweep:
    reports the refusal; partial outcomes are reported per target.
 
 Only Git-ignored, untracked, link-free trees older than `--min-age-hours`
-(default 24) qualify. On Linux, a process of yours that cannot be inspected
+(default 24) qualify. Socket, FIFO and device entries always refuse, even
+with a discard decision. On Linux, a process of yours that cannot be inspected
 (for example a non-dumpable `sshd`) refuses a target unless you name it with
 `--accept-uninspectable NAME` while planning; the plan records that choice.
 Stop test and capture writers for the selected set before applying a plan.
