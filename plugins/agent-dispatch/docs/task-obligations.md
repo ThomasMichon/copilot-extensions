@@ -499,8 +499,9 @@ or rejected/reassigned binding cannot reuse it. Legacy direct writes and late-re
 enrichment refuse prepared tasks, including after restart; SQL also preserves
 the submitted proposal against older backfill code. Internal rejected-proposal
 resubmission uses the lineage below. Post-stop same-native recovery,
-non-circular decline, manual/absent-workspace applicability and full native
-qualification remain open. The ordinary completion consumer above does not
+manual/absent-workspace applicability and full native qualification remain
+open. Decline settles a retained task claim only after its committed requeue;
+see [retained task-claim ordering](pool-worker-decline.md#retained-task-claim-ordering). The ordinary completion consumer above does not
 enable assignment writer construction or qualify an installed cohort.
 
 The immutable preparation retains the original native/generation even after

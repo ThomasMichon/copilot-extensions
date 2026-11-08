@@ -216,7 +216,10 @@ def apply_resource_relationship(args: dict) -> dict:
                         raise ValueError("relationship ref collision")
                 else:
                     if claim.ref != probe_subject or not relationship.verified_retirement(proof, claim.ref):
-                        raise ValueError("provider did not verify exact local relationship retirement")
+                        raise ValueError(
+                            "provider did not verify exact local relationship retirement"
+                            + relationship.retirement_refusal(proof)
+                        )
                     claim.producer = {**claim.producer, "phase": "closed", "closeout": copy.deepcopy(proof)}
                     claim.state = "released"
             if not relationship.valid_metadata(claim.producer):
