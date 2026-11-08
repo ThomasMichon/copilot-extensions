@@ -631,7 +631,8 @@ class PickerScreenRenderingMixin(PickerNavigationRenderingMixin, PickerFooterMix
                     w.refresh_data()
                 else:
                     if isinstance(w, _PickerNotices):
-                        w.display = self._kind() == "worktrees"
+                        w.styles.height = len(notice_state[1])
+                        w.display = bool(notice_state[1])
                     w.refresh()
             except Exception:
                 pass
