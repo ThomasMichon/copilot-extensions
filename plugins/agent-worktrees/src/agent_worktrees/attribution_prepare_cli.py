@@ -23,11 +23,16 @@ def resolve_comment_origin(
     root = source_root.resolve(strict=True)
     if not root.is_dir():
         raise ValueError("an explicit managed producer root is required")
-    tracking_path = cfg.tracking_dir(config.repo_name)
+    project = config.repo_name
+    if not project:
+        if len(config.repos) != 1:
+            raise ValueError("selected producer requires one unambiguous configured project")
+        project = next(iter(config.repos))
+    tracking_path = cfg.tracking_dir(project)
     matches = [
         record.worktree_id
         for record in tracking.list_records(
-            tracking_path, repo_filter=config.repo_name, copy_records=False,
+            tracking_path, repo_filter=project, copy_records=False,
         )
         if record.worktree_path and Path(record.worktree_path).resolve() == root
     ]
@@ -37,7 +42,7 @@ def resolve_comment_origin(
         matches[0], tracking_path=tracking_path,
     ) if matches else None
     if (
-        record is None or record.repo != config.repo_name or not record.worktree_path
+        record is None or record.repo != project or not record.worktree_path
         or Path(record.worktree_path).resolve(strict=True) != root
     ):
         raise ValueError("selected producer differs from its managed source")

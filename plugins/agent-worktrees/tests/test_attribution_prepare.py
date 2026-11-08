@@ -532,3 +532,45 @@ def test_new_origin_modes_reject_ambiguous_or_ambient_inputs_before_resolution(
     monkeypatch.setattr(cli.tracking, "find_worktree_id_by_cwd", forbidden)
     assert cli.cmd_attribution_prepare(_comment_args(*argv, "--json")) == 1
     assert "error" in json.loads(capfd.readouterr().out)
+
+
+@pytest.mark.parametrize("repositories", [1, 2])
+def test_explicit_origin_uses_real_unnamed_config_without_ambient_project(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    capfd: pytest.CaptureFixture[str], repositories: int,
+) -> None:
+    root = tmp_path / "source"
+    root.mkdir()
+    state = tmp_path / "project"
+    (state / "worktrees").mkdir(parents=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    (state / "worktrees/selected.yaml").write_text(json.dumps({
+        "worktree_id": "selected", "branch": "worktree/selected", "repo": "fixture",
+        "machine": "fixture-machine", "platform": "linux", "worktree_path": str(root),
+        "codename": "bolted-circuit", "codename_source": "built-in", "sessions": [],
+    }), encoding="utf-8")
+    config_path = state / "config.yaml"
+    config_path.write_text(json.dumps({
+        "machine": "fixture-machine", "platform": "linux",
+        "repos": {
+            name: {"anchor": str(root)} for name in (
+                ["fixture"] if repositories == 1 else ["fixture", "other"]
+            )
+        },
+    }), encoding="utf-8")
+    monkeypatch.setenv("AGENT_HOME", str(home))
+    monkeypatch.setattr(cli.cfg, "_ACTIVE_PROJECT", None)
+    monkeypatch.setattr(cli.cfg, "global_config_path", lambda: home / "absent-global.yaml")
+    projects = []
+    monkeypatch.setattr(cli.cfg, "project_dir", lambda name=None: projects.append(name) or state)
+    monkeypatch.chdir(tmp_path)
+    assert cli.cmd_attribution_prepare(_comment_args(
+        "--comment-origin", "--source-root", str(root), "--config", str(config_path), "--json",
+    )) == (0 if repositories == 1 else 1)
+    result = json.loads(capfd.readouterr().out)
+    if repositories == 1:
+        assert result["origin"] == {"codename": "bolted-circuit"}
+        assert "fixture" in projects
+    else:
+        assert "error" in result and "origin" not in result

@@ -260,6 +260,8 @@ outside any managed CWD:
 ```
 
 Both references must be absolute; the configuration file must exist.
+An omitted `repo_name` selects the sole configured repository; multiple
+unnamed repositories refuse rather than borrowing an active project.
 The exact-root resolver above owns registration and privacy checks. It never
 falls back to an enclosing worktree or the service's CWD. Missing, ambiguous,
 withdrawn or unauthorized source data refuses without allocating or modifying
