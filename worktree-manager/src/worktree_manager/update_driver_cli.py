@@ -30,7 +30,11 @@ _CONTEXT_KEYS = (
     "CE_UPDATE_AUTH",
 )
 _UNATTENDED = "CE_UPDATE_UNATTENDED"
-_RUNNER_CONTEXT_KEYS = (*_CONTEXT_KEYS, _UNATTENDED)
+_TELEMETRY_KEYS = (
+    "COPILOT_EXTENSIONS_UPDATE_RUN_ID", "COPILOT_EXTENSIONS_UPDATE_EVENTS",
+    "COPILOT_EXTENSIONS_UPDATE_OWNER",
+)
+_RUNNER_CONTEXT_KEYS = (*_CONTEXT_KEYS, _UNATTENDED, *_TELEMETRY_KEYS)
 
 
 def _current_authority(driver, **kwargs):
@@ -249,6 +253,7 @@ def _request_environment(
     values = dict(context)
     if values.keys() - set(_CONTEXT_KEYS):
         raise ValueError("update request contains unsupported execution context")
+    values.update((key, os.environ[key]) for key in _TELEMETRY_KEYS if key in os.environ)
     if cwd:
         if not Path(cwd).is_absolute():
             raise ValueError("update request source anchor must be absolute")

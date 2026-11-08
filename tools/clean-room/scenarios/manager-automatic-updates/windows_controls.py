@@ -14,6 +14,10 @@ from windows_api import NativeBlocked, WinAPI, WindowObserver, require_desktop
 
 def sensitivity(packet: dict, hwnd: int, original: int) -> bool:
     raw = packet.get("raw_events", [])
+    activation = next((
+        index for index, event in enumerate(raw)
+        if event["kind"] == "foreground-event" and event.get("hwnd") == hwnd
+    ), len(raw))
     return bool(
         packet.get("sealed") and packet.get("hooks_closed")
         and packet.get("hooks_registered") == 2 and packet.get("samples", 0) > 0
@@ -21,8 +25,8 @@ def sensitivity(packet: dict, hwnd: int, original: int) -> bool:
         and not any(packet.get(key) for key in
                     ("observer_error", "cleanup_error", "callback_error", "overflow"))
         and any(event["kind"] == "show-event" and event.get("hwnd") == hwnd for event in raw)
-        and any(event["kind"] == "foreground-event" and event.get("hwnd") == hwnd for event in raw)
-        and any(event["kind"] == "foreground-event" and event.get("hwnd") == original for event in raw)
+        and any(event["kind"] == "foreground-event" and event.get("hwnd") == original
+                for event in raw[activation + 1:])
         and packet.get("passed") is False
     )
 

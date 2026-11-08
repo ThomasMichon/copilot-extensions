@@ -37,7 +37,7 @@ class UpdateRun:
             self._run = (
                 _ut.Run.from_env_or_new("manager", trigger=trigger) if _ut is not None else None
             )
-            if self._run is not None and automatic_trigger is not None:
+            if self._run is not None and self._run.is_owner and automatic_trigger is not None:
                 self._run.emit(
                     "run", "manager", "info", action="automatic_trigger",
                     details={"automatic_trigger": automatic_trigger},

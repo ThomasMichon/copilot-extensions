@@ -146,6 +146,13 @@ retain the same attribution and use the shared `lock` phase with action
 `update_admission`, without extending the published telemetry vocabulary.
 Worker logs and status live under `<Manager root>/automatic-updates/`.
 
+The automatic project-controller route opens its scheduled telemetry run only
+for actual engine dispatch, after admission custody is released, not while
+queueing. Engine phases and Manager callbacks join that run; only its owner
+emits the automatic-origin event. Existing ephemeral telemetry variables survive
+callback credential scrubbing but are cleared from the initial pinned runner's
+inherited environment and are never stored in the durable request context.
+
 The non-TTY worker explicitly prohibits OpenSSH askpass, including an inherited
 force setting, without replacing the configured SSH transport or account setup.
 Custom transports retain their own provider policy; this is not a credential

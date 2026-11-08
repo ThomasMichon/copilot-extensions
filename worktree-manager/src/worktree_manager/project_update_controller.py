@@ -82,16 +82,22 @@ def handoff(
         if managed:
             raise ValueError("selected project update controller is unavailable")
         return None
+    run = None
     if any(
         value == "--automatic-trigger" or value.startswith("--automatic-trigger=")
         for value in forwarded
     ):
         from .automatic_updates_cli import guarded_update
+        from .update_events import UpdateRun
 
         normalized: list[str] = []
+        trigger = "manual"
+        automatic_trigger = None
 
-        def admit(arguments: list[str], _trigger: str, _automatic_trigger: str | None) -> int:
+        def admit(arguments: list[str], admitted_trigger: str, admitted_origin: str | None) -> int:
+            nonlocal trigger, automatic_trigger
             normalized.extend(arguments)
+            trigger, automatic_trigger = admitted_trigger, admitted_origin
             return 0
 
         # Release admission custody before the engine can call Manager back.
@@ -101,7 +107,14 @@ def handoff(
         if defer_automatic:
             return None
         forwarded = normalized
-    return engine_client.run_engine_passthrough(
-        project, ["update", *forwarded, *(observer or [])],
-        **({"headless": True} if observer and "--detach" in observer else {}),
-    )
+        run = UpdateRun(trigger=trigger, automatic_trigger=automatic_trigger)
+    try:
+        code = engine_client.run_engine_passthrough(
+            project, ["update", *forwarded, *(observer or [])],
+            **({"headless": True} if observer and "--detach" in observer else {}),
+        )
+        return run.finish(code) if run is not None else code
+    except BaseException as error:
+        if run is not None:
+            run.abort(error)
+        raise

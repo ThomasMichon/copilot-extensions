@@ -419,6 +419,15 @@ def test_positive_control_proof_needs_show_and_both_foreground_events(probe):
                        {"kind": "foreground-event", "hwnd": 10}],
     }
     assert module.sensitivity(packet, 20, 10)
+    for order in ((2, 0, 1), (0, 2, 1)):
+        assert not module.sensitivity(
+            {**packet, "raw_events": [packet["raw_events"][index] for index in order]},
+            20, 10,
+        )
+    assert module.sensitivity(
+        {**packet, "raw_events": [packet["raw_events"][2], *packet["raw_events"]]},
+        20, 10,
+    )
     for field in ("observer_error", "cleanup_error", "callback_error", "overflow"):
         assert not module.sensitivity({**packet, field: "failure"}, 20, 10)
     for index in range(3):

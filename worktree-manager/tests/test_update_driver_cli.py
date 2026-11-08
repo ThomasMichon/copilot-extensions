@@ -554,7 +554,7 @@ def test_automatic_controller_handoff_admits_owner_and_normalizes_engine_flags(
         # Admission must not hold the Manager transaction across its engine child.
         with CutoverLock(policy.state_dir(root) / "update-transaction"):
             calls.append((selected, arguments, options))
-        return 47
+        return 4
 
     monkeypatch.setattr(engine_client, "run_engine_passthrough", execute)
     assert driver.cmd_update_request([
@@ -582,10 +582,102 @@ def test_automatic_controller_handoff_admits_owner_and_normalizes_engine_flags(
     request.state = "running"
     monkeypatch.setattr(update_driver, "borrowed_custody", Custody)
     monkeypatch.setattr(update_driver, "status", lambda *_args, **_kwargs: request)
-    assert driver.cmd_update_request(list(request.spec.argv)) == 47
+    assert driver.cmd_update_request(list(request.spec.argv)) == 4
     assert calls == [(
         project, ["update", "--no-anchor-sync", "--auto"], {},
     )]
+
+
+@pytest.mark.parametrize("origin", ["manager", "external", "legacy-agent-machines"])
+@pytest.mark.parametrize("callback", [False, True])
+@pytest.mark.parametrize("code,outcome", [(0, "verified_current"), (4, "auth_required")])
+def test_public_automatic_controller_owns_scheduled_telemetry(
+    queued, monkeypatch, tmp_path, origin, callback, code, outcome,
+):
+    from contextlib import nullcontext
+    import os
+    import update_driver
+    import update_telemetry as telemetry
+    from test_automatic_updates_telemetry import _arguments, _assert_events, _assert_status
+    from worktree_manager import __main__ as manager, automatic_updates_cli as admission
+    from worktree_manager import automatic_updates_policy as policy, engine_client
+    from worktree_manager import runtime_source_update, update_bootstrap, update_orchestration
+    from zdd.cutover_lock import CutoverLock
+
+    _, request = queued
+    root = tmp_path / "manager"
+    home = tmp_path / "telemetry"
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(root))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_UPDATE_HOME", str(home))
+    for key in (telemetry.ENV_RUN_ID, telemetry.ENV_EVENTS, telemetry.ENV_OWNER):
+        monkeypatch.delenv(key, raising=False)
+    if origin != "legacy-agent-machines":
+        policy.configure(
+            root, owner=origin, provenance="user", project="example",
+            external_controller="example-controller" if origin == "external" else None,
+        )
+    monkeypatch.setattr(engine_client, "get_value", lambda *_args: "tools/update.py")
+    assert driver.cmd_update_request([*_arguments(origin), "--project", "example", "--detach"]) == 0
+    assert not home.exists()  # Admission alone must not open an installation telemetry run.
+    assert not (set(dict(request.spec.context)) & set(driver._TELEMETRY_KEYS))
+    assert set(driver._TELEMETRY_KEYS) <= set(request.runner.context_keys)
+
+    class Custody:
+        request_id = request.id
+        root = tmp_path
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def assert_owned(self):
+            pass
+
+    request.state = "running"
+    monkeypatch.setattr(update_driver, "borrowed_custody", Custody)
+    monkeypatch.setattr(update_driver, "status", lambda *_args, **_kwargs: request)
+    monkeypatch.setattr(update_orchestration, "preflight_runtime_source", lambda *a, **k: True)
+    monkeypatch.setattr(runtime_source_update, "repair_selection", lambda args: nullcontext(None))
+    monkeypatch.setattr(update_bootstrap, "prepare_update", lambda args: SimpleNamespace(
+        exit_code=0, arguments=args, fresh_manager=False, environment={},
+    ))
+    monkeypatch.setattr(
+        manager, "_cmd_update",
+        lambda args: admission.guarded_update(args, manager._cmd_update_recorded),
+    )
+    callbacks = []
+
+    def manager_steps(_arguments, run, **_options):
+        callbacks.append(run._run.run_id)
+        with run.self_update_phase():
+            run.record_self_update("already-current", False, None)
+        return code
+
+    monkeypatch.setattr(manager, "_cmd_update_steps", manager_steps)
+
+    def engine(project, arguments, **_options):
+        assert project == "example" and arguments == ["update", "--auto"]
+        with CutoverLock(policy.state_dir(root) / "update-transaction"):
+            pass
+        active = _assert_status(home, origin, "in_progress")["run"]["id"]
+        participant = telemetry.Run.from_env_or_new("engine")
+        assert not participant.is_owner and participant.run_id == active
+        participant.target("runtime_reconcile", "engine", telemetry.VERIFIED_CURRENT)
+        if callback:
+            assert driver.cmd_update_request(["--auto", "--no-project-controller"]) == code
+            assert os.environ[telemetry.ENV_RUN_ID] == active
+        return participant.finish(telemetry.outcome_for_exit_code(code)[0])
+
+    monkeypatch.setattr(engine_client, "run_engine_passthrough", engine)
+    assert driver.cmd_update_request(list(request.spec.argv)) == code
+    status = _assert_status(home, origin, outcome)
+    events = _assert_events(status, origin)
+    assert {event["run_id"] for event in events} == {status["run"]["id"]}
+    assert any(event["proc"] == "engine" and event["phase"] == "runtime_reconcile" for event in events)
+    assert callbacks == ([status["run"]["id"]] if callback else [])
+    assert not (set(os.environ) & set(driver._TELEMETRY_KEYS))
 
 
 @pytest.mark.parametrize("refusal,code", [
@@ -826,10 +918,10 @@ def test_project_controller_routes_borrowed_request_before_manager_source(
     monkeypatch.setattr(engine_client, "get_value", lambda *_args: "tools/update.py")
     monkeypatch.setattr(
         engine_client, "run_engine_passthrough",
-        lambda project, args, **kwargs: calls.append((project, args)) or 47,
+        lambda project, args, **kwargs: calls.append((project, args)) or (4 if automatic else 47),
     )
     monkeypatch.setattr(driver, "_source_key", lambda: pytest.fail("Manager source queried"))
-    assert driver.cmd_update_request(flags) == 47
+    assert driver.cmd_update_request(flags) == (4 if automatic else 47)
     assert calls == [("example", ["update", *(["--auto"] if automatic else []), "--force"])]
 
 
