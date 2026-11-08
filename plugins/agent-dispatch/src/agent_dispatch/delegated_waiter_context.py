@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 from . import peer_launch
-from .install_paths import install_dir
+from .install_paths import INSTALL_DIR_ENV, install_dir, legacy_install_dir, normalized_path
 
 
 def validate_installation(value: object) -> dict:
@@ -33,7 +33,14 @@ def _validated_context(installation: dict) -> dict:
 def capture() -> tuple[dict | None, dict[str, str]]:
     raw = os.environ.get("COPILOT_EXTENSIONS_CONTEXT", "")
     if not raw:
-        return None, {}
+        root = os.environ.get(INSTALL_DIR_ENV, "")
+        intrinsic = {}
+        if (
+            root and Path(root).is_absolute()
+            and normalized_path(Path(root)) == normalized_path(legacy_install_dir())
+        ):
+            intrinsic[INSTALL_DIR_ENV] = root
+        return None, intrinsic
     context = _validated_context({"root": str(install_dir()), "receipt": raw})
     return (
         {"root": context["pluginRoot"], "receipt": context["installReceipt"]},
