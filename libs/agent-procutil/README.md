@@ -1635,6 +1635,8 @@ read-only inventory of a temp root: entries grouped by name prefix with
 counts, bytes, oldest/newest age and how many carry a breadcrumb (only a
 regular-file breadcrumb is read). It has no
 deletion capability; stale content is left for the operator to review.
+Byte accounting walks directory contents recursively and can be expensive on
+large roots; this is an explicitly invoked diagnostic, not a startup probe.
 
 ## Vendoring
 

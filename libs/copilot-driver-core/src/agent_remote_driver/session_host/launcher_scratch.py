@@ -24,7 +24,7 @@ def launch_state(
             retention="retained while its host authority may be read; removed on failed launch",
         )
     phase = {
-        "spawn_attempted": False, "creation_refused": False, "exited": False,
+        "spawn_attempted": False, "creation_refused": False, "cleanup_safe": False,
         "disposable": fallback is not None and acquisition_launch is None,
     }
     try:
@@ -32,7 +32,7 @@ def launch_state(
     except BaseException:
         # Unknown post-spawn outcomes and custody owners keep their evidence.
         if fallback is not None and acquisition_launch is None and (
-            not phase["spawn_attempted"] or phase["creation_refused"] or phase["exited"]
+            not phase["spawn_attempted"] or phase["creation_refused"] or phase["cleanup_safe"]
         ):
             remove_scratch(fallback)
         raise
@@ -44,7 +44,7 @@ def tracked_creation(phase: dict[str, bool]):
         phase["spawn_attempted"] = True
         try:
             return subprocess.Popen(*args, **kwargs)
-        except OSError:
+        except (OSError, ValueError):
             phase["creation_refused"] = True
             raise
 
@@ -53,9 +53,11 @@ def tracked_creation(phase: dict[str, bool]):
 
 def observe_exit(phase: dict[str, bool], process) -> None:
     """Settle an exited Host's exact registry record before removing its root."""
-    phase["exited"] = True
+    phase["cleanup_safe"] = True
     receipt = getattr(process, "instance_receipt", None)
     if phase["disposable"] and receipt is not None:
         from agent_procutil.daemon_instances import cleanup_instance
 
-        phase["exited"] = cleanup_instance(receipt, terminate=False).status in ("settled", "missing")
+        phase["cleanup_safe"] = cleanup_instance(receipt, terminate=False).status in (
+            "settled", "missing",
+        )

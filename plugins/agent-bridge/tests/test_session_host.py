@@ -1219,8 +1219,9 @@ def test_launch_session_host_fallback_scratch_is_labeled_and_removed_on_crash(
         assert remaining == []
 
 
+@pytest.mark.parametrize("refusal", ["cwd", "environment"])
 def test_launch_session_host_fallback_scratch_removed_when_creation_refused(
-    tmp_path, monkeypatch,
+    tmp_path, monkeypatch, refusal,
 ):
     scratch_root = tmp_path / "scratch"
     scratch_root.mkdir()
@@ -1232,10 +1233,14 @@ def test_launch_session_host_fallback_scratch_removed_when_creation_refused(
         if "--support-json" in argv:
             return real_popen(argv, **kwargs)
         refused.extend(scratch_root.iterdir())
-        return real_popen(argv, **{**kwargs, "cwd": str(tmp_path / "missing")})
+        if refusal == "cwd":
+            kwargs["cwd"] = str(tmp_path / "missing")
+        else:
+            kwargs["env"] = {**kwargs["env"], "INVALID": "embedded\0null"}
+        return real_popen(argv, **kwargs)
 
     monkeypatch.setattr(launcher.subprocess, "Popen", refusing_popen)
-    with pytest.raises((FileNotFoundError, NotADirectoryError)):
+    with pytest.raises((FileNotFoundError, NotADirectoryError, ValueError)):
         launcher.launch_session_host(["irrelevant-child-argv"], ready_timeout=5.0)
     assert len(refused) == 1
     assert not refused[0].exists()
