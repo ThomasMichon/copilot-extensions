@@ -470,7 +470,6 @@
       "r:plugins/agent-bridge/scripts/install.sh::<script>::ExecStart": 1,
       "r:plugins/agent-bridge/scripts/install.sh::<script>::nohup": 1,
       "r:plugins/agent-bridge/scripts/repair-scheduled-task.ps1::<script>::Start-Process": 1,
-      "r:plugins/agent-bridge/scripts/repair-scheduled-task.ps1::<script>::New-ScheduledTaskAction": 2,
       "r:plugins/agent-codespaces/scripts/install.ps1::<script>::Start-Process": 2,
       "r:plugins/agent-codespaces/scripts/install.ps1::<script>::New-ScheduledTaskAction": 1,
       "r:plugins/agent-codespaces/scripts/install.sh::<script>::ExecStart": 1,

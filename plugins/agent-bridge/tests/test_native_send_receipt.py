@@ -61,6 +61,7 @@ async def _seed(native_send):
     manager, session, request = native_send
     receipt = await submit(manager, session.session_id, request)
     await session._prompt_task
+    manager.db.flush()
     manager._run_prompt.reset_mock()
     return receipt
 
@@ -106,6 +107,7 @@ async def test_route_found_or_missing_never_changes_session_or_journal(
         assert response.json() == {"detail": {"code": "native_receipt_missing"}}
     assert session.status == status
     assert session.turn_count == int(found)
+    tmp_db.flush()
     assert before == (
         tmp_db.execute_read("SELECT * FROM turns"),
         tmp_db.execute_read("SELECT * FROM events"),

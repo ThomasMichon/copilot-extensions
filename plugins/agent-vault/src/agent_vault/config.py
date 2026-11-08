@@ -204,6 +204,10 @@ def _vault_registry(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 def _validate_config_data(data: dict[str, Any], label: str) -> None:
+    if "windows_scheduled_task" in data and data["windows_scheduled_task"] not in (
+        "preserve", "enabled", "absent",
+    ):
+        raise RuntimeError(f"{label}: windows_scheduled_task must be preserve, enabled or absent")
     if "enabled" in data and type(data["enabled"]) is not bool:
         raise RuntimeError(f"{label}: enabled must be a boolean")
     for key in ("kpdb", "group", "vault_group", "vault", "default_vault"):
