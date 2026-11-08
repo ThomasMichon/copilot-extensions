@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import stat
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -193,7 +194,7 @@ def selection(owner: SimpleNamespace, root: Path) -> Any:
     )
 
 
-@pytest.mark.skipif(os.name == "nt", reason="Linux host selection/state contract")
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux host selection/state contract")
 def test_split_credentials_join_real_selection_state_and_recovery(
     split_owner: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -221,7 +222,7 @@ def test_split_credentials_join_real_selection_state_and_recovery(
     assert private_state.os.getuid() == 1234 and private_state.os.geteuid() == 0
 
 
-@pytest.mark.skipif(os.name == "nt", reason="Linux host selection/state contract")
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux host selection/state contract")
 @pytest.mark.parametrize("target", ["runtime", "recovery", "lock", "pending"])
 def test_split_credentials_keep_one_owner_through_selection_and_state(
     split_owner: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target: str,
