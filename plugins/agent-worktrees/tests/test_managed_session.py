@@ -1338,7 +1338,9 @@ def test_admission_query_serialization_cold_fallback(tmp_path, shell, old_engine
         session.mkdir(parents=True)
         scripts = home / "payload" / "scripts"
         shutil.copytree(SCRIPTS, scripts)
-        source = (scripts / "managed-session.ps1").read_text(encoding="utf-8")
+        managed = scripts / "managed-session.ps1"
+        managed.write_bytes(managed.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+        source = managed.read_text(encoding="utf-8").replace("\r\n", "\n")
         original = "$frame = ConvertTo-Json -InputObject $query -Compress"
         candidate = (
             "$frame = if ($PSVersionTable.PSVersion.Major -ge 6) {\n"
