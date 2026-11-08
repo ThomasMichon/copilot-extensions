@@ -174,6 +174,17 @@ must not substitute for bounded tests and timely CI feedback.
 
 ## Focused packet catalog
 
+For contained Windows post-tool entry diagnosis, set
+`AGENT_WORKTREES_PROFILE_ENTRY=1` and select `prepared_post_entry_stage_profile`
+in `tests/test_post_tool_shell.py`. For a fixed-fixture A/B/A comparison, select
+`prepared_post_entry_baseline_comparison` with `AGENT_WORKTREES_PROFILE_BASELINE`
+set to a full lowercase commit ID and `AGENT_WORKTREES_PROFILE_BASELINE_REPO`
+to its readable source checkout. Only private fixture copies are swapped;
+the baseline checkout is read through `git show`, never modified. Both shells
+retain real receiver/count assertions and the ordinary test deadlines.
+Stage spans are inclusive; neither these diagnostics nor their finite timings
+establish installed or whole-roster throughput.
+
 `python-selection-native.yml` supplies real Python 3.9 and supported Python
 side by side on a disposable hosted Windows runner. Its `TEST_PYTHON39` input
 names the existing 3.9 executable explicitly and is version-checked before
