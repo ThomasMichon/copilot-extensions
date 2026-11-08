@@ -427,11 +427,13 @@ _Operator-required outcome; agent-recommended slices and validation._
 - [x] Review the finite [acquired comment observation refinement](comment-observation-correlation.md)
   before joining original prepared receipts to acquired native objects.
   Keep the independently unavailable protected credential source unsupported
-  (#11511; consumer qualification remains open).
+  (#11511; broader provider/installed qualification remains open).
 - [x] Deliver its finite existing-owner read-only library projection (#11514;
   212 coupled source cases). Preserve original native receipts, unknown
   outcomes and acquired observation intervals without new IO or storage.
-- [ ] Separately qualify negotiated workspace/CLI/client/Gateway consumers. Preserve original
+- [x] Separately qualify negotiated workspace/CLI/client/Gateway source consumers
+  (#11517; 210 coupled and final 82 focused consumer/Gateway cases, overlapping).
+  Preserve original
   receipt/unknown states and observation age; a current content match is not
   original-version proof, persisted DB mapping or full C3/provider acceptance.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
@@ -987,8 +989,10 @@ or silently expanding a bounded source claim.
   exact scoped native IDs/actor/content, restart, later edits/deletion,
   copied tags, partial/unknown evidence and zero mutation/acquisition/send
   (#11514; 212 coupled source cases, including real owner-lock contention).
-- [ ] Qualify old/current/rolled-back workspace peers separately; neither cached
-  matches nor today's object digest establish original-version feedback.
+- [x] Qualify old/current/rolled-back workspace source peers separately (#11517),
+  including actual adopted-storage rechecks at dispatch for direct and stale
+  native/Gateway clients. Neither cached matches nor today's object digest
+  establish original-version feedback; provider/installed acceptance remains open.
 - [x] Qualify preparation-only CLI/client/Gateway allocation and original
   recovery with the actual preparer, zero protected acquisitions/sends,
   independent submission refusal, unchanged writer/default behavior and

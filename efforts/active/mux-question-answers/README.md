@@ -96,7 +96,7 @@ runtime remediation, elevated operation or destructive cleanup is authorized.
 
 ### Phase 3 - Delivery and rollout
 - [x] Land qualified implementation after whole-surface audit, review and CI.
-- [ ] Verify ordinary promotion to `main`; diagnose actual failing jobs and
+- [x] Verify ordinary promotion to `main`; diagnose actual failing jobs and
   fix forward rather than bypassing a red release gate.
 - [ ] Complete the separately authorized adopter updates and synthetic proof
   on both environments, retaining undelivered-row and session-preservation
@@ -352,3 +352,29 @@ runtime remediation, elevated operation or destructive cleanup is authorized.
   behavior or qualified capture input changed.
 - Require the corrected current head's actual unit execution and normal review
   before merge. An earlier approval or the unchanged capture is not a CI waiver.
+
+### 2026-11-07 - Reviewed correction merged
+
+- #11467 merged as `09887f83f828c7fd00e74f43a6fd191e502005f2` after
+  approval of the corrected current head and successful current CI runs
+  42446514551 and 42446522645, including actual admitted unit execution.
+- The reviewed correction also fixes #11477's repeated historical Git work;
+  final exact-source historical qualification passed without a retry or
+  deadline change.
+- Continue the ordinary Dev CI and Main promotion flow, then separately
+  authorized adopter updates and fresh installed proofs. This merge does
+  not close the effort or establish deployment.
+
+### 2026-11-07 - Correction released through ordinary promotion
+
+- Run 42448343361 passed source qualification, Windows pane startup, artifact
+  validation, exact source-unit reuse, immutable asset publication/readback
+  and the non-administrator Main merge.
+- The admitted Dev source `413ea54760315a690940ced5ec271e1493c62521`
+  contains the reviewed correction. It landed on Main as
+  `2e0453a8e24b69ad51be5fc3ae9a115c6161a19d`, releasing Bridge
+  `0.9.365-dev1`. The released parser and mux backend blobs exactly match
+  the qualified source.
+- Adopter installation, actual synthetic answers and same-session
+  continuation remain separate pending gates. Preserve current rollout
+  custody, bounded inspection approvals and pre-existing sessions.

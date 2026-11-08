@@ -2062,12 +2062,12 @@
       "sha256": "170254e860d0038d5a5c7a134378cf7b6822361e8c5330622fdb1db5e8b4f447"
     },
     "plugins/agent-bridge/extensions/agent-bridge/extension.mjs": {
-      "blob": "198b85ebe3fdabf3a74b8977382eb27ba32c78f6",
-      "sha256": "1a8129d7de782d1d1e83757cdb8724c05b5ad6a534c05ebf4e5c5efbb42d0c62"
+      "blob": "bd06bcb70b99de8423887a9aeb9459d22255dc3a",
+      "sha256": "067ace6d6b244a004948980fc5a8c00612681081e04bea1e16bb463a216cd64c"
     },
     "plugins/agent-bridge/extensions/agent-bridge/metadata.mjs": {
-      "blob": "7e44e7c381aaa3a29bb0bc5abeb23313143b93ad",
-      "sha256": "393a8f5767bd286fbf73e96f2012acc0b7d239de4fe8d0babbefc7c95714c607"
+      "blob": "2aeb9b19f9c255e0715af484e5f25ceabed701a9",
+      "sha256": "9705b6992466b88f6a45665c491073cd0f1b06cb9e875ac440770397f1fb147c"
     },
     "plugins/agent-bridge/extensions/agent-bridge/plugin-readiness.mjs": {
       "blob": "441e130f19f486c5d69be71f9f82d770e988a542",
@@ -3878,8 +3878,8 @@
       "sha256": "250f36eca59bc75d23b5762d75d50c9558a185c0e0d1cdc9ae146cbcc1a525ac"
     },
     "plugins/agent-bridge/tests/retained-extension.test.mjs": {
-      "blob": "2c07f92c1ef4c75a4182a1248ce2cfc368da0b19",
-      "sha256": "f8942b791f4d8b5f850a8536d3775f37e5b3551d32a024676d1c8feddd3f3740"
+      "blob": "61edaaef8c421ae5eddc52017d713d43ad13f00c",
+      "sha256": "7c88f70d4369b801bb503d41f40d8c626ba059a3d5cb92c1eb80f10fab7b77f2"
     },
     "plugins/agent-bridge/tests/test_acp_current_requests.py": {
       "blob": "ee31a24a0c55b7d61b8849842af132c74b7e4d0b",
@@ -9098,7 +9098,7 @@
       "sha256": "a9925c3f74fe1e6a3adf3450d58af86260ccfa52eb63ccd88b98316c02409bf9"
     }
   },
-  "execution_closure_sha256": "fe5c1509413902d11e1aa02d1fc94e7330481ea0b5487d1464a366459d4e8f07",
+  "execution_closure_sha256": "0e8d7a21f0cecae2d42b622293569ff0a7167a26af1cee619ec7094049f0e9cb",
   "runtime_binding_policy": "every-owned-interpreter-source-and-entrypoint-v1",
   "runtime_roles": [
     "observer"
@@ -9260,7 +9260,7 @@
   },
   "scope": "model-free native-send and known-session observation ASGI/journal evidence; not SDK/native qualification; membership transcripts use a virtual reader clock; separate deadline-expiry and actual SQLite VM-cutoff probes; not wall-clock read qualification; portable launch joins actual archive/policy readers, ASGI/SQLite and driver HTTP with controlled SDK, native mux, provider process, SSH, Owner, claims, forwards and POSIX-to-private-scratch namespace fixtures; not native Copilot, mux, remote authentication or installed qualification",
   "captured_from": {
-    "commit": "28529938b13efba3f2dcdb0f532effd96d86f426",
+    "commit": "b5d372952413930046634389461786acd788e773",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 52,
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
