@@ -48,7 +48,9 @@ never resolved here: the owner (the sessionStart session-context path, running
 in the selected runtime) publishes a tiny record,
 ``<runtime>/nudge-state/<worktree>.agenda-policy.json`` =
 ``{"version": 1, "policy": "off"|"expected", "written_at": <epoch>}``, on every
-session start/resume. This hook (and the Windows prepared PowerShell path)
+session start/resume and every ``agent-worktrees status`` write (which the
+disposition nudge above prompts), so a running session sees a changed setting
+at its next disposition write. This hook (and the Windows prepared PowerShell path)
 reads only that record and the local lane evidence on a due tick -- stdlib-only,
 no config loader, no git -- so it works under a bare fallback interpreter and
 cannot stall the resident. A missing/unreadable record or policy ``off`` is

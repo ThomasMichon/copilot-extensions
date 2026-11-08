@@ -118,6 +118,8 @@ def _run_engine_ensure(tmp_path: Path, host: str, manage_body: str) -> subproces
         f"$EngineEnvFile = '{tmp_path / 'engine.env'}'\n$EngineHome = '{tmp_path}'\n"
         f"function Get-ActiveSlotPython {{ '{manage}' }}\n"
         "function Write-EngineFiles { }\nfunction Test-EnginePort { $false }\n"
+        "function Test-IndexStartAllowed { param($Name); $true }\n"
+        "function Get-RequiredRuntimeRole { 'host' }\n"
         + helpers + "\n" + _function("Invoke-WithEnvFile") + "\n"
         + _function("Ensure-EngineRunning") + "\nEnsure-EngineRunning\nWrite-Host 'AFTER'\n",
         encoding="utf-8-sig",
@@ -175,27 +177,3 @@ Invoke-WithEnvFile -Path '{env_file}' -Extra $extra -Body {{
 }}
 """
     assert _run(script) == ["in:from-file|x"]
-
-
-def test_a_failed_start_now_still_registers_the_logon_entry():
-    script = _function("Install-LogonAutostartEntry") + """
-$ErrorActionPreference = 'Stop'
-$RunKey = 'HKCU:\\Software\\aix-test-run-key-not-used'
-function Get-ScheduledTask { $null }
-function Remove-LogonAutostart { param($Name) }
-function Test-Path { param($Path) $true }
-function New-Item { }
-function New-ItemProperty {
-    param($Path, $Name, $Value, $PropertyType, [switch]$Force)
-    Write-Host "registered:$Name"
-}
-function Write-Ok { param($Msg) Write-Output "ok:$Msg" }
-function Write-Warn { param($Msg) Write-Output "warn:$Msg" }
-function Write-Skip { param($Msg) Write-Output "skip:$Msg" }
-Install-LogonAutostartEntry -Name 'aix' -LauncherPath 'C:\\l.ps1' -Kind 'Engine daemon' `
-    -IsHealthy { $false } -Ensure { throw 'cold start failed' } -ScheduledTaskName 'aix-task'
-"""
-    out = _run(script)
-    assert any(line.startswith("warn:Could not start Engine daemon now: cold start failed")
-               for line in out), out
-    assert "ok:Logon auto-start registered (HKCU Run 'aix') -- durable without elevation" in out

@@ -54,6 +54,57 @@ def test_status_write_republishes_agenda_policy(status_env, monkeypatch):
     assert published == ["wt-status"]
 
 
+
+def test_running_session_sees_enabled_agenda_default_after_status_write(
+    status_env, monkeypatch, tmp_path,
+):
+    """An operator enabling ``agendas.default`` mid-session reaches the
+    reminder hook through the next disposition write, without a restart."""
+    import importlib.util
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from agent_worktrees import session_context
+
+    spec = importlib.util.spec_from_file_location(
+        "nudge_status_running", Path(__file__).resolve().parents[1] / "scripts" / "nudge_status.py",
+    )
+    nudge = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(nudge)
+    record = tracking.load_record(status_env)
+    record.status, record.completed_at = "active", None
+    tracking.save_record(record, status_env)
+    agent_home = tmp_path / "agent-home"
+    runtime = agent_home / ".agent-worktrees"
+    monkeypatch.setattr(session_context, "_agenda_policy_roots", lambda: [runtime])
+    config = SimpleNamespace(agenda_default="off")
+    monkeypatch.setattr(main.cfg, "load_config", lambda: config)
+    env = {
+        "AGENT_HOME": str(agent_home),
+        "AGENT_WORKTREES_NUDGE_CALLS": "2", "AGENT_WORKTREES_NUDGE_MINUTES": "999",
+    }
+
+    def reminders(start):
+        return [
+            nudge.decide(
+                {"toolName": "view", "cwd": str(tmp_path)}, env=env,
+                home=tmp_path / "real-home", now=start + i,
+                tracking_record=(record.worktree_id, status_env),
+            )
+            for i in range(2)
+        ]
+
+    session_context.publish_agenda_policy(config, record)
+    assert not any("driving-effort-agendas" in (out or "") for out in reminders(1000.0))
+
+    config.agenda_default = main.cfg.AGENDA_DEFAULT_EXPECTED
+    assert main._cmd_status_write(
+        argparse.Namespace(worktree_id=None), summary="Still working",
+    ) == 0
+
+    assert nudge.read_agenda_policy(runtime, record.worktree_id) == "expected"
+    assert "driving-effort-agendas" in (reminders(2000.0)[-1] or "")
+
 @pytest.fixture
 def status_env(tmp_path, tmp_tracking_dir, monkeypatch):
     record = tracking.WorktreeRecord(
