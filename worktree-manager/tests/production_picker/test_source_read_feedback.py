@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 from textual.widgets import OptionList
 
-from test_picker_tui import _fixture_source
+from test_picker_tui import _fixture_source, _wait_for_initial_setup
 from worktree_manager.production_picker.picker_tui import data_ssh
 from worktree_manager.production_picker.picker_tui.engine import PickerApp, PickerScreen
 from worktree_manager.production_picker.picker_tui.source_read_notices import worktree_read_feedback
@@ -42,7 +42,7 @@ def body(screen):
 
 
 @pytest.mark.parametrize("width", [48, 118])
-def test_cached_notices_and_knowledge_changes_do_not_rebuild_or_move_list(monkeypatch, width):
+def test_cached_notices_and_knowledge_changes_do_not_rebuild_list_or_move_modal(monkeypatch, width):
     from worktree_manager.production_picker.picker_tui.engine_regions import _PickerNativeData
     from worktree_manager.production_picker.picker_tui.worktree_details_screen import WtDetailsScreen
 
@@ -52,7 +52,7 @@ def test_cached_notices_and_knowledge_changes_do_not_rebuild_or_move_list(monkey
         app = PickerApp(_fixture_source(), live=False)
         async with app.run_test(size=(width, 30)) as pilot:
             screen = app.query_one(PickerScreen)
-            assert await asyncio.to_thread(screen._ensure_setup_completion_event().wait, 3)
+            await _wait_for_initial_setup(pilot, screen)
             await pilot.pause()
             screen.live = True
             screen.machine_idx = screen.local_index()
@@ -70,7 +70,7 @@ def test_cached_notices_and_knowledge_changes_do_not_rebuild_or_move_list(monkey
             region = native.region
             prompts = [native.get_option_at_index(i) for i in range(native.option_count)]
             notices = screen.query_one("#nf-notices")
-            assert notices.region.height == 2
+            assert not notices.display
             monkeypatch.setattr(native, "_rebuild", lambda: pytest.fail("notice rebuilt the list"))
             modal = WtDetailsScreen(screen.list_records()[0], engine=screen)
             await app.push_screen(modal)
@@ -86,7 +86,6 @@ def test_cached_notices_and_knowledge_changes_do_not_rebuild_or_move_list(monkey
                     screen.loader._feed_commit(source, 0, rows)
                 screen.refresh(cause="pulse")
                 await pilot.pause()
-                assert native.region == region
                 assert modal.query_one("#details-frame").region == modal_region
                 assert sum(
                     strip.text.count("Kept worktree")
@@ -123,6 +122,78 @@ def test_cached_notices_and_knowledge_changes_do_not_rebuild_or_move_list(monkey
                 await pilot.pause()
                 painted = "\n".join(strip.text for strip in app.screen._compositor.render_strips())
                 assert ("o: Doctor" in painted) == bool(orphans)
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("width", [48, 118])
+def test_notice_layout_reclaims_rows_without_losing_native_cursor(monkeypatch, width):
+    from worktree_manager.production_picker.picker_tui.engine_regions import _PickerNativeData
+
+    monkeypatch.setattr(PickerScreen, "_tick", lambda self: None)
+
+    async def run():
+        app = PickerApp(_fixture_source(), live=False)
+        async with app.run_test(size=(width, 30)) as pilot:
+            screen = app.query_one(PickerScreen)
+            await _wait_for_initial_setup(pilot, screen)
+            await pilot.pause()
+            screen.machine_idx = screen.local_index()
+            _, machine, environment, _ = screen.machines[screen.machine_idx]
+            source = data_ssh.Source(machine, environment, None, local=True)
+            screen.source_tabs[screen.machine_idx]["source_id"] = source.source_id
+            screen.loader = data_ssh.LiveLoader([source])
+            rows = [{"id": f"row-{i:02}", "title": f"Worktree {i:02}"} for i in range(50)]
+            screen.loader._feed_commit(source, 0, rows)
+            screen.data = screen.loader.records()
+            screen.live = True
+            screen._knowledge_readiness = {"ready": True}
+            screen.refresh()
+            await pilot.pause()
+            native = screen.query_one("#nf-body-data", _PickerNativeData)
+            notices = screen.query_one("#nf-notices")
+            buttons = screen.query_one("#nf-buttons")
+            assert not notices.display
+            assert native.region.y == buttons.region.bottom
+            native.focus()
+            await pilot.press(*(["down"] * 15))
+            await pilot.pause()
+            region = native.region
+            state = (screen.sel, set(screen.wt_sel), native.highlighted, native.scroll_y)
+            options = [native.get_option_at_index(i) for i in range(native.option_count)]
+            rebuild = native._rebuild
+            monkeypatch.setattr(native, "_rebuild", lambda: pytest.fail("notice rebuilt options"))
+            for ready, failed, count in [
+                (False, False, 1), (False, True, 2), (True, True, 1),
+                (True, False, 0), (False, True, 2), (True, False, 0),
+            ]:
+                screen._knowledge_readiness = {
+                    "ready": ready, "code": "ready" if ready else "knowledge_binding_required",
+                }
+                if failed:
+                    screen.loader._feed_error(source, 0, "fixture unavailable", kind="content")
+                else:
+                    screen.loader._feed_commit(source, 0, rows)
+                screen.refresh(cause="pulse")
+                await pilot.pause()
+                assert notices.display == bool(count)
+                if count:
+                    assert notices.region.height == count
+                    assert len(notices.render().split("\n")) == count
+                assert native.region.y == region.y + count
+                assert native.region.height == region.height - count
+                assert app.focused is native
+                assert (screen.sel, set(screen.wt_sel), native.highlighted, native.scroll_y) == state
+                assert [native.get_option_at_index(i) for i in range(native.option_count)] == options
+                assert all(line.cell_len <= width for line in notices.render().split("\n"))
+            monkeypatch.setattr(native, "_rebuild", rebuild)
+            screen._knowledge_readiness = {"ready": False}
+            screen.htab = next(i for i, pivot in enumerate(screen.pivots)
+                               if pivot["kind"] != "worktrees")
+            screen.refresh()
+            await pilot.pause()
+            assert not notices.display
+            assert native.region.y == buttons.region.bottom
 
     asyncio.run(run())
 
@@ -219,7 +290,7 @@ def test_all_scope_cached_failure_is_not_hidden_by_an_earlier_refreshing_source(
     screen.loader._feed_error(other, 0, "fixture unavailable")
     notices = worktree_read_feedback(screen)
     assert notices[0].state == "loading" and notices[1].state == "failed"
-    text = screen.worktrees_view.notice_lines()[1].plain
+    text = screen.worktrees_view.notice_lines()[0].plain
     assert "Other source" in text and "Updates paused" in text
     assert "+1 sources" in text
 

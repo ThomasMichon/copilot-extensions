@@ -1,0 +1,9 @@
+{
+  "comment": "Reclaim unused Picker notice rows while preserving native selection and quiet cached-source feedback",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

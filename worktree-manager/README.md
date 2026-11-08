@@ -30,9 +30,11 @@ Existing mappings and counts are preserved, not revalidated. See
 [preservation-first recovery](../plugins/agent-worktrees/docs/mux.md#preserve-first-when-discovery-is-unavailable)
 for the scope, older-consumer limitation and separately authorized recovery.
 
-The Picker reserves two fixed notice rows for Knowledge setup and cached-source
-refresh status. Updates to these notices do not insert entries into the worktree
-list or move its selection. Claim-coverage warnings appear as a compact warning
+The Picker allocates rows only for real Knowledge setup and cached-source
+refresh notices: none when healthy, one for either notice, two when both apply.
+Updates resize the list viewport without inserting selectable options or moving
+its keyed selection. Cached-source status stays in the notice rather than
+repeating a stale prefix in every worktree title. Claim-coverage warnings appear as a compact warning
 icon; impacted worktrees offer **Doctor** in Actions for read-only diagnostics
 and full claim inspection. Inspection does not repair or release resources.
 Re-homed resources without a worktree row retain the compact `o: Doctor`
