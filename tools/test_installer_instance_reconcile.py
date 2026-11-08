@@ -141,7 +141,7 @@ def test_missing_runtime_scope_never_invokes_a_shell(tmp_path, monkeypatch, caps
     monkeypatch.setattr(
         adapter.subprocess, "run", lambda *_a, **_k: pytest.fail("unscoped collection"),
     )
-    assert not adapter.reconcile_installer_instances(ENGINE, registry_root=tmp_path)
+    assert adapter.reconcile_installer_instances(ENGINE, registry_root=tmp_path)
     assert "runtime-scope-unavailable" in capsys.readouterr().err
 
 

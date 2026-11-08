@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import errno
+import hashlib
 import math
 import logging
 import os
@@ -910,8 +911,15 @@ def cleanup(
         return result("held", type(error).__name__)
 
 
-def _read_cursor(root):
-    path = root / ".reconcile.cursor"
+def _cursor_path(root, runtime_root=None):
+    if runtime_root is None:
+        return root / ".reconcile.cursor"
+    scope = os.fsencode(os.path.normcase(os.fspath(runtime_root)))
+    return root / (".reconcile." + hashlib.sha256(scope).hexdigest() + ".cursor")
+
+
+def _read_cursor(root, runtime_root=None):
+    path = _cursor_path(root, runtime_root)
     try:
         info = _plain(path)
     except FileNotFoundError:
@@ -928,8 +936,8 @@ def _read_cursor(root):
     return key
 
 
-def _write_cursor(root, key):
-    path = root / ".reconcile.cursor"
+def _write_cursor(root, key, runtime_root=None):
+    path = _cursor_path(root, runtime_root)
     if os.path.lexists(path):
         _plain(path)
     pending = root / (".reconcile." + uuid.uuid4().hex + ".pending")

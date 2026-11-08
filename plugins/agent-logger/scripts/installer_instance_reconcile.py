@@ -20,7 +20,7 @@ def reconcile_installer_instances(
         return True
     if runtime_root is None:
         print("[installer-instance-gc] deferred: runtime-scope-unavailable", file=sys.stderr)
-        return False
+        return True
     try:
         adapter_root = Path(__file__).resolve().parent
         if os.name == "nt":

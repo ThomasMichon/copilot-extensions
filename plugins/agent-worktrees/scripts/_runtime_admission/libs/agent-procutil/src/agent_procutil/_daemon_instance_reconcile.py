@@ -25,7 +25,7 @@ def reconcile(
         return []
     store._root(root)
     paths = sorted(store._inventory_paths(root))
-    cursor = store._read_cursor(root)
+    cursor = store._read_cursor(root, runtime_root)
     if not paths:
         return []
     if any(not store._ID.fullmatch(path.stem) for path in paths):
@@ -35,7 +35,7 @@ def reconcile(
     with store._file_lock(
         root / ".reconcile.lock", guard=store._cursor_guard, nonblocking=True,
     ):
-        cursor = store._read_cursor(root)
+        cursor = store._read_cursor(root, runtime_root)
         ordered = [path for path in paths if path.stem > cursor]
         ordered += [path for path in paths if path.stem <= cursor]
         visited = None
@@ -72,5 +72,5 @@ def reconcile(
                 results.append(store.cleanup(DaemonInstanceReceipt(path.stem, root), **options))
         finally:
             if visited is not None and visited != cursor:
-                store._write_cursor(root, visited)
+                store._write_cursor(root, visited, runtime_root)
     return results

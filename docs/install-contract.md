@@ -68,7 +68,13 @@ process termination. An expired instance that is still live remains held;
 another installation's record and artifacts are not cleanup candidates.
 Observed-exit artifacts retain their existing exact-ownership checks. Missing
 scope or a legacy helper without termination-policy/runtime-scope support defers
-this optional cleanup before effects, without falling back to a global sweep.
+this optional cleanup before effects, preserving installation success without
+falling back to a global sweep. The count limit bounds all scanned records,
+including foreign-root records; each runtime scope has its own progress cursor
+so interleaved installers cannot advance past another installation's work.
+Python and native wrappers share that cursor namespace (case-normalized on
+Windows), the existing collection lock and the time bound. Unscoped lifecycle
+collection retains the legacy global cursor.
 Explicit lifecycle-owner cleanup and lease supervision remain separate.
 
 Runtime code, old daemon generations, stale installer transactions and owned
