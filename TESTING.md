@@ -8342,8 +8342,9 @@ the runner no longer writes them. Reclaiming them is guided, never a sweep:
 
 1. `python tools/reclaim_legacy_test_dirs.py [--checkout <worktree>]` inventories
    registered worktrees of this clone without changing anything. Each tree is
-   `ready` (only virtual environments), `needs-decision` (other files such as
-   captured evidence, with a sample listed) or `refused` with its reason.
+   `ready` (recognized virtual-environment layout), `needs-decision` (other
+   files such as captured evidence, even inside a virtual environment, with a
+   sample listed) or `refused` with its reason.
 2. Review the set, then record it:
    `--select <dir> [--discard <dir>] --plan-out plan.json`. A `needs-decision`
    tree needs a matching `--discard`, the owner's decision to drop its

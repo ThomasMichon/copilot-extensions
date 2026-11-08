@@ -10,8 +10,8 @@ deletes anything a person did not explicitly select from a reviewed inventory:
 1. **Inventory** (default, read-only). Reports each candidate's size, content
    fingerprint and status:
 
-   * ``ready``: contains only Python environments (directories with
-     ``pyvenv.cfg``);
+   * ``ready``: contains only recognized Python environment layout under
+     directories with ``pyvenv.cfg``;
    * ``needs-decision``: also contains unclassified content (run output,
      captured evidence, reports), listed for review;
    * ``refused``: cannot be reclaimed safely (see ``reason``).
@@ -34,7 +34,7 @@ deletes anything a person did not explicitly select from a reviewed inventory:
 Stop test and capture writers for the selected set before applying a plan.
 Liveness: on Windows the rename refuses sharing violations, but is not a lock
 against all possible users. On Linux ``/proc`` is scanned for this user's processes whose
-cwd, executable or open files are inside the tree. A process of this user that
+cwd, executable, open files or mapped files are inside the tree. A process of this user that
 cannot be inspected (for example a non-dumpable ``sshd`` or ``systemd --user``)
 refuses the target unless its name is accepted with ``--accept-uninspectable``
 when planning; the plan records that acceptance. Other platforms are refused.
@@ -71,6 +71,9 @@ _REPARSE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
 _GIT_TIMEOUT = 30
 _SAMPLE_LIMIT = 20
 _WINDOWS = os.name == "nt"
+_ENV_DIRS = {"bin", "scripts", "lib", "lib64", "include", "share"}
+_ENV_FILES = {"pyvenv.cfg", "python", "python.exe", ".gitignore", ".typecheck-prepared"}
+_EVIDENCE_DIRS = {"reports", "evidence", "captures", "artifacts", "logs", "test-results"}
 _GIT_SELECTORS = {
     "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
     "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CEILING_DIRECTORIES",
@@ -116,17 +119,18 @@ def git_environment() -> dict[str, str]:
 def _git(checkout: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", "-C", str(checkout), *args], env=git_environment(),
-        capture_output=True, text=True, timeout=_GIT_TIMEOUT, check=False,
+        capture_output=True, text=True, encoding="utf-8", errors="surrogateescape",
+        timeout=_GIT_TIMEOUT, check=False,
         creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)),
     )
 
 
 def registered_worktrees(repo: Path) -> list[Path]:
-    result = _git(repo, "worktree", "list", "--porcelain")
+    result = _git(repo, "worktree", "list", "--porcelain", "-z")
     if result.returncode:
         raise RuntimeError(result.stderr.strip() or "git worktree list failed")
     return [
-        Path(line[len("worktree "):]) for line in result.stdout.splitlines()
+        Path(line[len("worktree "):]) for line in result.stdout.split("\0")
         if line.startswith("worktree ")
     ]
 
@@ -156,23 +160,25 @@ def _identity(info: os.stat_result) -> list[int]:
 def survey(path: Path) -> Survey:
     """Measure, fingerprint and classify a tree without following links.
 
-    Content under a directory that contains ``pyvenv.cfg`` is a Python
-    environment; everything else is unclassified and needs an explicit decision.
+    Recognized environment layout is disposable. Other contents and evidence
+    directories remain unclassified even when nested inside an environment.
     """
     result = Survey()
     digest = hashlib.sha256()
     rows: list[str] = []
-    stack: list[tuple[Path, str, bool]] = [(path, "", False)]
+    stack: list[tuple[Path, str, str | None]] = [(path, "", None)]
     while stack:
-        current, relative, in_env = stack.pop()
+        current, relative, env_root = stack.pop()
         try:
             entries = list(os.scandir(_native(current)))
         except OSError as exc:
             result.problem = f"unreadable: {exc.strerror or exc}"
             return result
-        if not in_env:
-            in_env = any(entry.name == "pyvenv.cfg" and entry.is_file(follow_symlinks=False)
-                         for entry in entries)
+        if env_root is None and any(
+            entry.name == "pyvenv.cfg" and entry.is_file(follow_symlinks=False)
+            for entry in entries
+        ):
+            env_root = relative
         for entry in entries:
             entry_path = Path(entry.path)
             child = f"{relative}/{entry.name}" if relative else entry.name
@@ -187,11 +193,16 @@ def survey(path: Path) -> Survey:
             result.newest = max(result.newest, info.st_mtime)
             if stat.S_ISDIR(info.st_mode):
                 rows.append(f"d\0{child}\0{info.st_mtime_ns}")
-                stack.append((entry_path, child, in_env))
+                stack.append((entry_path, child, env_root))
             else:
                 rows.append(f"f\0{child}\0{info.st_size}\0{info.st_mtime_ns}")
                 result.bytes += info.st_size
-                if not in_env:
+                local = child[len(env_root) + 1:] if env_root else child
+                parts = local.lower().split("/")
+                disposable = env_root is not None and (
+                    parts[0] in _ENV_DIRS or local.lower() in _ENV_FILES
+                ) and not _EVIDENCE_DIRS.intersection(parts[:-1])
+                if not disposable:
                     result.unclassified.append((child, info.st_size))
     for row in sorted(rows):
         digest.update(row.encode("utf-8", "surrogateescape") + b"\n")
@@ -203,7 +214,7 @@ def survey(path: Path) -> Survey:
 def _linux_scan(path: Path) -> tuple[bool, set[str]] | None:
     """Scan this user's processes; None when ``/proc`` is unavailable.
 
-    Returns whether a process's cwd, executable or open file is inside ``path``
+    Returns whether a process's cwd, executable, open or mapped file is inside ``path``
     and the names of this user's processes that could not be inspected (for
     example non-dumpable session managers). A process that exits mid-scan is
     absent, not uninspectable.
@@ -246,6 +257,19 @@ def _linux_scan(path: Path) -> tuple[bool, set[str]] | None:
                 break
             if target == prefix or target.startswith(prefix + os.sep):
                 return True, blind
+        try:
+            maps = (pid / "maps").read_text(encoding="utf-8", errors="surrogateescape")
+        except gone:
+            continue
+        except OSError:
+            blind.add(name(pid))
+            continue
+        for row in maps.splitlines():
+            fields = row.split(maxsplit=5)
+            if len(fields) == 6:
+                target = fields[5].replace("\\012", "\n")
+                if target == prefix or target.startswith(prefix + os.sep):
+                    return True, blind
     return False, blind
 
 

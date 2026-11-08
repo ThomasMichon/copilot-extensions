@@ -5007,6 +5007,7 @@
         "services/chat/src/agent_chat_service/store.py": "59b7977bd429801796f58d5468fe3d4a6c90a158dde5325d1d511242603e8f29",
         "tools/_admission_protocol.py": "baa0c1a2af44616eedf02bf678c128fd3c07045bd8e5542d4fe8ece3df54dc21",
         "tools/cache_directory_paths.py": "2a991cb0ec7d3bcf7f658922821271295a87083132238867873eb5393711a87c",
+        "tools/plugin_test_resources.py": "b5f1d7b5743b10af58377cf27b648559f325739ab5e02e690266368394c21e10",
         "tools/typecheck.py": "eb4bb3640a0cc78b822c8bed8b5f710e30f7cb21497cd459935d1f766df526dd",
         "tools/typecheck_source_views.py": "fdd41d73c8b62b1dae13b851364e829e4a2810ba729e334a970026597ba286f9",
         "tools/promotion_unit_tests/test_typecheck.py": "85477198cfa71944bbe5dffeaf68ba2b9f8a854e49579f81b77848ff10ced966",

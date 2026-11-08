@@ -97,6 +97,30 @@ def test_environment_only_tree_is_ready_and_reclaimed_from_plan(repo, tmp_path, 
     assert not list(repo.glob(".test-venvs.reclaiming-*"))
 
 
+@pytest.mark.parametrize("relative", ["reports/session.json", "Lib/reports/session.json", "capture.json"])
+def test_evidence_inside_environment_still_requires_discard(repo, tmp_path, capsys, relative):
+    target = _legacy(repo)
+    evidence = target / "linux" / "plugin" / relative
+    evidence.parent.mkdir(parents=True, exist_ok=True)
+    evidence.write_text("retained evidence", encoding="utf-8")
+    _age(target)
+    code, report = _run("--repo", repo, capsys=capsys)
+    assert code == 0
+    assert report["candidates"][0]["status"] == "needs-decision"
+    assert evidence.relative_to(target).as_posix() in report["candidates"][0]["unclassified_sample"]
+    code, plan = _plan(repo, tmp_path, target, capsys=capsys)
+    assert code == 2 and not plan.exists() and evidence.is_file()
+
+
+def test_non_ascii_worktree_is_discovered_without_git_path_quoting(repo, tmp_path, capsys):
+    sibling = tmp_path / "worktree-\u00e9"
+    _git(repo, "worktree", "add", "-q", str(sibling))
+    target = _legacy(sibling)
+    code, report = _run("--repo", repo, "--checkout", sibling, capsys=capsys)
+    assert code == 0
+    assert [row["path"] for row in report["candidates"]] == [str(target)]
+
+
 def test_unclassified_content_requires_target_specific_discard(repo, tmp_path, capsys):
     target = _legacy(repo, evidence=True)
     code, plan = _plan(repo, tmp_path, target, capsys=capsys)
@@ -314,8 +338,9 @@ def test_unsupported_platform_cannot_verify_liveness(monkeypatch, tmp_path):
 class _FakeProc:
     """Minimal ``/proc/<pid>`` stand-in for exercising inspection failures."""
 
-    def __init__(self, name, uid, fd_error=None, comm="worker"):
+    def __init__(self, name, uid, fd_error=None, comm="worker", maps="", maps_error=None):
         self.name, self._uid, self._fd_error, self.comm = name, uid, fd_error, comm
+        self.maps, self.maps_error = maps, maps_error
 
     def stat(self):
         return type("S", (), {"st_uid": self._uid})()
@@ -334,6 +359,10 @@ class _FakeLink:
         return iter([])
 
     def read_text(self, **_kwargs):
+        if self.part == "maps":
+            if self.proc.maps_error:
+                raise self.proc.maps_error
+            return self.proc.maps
         return self.proc.comm + "\n"
 
     def __fspath__(self):
@@ -374,6 +403,17 @@ def test_accepted_uninspectable_process_is_explicit(monkeypatch, tmp_path):
     assert reclaim.in_use(tmp_path, frozenset({"sshd", "python3"})) == (False, "")
 
 
+def test_linux_mapping_without_open_descriptor_is_detected(monkeypatch, tmp_path):
+    mapped = os.path.join(os.path.realpath(tmp_path), "mapped library.so")
+    _fake_linux(monkeypatch, [_FakeProc("10", 7, maps=f"100-200 r--p 0 00:01 1 {mapped}\n")])
+    assert reclaim._linux_scan(tmp_path) == (True, set())
+
+
+def test_unreadable_linux_maps_is_not_absence(monkeypatch, tmp_path):
+    _fake_linux(monkeypatch, [_FakeProc("10", 7, maps_error=PermissionError("denied"))])
+    assert reclaim.in_use(tmp_path)[0] is None
+
+
 def test_linux_scan_detects_cwd_inside_tree(monkeypatch, tmp_path):
     inside = os.path.join(os.path.realpath(tmp_path), "child")
     _fake_linux(monkeypatch, [_FakeProc("10", 7)],
@@ -402,6 +442,29 @@ def test_real_proc_scan_detects_child_cwd(tmp_path):
     finally:
         child.kill()
         child.wait()
+    assert reclaim._linux_scan(tree)[0] is False
+
+
+@pytest.mark.skipif(not os.path.isdir("/proc/self/fd"), reason="Linux /proc scan")
+def test_real_proc_scan_detects_closed_descriptor_mapping(tmp_path):
+    tree = tmp_path / ".test-venvs"
+    tree.mkdir()
+    mapped = tree / "mapped.bin"
+    mapped.write_bytes(b"x" * 4096)
+    code = (
+        "import mmap,sys,time; "
+        "f=open(sys.argv[1],'rb'); m=mmap.mmap(f.fileno(),0,access=mmap.ACCESS_READ); "
+        "f.close(); print('ready',flush=True); time.sleep(30)"
+    )
+    child = subprocess.Popen([sys.executable, "-c", code, str(mapped)],
+                             stdout=subprocess.PIPE, text=True)
+    try:
+        assert child.stdout.readline().strip() == "ready"
+        assert reclaim._linux_scan(tree)[0] is True
+    finally:
+        child.kill()
+        child.wait()
+        child.stdout.close()
     assert reclaim._linux_scan(tree)[0] is False
 
 
