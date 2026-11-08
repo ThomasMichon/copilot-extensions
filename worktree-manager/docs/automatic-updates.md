@@ -58,8 +58,10 @@ its separate source-selection and publication prerequisites.
 
 Policy is strict, versioned JSON in
 `<Manager root>/automatic-updates.json`; a missing file means no enrollment.
-Malformed policy is a blocker, not a default. `ownership --json` reads it
-without creating state.
+Malformed or unreadable policy blocks automatic updates and enrollment, not
+explicit manual updates. Manual updates do not load automatic consent, but
+still acquire the shared update transaction. `ownership --json` reads the
+policy without creating state.
 
 ```text
 worktree-manager automatic-updates disable --apply --json

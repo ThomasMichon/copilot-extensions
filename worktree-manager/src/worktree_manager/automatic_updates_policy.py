@@ -153,10 +153,10 @@ def configure(
         return requested
 
 
-def admit_trigger(root: Path, trigger: str | None, controller: str | None = None) -> Policy:
-    policy = load_policy(root)
+def admit_trigger(root: Path, trigger: str | None, controller: str | None = None) -> Policy | None:
     if trigger is None:
-        return policy  # explicit foreground updates remain supported
+        return None  # Automatic consent cannot inhibit explicit foreground updates.
+    policy = load_policy(root)
     if trigger == "manager" and policy.owner == "manager":
         return policy
     if (

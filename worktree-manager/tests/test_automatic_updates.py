@@ -144,13 +144,64 @@ def test_manual_and_automatic_admission(tmp_path: Path) -> None:
         policy.admit_trigger(tmp_path, "manager")
     policy.configure(tmp_path, owner="manager", provenance="user", project="example")
     assert policy.admit_trigger(tmp_path, "manager").owner == "manager"
-    assert policy.admit_trigger(tmp_path, None).owner == "manager"
+    assert policy.admit_trigger(tmp_path, None) is None
     with pytest.raises(policy.PolicyError, match="refused"):
         policy.admit_trigger(tmp_path, "legacy-agent-machines")
     policy.configure(tmp_path, owner="disabled", provenance="user")
     with pytest.raises(policy.PolicyError, match="refused"):
         policy.admit_trigger(tmp_path, "manager")
-    assert policy.admit_trigger(tmp_path, None).user_disabled
+    assert policy.admit_trigger(tmp_path, None) is None
+
+
+@pytest.mark.parametrize("contents", [b"{", b'{"version": 999}', b"\xff"])
+def test_invalid_automatic_policy_does_not_block_serialized_manual_update(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, contents: bytes,
+) -> None:
+    path = tmp_path / policy.POLICY_NAME
+    path.write_bytes(contents)
+    monkeypatch.setattr(cli, "default_root", lambda: tmp_path)
+    monkeypatch.setenv("COPILOT_EXTENSIONS_UPDATE_HOME", str(tmp_path / "telemetry"))
+    calls = []
+
+    def execute(args: list[str], trigger: str, automatic_trigger: str | None) -> int:
+        calls.append((args, trigger, automatic_trigger))
+        with pytest.raises(CutoverLockedError):
+            with CutoverLock(policy.state_dir(tmp_path) / "update-transaction"):
+                pytest.fail("manual update lost its transaction")
+        return 47
+
+    assert cli.guarded_update(["--project", "example"], execute) == 47
+    assert calls == [(["--project", "example"], "manual", None)]
+    for flags in (
+        ["--automatic-trigger", "manager"],
+        ["--automatic-trigger", "external", "--controller", "one"],
+        ["--automatic-trigger", "legacy-agent-machines"],
+    ):
+        assert cli.guarded_update(flags, execute) == 3
+    assert len(calls) == 1
+    with CutoverLock(policy.state_dir(tmp_path) / "update-transaction"):
+        assert cli.guarded_update(["--project", "example"], execute) == 5
+    assert len(calls) == 1
+    assert path.read_bytes() == contents
+
+
+def test_unreadable_automatic_policy_does_not_block_manual_update(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    read_text = Path.read_text
+
+    def deny_policy(path: Path, *args, **kwargs) -> str:
+        if path == tmp_path / policy.POLICY_NAME:
+            raise PermissionError("fixture policy is unreadable")
+        return read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", deny_policy)
+    monkeypatch.setattr(cli, "default_root", lambda: tmp_path)
+    monkeypatch.setenv("COPILOT_EXTENSIONS_UPDATE_HOME", str(tmp_path / "telemetry"))
+    assert cli.guarded_update([], lambda args, trigger, origin: 47) == 47
+    assert cli.guarded_update(
+        ["--automatic-trigger", "manager"], lambda *args: pytest.fail("automatic update ran"),
+    ) == 3
 
 
 def test_external_trigger_is_controller_specific(tmp_path: Path) -> None:
