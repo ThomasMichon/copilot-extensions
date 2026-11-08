@@ -136,6 +136,13 @@ def test_no_native_servers_proves_absence_even_without_a_registry(tmp_path, monk
     assert reader.observe() == {}
 
 
+def test_relative_data_directory_refuses_before_native_observation(monkeypatch):
+    monkeypatch.setenv("PSMUX_DATA_DIR", "relative-mux-state")
+    monkeypatch.setattr(native, "servers", lambda: pytest.fail("relative root reached native observation"))
+    with pytest.raises(MuxObservationUnavailable, match="must be absolute"):
+        reader.observe()
+
+
 @pytest.mark.parametrize("mode,expected", [("server -s fixture", {101: "123"}), ("attach-session -t fixture", {})])
 def test_native_census_distinguishes_clients_without_executing_them(monkeypatch, mode, expected):
     monkeypatch.setattr(native, "_processes", lambda: [(101, "psmux.exe")])

@@ -1371,7 +1371,10 @@ def worktree_id_from_mux_session(
 def has_mux_session(
     worktree_id: str, *, strict: bool = False, timeout: float = 5,
 ) -> bool:
-    """Probe mux presence; strict callers retain unavailable evidence."""
+    """Probe mux presence; strict callers retain unavailable evidence.
+
+    Windows strict checks cap the caller's timeout at five seconds in total.
+    """
     import subprocess
     from agent_procutil import no_window_kwargs
 

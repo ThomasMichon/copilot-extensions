@@ -33,7 +33,9 @@ def _read(path: Path) -> str:
     return value.decode("ascii").strip()
 
 
-def _registrations(root: Path, servers: dict[int, str], deadline: float) -> dict:
+def _registrations(
+    root: Path, servers: dict[int, str], deadline: float,
+) -> dict[int, tuple[str, int, str]]:
     entries = []
     try:
         with os.scandir(root) as iterator:
@@ -102,6 +104,7 @@ def observe(*, timeout: float = 5) -> dict[str, int]:
     Registration absence alone cannot exclude an orphaned live server. Query
     every enumerated server, including warm servers, then recheck coverage and
     process births. No CLI, registry repair, pane command or cache is involved.
+    ``timeout`` may shorten, but never expand, the five-second total budget.
     """
     deadline = time.monotonic() + min(timeout, 5)
     root = Path(os.environ["PSMUX_DATA_DIR"]) if os.environ.get("PSMUX_DATA_DIR") else Path.home() / ".psmux"
