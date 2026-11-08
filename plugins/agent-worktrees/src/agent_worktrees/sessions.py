@@ -1484,19 +1484,9 @@ def mux_status_many(worktree_ids: list[str], *, strict: bool = False) -> dict[st
         return result
 
     if platform.system() == "Windows":
-        from agent_remote_driver.mux_observation import observe_psmux_many
+        from .psmux_observation import display_status
 
-        observations = observe_psmux_many([mux_session_name(wt_id) for wt_id in worktree_ids])
-        for wt_id in worktree_ids:
-            observation = observations[mux_session_name(wt_id)]
-            if observation.status not in {"present", "absent"}:
-                result[wt_id] = MuxInfo(observed=False)
-            else:
-                result[wt_id] = MuxInfo(
-                    exists=observation.status == "present",
-                    clients=observation.clients if observation.status == "present" else 0,
-                )
-        return result
+        return display_status(worktree_ids)
 
     all_sessions = _list_mux_sessions(strict=True) if strict else _list_mux_sessions()
     if all_sessions is not None:

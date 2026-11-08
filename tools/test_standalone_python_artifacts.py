@@ -52,6 +52,7 @@ def test_manager_embedded_metadata_covers_the_canonical_third_party_projection(t
     manager = ROOT / "worktree-manager"
     selected = helper["embedded_projects"](manager)
     assert {"agent-copilot-driver-core", "agent-repository-policy"} <= selected.keys()
+    assert "agent_remote_driver/mux_observation.py" in helper["embedded_members"](manager)
     for source in [manager, *(directory for directory, _data in selected.values())]:
         target = tmp_path / source.relative_to(ROOT) / "pyproject.toml"
         target.parent.mkdir(parents=True, exist_ok=True)

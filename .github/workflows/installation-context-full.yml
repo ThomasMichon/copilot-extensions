@@ -1851,7 +1851,16 @@ jobs:
             $version = '3.4.0'
             $digest = 'a66b6be7c13c6fa0dc3660a267b9e34eaa91a4eb7f07fbd55a0468018bd0f721'
           }
-          Invoke-WebRequest -Uri "https://github.com/psmux/psmux/releases/download/v$version/psmux-v$version-windows-x64.zip" -OutFile $archive
+          try {
+            Invoke-WebRequest -Uri "https://github.com/psmux/psmux/releases/download/v$version/psmux-v$version-windows-x64.zip" -OutFile $archive -TimeoutSec 60
+          } catch {
+            if ([int]$_.Exception.Response.StatusCode -notin @(429, 500, 502, 503, 504)) { throw }
+            Write-Host 'Retrying pinned PSMux acquisition through its public release API'
+            $release = Invoke-RestMethod -Uri "https://api.github.com/repos/psmux/psmux/releases/tags/v$version" -TimeoutSec 30
+            $assets = @($release.assets | Where-Object name -eq "psmux-v$version-windows-x64.zip")
+            if ($assets.Count -ne 1 -or $assets[0].id -le 0) { throw 'Pinned PSMux asset is unavailable' }
+            Invoke-WebRequest -Uri ("https://api.github.com/repos/psmux/psmux/releases/assets/" + [long]$assets[0].id) -Headers @{ Accept = 'application/octet-stream' } -OutFile $archive -TimeoutSec 60
+          }
           if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $digest) {
             throw 'Pinned PSMux archive digest mismatch'
           }

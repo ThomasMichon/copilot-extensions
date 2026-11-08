@@ -15,13 +15,11 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from agent_procutil import no_window_kwargs, windowless_python
+from agent_procutil import windowless_python
 
 from . import activity, locks, output, sessions_pane_retire, stale_runtime_reap, tracking
 from . import config as cfg
 from . import status_updater_cli
-from .mux_list_result import is_empty_tmux_listing, parse_monitor_sessions
-from .mux_creation import is_psmux
 from .status_monitor_python import direct_monitor_python as direct_monitor_python
 from .status_monitor_spawn import _spawn_detached as _spawn_detached
 
@@ -795,39 +793,17 @@ def _monitor_list_sessions(
     override = _core_helper("_monitor_list_sessions", _monitor_list_sessions)
     if override is not _monitor_list_sessions:
         return override(mux_bin)
-    if is_psmux(mux_bin):
-        from agent_remote_driver.mux_observation import list_psmux
+    from .status_monitor_discovery import list_sessions
 
-        observed = list_psmux()
-        if observed is None or any(o.status not in {"present", "absent"} for o in observed.values()):
-            return None
-        return {
-            name: (o.clients, o.incarnation)
-            for name, o in observed.items() if o.status == "present"
-        }
-    try:
-        r = subprocess.run(
-            [
-                mux_bin,
-                "list-sessions",
-                "-F",
-                "#{session_name}:#{session_attached}:#{session_id}:#{session_created}",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=15,
-            **no_window_kwargs(),
-        )
-    except Exception:
-        return None
-    if r.returncode != 0:
-        return {} if is_empty_tmux_listing(mux_bin, r) else None
-    if (r.stderr or "").strip():
-        return None
-    try:
-        return parse_monitor_sessions(r.stdout, strict=True)
-    except ValueError:
-        return None
+    return list_sessions(mux_bin)
+
+
+def publish_psmux_observation(live, catalog_observer, publish_rosters) -> int:
+    """Fresh observation must not reactivate cleanup-bearing periodic CLI writes."""
+    if live is not None and catalog_observer is not None:
+        catalog_observer(set(live))
+    publish_rosters()
+    return -1 if live is None else len(live)
 
 
 def _monitor_managed_session_union(
