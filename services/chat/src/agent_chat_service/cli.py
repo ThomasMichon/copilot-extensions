@@ -36,7 +36,7 @@ def configured(path: str | None) -> Client:
     return Client(GatewayTransport(config), config["actor"], config["state_dir"])
 
 
-def main(argv=None) -> int:
+def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:

@@ -12,6 +12,7 @@ import re
 import sys
 import tempfile
 import uuid
+from typing import Any, NoReturn
 
 from .client import ClientError, emit
 from .construction import _engine, client_candidate
@@ -22,7 +23,7 @@ _JOURNAL = "installation.json"
 _MAX_BYTES = 1024 * 1024
 
 
-def _refuse(message: str) -> None:
+def _refuse(message: str) -> NoReturn:
     raise ClientError("setup_refused", message)
 
 
@@ -56,7 +57,7 @@ def _read(path: Path, publication):
     return strict_json(data, max_bytes=_MAX_BYTES)
 
 
-def _write(path: Path, data: dict, publication) -> None:
+def _write(path: Path, data: dict[str, Any], publication) -> None:
     contents = json_bytes(data) + b"\n"
     if len(contents) > _MAX_BYTES:
         _refuse("Installation journal reached its supported byte bound.")
@@ -110,12 +111,12 @@ def _identity(root: Path, installation_id: str, publication, *, create: bool = F
     return data
 
 
-def _settled(data):
+def _settled(data: dict[str, Any]) -> None:
     if data["pending"] is not None:
         _refuse("An installation operation is unresolved; invoke explicit recover first.")
 
 
-def _operation(root: Path, value: dict, publication):
+def _operation(root: Path, value: dict[str, Any], publication):
     if not isinstance(value, dict) or set(value) != {
         "id", "baseline", "context", "expected", "receipts", "state",
     } or not isinstance(value["state"], str) or value["state"] not in {
@@ -174,7 +175,7 @@ def _operation(root: Path, value: dict, publication):
     return workspace, context, receipts, baseline
 
 
-def _proofs(root: Path, data: dict, publication):
+def _proofs(root: Path, data: dict[str, Any], publication):
     proofs = {root / name: [] for name in _TARGETS}
     allowed = {path: set() for path in proofs}
     for operation in data["history"]:
@@ -197,7 +198,7 @@ def _proofs(root: Path, data: dict, publication):
     return proofs
 
 
-def _owned(root: Path, data: dict, publication):
+def _owned(root: Path, data: dict[str, Any], publication):
     proofs = _proofs(root, data, publication)
     for path, states in proofs.items():
         current = publication.state_path(path)
@@ -240,7 +241,7 @@ def _config(path: Path, root: Path, publication) -> str:
     return before.digest
 
 
-def _argv(root: Path, selected: dict):
+def _argv(root: Path, selected: dict[str, Any]) -> list[str]:
     runtime = _engine().runtime
     version = selected["slot"]
     slot = root / "versions" / version
@@ -255,7 +256,7 @@ def _argv(root: Path, selected: dict):
     ]
 
 
-def status(root: Path, installation_id: str) -> dict:
+def status(root: Path, installation_id: str) -> dict[str, Any]:
     """Read local ownership only; no locks, construction, subprocess or repair."""
     publication = _publication()
     data = _identity(root, installation_id, publication)
@@ -283,7 +284,7 @@ def status(root: Path, installation_id: str) -> dict:
     return result
 
 
-def catalog(root: Path, installation_id: str) -> dict:
+def catalog(root: Path, installation_id: str) -> dict[str, Any]:
     """Derive invocation from the selected slot's independently verified catalog."""
     publication = _publication()
     data = _identity(root, installation_id, publication)
@@ -319,7 +320,7 @@ def catalog(root: Path, installation_id: str) -> dict:
 
 
 def install(root: Path, installation_id: str, *, config: Path, version: str,
-            project: Path, uv: Path, python: Path) -> dict:
+            project: Path, uv: Path, python: Path) -> dict[str, Any]:
     version = _slot_name(version)
     publication = _publication()
     root = _absolute(root)
@@ -365,7 +366,7 @@ def install(root: Path, installation_id: str, *, config: Path, version: str,
                     source, root / name, hashlib.sha256(value).hexdigest(),
                 ))
 
-            def validate():
+            def validate() -> None:
                 if _config(config, root, publication) != config_digest:
                     _refuse("Client configuration changed before publication.")
                 if data["selected"] is not None:
@@ -373,7 +374,7 @@ def install(root: Path, installation_id: str, *, config: Path, version: str,
                     if data["pending"] is None:
                         _owned(root, data, publication)
 
-            def pending():
+            def pending() -> None:
                 if data["selected"] is not None:
                     _owned(root, data, publication)
                 elif any(state is not None for state in publisher.baseline.values()):
@@ -407,7 +408,7 @@ def install(root: Path, installation_id: str, *, config: Path, version: str,
             return {"state": "selected", "selection": selection}
 
 
-def _recover(root: Path, data: dict, publication) -> None:
+def _recover(root: Path, data: dict[str, Any], publication) -> None:
     pending = data["pending"]
     if (not isinstance(pending, dict) or set(pending) != {"kind", "operation"}
             or pending["kind"] not in {"publish", "remove"}):
@@ -440,7 +441,7 @@ def _recover(root: Path, data: dict, publication) -> None:
     _write(root / _JOURNAL, data, publication)
 
 
-def recover(root: Path, installation_id: str) -> dict:
+def recover(root: Path, installation_id: str) -> dict[str, Any]:
     publication = _publication()
     data = _identity(root, installation_id, publication)
     if data is None:
@@ -452,7 +453,7 @@ def recover(root: Path, installation_id: str) -> dict:
     return {"state": "recovered", "selection": data["selected"]}
 
 
-def uninstall(root: Path, installation_id: str) -> dict:
+def uninstall(root: Path, installation_id: str) -> dict[str, Any]:
     """Withdraw only attributable selectors; preserve slots, proofs, config and data."""
     publication = _publication()
     data = _identity(root, installation_id, publication)
@@ -474,7 +475,7 @@ def uninstall(root: Path, installation_id: str) -> dict:
     return {"state": "unselected", "preserved": ["runtime-slots", "configuration", "data", "proofs"]}
 
 
-def main(argv=None) -> int:
+def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         reconfigure = getattr(stream, "reconfigure", None)
         if reconfigure is not None:

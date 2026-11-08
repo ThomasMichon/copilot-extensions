@@ -4,6 +4,10 @@ import hashlib
 import json
 import os
 from collections import Counter
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any
+
+from pytest import TestReport
 
 
 FAMILIES = {
@@ -281,7 +285,7 @@ PARAMETER_COUNTS.update({
 })
 
 
-def membership(nodes):
+def membership(nodes: Sequence[str]) -> dict[str, str]:
     """Refuse missing/new families and duplicate nodes instead of silently omitting work."""
     if len(nodes) != len(set(nodes)):
         raise ValueError("duplicate Chat qualification nodes")
@@ -296,13 +300,15 @@ def membership(nodes):
     return {node: EXPECTED[node.split("[", 1)[0]] for node in sorted(nodes)}
 
 
-def membership_digest(mapping):
+def membership_digest(mapping: Mapping[str, str]) -> str:
     return hashlib.sha256(
         json.dumps(mapping, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
 
 
-def execution_summary(mapping, profile, reports):
+def execution_summary(
+    mapping: Mapping[str, str], profile: str, reports: Iterable[TestReport],
+) -> dict[str, Any]:
     if profile not in {"acceptance", "full"}:
         raise ValueError("unknown Chat qualification lane")
     expected = {

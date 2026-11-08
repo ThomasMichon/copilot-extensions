@@ -9,6 +9,7 @@ from pathlib import Path
 import stat
 import sys
 import sysconfig
+from typing import Any, NoReturn
 
 from . import __version__
 from .client import ClientError
@@ -28,7 +29,7 @@ PACKAGE_FILES = (
 )
 
 
-def _refuse() -> None:
+def _refuse() -> NoReturn:
     raise ClientError(
         "invalid_installation",
         "Catalog requires an ordinary interpreter-local wheel installation with intact RECORD resources.",
@@ -54,7 +55,7 @@ def _resource(path: Path) -> bytes:
     return data
 
 
-def installed_catalog() -> dict:
+def installed_catalog() -> dict[str, Any]:
     """Return exact isolated argv only after checking the imported installed closure."""
     try:
         distribution = metadata.distribution("agent-chat-service")

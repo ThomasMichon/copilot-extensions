@@ -1,5 +1,5 @@
 {
-  "comment": "Annotate Chat storage and collaboration source contracts without changing request validation",
+  "comment": "Annotate Chat storage, client, transport, hosting and fixture contracts while preserving validation and native behavior",
   "changes": [
     {
       "plugin": "agent-chat-service",

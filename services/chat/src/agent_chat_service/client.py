@@ -8,7 +8,7 @@ import re
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Iterator, Protocol
 
 from .store import (
     ChatError, MAX_BODY_BYTES, MAX_PAGE_BYTES, json_bytes, strict_json, validate_request,
@@ -19,12 +19,12 @@ UNANNOTATED = object()
 
 
 class ClientError(Exception):
-    def __init__(self, code: str, message: str, *, status: int | None = None):
+    def __init__(self, code: str, message: str, *, status: int | None = None) -> None:
         super().__init__(message)
         self.code, self.message, self.status = code, message, status
 
-    def as_dict(self) -> dict:
-        result = {"error": self.code, "message": self.message}
+    def as_dict(self) -> dict[str, str | int]:
+        result: dict[str, str | int] = {"error": self.code, "message": self.message}
         if self.status is not None:
             result["status"] = self.status
         return result
@@ -33,11 +33,17 @@ class ClientError(Exception):
 class RpcTransport(Protocol):
     identity: str
 
-    def call(self, payload: dict) -> dict: ...
+    def call(self, payload: dict[str, Any]) -> dict[str, Any]: ...
+
+
+class TextOutput(Protocol):
+    def write(self, text: str) -> int: ...
+
+    def flush(self) -> None: ...
 
 
 @contextmanager
-def reader_lock(path: Path):
+def reader_lock(path: Path) -> Iterator[None]:
     """Nonblocking OS locks are released even if the client process dies."""
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     if path.is_symlink():
@@ -71,7 +77,7 @@ def reader_lock(path: Path):
                 fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
 
-def emit(value: dict, stream) -> None:
+def emit(value: dict[str, Any], stream: TextOutput) -> None:
     text = json_bytes(value).decode("utf-8") + "\n"
     if len(text.encode("utf-8")) > MAX_PAGE_BYTES:
         raise ClientError("invalid_response", "Output exceeds the response byte bound.")
@@ -80,7 +86,7 @@ def emit(value: dict, stream) -> None:
     stream.flush()
 
 
-def _atomic_json(path: Path, value: dict) -> None:
+def _atomic_json(path: Path, value: dict[str, Any]) -> None:
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
     try:
@@ -95,7 +101,7 @@ def _atomic_json(path: Path, value: dict) -> None:
             temporary.unlink()
 
 
-def _event(event: object) -> dict:
+def _event(event: object) -> dict[str, Any]:
     if not isinstance(event, dict) or set(event) != {
         "id", "channel", "timestamp", "author", "text", "request_id",
     }:
@@ -116,7 +122,9 @@ def _event(event: object) -> dict:
 
 
 class Client:
-    def __init__(self, transport: RpcTransport, actor: dict, state_dir: str | Path):
+    def __init__(
+        self, transport: RpcTransport, actor: dict[str, Any], state_dir: str | Path,
+    ) -> None:
         validate_request({"op": "join", "channel": "validation", "actor": actor})
         if (not isinstance(transport.identity, str) or not transport.identity
                 or len(transport.identity.encode("utf-8")) > 4096):
@@ -130,7 +138,7 @@ class Client:
         if self.directory.is_symlink():
             raise ClientError("invalid_state", "Redirected client namespace.")
 
-    def request(self, op: str, **fields) -> dict:
+    def request(self, op: str, **fields: Any) -> dict[str, Any]:
         payload = {"op": op, **fields}
         validate_request(payload)
         if len(json_bytes(payload)) > MAX_BODY_BYTES:
@@ -145,7 +153,7 @@ class Client:
             raise ClientError("invalid_response", "Invalid or oversized service response.") from None
         return result
 
-    def join(self, channel: str) -> dict:
+    def join(self, channel: str) -> dict[str, Any]:
         result = self.request("join", channel=channel, actor=self.actor)
         try:
             if set(result) != {"channel", "actor", "membership", "cursor"}:
@@ -163,14 +171,16 @@ class Client:
             raise ClientError("join_unconfirmed", "The service did not confirm the intended membership.") from None
         return result
 
-    def leave(self, channel: str) -> dict:
+    def leave(self, channel: str) -> dict[str, Any]:
         result = self.request("leave", channel=channel, codename=self.actor["codename"], actor=self.actor)
         if (set(result) != {"channel", "codename", "active"} or result["channel"] != channel
                 or result["codename"] != self.actor["codename"] or result["active"] is not False):
             raise ClientError("leave_unconfirmed", "The service did not confirm the intended leave.")
         return result
 
-    def wait(self, channel: str, *, timeout=300, batch_ms=250) -> dict:
+    def wait(
+        self, channel: str, *, timeout: float = 300, batch_ms: int = 250,
+    ) -> dict[str, Any]:
         result = self.request(
             "wait", channel=channel, codename=self.actor["codename"], timeout=timeout, batch_ms=batch_ms,
         )
@@ -182,7 +192,7 @@ class Client:
             raise ClientError("invalid_response", "Invalid wait metadata.")
         return result
 
-    def scan(self, **controls) -> dict:
+    def scan(self, **controls: Any) -> dict[str, Any]:
         result = self.request("scan", codename=self.actor["codename"], **controls)
         try:
             if (set(result) != {"schema", "version", "installation_id", "epoch", "codename",
@@ -232,7 +242,9 @@ class Client:
             raise ClientError("invalid_response", "Invalid body-free scan metadata; progress is not accepted.") from None
         return result
 
-    def members(self, channel: str, *, limit: int | None = None, after: str | None = None) -> dict:
+    def members(
+        self, channel: str, *, limit: int | None = None, after: str | None = None,
+    ) -> dict[str, Any]:
         controls: dict[str, int | str] = {}
         if limit is not None:
             controls["limit"] = limit
@@ -272,7 +284,7 @@ class Client:
             raise ClientError("invalid_response", "Invalid recorded membership metadata.") from None
         return result
 
-    def resolve(self, codename: str) -> dict:
+    def resolve(self, codename: str) -> dict[str, Any]:
         result = self.request("resolve", codename=codename)
         try:
             if set(result) != {"actor", "channels"} or not isinstance(result["channels"], list):
@@ -288,7 +300,7 @@ class Client:
             raise ClientError("invalid_response", "Invalid recorded actor metadata.") from None
         return result
 
-    def read(self, channel: str, stream, *, limit: int = 10) -> dict:
+    def read(self, channel: str, stream: TextOutput, *, limit: int = 10) -> dict[str, Any]:
         with reader_lock(self.directory / "reader.lock"):
             page = self.request("read", channel=channel, codename=self.actor["codename"], limit=limit)
             if (set(page) != {"channel", "codename", "cursor", "next_cursor", "messages", "more"}
@@ -324,8 +336,8 @@ class Client:
                     ) from error
             return page
 
-    def _pending(self) -> list[tuple[Path, dict]]:
-        records = []
+    def _pending(self) -> list[tuple[Path, dict[str, Any]]]:
+        records: list[tuple[Path, dict[str, Any]]] = []
         directory = self.directory / "pending-posts"
         if directory.is_symlink():
             raise ClientError("invalid_state", "Redirected pending state.")
@@ -346,7 +358,7 @@ class Client:
             records.append((path, request))
         return sorted(records, key=lambda record: record[0].name)
 
-    def status(self) -> dict:
+    def status(self) -> dict[str, Any]:
         with reader_lock(self.directory / "reader.lock"):
             pending = self._pending()
         return {
@@ -357,13 +369,13 @@ class Client:
             ],
         }
 
-    def thread(self, channel: str, event_id: int, **controls) -> dict:
+    def thread(self, channel: str, event_id: int, **controls: Any) -> dict[str, Any]:
         return self._view("thread", channel, event_id=event_id, **controls)
 
-    def inbox(self, channel: str, **controls) -> dict:
+    def inbox(self, channel: str, **controls: Any) -> dict[str, Any]:
         return self._view("inbox", channel, **controls)
 
-    def _view(self, op: str, channel: str, **controls) -> dict:
+    def _view(self, op: str, channel: str, **controls: Any) -> dict[str, Any]:
         from .collaboration import normalize, validate_view
 
         result = self.request(op, channel=channel, codename=self.actor["codename"], **controls)
@@ -457,10 +469,12 @@ class Client:
             raise ClientError("invalid_response", "Invalid non-consuming collaboration view.") from None
         return result
 
-    def post(self, channel: str, text: str, request_id: str, *, collaboration=UNANNOTATED) -> dict:
+    def post(
+        self, channel: str, text: str, request_id: str, *, collaboration: object = UNANNOTATED,
+    ) -> dict[str, Any]:
         from .collaboration import normalize
 
-        request = {
+        request: dict[str, Any] = {
             "op": "post", "channel": channel, "codename": self.actor["codename"],
             "text": text, "request_id": request_id,
         }

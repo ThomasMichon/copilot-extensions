@@ -572,7 +572,13 @@
         "services/chat"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "pending",
+      "import_roots": [
+        "services/chat/tests",
+        "libs/agent-procutil/tests",
+        "libs/versioned-runtime",
+        "tools"
+      ]
     },
     {
       "name": "service-dispatch",
