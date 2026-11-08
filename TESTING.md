@@ -191,6 +191,19 @@ establish installed or whole-roster throughput.
 The stage profile, baseline comparison and prepared cold-process tests emit
 their reports with ordinary pytest capture enabled; no `-s` or `-rP` is needed.
 
+The Windows pre-tool packet selects `native_entry or json_engine_parity` in
+`tests/test_pre_tool_native_entry.py`, with `COPILOT_TEST_HOOK_PRE_PYTHON`
+naming the contained runner's dependency-ready interpreter. Its admitted
+policy fixtures retain the complete managed JSON module but isolate membership;
+`registered_pre_tool_entry` in `tests/test_managed_session.py` separately
+exercises the unchanged registered command and actual prepared membership,
+raw-input forwarding and revocation. The PS7 decoder comparison reports
+cmdlet/native/cmdlet first-use samples after assembly-only admission preparation,
+without utility-cmdlet preloading. It also rejects JSON cmdlet use by the
+production decoder and verifies structured-value and malformed-input parity.
+Child/item/group limits remain 10/30/300 seconds. These finite synthetic
+measurements are not installed, composed-hook or productive-throughput proof.
+
 `python-selection-native.yml` supplies real Python 3.9 and supported Python
 side by side on a disposable hosted Windows runner. Its `TEST_PYTHON39` input
 names the existing 3.9 executable explicitly and is version-checked before
