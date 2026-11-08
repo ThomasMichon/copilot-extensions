@@ -707,6 +707,29 @@ def test_claim_held_rearm_waits_for_coordinator_capability(assignment, independe
     assert queue.get_reservation(reservation.key).conclusion_state == "pending"
 
 
+def test_claim_held_rearm_tolerates_coordinator_transport_failures(
+    assignment, independent_readiness,
+):
+    from agent_dispatch.supervisor_relationship_settlement import rearm_claim_held_cleanup
+
+    queue, owner, workspace, task = assignment
+    reservation, held_detail = _settled_retired_attempt(queue, workspace, task)
+    queue.retire_spawn(
+        reservation.key, exact_absence=True, conclusion_state="held",
+        conclusion_detail=held_detail,
+    )
+    queue.confirm(task.id)
+
+    def timed_out(*_args, **_kwargs):
+        raise httpx.ReadTimeout("coordinator timed out")
+
+    supervisor = _rearm_supervisor(queue, task, {CLAIM_HELD_REARM_CAPABILITY: 1}, timed_out)
+    assert rearm_claim_held_cleanup(supervisor) == 0
+    supervisor.client.health = timed_out
+    assert rearm_claim_held_cleanup(supervisor) == 0
+    assert queue.get_reservation(reservation.key).conclusion_state == "held"
+
+
 def test_claim_held_rearm_bounds_attempts_and_rotates_past_failures():
     from agent_dispatch.client import DispatchError
     from agent_dispatch.supervisor import Supervisor

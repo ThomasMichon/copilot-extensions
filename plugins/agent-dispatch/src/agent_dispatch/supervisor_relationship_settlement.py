@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import httpx
+
 from .client import DispatchError
 from .queue import SpawnState, Status
 from .queue_spawn_conclusion import CLAIM_HELD_REARM_CAPABILITY, claim_blocked_rearm_payload
@@ -59,7 +61,7 @@ def _rearm_supported(supervisor: Any) -> bool:
     """
     try:
         health = supervisor.client.health()
-    except DispatchError:
+    except (DispatchError, httpx.TransportError):
         return False
     if isinstance(health, dict) and health.get(CLAIM_HELD_REARM_CAPABILITY) == 1:
         return True
@@ -101,7 +103,7 @@ def rearm_claim_held_cleanup(supervisor: Any) -> int:
         supervisor._claim_held_rearm_cursor = key
         try:
             task = supervisor.client.get(res["task_id"])
-        except DispatchError:
+        except (DispatchError, httpx.TransportError):
             continue
         if task.get("status") != Status.COMPLETED or not supervisor._matches_pool(task):
             continue
@@ -111,7 +113,7 @@ def rearm_claim_held_cleanup(supervisor: Any) -> int:
             supervisor._conclusion_client.rearm_claim_held_conclusion(
                 key, expected_detail=res["conclusion_detail"],
             )
-        except DispatchError:
+        except (DispatchError, httpx.TransportError):
             log.exception("could not re-arm claim-held cleanup for %s", key)
             continue
         rearmed += 1

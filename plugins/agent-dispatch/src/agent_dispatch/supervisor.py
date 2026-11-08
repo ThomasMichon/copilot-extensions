@@ -1437,7 +1437,10 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         """Retire proven-absent bodies and preserve cleanup obligations."""
         now = time.time() if now is None else now
         released = 0
-        rearm_claim_held_cleanup(self)
+        try:
+            rearm_claim_held_cleanup(self)
+        except (DispatchError, httpx.TransportError):
+            log.warning("claim-held cleanup sweep failed; retrying next cycle", exc_info=True)
         reservations = self._pool_reservations(
             state=(
                 f"{SpawnState.RESERVING},{SpawnState.SPAWNED},"
