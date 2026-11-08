@@ -4094,13 +4094,14 @@ class _ResidentHookPolicy:
             return {}
         return {"additionalContext": text} if text else {}
 
-    def native_batch_targets(self, payload: dict) -> list[str] | None:
+    def native_batch_targets(self, payload: dict, *, include_shell: bool = False) -> list[str] | None:
         from .hook_ipc import HookUnavailable
 
-        forms = self._module("tool_call_forms.py")
-        if forms is None:
+        if (forms := self._module("tool_call_forms.py")) is None:
             raise HookUnavailable
         try:
+            if include_shell:
+                return forms.mixed_mutation_targets(payload, allowed_tools=_HOOK_WRITE_TOOLS | _HOOK_SHELL_TOOLS | {"view", "rg", "glob"}, classify=self.mutation_targets)
             return forms.native_mutation_targets(payload, write_tools=_HOOK_WRITE_TOOLS, cwd=_hook_payload_cwd(payload))
         except ValueError as exc:
             raise HookUnavailable from exc
@@ -4146,10 +4147,11 @@ def _resident_hook_decision(
     if kind == "preToolUse":
         return policy.pre(payload)
 
-    if kind in {"nativeToolMutation", "nativeToolBatchMutation", "shellToolMutation"}:
+    if kind in {"nativeToolMutation", "nativeToolBatchMutation", "shellToolMutation", "mixedToolBatchMutation"}:
         tool = payload.get("toolName") or payload.get("tool_name")
-        if (kind == "nativeToolBatchMutation" and "toolCalls" not in payload) or (
-            kind != "nativeToolBatchMutation" and (
+        batch = kind in {"nativeToolBatchMutation", "mixedToolBatchMutation"}
+        if (batch and "toolCalls" not in payload) or (
+            not batch and (
                 not isinstance(tool, str) or tool.lower() not in (
                     _HOOK_SHELL_TOOLS if kind == "shellToolMutation" else _HOOK_WRITE_TOOLS
                 )
@@ -4159,7 +4161,7 @@ def _resident_hook_decision(
             from .hook_ipc import HookUnavailable
 
             raise HookUnavailable
-        targets = policy.native_batch_targets(payload) if kind == "nativeToolBatchMutation" else policy.mutation_targets(payload)
+        targets = policy.native_batch_targets(payload, include_shell=kind == "mixedToolBatchMutation") if batch else policy.mutation_targets(payload)
         if targets is None:
             segment_cache.invalidate_all()
         else:

@@ -217,7 +217,7 @@ database, thread and transport controls remain outside required unit-only CI.
 
 Worktrees' opt-in `--test-file tests/test_post_tool_shell.py --test-file
 tests/test_hook_ipc.py --test-file tests/test_status_monitor.py
---allow-explicit-tiers -k "native_mutation or
+--allow-explicit-tiers -k "native_mutation or mixed_batch or
 registered_post_hook_reuses_original_prepared_membership or
 registered_read_demand_is_send_only or handoff_wake_kind_actually_wakes"`
 packet exercises real registered Windows PowerShell 5.1/7 entries with original
@@ -241,16 +241,34 @@ demand does not trigger a mutation sweep and unadmitted events have no effect.
 The portable unit packet additionally exercises the original send-only handler
 and mutation-only parser with synthetic inputs; it is not native evidence.
 
+The same packet's `mixed_batch` controls prove complete validation before
+classification or invalidation, original native/shell semantics, aggregate
+target overflow, read-only no-wake and live managed admission. The registered
+consumer's `mixed-` cases cover targeted writes beside shell reads,
+conservative shell writes/unknown arguments, separate capability rollback,
+wrong-generation/closed/missing discovery, wire overflow and a non-replying
+peer. Unit-only CI adds twelve in-memory mixed-notification boundary cases and two
+original-normalizer aggregation/refusal cases;
+real shell/IPC/monitor execution stays in the explicit packet.
+
 The separately path-gated `prepared-membership-native.yml` lane also selects
 `tests/test_post_tool_shell.py -k registered_prepared_cell` on Windows.
 Actual stamped cells, original membership/binding/current-row publishers and
-the registered PowerShell 5.1/7 entry compose read/native/batch/single-shell
+the registered PowerShell 5.1/7 entry compose read/native/batch/single-shell/mixed
 notifications. It checks installation-scoped discovery, changed-byte refusal,
 old membership routing, missing rows, live reminder opt-out, late guidance
 and non-replying peers. Warm interpreter/client and synchronous requests are
 trapped; incompatible membership explicitly retains its original admission
-lookup. Original 30-second item, 10-second child, 300-second group and 50-ms
-production-send limits remain unchanged. These are isolated source consumers,
+lookup. Original 30-second item, 10-second child and 300-second group limits
+remain unchanged. The Windows production sender shares a 100-ms allocation/
+connect/write ceiling, subtracting elapsed time from both waits. Controlled-clock
+and transport-adapter tests execute the real sender/encoder to prove the
+remaining connection/write allowances and refusal after budget exhaustion;
+these are deadline arithmetic controls, not native delivery/performance samples.
+The uninstrumented cold-process tail cases run three separate shell processes
+per group across four fresh fixtures per shell, retain every real receiver/
+accounting assertion, and report entry and complete-process durations.
+These 24 observations are not a p99 or worst-case distribution. These are isolated source consumers,
 not installed, cold/directory/POSIX/recovery, composed or throughput acceptance.
 
 The path-gated, manually dispatchable legacy-monitor native lane also runs

@@ -237,15 +237,21 @@ qualified installation-cell subset below.
 The version-1 notification contains only `version`, `kind`, `token`,
 `hook_generation` and `deadline`; it carries no tool arguments, session content
 or mutation targets. It is at most 2 KiB, newline terminated, and uses one
-loopback connection with a combined 50 ms connect/write wait. The shell
+loopback connection with a combined 100 ms allocation/connect/write wait. The shell
 disposes that connection without reading any response. Missing, malformed,
 wrong-installation or old discovery skips the optional send. A connection or
 write failure has unknown acceptance and is not retried, replayed through
 another endpoint or replaced by Python. Provider rollback therefore retains
 the shell-safe advisory baseline, not a blocking compatibility call.
+The sender allocates an explicitly IPv4 client for its IPv4-only loopback
+endpoint, avoiding the modern runtime's default dual-mode socket selection.
+Client allocation remains inside the send clock. Both connection and write
+waits subtract the elapsed time; allocation cannot receive a separate wait
+allowance. The 100-ms ceiling gives cold framework initialization headroom
+without making the hook wait for a response or adding a retry.
 The sender first checks the runtime's IPv4 support. That capability query can
 initialize the socket subsystem on first use; its cost is part of whole-hook
-entry, not the 50-ms client-allocation/connect/write clock. No probe connection
+entry, not the 100-ms client-allocation/connect/write clock. No probe connection
 or request is made by this preflight, and it does not establish receiver readiness.
 
 Only the advertised process generation can accept the notice. The receiver
@@ -277,7 +283,7 @@ token, process generation and one-second deadline envelope as read demand,
 plus `payload`. That payload contains only the event's tool name, arguments,
 current admitted workspace and session; tool results are not transmitted.
 The newline-terminated wire is bounded to 64 KiB, with the same combined
-50 ms connect/write wait and no response, retry or uncertain-event replay.
+100 ms allocation/connect/write wait and no response, retry or uncertain-event replay.
 Absent, old or invalid discovery and an oversized notification skip the
 optional send, not shell advisory evaluation.
 
@@ -313,7 +319,7 @@ separately. The existing 1 MiB event and live prepared-membership bounds remain.
 The original receiver separately advertises `native-hook-batch-mutation-v1`.
 One send-only `nativeToolBatchMutation` carries the batch plus the original
 event workspace/session fields, not tool results. The 64 KiB wire limit,
-process-generation/token/deadline validation, combined 50 ms connect/write
+process-generation/token/deadline validation, combined 100 ms allocation/connect/write
 wait, current admission/state lock and no-reply/no-retry semantics are the
 same as single native mutations. New consumers skip the optional notice when
 old discovery advertises only single-write support; they do not reinterpret
@@ -333,8 +339,38 @@ invalidate their targets and use the original mutation wake.
 Reminders and late-guidance consumption run once per outer event, not per
 call. No current event is replayed, and a lost notification retains the
 existing refresh backstop rather than asserting fresh status. This source
-consumer does not qualify shell batches, installed behavior, cold/unprepared-cell/POSIX
+consumer does not qualify shell batches outside the mixed subset below, installed behavior, cold/unprepared-cell/POSIX
 entry, complete hook composition or actual throughput.
+
+### Windows mixed-batch consumer
+
+A prepared Windows batch may also contain the original shell aliases together
+with native writes and `view`, `rg` or `glob`. The complete strict shape, 128-call
+limit, canonical event/workspace/argument normalization and once-per-outer-event
+advisory accounting are unchanged. Unknown tools, extra per-call fields,
+malformed calls and empty/oversized batches retain the entire prior route.
+The outer tool name never overrides the batch's actual calls.
+
+The original receiver separately advertises `mixed-hook-batch-mutation-v1`.
+One send-only `mixedToolBatchMutation` uses the existing 64 KiB wire,
+generation/token/deadline, selected-installation, live admission, state-lock and
+100-ms allocation/connect/write contracts. Native-only batch or single-shell capabilities
+do not establish mixed-batch support. Missing support skips the optional
+notification while preserving shell advisory evaluation, not a blocking fallback.
+
+Before any effect, the receiver validates every call through the original
+strict normalizer and then reuses the native target extractor and single-shell
+mutation classifier. Read-only shells do not hide native targets; any
+conservatively mutating shell or aggregate target overflow invalidates all.
+Otherwise targets are deduplicated across the complete batch with a shared
+128-target bound. Entirely read-only batches renew idle demand without a sweep
+wake. Permission policy and legacy `postToolUse` behavior remain unchanged.
+
+No commands are executed to classify a batch. There is no reply, retry,
+current-event replay, new publisher, boot operation or durable notification.
+Lost delivery retains the existing refresh backstop and does not certify fresh
+status. These source consumers cover prepared legacy and eligible installation
+cells, not cold/directory/POSIX entry, installed composition or actual throughput.
 
 ### Windows single-shell consumer
 
@@ -344,9 +380,9 @@ separately advertises `shell-hook-mutation-v1`; a `shellToolMutation` carries
 the tool, original argument fields, workspace and session, without tool results.
 Native-write support alone is not shell support. The same 1 MiB event,
 64 KiB newline-terminated wire, one-second generation-qualified deadline and
-combined 50 ms connect/write bound apply. Missing/old discovery skips the
+combined 100 ms allocation/connect/write bound apply. Missing/old discovery skips the
 optional send. No reply, interpreter fallback, retry or event replay follows.
-Mixed shell/native batches retain their prior path.
+Mixed shell/native batches have the separately negotiated consumer below.
 
 The receiver reuses the original guard argument normalizer, including JSON
 strings and raw command strings. Its mutation-only classifier composes the
@@ -441,8 +477,9 @@ namespaces, oversized events and unsupported batches retain their original
 entry route. This warm-path migration does not remove or qualify their
 Python fallback. A qualified warm event with unavailable/old discovery
 stays shell-only and skips the optional notification without retry or replay.
-The existing 1-MiB event/membership, 16-KiB discovery/fact and 50-ms send
-bounds remain unchanged. Source-native controls are not installed,
+The existing 1-MiB event/membership and 16-KiB discovery/fact bounds remain;
+the Windows sender shares the 100-ms allocation/connect/write ceiling above.
+Source-native controls are not installed,
 composed-latency, POSIX, recovery or actual-throughput acceptance.
 
 ### Prepared Windows membership reuse
