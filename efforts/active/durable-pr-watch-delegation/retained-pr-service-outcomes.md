@@ -7,7 +7,7 @@ Retained open keeper: #6007. Per-origin adoption/fleet outcomes: #6286/#7188.
 
 Retain the complete originals, refinements and inherited acceptance, not only
 the umbrella names. All 54 existing checked source/documented-qualification
-baselines stay credited at their actual tiers. New unchecked retention rows
+baselines stay credited at their actual tiers. Unchecked retention rows
 below do not reopen delivered source or assert installed/provider/image/fleet
 success. #6286's selected installed-adoption exit remains narrower than
 #7188's broader fleet acceptance.
@@ -25,7 +25,7 @@ success. #6286's selected installed-adoption exit remains narrower than
   without persistence, original-ID reconciliation before fallback, positive
   finite delegated deadlines, ordinary/arbitrary-command wait alternatives,
   independent installation and attributable optional discovery.
-- [ ] `O6007-source-and-release-credit`: Credit #6019, #7160/#7240, #7714
+- [x] `O6007-source-and-release-credit`: Credit #6019, #7160/#7240, #7714
   and #7291/#7751 at their actual source/native/release scopes. Do not
   resurrect old open-review/release holds or call those milestones installed
   deployment.
@@ -40,20 +40,34 @@ success. #6286's selected installed-adoption exit remains narrower than
 
 ### #6286 - Selected cell and governed-owner prerequisite
 
-- [ ] `O6286-canonical-cells-no-fallback`: Preserve canonical installation-
+Release #11489, authorized unified rollout, four installed-profile cases and
+native run `42461516789` at the identical released tree qualify this finite
+installed prerequisite. Its 15 selected jobs account for 116 passing tests;
+seven Windows-only controls skipped on Linux pass on Windows. Positive macOS
+governed lifecycle remains #11545 under the tested native fail-closed
+disposition. No live delegation, whole-service/fleet completion or resource
+release follows from this credit.
+
+The lease-only evidence exercises post-installation serving activation against
+a concrete held writer; the incoming runtime is already installed and selected.
+It does not turn outgoing retirement into code-installation completion or claim
+that every installer realizes
+[authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement).
+
+- [x] `O6286-canonical-cells-no-fallback`: Preserve canonical installation-
   context payload, installer/bootstrap/runtime/state roots and receipts,
   same-cell peer launch and supported legacy behavior without silent
   downgrade, ambient peer discovery, secrets, fake receipts or a new service.
-- [ ] `O6286-finite-adoption-matrix`: Retain shipped-payload first-touch/
+- [x] `O6286-finite-adoption-matrix`: Retain shipped-payload first-touch/
   upgrade, invalid/foreign refusal, two-cell isolation, actual owner
   invocation, pending subscriptions and installed-contract acceptance before
   cell delegation.
-- [ ] `O6286-governed-owner-custody`: Keep the explicitly selected reviewed
+- [x] `O6286-governed-owner-custody`: Keep the explicitly selected reviewed
   graceful cutover: inactive construction/read-ready reload, budget-bound
   complete quiescence, same-owner resume, exact-instance activation/recovery,
   first lease-only upgrade refusal and one writer across drain/adoption.
   Do not substitute a stop/start exemption.
-- [ ] `O6286-superseded-hold-and-narrow-exit`: Credit #7160/#7240 source/native
+- [x] `O6286-superseded-hold-and-narrow-exit`: Credit #7160/#7240 source/native
   and #7291/#7751 release; #7208 is a tracked observation, not a renewed
   investigation merge veto. Retain this prerequisite's own installed exit,
   not every later #7188 fleet duty.
@@ -124,7 +138,7 @@ success. #6286's selected installed-adoption exit remains narrower than
   precommit rollback versus postcommit forward recovery and old-cleanup
   refusal. Unprovable lease-only owner means refusal, not stop/start or a new
   one-time authority surface.
-- [ ] `CELL-INSTALLED-EXIT`: Retain #6286's own complete installed prerequisite
+- [x] `CELL-INSTALLED-EXIT`: Retain #6286's own complete installed prerequisite
   before cell delegation: canonical roots/receipts/no downgrade, shipped
   same-cell owner invocation, first-touch/upgrade, invalid/foreign refusal,
   two-cell isolation and subscription recovery.
@@ -171,7 +185,7 @@ current root and linked contract matrices.
 - [ ] `V-O6007-negotiation-credentials-fallback`: Qualify actual negotiation,
   explicit token/control behavior, original-ID-before-fallback, supported
   no-timeout native subscriptions and independent attributed installation.
-- [ ] `V-O6007-source-and-release-credit`: Retain source/release milestones
+- [x] `V-O6007-source-and-release-credit`: Retain source/release milestones
   separately from configured installed credentials and authorized running
   consumer/fleet proof; do not reinstate superseded holds.
 - [ ] `V-O6007-accepted-full-expansion`: Preserve the accepted complete
@@ -179,13 +193,13 @@ current root and linked contract matrices.
 - [ ] `V-O6007-whole-remaining-not-source-only-close`: Score original installed,
   credential, running-consumer, fleet/client/container and closure duties
   separately from source completion.
-- [ ] `V-O6286-canonical-cells-no-fallback`: Exercise actual canonical roots,
+- [x] `V-O6286-canonical-cells-no-fallback`: Exercise actual canonical roots,
   shipped same-cell owner and legacy compatibility without silent downgrade.
-- [ ] `V-O6286-finite-adoption-matrix`: Retain first-touch/upgrade, invalid/
+- [x] `V-O6286-finite-adoption-matrix`: Retain first-touch/upgrade, invalid/
   foreign refusal, two-cell isolation and pending-subscription evidence.
-- [ ] `V-O6286-governed-owner-custody`: Preserve complete governed drain,
+- [x] `V-O6286-governed-owner-custody`: Preserve complete governed drain,
   writer/identity/recovery controls and original installed acceptance.
-- [ ] `V-O6286-superseded-hold-and-narrow-exit`: Credit source/native/release
+- [x] `V-O6286-superseded-hold-and-narrow-exit`: Credit source/native/release
   and retain #7208 as tracked residual, not an old merge veto or all-fleet gate.
 - [ ] `V-O7188-direct-extension-not-replacement`: Qualify the original complete
   extension without replacing reliable delegation/adoption/cutover.
@@ -224,7 +238,7 @@ current root and linked contract matrices.
 - [ ] `V-CELL-RECOVERY-IDENTITY`: Cover writer-transfer/marker-CAS/route/
   retirement failures, governance withdrawal and actual identity-bound
   termination negatives. No name/path/PID-text substitute or second writer.
-- [ ] `V-CELL-INSTALLED-EXIT`: Retain source/native plus release credit and
+- [x] `V-CELL-INSTALLED-EXIT`: Retain source/native plus release credit and
   original installed acceptance, Windows/Linux and declared macOS proof
   **OR** justified exemption with fail-closed fallback/named follow-up.
   Unavailable authorized live/clean-room lanes retain exact reasons.
@@ -267,19 +281,19 @@ age, source receipt, empty assignees or this paper intake.
   delegation objective and actual watch/dispatch ownership.
 - [ ] `C-O6007-negotiation-credentials-fallback`: Retain caller/owner
   credential and supported fallback responsibilities.
-- [ ] `C-O6007-source-and-release-credit`: Preserve finite delivery credit
+- [x] `C-O6007-source-and-release-credit`: Preserve finite delivery credit
   without releasing the whole original reservation.
 - [ ] `C-O6007-accepted-full-expansion`: Keep one operator and the existing
   same-effort scope expansion, not a new controller.
 - [ ] `C-O6007-whole-remaining-not-source-only-close`: Keeper #6007 remains
   open for its complete original/refined/inherited objective.
-- [ ] `C-O6286-canonical-cells-no-fallback`: Preserve actual installer/cell/
+- [x] `C-O6286-canonical-cells-no-fallback`: Preserve actual installer/cell/
   governance ownership and the leaf's own finite exit.
-- [ ] `C-O6286-finite-adoption-matrix`: Retain selected installed acceptance,
+- [x] `C-O6286-finite-adoption-matrix`: Retain selected installed acceptance,
   not every later fleet obligation.
-- [ ] `C-O6286-governed-owner-custody`: Preserve original transition and
+- [x] `C-O6286-governed-owner-custody`: Preserve original transition and
   one-writer custodians without a stop/start waiver.
-- [ ] `C-O6286-superseded-hold-and-narrow-exit`: Keep #7208's tracked
+- [x] `C-O6286-superseded-hold-and-narrow-exit`: Keep #7208's tracked
   observation and actual remaining leaf exit; do not restore its old hold.
 - [ ] `C-O7188-direct-extension-not-replacement`: Preserve the existing
   planning/consumer-adapter slice and surrounding domain owners.
@@ -310,7 +324,7 @@ age, source receipt, empty assignees or this paper intake.
 - [ ] `C-CELL-RECOVERY-IDENTITY`: Keep canonical installer/lifecycle custody,
   legacy compatibility and generation-fenced replay, not exactly-once process
   execution.
-- [ ] `C-CELL-INSTALLED-EXIT`: Do not attach whole #7188 scope to #6286 or
+- [x] `C-CELL-INSTALLED-EXIT`: Do not attach whole #7188 scope to #6286 or
   treat old #7208 history as an unpause/update grant.
 - [ ] `C-SERVICE-SCOPED-BINDING`: Credit delivered v2/scoped replay without
   treating an old proposal as another implementation or production activation.
