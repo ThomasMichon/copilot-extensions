@@ -12,6 +12,27 @@ from .review_workspace import _digest, _scope, _section
 from .watch_replay_store import ReplayStore
 
 
+def contract() -> dict:
+    """Optional executing-receiver support, not storage adoption or freshness."""
+    return {
+        "protocol": "agent-pull-requests.comment-observation/v1",
+        "result_protocol": "agent-pull-requests.prepared-comment-observation/v1",
+        "generation_versions": [1], "effects": "none", "original_version_proof": False,
+    }
+
+
+def supports(value: object) -> bool:
+    expected = contract()
+    return (
+        isinstance(value, dict) and set(value) == set(expected)
+        and value["protocol"] == expected["protocol"]
+        and value["result_protocol"] == expected["result_protocol"]
+        and type(value["generation_versions"]) is list and len(value["generation_versions"]) == 1
+        and type(value["generation_versions"][0]) is int and value["generation_versions"] == [1]
+        and value["effects"] == "none" and value["original_version_proof"] is False
+    )
+
+
 def observe_prepared_comment(
     store: ReplayStore, cache: GenerationCache, operation_id: str, scope: dict,
     action_id: str, generation_id: str, *, expires_at: int,
@@ -20,7 +41,8 @@ def observe_prepared_comment(
     """Select through the existing owners; no acquisition, write or feedback progress.
 
     The embedding supplies its authenticated scope and existing storage owners,
-    not caller-asserted execution authority. No workspace wire operation is added.
+    not caller-asserted execution authority. The optional workspace receiver
+    owns negotiation of its separate wire operation.
     """
     scope = _scope(scope)
     review_intent.text(action_id, 128)
@@ -43,7 +65,7 @@ def observe_prepared_comment(
         raise ValueError("selected review action missing")
     state = next(row for row in operation["actions"] if row["id"] == action_id)
     result = {
-        "protocol": "agent-pull-requests.prepared-comment-observation/v1",
+        "protocol": contract()["result_protocol"],
         "operation_id": operation_id, "action_id": action_id, "scope": scope,
         "intent_id": operation["intent_id"], "action_state": state["state"],
         "receipt": copy.deepcopy(state["receipt"]),

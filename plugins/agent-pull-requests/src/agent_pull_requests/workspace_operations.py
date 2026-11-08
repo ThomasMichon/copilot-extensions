@@ -22,6 +22,10 @@ from .owner_read import OwnerReadBudgetExceeded, OwnerReadHandler, REQUEST_SCHEM
 from .review_executor import execute_review
 from .review_feedback import FeedbackInputs
 from .review_intent import identifier
+from .review_comment_observation import (
+    contract as comment_observation_contract, observe_prepared_comment,
+    supports as supports_comment_observation,
+)
 from .workspace_selection import (
     allocate_selection, needs_owned_edits, owned_edit_contract, selection_contract,
     supports_owned_edits, supports_selection,
@@ -31,7 +35,7 @@ from .review_workspace import MAX_GENERATION_BYTES, _generation, _scope, compare
 PROTOCOL = "agent-pull-requests.workspace/v1"
 CHUNK_BYTES = 8192
 OPERATIONS = ("capabilities", "load", "sync", "lookup", "chunk", "inspect", "submit", "events", "receipt",
-              "allocate")
+              "allocate", "observe-comment")
 
 
 def prepared_review_contract() -> dict[str, object]:
@@ -54,7 +58,7 @@ def supports_prepared_review(value: object) -> bool:
 
 
 def needs_prepared_review(operation: str, payload: object) -> bool:
-    return operation == "receipt" or (
+    return operation in ("receipt", "observe-comment") or (
         operation == "submit" and isinstance(payload, dict) and isinstance(payload.get("intent"), dict)
         and payload["intent"].get("version") == 2
     )
@@ -194,6 +198,7 @@ class WorkspaceOperations:
             "chunk": ({"number", "generation_id", "offset"}, set()),
             "inspect": ({"number", "operation_id"}, set()),
             "receipt": ({"number", "operation_id", "action_id"}, set()),
+            "observe-comment": ({"number", "operation_id", "action_id", "generation_id"}, set()),
             "submit": ({"number", "intent", "source_attachment", "budget_seconds"}, set()),
             "allocate": ({"number", "intent", "source_attachment", "budget_seconds"}, set()),
             "events": ({"number", "after", "limit"}, set()),
@@ -240,7 +245,7 @@ class WorkspaceOperations:
                     name for name in OPERATIONS
                     if (name != "submit" or self.write_available)
                     and (name != "events" or self.conversations)
-                    and (name != "receipt" or prepared)
+                    and (name not in ("receipt", "observe-comment") or prepared)
                     and (name != "allocate" or selection)
                 ],
                 "generation_versions": [1], "owner_store_versions": [2],
@@ -251,6 +256,7 @@ class WorkspaceOperations:
                 **({"read_acquisition": self.read_owner.profile}
                    if isinstance(self.read_owner, NativeReadHandler) else {}),
                 **({"prepared_review_contract": prepared_review_contract()} if prepared else {}),
+                **({"comment_observation_contract": comment_observation_contract()} if prepared else {}),
                 **({"selection_contract": selection_contract()} if selection else {}),
                 **({"owned_edit_selection_contract": owned_edit_contract()}
                    if selection and self.selection_owned_edits is True else {}),
@@ -365,6 +371,13 @@ class WorkspaceOperations:
                 payload["operation_id"], scope, payload["action_id"],
                 expires_at=expires_at, checkpoint=check,
             )
+        elif operation == "observe-comment":
+            if self.prepared_reviews is not True:
+                raise WorkspaceUnavailable("prepared comment observation receiver unavailable")
+            result = observe_prepared_comment(
+                self.store, cache, payload["operation_id"], scope, payload["action_id"],
+                payload["generation_id"], expires_at=expires_at, checkpoint=check,
+            )
         else:
             if not self.write_available:
                 raise WorkspaceUnavailable("existing protected write context unavailable")
@@ -477,6 +490,7 @@ class NativeWorkspaceClient:
         self._prepared_contract: object = None
         self._selection_contract: object = None
         self._owned_edit_contract: object = None
+        self._observation_contract: object = None
         self._prepared_lock = threading.Lock()
         self._discovery_epoch = 0
 
@@ -498,6 +512,13 @@ class NativeWorkspaceClient:
                 self._prepared_contract = None
                 self._selection_contract = None
                 self._owned_edit_contract = None
+                self._observation_contract = None
+        if operation == "observe-comment":
+            current()
+            with self._prepared_lock:
+                supported = supports_comment_observation(self._observation_contract)
+            if not supported:
+                raise WorkspaceUnavailable("comment observation capability required")
         if operation == "allocate":
             current()
             with self._prepared_lock:
@@ -526,6 +547,10 @@ class NativeWorkspaceClient:
                 self._prepared_contract = copy.deepcopy(result.get("prepared_review_contract"))
                 self._selection_contract = copy.deepcopy(result.get("selection_contract"))
                 self._owned_edit_contract = copy.deepcopy(result.get("owned_edit_selection_contract"))
+                self._observation_contract = (
+                    copy.deepcopy(result.get("comment_observation_contract"))
+                    if "observe-comment" in result.get("operations", []) else None
+                )
         return result
 
     def materialize(self, number, generation_id, *, checkpoint=None):
