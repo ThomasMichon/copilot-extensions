@@ -1,0 +1,9 @@
+{
+  "comment": "Offer guarded Finalize across worktree menus and retain complete refusal details",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
