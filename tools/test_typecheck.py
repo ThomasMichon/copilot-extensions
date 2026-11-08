@@ -35,7 +35,7 @@ def _isolated_scratch(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pyt
     monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(tmp_path_factory.mktemp("scratch")))
 
     def resource_path(root: Path) -> Path:
-        if root.resolve() != typecheck.ROOT:
+        if root.resolve() != typecheck.ROOT.resolve():
             return real(root)
         with monkeypatch.context() as scoped:
             if original is None:

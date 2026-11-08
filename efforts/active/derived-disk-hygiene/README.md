@@ -138,15 +138,19 @@ claims the worktree's agent must close out before finalize.
       remain after Track A). Legacy unmarked dirs stay Track A's job.
 
 ### Track D — Labeled scratch and lock hygiene (#10968)
-- [ ] Shared `labeled_scratch(prefix, purpose)` helper that creates a
+- [x] Shared `labeled_scratch(prefix, purpose)` helper that creates a
       timestamped dir with `scratch-owner.json` (owner refs, created,
-      purpose, retention) and removes it on context exit.
-- [ ] `agbridge-host-*` mkdtemp fallback in copilot-driver-core uses it and
-      cleans up on host exit.
-- [ ] Instruction-projection lock files move under owner state and are
-      unlinked after release.
-- [ ] Identify the root-level `.lock` producer by name pattern and fix it.
-- [ ] Report-only `scratch report` listing unlabeled/orphaned temp dirs
+      purpose, retention) with link-safe, bounded cleanup.
+- [x] Bridge Host fallback labeling and confirmed-refusal cleanup; preserve
+      uncertain launches and unsettled lifecycle state for recovery.
+- [ ] Mixed-version-safe projection-lock migration under #10968. Stable
+      legacy locks remain under `copilot-instruction-projections`; relocating
+      or unconditionally unlinking them would split waiter lock identities.
+      The original unlink-after-release approach was rejected, not completed.
+- [x] Redirect UV's per-source `uv-setuptools-*.lock` producer to build-local
+      temporary directories in `installer_source_build.py` and
+      `tools/build_python_artifacts.py`, including vendored copies.
+- [x] Report-only `scratch report` listing unlabeled/orphaned temp dirs
       (no automatic deletion).
 
 ## Validation Plan
@@ -207,3 +211,14 @@ The per-track Plan and Validation Plan define implementation and acceptance.
 - No installed-runtime rollout or real-cache pruning ran. The 24-hour
   creation-rate observation is still pending an authorized rollout; a
   source merge does not start that measurement or prove deployment.
+
+### 2026-11-08 — Track D merged
+- #11125 merged to `dev` as `cf5fcfe008e7b694720c54f634f558b637a3b496`
+  with exact-head approval, required CI green and no open findings. Its
+  source worktree was finalized after native landing verification.
+- Regressions: 69 passed / 3 platform skips, launcher lane 6 passed, and
+  POSIX scratch lane 19 passed / 1 unsupported-FIFO skip.
+- Labeling, safe fallback/lifecycle cleanup, UV lock placement and report-only
+  inventory landed. Projection locks intentionally retain their stable
+  legacy identity; mixed-version-safe migration remains tracked by #10968.
+- No production cleanup or installed-runtime rollout ran.

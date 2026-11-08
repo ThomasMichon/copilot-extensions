@@ -576,9 +576,16 @@ class _FakeLink:
 
 
 def _fake_linux(monkeypatch, procs, readlink=lambda _link: "/elsewhere"):
+    real_readlink = reclaim.os.readlink
+
+    def proc_readlink(link, *args, **kwargs):
+        if os.fsdecode(link).startswith("/proc/"):
+            return readlink(link)
+        return real_readlink(link, *args, **kwargs)
+
     monkeypatch.setattr(reclaim.os, "getuid", lambda: 7, raising=False)
     monkeypatch.setattr(reclaim, "Path", _patched_path(procs))
-    monkeypatch.setattr(reclaim.os, "readlink", readlink)
+    monkeypatch.setattr(reclaim.os, "readlink", proc_readlink)
     monkeypatch.setattr(reclaim, "_WINDOWS", False)
     monkeypatch.setattr(reclaim, "in_use", _REAL_IN_USE)
 
@@ -613,6 +620,32 @@ def test_linux_mapping_without_open_descriptor_is_detected(monkeypatch, tmp_path
     mapped = os.path.join(os.path.realpath(tmp_path), "mapped library.so")
     _fake_linux(monkeypatch, [_FakeProc("10", 7, maps=f"100-200 r--p 0 00:01 1 {mapped}\n")])
     assert reclaim._linux_scan(tmp_path) == (True, set())
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symlink namespace")
+@pytest.mark.parametrize("source", ["exe", "maps"])
+def test_linux_targets_are_normalized_through_aliases(monkeypatch, tmp_path, source):
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    (tree / "held").write_bytes(b"x")
+    alias = tmp_path / "alias"
+    alias.symlink_to(tree, target_is_directory=True)
+    target = str(alias / "held")
+    maps = f"100-200 r--p 0 00:01 1 {target}\n" if source == "maps" else ""
+    _fake_linux(
+        monkeypatch, [_FakeProc("10", 7, maps=maps)],
+        lambda link: target if source == "exe" and os.fspath(link).endswith("/exe") else "/elsewhere",
+    )
+    assert reclaim._linux_scan(tree)[0] is True
+
+
+@pytest.mark.parametrize("target", ["socket:[123]", "anon_inode:[eventpoll]"])
+def test_non_path_process_targets_are_not_resolved_under_the_current_directory(
+    monkeypatch, tmp_path, target,
+):
+    monkeypatch.chdir(tmp_path)
+    _fake_linux(monkeypatch, [_FakeProc("10", 7)], lambda _link: target)
+    assert reclaim._linux_scan(tmp_path) == (False, set())
 
 
 def test_unreadable_linux_maps_is_not_absence(monkeypatch, tmp_path):
@@ -658,14 +691,28 @@ def test_real_proc_scan_detects_closed_descriptor_mapping(tmp_path):
     mapped = tree / "mapped.bin"
     mapped.write_bytes(b"x" * 4096)
     code = (
-        "import mmap,sys,time; "
-        "f=open(sys.argv[1],'rb'); m=mmap.mmap(f.fileno(),0,access=mmap.ACCESS_READ); "
-        "f.close(); print('ready',flush=True); time.sleep(30)"
+        "import ctypes,mmap,os,sys,time\n"
+        "libc=ctypes.CDLL(None,use_errno=True)\n"
+        "libc.mmap.argtypes=[ctypes.c_void_p,ctypes.c_size_t,ctypes.c_int,"
+        "ctypes.c_int,ctypes.c_int,ctypes.c_long]\n"
+        "libc.mmap.restype=ctypes.c_void_p\n"
+        "fd=os.open(sys.argv[1],os.O_RDONLY)\n"
+        "address=libc.mmap(None,4096,mmap.PROT_READ,mmap.MAP_PRIVATE,fd,0)\n"
+        "os.close(fd)\n"
+        "assert address != ctypes.c_void_p(-1).value, ctypes.get_errno()\n"
+        "print('ready',flush=True)\n"
+        "time.sleep(30)\n"
     )
     child = subprocess.Popen([sys.executable, "-c", code, str(mapped)],
                              stdout=subprocess.PIPE, text=True)
     try:
         assert child.stdout.readline().strip() == "ready"
+        for descriptor in (Path("/proc") / str(child.pid) / "fd").iterdir():
+            target = os.readlink(descriptor)
+            assert not (
+                target == str(tree.resolve())
+                or target.startswith(str(tree.resolve()) + os.sep)
+            )
         assert reclaim._linux_scan(tree)[0] is True
     finally:
         child.kill()

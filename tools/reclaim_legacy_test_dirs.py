@@ -225,6 +225,15 @@ def survey(path: Path) -> Survey:
     return result
 
 
+def _references_tree(target: str, prefix: str) -> bool:
+    if not os.path.isabs(target):
+        return False
+    if target == prefix or target.startswith(prefix + os.sep):
+        return True
+    resolved = os.path.realpath(target)
+    return resolved == prefix or resolved.startswith(prefix + os.sep)
+
+
 def _linux_scan(path: Path) -> tuple[bool, set[str]] | None:
     """Scan this user's processes; None when ``/proc`` is unavailable.
 
@@ -269,7 +278,7 @@ def _linux_scan(path: Path) -> tuple[bool, set[str]] | None:
             except OSError:
                 blind.add(name(pid))
                 break
-            if target == prefix or target.startswith(prefix + os.sep):
+            if _references_tree(target, prefix):
                 return True, blind
         try:
             maps = (pid / "maps").read_text(encoding="utf-8", errors="surrogateescape")
@@ -282,7 +291,7 @@ def _linux_scan(path: Path) -> tuple[bool, set[str]] | None:
             fields = row.split(maxsplit=5)
             if len(fields) == 6:
                 target = fields[5].replace("\\012", "\n")
-                if target == prefix or target.startswith(prefix + os.sep):
+                if _references_tree(target, prefix):
                     return True, blind
     return False, blind
 
