@@ -325,20 +325,25 @@ class ExtensionRegistry:
                 return result
         return None
 
-    def collect_config(self, cwd: str | None) -> dict[str, Any]:
+    def collect_config(self, cwd: str | None, *, strict: bool = False) -> dict[str, Any]:
         """Merge config-source contributions.
 
         Sources run in priority order; a lower-priority source only fills keys a
-        higher-priority one did not set. Returns a flat mapping.
+        higher-priority one did not set. Strict consumers refuse provider errors
+        instead of selecting a fallback policy.
         """
         merged: dict[str, Any] = {}
         for ranked in self._config_sources:
             try:
                 contribution = ranked.fn(cwd)
             except Exception as exc:
+                if strict:
+                    raise ValueError("Configuration source failed") from None
                 log.warning("Config source %r raised: %s", ranked.name, exc)
                 continue
             if not isinstance(contribution, dict):
+                if strict:
+                    raise ValueError("Configuration source returned an invalid contribution")
                 continue
             for key, value in contribution.items():
                 merged.setdefault(key, value)

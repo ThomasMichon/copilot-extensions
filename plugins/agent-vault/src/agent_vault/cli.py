@@ -1690,6 +1690,10 @@ def _main(argv: list[str] | None = None):
 
     add_read_commands(sub, cmd_get)
 
+    from .authenticated_curl import add_commands as add_http_commands
+
+    add_http_commands(sub)
+
     p = sub.add_parser("has", help="Check if an entry exists")
     p.add_argument("entry", help="Entry path")
     p.set_defaults(func=cmd_has)
