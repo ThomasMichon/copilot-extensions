@@ -23,7 +23,10 @@ def launch_state(
             owner_refs={"session_id": session_id} if session_id else None,
             retention="retained while its host authority may be read; removed on failed launch",
         )
-    phase = {"spawn_attempted": False, "creation_refused": False, "exited": False}
+    phase = {
+        "spawn_attempted": False, "creation_refused": False, "exited": False,
+        "disposable": fallback is not None and acquisition_launch is None,
+    }
     try:
         yield sd, phase
     except BaseException:
@@ -46,3 +49,13 @@ def tracked_creation(phase: dict[str, bool]):
             raise
 
     return create_host
+
+
+def observe_exit(phase: dict[str, bool], process) -> None:
+    """Settle an exited Host's exact registry record before removing its root."""
+    phase["exited"] = True
+    receipt = getattr(process, "instance_receipt", None)
+    if phase["disposable"] and receipt is not None:
+        from agent_procutil.daemon_instances import cleanup_instance
+
+        phase["exited"] = cleanup_instance(receipt, terminate=False).status in ("settled", "missing")

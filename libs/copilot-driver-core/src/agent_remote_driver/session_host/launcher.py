@@ -302,7 +302,7 @@ def _launch_in(
     phase: dict[str, bool],
 ) -> HostHandle:
     from agent_procutil._daemon_instance_store import _root
-    from .launcher_scratch import tracked_creation
+    from .launcher_scratch import observe_exit, tracked_creation
 
     _root(sd, create=True)
     state_file = sd / f"host-{os.getpid()}-{int(time.time()*1000)}.json"
@@ -424,7 +424,7 @@ def _launch_in(
     deadline = time.time() + ready_timeout
     while True:
         if proc.poll() is not None:
-            phase["exited"] = True
+            observe_exit(phase, proc)
             if startup is not None:
                 startup.close()
             # The process has exited, but the OS pipe may still hold bytes

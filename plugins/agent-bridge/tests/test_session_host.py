@@ -1177,8 +1177,9 @@ def test_launch_session_host_surfaces_crash_tail(tmp_path, monkeypatch):
     assert "diagnosable detail line" in message
 
 
+@pytest.mark.parametrize("cleanup_held", [False, True])
 def test_launch_session_host_fallback_scratch_is_labeled_and_removed_on_crash(
-    tmp_path, monkeypatch,
+    tmp_path, monkeypatch, cleanup_held,
 ):
     """Without ``state_dir`` the fallback lives in labeled scratch and a
     failed launch leaves no ``agbridge-host-*`` directory behind."""
@@ -1200,11 +1201,22 @@ def test_launch_session_host_fallback_scratch_is_labeled_and_removed_on_crash(
         return real_popen([sys.executable, str(crash_script)], **kwargs)
 
     monkeypatch.setattr(launcher.subprocess, "Popen", _fake_popen)
+    if cleanup_held:
+        from agent_procutil import daemon_instances
+
+        monkeypatch.setattr(
+            daemon_instances, "cleanup_instance",
+            lambda *args, **kwargs: types.SimpleNamespace(status="held"),
+        )
 
     with pytest.raises(RuntimeError, match="exited early"):
         launcher.launch_session_host(["irrelevant-child-argv"], ready_timeout=5.0)
     assert seen and all(name.startswith("agbridge-host-") for name in seen)
-    assert list(scratch_root.iterdir()) == []
+    remaining = list(scratch_root.iterdir())
+    if cleanup_held:
+        assert len(remaining) == 1 and (remaining[0] / "scratch-owner.json").is_file()
+    else:
+        assert remaining == []
 
 
 def test_launch_session_host_fallback_scratch_removed_when_creation_refused(
