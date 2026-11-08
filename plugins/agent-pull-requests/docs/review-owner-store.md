@@ -154,6 +154,36 @@ can expose the adopted contract; data adoption alone advertises no capability
 or installed/provider qualification. Rollback cannot remove
 the extension or downgrade a file with unresolved v2 records.
 
+### Acquired comment observation
+
+The source-library function
+`review_comment_observation.observe_prepared_comment(store, cache, operation_id,
+scope, action_id, generation_id, expires_at=..., checkpoint=...)` joins an
+admitted original action to one immutable generation in the existing
+`GenerationCache`. The authenticated embedding supplies the actual scope and
+both existing owners; cache root, namespace and service binding must agree.
+This adds no workspace request, CLI operation, storage extension or acquisition.
+
+The body-free `agent-pull-requests.prepared-comment-observation/v1` result
+preserves original prepared identity, body hash, action state and native receipt.
+Only a confirmed prepared comment/reply/owned-edit can correlate. Original
+native thread/comment IDs select the cached object, never equal text or a GUID
+search. Complete usable discussion evidence must contain that live text
+comment under the original native author, with exact prepared content and
+consistent selected reply/edit targets. Missing evidence is `unavailable`;
+later native deletion or actor/type/parent/content divergence is `conflict`.
+Neither changes the retained original confirmation or unknown state.
+
+The result names the selected generation, its retained discussion observation
+interval, completeness/error count and source revision. A selected object's
+digest identifies that normalized current observation, **not an original native
+write/version receipt**. Old cached evidence is not refreshed to wall-clock time.
+The read does not acquire, send, reconcile unknown writes, ACK, advance handled
+positions or feed interest-specific echo. Original-version feedback remains
+with its existing owner. See the
+[reviewed correlation contract](../../../efforts/active/durable-pr-watch-delegation/comment-observation-correlation.md)
+for the separately unfinished receiver, provider and installed qualification.
+
 ## Optional pre-approval selection retention
 
 `ReviewSelectionStore(existing_store)` uses the same file, operation lock,
