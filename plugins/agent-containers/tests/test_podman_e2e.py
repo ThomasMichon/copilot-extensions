@@ -1,7 +1,9 @@
 """Explicit, separately authorized native Podman/SSH fixture qualification."""
 
+import json
 import os
 import shutil
+import sys
 import uuid
 
 import pytest
@@ -17,8 +19,25 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+@pytest.fixture
+def bundled_podman(tmp_path, monkeypatch):
+    directory = tmp_path / "drivers"
+    directory.mkdir()
+    (directory / "podman.json").write_text(json.dumps({
+        "schema_version": 1, "name": "podman",
+        "command": [sys.executable, "-m", "agent_containers.podman_driver"],
+    }), encoding="utf-8")
+    monkeypatch.setenv("AGENT_CONTAINERS_DRIVERS_DIR", str(directory))
+    original_which = shutil.which
+    monkeypatch.setattr(
+        shutil, "which",
+        lambda executable: str(tmp_path / "unapproved-driver")
+        if executable == "agent-containers-driver-podman" else original_which(executable),
+    )
+
+
 @pytest.mark.skipif(os.name == "nt", reason="Windows provider SSH remains unsupported")
-def test_native_podman_authenticated_provider_flow(tmp_path, monkeypatch):
+def test_native_podman_authenticated_provider_flow(tmp_path, monkeypatch, bundled_podman):
     """Create one owned member, authenticate over provider SSH, return and remove it."""
     image = os.environ.get("AGENT_CONTAINERS_PODMAN_E2E_IMAGE")
     assert image, "select an explicitly authorized image; there is no default registry/image"
@@ -39,7 +58,6 @@ def test_native_podman_authenticated_provider_flow(tmp_path, monkeypatch):
         workspace_folder="/workspaces/qualification",
     )
     config = ContainersConfig(fleets={name: selected})
-    monkeypatch.setenv("AGENT_CONTAINERS_DRIVERS_DIR", str(tmp_path / "drivers"))
     monkeypatch.setattr(ssh_transport, "_SSH_DIR", tmp_path / "ssh")
     # This fixture is authorized for Podman only, never the host's Docker engine.
     def no_docker(*_args, **_kwargs):
@@ -79,7 +97,7 @@ def test_native_podman_authenticated_provider_flow(tmp_path, monkeypatch):
             runtime_drivers.clear_bindings()
 
 
-def test_native_podman_provider_lifecycle(tmp_path, monkeypatch):
+def test_native_podman_provider_lifecycle(tmp_path, monkeypatch, bundled_podman):
     """Qualify native lifecycle without claiming authenticated dispatch support."""
     image = os.environ.get("AGENT_CONTAINERS_PODMAN_E2E_IMAGE")
     assert image, "select an explicitly authorized image"
@@ -95,7 +113,6 @@ def test_native_podman_provider_lifecycle(tmp_path, monkeypatch):
         workspace_folder="/workspaces/qualification",
     )
     config = ContainersConfig(fleets={name: selected})
-    monkeypatch.setenv("AGENT_CONTAINERS_DRIVERS_DIR", str(tmp_path / "drivers"))
 
     def no_docker(*_args, **_kwargs):
         raise RuntimeError("Docker is not part of this fixture")

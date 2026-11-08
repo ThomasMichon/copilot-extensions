@@ -127,7 +127,11 @@ def scan_drivers() -> tuple[dict[str, DriverSpec], list[dict[str, str]]]:
     findings: list[dict[str, str]] = []
     root = drivers_dir()
     try:
-        entries = sorted(root.glob("*.json")) if root.is_dir() else []
+        entries = sorted(
+            path for path in root.iterdir()
+            if path.suffix == ".json"
+            or (path.stem.casefold() == "podman" and path.suffix.casefold() == ".json")
+        ) if root.is_dir() else []
     except OSError as exc:
         return specs, [{"path": str(root), "reason": f"cannot enumerate: {exc}"}]
     for path in entries:

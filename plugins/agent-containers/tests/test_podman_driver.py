@@ -236,6 +236,18 @@ def test_real_provider_and_driver_process_roundtrip(tmp_path, monkeypatch):
     monkeypatch.chdir(root)
     monkeypatch.setenv("PODMAN_TEST_ROOT", str(root))
     monkeypatch.setenv("AGENT_CONTAINERS_DRIVERS_DIR", str(root / "drivers"))
+    registered = root / "drivers"
+    registered.mkdir()
+    (registered / "podman.json").write_text(json.dumps({
+        "schema_version": 1, "name": "podman",
+        "command": [sys.executable, "-m", "agent_containers.podman_driver"],
+    }), encoding="utf-8")
+    original_which = podman_driver.shutil.which
+    monkeypatch.setattr(
+        podman_driver.shutil, "which",
+        lambda executable: str(tmp_path / "unapproved-driver")
+        if executable == "agent-containers-driver-podman" else original_which(executable),
+    )
     monkeypatch.setattr(lifecycle, "_docker", lambda *_args, **_kw: (_ for _ in ()).throw(
         RuntimeError("Docker is not part of this fixture"),
     ))

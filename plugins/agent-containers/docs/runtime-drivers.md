@@ -163,6 +163,11 @@ when qualifying an existing Windows connection, Podman's supported
 `PODMAN_CONNECTIONS_CONF` may point to its existing connection file without
 copying its contents or changing general test-home isolation.
 
+Each native fixture explicitly registers the bundled command in its private
+driver directory and traps an inherited Podman PATH driver. A private directory
+alone is not selection: ordinary driver resolution still prefers PATH over the
+bundled fallback.
+
 The lifecycle fixture covers provider provisioning, real native inventory,
 literal exec, copy-in and stopped/restarted state on Windows or POSIX. Its
 selected image must provide `/workspaces/qualification` and no baked-in SSH

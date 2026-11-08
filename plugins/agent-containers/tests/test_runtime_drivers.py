@@ -195,7 +195,7 @@ def test_podman_bundled_fallback_preserves_explicit_drivers(fake, monkeypatch):
     assert find_driver("podman").command == (sys.executable, "custom.py")
 
 
-@pytest.mark.parametrize("filename", ["podman.json", "PODMAN.json"])
+@pytest.mark.parametrize("filename", ["podman.json", "PODMAN.json", "podman.JSON", "PODMAN.JSON"])
 def test_invalid_explicit_podman_does_not_fall_back(fake, monkeypatch, filename):
     (fake.drivers / filename).write_text("{broken")
     monkeypatch.setattr(external_driver.shutil, "which", lambda _: "/tools/custom-podman")
