@@ -5,7 +5,7 @@ import shutil
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -82,7 +82,8 @@ print(json.dumps({"construction":"ready","artifact_contained":True}))
         [str(installed_chat.core_python), "-I", "-B", "-c", probe], cwd=tmp_path,
     ))
     assert result == (
-        {"construction": "requires-python-3.11"} if sys.version_info < (3, 11)
+        cast(dict[str, str | bool], {"construction": "requires-python-3.11"})
+        if sys.version_info < (3, 11)
         else {"construction": "ready", "artifact_contained": True}
     )
 
@@ -341,7 +342,8 @@ print(json.dumps({"construction":"complete","reused":True,"selected":False}))
         ], cwd=tmp_path, timeout=180,
     ))
     assert result == (
-        {"construction": "requires-python-3.11"} if sys.version_info < (3, 11)
+        cast(dict[str, str | bool], {"construction": "requires-python-3.11"})
+        if sys.version_info < (3, 11)
         else {"construction": "complete", "reused": True, "selected": False}
     )
 
