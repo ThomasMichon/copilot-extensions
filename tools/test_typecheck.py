@@ -59,11 +59,11 @@ def _harness_emitted_fixture(root: Path) -> tuple[str, ...]:
 def test_harness_emitted_exact_roles_and_escaping(tmp_path: Path) -> None:
     paths = _harness_emitted_fixture(tmp_path)
     inputs, programs = views.harness_emitted_inputs(tmp_path, paths)
-    assert len(programs) == 18
+    assert len(programs) == 20
     assert len(inputs) == len(paths) + 4
     assert any(b"pytest.mark.effect('process')" in body for _, body, _, _ in programs)
     assert any(b"raise SystemExit(7)" in body for _, body, _, _ in programs)
-    assert sum(b"\r\n" in body for _, body, _, _ in programs) == 4
+    assert sum(b"\r\n" in body for _, body, _, _ in programs) == 6
     for _, body, first, last in programs:
         compile(body, "<portable-typing-witness>", "exec")
         assert 1 <= first <= last
@@ -144,7 +144,7 @@ def test_harness_emitted_candidate_data_does_not_follow_host_drift(tmp_path: Pat
     paths = _harness_emitted_fixture(tmp_path / "source")
     _harness_emitted_fixture(tmp_path / "candidate")
     candidate = views.harness_emitted_views(tmp_path / "candidate", paths, tmp_path / "stage")
-    assert len(candidate) == 18
+    assert len(candidate) == 20
     host = tmp_path / "source" / paths[0]
     host.write_bytes(host.read_bytes() + b"\n# host drift\n")
     for view in candidate:
@@ -662,6 +662,7 @@ def test_real_catalog_source_and_frozen_frontdoors(
     root.mkdir()
     closure = {
         "tools/typecheck.py", "tools/_admission_protocol.py", "tools/cache_directory_paths.py",
+        "tools/plugin_test_resources.py",
         "tools/typecheck_source_views.py", "tools/typecheck_catalog_views.py",
         "tools/native_test_paths.py", "tools/typecheck-requirements.txt",
         catalog.DECLARATION, *catalog.MEMBERS,

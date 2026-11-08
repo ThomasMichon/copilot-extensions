@@ -16,9 +16,13 @@ path. A long-running developer machine accumulated hundreds of GiB of such
 state because several producers create it without any matching cleanup,
 and the documented guidance said legacy state is never reclaimed.
 
-Every track follows the same safety shape: dry-run by default, explicit
-`--apply`, never follow reparse points, never touch tracked or non-derived
-content, refuse paths with a live process, and fail closed on uncertainty.
+Automatic maintenance never deletes unclassified or retained evidence.
+On-demand guided reclamation instead inventories a set, records explicit
+target selections and requires a separate target-specific discard decision
+for unclassified content. It never follows reparse points or deletes tracked
+files. Known use or an unaccepted inspection failure refuses reclamation.
+Writers must be quiesced first; process scans and rename probes are not an
+exclusive mutation lock.
 
 ## Context
 
@@ -46,18 +50,20 @@ unification evaluation), which stays on the tracker.
 ## Plan
 
 ### Track A — Reclaim legacy `.test-venvs` (#10965)
-- [x] `tools/reclaim_legacy_test_dirs.py [--apply]` (standalone: the runner
-      is at the module-size cap): enumerate root `.test-venvs/`/`.test-runs/`
-      across every registered worktree, report size/age; delete only with
-      `--apply`, only when ignored by Git, untracked, link-free, older than
-      `--min-age-hours` (24) and not in use (Windows rename probe, Linux
-      `/proc` scan, otherwise refuse). Local dry run: 158 trees / 11.2 GiB
-      eligible, 15 refused (links, recent).
+- [x] Standalone `tools/reclaim_legacy_test_dirs.py`: inventory root
+      `.test-venvs/`/`.test-runs/` across registered worktrees, optionally
+      narrowed with `--checkout`; record reviewed `--select` targets with
+      `--plan-out`, requiring `--discard` for unclassified content; apply
+      only that plan with `--apply-plan`. Revalidate identity, metadata,
+      ignored/untracked/link-free status, age and known use before removal.
+      Report refusals and partial outcomes rather than claiming atomicity.
+      The earlier 158-tree / 11.2 GiB inventory was not a discard decision.
 - [x] Move `tools/typecheck.py` cache environments to
       `ce-tests-<key>/typecheck/<platform>/` so no current writer creates
       `.test-venvs` for environments.
-- [ ] Evidence-capture tools: keep their report path but document it as
-      discardable evidence (not a venv). (Deferred; reports only.)
+- [x] Keep capture-report paths, but classify their contents as evidence
+      requiring an explicit discard decision, including reports nested in
+      an otherwise recognized environment.
 - [x] Replace TESTING.md "neither migrated nor deleted" guidance with the
       supported reclamation command.
 
@@ -77,19 +83,19 @@ unification evaluation), which stays on the tracker.
 ### Track C — Derived outputs as open claims (#10967)
 Finalize never deletes anything. Derived outputs are journaled as explicit
 claims the worktree's agent must close out before finalize.
-- [ ] New `derived` claim kind on the existing outbound ledger. A producer
+- [x] New `derived` claim kind on the existing outbound ledger. A producer
       that creates a derived dir records `claims add derived <path>` for its
       worktree and writes a `.derived-claim.json` marker (worktree id,
       nonce, creator, created). A pre-existing dir without a matching
       marker is never adopted.
-- [ ] The existing kind-agnostic finalize gate blocks while `derived`
+- [x] The existing kind-agnostic finalize gate blocks while `derived`
       claims are open and lists them.
-- [ ] `claims settle <path> --reclaim` deletes exactly that one path, only
+- [x] `claims settle <path> --reclaim` deletes exactly that one path, only
       when the marker's worktree id + nonce match the ledger entry, the path
       is inside this checkout, contains no tracked files or reparse points,
       and no live process holds it. Any mismatch refuses and leaves the
       claim open. `claims release <path>` keeps the dir.
-- [ ] No chaining: one ledger entry per settle, never another worktree's
+- [x] No chaining: one ledger entry per settle, never another worktree's
       claims, and the reclaim sweep skips `derived` claims (like `pr`).
 - [ ] First producer: `run-plugin-tests.py` (`.test-venvs` writers that
       remain after Track A). Legacy unmarked dirs stay Track A's job.
@@ -132,3 +138,17 @@ claims the worktree's agent must close out before finalize.
   `tools/test_typecheck.py` green with a mypy-enabled interpreter (host
   Python lacks mypy; one case needed a rerun after a 120 s emulation
   timeout). Local dry run: 158 trees / 11.2 GiB eligible; no `--apply` yet.
+
+### 2026-11-08 — Guided cleanup review and merge stewardship
+- Replaced broad apply with reviewed, target-specific plans and discard
+  decisions; added mutation-boundary revalidation and honest partial reports.
+- Covered nested evidence, non-ASCII worktree paths, unreadable Linux
+  process metadata and live mappings after descriptor closure. Focused
+  reclaim suites passed on Windows and Linux; no real-data apply ran.
+- Track C's claim engine merged in #11103. Producer integration remains
+  open: the runner's source-bound caches now live outside the checkout,
+  while the current reclaim contract only admits checkout-contained paths.
+  Do not silently adopt external or pre-existing unmarked directories.
+- Driving #11126 (A), #11122 (B) and #11125 (D) through review and CI.
+  Reconciled the existing Windows-wrapper emitted-source declaration as a
+  checker prerequisite without relaxing producer/epoch admission.
