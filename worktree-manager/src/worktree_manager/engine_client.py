@@ -17,6 +17,8 @@ from worktree_identity import parse_machine_identity
 
 from . import agent_plugin_runtime, picker_review
 from .engine_sessions import list_worktree_session_snapshot as list_worktree_session_snapshot
+from .engine_progress import error_from_envelope as _error_from_envelope
+from .engine_progress import json_with_failure_detail
 from .engine_posix_process import EngineCleanupError as EngineCleanupError
 from .worktree_rows_contract import (
     _int_field as _int_field,
@@ -204,6 +206,7 @@ def _run(
     stream_progress: bool = False,
     environment: dict[str, str] | None = None,
     engine_command: list[str] | None = None,
+    preserve_failure_detail: bool = False,
 ) -> str:
     """Run ``agent-worktrees [--project <p>] <args>`` and return stdout.
 
@@ -254,6 +257,8 @@ def _run(
         raise EngineError(f"{ENGINE_BIN} {' '.join(args)} timed out") from e
     except OSError as e:
         raise EngineError(f"could not run {ENGINE_BIN}: {e}") from e
+    if preserve_failure_detail and allow_nonzero:
+        return json_with_failure_detail(proc.stdout, proc.stderr, failed=proc.returncode != 0)
     if proc.returncode != 0 and allow_nonzero:
         try:
             json.loads(proc.stdout)
@@ -270,17 +275,6 @@ def _run(
     return proc.stdout
 
 
-def _error_from_envelope(stdout: str) -> str | None:
-    """Pull the ``error`` field out of a JSON error envelope, if stdout is one."""
-    try:
-        obj = json.loads(stdout)
-    except (ValueError, TypeError):
-        return None
-    if isinstance(obj, dict) and obj.get("error"):
-        return str(obj["error"])
-    return None
-
-
 def run_json(project: str | None, args: list[str], *,
              timeout: int | None = _DEFAULT_TIMEOUT,
              allow_nonzero: bool = False,
@@ -288,6 +282,7 @@ def run_json(project: str | None, args: list[str], *,
              stream_progress: bool = False,
              environment: dict[str, str] | None = None,
              engine_command: list[str] | None = None,
+             preserve_failure_detail: bool = False,
              max_bytes: int | None = None) -> dict:
     """Run a ``--json`` verb; bound its UTF-8 stdout to ``max_bytes``, then parse it."""
     raw = _run(
@@ -295,6 +290,7 @@ def run_json(project: str | None, args: list[str], *,
         stream_progress=stream_progress,
         **({"environment": environment} if environment is not None else {}),
         **({"engine_command": engine_command} if engine_command is not None else {}),
+        **({"preserve_failure_detail": True} if preserve_failure_detail else {}),
     )
     if max_bytes is not None and len(raw.encode("utf-8", errors="surrogatepass")) > max_bytes:
         raise EngineError(

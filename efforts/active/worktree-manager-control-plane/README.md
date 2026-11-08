@@ -2888,6 +2888,57 @@ own scopes. No source/resource/physical custody or updater authority transfers.
 
 ## Journal
 
+### 2026-11-08 - Bounded #4437 Finalize consumer slice
+
+- Managed source `weathered-crank` claims only M4437-P1 through P4 and
+  M4437-V1's menu/invocation/refusal-help consumer boundary. This continues
+  the reviewed finite contract, not this umbrella's other phases.
+- Keep Finalize discoverable on ordinary machine-backed rows. Preserve
+  managed-child/provider refusal, confirmation/cancel and the canonical
+  engine operation. Protected live/unknown observations become useful
+  executor refusals, never authorization to retire or restore a session.
+- Retain full local and SSH failure diagnostics through the existing
+  transport/executor. The completed progress dialog reuses the scrollable
+  command-result viewer for exact claims and the supported cleanup-help path.
+  No new command, persistent state, registry, polling or backend finality
+  predicate is introduced.
+- #11564 retains mux observation, discovery and unknown-state admission.
+  Its inspected changes are in the earlier liveness branches and the
+  Sync/Cleanup condition; this slice keeps those semantics and adds a
+  separately guarded Finalize route. No shared mux probe or live retirement.
+- Fail-first controls reproduce fourteen menu, protected-target, process
+  diagnostic and actual Textual confirmation failures against unchanged
+  production. The affected five-file packet passed 491 cases with two
+  render/capture fixture races; the 20-case residual packet then passed,
+  retaining all assertions and matching the current fake runtime API.
+  A final fourteen-case consumer run proves eighty claim references remain
+  available in the keyboard-scrollable viewer, confirmation/cancel and
+  local/SSH subprocess diagnostics. This is complementary evidence, not a
+  claimed single green 493-case run.
+- Touched-source Ruff and the install contract pass. The local conservative
+  typing sweep stopped on a cold Windows checker timeout; the prepared
+  checker-only residual passes Linux and Windows. Manager remains pending
+  typing admission, and no whole-portfolio typing pass is claimed.
+  Source review/CI, release and separately authorized installed evidence
+  remain distinct; no completion or rollout is claimed here.
+- Review found three real omissions: AHP/execution-leg live signals, the
+  separate bulk-menu predicate and detail-only canonical stderr refusals.
+  Four fail-first cases reproduced all three; the correction passes 179
+  Finalize, custody, Sync and engine-client controls. The normalizer's full
+  live-signal family now refuses, both menu paths agree, and the compact
+  summary retains the first actual refusal rather than trailing abandon
+  advice. Full diagnostics remain available without replay.
+- The required module-size check also refused the expanded engine client.
+  Its existing error-envelope parser now lives in `engine_progress`, which
+  already owns stderr/JSON-boundary handling, with the old private import
+  retained. Engine client is 995 lines; no baseline or guard was weakened.
+- The next review identified missing/malformed JSON fallback loss, not a
+  clean verdict despite zero inline issues. Four real-process controls
+  reproduced lost local and remote stdout/stderr, including malformed output
+  with exit zero. The explicit Finalize diagnostic path now retains both
+  streams as a failed result; ordinary engine-client callers are unchanged.
+  The expanded focused consumer/custody/transport packet passes 183 cases.
+
 ### 2026-11-05 - Planned #5898 terminal/mux receiving
 
 Added the complete pending #7962 Plan/local Validation and actual global

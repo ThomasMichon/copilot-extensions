@@ -3069,6 +3069,22 @@ normal Finalize can proceed; terminal exit never performs that destruction.
 
 ### Actions dialog refinement
 
+**Finalize** is available on ordinary machine-backed worktree rows and bulk
+selections regardless of cleanup bucket. It opens an explicit confirmation;
+cancel runs nothing.
+Controller-owned children and unsupported sources retain their action boundary.
+Known live sessions, lock residue and unavailable mux observations return a
+visible refusal without invoking the engine. Resolve those lifecycle conditions
+before retrying.
+
+Otherwise the existing asynchronous executor calls the selected engine's
+canonical `finalize <id> --json`, never force cleanup. Content, objectives,
+PRs and resource obligations remain engine-owned checks; the menu does not
+reimplement them or remove saved conversations. Failed results retain the
+engine's diagnostics. Press **v** in completed Finalize progress to read the
+full scrollable result, including exact claim references; ask
+`help clean up worktree <id>` for the existing claims/obligations procedure.
+
 Actions opens from a private snapshot of the published row. Tracking-path and
 locality discovery run on its existing background worker, never before modal
 push. Unknown locality does not enable local-only AHP operations.

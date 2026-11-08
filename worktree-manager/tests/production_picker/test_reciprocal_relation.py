@@ -117,7 +117,7 @@ def test_finalize_execution_boundary_rejects_owned_children():
     )
     PickerScreen._start_finalize(screen, [owned])
     assert not calls
-    assert "no conversation-only" in screen.debug
+    assert "controller or provider boundary" in screen.debug
 
 
 @pytest.mark.parametrize("values", [

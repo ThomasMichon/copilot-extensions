@@ -165,7 +165,7 @@ class PickerScreenWorktreeActionsMixin:
         # registered.
         if rec.get("session_count"):
             acts.append("Sessions")
-        # FF-sync / cleanup / finalize -- offered only in the non-broken,
+        # FF-sync / cleanup -- offered only in the non-broken,
         # non-residue lifecycle states (never beside Reclaim/Repair, where a
         # Cleanup/Sync would race the residue). A gone worktree still offers
         # Cleanup to prune the leftover record.
@@ -174,13 +174,12 @@ class PickerScreenWorktreeActionsMixin:
                 acts.append("Sync")
             if PickerScreenWorktreeActionsMixin._cleanable(rec):
                 acts.append("Cleanup")
-            if rec.get("cleanup_bucket") in ("conversation", "unused"):
-                # A conversation-only / unused worktree (no commits) can be
-                # wrapped up directly -- finalize validates nothing is unpushed
-                # and removes it (#2258 follow-up).
-                acts.append("Finalize")
         elif gone and PickerScreenWorktreeActionsMixin._cleanable(rec) and not rec.get("managed_child"):
             acts.append("Cleanup")
+        if not rec.get("managed_child"):
+            # The executor explains protected states; only the engine can
+            # decide whether work and outbound obligations are settled.
+            acts.append("Finalize")
         acts.append("Refresh")
         return acts
     def _submenu_target(self):
