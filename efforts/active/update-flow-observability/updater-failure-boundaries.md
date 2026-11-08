@@ -70,6 +70,36 @@ The following implementation choices are _(agent-recommended)_:
 
 ## Journal
 
+- Resumed the explicitly assigned narrow Manager startup-cost diagnosis after
+  the operator's pause. The Manager stream correction had already landed in
+  #9678; it is not implemented or published again here. Earlier local
+  failure-settlement work remains preserved separately from current source,
+  whose asynchronous publication contract has changed.
+- The original three-provider acceptance still reached its 30-second native
+  item limit on current source. A timing-only real-process diagnostic
+  completed in 24.641 seconds, while changing only its bytecode-cache prefix
+  to a fresh directory reached the same 30-second outer bound. The retained
+  trace places unfinished work in child initialization; observed participant
+  connects and completed settlement exchanges remain bounded. These samples
+  do not prove a general IPC defect or stable performance improvement.
+- The private, explicitly bound executor shim now omits unused `site`
+  initialization. Its standard-library dependencies and directly loaded
+  participant/procutil modules remain available; the product's pinned argv,
+  interpreter behavior, authentication, native custody and external bytecode
+  cache are unchanged. Real temporary-runtime tests reject `site` inside the
+  actual shim and preserve source bytes, timestamps, identities and cold/warm
+  cached bytecode. Four native Windows execution/serialization/timeout
+  controls pass. The preserved original Manager acceptance passes in
+  23.08 seconds under its unchanged 20-second child and 30-second item
+  limits. A fresh offline Linux container also passes both real cold/warm
+  executions. None is a complete installation or rollout claim.
+- The independent full construction/reuse case still exhausts its original
+  300-second group limit; the observed wrapper total is 436.91 seconds
+  including preparation and cleanup. That failure and missing completed
+  phase/JUnit evidence remain open. No larger deadline, completed-construction
+  claim, installed update, task replay or registration activation followed.
+  Source review/release and whole-construction qualification remain separate
+  from the passing narrow queue controls.
 - A bounded follow-up implements only the Manager-to-engine stream-preservation
   item from this reviewed plan. Native Windows reproduction through an actual
   no-window captured parent retained the engine's exit23 but lost its stdout
