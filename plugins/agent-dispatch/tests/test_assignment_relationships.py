@@ -551,6 +551,29 @@ def test_submission_and_abandonment_keep_responsibility_until_independent_comple
     assert next(iter(owner.claims.values()))["closeout"]["relationship_verification"]["retired"]
 
 
+def test_supervisor_settles_exact_relationship_only_after_independent_completion(
+    assignment, independent_readiness,
+):
+    from agent_dispatch.supervisor_relationship_settlement import settle_completed_relationship
+
+    queue, owner, workspace, task = assignment
+    start_managed(queue, workspace, task)
+    (reservation,) = queue.list_reservations(task_id=task.id)
+    supervisor = SimpleNamespace(client=queue)
+    queue.complete(task.id, workspace.worker_id, result={"answer": "proposed"})
+    submitted = asdict(queue.get(task.id))
+    assert settle_completed_relationship(supervisor, asdict(reservation), submitted)
+    assert queue.task_relationship(task.id)["state"] == "bound"
+    queue.confirm(task.id)
+    completed = asdict(queue.get(task.id))
+    assert settle_completed_relationship(supervisor, asdict(reservation), completed)
+    assert queue.task_relationship(task.id)["state"] == "closed"
+    claim_record = next(iter(owner.claims.values()))
+    assert claim_record["closeout"]["relationship_verification"]["retired"]
+    assert settle_completed_relationship(supervisor, asdict(reservation), completed)
+    assert len(owner.claims) == 1
+
+
 def test_legacy_or_forged_writer_answer_never_admits_execution(assignment):
     queue, owner, workspace, task = assignment
 

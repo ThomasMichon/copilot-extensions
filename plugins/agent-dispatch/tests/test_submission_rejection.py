@@ -219,6 +219,43 @@ def test_submission_rejection_supervisor_keeps_pending_conversation():
     supervisor.client.record_spawn_conclusion.assert_not_called()
 
 
+def _completed_supervisor(reconcile):
+    supervisor = object.__new__(Supervisor)
+    supervisor.client = Mock()
+    supervisor.client.get.return_value = {"id": "t1", "status": Status.COMPLETED}
+    supervisor.client.reconcile_task_relationship.side_effect = reconcile
+    supervisor._fence_terminal_startup = Mock(return_value=True)
+    supervisor._completion_detail = Mock(return_value="done")
+    supervisor._pool_reservations = Mock(side_effect=[[{
+        "key": "reservation", "task_id": "t1", "state": "spawned",
+        "worktree_ownership": "created", "task_relationship_event_id": 7,
+    }], []])
+    return supervisor
+
+
+def test_completed_task_settles_exact_claim_before_release():
+    order = []
+    supervisor = _completed_supervisor(
+        lambda *_, **__: order.append("settle") or {"state": "closed"},
+    )
+    supervisor.client.request_spawn_release.side_effect = lambda *_, **__: order.append("release")
+    supervisor.reconcile()
+    supervisor.client.reconcile_task_relationship.assert_called_once_with("t1", event_id=7)
+    assert order == ["settle", "release"]
+
+
+@pytest.mark.parametrize("outcome", [TaskError("writer unavailable"), {"state": "bound"}])
+def test_completed_task_retains_reservation_while_claim_is_unsettled(outcome):
+    def reconcile(*_, **__):
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    supervisor = _completed_supervisor(reconcile)
+    assert supervisor.reconcile() == 0
+    supervisor.client.request_spawn_release.assert_not_called()
+
+
 def test_submission_rejection_concurrent_replay_is_one_operation(tmp_path):
     q = TaskQueue(tmp_path / "tasks.db")
     task = _submitted(q)

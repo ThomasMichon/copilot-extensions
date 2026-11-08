@@ -278,6 +278,11 @@ original queue's retained request, not just a matching task id.
 Submission and rejection keep the claim; only `COMPLETED` or confirmed
 unassignment to unbound `QUEUED` permit its verified close. Abandonment,
 dead-letter state, lease expiry and runner exit remain non-settling.
+The supervisor's terminal reconcile settles a `COMPLETED` task's exact retained
+relationship through the existing reconcile route before releasing its
+reservation. A failure or a non-closed answer retains both the reservation and
+the claim and retries next cycle, so dispatch-attempt workspace conclusion never
+runs against a still-live task claim. Submitted tasks are not settled here.
 When cancellation finds no claim, reconciliation replays the original reserve
 and closes it, retaining its tombstone. Absence alone cannot fence a delayed
 in-flight reserve.
