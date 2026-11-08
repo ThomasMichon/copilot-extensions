@@ -332,6 +332,56 @@ def test_foreign_abandoned_transaction_recovers_all_slots_before_continuing(tmp_
     assert runtime.gc(root, min_age_days=0) == []
 
 
+def test_fresh_root_fence_can_be_recovered_by_another_owner(tmp_path):
+    root = tmp_path / "fresh"
+    code = """
+import os, pathlib, sys
+sys.path.insert(0, sys.argv[1])
+import versioned_runtime as runtime
+runtime._leases.begin_runtime_reference_transaction(pathlib.Path(sys.argv[2]), 'fixture/first')
+os._exit(23)
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", code, str(LIBRARY), str(root)],
+        timeout=15, capture_output=True,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 23, result.stderr
+    assert (root / "versions").is_dir()
+    with runtime._leases.reference_transaction_custody(root):
+        ticket = runtime._leases.begin_runtime_reference_transaction(
+            root, "fixture/second", recover_foreign=True,
+        )
+        assert ticket["owners"] == {}
+        runtime._leases.commit_runtime_reference_transaction(
+            root, "fixture/second", ticket["token"],
+            {"fixture/second": []}, expected={"fixture/second": []},
+        )
+    assert runtime._leases.read_runtime_references(root) == {}
+
+
+def test_recovery_does_not_recreate_a_missing_fenced_inventory(tmp_path):
+    root = case(tmp_path)
+    runtime._leases.begin_runtime_reference_transaction(root, "fixture/first")
+    shutil.rmtree(root / "versions")
+    with runtime._leases.reference_transaction_custody(root), pytest.raises(FileNotFoundError):
+        runtime._leases.begin_runtime_reference_transaction(
+            root, "fixture/second", recover_foreign=True,
+        )
+    assert not (root / "versions").exists()
+    with pytest.raises(ValueError):
+        runtime._leases.read_runtime_references(root)
+
+
+def test_fresh_fence_refuses_a_non_directory_inventory(tmp_path):
+    root = tmp_path / "runtime"
+    root.mkdir()
+    (root / "versions").write_text("foreign", encoding="utf-8")
+    with pytest.raises(ValueError, match="ordinary directory"):
+        runtime._leases.begin_runtime_reference_transaction(root, "fixture/first")
+    assert not (root / "runtime-references.json").exists()
+
+
 def test_foreign_recovery_failure_keeps_fence_and_existing_references(tmp_path, monkeypatch):
     root = case(tmp_path)
     replace(root, ["old"], owner="unrelated/component")

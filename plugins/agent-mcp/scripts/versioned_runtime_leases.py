@@ -818,6 +818,14 @@ def begin_runtime_reference_transaction(
         with _publication_lease(root, timeout=max(0.0, deadline - time.monotonic())):
             owners, transaction = _read_runtime_reference_state(root, allow_transaction=True)
             if transaction is None:
+                versions = root / "versions"
+                try:
+                    versions.mkdir()
+                except FileExistsError:
+                    pass
+                info = versions.lstat()
+                if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+                    raise ValueError("runtime reference inventory is not an ordinary directory")
                 transaction = {"owner": owner, "token": secrets.token_hex(32)}
                 _write_runtime_reference_state(root, owners, transaction)
             if transaction["owner"] == owner:
