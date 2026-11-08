@@ -101,6 +101,8 @@ def observe_local_serving(root: Path | None = None) -> dict[str, Any]:
                 or routing.read_table(root, strict=True) != table
             ):
                 return _unknown("ownership-changed")
+            if os.path.lexists(breadcrumb.breadcrumb_path(root)):
+                return _unknown("cutover-pending")
         return {
             "schema": SCHEMA, "version": VERSION, "state": "ready",
             "generation": endpoint.version, "pid": endpoint.pid,

@@ -120,6 +120,24 @@ def test_pending_cutover_is_unknown_and_evidence_is_untouched(serving):
     assert not serving.calls
 
 
+@pytest.mark.parametrize("cutover_on_call", [1, 2])
+def test_cutover_starting_during_health_is_unknown(serving, monkeypatch, cutover_on_call):
+    status = subject._owned_service_status
+    path = subject.breadcrumb.breadcrumb_path(serving.root)
+
+    def start_cutover(*args, **kwargs):
+        health = status(*args, **kwargs)
+        if len(serving.calls) == cutover_on_call:
+            path.write_text("pending", encoding="utf-8")
+        return health
+
+    monkeypatch.setattr(subject, "_owned_service_status", start_cutover)
+    result = subject.observe_local_serving(serving.root)
+    assert result["state"] == "unknown"
+    assert result["reason"] == "cutover-pending"
+    assert path.read_text(encoding="utf-8") == "pending"
+
+
 def test_unreadable_route_is_unknown_without_exposing_diagnostics(serving, monkeypatch):
     def denied(*_args, **_kwargs):
         raise PermissionError("private diagnostic")
