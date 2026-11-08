@@ -150,3 +150,54 @@ class TestPRReview:
         res = pr_reviewer_ops.pr_review(wid, event="APPROVED", config=config)
         assert res["has_pr"] is True
         assert "differs from configured provider" in res["error"]
+
+
+def test_selected_consumer_is_optional_and_never_resolves_legacy_credentials(pr_repo, monkeypatch):
+    from agent_worktrees import providers
+    from agent_worktrees.pr_selected_publication import PROTOCOL
+
+    config, wid, _, _ = pr_repo
+    pr_ops.set_pr(wid, number=7, state="open", provider="gitea")
+
+    class Selected:
+        protocol = PROTOCOL
+        phase = "preview"
+
+        def execute(
+            self, *, worktree_id: str, target: dict | None, command: str, body: str, event: str,
+        ) -> dict:
+            assert worktree_id == wid and target["provider"] == "gitea" and target["number"] == 7
+            assert command == "pr-comment" and body == "selected text" and event == ""
+            return {"publication": {"phase": "preview", "effects": "none"}}
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        raise AssertionError("selected consumer entered legacy provider/credential/reconcile")
+
+    monkeypatch.setattr(pr_ops, "_reconcile_active_pr", forbidden)
+    monkeypatch.setattr(providers, "get_provider", forbidden)
+    monkeypatch.setattr(providers, "account_token_for_slug", forbidden)
+    result = pr_reviewer_ops.pr_comment(wid, "selected text", config=config, publication=Selected())
+    assert result["publication"] == {"phase": "preview", "effects": "none"}
+
+
+def test_original_selected_recovery_needs_neither_current_tracking_nor_config(monkeypatch):
+    from agent_worktrees import config as cfg
+    from agent_worktrees.pr_selected_publication import PROTOCOL
+
+    class Recovery:
+        protocol = PROTOCOL
+        phase = "recover"
+
+        def execute(
+            self, *, worktree_id: str, target: dict | None, command: str, body: str, event: str,
+        ) -> dict:
+            assert target is None and worktree_id == "original" and command == "pr-review"
+            return {"publication": {"phase": "recover", "original": True}}
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        raise AssertionError("recovery depends on current tracking or config")
+
+    monkeypatch.setattr(cfg, "load_config", forbidden)
+    monkeypatch.setattr(pr_ops, "_load_record_or_none", forbidden)
+    result = pr_reviewer_ops.pr_review("original", event="APPROVED", publication=Recovery())
+    assert result["publication"] == {"phase": "recover", "original": True}
