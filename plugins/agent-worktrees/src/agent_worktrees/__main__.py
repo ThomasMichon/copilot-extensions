@@ -3095,19 +3095,16 @@ def _monitor_sweep(
     stale_sessions: list[str] = []
     if mux_bin:
         live = _monitor_list_sessions(mux_bin)
-        if sessions._is_psmux(mux_bin):
-            return _smr.publish_psmux_observation(
-                live, catalog_observer, lambda: publish_project_rosters(
-                    picker_projects or set(), interval=interval, project_lock=project_lock,
-                    lifecycle_priority=lifecycle_priority, governance=governance,
-                    segment_cache=segment_cache, config_cache_for_project=config_cache_for_project,
-                    roster_publisher=roster_publisher, warm_list_cache=_warm_list_cache_for_active_project,
-                ) if roster_publisher is not None else None,
-            )
-        if live is None:
-            if roster_failure is not None:
-                roster_failure(RuntimeError("mux-session enumeration unavailable"))
-            return -1
+        observed = _smr.publish_mux_observation(
+            mux_bin, live, catalog_observer, lambda: publish_project_rosters(
+                picker_projects or set(), interval=interval, project_lock=project_lock,
+                lifecycle_priority=lifecycle_priority, governance=governance,
+                segment_cache=segment_cache, config_cache_for_project=config_cache_for_project,
+                roster_publisher=roster_publisher, warm_list_cache=_warm_list_cache_for_active_project,
+            ) if roster_publisher is not None else None, roster_failure,
+        )
+        if observed is not None:
+            return observed
         from .status_monitor_discovery import discover_connected_worktrees
 
         registry.update(discover_connected_worktrees(

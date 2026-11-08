@@ -151,6 +151,20 @@ implementation proof obligations, not claims that native qualification passed.
 
 ## Journal
 
+### 2026-11-08 - Both native versions qualify
+
+- Candidate `06aa22c3c4` passed all eight native cases on PSMux 3.3.8
+  (63.03 seconds) and all eight on PSMux 3.4.0 (61.33 seconds). Cold Open,
+  same-pane reattach, independent attachments, fresh listings, explicit
+  retirement and both concurrent launch modes passed with the original bounds.
+- Reconciled concurrent effort-index changes without losing either entry;
+  range-diff retained the implementation patches.
+- Required CI then identified one excess line in the main module against its
+  shrink-only ceiling. Moved enumeration outcome handling into the existing
+  monitor runtime helper instead of widening the ceiling. Nine focused native
+  read-only/tmux publication and failure cases passed; all 17 changed source
+  modules meet their existing limits. Required CI/review remain merge gates.
+
 ### 2026-11-08 - Resume existing PR and resolve legacy framing
 
 - Resumed existing-PR stewardship. Exact candidate `d3ba7acc2c` again passed

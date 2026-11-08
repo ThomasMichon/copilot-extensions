@@ -798,8 +798,16 @@ def _monitor_list_sessions(
     return list_sessions(mux_bin)
 
 
-def publish_psmux_observation(live, catalog_observer, publish_rosters) -> int:
-    """Fresh observation must not reactivate cleanup-bearing periodic CLI writes."""
+def publish_mux_observation(
+    mux_bin, live, catalog_observer, publish_rosters, roster_failure,
+) -> int | None:
+    """Keep unknown enumeration and native reads out of periodic pane writes."""
+    from . import sessions
+
+    if not sessions._is_psmux(mux_bin):
+        if live is None and roster_failure is not None:
+            roster_failure(RuntimeError("mux-session enumeration unavailable"))
+        return -1 if live is None else None
     if live is not None and catalog_observer is not None:
         catalog_observer(set(live))
     publish_rosters()
