@@ -192,7 +192,10 @@ def _native_build_path(project, path):
     return "\\\\?\\" + absolute
 
 
-def commands(project, package, canonical_directory=None, *, companion_resources=None):
+def commands(
+    project, package, canonical_directory=None, *, companion_resources=None,
+    runtime_resources=None,
+):
     """Bind one package's hooks; generated sdist resources are not source mirrors."""
     from setuptools.command.build_py import build_py
     from setuptools.command.sdist import sdist
@@ -204,7 +207,9 @@ def commands(project, package, canonical_directory=None, *, companion_resources=
         from setuptools import find_packages
     resources = {
         name: Path("src") / package / destination
-        for name, destination in RUNTIME_RESOURCES.items()
+        for name, destination in (
+            RUNTIME_RESOURCES if runtime_resources is None else runtime_resources
+        ).items()
     }
     canonical_directory = Path(canonical_directory) if canonical_directory else None
 
