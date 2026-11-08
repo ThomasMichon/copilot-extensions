@@ -547,7 +547,7 @@ def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config, request):
 @pytest.mark.parametrize("prepared_read_event", ["cell"], indirect=True)
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("case", [
-    "read", "native", "batch", "shell", "shell-read", "mixed-targets", "mixed-write",
+    "read", "native", "batch", "shell", "shell-read", "mixed-targets", "mixed-write", "native-io",
     "no-reply", "missing-discovery",
     "old-provider", "wrong-generation", "closed", "foreign-marketplace",
     "foreign-receipt", "foreign-root", "legacy-discovery", "missing-row",
@@ -569,6 +569,24 @@ def test_registered_prepared_cell_post_tool_uses_selected_original_owners(
             pytest.fail(f"Required native membership shell {shell} is unavailable")
         pytest.skip(f"{shell} is unavailable")
     fixture = prepared_read_event
+    if case == "native-io":
+        harness = fixture["harness"].read_text(encoding="utf-8")
+        assertion = "if ($script:unexpectedPython -ne"
+        assert assertion in harness
+        harness = harness.replace(
+            assertion,
+            "if ($script:unexpectedManagement -or (Get-Module Microsoft.PowerShell.Management)) {\n"
+            " throw 'prepared entry loaded or invoked Management cmdlets'\n"
+            "}\n" + assertion,
+        )
+        fixture["harness"].write_text(
+            "$script:unexpectedManagement=0\n"
+            "function Join-Path { $script:unexpectedManagement++; throw 'unexpected Join-Path' }\n"
+            "function Split-Path { $script:unexpectedManagement++; throw 'unexpected Split-Path' }\n"
+            "function Get-Item { $script:unexpectedManagement++; throw 'unexpected Get-Item' }\n"
+            + harness,
+            encoding="utf-8",
+        )
     invalidated, notices, synchronous = [], [], []
     received, release = threading.Event(), threading.Event()
     policy = main._ResidentHookPolicy(main._load_hook_client_module())
@@ -751,6 +769,201 @@ def test_registered_prepared_cell_post_tool_uses_selected_original_owners(
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("process")
 @pytest.mark.effect("filesystem")
+@pytest.mark.skipif(os.name != "nt", reason="Native post-tool relative source compatibility")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("path_kind", ["relative", "drive-relative", "root-relative"])
+def test_registered_post_tool_preserves_relative_source_location(prepared_read_event, shell, path_kind):
+    from agent_procutil import no_window_kwargs
+
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.fail(f"Required relative-source shell {shell} is unavailable")
+    fixture = prepared_read_event
+    unrelated = fixture["home"] / "unrelated"
+    unrelated.mkdir()
+    source = os.path.relpath(fixture["payload_root"], fixture["home"])
+    if path_kind == "drive-relative":
+        source = fixture["home"].drive + source
+    elif path_kind == "root-relative":
+        source = str(fixture["payload_root"])[len(fixture["payload_root"].drive):]
+        if PLUGIN.drive != fixture["home"].drive:
+            unrelated = PLUGIN
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-File", str(fixture["harness"])],
+        input=json.dumps(fixture["payload"]), text=True, capture_output=True, timeout=10,
+        cwd=unrelated,
+        env={
+            **fixture["env"],
+            "COPILOT_PLUGIN_ROOT": source,
+        },
+        **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+    assert result.stderr.startswith("entry_seconds="), result.stderr
+    assert json.loads(fixture["sidecar"].read_text())["count"] == 1
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.skipif(os.name != "nt", reason="Native post-tool missing/non-file entry compatibility")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("case", ["missing", "directory"])
+def test_registered_post_tool_entry_fallback_preserves_original_boundary(tmp_path, shell, case):
+    from agent_procutil import no_window_kwargs
+
+    executable = shutil.which(shell)
+    assert executable, f"Required fallback shell {shell} is unavailable"
+    source = tmp_path / "payload"
+    scripts = source / "scripts"
+    scripts.mkdir(parents=True)
+    if case == "directory":
+        (scripts / SCRIPT.name).mkdir()
+    (scripts / "hook_client.py").write_text(
+        "import json,os,sys\n"
+        "assert sys.argv[1:] == ['postToolUse']\n"
+        "assert json.load(sys.stdin) == {}\n"
+        "assert os.getcwd() == os.environ['USERPROFILE']\n"
+        "print('original-fallback')\n",
+        encoding="utf-8",
+    )
+    command = json.loads((PLUGIN / "hooks.json").read_text())["hooks"]["postToolUse"][0]["powershell"]
+    python = str(sys.executable).replace("'", "''")
+    harness = tmp_path / "fallback.ps1"
+    harness.write_text(
+        "$ErrorActionPreference='Stop'\n"
+        "function Get-Command {\n"
+        " if ($env:ENTRY_TEST_CASE -eq 'directory') { throw 'unexpected fallback selection' }\n"
+        " if ((Get-Location).Path -cne $env:USERPROFILE -or\n"
+        "     [IO.Directory]::GetCurrentDirectory() -cne $env:USERPROFILE) { throw 'cwd not repaired' }\n"
+        f" [pscustomobject]@{{Source='{python}'}}\n"
+        "}\n" + command,
+        encoding="utf-8",
+    )
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-File", str(harness)],
+        input="{}", text=True, capture_output=True, timeout=10, cwd=unrelated,
+        env={
+            **os.environ, "USERPROFILE": str(tmp_path), "COPILOT_PLUGIN_ROOT": str(source),
+            "ENTRY_TEST_CASE": case,
+        },
+        **no_window_kwargs(),
+    )
+    if case == "directory":
+        assert result.returncode != 0 and not result.stdout
+        assert "unexpected fallback selection" not in result.stderr
+    else:
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "original-fallback" and not result.stderr
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.skipif(os.name != "nt", reason="Native post-tool fallback cwd compatibility")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+def test_post_tool_fallback_repairs_cwd_before_original_admission(tmp_path, shell):
+    from agent_procutil import no_window_kwargs
+
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.fail(f"Required fallback shell {shell} is unavailable")
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    shutil.copyfile(SCRIPT, scripts / SCRIPT.name)
+    (scripts / "managed-session.ps1").write_text(
+        "function Test-ManagedWorktreesSession {\n"
+        " if ((Get-Location).Path -cne $env:USERPROFILE -or\n"
+        "     [IO.Directory]::GetCurrentDirectory() -cne $env:USERPROFILE) { throw 'cwd not repaired' }\n"
+        " [IO.File]::WriteAllText((Join-Path $env:USERPROFILE 'admission-checked'), 'checked')\n"
+        " return $false\n}\n",
+        encoding="utf-8",
+    )
+    entry = str(scripts / SCRIPT.name).replace("'", "''")
+    unrelated = tmp_path / "unrelated"
+    unrelated.mkdir()
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-Command",
+         f"$ErrorActionPreference='Stop'; . '{entry}'; Invoke-PostToolHook -Raw '{{}}'"],
+        text=True, capture_output=True, timeout=10, cwd=unrelated,
+        env={**os.environ, "USERPROFILE": str(tmp_path)}, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    assert (tmp_path / "admission-checked").read_text() == "checked"
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.skipif(os.name != "nt", reason="Native prepared runtime-root compatibility")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("case", ["canonical", "dot", "missing", "missing-dot", "linked-dot", "layout"])
+def test_prepared_runtime_root_preserves_literal_context_guards(tmp_path, shell, case):
+    from agent_procutil import no_window_kwargs
+
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.fail(f"Required native runtime-root shell {shell} is unavailable")
+    runtime = tmp_path / "market" / "plugins" / "agent-worktrees"
+    runtime.mkdir(parents=True)
+    pointer = runtime / "install.json"
+    pointer.write_text("{}", encoding="utf-8")
+    if case == "missing":
+        pointer.unlink()
+    elif case == "layout":
+        pointer = runtime / "other.json"
+        pointer.write_text("{}", encoding="utf-8")
+    elif case in {"dot", "missing-dot", "linked-dot"}:
+        detour = tmp_path / "detour"
+        if case != "missing-dot":
+            detour.mkdir()
+        if case == "linked-dot":
+            link = tmp_path / "linked"
+            created = subprocess.run(
+                ["cmd.exe", "/c", "mklink", "/J", str(link), str(detour)],
+                text=True, capture_output=True, timeout=10, **no_window_kwargs(),
+            )
+            assert created.returncode == 0, created.stderr
+            detour = link
+        pointer = detour / ".." / "market" / "plugins" / "agent-worktrees" / "install.json"
+    managed = str(PLUGIN / "scripts" / "managed-session.ps1").replace("'", "''")
+    facts = str(PLUGIN / "scripts" / "hook-facts.ps1").replace("'", "''")
+    script = tmp_path / "runtime-root-parity.ps1"
+    script.write_text(
+        f"$ErrorActionPreference='Stop'\n. '{managed}'\n. '{facts}'\n" + r"""
+try { $old = @{ accepted = $true; root = (Get-ManagedWorktreesRuntimeRoot) } }
+catch { $old = @{ accepted = $false; root = $null } }
+$script:unexpectedManagement = 0
+function Join-Path { $script:unexpectedManagement++; throw 'unexpected Join-Path' }
+function Split-Path { $script:unexpectedManagement++; throw 'unexpected Split-Path' }
+function Get-Item { $script:unexpectedManagement++; throw 'unexpected Get-Item' }
+try { $prepared = @{ accepted = $true; root = (Get-PostToolRuntimeRoot) } }
+catch { $prepared = @{ accepted = $false; root = $null } }
+if ($script:unexpectedManagement) { throw 'prepared root invoked a Management cmdlet' }
+ConvertTo-Json -Compress -InputObject @{ old = $old; prepared = $prepared }
+""",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-File", str(script)],
+        text=True, capture_output=True, timeout=10,
+        env={**os.environ, "USERPROFILE": str(tmp_path), "COPILOT_EXTENSIONS_CONTEXT": str(pointer)},
+        **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    value = json.loads(result.stdout)
+    assert value["old"] == value["prepared"]
+    assert value["prepared"]["accepted"] is (case in {"canonical", "dot"})
+    if value["prepared"]["accepted"]:
+        assert value["prepared"]["root"] == str(runtime)
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows sender deadline arithmetic")
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("allocation_ms", [60, 110])
@@ -897,6 +1110,279 @@ def test_registered_prepared_cell_post_tool_cold_process_tail(
             assert server.has_recent_hook_demand()
             assert json.loads(fixture["sidecar"].read_text())["count"] == index + 1
         print(f"{shell}/cell/cold-tail-{sample_group}: {json.dumps(samples)}")
+    finally:
+        server.close()
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("network")
+@pytest.mark.skipif(
+    os.name != "nt" or not os.environ.get("AGENT_WORKTREES_PROFILE_BASELINE"),
+    reason="Explicit contained Windows baseline/candidate comparison",
+)
+@pytest.mark.parametrize("prepared_read_event", ["cell"], indirect=True)
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("sample_group", range(2))
+def test_prepared_post_entry_baseline_comparison(prepared_read_event, shell, sample_group):
+    from agent_procutil import no_window_kwargs
+    from agent_worktrees.hook_ipc import HookIpcServer
+
+    executable = shutil.which(shell)
+    git = shutil.which("git")
+    assert executable and git, "Required native comparison tools are unavailable"
+    revision = os.environ["AGENT_WORKTREES_PROFILE_BASELINE"]
+    assert len(revision) == 40 and all(char in "0123456789abcdef" for char in revision)
+    repository = Path(os.environ["AGENT_WORKTREES_PROFILE_BASELINE_REPO"])
+    fixture = prepared_read_event
+    scripts = fixture["payload_root"] / "scripts"
+    fixture["env"]["AGENT_WORKTREES_NUDGE_CALLS"] = "1000"
+    names = ("post-tool-hook.ps1", "hook-facts.ps1")
+    candidate = {name: (scripts / name).read_bytes() for name in names}
+    command = json.loads((PLUGIN / "hooks.json").read_text())["hooks"]["postToolUse"][0]["powershell"]
+    harness = fixture["harness"].read_text(encoding="utf-8")
+    assert harness.count(command.removesuffix("exit 0")) == 1
+
+    def baseline_file(relative):
+        result = subprocess.run(
+            [git, "-C", str(repository), "show", f"{revision}:{relative}"],
+            capture_output=True, timeout=10, **no_window_kwargs(),
+        )
+        assert result.returncode == 0, result.stderr.decode(errors="replace")
+        return result.stdout
+
+    baseline = {
+        name: baseline_file(f"plugins/agent-worktrees/scripts/{name}")
+        for name in names
+    }
+    baseline["post-tool-hook.ps1"] += (
+        b"\nfunction Invoke-ResidentPostTool { throw 'synchronous resident call' }\n"
+    )
+    baseline_command = json.loads(baseline_file("plugins/agent-worktrees/hooks.json"))[
+        "hooks"
+    ]["postToolUse"][0]["powershell"]
+    notices, samples = [], []
+    received = threading.Event()
+
+    class Server(HookIpcServer):
+        def _on_read_demand(self, request):
+            super()._on_read_demand(request)
+            notices.append(request)
+            received.set()
+
+    server = Server(
+        lambda *args: pytest.fail("unexpected synchronous request"),
+        read_demand_admitted=lambda: True,
+    )
+    server.start()
+    try:
+        path = fixture["registry"] / "status-monitor.lock"
+        path.write_text(
+            json.dumps({**json.loads(path.read_text()), **server.rendezvous()}),
+            encoding="utf-8",
+        )
+        for index, variant in enumerate(("baseline", "candidate", "baseline")):
+            files = baseline if variant == "baseline" else candidate
+            for name, content in files.items():
+                (scripts / name).write_bytes(content)
+            selected_command = baseline_command if variant == "baseline" else command
+            fixture["harness"].write_text(
+                harness.replace(command.removesuffix("exit 0"), selected_command.removesuffix("exit 0")),
+                encoding="utf-8",
+            )
+            received.clear()
+            started = time.perf_counter()
+            result = subprocess.run(
+                [executable, "-NoProfile", "-NonInteractive", "-File", str(fixture["harness"])],
+                input=json.dumps(fixture["payload"]), text=True, capture_output=True, timeout=10,
+                env=fixture["env"], **no_window_kwargs(),
+            )
+            elapsed = time.perf_counter() - started
+            assert result.returncode == 0, result.stderr
+            assert result.stdout == ""
+            assert result.stderr.startswith("entry_seconds="), result.stderr
+            assert received.wait(2), "selected original IPC owner received no notification"
+            assert len(notices) == index + 1 and server.has_recent_hook_demand()
+            assert notices[-1]["kind"] == "readHookDemand" and "payload" not in notices[-1]
+            assert json.loads(fixture["sidecar"].read_text())["count"] == index + 1
+            samples.append({
+                "variant": variant, "process_seconds": elapsed,
+                "entry_seconds": float(result.stderr.removeprefix("entry_seconds=")),
+            })
+        print(json.dumps({
+            "shell": shell, "sample_group": sample_group,
+            "baseline_revision": revision, "fixed_fixture_aba": samples,
+        }))
+    finally:
+        server.close()
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("network")
+@pytest.mark.skipif(
+    os.name != "nt" or os.environ.get("AGENT_WORKTREES_PROFILE_ENTRY") != "1",
+    reason="Explicit contained Windows entry-stage diagnosis",
+)
+@pytest.mark.parametrize("prepared_read_event", ["cell"], indirect=True)
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("mode", ["startup", "registered", "stages"])
+def test_prepared_post_entry_stage_profile(prepared_read_event, shell, mode):
+    from agent_procutil import no_window_kwargs
+    from agent_worktrees.hook_ipc import HookIpcServer
+
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.fail(f"Required profiling shell {shell} is unavailable")
+    fixture = prepared_read_event
+    scripts = fixture["payload_root"] / "scripts"
+    fixture["env"]["AGENT_WORKTREES_NUDGE_CALLS"] = "1000"
+
+    def instrument(text, name, first_statement):
+        start = text.index(f"function {name} {{")
+        end = text.find("\nfunction ", start + 1)
+        end = len(text) if end < 0 else end
+        section = text[start:end]
+        opening = section.index(first_statement)
+        closing = section.rindex("\n}")
+        prefix = (
+            "    $__entryStageClock = [Diagnostics.Stopwatch]::StartNew()\n"
+            "    try {\n"
+        )
+        suffix = (
+            "\n    } finally {\n"
+            "        $__entryStageMs = $__entryStageClock.Elapsed.TotalMilliseconds\n"
+            f"        $__entryStageRow = $script:entryProfile['{name}']\n"
+            "        if ($null -eq $__entryStageRow) {\n"
+            "            $__entryStageRow = @{ count = 0; inclusive_ms = 0.0 }\n"
+            f"            $script:entryProfile['{name}'] = $__entryStageRow\n"
+            "        }\n"
+            "        $__entryStageRow.count++\n"
+            "        $__entryStageRow.inclusive_ms += $__entryStageMs\n"
+            "    }"
+        )
+        return (
+            text[:start] + section[:opening] + prefix + section[opening:closing]
+            + suffix + section[closing:] + text[end:]
+        )
+
+    if mode == "stages":
+        managed = (PLUGIN / "scripts" / "managed-session.ps1").read_text(encoding="utf-8")
+        for name, first in (
+            ("Get-ManagedWorktreesRuntimeRoot", "    $runtimeRoot ="),
+            ("ConvertFrom-ManagedWorktreesJson", "    if (-not $Text."),
+            ("Get-PreparedWorktreesPath", "    if ($Path -isnot"),
+            ("Test-PreparedWorktreesStamp", "    $canonical ="),
+            ("Test-PreparedWorktreesContent", "    $stream ="),
+            ("Test-PreparedManagedWorktreesSession", "    $stream ="),
+        ):
+            managed = instrument(managed, name, first)
+        copied_managed = scripts / "profiled-managed-session.ps1"
+        copied_managed.write_text(managed, encoding="utf-8")
+        wrapper = scripts / "managed-session.ps1"
+        original = str(PLUGIN / "scripts" / "managed-session.ps1").replace("'", "''")
+        assert original in wrapper.read_text(encoding="utf-8")
+        wrapper.write_text(
+            wrapper.read_text(encoding="utf-8").replace(
+                original, str(copied_managed).replace("'", "''"),
+            ),
+            encoding="utf-8",
+        )
+        copied_facts = scripts / "hook-facts.ps1"
+        facts = copied_facts.read_text(encoding="utf-8")
+        for name, first in (
+            ("Read-PostToolBoundedJson", "    $stream ="),
+            ("Read-PostToolHookFacts", "    $stream ="),
+            ("Send-PostToolReadDemand", "    $client ="),
+            ("Invoke-PreparedPostToolReminders", "    try {\n        $binding ="),
+        ):
+            facts = instrument(facts, name, first)
+        copied_facts.write_text(facts, encoding="utf-8")
+        copied_entry = scripts / "post-tool-hook.ps1"
+        copied_entry.write_text(
+            instrument(
+                copied_entry.read_text(encoding="utf-8"),
+                "Invoke-PostToolHook", "    $admission =",
+            ),
+            encoding="utf-8",
+        )
+
+    meta = r"""
+$process = [Diagnostics.Process]::GetCurrentProcess()
+try {
+    [Console]::Error.WriteLine('profile_cpu_seconds=' +
+        $process.TotalProcessorTime.TotalSeconds.ToString([Globalization.CultureInfo]::InvariantCulture))
+} finally { $process.Dispose() }
+"""
+    meta += (
+        "[Console]::Error.WriteLine('profile_stages=' + "
+        "(ConvertTo-Json -Compress -Depth 5 -InputObject $script:entryProfile))\n"
+        if mode == "stages" else "[Console]::Error.WriteLine('profile_stages={}')\n"
+    )
+    if mode == "startup":
+        harness = (
+            "$ErrorActionPreference='Stop'\n$script:entryProfile=@{}\n"
+            "$entryClock=[Diagnostics.Stopwatch]::StartNew()\n"
+            "$null=[Console]::In.ReadToEnd()\n"
+            "[Console]::Error.WriteLine('entry_seconds=' + "
+            "$entryClock.Elapsed.TotalSeconds.ToString([Globalization.CultureInfo]::InvariantCulture))\n"
+            + meta + "\nexit 0\n"
+        )
+    else:
+        harness = fixture["harness"].read_text(encoding="utf-8")
+        probe_start = harness.index("$counterPath='")
+        probe_end = harness.index("[Console]::Error.WriteLine('entry_seconds='", probe_start)
+        harness = harness[:probe_start] + harness[probe_end:]
+        exit_at = harness.rindex("; exit 0")
+        harness = (
+            "$script:entryProfile=@{}\n" + harness[:exit_at] + "\n" + meta
+            + "\nexit 0" + harness[exit_at + len("; exit 0"):]
+        )
+    fixture["harness"].write_text(harness, encoding="utf-8")
+    notices = []
+    received = threading.Event()
+
+    class Server(HookIpcServer):
+        def _on_read_demand(self, request):
+            super()._on_read_demand(request)
+            notices.append(request)
+            received.set()
+
+    server = Server(lambda *args: pytest.fail("unexpected synchronous request"), read_demand_admitted=lambda: True)
+    server.start()
+    try:
+        path = fixture["registry"] / "status-monitor.lock"
+        path.write_text(json.dumps({**json.loads(path.read_text()), **server.rendezvous()}), encoding="utf-8")
+        started = time.perf_counter()
+        result = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-File", str(fixture["harness"])],
+            input=json.dumps(fixture["payload"]), text=True, capture_output=True, timeout=10,
+            env=fixture["env"], **no_window_kwargs(),
+        )
+        elapsed = time.perf_counter() - started
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == ""
+        fields = dict(line.split("=", 1) for line in result.stderr.splitlines())
+        assert set(fields) == {"entry_seconds", "profile_cpu_seconds", "profile_stages"}
+        stages = json.loads(fields["profile_stages"])
+        if mode == "startup":
+            assert not notices and not fixture["sidecar"].exists()
+        else:
+            assert received.wait(2), "selected original IPC owner received no notification"
+            assert len(notices) == 1 and server.has_recent_hook_demand()
+            assert notices[0]["kind"] == "readHookDemand" and "payload" not in notices[0]
+            assert json.loads(fixture["sidecar"].read_text())["count"] == 1
+        if mode == "stages":
+            assert stages["Test-PreparedManagedWorktreesSession"]["count"] == 1
+            assert stages["Get-PreparedWorktreesPath"]["count"] > 0
+        print(json.dumps({
+            "shell": shell, "mode": mode, "process_seconds": elapsed,
+            "entry_seconds": float(fields["entry_seconds"]),
+            "cpu_seconds": float(fields["profile_cpu_seconds"]),
+            "diagnostic_inclusive_stages": stages,
+        }))
     finally:
         server.close()
 

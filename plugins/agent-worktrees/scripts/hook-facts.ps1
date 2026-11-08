@@ -55,14 +55,14 @@ function Read-PostToolHookFacts {
         foreach ($root in @($RuntimeRoot, $ProjectRoot, $Workspace)) {
             if (-not [IO.Path]::IsPathRooted($root)) { return $null }
         }
-        $factsHome = Join-Path $ProjectRoot 'worktrees'
+        $factsHome = [IO.Path]::Combine($ProjectRoot, 'worktrees')
         foreach ($segment in @('', $WorktreeId, 'hook-facts')) {
-            if ($segment) { $factsHome = Join-Path $factsHome $segment }
+            if ($segment) { $factsHome = [IO.Path]::Combine($factsHome, $segment) }
             $attributes = [IO.File]::GetAttributes($factsHome)
             if (($attributes -band [IO.FileAttributes]::ReparsePoint) -or
                 -not ($attributes -band [IO.FileAttributes]::Directory)) { return $null }
         }
-        $path = Join-Path $factsHome ($Discovery.hook_facts_generation + '.json')
+        $path = [IO.Path]::Combine($factsHome, $Discovery.hook_facts_generation + '.json')
         $attributes = [IO.File]::GetAttributes($path)
         if ($attributes -band ([IO.FileAttributes]::ReparsePoint -bor [IO.FileAttributes]::Directory)) {
             return $null
@@ -434,7 +434,23 @@ function Send-PostToolReadDemand {
 
 function Get-PostToolRuntimeRoot {
     if ($env:COPILOT_EXTENSIONS_CONTEXT) {
-        $runtime = Get-ManagedWorktreesRuntimeRoot
+        $pointer = $env:COPILOT_EXTENSIONS_CONTEXT
+        $null = Get-PreparedWorktreesPath $pointer
+        if ([IO.Path]::GetFileName($pointer) -cne 'install.json') { throw 'Invalid context pointer' }
+        $runtime = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($pointer))
+        if ([IO.Path]::GetFileName($runtime) -cne 'agent-worktrees' -or
+            [IO.Path]::GetFileName([IO.Path]::GetDirectoryName($runtime)) -cne 'plugins') {
+            throw 'Invalid context layout'
+        }
+        # Normalization can erase an ancestor; retain the original literal-path checks.
+        $ancestor = $pointer
+        for ($depth = 0; $ancestor; $depth++) {
+            if ($depth -ge 128) { throw 'Prepared context path exceeds its bound' }
+            if ([IO.File]::GetAttributes($ancestor) -band [IO.FileAttributes]::ReparsePoint) {
+                throw 'Linked context path'
+            }
+            $ancestor = [IO.Path]::GetDirectoryName($ancestor)
+        }
     } else {
         $registryHome = if ($env:AGENT_HOME -and $env:AGENT_HOME.Trim()) {
             $env:AGENT_HOME.Trim()
@@ -661,7 +677,10 @@ function Invoke-PreparedPostToolReminders {
         if ($null -eq $view -or $view['version'] -ne 2) { return ,@{} }
         $facts = $view['facts']
         $worktree = $binding['worktreeId']
-        $stateHome = [IO.Path]::Combine((Get-ManagedWorktreesRuntimeRoot), 'nudge-state')
+        $stateRuntime = if ($env:COPILOT_EXTENSIONS_CONTEXT) { $runtime } else {
+            [IO.Path]::Combine($env:USERPROFILE, '.agent-worktrees')
+        }
+        $stateHome = [IO.Path]::Combine($stateRuntime, 'nudge-state')
         $sidecar = [IO.Path]::Combine($stateHome, $worktree + '.json')
         $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000.0
         $messages = [Collections.Generic.List[string]]::new()
