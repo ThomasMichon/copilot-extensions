@@ -8337,7 +8337,39 @@ Nested test tools receive a sandbox-local `AGENT_SCRATCH_ROOT`, never the host's
 retained scratch root. Pytest's cache and interpreter bytecode caches also
 stay in the disposable sandbox. Environment leases, source fingerprints and unreaped-tree
 retention remain unchanged. `--list` does not allocate or validate scratch.
-Old `.test-venvs` and `.test-runs` directories are neither migrated nor deleted.
+Old checkout-root `.test-venvs` and `.test-runs` directories are not migrated;
+the runner no longer writes them. Reclaiming them is guided, never a sweep:
+
+1. `python tools/reclaim_legacy_test_dirs.py [--checkout <worktree>]` inventories
+   registered worktrees of this clone without changing anything. Each tree is
+   `ready` (recognized virtual-environment layout), `needs-decision` (other
+   files such as captured evidence, even inside a virtual environment, with a
+   sample listed) or `refused` with its reason.
+2. Review the set, then record it:
+   `--select <dir> [--discard <dir>] --plan-out plan.json`. A `needs-decision`
+   tree needs a matching `--discard`, the owner's decision to drop its
+   unclassified files. The plan binds each tree's identity and
+   metadata fingerprint.
+3. Stop test/capture writers for the selected set, then run
+   `--apply-plan plan.json --confirm-writers-stopped`. It re-verifies each target, renames it aside,
+   re-verifies again and only then deletes it. Failed checks refuse and attempt
+   restoration without replacing a newly existing original path. Partial or
+   unverifiable removal is not reported as success; retained quarantine paths
+   and restoration errors are reported per target.
+
+Only Git-ignored, untracked, link-free trees older than `--min-age-hours`
+(default 24) qualify. Socket, FIFO and device entries always refuse, even
+with a discard decision. On Linux, a process of yours that cannot be inspected
+(for example a non-dumpable `sshd`) refuses a target unless you name it with
+`--accept-uninspectable NAME` while planning; the plan records that choice.
+Stop test and capture writers for the selected set before applying a plan.
+These checks detect known users when they run; they do not prove exclusive use
+or protect against concurrent or adversarial mutation. Windows rename detects
+sharing violations, not every possible open handle.
+Permission failures are reported without changing permissions or blindly
+retrying filesystem functions; incomplete removal is reported as partial.
+`tools/typecheck.py` keeps its prepared environments under the same
+`ce-tests-<canonical-checkout-key>/typecheck/<platform>/` retained cache.
 Changing scratch storage starts a separate cache; keep the same setting between
 `--prepare-only` and execution. This does not relocate unrelated tools' caches
 or caller-selected reports.
@@ -8784,7 +8816,8 @@ This cleans only that target's current-platform test environment in this
 checkout, after acquiring its normal lease. A busy environment refuses or waits
 under `--admission-wait`; linked cache roots refuse before cleanup. Other
 targets, platforms, checkouts, installed runtimes and the global UV cache are
-untouched. There is no need to delete `.test-venvs` or purge UV's cache.
+untouched. Legacy checkout-root `.test-venvs` trees are reclaimed separately
+with `tools/reclaim_legacy_test_dirs.py`; purging UV's cache is never required.
 
 On Windows, cache inspection/removal and disposable sandbox cleanup use one
 native extended-path spelling so deep private UV wheel paths do not become
