@@ -402,10 +402,12 @@ _Operator-required outcome; agent-recommended slices and validation._
   through the existing allocation and trusted source/profile owners (#11471).
   Retain exact selection contracts and original previews without a writer;
   submission remains independently unavailable.
-- [ ] Deliver the [canonical helper and native source-discovery prerequisites](comment-producer-enrollment.md#canonical-helper-delivery-and-native-source-discovery)
+- [x] Deliver the [canonical helper and native source-discovery prerequisites](comment-producer-enrollment.md#canonical-helper-delivery-and-native-source-discovery)
   before expanding strict standalone configuration. Direct wheel/sdist/release
   delivery and actual executing exact-root discovery are separate from
-  fixture imports or installed enrollment.
+  fixture imports or installed enrollment. Native discovery merged in #11488
+  and canonical helper packaging in #11500; this closes only the finite source
+  prerequisites, not normal-host or installed enrollment.
 - [ ] Supply explicitly selected standalone preparation-only hosting using
   those actual source/profile dependencies. Qualify the executing provider before
   advertising support; no preview verifies protected-source grants or
