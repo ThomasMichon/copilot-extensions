@@ -269,8 +269,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     repositories_runtime = repository_map.RepositoryMapRuntime(
         status_monitor_runtime._aw_runtime_home()
     )
-    worktrees_runtime = WorktreesRuntime.for_monitor(wake_event, handover.read_admitted, installation_context)
-    resident_push.bind(wake_event, segment_cache)
+    worktrees_runtime = WorktreesRuntime.for_monitor(wake_event, handover.read_admitted, installation_context, interval=interval)
+    resident_push.bind(wake_event, segment_cache, changed=worktrees_runtime.note_changed)
     published: dict[tuple[str, str], str] = {}
     incarnations: dict[str, str] = {}
     session_projects: dict[str, str] = {}
@@ -882,7 +882,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     my_prefix,
                     ctx_done,
                     interval=interval,
-                    picker_projects=external_projects,
+                    picker_projects=external_projects | worktrees_runtime.take_changed_projects(
+                        resident_push.project_resolver(session_projects, segment_cache)),
                     catalog_observer=reconciler.observe_mux,
                     pane_observer=pane_reconciler.observe,
                     segment_cache=segment_cache,
