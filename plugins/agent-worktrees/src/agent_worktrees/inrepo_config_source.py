@@ -116,7 +116,7 @@ def _offline_remote_head_branch(
     try:
         proc = git_ops.git(
             "symbolic-ref", "-q", f"refs/remotes/{remote}/HEAD",
-            cwd=anchor, check=False, capture=True, timeout=timeout,
+            cwd=anchor, check=False, capture=True, timeout=timeout, isolated_repository=True,
         )
     except Exception as exc:
         return _unavailable(str(anchor), "committed-head", type(exc).__name__)
@@ -145,7 +145,7 @@ def _offline_remote_branch_exists(
     try:
         proc = git_ops.git(
             "show-ref", "--verify", "--quiet", f"refs/remotes/{remote}/{branch}",
-            cwd=anchor, check=False, capture=True, timeout=timeout,
+            cwd=anchor, check=False, capture=True, timeout=timeout, isolated_repository=True,
         )
     except Exception as exc:
         _unavailable(str(anchor), "committed-branch", type(exc).__name__)
@@ -170,7 +170,8 @@ def _read_committed_blob(
     spec = f"{remote}/{branch}:{rel_path.as_posix()}"
     try:
         proc = git_ops.git(
-            "show", spec, cwd=anchor, check=False, capture=True, timeout=timeout
+            "show", spec, cwd=anchor, check=False, capture=True, timeout=timeout,
+            isolated_repository=True,
         )
     except Exception as exc:
         return _unavailable(spec, "committed-blob", type(exc).__name__)
@@ -193,7 +194,7 @@ def _committed_candidates(
         proc = git_ops.git(
             "--literal-pathspecs", "ls-tree", "-z", "--full-tree", f"{remote}/{branch}", "--",
             *(candidate.as_posix() for candidate in candidates),
-            cwd=anchor, check=False, capture=True, timeout=timeout,
+            cwd=anchor, check=False, capture=True, timeout=timeout, isolated_repository=True,
         )
     except (OSError, ValueError, subprocess.TimeoutExpired, git_ops.GitError) as exc:
         logging.getLogger("agent-worktrees").warning(
@@ -243,7 +244,7 @@ def _read_committed_batch(
     try:
         result = git_ops.git(
             "cat-file", "--batch", cwd=anchor, check=False, capture=True, timeout=timeout,
-            input_data=b"".join(spec + b"\n" for spec in specs),
+            input_data=b"".join(spec + b"\n" for spec in specs), isolated_repository=True,
         )
     except (OSError, ValueError, subprocess.SubprocessError, git_ops.GitError):
         return _unavailable(str(anchor), "committed-batch", "batch result unavailable")
