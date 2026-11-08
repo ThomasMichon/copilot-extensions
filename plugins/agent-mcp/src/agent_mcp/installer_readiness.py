@@ -9,7 +9,8 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from .config import ConfigError, load_config, normalize_bridge_name
+from .config import ConfigError, normalize_bridge_name
+from .configuration import load_readiness_config
 
 MODULE_ID = "agent-mcp/runtime"
 
@@ -27,9 +28,9 @@ def _result(state: str, detail: str) -> dict[str, Any]:
 def evaluate(
     candidates: Sequence[tuple[str, Path]],
     *,
-    loader: Callable[[str], object] = load_config,
+    loader: Callable[[str], object] = load_readiness_config,
 ) -> dict[str, Any]:
-    """Validate configured bridges without starting an upstream process."""
+    """Validate native bridges without requiring a repository or starting an upstream."""
     unique_candidates = tuple(
         dict.fromkeys(
             (normalize_bridge_name(name), path.resolve())

@@ -21,6 +21,16 @@ FIELDS = {"timeout", "retries", "idle_timeout"}
 RELPATH = Path(".copilot-extensions") / "agent-mcp" / "bridges"
 
 
+def load_readiness_config(name_or_path: str) -> BridgeConfig:
+    """Validate native declarations without selecting a caller's repository preferences."""
+    from . import config as native
+
+    path = native.resolve_config_path(name_or_path)
+    data = native._read_file(path)
+    machine = native._machine_overlay(data, path)
+    return native.parse_config(native._deep_merge(data, machine), name=path.stem, source_path=path)
+
+
 def load_native_config(
     name_or_path: str, *, repository_root: Path | None = None,
 ) -> BridgeConfig:
