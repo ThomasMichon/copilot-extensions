@@ -3176,7 +3176,9 @@ nonblocking driver admission while holding their respective first-use locks;
 they release the lock before retrying a busy driver, recheck selection on each
 attempt, and never replay pending work. An unsettled queue fails rather than
 being retried as ordinary contention. A selected installer lacking the
-nonblocking first-use contract is refused until explicit install or repair.
+nonblocking first-use contract is refused until explicit install or repair
+through the selected authority; standalone installation cannot override
+project authority.
 The contract marker is a compatibility check, not execution authority.
 The canonical version-1 payload shim and Bridge/Dispatch retained command gates
 serialize stale PID-link revalidation with `.provision.reap.mutex` when `flock`
