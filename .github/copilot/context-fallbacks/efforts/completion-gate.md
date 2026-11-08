@@ -1,12 +1,18 @@
 ---
 applyTo: "**"
 ---
-<!-- copilot-extension-instruction-projection {"applyTo":"**","bodySha256":"e759052d9fc225910a9c248cef39e9b7fb9fef991d4a545a65c00e5f6aa8d74c","customizationKind":"instructions","deliveryKind":"body","destination":".github/instructions/efforts/completion-gate.instructions.md","plugin":"efforts@copilot-extensions","pluginVersion":"0.2.2-dev1","renderedBytes":4799,"schema":"copilot-extensions.instruction-projection","sourceId":"completion-gate","template":"instructions/completion-gate.instructions.md","templateBytes":4048,"templateSha256":"ecd1cb0a3883a182c298ac854b26f45db31f188978bcb1a67d378c406840014b","version":1} -->
+<!-- copilot-extension-instruction-projection {"applyTo":"**","bodySha256":"dd6c325d159a4ac99a6675f66cdba9538f20411f437617a5db534ad85ee4e49d","customizationKind":"instructions","deliveryKind":"body","destination":".github/instructions/efforts/completion-gate.instructions.md","plugin":"efforts@copilot-extensions","pluginVersion":"0.2.3-dev1","renderedBytes":4733,"schema":"copilot-extensions.instruction-projection","sourceId":"completion-gate","template":"instructions/completion-gate.instructions.md","templateBytes":3982,"templateSha256":"ac9bcbf8e53c20c8528dbe224769e00d60e39522d018edc5c4aaca2faac652e2","version":1} -->
 
 
 # Effort completion fallback
 
-**Fallback policy `[owner: efforts@0.2.2-dev1]`:** In repositories requiring efforts for substantial multi-step work, use `planning-efforts` to create/resume the canonical effort. Its rightful head may declare completion only when it is explicitly Done and every Plan/Validation Plan item is resolved or transferred to a named tracked objective. A completed phase, PR, handoff or session is not objective completion. **Only two terminal outcomes are acceptable for a worktree/session bound to an active effort:** the effort is fully Done (every Plan/Validation Plan item resolved or transferred — recommend finalizing the worktree), or a context handoff (the effort stays open for a successor). A merged PR, a completed task, or "nothing actionable remains" is never itself either outcome. **After any effort-linked PR merges, return to the effort before reporting status or ending the turn:** use the planning skill's effort digest to re-read current Plan/Validation Plan state and touched sections, not the whole document tree or just the merged-PR summary; resolve only the items it closed, journal what landed, and name or start the next stretch. **Durable journaling licenses relentless driving:** keep selecting and executing the next Plan item — including watching a reviewable gate through to merge, not stopping once it's merely opened — without waiting to be re-prompted. Diagnose ordinary uncertainty/failures autonomously within scope and bounds; preserve waiting or other authorized work instead of asking for the known goal again. Involve the Operator only for an actual human decision, authority/permission or safety gate. Required review, explicit holds, resource limits and handoff boundaries still apply.
+On an operator goal/mission/objective amendment, immediately update the effort's
+top `## Goal` (public-safe verbatim). Retain prior intent and original approvals,
+limits and holds in Request/its sidecar. Re-read current Goal after reconstruction;
+agenda/handoff roots reference it. Use labelled legacy Guiding Intent if absent.
+Research stale steers before action; records grant no authority.
+
+**Fallback policy `[owner: efforts@0.2.3-dev1]`:** Where substantial work requires efforts, use `planning-efforts`. The rightful head declares completion only at explicit Done with every Plan/Validation Plan item resolved or transferred to a named tracked objective. A phase, PR, task, handoff or session ending is not objective completion. **Only two terminal outcomes are acceptable for a worktree/session bound to an active effort:** fully Done (recommend finalizing), or a context handoff leaving the effort open. **After any effort-linked PR merges, return to the effort before reporting status or ending the turn:** use its planning-skill digest to re-read current Plan/Validation Plan and touched sections, not the whole tree or only a merge summary; resolve only closed items, journal the result and start/name the next stretch. **Durable journaling licenses relentless driving:** execute the next Plan item, including watching review through merge, without re-prompting. Diagnose ordinary uncertainty/failures autonomously within scope/bounds; wait or do other authorized work rather than re-ask the known goal. Involve the Operator only for a human decision, permission or safety gate. Preserve required review, holds, resource limits and handoff boundaries.
 
 Parent reconciliation does not force depth-first order: preserve each program's
 owner and gate, but follow a finite delivery queue unless a real dependency or
@@ -35,4 +41,4 @@ Explicit legacy-lane adoption requires quiescence and the skill's durable
 old-reader fence/recovery procedure; a DB marker alone cannot stop an installed
 older inspector from reading stale JSON.
 
-<!-- copilot-guidance-body-end:v1 {"bindingSha256":"2bd6a838644638ddfa508d596b6551ab5610b81e8d15db75856ecc7443be9ff1"} -->
+<!-- copilot-guidance-body-end:v1 {"bindingSha256":"c243d43996e44df129016e3c03d9125d43d94b26f9aee0ba54866a7a508a7a47"} -->

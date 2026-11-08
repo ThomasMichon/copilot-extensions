@@ -17,7 +17,7 @@ from agenda_queue import QueueState, init_queue
 from agenda_v2_operations import apply
 from agenda_v2_graph import attach as attach_graph
 from agenda_v2_projection import project as project_at
-from agenda_v2_schema import MODE, board, project, validate, CAPS
+from agenda_v2_schema import MODE, board, validate, CAPS
 
 
 def schema(db: sqlite3.Connection) -> None:
@@ -46,7 +46,7 @@ def state(db: sqlite3.Connection, home: Path) -> dict[str, Any]:
     delivery = db.execute("SELECT status FROM delivery").fetchone()
     return {"store_id": row[0], "revision": row[1], "committed_at": row[2],
         "documents": documents, "metadata": decode(row[4].encode(), limit=262144),
-        "records": records, "snapshot": asdict(project(documents, records)),
+        "records": records, "snapshot": asdict(project_at(documents, records, home=home)),
         "delivery": decode(delivery[0].encode()) if delivery else None}
 
 

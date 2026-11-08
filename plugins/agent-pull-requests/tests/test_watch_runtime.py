@@ -85,6 +85,34 @@ def test_completed_runtime_is_read_only_and_not_current_selection(completed):
     assert not (installation.plugin_root / "current.version").exists()
 
 
+@pytest.mark.parametrize("damage", [None, "snapshot", "native"])
+def test_local_native_identity_keeps_fresh_build_and_birth_checks(completed, monkeypatch, damage):
+    installation, runtime = completed
+    instance = _instance(runtime)
+    reads = []
+    validate = api.validate_runtime_slot_completion
+
+    def counted(**arguments):
+        reads.append(True)
+        return validate(**arguments)
+
+    monkeypatch.setattr(api, "validate_runtime_slot_completion", counted)
+    if damage == "snapshot":
+        path = installation.plugin_root / "snapshots" / runtime.snapshot_id / "entry.py"
+        path.write_bytes(b"changed snapshot")
+        with pytest.raises(api.InstallationContextError):
+            instance.require_native_identity(installation, environment={})
+    elif damage == "native":
+        instance = replace(instance, start_time=str(int(instance.start_time) + 1))
+        with pytest.raises(ProcessLookupError):
+            instance.require_native_identity(installation, environment={})
+    else:
+        instance.require_native_identity(installation, environment={})
+    assert len(reads) == 1
+    assert not installation.state_root.exists()
+    assert not installation.run_root.exists()
+
+
 def test_uncompleted_slot_refuses(completed):
     installation, runtime = completed
     completion = api.validate_runtime_slot_completion(

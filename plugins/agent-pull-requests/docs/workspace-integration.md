@@ -191,7 +191,11 @@ or operations from a package-version assumption.
 After explicit prepared-intent and
 [selection storage adoption](review-owner-store.md#optional-pre-approval-selection-retention),
 the existing host may supply `selection_preparer` alongside `prepared_reviews=True`
-and its selected `write_context` or `write_context_factory`. This trusted
+independently of `write_context` or `write_context_factory`. A preparation-only
+embedding advertises `allocate` and prepared receipt support, not `submit`;
+the existing strict capability shapes and allocation payload are unchanged.
+An approved preview cannot substitute for the missing protected writer.
+This trusted
 synchronous preparation resolver receives the
 selected cached generation and `checkpoint` keyword; it resolves actual current
 destination policy, AI profile and producer origin outside the replay lock,
@@ -279,7 +283,8 @@ protected synthetic native owner, not a live provider or installed host.
 ### Optional selected edits
 
 A trusted embedding may additionally select `selection_owned_edits=True`,
-default false, with its existing prepared mode, resolver and write context.
+default false, with its existing prepared mode and resolver. As with baseline
+allocation, an optional writer is required for submission, not preparation.
 The exact baseline capability above remains unchanged. Only a currently
 supported opted-in receiver adds `owned_edit_selection_contract`:
 
