@@ -424,9 +424,10 @@ _Operator-required outcome; agent-recommended slices and validation._
   cleared review in #11450. It separates actual source/native/custodian
   verification and binds one factory per execution before strict host
   configuration expands.
-- [ ] Review the finite [acquired comment observation refinement](comment-observation-correlation.md)
+- [x] Review the finite [acquired comment observation refinement](comment-observation-correlation.md)
   before joining original prepared receipts to acquired native objects.
-  Keep the independently unavailable protected credential source unsupported.
+  Keep the independently unavailable protected credential source unsupported
+  (#11511; implementation and consumer qualification remain open).
 - [ ] Deliver its finite existing-owner read-only projection, then separately
   qualify negotiated workspace/CLI/client/Gateway consumers. Preserve original
   receipt/unknown states and observation age; a current content match is not
