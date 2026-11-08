@@ -50,7 +50,7 @@ _ADD_PARSERS_MODULES = [
     "status_updater_cli", "status_monitor_cli", "historical_daemons_cli", "status_monitor_runtime", "status_monitor_reap_stale",
     "pane_lifecycle", "handoff_cli", "handoff_successor_repair_cli", "handoff_cancel_cli", "list_cli", "claims_cli", "follow_ups_cli",
     "session_metadata_cli", "cleanup_gc_cli", "reap_cli", "reclaim_cli", "resource_producer_cli",
-    "worktree_ops_cli", "picker_profiles_cli", "maintenance_cli",
+    "worktree_ops_cli", "picker_profiles_cli", "maintenance_cli", "python_cache_prune",
     "installation_cli", "update_cli", "plugin_preparation", "repository_setup", "update_launch_cli", "context_cli", "services_cli",
     "repos_cli", "related_cli", "git_cli", "pr_cli", "pr_author_cli", "session_binding_cli",
     "session_inspection_cli", "session_tracking_cli", "session_observations_cli", "record_cli", "worktree_status_audit",
