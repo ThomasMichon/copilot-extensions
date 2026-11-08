@@ -116,7 +116,9 @@ not proof of workload readiness, lifecycle support or actual Actions job use.
 
 ## Plan and validation
 
-- [ ] Review this protocol and source appointment through the ordinary PR gate.
+- [x] Review this protocol and source appointment through the ordinary PR gate.
+  #8931 merged after current-head Copilot approval and required source checks;
+  implementation, provider enforcement and actual adoption remain open.
 - [ ] Extend the existing canonical resource owner with strict custody records,
   mixed-history validation, exact CAS transitions and truthful CLI outcomes.
 - [ ] Integrate the actual provider guards, including forced/legacy paths,
@@ -137,3 +139,62 @@ multi-process, installed, native and live lanes retain their separate portfolio
 owners and explicit results; missing lanes remain open rather than being
 substituted with mocks. Existing broader runner lifecycle and job acceptance
 remain in the parent plan.
+
+## Local implementation checkpoint
+
+Work resumed after the operator's requested pause and machine restart.
+The receiver-only implementation adds
+the distinct service envelope, exact-parent mixed-history validation, explicit
+task-operation refusals and mixed CLI inventory. It deliberately enables no
+service adoption or retirement writer. The canonical-owner checklist item above
+remains open, along with every provider/effect, installed-peer and live gate.
+
+Focused lint and the install-contract check passed. The combined existing-lease
+and receiver packet exhausted its unchanged 300-second group deadline; it did
+not complete and is not a passing result. Further pure CLI/event controls and
+the exact-fence race regression were added after that run's snapshot and have
+not been executed at the pause.
+
+On resumption, all 40 pure lease/custody protocol and CLI controls passed.
+The real Git lane exposed a per-item timeout in a single test containing ten
+mutation/fence combinations; those combinations are now separate parameterized
+items with unchanged assertions and deadlines. Fifteen real Git cases passed.
+The fresh CLI process then correctly refused the fixture's missing project
+context; after adding a synthetic selected project, both process cases passed
+with actual permanent inventory and protected release refusal. This qualifies
+the receiver on Windows, not installed provider compatibility, distributed
+native-effect settlement or live adoption. No live resource, credential,
+controller, capacity or routing change was made.
+
+After pulling forward to current `dev`, the complete receiver packet passed:
+4 original protocol controls, 36 custody protocol/CLI controls and all 17 real
+Git/process cases. The only rebase conflict was the parent's relocated journal;
+upstream history and the custody entry were both preserved. Focused lint,
+changed-module size, final-diff blob size and install-contract checks passed.
+This remains a receiver expansion, not completion of the canonical-owner or
+provider admission plan items.
+
+The custody record retains the actual acceptance margin, making validation of
+the complete custody-headed history independent of inspecting clients'
+clock-skew settings, including predecessor transfer/takeover validation.
+Ordinary task admission still uses its existing policy. Released-only
+acquisition and version-2 return-evidence checks remain enforced.
+
+Current qualification covers all 126 selected cases on the revised source,
+using native Windows and the isolated runner's unchanged 30-second item and
+300-second group limits. All 17 released-only/return-proof task cases passed,
+including four independent real-Git phases for generation stability, successor/
+transfer/renew preservation, final release and stale-fence refusal, and actual
+compaction, reflog expiry and GC. Canonical history prefixes are copied into
+each case's private remote; the effects under test remain real.
+
+The 20 custody Git/process cases passed in independent 14- and 6-case groups,
+including all three inspecting-client margins and fresh CLI inventory/refusal.
+A residual legacy/protocol group timed out after 37 named passing outcomes;
+its unfinished sweep-race case and unstarted controls then passed in a bounded
+52-case group, including the nine new return-proof parser cases. Together these
+cover all 59 pure protocol controls and 30 legacy lease-store/CLI cases.
+The timed-out groups remain failed attempts, not aggregate-budget passes.
+Focused lint, install-contract, changed-module and committed-blob checks passed.
+This evidence still does not qualify installed provider compatibility, native
+effect admission or live adoption, and enables no custody writer.

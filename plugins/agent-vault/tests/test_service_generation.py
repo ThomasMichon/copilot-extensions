@@ -356,6 +356,77 @@ def test_generation_identity_follows_the_selected_build_not_version_order(
     })
 
 
+@pytest.mark.parametrize("nested", (False, True), ids=("direct", "application"))
+@pytest.mark.parametrize("marker", (False, True), ids=("slot-name", "build-generation"))
+def test_imported_generation_preserves_installed_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, nested: bool, marker: bool,
+) -> None:
+    import importlib.util
+
+    root = tmp_path / "vault"
+    first = root / "versions" / "1.0.0.source.first"
+    second = root / "versions" / "1.0.0.source.second"
+    for slot, identity in ((first, "a" * 32), (second, "b" * 32)):
+        (slot / ".venv").mkdir(parents=True)
+        if marker:
+            (slot / ".runtime-bootstrap").mkdir()
+            (slot / ".runtime-bootstrap" / "runtime-generation").write_text(identity)
+    monkeypatch.setattr(sys, "prefix", str(first / ".venv" if nested else first))
+    spec = importlib.util.spec_from_file_location(
+        "agent_vault._fixture_generation", generation.__file__,
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(module, "home_dir", lambda: root)
+    (root / "current-version").write_text(first.name)
+    expected = "a" * 32 if marker else first.name
+    own_health = {
+        "ok": True, "pid": 123, "generation_protocol": module.PROTOCOL,
+        "runtime_generation": expected,
+    }
+    assert module.selected()
+    assert module.same_generation(own_health)
+    assert not module.same_generation(own_health | {"runtime_generation": "1.0.0"})
+    (root / "current-version").write_text(second.name)
+    assert not module.selected()
+    assert not module.same_generation(own_health | {
+        "runtime_generation": "b" * 32 if marker else second.name,
+    })
+
+
+@pytest.mark.parametrize("nested", (False, True), ids=("direct", "application"))
+def test_real_venv_generation_obeys_reselection(tmp_path: Path, nested: bool) -> None:
+    import venv
+
+    root = tmp_path / "vault"
+    slot = root / "versions" / "1.0.0.source.fixture"
+    prefix = slot / ".venv" if nested else slot
+    venv.EnvBuilder(with_pip=False).create(prefix)
+    (slot / ".runtime-bootstrap").mkdir()
+    (slot / ".runtime-bootstrap" / "runtime-generation").write_text("a" * 32)
+    (root / "current-version").write_text(slot.name)
+    python = prefix / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    result = subprocess.run(
+        [
+            str(python), "-I", "-B", "-c",
+            "import json,sys\n"
+            "from pathlib import Path\n"
+            "sys.path[:0]=json.loads(sys.argv[1])\n"
+            "from agent_vault import service_generation as g\n"
+            "root=Path(sys.argv[2])\n"
+            "g.home_dir=lambda:root\n"
+            "before=g.selected()\n"
+            "(root/'current-version').write_text('1.0.0.source.successor')\n"
+            "print(json.dumps([g.PROCESS_GENERATION,before,g.selected()]))\n",
+            json.dumps(sys.path), str(root),
+        ],
+        capture_output=True, text=True, timeout=20, check=False,
+        **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == ["a" * 32, True, False]
+
+
 @pytest.mark.parametrize("selection", ("../foreign", "..", "/foreign", "bad\nname"))
 def test_selection_cannot_resolve_an_external_generation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, selection: str,
