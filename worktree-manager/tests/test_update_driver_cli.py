@@ -515,6 +515,92 @@ def test_project_controller_routes_before_manager_source(queued, monkeypatch, ob
     )]
 
 
+@pytest.mark.parametrize("configured", [False, True])
+@pytest.mark.parametrize("trigger,owner", [
+    (["--automatic-trigger", "manager"], "manager"),
+    (["--automatic-trigger=external", "--controller=example"], "external"),
+    (["--automatic-trigger", "legacy-agent-machines"], None),
+])
+def test_automatic_controller_handoff_admits_owner_and_normalizes_engine_flags(
+    queued, monkeypatch, tmp_path, configured, trigger, owner,
+):
+    import update_driver
+    from update_driver.authority import UpdateAuthority, selection
+    from worktree_manager import automatic_updates_policy as policy, engine_client
+    from zdd.cutover_lock import CutoverLock
+
+    seen, _request = queued
+    root = tmp_path / "manager"
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(root))
+    if owner is not None:
+        policy.configure(
+            root, owner=owner, provenance="user", project="example",
+            external_controller="example" if owner == "external" else None,
+        )
+    monkeypatch.setattr(
+        update_driver, "current_authority",
+        lambda **_kwargs: selection("project", "harness") if configured else UpdateAuthority(),
+    )
+    project = "harness" if configured else "example"
+    monkeypatch.setattr(
+        engine_client, "get_value",
+        lambda selected, key: "tools/update.py" if (selected, key) == (
+            project, "update-controller",
+        ) else pytest.fail("wrong project controller probed"),
+    )
+    calls = []
+
+    def execute(selected, arguments, **options):
+        # Admission must not hold the Manager transaction across its engine child.
+        with CutoverLock(policy.state_dir(root) / "update-transaction"):
+            calls.append((selected, arguments, options))
+        return 47
+
+    monkeypatch.setattr(engine_client, "run_engine_passthrough", execute)
+    monkeypatch.setattr(driver, "_source_key", lambda: pytest.fail("Manager source queried"))
+    assert driver.cmd_update_request([
+        *trigger, "--project", "example", "--no-anchor-sync", "--detach", "--json",
+    ]) == 47
+    assert calls == [(
+        project, ["update", "--auto", "--no-anchor-sync", "--detach", "--json"],
+        {"headless": True},
+    )]
+    assert "spec" not in seen
+
+
+@pytest.mark.parametrize("refusal,code", [
+    ("disabled", 3), ("wrong-controller", 3), ("locked", 5),
+])
+def test_automatic_controller_handoff_refuses_before_engine_execution(
+    queued, monkeypatch, tmp_path, refusal, code,
+):
+    from contextlib import nullcontext
+    from worktree_manager import automatic_updates_policy as policy, engine_client
+    from zdd.cutover_lock import CutoverLock
+
+    seen, _request = queued
+    root = tmp_path / "manager"
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(root))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_UPDATE_HOME", str(tmp_path / "telemetry"))
+    if refusal != "disabled":
+        policy.configure(
+            root, owner="external", provenance="user", external_controller="selected",
+        )
+    monkeypatch.setattr(engine_client, "get_value", lambda *_args: "tools/update.py")
+    monkeypatch.setattr(
+        engine_client, "run_engine_passthrough",
+        lambda *_args, **_kwargs: pytest.fail("refused automatic trigger reached engine"),
+    )
+    guard = CutoverLock(policy.state_dir(root) / "update-transaction")
+    with guard if refusal == "locked" else nullcontext():
+        assert driver.cmd_update_request([
+            "--automatic-trigger", "external", "--controller",
+            "other" if refusal == "wrong-controller" else "selected",
+            "--project", "example",
+        ]) == code
+    assert "spec" not in seen
+
+
 @pytest.mark.parametrize("root_form", ["default", "relative"])
 def test_project_controller_handoff_freezes_manager_policy_root(
     queued, monkeypatch, tmp_path, root_form,
@@ -592,11 +678,20 @@ def test_neutral_controller_probe_does_not_block_manager_update(queued, monkeypa
     assert ("spec" in seen) is (project is None)
 
 
+@pytest.mark.parametrize("automatic", [False, True])
 def test_project_controller_routes_borrowed_request_before_manager_source(
-    queued, monkeypatch, tmp_path,
+    queued, monkeypatch, tmp_path, automatic,
 ):
     import update_driver
-    from worktree_manager import engine_client
+    from worktree_manager import automatic_updates_policy as policy, engine_client
+
+    flags = ["--project", "example", "--force"]
+    context = ()
+    if automatic:
+        root = tmp_path / "manager"
+        policy.configure(root, owner="manager", provenance="user", project="example")
+        flags += ["--automatic-trigger", "manager"]
+        context = (("WORKTREE_MANAGER_ROOT", str(root)),)
 
     class Custody:
         request_id = "synthetic-request"
@@ -611,8 +706,8 @@ def test_project_controller_routes_borrowed_request_before_manager_source(
     request = SimpleNamespace(
         state="running",
         spec=SimpleNamespace(
-            backend="manager", context=(), killswitch_path=None, cwd=str(tmp_path),
-            argv=("--project", "example", "--force"),
+            backend="manager", context=context, killswitch_path=None, cwd=str(tmp_path),
+            argv=tuple(flags),
         ),
     )
     calls = []
@@ -624,8 +719,8 @@ def test_project_controller_routes_borrowed_request_before_manager_source(
         lambda project, args, **kwargs: calls.append((project, args)) or 47,
     )
     monkeypatch.setattr(driver, "_source_key", lambda: pytest.fail("Manager source queried"))
-    assert driver.cmd_update_request(["--project", "example", "--force"]) == 47
-    assert calls == [("example", ["update", "--force"])]
+    assert driver.cmd_update_request(flags) == 47
+    assert calls == [("example", ["update", *(["--auto"] if automatic else []), "--force"])]
 
 
 def test_legacy_project_request_reaches_manager_controller_under_real_custody(tmp_path, monkeypatch):

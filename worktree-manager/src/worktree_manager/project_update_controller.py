@@ -82,6 +82,23 @@ def handoff(
         if managed:
             raise ValueError("selected project update controller is unavailable")
         return None
+    if any(
+        value == "--automatic-trigger" or value.startswith("--automatic-trigger=")
+        for value in forwarded
+    ):
+        from .automatic_updates_cli import guarded_update
+
+        normalized: list[str] = []
+
+        def admit(arguments: list[str], _trigger: str, _automatic_trigger: str | None) -> int:
+            normalized.extend(arguments)
+            return 0
+
+        # Release admission custody before the engine can call Manager back.
+        admitted = guarded_update(forwarded, admit)
+        if admitted:
+            return admitted
+        forwarded = normalized
     return engine_client.run_engine_passthrough(
         project, ["update", *forwarded, *(observer or [])],
         **({"headless": True} if observer and "--detach" in observer else {}),
