@@ -71,6 +71,28 @@ Each capture retains its own existing aggregate clock, including managed test
 environment preparation; the workflow timeout does not enlarge it.
 Returned files are data: the client never applies the generated outputs.
 
+`submit --packet native-worktrees-embody` selects only the installed public
+Worktrees detached caller. The candidate must supply `test_public_embody` in
+`tests/native/test_native_seed_application.py`; controller support does not
+provide or qualify that source fixture. The protected controller prepares hash-pinned,
+disposable Copilot 1.0.105 and PSMux 3.3.8 binaries, checks their actual versions,
+and requires anonymous access to the configured non-public HTTPS package feed
+from that hosted runner. The repository owner explicitly configures
+`WINDOWS_QUALIFICATION_INDEX_URL` as an Actions secret containing only the feed
+URL, without credentials, query or fragment. No endpoint is committed here.
+It is injected only for this named packet, not generic tests. Captured logs,
+JUnit and result files redact URLs and the configured feed hostname before
+upload; a separate protected post-execution step repeats this sanitization
+after worker interruption. Unsafe or oversized text is omitted and cannot
+qualify. Console masking alone does not sanitize artifact contents.
+The packet retains the public caller's 900-second functional case,
+1200-second plugin aggregate, separate 420/300/180-second preparation/native
+bounds, startup limits and exact cleanup. Missing prerequisites, empty or
+skipped tests and a different actual caller never qualify. This is evidence
+for the recorded native versions, not the operator's installed build, attached
+or new-window use, or survival across caller cleanup Jobs. New packet support
+must be reviewed and promoted to the protected controller before submission.
+
 Before any staging or dispatch, the client reads the selected protected
 controller's `tools/windows-qualification-support.json`. Missing/unsupported
 request, result or selection support refuses without publishing source.
