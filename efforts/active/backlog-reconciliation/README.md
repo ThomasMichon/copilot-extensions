@@ -287,6 +287,12 @@ the non-public approval conversation.
 
 ## Plan
 
+The [worker-witness and safe Resume study](<journal/2026/11.08 worker-witness-and-safe-resume.md>)
+preserves the independent retirement witness, claimed native acceptance and
+documentary coordination contracts without implementation or closure credit.
+The dated complete census is 840 whole OPEN, 111 above fixed 729; all existing
+completion check states remain unchanged and the campaign Active.
+
 The [fulfilled-request and bridge-identity checkpoint](<journal/2026/11.07 fulfilled-requests-and-bridge-identity.md>)
 records the campaign-wide standing completion-check approval, #11445's audited
 `COMPLETED` source outcome in merged #11508 and three independent OPEN
@@ -3050,6 +3056,12 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [worker-witness and safe Resume study](<journal/2026/11.08 worker-witness-and-safe-resume.md>)
+distinguishes complete prebody provenance qualification, static witness
+definitions and a verified public research comment from execution or native
+acceptance. Whole-source refusals and spent acquisition limits remain intact;
+no campaign or technical completion checkbox changes.
 
 The [serving-owner and attribution-event study](<journal/2026/11.07 serving-owner-and-attribution-events.md>)
 distinguishes guarded source inspection, attributed native witness results,
