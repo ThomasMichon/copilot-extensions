@@ -361,7 +361,13 @@ def test_reconcile_explicit_owner_termination_preserves_expired_cleanup(instance
     assert results[0].status == "settled"
     stop.assert_called_once_with(4321, "fixture", timeout=5)
 
-def test_reconcile_scopes_dead_records_and_artifacts_to_exact_runtime(instance_store, monkeypatch):
+@pytest.mark.parametrize("case_variant", [
+    False,
+    pytest.param(True, marks=pytest.mark.skipif(store.os.name != "nt", reason="Windows case aliases")),
+])
+def test_reconcile_scopes_dead_records_and_artifacts_to_exact_runtime(
+    instance_store, monkeypatch, case_variant,
+):
     root, runtime = instance_store
     foreign = runtime / "other-installation"
     foreign.mkdir()
@@ -385,13 +391,15 @@ def test_reconcile_scopes_dead_records_and_artifacts_to_exact_runtime(instance_s
     monkeypatch.setattr(store, "_monotonic_clock", lambda: expired_mono)
     monkeypatch.setattr(store, "identity_state", lambda *_: "dead")
 
-    results = store.reconcile(root, 128, 5, runtime_root=runtime)
+    scope = Path(str(runtime).swapcase()) if case_variant else runtime
+    results = store.reconcile(root, 128, 5, runtime_root=scope)
 
     assert [result.instance_id for result in results] == [receipts[0].instance_id]
     assert results[0].status == "settled"
     assert not (runtime / "expired.pid").exists()
     assert (foreign / "expired.pid").read_text() == "fixture"
     assert receipts[1].record_path.read_bytes() == foreign_bytes
+    assert store._read_cursor(root, scope) == store._read_cursor(root, runtime)
 
 
 def test_scoped_cleanup_rechecks_record_runtime_under_lock(instance_store, monkeypatch):
