@@ -105,8 +105,8 @@ The operator accepted reusing the existing Git-backed coordination store for a
 **distinct permanent service-custody record**, not another database or a renamed
 task lease. The [custody realization proposal](runner-service-custody.md) records
 the agent-recommended protocol, provider interlock and mixed-version gates.
-That proposal must clear source review before implementation. No permanent
-record, provider migration or live adoption is claimed by this choice.
+That proposal cleared source review in #8931. No permanent record, provider
+migration or live adoption is claimed by that reviewed design.
 
 ### 1. Template and allocation composition
 
