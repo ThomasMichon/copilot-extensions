@@ -10,13 +10,14 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 from types import SimpleNamespace
 from typing import Callable, cast
 from uuid import uuid4
 
 import pytest
 
-from tools import typecheck
+from tools import plugin_test_resources, typecheck
 from tools import typecheck_source_views as views
 from installer_dependency_policy import DependencyPolicyError
 
@@ -24,6 +25,26 @@ from installer_dependency_policy import DependencyPolicyError
 @pytest.fixture(autouse=True)
 def fixed_checker_stage(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(typecheck, "uuid4", lambda: SimpleNamespace(hex=""))
+
+
+@pytest.fixture(autouse=True)
+def _isolated_scratch(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep temporary checkouts' environments out of the shared scratch root."""
+    real = plugin_test_resources.resource_path
+    original = os.environ.get("AGENT_SCRATCH_ROOT")
+    monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(tmp_path_factory.mktemp("scratch")))
+
+    def resource_path(root: Path) -> Path:
+        if root.resolve() != typecheck.ROOT.resolve():
+            return real(root)
+        with monkeypatch.context() as scoped:
+            if original is None:
+                scoped.delenv("AGENT_SCRATCH_ROOT")
+            else:
+                scoped.setenv("AGENT_SCRATCH_ROOT", original)
+            return real(root)
+
+    monkeypatch.setattr(plugin_test_resources, "resource_path", resource_path)
 
 
 def _harness_emitted_fixture(root: Path) -> tuple[str, ...]:
@@ -39,11 +60,11 @@ def _harness_emitted_fixture(root: Path) -> tuple[str, ...]:
 def test_harness_emitted_exact_roles_and_escaping(tmp_path: Path) -> None:
     paths = _harness_emitted_fixture(tmp_path)
     inputs, programs = views.harness_emitted_inputs(tmp_path, paths)
-    assert len(programs) == 18
+    assert len(programs) == 20
     assert len(inputs) == len(paths) + 4
     assert any(b"pytest.mark.effect('process')" in body for _, body, _, _ in programs)
     assert any(b"raise SystemExit(7)" in body for _, body, _, _ in programs)
-    assert sum(b"\r\n" in body for _, body, _, _ in programs) == 4
+    assert sum(b"\r\n" in body for _, body, _, _ in programs) == 6
     for _, body, first, last in programs:
         compile(body, "<portable-typing-witness>", "exec")
         assert 1 <= first <= last
@@ -124,7 +145,7 @@ def test_harness_emitted_candidate_data_does_not_follow_host_drift(tmp_path: Pat
     paths = _harness_emitted_fixture(tmp_path / "source")
     _harness_emitted_fixture(tmp_path / "candidate")
     candidate = views.harness_emitted_views(tmp_path / "candidate", paths, tmp_path / "stage")
-    assert len(candidate) == 18
+    assert len(candidate) == 20
     host = tmp_path / "source" / paths[0]
     host.write_bytes(host.read_bytes() + b"\n# host drift\n")
     for view in candidate:
@@ -513,6 +534,7 @@ def test_real_source_and_frozen_candidate_frontdoors_enforce_version_matrix(
     root.mkdir()
     closure = [
         "tools/typecheck.py", "tools/_admission_protocol.py", "tools/cache_directory_paths.py",
+        "tools/plugin_test_resources.py",
         "tools/typecheck_source_views.py", "tools/typecheck_catalog_views.py",
         "tools/native_test_paths.py", "tools/typecheck-requirements.txt",
         *(
@@ -641,6 +663,7 @@ def test_real_catalog_source_and_frozen_frontdoors(
     root.mkdir()
     closure = {
         "tools/typecheck.py", "tools/_admission_protocol.py", "tools/cache_directory_paths.py",
+        "tools/plugin_test_resources.py",
         "tools/typecheck_source_views.py", "tools/typecheck_catalog_views.py",
         "tools/native_test_paths.py", "tools/typecheck-requirements.txt",
         catalog.DECLARATION, *catalog.MEMBERS,
@@ -1312,15 +1335,35 @@ def test_changed_selection_conservatively_checks_all_admitted_consumers(
 
 
 def test_missing_preparation_is_actionable_and_does_not_create_environment(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A check is not an implicit installer."""
+    scratch = tmp_path.parent / "unallocated-scratch"
+    monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(scratch))
     (tmp_path / "requirements.txt").write_text("mypy==1.18.2\n", encoding="utf-8")
     with pytest.raises(typecheck.TypecheckError, match="sample --prepare"):
         typecheck.check_project(
             tmp_path, project(), ("sample.py",), all_paths=("sample.py",),
         )
+    assert not typecheck.environment_path(tmp_path, project())[0].exists()
     assert not (tmp_path / ".test-venvs").exists()
+    assert not scratch.exists()
+
+
+def test_nonallocating_lookup_still_refuses_unsafe_existing_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if sys.platform == "win32":
+        pytest.skip("POSIX fallback ownership contract")
+    source = tmp_path / "source"
+    source.mkdir()
+    monkeypatch.delenv("AGENT_SCRATCH_ROOT", raising=False)
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    scratch = tmp_path / f"ce-{os.getuid()}"
+    scratch.mkdir()
+    scratch.chmod(0o755)
+    with pytest.raises(ValueError, match="private and owned"):
+        plugin_test_resources.resource_path(source)
 
 
 def test_pending_probe_never_certifies_admission(
@@ -1426,6 +1469,8 @@ def test_preparation_installs_the_same_lock_bytes_that_keyed_the_cache(
     requirements.write_bytes(initial)
     path, digest = typecheck.environment_path(tmp_path, project())
     assert (path / ".typecheck-prepared").read_text(encoding="utf-8").strip() == digest
+    owner = plugin_test_resources.resource_path(tmp_path) / "scratch-owner.json"
+    assert json.loads(owner.read_text(encoding="utf-8"))["source_checkout"] == str(tmp_path.resolve())
 
 
 def test_failed_cache_repair_cannot_preserve_preparation_marker(

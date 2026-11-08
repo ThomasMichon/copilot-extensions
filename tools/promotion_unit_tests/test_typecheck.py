@@ -21,6 +21,11 @@ def fixed_checker_stage(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(checker, "uuid4", lambda: SimpleNamespace(hex=""))
 
 
+@pytest.fixture(autouse=True)
+def _isolated_scratch(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(tmp_path_factory.mktemp("scratch")))
+
+
 @pytest.fixture
 def guard_scope(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -94,11 +99,15 @@ def test_candidate_guard_alias_exact_owned_scope_and_N_to_N(
     mkdir = Path.mkdir
     stage = environment.parent / ("source-views-" + environment.name) / project.name
     creation_races: list[str] = []
+    scratch = Path(os.environ["AGENT_SCRATCH_ROOT"]).resolve()
 
     def owned_mkdir(
         path: Path, mode: int = 0o777, parents: bool = False, exist_ok: bool = False,
     ) -> None:
-        assert path.resolve().is_relative_to(tmp_path), "mkdir outside synthetic unit storage"
+        resolved = path.resolve()
+        assert resolved.is_relative_to(tmp_path) or resolved.is_relative_to(scratch), (
+            "mkdir outside synthetic unit storage"
+        )
         if scope == "owned" and path == stage and not creation_races:
             mkdir(path, mode=mode, parents=parents, exist_ok=exist_ok)
             creation_races.append("ordinary directory won creation race")
