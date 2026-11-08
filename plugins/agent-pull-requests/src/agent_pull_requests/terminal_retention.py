@@ -214,11 +214,16 @@ def observe_terminal(
         (row for row in state["records"] if row["scope"] == scope
          and row["cursor"]["epoch"] == record["epoch"]), None,
     )
-    if previous is not None:
-        return copy.deepcopy(previous)
     value = Observation.restore(record["current"])
     if not value.terminal:
         raise ValueError("complete terminal evidence required")
+    binding = {"account": target.account, "repo": target.repo, "number": target.number}
+    if previous is not None:
+        if previous["target"] != binding:
+            raise ValueError("terminal observation changed its original watch binding")
+        known = {row["registration_id"] for row in previous["deliveries"]}
+        if previous["evidence"] == record["current"] and target.registration_ids <= known:
+            return copy.deepcopy(previous)
     before = document["replay"]
     if any(
         row["outcome"] == "active" and row["scope"]["account"] == target.account
@@ -262,9 +267,22 @@ def observe_terminal(
             "event_id": event["event_id"] if event is not None else None,
             "frozen_before_terminal": pending(before) is not None,
         })
+    if previous is not None:
+        previous["evidence"] = copy.deepcopy(record["current"])
+        for delivery in deliveries:
+            retained = next(
+                (row for row in previous["deliveries"]
+                 if row["registration_id"] == delivery["registration_id"]), None,
+            )
+            if retained is None:
+                previous["deliveries"].append(delivery)
+            elif retained["event_id"] is None:
+                retained["event_id"] = delivery["event_id"]
+        document["replay"] = after
+        return copy.deepcopy(previous)
     row = {
         "scope": copy.deepcopy(scope),
-        "target": {"account": target.account, "repo": target.repo, "number": target.number},
+        "target": binding,
         "cursor": {"epoch": record["epoch"], "sequence": record["sequence"]},
         "evidence": copy.deepcopy(record["current"]),
         "operations": [

@@ -306,3 +306,35 @@ def test_delayed_native_replay_read_cannot_reintroduce_retired_bodies_after_reop
         assert owner.path.read_bytes() == before and not pending["events"]
     else:
         assert len(pending["events"]) == 1 and "snapshot" not in pending["events"][0]
+
+
+def test_missed_reopen_updates_terminal_facts_without_replacing_frozen_closed_event(owner, evidence):
+    closed = register(owner, "closed", until=("closed",))
+    merged = register(owner, "merged", until=("merged",))
+    captured = target(closed, merged)
+    evidence["sections"]["pull_request"]["data"]["status"] = "abandoned"
+    first = observe(owner, evidence, captured=captured)
+    frozen = owner.execute(CONSUMER, "pending", {}, expires_at=100)["events"][0]
+    assert frozen["merged"] is False
+    evidence["sections"]["pull_request"]["data"]["status"] = "completed"
+    latest = observe(owner, evidence, second=2, captured=captured)
+    assert latest["cursor"] == {"epoch": 1, "sequence": 2}
+    assert latest["retirement"]["cursor"] == first["retirement"]["cursor"]
+    assert latest["retirement"]["evidence"]["state"] == "merged"
+    pending = owner.execute(CONSUMER, "pending", {}, expires_at=100)["events"]
+    assert next(event for event in pending if event["event_id"] == frozen["event_id"]) == frozen
+    notification = next(event for event in pending if event["registration_id"] == merged["registration_id"])
+    assert notification["merged"] is True and "snapshot" not in notification
+    assert next(
+        row for row in latest["retirement"]["deliveries"]
+        if row["registration_id"] == merged["registration_id"]
+    )["event_id"] == notification["event_id"]
+    assert observe(owner, evidence, second=2, captured=captured)["retirement"] == latest["retirement"]
+    later = register(owner, "later")
+    owner.observe(
+        owner.observation_targets(expires_at=100)[0],
+        PRSnapshot(merged=True, native_snapshot={"body": "must stay absent"}), expires_at=100,
+    )
+    pending = owner.execute(CONSUMER, "pending", {}, expires_at=100)["events"]
+    assert next(event for event in pending if event["registration_id"] == later["registration_id"])["merged"]
+    assert "must stay absent" not in json.dumps(pending)

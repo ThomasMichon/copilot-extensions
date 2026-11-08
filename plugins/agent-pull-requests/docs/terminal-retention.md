@@ -62,6 +62,10 @@ ReplayStore captures the full-scope epoch on its actual pre-IO observation
 target and preserves it when refreshing waiting registrations. A result
 superseded by reopen uses only the matching retained body-free terminal facts,
 or reports stale observation; it never falls through to the old native body.
+If a complete observation changes closed-unmerged to merged without an observed
+reopen, the same retirement keeps its original cursor/custody and updates its
+latest body-free evidence. Newly satisfied registrations get their minimal
+event in that envelope; previously frozen events keep their exact bytes and IDs.
 
 ## Admission, drain and reopen
 
