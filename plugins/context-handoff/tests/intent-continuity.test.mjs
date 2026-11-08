@@ -8,7 +8,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { IntentCorpus, classifyIntent } from "../extensions/context-handoff/intent-corpus.mjs";
 import { registerIntentObservation } from "../extensions/context-handoff/intent-observation.mjs";
-import { readCanonicalGoal } from "../extensions/context-handoff/intent-goal.mjs";
+import { readCanonicalGoal, resolveIntentCwd } from "../extensions/context-handoff/intent-goal.mjs";
 import { formatHandoffMarkdown } from "../extensions/context-handoff/handoff-markdown.mjs";
 
 function fixture(t) {
@@ -236,6 +236,7 @@ test("Goal lookup uses the bound effort home and refreshes source text, with exp
     return args[0] === "state-root" ? f.b : JSON.stringify({
       active_effort: { active: true, path: "effort.md", participant: "driver", slice: "phase" },
     });
+
   };
   assert.equal(readCanonicalGoal(f.a, execute).goal, "Full mission.");
   writeFileSync(effort, "# Work\n\n## Goal\n\nChanged objective.\n");
@@ -275,4 +276,17 @@ test("the extension-free payload reader returns the exact pinned continuation pa
   const second = JSON.parse(result.stdout);
   assert.equal(second.next, null);
   assert.equal([...first.records, ...second.records].map((v) => v.text).join(""), text);
+});
+
+test("bare resume selects the continuing worktree once without provisioning optional tooling", (t) => {
+  const f = fixture(t);
+  const execute = (bin, args, options) => {
+    assert.equal(bin, "agent-worktrees");
+    assert.deepEqual(args, ["get", "worktree-dir", "--session-id", "resumed-session"]);
+    assert.equal(options.allowProvision, false);
+    return f.b;
+  };
+  assert.equal(resolveIntentCwd(f.a, "resumed-session", execute), f.b);
+  assert.equal(resolveIntentCwd(f.a, "resumed-session", () => { throw new Error("unavailable"); }), f.a);
+  assert.equal(resolveIntentCwd(f.a, null, () => { throw new Error("must not call"); }), f.a);
 });

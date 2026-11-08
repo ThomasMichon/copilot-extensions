@@ -1483,7 +1483,7 @@ export function collectCliHandoffFacts(cwd, sid) {
     repo: git.repo,
     gitStatus: git.status,
     sessionBinding: sessionBindingForSession(sid, cwd),
-    intentContinuity: collectLocalIntentFacts(cwd, runCli),
+    intentContinuity: collectLocalIntentFacts(info.wtDir || cwd, runCli),
     generatedAt: new Date().toISOString(),
   };
 }

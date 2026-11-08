@@ -93,7 +93,7 @@ import { createNativeContextObserver, nativePressurePrompt } from "./native-cont
 import { nativePressureDeferred } from "./native-pressure.mjs";
 import { registerNativePromptReceiptObservation } from "./prompt-receipt.mjs";
 import { registerIntentObservation } from "./intent-observation.mjs";
-import { readCanonicalGoal } from "./intent-goal.mjs";
+import { readCanonicalGoal, resolveIntentCwd } from "./intent-goal.mjs";
 import {
   formatAuthorizationEvidence,
   formatHandoffMarkdown,
@@ -1468,6 +1468,7 @@ nativeObserver = createNativeContextObserver({
 // own extension launch log, so nothing is lost by staying silent in the UI.
 state.sessionId = session.sessionId ?? state.sessionId ?? null;
 state.cwd = state.cwd || process.cwd();
+state.cwd = resolveIntentCwd(state.cwd, state.sessionId, runCli);
 state.turnCount = 0;
 // handoffConfig may not have resolved yet at this exact point (it is
 // deliberately not awaited before/alongside joinSession() -- see the

@@ -2,6 +2,17 @@ import { readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { IntentCorpus, INTENT_RESEARCH_DIRECTIVE } from "./intent-corpus.mjs";
 
+export function resolveIntentCwd(cwd, sessionId, execute) {
+  if (!sessionId) return cwd;
+  try {
+    const bound = execute("agent-worktrees", ["get", "worktree-dir", "--session-id", sessionId],
+      { cwd, timeout: 3000, allowProvision: false }).trim();
+    return bound ? realpathSync(bound) : cwd;
+  } catch {
+    return cwd;
+  }
+}
+
 export function intentSection(text, heading) {
   const lines = [];
   let active = false;
