@@ -213,6 +213,169 @@ def test_explicit_selector_refusal_precedes_queue_and_native_child(boundary, mon
     assert not list(args.root.iterdir())
 
 
+@pytest.fixture
+def index_consumer(boundary, area):
+    prepare, project = boundary
+
+    def prepare_consumer(unsupported=None):
+        _, args, _, _, paths, stage = prepare("agent-index")
+        scripts = args.payload / "scripts"
+        shutil.copyfile(
+            ROOT / "libs" / "versioned-runtime" / "versioned_runtime_native.ps1",
+            scripts / "versioned_runtime_native.ps1",
+        )
+        if unsupported:
+            provider = scripts / "installer_driver.py"
+            text = provider.read_text()
+            start, end = text.index("CONTEXT_KEYS = ("), text.index("\nTRANSIENT_KEYS = (")
+            declaration = text[start:end]
+            assert declaration.count(f'"{unsupported}"') == 1
+            provider.write_text(
+                text[:start] + declaration.replace(f'"{unsupported}",', "") + text[end:],
+            )
+        profile = area / "profile"
+        profile.mkdir()
+        trace = area / "consumer.jsonl"
+        consumer = ROOT / "plugins" / "agent-index" / "scripts" / "install.ps1"
+        # Select the actual consumer body, not the top-level test-inhibited installer.
+        # Its guard and native entry stay intact; no contained-test flag is cleared.
+        extraction = f"""
+$ErrorActionPreference='Stop'
+$tokens=$null;$errors=$null
+$source=[IO.File]::ReadAllText({quote(consumer)})
+$ast=[Management.Automation.Language.Parser]::ParseInput($source,[ref]$tokens,[ref]$errors)
+if($errors.Count){{throw 'Index source parse failed'}}
+$entry=@($ast.EndBlock.Statements|Where-Object {{
+ $_ -is [Management.Automation.Language.IfStatementAst] -and
+ $_.Extent.Text.StartsWith("if (`$env:OS -eq 'Windows_NT' -and") -and
+ $_.Extent.Text.Contains('Native Index driver cannot retain')
+}})
+if($entry.Count -ne 1 -or $entry[0].Clauses.Count -ne 1){{throw 'Index admission boundary is ambiguous'}}
+$start=$source.IndexOf('# Capture caller-relative selectors before driver entry')
+if($start -lt 0 -or $start -ge $entry[0].Extent.StartOffset){{throw 'Index selector boundary is unavailable'}}
+$freeze=$source.Substring($start,$entry[0].Extent.StartOffset-$start)
+$admit=($entry[0].Clauses[0].Item2.Statements|ForEach-Object {{$_.Extent.Text}})-join "`n"
+@{{freeze=$freeze;admit=$admit}}|ConvertTo-Json -Compress
+"""
+        extracted = subprocess.run(
+            [str(args.shell), "-NoProfile", "-NonInteractive", "-Command", extraction],
+            capture_output=True, text=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        assert extracted.returncode == 0, extracted.stderr
+        fragments = json.loads(extracted.stdout)
+
+        def admitted_consumer(phase):
+            return f"""
+$inputValues=@{{installation=$InstallDir; policy=$InstallationConfig;
+ policy_environment=$env:AGENT_INDEX_INSTALLATION_CONFIG; config_root=$env:AGENT_INDEX_CONFIG_ROOT}}
+{fragments['freeze']}
+$row=@{{phase='{phase}'; incoming=$inputValues; installation=$InstallDir;
+ policy=$env:AGENT_INDEX_INSTALLATION_CONFIG; config_root=$env:AGENT_INDEX_CONFIG_ROOT;
+ cwd=(Get-Location).Path; native=$env:COPILOT_EXTENSIONS_NATIVE_INSTALLER;
+ contained=$env:COPILOT_EXTENSIONS_TEST_CONTAINED}}
+[IO.File]::AppendAllText({quote(trace)},($row|ConvertTo-Json -Depth 4 -Compress)+"`n")
+{fragments['admit']}
+if(-not $driverEntry.Participant -or $driverEntry.ExitCode -ne 0){{throw 'consumer did not authenticate'}}
+"""
+
+        (scripts / "install.ps1").write_text(f"""
+param([string]$Action,[string]$InstallDir,[string]$InstallationConfig)
+$ErrorActionPreference='Stop'
+Set-StrictMode -Version 2
+if($env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1'){{throw 'fixture requires native containment'}}
+function Start-ScheduledTask {{throw 'host scheduling effects are excluded'}}
+function Register-ScheduledTask {{throw 'host scheduling effects are excluded'}}
+function Stop-ScheduledTask {{throw 'host scheduling effects are excluded'}}
+function Unregister-ScheduledTask {{throw 'host scheduling effects are excluded'}}
+function Start-Process {{throw 'installer business effects are excluded'}}
+function Stop-Process {{throw 'worker retirement is excluded'}}
+. (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+$ScheduledTaskNames=$null;$DryRun=$false
+{admitted_consumer('entry')}
+$before=$row
+Set-Location -LiteralPath {quote(stage)}
+{admitted_consumer('staged')}
+$after=$row
+[IO.File]::WriteAllText((Join-Path $before.installation 'boundary.json'),
+ (@{{before=$before;after=$after}}|ConvertTo-Json -Depth 5 -Compress))
+""", encoding="utf-8", newline="")
+        parse = (
+            "$tokens=$null;$errors=$null;"
+            "[void][Management.Automation.Language.Parser]::ParseFile("
+            + quote(scripts / "install.ps1")
+            + ",[ref]$tokens,[ref]$errors);if($errors.Count){throw ($errors|Out-String)}"
+        )
+        for shell in dict.fromkeys((str(args.shell), shutil.which("pwsh"))):
+            if shell is None:
+                continue
+            parsed = subprocess.run(
+                [shell, "-NoProfile", "-NonInteractive", "-Command", parse],
+                capture_output=True, text=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            assert parsed.returncode == 0, parsed.stderr
+        environment = dict(os.environ, HOME=str(profile), USERPROFILE=str(profile))
+        environment[KEYS[1]] = str(paths[1].with_name("alternate.json").relative_to(project))
+        command = [
+            str(args.shell), "-NoProfile", "-NonInteractive", "-File", str(scripts / "install.ps1"),
+            "-Action", "update", "-InstallDir", os.path.relpath(args.root, project),
+            "-InstallationConfig", str(paths[1].relative_to(project)),
+        ]
+        return command, environment, args, paths, stage, trace, profile / ".copilot-extensions" / "update-driver"
+
+    return prepare_consumer, project
+
+
+def test_actual_index_consumer_freezes_selectors_through_native_driver_and_reentry(index_consumer):
+    prepare, project = index_consumer
+    command, environment, args, paths, stage, trace, execution = prepare()
+    result = subprocess.run(
+        command, cwd=project, env=environment, capture_output=True, text=True, timeout=25,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    rows = [json.loads(line) for line in trace.read_text().splitlines()]
+    assert len(rows) == 3
+    assert rows[0]["incoming"] == {
+        "installation": os.path.relpath(args.root, project),
+        "policy": str(paths[1].relative_to(project)),
+        "policy_environment": str(paths[1].with_name("alternate.json").relative_to(project)),
+        "config_root": str(paths[2].relative_to(project)),
+    }
+    for row in rows:
+        assert row["installation"] == str(args.root)
+        assert row["policy"] == str(paths[1])
+        assert row["config_root"] == str(paths[2])
+        assert row["contained"] == "1"
+    assert [row["cwd"] for row in rows] == [str(project), str(project), str(stage)]
+    assert [row["native"] for row in rows] == [None, "agent-index", "agent-index"]
+    receipt = json.loads((args.root / "boundary.json").read_text())
+    assert receipt["before"] == rows[1]
+    assert receipt["after"] == rows[2]
+    request, = core.status(root=execution)
+    assert request.state == "completed"
+    assert request.spec.project == str(args.root)
+    assert Path(request.spec.cwd) == project
+    context = dict(request.spec.context)
+    assert context[KEYS[1]] == str(paths[1])
+    assert context[KEYS[2]] == str(paths[2])
+    assert set(path.name for path in args.root.iterdir()) == {"boundary.json"}
+
+
+@pytest.mark.parametrize("unsupported", KEYS[1:])
+def test_actual_index_consumer_refuses_downlevel_provider_before_queue(index_consumer, unsupported):
+    prepare, project = index_consumer
+    command, environment, args, _, _, trace, execution = prepare(unsupported)
+    result = subprocess.run(
+        command, cwd=project, env=environment, capture_output=True, text=True, timeout=15,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode != 0
+    assert f"Native Index driver cannot retain {unsupported}" in result.stderr
+    assert len(trace.read_text().splitlines()) == 1
+    assert not execution.exists()
+    assert not list(args.root.iterdir())
+
+
 def test_restored_stage_copy_remains_pure_before_selector_admission(area):
     start = "# === install-contract:v4 payload-copy"
     end = "# === end install-contract:v4 payload-copy ==="
