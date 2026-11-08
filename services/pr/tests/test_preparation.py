@@ -444,7 +444,7 @@ def test_mapping_config_rejects_nonboolean_selection_without_io(
     value = json.loads(path.read_text())
     value["workspaces"]["bindings"][0]["comment_mappings"] = selection
     path.write_text(json.dumps(value))
-    with pytest.raises(ValueError, match="explicit preparation"):
+    with pytest.raises(ValueError, match="JSON boolean"):
         load_config(path)
     assert not config.root.exists() and not control.with_suffix(".calls").exists()
 

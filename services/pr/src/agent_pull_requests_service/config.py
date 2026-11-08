@@ -227,7 +227,9 @@ def _workspaces(value: object, bindings: list[WatchScopeBinding],
             "preparation", "comment_mappings",
         })
         mapping = entry.get("comment_mappings", False)
-        if type(mapping) is not bool or mapping and "preparation" not in entry:
+        if type(mapping) is not bool:
+            raise ValueError("comment_mappings requires a JSON boolean")
+        if mapping and "preparation" not in entry:
             raise ValueError("comment mappings require explicit preparation hosting")
         key = (entry["principal"], entry["target"])
         if key not in scopes or any((p, t) == key for p, t, _ in readers):
