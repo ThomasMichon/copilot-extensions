@@ -1,0 +1,9 @@
+{
+  "comment": "Record current HTTP-52 contract evidence for the retained registration writer's open-activation attach.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

@@ -14,53 +14,12 @@ unlock a vault, start a daemon, fetch a credential, or install anything.
 The global file is selected by `AGENT_VAULT_CONFIG`, otherwise
 `%APPDATA%/agent-vault/config.json` on Windows or
 `${XDG_CONFIG_HOME:-~/.config}/agent-vault/config.json` elsewhere.
-The Windows installer resolves an explicit relative selector against its original
-filesystem invocation directory before activation or staging changes cwd. The
-absolute selection is retained for task-only actions and staged child invocations;
-an invalid present file never becomes a missing-file/default-policy result.
 `_discover_repo_config` walks the calling directory's parents for the first
 `.agent-vault.json`. Registered extension configuration is collected separately
 by `extensions.py`; it is not a knowledge-binding or repository-identity engine.
 Missing files contribute nothing. Strict readers refuse malformed-present JSON,
 non-object documents and invalid known fields rather than using defaults.
 Non-strict legacy reads tolerate malformed configuration as empty.
-
-## Windows scheduling is separate from activation
-
-The **global native settings file** (selected above) accepts
-`"windows_scheduled_task": "preserve"`, `"enabled"` or `"absent"`. This is
-machine deployment policy, not a portable `.agent-vault.json` preference.
-
-`preserve` is the new default: install/update/first-use never create a missing
-task and do not rewrite existing/custom registrations. `enabled` explicitly
-provisions the logon task through the existing installer. `absent` removes
-only a validated task owned by this installation; foreign/ambiguous tasks and
-removal failures refuse rather than purge. The selection persists across updates.
-Task-query permission/CIM failures or an unavailable ScheduledTasks module also
-refuse retirement rather than report absence. Default `preserve` still works
-without that module.
-
-Run `scripts\install.ps1 schedule` after changing the setting to reconcile task
-policy alone. With `absent`, no daemon is stopped or started, no runtime/state
-is deleted, and nothing else is enabled.
-Task-only absence reads retained configuration without requiring an interpreter,
-even when the incoming payload's version has not been built. Task-only opt-in
-resolves the selected installed runtime instead of assuming the incoming slot.
-It retains the original project selection across payload staging for both runtime
-activation and the service configuration snapshot; a repository-only activation
-opt-in remains effective. Task ownership validates the actual PowerShell script
-operand, including supported conhost wrapping, never a later forwarded path.
-Normal install/update still prepare
-the native launcher and ensure the selected service generation independently
-of task registration. Without a task, `agent-vault start` retains the existing
-on-demand user-mode startup path.
-
-An existing disabled task keeps its independent startup hold: it is not
-re-enabled or bypassed by installer startup, and `absent` refuses to retire it until that intent is
-deliberately cleared. Runtime `enabled`, maintenance inhibition and `-NoService`
-remain independent; do not use client-only `-NoService` to select task absence.
-No administrative account, Task Scheduler registration or substitute supervisor
-is required by the default scheduling policy.
 
 ## Runtime activation
 

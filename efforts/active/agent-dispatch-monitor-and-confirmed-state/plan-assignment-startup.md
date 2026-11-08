@@ -231,6 +231,13 @@ Canonical component of [this same Active effort](README.md). This is not a child
       and the delayed-owner HTTP budget. This source item does not close
       participating-writer admission, manual/no-worktree intake, stopped-native
       recovery or full running lifecycle qualification.
+- [x] Land the measured ordinary preparation observation-budget correction in
+      [#11179](https://github.com/ThomasMichon/copilot-extensions/pull/11179),
+      merged as `890a443f89` after exact-head independent approval and required CI.
+      Existing startup observation policy now reaches guarded attachment without
+      shortening unrelated or longer/disabled reads. The
+      [receipt](journal/2026/11.06-retained-acquisition.md#ordinary-preparation-observation-budget)
+      preserves source credit separately from fresh running/lifecycle acceptance.
 - [x] Land read-only [task-obligation provider evidence](journal/2026/11.03-task-obligation-provider.md)
       in [#10365](https://github.com/ThomasMichon/copilot-extensions/pull/10365),
       merged as `e9c3c3f9bd` after exact-head approval and required CI.
@@ -238,6 +245,13 @@ Canonical component of [this same Active effort](README.md). This is not a child
       worktree routing, concurrent migration and unknown legacy custody.
       Ordinary claim admission/settlement, readiness, rejected-worker recovery
       and installed/native qualification remain open.
+- [x] Qualify the bounded isolated three-candidate synthetic review loop on
+      reviewed source `890a443f89`: actual ordinary allocation and protected
+      relationship admission precede three prepared submissions, two independent
+      rejections and confirmation in the same task/native.
+      The [running receipt](journal/2026/11.06-retained-acquisition.md#isolated-guarded-review-loop)
+      distinguishes the actual component simulation from real-model/forge,
+      stopped-worker recovery, permanent finalization and production admission.
 - [x] Land the [exact retained-task callback provider](journal/2026/11.03-task-relationship-provider.md)
       in [#10382](https://github.com/ThomasMichon/copilot-extensions/pull/10382),
       merged as `7b030e364a` after exact-head approval and required CI.

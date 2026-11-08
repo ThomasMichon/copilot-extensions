@@ -22,6 +22,7 @@ from .gateway_contract import (
     CREDENTIAL_WORKERS,
     INDEX_CONTRACT,
     MAX_WIRE,
+    REVIEW_CREDENTIAL_CONTRACT,
     GatewayConfig,
     GatewayError,
     encode,
@@ -81,12 +82,17 @@ class Gateway:
                 ):
                     supported.append("index.search")
                 if context.peer.role in CREDENTIAL_WORKERS and any(
-                    r["worker"] == context.peer.principal for r in self.config.credential_rules
+                    r["worker"] == context.peer.principal and "review" not in r
+                    for r in self.config.credential_rules
                 ):
                     supported.append("credential.get")
+                if self.broker.supports_review(context.peer.principal):
+                    supported.append("credential.review")
                 response = {"state": "ADMITTED", "epoch": self.epoch, "supported": supported,
                             "unsupported": ["index.similar", "index.clusters", "index.status",
                                             "reindex", "drain", "deploy", "node.serve"]}
+                if self.config.protected_review:
+                    response["contracts"] = [REVIEW_CREDENTIAL_CONTRACT]
             else:
                 require(body["epoch"] == self.epoch, "gateway-restarted")
                 routes = {

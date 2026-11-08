@@ -1,0 +1,9 @@
+{
+  "comment": "Add separately selected protected review credential delivery through the existing Gateway, controller and worker",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

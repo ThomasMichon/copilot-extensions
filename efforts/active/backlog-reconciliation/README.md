@@ -233,6 +233,22 @@ implementation authority, resource custody or the fixed checkpoint.
 
 ## Plan
 
+The [anchor source and durable-steer study](<journal/2026/11.07 anchor-source-and-steer-plan.md>)
+qualifies #11415's finite documentation-only source outcome in merged #11421,
+pending reviewed publication and a separate current tracking judgment.
+#11403 retains its complete Goal/capture/replay contract and existing author
+claim under a merged Draft effort, not implemented behavior. No installed
+rollout or anchor operation follows. The dated complete census measures
+826 whole OPEN, 97 above fixed 729; all completion gates remain Active.
+
+The [mux, driver and sweep cohort](<journal/2026/11.07 mux-driver-and-sweep-contracts.md>)
+preserves four qualified actionable contracts and a completed three-object
+static companion-fixture study. Candidate merge state is not a requirement
+crosswalk or passing runtime test; the literal fixture OR behavior alternative,
+driver/image owners and consumer-owned sweep learning remain independent.
+One whole-source refusal supplies no contract credit. The dated complete census
+measures 824 whole OPEN, 95 above fixed 729; all completion gates remain Active.
+
 The [serving-owner and attribution-event study](<journal/2026/11.07 serving-owner-and-attribution-events.md>)
 qualifies complete originals and a new author refinement, and identifies a
 canonical MCP exception/fallback mismatch without claiming a deployed fix.

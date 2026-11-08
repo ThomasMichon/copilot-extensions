@@ -52,7 +52,8 @@ def test_worktrees_native_fresh_and_resume_keep_one_history_and_real_receipts(tm
 
 def _qualify_native_worktrees(
     tmp_path, control, *, manager_script=None, manager_environment=None,
-    manager_python=None, verify_reuse=True,
+    manager_python=None, verify_reuse=True, worktrees_python=None,
+    worktrees_root=None, worktrees_environment=None,
 ):
     from plugin_test_command_safety import private_mux_args
 
@@ -61,11 +62,18 @@ def _qualify_native_worktrees(
     shell = shutil.which("pwsh")
     assert executable and Path(executable).is_absolute() and Path(executable).is_file()
     assert binary and shell, "Select existing native Copilot, PSMux and PowerShell"
-    owner_python = physical_executable(getattr(sys, "_base_executable", sys.executable))
+    installed = worktrees_python is not None
+    if installed:
+        assert control == "broker" and worktrees_root is not None
+        assert Path(worktrees_python).is_file()
+        assert worktrees_environment is not None
+    owner_python = str(worktrees_python) if installed else physical_executable(
+        getattr(sys, "_base_executable", sys.executable),
+    )
     assert owner_python
     source_root = Path(__file__).resolve().parents[4]
-    site_packages = sysconfig.get_paths()["purelib"]
-    prefix = [sys.executable, "-I", "-B", "-X", "utf8"]
+    site_packages = None if installed else sysconfig.get_paths()["purelib"]
+    prefix = [str(worktrees_python) if installed else sys.executable, "-I", "-B", "-X", "utf8"]
     home, checkout = tmp_path / "copilot-home", tmp_path / "checkout"
     home.mkdir()
     checkout.mkdir()
@@ -104,7 +112,9 @@ def _qualify_native_worktrees(
     provider = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Provider)
     provider.daemon_threads = True
     environment = {
-        key: value for key, value in os.environ.items()
+        key: value for key, value in (
+            worktrees_environment if installed else os.environ
+        ).items()
         if (key.startswith("COPILOT_EXTENSIONS_") or not key.startswith(("COPILOT_", "OTEL_")))
         and key not in {
             "GH_TOKEN", "GITHUB_TOKEN", "GITHUB_API_TOKEN", "TMUX", "TMUX_PANE",
@@ -240,6 +250,21 @@ class Mux {
         assert result.returncode == 0, result.stdout + result.stderr
         return json.loads(result.stdout)
 
+    if installed:
+        selected = runtime(
+            "import json,sys;from pathlib import Path;"
+            "from agent_worktrees import config,launch_seed_exec;import agent_remote_driver;"
+            "root=Path(sys.argv[1]);environment=Path(sys.prefix);"
+            "assert config.runtime_install_dir()==root;"
+            "assert config.install_dir()==root;"
+            "assert config.venv_python().samefile(sys.executable);"
+            "assert Path(launch_seed_exec.__file__).is_relative_to(environment);"
+            "assert Path(agent_remote_driver.__file__).is_relative_to(environment);"
+            "print(json.dumps(str(environment)))",
+            worktrees_root,
+        )
+        assert Path(selected) == Path(worktrees_python).parent.parent
+
     def manager_mapping():
         result = run_caller_owned(
             [str(manager_python), "-I", "-B", "-X", "utf8", "-c",
@@ -353,6 +378,8 @@ class Mux {
                 ).read_bytes()
             assert manager_script.is_file()
         for leg in ("fresh", "resume"):
+            leg_started = time.monotonic()
+            print(f"Native {control} {leg}: starting", flush=True)
             namespace = private_mux_args(tmp_path)
             namespace_file.write_text(namespace[1], encoding="utf-8")
             outer_target = "headed-fixture-" + uuid4().hex
@@ -435,7 +462,7 @@ class Mux {
                 "    set_stderr=ctypes.windll.kernel32.SetStdHandle\n"
                 "    set_stderr.argtypes=[ctypes.c_ulong,ctypes.c_void_p]\n"
                 "    assert set_stderr(-12,msvcrt.get_osfhandle(2))\n"
-                f"    site.addsitedir({site_packages!r})\n"
+                + (f"    site.addsitedir({site_packages!r})\n" if not installed else "")
                 + "    import time\n"
                 f"    while not Path({str(owner_ready)!r}).exists(): time.sleep(0.05)\n"
                 + invocation +
@@ -449,7 +476,9 @@ class Mux {
                 encoding="utf-8",
             )
             compile(driver.read_text(encoding="utf-8"), str(driver), "exec")
-            caller_command = [owner_python, "-I", "-S", "-B", str(driver)]
+            caller_command = [
+                owner_python, "-I", *([] if installed else ["-S"]), "-B", str(driver),
+            ]
             caller_environment = [
                 argument for name in ("PATH", "LOCALAPPDATA", "TEMP", "TMP")
                 for argument in ("-e", f"{name}={environment[name]}")
@@ -564,6 +593,8 @@ class Mux {
                 ),
             )
             histories.append(state)
+            print(f"Native {control} {leg}: broker bound in {time.monotonic() - leg_started:.2f}s",
+                  flush=True)
             assert state["session_id"] == native and state["restoration"] == "unqualified"
             assert pid_alive(state["pid"]) and pid_alive(state["child_pid"])
             if control == "manager-mux":
@@ -687,6 +718,8 @@ class Mux {
                 "import json,sys;from pathlib import Path;from agent_worktrees import launch_seed_state;"
                 "print(json.dumps(launch_seed_state.peek(Path(sys.argv[1]),read_only=True) is None))", record,
             ) is True
+            print(f"Native {control} {leg}: history/receipts in {time.monotonic() - leg_started:.2f}s",
+                  flush=True)
             asyncio.run(broker(state, stop=True))
             _until(
                 lambda: not any(pid_alive(state[key]) for key in ("pid", "child_pid", "extension_pid")),
@@ -737,6 +770,8 @@ class Mux {
                 assert observed_end["exit_code"] == exit_code, "\n".join(pane_output)
                 assert observed_end["observed_at"]
             identities, state = {}, None
+            print(f"Native {control} {leg}: retired in {time.monotonic() - leg_started:.2f}s",
+                  flush=True)
         assert (
             histories[0]["child_pid"], histories[0]["child_process_start_time"],
         ) != (histories[1]["child_pid"], histories[1]["child_process_start_time"])

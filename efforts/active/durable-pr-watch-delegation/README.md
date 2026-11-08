@@ -378,13 +378,18 @@ _Operator-required outcome; agent-recommended slices and validation._
 - [x] Deliver the finite optional in-process source/profile resolver through
   the actual Worktrees record and attribution owners (#11397). Resolve before
   pure retained composition; this is not normal-host enrollment.
+- [x] Deliver separately selected protected credential scope and encrypted
+  delivery through the existing Gateway/controller/worker owners (#11412).
+  Native permission verification, pinned transport and host adoption remain
+  separate; observation contracts retain their meanings.
 - [ ] Deliver the actual protected write-owner prerequisite through its
   existing owners, then bind one explicitly selected authenticated host route.
   Injected factories and observation credentials do not satisfy these exits;
   default watch-only and native read-only hosting stay unchanged.
-  Review the [provider-first writer expansion](comment-producer-enrollment.md#provider-first-protected-writer-expansion)
-  before changing credential/provider contracts; its implementation and
-  mixed-version/rotation/unknown-effect controls remain open.
+  The [provider-first writer expansion](comment-producer-enrollment.md#provider-first-protected-writer-expansion)
+  cleared review in #11410 before credential/provider changes. The finite
+  delivery leaf above does not close native rotation/unknown-effect or
+  normal-host qualification.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -969,6 +974,15 @@ or silently expanding a bounded source claim.
   existing skips. Cleanup is verified. Normal writer/host/provider adoption
   remains outside this finite source exit.
 
+- [x] Qualify the finite separate credential-delivery path (#11412): exact
+  selected scope, current/prior controller and Gateway support, withdrawal,
+  observation preservation, mismatched/expired material and sealed native
+  principal refusal before ACK. The selected canonical standalone packet
+  passes 158 cases with verified cleanup; 4,316 unrelated cases are
+  deselected. Provider verification remains synthetic, Fleet typing remains
+  pending under #9807, and native dispatch/rotation/unknown effects,
+  installed support and host adoption are not qualified by this packet.
+
 - [x] Qualify the finite pre-approval owner data path through actual shared
   preparation, original-key restart/lost-result recovery, contention,
   immutable input, explicit exact admission/native receipts, strict reader
@@ -1090,6 +1104,44 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-07 - Deliver separate protected credential scope without host activation
+
+- #11412 actually merged as `fe117fd8609ffa22bc5e787be3fbdf39903c9a12`
+  after corrected-head Copilot approval with no findings and latest CI
+  `42426371350`, including required gate `128567515092`, passed.
+  The original approval did not waive a missing standalone Fleet changefile
+  or become approval of the corrected head. After a normal bounded wait,
+  a requested current-head pass supplied the actual approval. Managed
+  completion retained its backup and reconciled only the merged commits.
+- Separate `ReviewScope`, explicit version-2 configuration, current controller
+  support and exact sealed material checks extend the existing credential
+  owners. Prior observe-only contracts are unchanged. The mandatory external
+  verifier still owns actual native permissions; the SDK adds no verifier,
+  native request transport, CLI adapter, host writer or live enrollment.
+- The selected contained standalone packet passes 158 cases with cleanup
+  verified. The plugin-only devcontainer runner could not address the
+  standalone target and supplied no coverage. Ruff, docs, installation,
+  changefile, pre-commit and six-module size checks pass. Fleet's broad
+  project probe remains pending under #9807, not a strict pass.
+- Re-read the canonical Plan/Validation and close only the finite delivery
+  leaves. Continue the actual pinned native ADO transport and current-owner
+  policy before explicit host binding. Both parents and #11128 remain open;
+  no deployment, production effect or resource release follows from this merge.
+
+### 2026-11-07 - Separate protected credential support before native host adoption
+
+- #11410 actually merged as `15704f93b3d8aac8b9feb9be22775a1f2e7b173b`
+  after exact-head Copilot approval with no findings and latest CI
+  `42425153368` passed. Managed completion retained its backup and reconciled
+  only the merged source commits.
+- Re-read the affected canonical Plan and Validation. Contract review is the
+  only completed exit here. Continue the separate typed credential delivery
+  through the existing Gateway/controller/worker owners, then the native
+  pinned transport and explicit host consumer. Observe-only contracts remain
+  unchanged; a synthetic verifier is not actual native permission evidence.
+- Both parents and #11128 stay open. No credential enrollment, host activation,
+  production review, deployment or resource release follows from this merge.
 
 ### 2026-11-07 - Resolve actual producer source and profile before composition
 

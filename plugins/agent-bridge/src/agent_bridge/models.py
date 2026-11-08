@@ -732,7 +732,6 @@ class ServiceConfig(ExecutionSpaceConfigFields):
     # an ignored extra) so it round-trips through model_dump / save_config. Keep
     # in sync with agent_bridge.config_migrations.CONFIG_VERSION.
     schema_version: int = 2
-    windows_scheduled_task: Literal["preserve", "enabled", "absent"] = "preserve"
     session_modes: SessionModes = Field(default_factory=SessionModes)
     remote_acp: dict[str, RemoteAcpTarget] = Field(default_factory=dict)
     remote_acp_bindings: dict[str, RemoteAcpBinding] = Field(default_factory=dict)
