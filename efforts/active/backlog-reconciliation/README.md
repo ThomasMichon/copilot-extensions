@@ -297,6 +297,11 @@ all existing completion check states remain unchanged and the campaign remains A
 The next follow-through retains #11545's positive macOS lifecycle/recovery gap
 and 28 recovered prior whole-source refusals. Successful refusal-job metadata
 and a documentation-only candidate are not positive native acceptance.
+The later retained-supply study demonstrates no qualified continuation from
+235 audited identities, credits #11565's finite delivered source correction
+without claiming installed-consumer acceptance, and preserves #11570's
+independent Vault profile contract. Its dated census is 847 whole OPEN,
+118 above fixed 729; all campaign completion states remain unchanged.
 
 The [fulfilled-request and bridge-identity checkpoint](<journal/2026/11.07 fulfilled-requests-and-bridge-identity.md>)
 records the campaign-wide standing completion-check approval, #11445's audited
@@ -3074,6 +3079,10 @@ The same journal retains #11545's exhausted study scope and distinguishes
 complete job metadata from positive macOS lifecycle/recovery qualification.
 Its 28 recovered actual refusal records renew no acquisition allowance and
 supply no closure credit.
+The later six-object #11565 crosswalk distinguishes static source and test
+definitions from the reported process control and original installed-consumer
+qualification. Retained-supply audit conclusions renew no scope or stale
+worker claim; #11570's profile selection and existing custodians stay separate.
 
 The [serving-owner and attribution-event study](<journal/2026/11.07 serving-owner-and-attribution-events.md>)
 distinguishes guarded source inspection, attributed native witness results,
