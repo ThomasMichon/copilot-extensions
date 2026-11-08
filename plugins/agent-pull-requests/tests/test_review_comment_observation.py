@@ -292,7 +292,12 @@ def test_hash_valid_but_unusable_cached_discussions_do_not_correlate(edits: tupl
     before = retained_bytes(store)
     result = observe(store, cache, chosen, generation)
     assert result["status"] == "unavailable" and result["reason"] == "discussions_invalid"
-    assert result["observation"] is None and retained_bytes(store) == before
+    if change == "malformed-actor":
+        assert result["observation"]["observed_from"] == section["observed_from"]
+        assert result["observation"]["observed_to"] == section["observed_to"]
+    else:
+        assert result["observation"] is None
+    assert retained_bytes(store) == before
 
 
 def test_expiry_after_cached_read_returns_no_stale_success(edits: tuple) -> None:

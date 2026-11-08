@@ -316,16 +316,48 @@ def test_acquisition_normalizes_discussions_once_for_all_retained_actions(
     later = allocate(edits)
     submit(edits, later)
     normalize = review_comment_observation._acquired
+    digest = review_comment_observation._digest
     calls = []
-    def counted(value: dict, scope: dict) -> tuple:
+    hashes = []
+    def counted(value: dict, scope: dict) -> object:
         calls.append(value["id"])
         return normalize(value, scope)
+    def hashed(value: dict) -> str:
+        hashes.append(value["comment"]["id"])
+        return digest(value)
     monkeypatch.setattr(review_comment_observation, "_acquired", counted)
+    monkeypatch.setattr(review_comment_observation, "_digest", hashed)
     value = generation(edits)
     ingest(store, value)
     assert calls == [value["id"]]
+    assert hashes == [1]
     assert read(owner, first)["mapping"]["status"] == "conflict"
     assert read(owner, later)["mapping"]["status"] == "correlated"
+
+
+@pytest.mark.parametrize("duplicate", ["thread", "comment"])
+def test_newer_duplicate_native_ids_replace_old_positive_correlation(edits: tuple, duplicate: str) -> None:
+    (store, _, _, _, backend, _), _, _, _ = edits
+    chosen = allocate(edits)
+    submit(edits, chosen)
+    owner = enable(store)
+    ingest(store, generation(edits))
+    original = read(owner, chosen)
+    assert original["mapping"]["status"] == "correlated"
+    if duplicate == "thread":
+        backend.threads.append(copy.deepcopy(backend.threads[0]))
+    else:
+        comments = backend.threads[0]["comments"]
+        comments.append(copy.deepcopy(comments[0]))
+    newer = generation(edits, 4)
+    assert ingest(store, newer)["status"] == "observed"
+    current = read(owner, chosen)
+    assert current["mapping"]["status"] == "unavailable"
+    assert current["mapping"]["reason"] == "discussions_invalid"
+    assert current["mapping"]["generation_id"] == newer["id"]
+    assert current["mapping"]["observation"]["observed_from"] == "2026-10-30T00:02:04Z"
+    assert current["mapping"]["current_object_id"] is None
+    assert current["receipt"] == original["receipt"] and current["action_state"] == "confirmed"
 
 
 def test_full_mapping_budget_preserves_pending_receipt_capacity(edits: tuple) -> None:

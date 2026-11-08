@@ -206,8 +206,9 @@ An actual acquisition embedding may explicitly select
 `ConversationStore.observe_workspace(..., comment_mappings=True)` after
 successful cache publication. It reuses the normalized read-only join inside
 the same admitted journal/envelope transaction. Discussion normalization and
-native-ID indexing occur once per acquired generation, followed by bounded
-existing-operation/action lookup. No provider query or background loop is added.
+native-ID indexing occur once per acquired generation; repeated targets also
+reuse one object digest. Bounded existing-operation/action lookup follows.
+No provider query or background loop is added.
 Default acquisition remains unchanged; the current workspace load/sync host
 does not yet select this option.
 
@@ -216,6 +217,10 @@ completeness/error count, correlation outcome/reason and an available
 normalized object digest. Stale/rejected journal observations cannot change
 them; older or overlapping discussion evidence cannot replace a known newer
 slot. Repeating the same evidence reconciles idempotently. Changed native
+objects with independently valid newer section timestamps can replace a
+positive slot with explicit unavailability even when duplicate IDs or malformed
+objects make the join unusable; the timestamps do not certify its contents.
+Changed native
 attempt/receipt state invalidates its prior slot, rather than combining old
 correlation with a new receipt. No mapping-only update advances conversation,
 attention, echo, handled or ACK state. Cache publication is still a separate
