@@ -594,6 +594,7 @@
       ],
       "exclude": [],
       "level": "pending",
+      "requirements": "tools/typecheck-service-chat-requirements.txt",
       "import_roots": [
         "services/chat/tests",
         "libs/agent-procutil/tests",

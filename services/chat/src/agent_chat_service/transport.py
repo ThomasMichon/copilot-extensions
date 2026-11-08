@@ -225,7 +225,10 @@ class GatewayTransport:
         if self.request_command is not None and (not loopback or self.endpoint_dir is not None):
             raise ClientError("invalid_configuration", "The fixed-route stdio provider requires loopback.")
         self.parsed, self.runner = parsed, runner
-        self.identity = "local:" + self.endpoint_dir if self.endpoint_dir is not None else endpoint.rstrip("/")
+        self.identity = (
+            "local:" + self.endpoint_dir if self.endpoint_dir is not None
+            else cast(str, endpoint).rstrip("/")
+        )
 
     @staticmethod
     def _result(status: int, result: dict[str, Any]) -> dict[str, Any]:

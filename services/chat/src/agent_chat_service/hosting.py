@@ -18,7 +18,7 @@ import sys
 import threading
 import uuid
 from io import BufferedIOBase
-from typing import Any, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from single_instance_lease import SingleInstance
@@ -239,13 +239,18 @@ class _Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
         self.draining = False
         self.authorization = authorization
         self.slots = threading.BoundedSemaphore(MAX_CONNECTIONS)
-        super().__init__(address, _Handler)
+        initialize: Callable[[tuple[str, int] | str, type[_Handler]], None] = getattr(
+            super(), "__init__",
+        )
+        initialize(address, _Handler)
         self.timeout = .2
 
     def server_bind(self) -> None:
         socketserver.TCPServer.server_bind(self)
 
-    def process_request(self, request: socket.socket, client_address: object) -> None:
+    def process_request(
+        self, request: socket.socket | tuple[bytes, socket.socket], client_address: object,
+    ) -> None:
         if not self.slots.acquire(blocking=False):
             self.shutdown_request(request)
             return
@@ -255,13 +260,17 @@ class _Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
             self.slots.release()
             raise
 
-    def process_request_thread(self, request: socket.socket, client_address: object) -> None:
+    def process_request_thread(
+        self, request: socket.socket | tuple[bytes, socket.socket], client_address: object,
+    ) -> None:
         try:
             super().process_request_thread(request, client_address)
         finally:
             self.slots.release()
 
-    def handle_error(self, request: socket.socket, client_address: object) -> None:
+    def handle_error(
+        self, request: socket.socket | tuple[bytes, socket.socket], client_address: object,
+    ) -> None:
         logging.error("chat_host_request_failed exception=%s", type(sys.exc_info()[1]).__name__)
 
 
@@ -442,11 +451,11 @@ class HostedChat:
 
     def serve(self, stop: threading.Event) -> None:
         while not stop.is_set():
-            self.server.handle_request()
+            cast(_Server, self.server).handle_request()
 
     def drain(self) -> dict[str, Any]:
-        self.server.draining = True
-        return self.store.drain()
+        cast(_Server, self.server).draining = True
+        return cast(ChatStore, self.store).drain()
 
     def close(self) -> None:
         drain_error = None
@@ -467,9 +476,9 @@ class HostedChat:
             self._clear_endpoint(self.run_dir)
             self._advertised = False
         if self._socket_identity is not None:
-            info = self._socket_path.lstat()
+            info = cast(Path, self._socket_path).lstat()
             if (info.st_dev, info.st_ino) == self._socket_identity and stat.S_ISSOCK(info.st_mode):
-                self._socket_path.unlink()
+                cast(Path, self._socket_path).unlink()
             else:
                 raise HostError("host_socket_ownership_changed")
             self._socket_identity = None
@@ -536,11 +545,12 @@ def _serve(args: argparse.Namespace) -> int:
             print(json.dumps({
                 "schema": "agent-chat.host-ready", "version": 1,
                 "transport": host.transport, "endpoint": host.endpoint,
-                "installation_id": host.store.installation_id,
+                "installation_id": cast(ChatStore, host.store).installation_id,
             }), flush=True)
             host.serve(stop)
         return 0
     except (HostError, ChatError, OSError, sqlite3.Error) as error:
+        value: dict[str, Any]
         if isinstance(error, HostError):
             value = {"error": str(error)}
         elif isinstance(error, ChatError):
