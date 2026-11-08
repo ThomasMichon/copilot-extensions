@@ -219,6 +219,29 @@ def test_gone_ordinary_native_with_pending_wake_stays_started_for_same_native_re
     assert still.id == wake.id and still.status == "pending"
 
 
+def test_gone_verdict_observed_before_wake_delivery_does_not_suspend_resumed_native(
+    hosted: tuple[TaskQueue, str],
+) -> None:
+    queue, task_id = hosted
+    before = queue.resume(task_id, OWNER, wake_requested=True, wake_message="revise")
+
+    def delivered_during_probe(_session: str) -> str:
+        claimed = queue.claim_due_wake()
+        assert claimed is not None and claimed.id == before.wake_operation_id
+        queue.finish_wake(claimed.id, claimed.delivery_token, delivered=True)
+        return "gone"
+
+    counts = queue.reconcile_liveness(headless_local_verdict=delivered_during_probe)
+
+    assert counts["gone"] == 1 and counts["suspended"] == counts["requeued"] == 0
+    current = queue.get(task_id)
+    assert (current.status, current.owner_session_id, current.generation) == (
+        "started", NATIVE, before.generation,
+    )
+    [wake] = queue.list_wakes(task_id)
+    assert wake.status == "delivered"
+
+
 @pytest.mark.parametrize("verdict", ["live", "unknown"])
 def test_liveness_keeps_live_or_unknown_ordinary_owners(
     hosted: tuple[TaskQueue, str], verdict: str,
