@@ -1,0 +1,9 @@
+{
+  "comment": "Forward the existing admitted lifecycle to cold native helper publication without preselecting a runtime.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
