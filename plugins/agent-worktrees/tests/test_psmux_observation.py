@@ -15,6 +15,7 @@ import pytest
 from agent_worktrees import launch_seed_exec, reclaim, resume_seed, sessions
 from agent_worktrees import windows_mux_processes as native
 from agent_remote_driver import mux_inventory as reader
+from agent_remote_driver.mux_observation import observe_psmux as observe_native_psmux
 from agent_remote_driver.mux_observation_types import ObservationUnavailable as MuxObservationUnavailable
 
 
@@ -112,6 +113,23 @@ def test_same_session_name_in_multiple_namespaces_remains_unknown(registered, mo
     (registered / "example__wt-other.port").write_text("12346")
     (registered / "example__wt-other.key").write_text("b" * 16)
     monkeypatch.setattr(reader, "_query", lambda port, *a: ("wt-other", 1, 101 if port == 12345 else 202))
+    with pytest.raises(MuxObservationUnavailable, match="ambiguous"):
+        reader.observe()
+
+
+def test_namespace_qualified_absence_preserves_complete_coverage_and_legacy_api(registered, monkeypatch):
+    from agent_remote_driver import mux_observation
+
+    monkeypatch.setattr(native, "servers", lambda: {101: "123", 202: "456"})
+    (registered / "example__wt-other.pid").write_text("202:456")
+    (registered / "example__wt-other.port").write_text("12346")
+    (registered / "example__wt-other.key").write_text("b" * 16)
+    monkeypatch.setattr(reader, "_query", lambda port, *a: ("wt-other", 1, 101 if port == 12345 else 202))
+    monkeypatch.setattr(mux_observation, "observe_psmux", observe_native_psmux)
+    monkeypatch.setenv("COPILOT_DRIVER_PSMUX_NAMESPACE", "another")
+    assert reader.observe(qualified=True) == {"wt-other": 1, "example__wt-other": 1}
+    assert mux_observation.observe_psmux("wt-other", data_dir=registered).status == "absent"
+    assert mux_observation.observe_psmux_many(["wt-other"])["wt-other"].status == "absent"
     with pytest.raises(MuxObservationUnavailable, match="ambiguous"):
         reader.observe()
 

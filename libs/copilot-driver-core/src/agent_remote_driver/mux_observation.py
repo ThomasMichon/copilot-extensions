@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import json
 import os
 from pathlib import Path
@@ -22,7 +22,7 @@ _QUERIES = tuple(query.encode("ascii") for query in (
     'list-panes -s -F "P\t#{session_name}\t#{session_id}:#{session_created}'
     '\t#{pane_id}\t#{pane_dead}\t#{pane_active}\t#{pane_current_path}"\n',
     'list-clients -F "C\t#{session_name}"\n',
-    'display-message -p "I\t#{session_name}\t#{session_id}:#{session_created}"\n',
+    'display-message -p "I\t#{session_name}\t#{session_id}:#{session_created}\t#{pane_id}"\n',
 ))
 
 
@@ -101,6 +101,7 @@ def _parse(body: str, session: str) -> Observation:
     identities: set[str] = set()
     clients = 0
     complete = False
+    current_pane = ""
     for line in body.splitlines():
         if not line:
             continue
@@ -113,8 +114,9 @@ def _parse(body: str, session: str) -> Observation:
         if len(fields) < 3 or not re.fullmatch(r"\$[0-9]+:[0-9]+", fields[2]):
             raise ValueError("Unconfirmed native session")
         identities.add(fields[2])
-        if fields[0] == "I" and len(fields) == 3:
+        if fields[0] == "I" and len(fields) == 4 and re.fullmatch(r"%[0-9]+", fields[3]):
             complete = True
+            current_pane = fields[3]
         elif (
             fields[0] == "P" and len(fields) == 7
             and re.fullmatch(r"%[0-9]+", fields[3])
@@ -123,9 +125,14 @@ def _parse(body: str, session: str) -> Observation:
             panes.append(Pane(fields[3], fields[4] == "1", fields[5] == "1", fields[6]))
         else:
             raise ValueError("Malformed native observation")
-    if not complete or not panes or len(identities) != 1 or len({p.pane_id for p in panes}) != len(panes):
+    pane_ids = {p.pane_id for p in panes}
+    if not complete or current_pane not in pane_ids or len(identities) != 1 or len(pane_ids) != len(panes):
         raise ValueError("Unconfirmed native session identity")
-    return Observation("present", incarnation=identities.pop(), clients=clients, panes=tuple(panes))
+    # pane_active is window-local; the final identity identifies the current pane.
+    return Observation(
+        "present", incarnation=identities.pop(), clients=clients,
+        panes=tuple(replace(p, active=p.pane_id == current_pane) for p in panes),
+    )
 
 
 def _settled_inventory(root: Path, deadline: float) -> dict[str, int]:
@@ -133,7 +140,7 @@ def _settled_inventory(root: Path, deadline: float) -> dict[str, int]:
 
     while True:
         try:
-            return mux_inventory.observe(timeout=_remaining(deadline), data_dir=root)
+            return mux_inventory.observe(timeout=_remaining(deadline), data_dir=root, qualified=True)
         except ObservationUnavailable:
             # Warm/cold servers publish several rendezvous files before readiness.
             time.sleep(min(0.05, _remaining(deadline)))
@@ -169,7 +176,7 @@ def observe_psmux(
                 else _settled_inventory(root, deadline)
             )
             return (
-                Observation("absent") if session not in inventory
+                Observation("absent") if base not in inventory
                 else Observation("unknown", "missing-rendezvous")
             )
         key_raw = _read(paths["key"])
@@ -200,7 +207,7 @@ def observe_psmux_many(sessions: list[str], *, timeout: float = 1.0) -> dict[str
             if not snapshot:
                 try:
                     snapshot.append(mux_inventory.observe(
-                        timeout=_remaining(deadline), data_dir=_data_dir(),
+                        timeout=_remaining(deadline), data_dir=_data_dir(), qualified=True,
                     ))
                 except (OSError, ValueError, ObservationUnavailable):
                     snapshot.append(None)
@@ -244,7 +251,7 @@ def list_psmux() -> dict[str, Observation] | None:
             pass
         from agent_remote_driver import mux_inventory
 
-        mux_inventory.observe(timeout=_remaining(deadline), data_dir=root)
+        mux_inventory.observe(timeout=_remaining(deadline), data_dir=root, qualified=True)
         return observe_psmux_many(sorted(names), timeout=_remaining(deadline))
     except (OSError, ValueError, ObservationUnavailable):
         return None

@@ -89,7 +89,8 @@ def test_unknown_mux_keeps_open_but_cannot_offer_destructive_recovery():
     }
     actions = PickerScreenWorktreeActionsMixin._session_action_verbs(row)
     assert "Open" in actions
-    assert not {"Reclaim", "Restore", "Stop", "Repair", "Cleanup", "Finalize"} & set(actions)
+    assert not {"Reclaim", "Restore", "Stop", "Repair", "Cleanup"} & set(actions)
+    assert "Finalize" in actions
 
 
 @pytest.mark.parametrize("mux_fields", [

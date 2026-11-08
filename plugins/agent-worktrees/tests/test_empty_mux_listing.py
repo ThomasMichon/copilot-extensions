@@ -281,7 +281,9 @@ def test_passive_psmux_observation_never_executes(monkeypatch: pytest.MonkeyPatc
     assert status_monitor_runtime._monitor_list_sessions(r"C:\Tools\PSMux.exe") is None
     assert sessions._list_mux_sessions() is None
     assert sessions._mux_session_activity() == {}
-    assert not sessions.mux_status_many(["fixture"])["fixture"].observed
+    with pytest.raises(MuxObservationUnavailable):
+        sessions.mux_status_many(["fixture"])
+    assert not sessions.mux_status_for_display(["fixture"])["fixture"].observed
     with pytest.raises(MuxObservationUnavailable, match="presence is unknown"):
         sessions.mux_status_many(["fixture"], strict=True)
 
@@ -338,6 +340,30 @@ def test_explicit_and_display_presence_use_driver_counts_without_cli(monkeypatch
     assert sessions.has_mux_session("fixture")
     assert sessions.has_mux_session_named("wt-fixture", mux="psmux")
     assert sessions.mux_active_pane_named("wt-fixture", mux="psmux") == "%2"
+
+
+def test_unknown_native_results_are_display_only_and_never_admit_reclaim(monkeypatch):
+    from agent_worktrees import reclaim
+
+    monkeypatch.setattr(sessions.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        mux_observation, "observe_psmux",
+        lambda name, **kw: mux_observation.Observation("unknown", "timeout")
+        if name == "wt-fixture" else mux_observation.Observation("present", clients=2),
+    )
+    with pytest.raises(MuxObservationUnavailable):
+        sessions.mux_status_many(["fixture", "other"])
+    display = sessions.mux_status_for_display(["fixture", "other"])
+    assert not display["fixture"].observed
+    assert display["other"].observed and display["other"].clients == 2
+    target = {"pid": 101, "homing": "mux", "worktree_id": "fixture"}
+    monkeypatch.setattr(
+        reclaim, "mux_ancestors_of",
+        lambda *a: pytest.fail("unknown mux admitted detached-server teardown"),
+    )
+    assert reclaim._mux_reachability(["fixture"]) == {"fixture": None}
+    assert reclaim.filter_stop_unreachable([target], table={}) == []
+    assert reclaim.teardown_detached_mux([target], table={}) == []
 
 
 def test_monitor_uses_driver_identity_and_preserves_partial_unknown(monkeypatch) -> None:

@@ -32,6 +32,24 @@ def display_status(worktree_ids: list[str]) -> dict:
     return result
 
 
+def session_status(worktree_ids: list[str], *, strict: bool = False) -> dict:
+    """Keep unknown rows out of authoritative liveness and recovery callers."""
+    from .sessions import MuxInfo, mux_session_name
+
+    if strict:
+        inventory = observe()
+        return {
+            wt_id: MuxInfo(
+                exists=mux_session_name(wt_id) in inventory,
+                clients=inventory.get(mux_session_name(wt_id), 0),
+            ) for wt_id in worktree_ids
+        }
+    result = display_status(worktree_ids)
+    if any(not info.observed for info in result.values()):
+        raise MuxObservationUnavailable("Native mux presence observation is unavailable")
+    return result
+
+
 def list_session_counts() -> dict[str, int] | None:
     from agent_remote_driver.mux_observation import list_psmux
 

@@ -60,11 +60,16 @@ connection; all three share one deadline and aggregate response-byte cap.
 It never executes PSMux, repairs registrations or starts a background observer.
 Pane and final identity responses must identify the requested session and
 one incarnation; port/key hints must remain unchanged across the reads.
+The final identity also names the current pane, so window-local active flags
+from other windows cannot select the wrong pane.
 Missing port/key/session-ID/PID hints alone never establish absence: Driver
 retains the complete native server/PID-birth coverage reader introduced for
 prompted Resume. A missing live-server registration, unsupported process mode
 or changing inventory remains unknown. Listings share one absence-coverage
 snapshot within their finite budget; live positive rows use their own reads.
+Selected-namespace absence uses qualified registration identities while still
+covering every native server. The legacy name-only inventory API retains its
+ambiguity refusal for duplicate logical names across namespaces.
 Stale, partial, unreadable, changed, malformed or timed-out observations remain unknown.
 Client counts come from client rows, not PSMux's boolean `session_attached`.
 

@@ -112,6 +112,9 @@ authenticated session/pane replies establish presence and actual client rows
 supply counts. Missing rendezvous needs complete native server coverage to establish absence;
 partial, stale, refused or timed-out queries remain unknown, not an empty
 catalog. Independent worktree, Git and process facts can still publish.
+Authoritative batched status raises when any native row is unobserved, so
+reclaim cannot interpret an unavailable row's default `exists=False` as death.
+The separate display API preserves available rows alongside unknown ones.
 Last-known mux presence retains its original timestamp when fresh observation
 fails; it is not refreshed into current proof. TMux retains bounded CLI
 observations, but malformed rows, duplicate sessions, diagnostics and failed

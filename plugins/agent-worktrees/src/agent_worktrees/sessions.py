@@ -1472,18 +1472,10 @@ def mux_status_many(worktree_ids: list[str], *, strict: bool = False) -> dict[st
     if not worktree_ids:
         return result
 
-    if strict and platform.system() == "Windows":
-        from .psmux_observation import observe
-        observed = observe()
-        for wt_id in worktree_ids:
-            name = mux_session_name(wt_id)
-            result[wt_id] = MuxInfo(exists=name in observed, clients=observed.get(name, 0))
-        return result
-
     if platform.system() == "Windows":
-        from .psmux_observation import display_status
+        from .psmux_observation import session_status
 
-        return display_status(worktree_ids)
+        return session_status(worktree_ids, strict=strict)
 
     all_sessions = _list_mux_sessions(strict=True) if strict else _list_mux_sessions()
     if all_sessions is not None:
@@ -1517,6 +1509,10 @@ def mux_status_for_display(worktree_ids: list[str]) -> dict[str, MuxInfo]:
     """Keep independent display facts usable without inventing mux negatives."""
     from .mux_list_result import MuxObservationUnavailable
 
+    if platform.system() == "Windows":
+        from .psmux_observation import display_status
+
+        return display_status(worktree_ids)
     try:
         return mux_status_many(worktree_ids)
     except MuxObservationUnavailable:

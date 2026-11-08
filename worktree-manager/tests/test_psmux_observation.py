@@ -89,7 +89,7 @@ def test_shipped_open_check_uses_real_finite_provider_without_psmux(tmp_path, st
                 for command, response in (
                     (b"list-panes ", b"OK\nP\twt-fixture\t$7:100\t%2\t0\t1\tC:\\fixture\n"),
                     (b"list-clients ", b"OK\n"),
-                    (b"display-message ", b"OK\nI\twt-fixture\t$7:100\n"),
+                    (b"display-message ", b"OK\nI\twt-fixture\t$7:100\t%2\n"),
                 ):
                     with listener.accept()[0] as stream:
                         stream.settimeout(5)

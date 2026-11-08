@@ -99,13 +99,16 @@ def _query(port: int, key: str, deadline: float) -> tuple[str, int, int]:
     return name, int(count), int(identity)
 
 
-def observe(*, timeout: float = 5, data_dir: Path | None = None) -> dict[str, int]:
+def observe(
+    *, timeout: float = 5, data_dir: Path | None = None, qualified: bool = False,
+) -> dict[str, int]:
     """Confirm names only with complete, stable native-server coverage.
 
     Registration absence alone cannot exclude an orphaned live server. Query
     every enumerated server, including warm servers, then recheck coverage and
     process births. No CLI, registry repair, pane command or cache is involved.
     ``timeout`` may shorten, but never expand, the five-second total budget.
+    ``qualified`` retains native namespace prefixes; legacy callers keep names.
     """
     deadline = time.monotonic() + min(timeout, 5)
     root = data_dir if data_dir is not None else (
@@ -121,9 +124,10 @@ def observe(*, timeout: float = 5, data_dir: Path | None = None) -> dict[str, in
             name, clients, reported_pid = _query(port, key, deadline)
             if reported_pid != pid or not (base == name or base.endswith("__" + name)):
                 raise MuxObservationUnavailable("Native mux reply disagrees with its registration")
-            if name in result:
+            identity = base if qualified else name
+            if identity in result:
                 raise MuxObservationUnavailable("Native mux session name is ambiguous")
-            result[name] = clients
+            result[identity] = clients
         if (
             windows_mux_processes.servers() != servers
             or _registrations(root, servers, deadline) != registrations

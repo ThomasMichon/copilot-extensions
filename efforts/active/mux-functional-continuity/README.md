@@ -151,6 +151,24 @@ implementation proof obligations, not claims that native qualification passed.
 
 ## Journal
 
+### 2026-11-08 - Preserve pane, recovery and namespace boundaries
+
+- The final authenticated identity now names the current pane. Window-local
+  active flags cannot make a normal multi-window session lose its current-pane
+  target; a two-window wire regression covers that distinction.
+- Authoritative Windows batches raise on unobserved rows. Only the display
+  API retains partial unknown facts; reclaim reachability and detached-server
+  teardown tests verify that unknown never authorizes selecting live targets.
+- Driver absence uses namespace-qualified registration identities while still
+  verifying every native server. The strict legacy name-only inventory retains
+  its duplicate-name ambiguity refusal.
+- Preserved the existing non-managed Finalize menu entry, whose executor owns
+  eligibility checks, without enabling Restore/Reclaim/Stop on unknown rows.
+- Focused contained results: Driver wire 27 passed, Worktrees 113 passed with
+  one POSIX-only skip, Manager wire/Picker 28 passed; all 17 changed source
+  modules meet the unchanged ceilings. Fresh native qualification, CI and a
+  subsequent passing review remain required before merge.
+
 ### 2026-11-08 - Both native versions qualify
 
 - Candidate `06aa22c3c4` passed all eight native cases on PSMux 3.3.8

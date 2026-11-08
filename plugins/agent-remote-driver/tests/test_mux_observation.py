@@ -19,7 +19,7 @@ from agent_procutil import no_window_kwargs
 
 _PANE = b"P\twt-fixture\t$7:100\t%2\t0\t1\tC:\\fixture with spaces\n"
 _CLIENT = b"C\twt-fixture\n"
-_IDENTITY = b"I\twt-fixture\t$7:100\n"
+_IDENTITY = b"I\twt-fixture\t$7:100\t%2\n"
 
 @pytest.fixture(autouse=True)
 def private_native_inventory(monkeypatch):
@@ -93,7 +93,9 @@ def test_fresh_authenticated_presence_and_real_client_count_without_cli(tmp_path
     assert captured[::2] == [scheme + b"synthetic-key\n"] * 3
     assert captured[1].startswith(b"list-panes ") and b" ; " not in captured[1]
     assert captured[3] == b'list-clients -F "C\t#{session_name}"\n'
-    assert captured[5] == b'display-message -p "I\t#{session_name}\t#{session_id}:#{session_created}"\n'
+    assert captured[5] == (
+        b'display-message -p "I\t#{session_name}\t#{session_id}:#{session_created}\t#{pane_id}"\n'
+    )
     assert (tmp_path / "wt-fixture.key").read_text() == "synthetic-key"
 
 
@@ -101,6 +103,17 @@ def test_zero_clients_is_live_not_absent(tmp_path):
     with native_endpoint(tmp_path, (b"OK\r\n" + _PANE, b"OK\n", b"OK\n" + _IDENTITY)):
         observed = mux.observe_psmux("wt-fixture", data_dir=tmp_path)
     assert observed.presence() and observed.clients == 0
+
+
+def test_current_pane_is_selected_across_two_windows_with_active_panes(tmp_path):
+    other_window = _PANE.replace(b"%2", b"%3")
+    with native_endpoint(tmp_path, (
+        b"OK\n" + _PANE + other_window, b"OK\n" + _CLIENT,
+        b"OK\n" + _IDENTITY.replace(b"%2", b"%3"),
+    )):
+        observed = mux.observe_psmux("wt-fixture", data_dir=tmp_path)
+    assert observed.presence()
+    assert [p.pane_id for p in observed.panes if p.active] == ["%3"]
 
 
 def test_explicit_namespace_scopes_listing_and_keeps_logical_identity(tmp_path, monkeypatch):
@@ -129,10 +142,12 @@ def test_explicit_namespace_scopes_listing_and_keeps_logical_identity(tmp_path, 
     b"OK\n" + _PANE + _IDENTITY + _CLIENT,
     b"OK\n" + _PANE + _CLIENT.replace(b"wt-fixture", b"wt-other") + _IDENTITY,
     b"OK\n" + _PANE + _IDENTITY * 2,
+    b"OK\n" + _PANE + _IDENTITY.replace(b"%2", b"%99"),
     b"OK\n" + b"x" * (mux._LIMIT + 1),
 ], ids=[
     "auth", "empty", "error", "name", "incarnation", "duplicate-pane", "malformed",
-    "missing-end", "trailing-client", "foreign-client", "duplicate-end", "oversized",
+    "missing-end", "trailing-client", "foreign-client", "duplicate-end", "missing-current-pane",
+    "oversized",
 ])
 def test_invalid_or_unconfirmed_wire_never_means_absence(tmp_path, response):
     with native_endpoint(tmp_path, response):
