@@ -369,7 +369,7 @@ def test_native_build_paths_normalize_local_and_unc_roots():
 @pytest.mark.skipif(os.name != "nt", reason="Windows wheel command selection")
 def test_native_metadata_loads_when_wheel_command_is_unavailable(tmp_path, monkeypatch):
     from setuptools import Distribution
-    from setuptools._distutils.errors import DistutilsModuleError
+    from distutils.errors import DistutilsModuleError
 
     original = Distribution.get_command_class
 

@@ -363,7 +363,7 @@ def commands(project, package, canonical_directory=None, *, companion_resources=
 
         classes["install_lib"] = WindowsInstallLib
         from setuptools import Distribution
-        from setuptools._distutils.errors import DistutilsModuleError
+        from distutils.errors import DistutilsModuleError
 
         try:
             bdist_wheel = Distribution().get_command_class("bdist_wheel")

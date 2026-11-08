@@ -312,7 +312,7 @@ def runtime_builder(monkeypatch):
             raise MissingWheelCommand()
 
     # Only setuptools' superclass actors are replaced; the resource decisions run unchanged.
-    for name in ("setuptools", "setuptools.command", "setuptools._distutils"):
+    for name in ("setuptools", "setuptools.command", "distutils"):
         package = ModuleType(name)
         package.__path__ = []
         if name == "setuptools":
@@ -322,7 +322,7 @@ def runtime_builder(monkeypatch):
         ("setuptools.command.build_py", "build_py", BuildPyActor),
         ("setuptools.command.sdist", "sdist", SdistActor),
         ("setuptools.command.install_lib", "install_lib", InstallLibActor),
-        ("setuptools._distutils.errors", "DistutilsModuleError", MissingWheelCommand),
+        ("distutils.errors", "DistutilsModuleError", MissingWheelCommand),
     ):
         module = ModuleType(name)
         setattr(module, attribute, actor)
