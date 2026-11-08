@@ -45,8 +45,13 @@ export function formatHandoffMarkdown(handoffData, scope) {
     "",
   ];
   if (scope) lines.push("## Continuation Scope", `> ${scope}`, "");
+  if (handoffData.intentContinuity) {
+    lines.push("## Canonical Goal and Intent Corpus",
+      JSON.stringify(handoffData.intentContinuity, null, 2),
+      "Re-read the current canonical Goal and all corpus pages; this snapshot is evidence, not authority.", "");
+  }
   if (handoffData.firstUserPrompt) {
-    lines.push("## Original Request", `> ${handoffData.firstUserPrompt.slice(0, 500)}`, "");
+    lines.push("## Original Request", handoffData.firstUserPrompt, "");
   }
   const files = Object.entries(handoffData.filesModified || {});
   if (files.length > 0) {

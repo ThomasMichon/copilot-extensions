@@ -41,12 +41,14 @@ class WatchRuntime:
         cls, *, installation: WatchInstallation, snapshot_id: str,
         runtime_version: str, runtime_root: Path, payload_root: Path,
         payload_version: str, environment: Mapping[str, str] | None = None,
+        require_selected: bool = False,
     ) -> WatchRuntime:
         installation.require_current(environment=environment)
         runtime = cls.capture_identity(
             installation=installation, snapshot_id=snapshot_id,
             runtime_version=runtime_version, runtime_root=runtime_root,
             payload_root=payload_root, payload_version=payload_version, environment=environment,
+            require_selected=require_selected,
         )
         installation.require_current(environment=environment)
         return runtime
@@ -56,6 +58,7 @@ class WatchRuntime:
         cls, *, installation: WatchInstallation, snapshot_id: str,
         runtime_version: str, runtime_root: Path, payload_root: Path,
         payload_version: str, environment: Mapping[str, str] | None = None,
+        require_selected: bool = False,
     ) -> WatchRuntime:
         """Read completed build identity; never authorize a lifecycle transition."""
         if not runtime_root.is_absolute() or not payload_root.is_absolute():
@@ -71,6 +74,12 @@ class WatchRuntime:
         )
         if not api.paths_equal(completed["slotRoot"], runtime_root):
             raise PermissionError("watch runtime does not match its completed slot")
+        if require_selected:
+            require_selected_metadata(
+                api, root=installation.plugin_root, runtime_version=runtime_version,
+                snapshot_id=snapshot_id, payload_root=payload_root,
+                payload_version=payload_version, completed=completed,
+            )
         installation.read_identity(environment=environment)
         return cls(
             installation.marketplace_id, installation.plugin_root, installation.receipt,
@@ -178,6 +187,38 @@ def native_start_time(pid: int) -> str | None:
     return token
 
 
+def capture_completed_pair(
+    target: object, predecessor: object, installation: WatchInstallation, *,
+    environment: Mapping[str, str] | None = None,
+) -> tuple[WatchRuntime, WatchInstance | None]:
+    """Join independent fresh build reads; neither result grants control."""
+    from concurrent.futures import ThreadPoolExecutor
+    from contextvars import copy_context
+
+    prior_runtime = (
+        {key: value for key, value in predecessor.items()
+         if key not in {"pid", "startTime", "instanceId"}}
+        if isinstance(predecessor, dict) else None
+    )
+    if (
+        prior_runtime is None or prior_runtime == target
+        or api._VALIDATION_SCOPE_DEPTH.get()
+    ):
+        return WatchRuntime.from_identity_evidence(
+            target, installation, environment=environment,
+        ), None
+    with ThreadPoolExecutor(max_workers=2) as readers:
+        target_read = readers.submit(
+            copy_context().run, WatchRuntime.from_identity_evidence,
+            target, installation, environment=environment,
+        )
+        predecessor_read = readers.submit(
+            copy_context().run, WatchInstance.from_identity_evidence,
+            predecessor, installation, environment=environment,
+        )
+        return target_read.result(), predecessor_read.result()
+
+
 @dataclass(frozen=True)
 class WatchInstance:
     """Expected identity obtained from an attributable launch or owner journal.
@@ -259,9 +300,7 @@ class WatchInstance:
         environment: Mapping[str, str] | None = None,
     ) -> Mapping[str, object]:
         """Read exact native identity and authenticated health, without authority."""
-        self.runtime.require_identity(installation, environment=environment)
-        if diagnostics.process_start_time(self.pid) != self.start_time:
-            raise ProcessLookupError("watch instance native identity changed or is unavailable")
+        self.require_native_identity(installation, environment=environment)
         health = read_health()
         if health.get("instance") != self.evidence():
             raise PermissionError("watch instance health does not match expected ownership")
@@ -269,6 +308,15 @@ class WatchInstance:
         if diagnostics.process_start_time(self.pid) != self.start_time:
             raise ProcessLookupError("watch instance exited during ownership validation")
         return health
+
+    def require_native_identity(
+        self, installation: WatchInstallation, *,
+        environment: Mapping[str, str] | None = None,
+    ) -> None:
+        """Validate a local process without fabricating a health exchange."""
+        self.runtime.require_identity(installation, environment=environment)
+        if diagnostics.process_start_time(self.pid) != self.start_time:
+            raise ProcessLookupError("watch instance native identity changed or is unavailable")
 
     def capture_exit(
         self, installation: WatchInstallation, *,

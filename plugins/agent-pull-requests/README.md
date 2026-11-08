@@ -587,11 +587,26 @@ authenticated health exchange with fresh runtime and native-birth checks,
 closing the reference on any refusal or observed exit. These are
 evidence boundaries, not permission to promote or retire an owner.
 
+Running-slot capture checks completion and selected metadata together, then
+rechecks the loaded module set without importing new code after attestation.
+Local native-identity validation does not invent a health exchange or claim
+readiness. Actual health and passive-launch callbacks retain fresh checks on
+both sides; none of these paths caches a proof or extends the 120-second cutover
+budget.
+
 The internal `WatchJournal` records random transaction authorization, exact
 instances, prior marker/manifest/route bytes and the completed target separately
 from ZDD's breadcrumb. Journal writes require custody of the installation's
-canonical guard, including inside borrowed orchestrator callbacks. Recorded
-drain/release/read-ready phases authorize bounded control intent; they are not
+canonical guard, including inside borrowed orchestrator callbacks.
+Journal reads return their freshly validated target and instances for that
+action, without retaining them as authority for a later read. An owned journal
+must still match its guarded document before two distinct runtime reads may
+overlap; both finish, including on failure, before the action proceeds.
+An existing canonical validation scope keeps serial reads and its shared
+changed-file observations. Manifest publication revalidates before and after
+the write while its metadata locks
+remain held; archive validation follows the actual archive read.
+Recorded drain/release/read-ready phases authorize bounded control intent; they are not
 proof that control or native writer transfer succeeded. Commit requires coherent
 target selection and an exact effect-free read-ready writer. Its durable commit
 precedes effect authorization and changes recovery to forward-only, even if the

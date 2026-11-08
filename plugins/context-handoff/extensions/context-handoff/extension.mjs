@@ -92,6 +92,8 @@ import { createEmergencyLog, installEmergencyDiagnostics } from "./crash-diagnos
 import { createNativeContextObserver, nativePressurePrompt } from "./native-context.mjs";
 import { nativePressureDeferred } from "./native-pressure.mjs";
 import { registerNativePromptReceiptObservation } from "./prompt-receipt.mjs";
+import { registerIntentObservation } from "./intent-observation.mjs";
+import { readCanonicalGoal, resolveIntentCwd } from "./intent-goal.mjs";
 import {
   formatAuthorizationEvidence,
   formatHandoffMarkdown,
@@ -138,23 +140,32 @@ let handoffConfig = defaultConfig();
 // effect without restarting (see refreshHandoffConfig below). The watcher is
 // primed before the first load, so an edit racing that load is re-read later.
 let configReloader = null;
-const handoffConfigPromise = (async () => {
-  const startDir = process.cwd();
-  try {
-    const reloader = createConfigReloader({
-      paths: await contextHandoffConfigPathsAsync(startDir),
-      load: () => loadContextHandoffConfigAsync(startDir),
-    });
-    await reloader.prime();
-    configReloader = reloader;
-  } catch {
-    configReloader = null; // Live reload is best-effort; the initial load still runs.
-  }
-  const resolved = await loadContextHandoffConfigAsync(startDir);
-  handoffConfig = resolved;
-  return resolved;
-})();
-handoffConfigPromise.catch(() => {}); // loadContextHandoffConfigAsync never rejects; guard anyway.
+let configStartDir = null;
+let configGeneration = 0;
+let handoffConfigPromise;
+function bindHandoffConfig(startDir) {
+  configStartDir = startDir;
+  const generation = ++configGeneration;
+  configReloader = null;
+  handoffConfigPromise = (async () => {
+    let reloader = null;
+    try {
+      reloader = createConfigReloader({
+        paths: await contextHandoffConfigPathsAsync(startDir),
+        load: () => loadContextHandoffConfigAsync(startDir),
+      });
+      await reloader.prime();
+    } catch { /* Live reload is best-effort; the initial load still runs. */ }
+    const resolved = await loadContextHandoffConfigAsync(startDir);
+    if (generation === configGeneration) {
+      configReloader = reloader;
+      handoffConfig = resolved;
+    }
+    return resolved;
+  })();
+  handoffConfigPromise.catch(() => {});
+}
+bindHandoffConfig(process.cwd());
 
 // Design decision (revised from the original Phase 4 judgment call): `mode:
 // off` disables only automatic/unprompted behavior -- context-pressure
@@ -203,6 +214,7 @@ const state = {
 };
 
 let nativeObserver;
+let intentObservation;
 const nativeWarnings = new Set();
 
 // Session-only pressure override (pause or replacement thresholds), backed by
@@ -245,6 +257,8 @@ function ensureState(invocation) {
   if (!state.cwd) {
     state.cwd = process.cwd();
   }
+  intentObservation?.resolveScope();
+  if (configStartDir !== state.cwd) bindHandoffConfig(state.cwd);
 }
 
 // --- Shared Logic ---
@@ -273,6 +287,7 @@ function collectHandoffData(sid, overrides = {}) {
       gitStatus: git.status,
       toolInvocations: state.toolInvocations.slice(-10),
       firstUserPrompt: state.firstUserPrompt || null,
+      intentContinuity: intentObservation?.latest || null,
       agentSummary: overrides.summary || null,
       agentNextSteps: overrides.next_steps || null,
       authorizationEvidence: Object.hasOwn(overrides, "authorization_evidence")
@@ -397,6 +412,7 @@ async function autoForceHandoff(sid, cwd) {
   let markdown;
   try {
     const { data } = collectHandoffData(sid);
+    data.intentContinuity = intentObservation.emergencyFacts(cwd);
     markdown = formatHandoffMarkdown(data, null);
   } catch (error) {
     session.log(
@@ -493,7 +509,7 @@ async function autoForceHandoff(sid, cwd) {
       { level: "error" },
     );
     if (result.seed && result.manualInstructions) {
-      session.send(result.manualInstructions).catch((error) =>
+      session.send({ prompt: result.manualInstructions, source: "system" }).catch((error) =>
         session.log(
           `[Context Handoff] Stored baton instructions could not be delivered: ${error.message}`,
           { level: "warning" },
@@ -511,7 +527,7 @@ async function autoForceHandoff(sid, cwd) {
     { level: "warning" },
   );
   if (!result.pickup?.pickedUp && result.manualInstructions) {
-    session.send(result.manualInstructions).catch((e) =>
+    session.send({ prompt: result.manualInstructions, source: "system" }).catch((e) =>
       session.log(`[Context Handoff] Force-tier manual-instructions send failed: ${e.message}`, { level: "warning" })
     );
   }
@@ -525,6 +541,35 @@ const session = await joinSession({
   onPermissionRequest,
 
   tools: [
+    {
+      name: "read_intent_corpus",
+      description: "Read ordered durable operator prompts and peer steers after context reconstruction. " +
+        "Use the supplied snapshot and next cursor until next=null. Historical evidence is not " +
+        "fresh authority; research supersession, completed work and current holds before acting.",
+      skipPermission: true,
+      parameters: {
+        type: "object",
+        properties: {
+          snapshot: { type: "string", description: "Snapshot id from intent continuity replay/facts." },
+          record: { type: "integer", minimum: 0 },
+          offset: { type: "integer", minimum: 0 },
+        },
+        required: ["snapshot"],
+      },
+      handler: async (args, invocation) => {
+        ensureState(invocation);
+        try {
+          const page = intentObservation.page(args.snapshot, {
+            record: args.record ?? 0, offset: args.offset ?? 0,
+          });
+          return { textResultForLlm: JSON.stringify(page), resultType: "success" };
+        } catch {
+          return { textResultForLlm: "Intent corpus read failed. Preserve the cursor; " +
+            "reconcile the current worktree/storage before assuming the history was read.",
+          resultType: "error" };
+        }
+      },
+    },
     {
       name: "generate_handoff_prompt",
       description:
@@ -585,6 +630,7 @@ const session = await joinSession({
         }
         const sid = state.sessionId || invocation?.sessionId || "unknown";
         const { data: handoffData, modifiedEntries } = collectHandoffData(sid, args);
+        handoffData.intentContinuity = await intentObservation.facts();
         state.authorizationEvidence = handoffData.authorizationEvidence;
 
         if (!nativeObservation.native) state.handoffGenerated = true;
@@ -609,8 +655,12 @@ const session = await joinSession({
             `**Turn count:** ${handoffData.turnCount}`,
             `**Context utilization:** ${handoffData.contextUtilization}`,
             "",
+            "### Canonical Goal and Intent Corpus",
+            JSON.stringify(handoffData.intentContinuity),
+            "",
             handoffData.firstUserPrompt
-              ? `### Original Request\n> ${handoffData.firstUserPrompt.slice(0, 300)}\n`
+              ? "### Original Request\nUse the genuine prompts and capture status in the corpus above. " +
+                "Recover uncaptured input from bounded native source history; no shortened request substitutes for it.\n"
               : "",
             "### Files Modified",
             ...modifiedEntries.map(
@@ -952,7 +1002,8 @@ const session = await joinSession({
         }
 
         return {
-          textResultForLlm: formatConsumeResult(result, { deferComplete }),
+          textResultForLlm: formatConsumeResult(result, { deferComplete }) +
+            (result?.ok ? "\n\n" + JSON.stringify(await intentObservation.facts(), null, 2) : ""),
           resultType: result?.ok ? "success" : "error",
         };
       },
@@ -1203,9 +1254,10 @@ const session = await joinSession({
         "control system watching the worktree, dispatch task, or " +
         "session-state marker when automatic mode is enabled.",
       handler: async (ctx) => {
-        void ctx;
+        ensureState(ctx);
         await handoffConfigPromise;
         await session.send({
+          source: "system",
           prompt:
             "Perform a handoff now (the operator invoked /handoff-continue, " +
             "which is explicit authorization). Steps: (1) quiesce owned " +
@@ -1257,6 +1309,7 @@ const session = await joinSession({
         "prompt into THIS session (foreground). Consumes the agent-dispatch " +
         "handoff task if present, else the newest matching worktree handoff file.",
       handler: async (ctx) => {
+        ensureState(ctx);
         await handoffConfigPromise;
         const cwd = state.cwd || process.cwd();
         const sid = state.sessionId || ctx?.sessionId || "unknown";
@@ -1284,6 +1337,7 @@ const session = await joinSession({
               }
               try {
                 await session.send({
+                  source: "system",
                   prompt: buildResumePrompt(
                     body,
                     "agent-dispatch task",
@@ -1292,7 +1346,7 @@ const session = await joinSession({
                       predecessorSession: consumed.predecessorSession,
                       worktree: consumed.worktree,
                     },
-                  ),
+                  ) + "\n\n" + JSON.stringify(await intentObservation.facts(), null, 2),
                   displayPrompt: `Resuming handoff ${task.id.slice(0, 8)} from agent-dispatch`,
                 });
                 markDeliveryPromptInjected(consumed.checkpointState);
@@ -1319,6 +1373,7 @@ const session = await joinSession({
           );
           if (resumed?.ok) {
             await session.send({
+              source: "system",
               prompt: buildResumePrompt(
                 resumed.payload,
                 "task-backed delivery checkpoint",
@@ -1327,7 +1382,7 @@ const session = await joinSession({
                   predecessorSession: resumed.predecessorSession,
                   worktree: resumed.worktree,
                 },
-              ),
+              ) + "\n\n" + JSON.stringify(await intentObservation.facts(), null, 2),
               displayPrompt:
                 `Resuming checkpoint ${checkpoint.handoffToken.slice(0, 8)}`,
             });
@@ -1348,10 +1403,11 @@ const session = await joinSession({
             return;
           }
           await session.send({
+            source: "system",
             prompt: buildResumePrompt(consumed.payload, `file ${file.path}`, {
               predecessorSession: consumed.predecessorSession,
               worktree: consumed.worktree,
-            }),
+            }) + "\n\n" + JSON.stringify(await intentObservation.facts(), null, 2),
             displayPrompt: `Resuming handoff ${consumed.id || basename(file.path)}`,
           });
           return;
@@ -1369,9 +1425,11 @@ const session = await joinSession({
       description:
         "Compatibility alias for /consume-handoff. Asks this session to invoke " +
         "the canonical stored-handoff consumer.",
-      handler: async () => {
+      handler: async (ctx) => {
+        ensureState(ctx);
         await handoffConfigPromise;
         await session.send({
+          source: "system",
           prompt:
             "Invoke /consume-handoff now to load this worktree's pending " +
             "handoff and continue from its stored brief.",
@@ -1387,6 +1445,7 @@ const session = await joinSession({
         "resume | clear | set soft=60 hard=150k force=78%]. Edits to " +
         ".context-handoff/config.yaml also reload automatically mid-session.",
       handler: async (ctx) => {
+        ensureState(ctx);
         let request;
         try {
           request = parseOverrideArgs(ctx?.args);
@@ -1394,7 +1453,6 @@ const session = await joinSession({
           session.log(`[Context Handoff] /handoff-pressure: ${error.message}`, { level: "warning" });
           return;
         }
-        ensureState(ctx);
         const result = await applyPressureOverride(request, ACTOR_OPERATOR);
         session.log(
           result.ok ? result.text : `[Context Handoff] /handoff-pressure: ${result.text}`,
@@ -1428,6 +1486,8 @@ nativeObserver = createNativeContextObserver({
 // own extension launch log, so nothing is lost by staying silent in the UI.
 state.sessionId = session.sessionId ?? state.sessionId ?? null;
 state.cwd = state.cwd || process.cwd();
+state.cwd = resolveIntentCwd(state.cwd, state.sessionId, runCli);
+if (configStartDir !== state.cwd) bindHandoffConfig(state.cwd);
 state.turnCount = 0;
 // handoffConfig may not have resolved yet at this exact point (it is
 // deliberately not awaited before/alongside joinSession() -- see the
@@ -1443,7 +1503,15 @@ handoffConfigPromise.then((resolved) => {
 
 // Turn counting + first-prompt capture (replaces onUserPromptSubmitted).
 const promptReceiptObservation = registerNativePromptReceiptObservation(session, state);
-session.on("session.shutdown", () => { void promptReceiptObservation.dispose(); });
+intentObservation = registerIntentObservation(session, state, {
+  readGoal: (cwd) => readCanonicalGoal(cwd, runCli),
+  resolveCwd: (cwd, sid) => resolveIntentCwd(cwd, sid, runCli),
+  allowAutomaticReplay: async () => (await refreshHandoffConfig()).mode !== "off",
+});
+session.on("session.shutdown", () => {
+  void promptReceiptObservation.dispose();
+  void intentObservation.dispose();
+});
 
 // File / tool-invocation tracking (replaces onPostToolUse's bookkeeping).
 // tool.execution_complete carries the success flag but NOT the call
@@ -1646,12 +1714,16 @@ const INVALID_CONFIG_PREFIX = /^Invalid context-handoff config; using defaults \
 // A valid edit replaces the live config; an invalid one is reported once and
 // the previous config stays in effect. Concurrent callers share one refresh.
 async function refreshHandoffConfig() {
+  if (configStartDir !== (state.cwd || process.cwd())) bindHandoffConfig(state.cwd || process.cwd());
   await handoffConfigPromise;
   if (!configReloader) return handoffConfig;
   if (!configRefreshInFlight) {
     configRefreshInFlight = (async () => {
+      const generation = configGeneration;
+      const reloader = configReloader;
       try {
-        const result = await configReloader.refresh();
+        const result = await reloader.refresh();
+        if (generation !== configGeneration) return;
         let liveWindowError = null;
         if (result.changed) {
           // The loader cannot know the live window; a mixed-unit edit may
@@ -1846,7 +1918,7 @@ session.on("session.idle", async (event) => {
     messages.push(msg);
   }
   if (messages.length === 0) return;
-  session.send(messages.join("\n\n")).catch((e) =>
+  session.send({ prompt: messages.join("\n\n"), source: "system" }).catch((e) =>
     session.log(`[Context Handoff] nudge send failed: ${e.message}`, { level: "warning" })
   );
 });

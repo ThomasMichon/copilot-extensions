@@ -355,6 +355,27 @@ installed-runtime or authentication/inference acceptance. The source release
 controller requires it for every frozen candidate, separately from unit coverage;
 live enforcement depends on the independently governed Main controller.
 
+Installed Manager TTY qualification is a separate, positively selected native
+contract, not part of unit coverage:
+
+```powershell
+python tools\run-manager-runtime-acceptance.py --contract installed-tty --root <fresh-private-root> --candidate-commit <candidate-sha> --candidate-tree <candidate-tree> --source-commit <dev-source-sha> --main-before <pinned-main-sha> --run-id <run-id> --run-attempt <attempt> --output <result-json>
+```
+
+The candidate must actually be installed with a representative generic adopted
+project. Its generated project binstub traverses the installed engine, registered
+Manager and real terminal admission in native cmd and PowerShell ConPTY sessions.
+The witness requires rendered TUI output, a visible keyboard-driven response and
+clean owned exit, plus an install-success/launch-failure negative control.
+Version output, process existence and synthetic ready files are insufficient.
+The result binds the frozen candidate and execution attempt, with declared
+source provenance kept distinct from transformed candidate bytes. Missing,
+skipped, failed, timed-out, incomplete or stale results refuse promotion.
+Fixture diagnostics and cleanup remain privately owned and bounded; no operator
+installation, credentials, sessions or service registrations are borrowed.
+Source workflow wiring alone is not activation: the preserved Main controller
+requires its own reviewed adoption and exact-candidate native run.
+
 Worktrees' opt-in `--test-file tests/native/test_uninstall_windows_owner.py
 --allow-explicit-tiers` packet exercises the emitted Windows census script in
 Windows PowerShell and PowerShell 7. A controlled census verifies the real

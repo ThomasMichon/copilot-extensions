@@ -36,6 +36,8 @@ import { AGENT_WORKTREES_QUERY_TIMEOUT_MS } from "./cli-timeouts.mjs";
 import { observeResidentReceipt } from "./resident-receipt-client.mjs";
 import { DEFAULT_HANDOFF_MODE, automaticHandoffEnabled } from "./mode.mjs";
 import { captureHandoffIdentity } from "./handoff-identity.mjs";
+import { collectLocalIntentFacts } from "./intent-goal.mjs";
+import { INTENT_RESEARCH_DIRECTIVE } from "./intent-corpus.mjs";
 
 export const HANDOFF_META_PREFIX = "<!-- context-handoff:";
 export const HANDOFF_META_SUFFIX = "-->";
@@ -1481,6 +1483,7 @@ export function collectCliHandoffFacts(cwd, sid) {
     repo: git.repo,
     gitStatus: git.status,
     sessionBinding: sessionBindingForSession(sid, cwd),
+    intentContinuity: collectLocalIntentFacts(info.wtDir || cwd, runCli),
     generatedAt: new Date().toISOString(),
   };
 }
@@ -2804,6 +2807,7 @@ export function formatConsumeResult(
     CONTINUATION_DIRECTIVE,
     "",
     HANDOFF_MECHANISM_AWARENESS,
+    INTENT_RESEARCH_DIRECTIVE,
     "",
     "---",
     "",
@@ -2825,6 +2829,7 @@ export function buildResumePrompt(
     CONTINUATION_DIRECTIVE,
     "",
     HANDOFF_MECHANISM_AWARENESS,
+    INTENT_RESEARCH_DIRECTIVE,
     "",
     "---",
     "",

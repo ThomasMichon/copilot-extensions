@@ -331,7 +331,18 @@ def test_posix_fixture_invokes_the_shipped_launcher_name(
     reason="Native POSIX upgrade needs an isolated OS account",
 )
 def test_normal_payload_init_refreshes_receipt_and_upgrades_live_owner(tmp_path_factory, native_profile):
-    scenario_deadline = monotonic() + 900
+    started_at = monotonic()
+    scenario_deadline = started_at + 900
+
+    def phase(name):
+        now = monotonic()
+        print(
+            f"Owned lifecycle phase: {name}; elapsed={now - started_at:.2f}s; "
+            f"remaining={scenario_deadline - now:.2f}s",
+            flush=True,
+        )
+
+    phase("release preparation")
     root = tmp_path_factory.mktemp("u")
     payload, profile = _release(root, profile=native_profile)
     caller = root / "caller"
@@ -373,7 +384,9 @@ def test_normal_payload_init_refreshes_receipt_and_upgrades_live_owner(tmp_path_
     finally:
         policy.write_bytes(original_policy)
     assert not (profile / ".agent-pull-requests").exists()
+    phase("initial installation")
     initial = _run(init, [], environment, caller, timeout=300)
+    phase(f"initial installation returned {initial.returncode}")
     assert initial.returncode == 0, initial.stderr
     receipt, = (profile / ".copilot-extensions" / "marketplaces").glob(
         "*/plugins/agent-pull-requests/install.json",
@@ -393,13 +406,19 @@ def test_normal_payload_init_refreshes_receipt_and_upgrades_live_owner(tmp_path_
         # Once attempted, cleanup inspects/stops through the governed entry even
         # if a caller loses the startup response after the owner commits.
         started = True
+        phase("first owner startup")
         result = _run_cutover(
             command, ["restart", "--json"], environment, caller,
             run_root=run_root, phase="startup", timeout=_scenario_remaining(scenario_deadline),
         )
-        assert result.returncode == 0, result.stderr
+        phase(f"first owner startup returned {result.returncode}")
+        assert result.returncode == 0, (
+            f"{result.stderr}\n{json.dumps(_cutover_failure_details(run_root), sort_keys=True)}"
+        )
         assert json.loads(result.stdout) == {"restarted": True, "was_running": False}
+        phase("initial owner health")
         result = _run(command, ["watch", "health", "--json"], environment, caller, timeout=60)
+        phase(f"initial owner health returned {result.returncode}")
         assert result.returncode == 0, result.stderr
         old = json.loads(result.stdout)["instance"]
         reference = process_exit.open_process(old["pid"], old["startTime"])
@@ -413,10 +432,12 @@ def test_normal_payload_init_refreshes_receipt_and_upgrades_live_owner(tmp_path_
         assert new_version != old_version
         _refresh_release(payload, new_version)
         # No direct stamp, activation CAS, manual snapshot or runtime edit.
+        phase("normal live-owner upgrade")
         result = _run_cutover(
             init, [], environment, caller,
             run_root=run_root, phase="upgrade", timeout=_scenario_remaining(scenario_deadline),
         )
+        phase(f"normal live-owner upgrade returned {result.returncode}")
         if result.returncode != 0:
             pytest.fail(
                 f"Owned upgrade refused:\n{result.stderr}\n"
@@ -430,7 +451,9 @@ def test_normal_payload_init_refreshes_receipt_and_upgrades_live_owner(tmp_path_
         assert after_receipt["generation"] > before_receipt["generation"]
         assert after_receipt["payload"]["version"] == new_version
         assert after_receipt["payload"]["root"] == before_receipt["payload"]["root"]
+        phase("upgraded owner health")
         result = _run(command, ["watch", "health", "--json"], environment, caller, timeout=60)
+        phase(f"upgraded owner health returned {result.returncode}")
         assert result.returncode == 0, result.stderr
         health = json.loads(result.stdout)
         transaction = json.loads((run_root / "watch-owner-transaction.json").read_text("utf-8"))
@@ -456,22 +479,35 @@ def test_normal_payload_init_refreshes_receipt_and_upgrades_live_owner(tmp_path_
         assert not (profile / ".agent-pull-requests").exists()
         assert not (profile / ".local" / "bin").exists()
         assert not list(caller.iterdir())
+        phase("same-version owner restart")
         restarted = _run(
             command, ["restart", "--json"], environment, caller,
             timeout=_scenario_remaining(scenario_deadline),
         )
+        phase(f"same-version owner restart returned {restarted.returncode}")
         assert restarted.returncode == 0, restarted.stderr
         assert json.loads(restarted.stdout) == {"restarted": True, "was_running": True}
+        phase("restarted owner health")
         result = _run(command, ["watch", "health", "--json"], environment, caller, timeout=60)
+        phase(f"restarted owner health returned {result.returncode}")
         assert result.returncode == 0, result.stderr
         assert json.loads(result.stdout)["instance"]["instanceId"] != health["instance"]["instanceId"]
         assert read_subscriptions_state(state_root) == [saved]
+        phase("all lifecycle body assertions passed")
     finally:
         try:
             if started:
+                body_error = sys.exc_info()[1]
+                if body_error is not None:
+                    print(
+                        f"Owned lifecycle body failed ({type(body_error).__name__}): {body_error}",
+                        flush=True,
+                    )
+                phase("governed cleanup")
                 stopped = _run(
                     command, ["stop", "--json"], environment, caller, timeout=150,
                 )
+                phase(f"governed cleanup returned {stopped.returncode}")
                 assert stopped.returncode == 0, stopped.stderr
         finally:
             if reference is not None:

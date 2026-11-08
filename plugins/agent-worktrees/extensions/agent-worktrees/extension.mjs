@@ -208,6 +208,7 @@ function maybeNudgeDisposition(longTurn = false) {
   try {
     session.send({
       prompt: renderDispositionNudge(),
+      source: "system",
       displayPrompt: "Status checkpoint (worktree legibility)",
       mode: "immediate",
     }).catch(() => {});
