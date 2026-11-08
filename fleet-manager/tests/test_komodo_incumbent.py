@@ -992,7 +992,6 @@ def test_composed_incumbent_owner_keeps_exact_originals_and_never_applies(
             return info
 
         monkeypatch.setattr(Path, "stat", private_stat)
-        monkeypatch.setattr(os, "getuid", lambda: 0, raising=False)
         monkeypatch.setattr(os, "geteuid", lambda: 0, raising=False)
     executable = material.keys.parent / "docker-fixture"
     executable.write_bytes(b"not-executed")
