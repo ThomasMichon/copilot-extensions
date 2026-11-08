@@ -79,6 +79,35 @@ def current_pool_decline(
     })
 
 
+def recovered_pool_decline(
+    conn: sqlite3.Connection, task_id: str, *, worker_id: str, native_id: str, generation: int,
+) -> tuple[PoolWorkerDecline, str] | None:
+    """Find this exact incarnation's decline only behind its committed closeout receipt.
+
+    A replacement placement detaches the decline from the current assignment, so a
+    lost reply must be recovered by its original binding rather than current state.
+    """
+    rows = conn.execute(
+        "SELECT d.*, c.receipt, r.worktree AS reservation_worktree FROM pool_worker_declines d"
+        " JOIN pool_worker_decline_closeouts c ON c.reservation_key=d.reservation_key"
+        " JOIN spawn_reservations r ON r.key=d.reservation_key"
+        " WHERE d.task_id=? AND d.worker_id=? AND d.native_id=? AND d.generation=?",
+        (task_id, worker_id, native_id, generation),
+    ).fetchall()
+    if len(rows) != 1:
+        return None
+    row = dict(rows[0])
+    receipt, worktree = json.loads(row.pop("receipt")), row.pop("reservation_worktree")
+    decline = PoolWorkerDecline(**{**row, "exclusions": tuple(json.loads(row["exclusions"]))})
+    binding = {
+        "worker_id": worker_id, "native_id": native_id, "generation": generation,
+        "startup_revision": decline.startup_revision, "reservation_key": decline.reservation_key,
+    }
+    if receipt.get("task_id") != task_id or receipt.get("binding") != binding or not worktree:
+        return None
+    return decline, worktree
+
+
 def require_no_pool_decline(
     conn: sqlite3.Connection, task_id: str, *, reservation_key: str | None = None,
 ) -> None:
@@ -128,6 +157,14 @@ class PoolDeclineMixin:
     ) -> PoolWorkerDecline | None:
         with self._connect() as conn:
             return current_pool_decline(conn, task_id)
+
+    def recover_pool_decline(
+        self: _QueueOwner, task_id: str, *, worker_id: str, native_id: str, generation: int,
+    ) -> tuple[PoolWorkerDecline, str] | None:
+        with self._connect() as conn:
+            return recovered_pool_decline(
+                conn, task_id, worker_id=worker_id, native_id=native_id, generation=generation,
+            )
 
     def prepare_pool_decline(
         self: _QueueOwner, task_id: str, worker_id: str, *, native_id: str,

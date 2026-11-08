@@ -384,3 +384,90 @@ def test_unsettled_claim_for_another_reservation_refuses_before_decision(governe
     assert g.q.pool_worker_decline(g.task_id) is None and not order
     assert all(r.method == "GET" for r in requests)
     assert g.q.task_relationship(g.task_id)["state"] == "bound"
+
+
+def _replace_after_settled_decline(g, args, monkeypatch):
+    monkeypatch.setattr(worker, "DISPOSITION_WAIT_SECONDS", 0)
+    with pytest.raises(DispatchError, match="not yet confirmed"):
+        args.func(args)
+    # Dispatch settled the claim, but the worker never finalized its workspace.
+    assert g.q.close_pool_decline(g.task_id, **g.binding).relationship["state"] == "closed"
+    requeued = g.q.get(g.task_id)
+    g.q.retire_spawn(g.binding["reservation_key"], exact_absence=True, conclusion_state="skipped")
+    g.q.publish_pool_catalog_scope(
+        "host-a", "linux", "publisher-0", generation=1, expected_revision=1,
+        registration_revision=g.q.pool_registration_revision(), expected_cohort_revision=1,
+        input_revision="fresh-pool", definitions=(closeout.pool(),), now=requeued.not_before,
+    )
+    replacement, admitted = g.q.reserve_spawn(
+        g.task_id, reserved_by="allocator", driver="cli",
+        pool_catalog_revision=g.q.pool_catalog_snapshot().revision, now=requeued.not_before,
+    )
+    assert admitted and replacement.key != g.binding["reservation_key"]
+    assert g.q.pool_worker_decline(g.task_id) is None
+    return g.q.get(g.task_id)
+
+
+@pytest.mark.parametrize("governed", [False], indirect=True)
+def test_rerun_after_replacement_placement_recovers_exact_original_binding(governed_cli, monkeypatch, capsys):
+    g, args, order, requests, _ = governed_cli
+    placed = _replace_after_settled_decline(g, args, monkeypatch)
+    requests.clear()
+    for _ in range(2):
+        assert args.func(args) == 0
+        emitted = json.loads(capsys.readouterr().out)
+        assert emitted["task_relationship"] == "closed"
+        assert emitted["decline"]["reservation_key"] == g.binding["reservation_key"]
+    assert order == [("finalize", placed.status, "closed")] * 2
+    assert g.q.get(g.task_id) == placed
+    assert not any(
+        r.method == "POST" and r.url.path.endswith(("/closeout", "/pool-decline")) for r in requests
+    )
+
+
+@pytest.mark.parametrize("governed", [False], indirect=True)
+def test_recovery_refuses_another_incarnation_or_unsettled_decline(governed_cli):
+    g, _, _, _, app = governed_cli
+    from tests.test_pool_placement import headers
+    url = f"/tasks/{g.task_id}/pool-decline/recovery"
+    body = {"worker_id": g.binding["worker_id"], "native_id": "native",
+            "generation": g.binding["generation"]}
+    g.q.prepare_pool_decline(
+        g.task_id, **g.binding, exclusions=["worktree:tree"], note="The pool lacks the required tool.",
+    )
+    assert app.get(url, headers=headers("data"), params=body).status_code == 404
+    g.q.close_pool_decline(g.task_id, **g.binding)
+    found = app.get(url, headers=headers("data"), params=body)
+    assert found.status_code == 200
+    assert found.json()["decline"]["reservation_key"] == g.binding["reservation_key"]
+    assert found.json()["worktree"] == "tree"
+    for change in ({"native_id": "other"}, {"generation": g.binding["generation"] + 1},
+                   {"worker_id": "host-a/other"}):
+        assert app.get(url, headers=headers("data"), params={**body, **change}).status_code == 404
+
+
+@pytest.mark.parametrize("versions", ["missing", None, [], [True], [2]])
+@pytest.mark.parametrize("governed", [False], indirect=True)
+def test_rolled_back_coordinator_refuses_recovery_before_settlement(governed_cli, monkeypatch, versions):
+    g, args, order, requests, app = governed_cli
+    placed = _replace_after_settled_decline(g, args, monkeypatch)
+
+    def rewrite(request, response):
+        if request.url.path == "/health":
+            value = response.json()
+            if versions == "missing":
+                value["pool_placement"].pop("worker_decline_binding_recovery_versions")
+            else:
+                value["pool_placement"]["worker_decline_binding_recovery_versions"] = versions
+            return httpx.Response(200, json=value)
+        return response
+
+    monkeypatch.setattr(cli, "_client", lambda *a, **k: controls.connected(
+        app, requests, control=False, rewrite=rewrite,
+    ))
+    requests.clear()
+    with pytest.raises(DispatchUpgradeRequired, match="binding recovery"):
+        args.func(args)
+    assert not order and g.q.get(g.task_id) == placed
+    assert not any(r.url.path.endswith(("/recovery", "/settlement")) for r in requests)
+    assert all(r.method == "GET" for r in requests)
