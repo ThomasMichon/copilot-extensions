@@ -1,5 +1,5 @@
 {
-  "comment": "Make installer instance reconciliation termination-free and scoped to its addressed runtime",
+  "comment": "Make installer instance reconciliation termination-free and scoped to its addressed runtime; retain native bootstrap fixture import closure",
   "changes": [
     {
       "plugin": "agent-bridge",
