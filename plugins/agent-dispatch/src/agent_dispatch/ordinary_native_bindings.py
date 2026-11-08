@@ -130,11 +130,18 @@ def native_binding_evidence(
                     raise TaskError("retained session handle has conflicting native identities")
                 handle_natives[handle] = native
         evidence.append((history, native))
+    # A fenced, never-completed startup whose handle never proved a native (a
+    # transport ``local-body:`` handle or a pre-driver bare handle) retires as
+    # qualified-empty history rather than as an unprovable native retirement.
     empty_keys = {
         history["key"] for history, native in evidence
-        if native is None and not history["session_handle"] and not history["agent_info"]
+        if native is None and not history["agent_info"]
         and history["release_requested"] and not history["native_release_pending"]
-        and (history["startup_complete"] or history["startup_fenced"])
+        and (
+            not history["session_handle"] and (history["startup_complete"] or history["startup_fenced"])
+            or history["startup_fenced"] and not history["startup_complete"]
+            and history["session_handle"] not in handle_natives
+        )
         and is_native_retired(history)
     }
     retired_identity_keys = {
