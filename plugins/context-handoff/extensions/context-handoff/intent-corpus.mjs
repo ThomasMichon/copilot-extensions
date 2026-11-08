@@ -12,7 +12,8 @@ const validId = (value) => typeof value === "string" && /^[a-f0-9]{64}$/u.test(v
 export function classifyIntent(event, sessionId) {
   if (event.agentId || event.data?.agentId || event.data?.parentToolCallId) return null;
   const data = event.data || {};
-  const text = data.content;
+  const text = data.source === "agent-bridge"
+    ? data.transformedContent ?? data.content : data.content;
   if (typeof text !== "string" || !text.trim()) return null;
   const source = data.source ?? "user";
   if (/^\s*<(?:skill-context|system_notification|subagent_notification)\b/u.test(text)) return null;
@@ -142,10 +143,10 @@ export class IntentCorpus {
     return { id, count: entries.length, home: this.home };
   }
 
-  page(snapshotId, { record = 0, offset = 0, maxChars = 12000 } = {}) {
+  page(snapshotId, { record = 0, offset = 0, maxBytes = 12000 } = {}) {
     if (!validId(snapshotId) || !Number.isSafeInteger(record) || record < 0
         || !Number.isSafeInteger(offset) || offset < 0
-        || !Number.isSafeInteger(maxChars) || maxChars < 1 || maxChars > 16000) {
+        || !Number.isSafeInteger(maxBytes) || maxBytes < 512 || maxBytes > 16000) {
       throw new Error("intent-page-cursor-invalid");
     }
     checkDirectory(this.home);
@@ -158,24 +159,42 @@ export class IntentCorpus {
       throw new Error("intent-page-cursor-invalid");
     }
     const fragments = [];
-    let remaining = maxChars;
-    while (record < entries.length && remaining > 0) {
+    const output = (parts, nextRecord, nextOffset) => ({ snapshot: snapshotId, records: parts,
+      next: nextRecord < entries.length ? { record: nextRecord, offset: nextOffset } : null,
+      totalRecords: entries.length });
+    while (record < entries.length) {
       const entry = entries[record];
       if (!validId(entry.id) || !validId(entry.hash)) throw new Error("intent-snapshot-invalid");
       const raw = readRegular(join(this.home, "records", `${entry.id}.json`));
       if (digest(raw) !== entry.hash) throw new Error("intent-record-changed");
       const value = JSON.parse(raw);
       if (offset > value.text.length) throw new Error("intent-page-cursor-invalid");
-      const end = Math.min(value.text.length, offset + remaining);
-      fragments.push({ ...value, text: value.text.slice(offset, end),
+      const fragment = (end) => ({ ...value, text: value.text.slice(offset, end),
         textStart: offset, textEnd: end, textLength: value.text.length });
-      remaining -= end - offset;
+      const fits = (end) => {
+        const complete = end === value.text.length;
+        return Buffer.byteLength(JSON.stringify(output([...fragments, fragment(end)],
+          complete ? record + 1 : record, complete ? 0 : end)), "utf8") <= maxBytes;
+      };
+      let end = Math.min(value.text.length, offset + maxBytes);
+      if (!fits(end)) {
+        let low = offset, high = end;
+        while (low < high) {
+          const middle = Math.ceil((low + high) / 2);
+          if (fits(middle)) low = middle;
+          else high = middle - 1;
+        }
+        end = low;
+      }
+      if (!fits(end) || end === offset && end < value.text.length) {
+        if (fragments.length) break;
+        throw new Error("intent-record-metadata-exceeds-page-budget");
+      }
+      fragments.push(fragment(end));
       if (end === value.text.length) { record++; offset = 0; }
-      else offset = end;
+      else { offset = end; break; }
     }
-    return { snapshot: snapshotId, records: fragments,
-      next: record < entries.length ? { record, offset } : null,
-      totalRecords: entries.length };
+    return output(fragments, record, offset);
   }
 }
 

@@ -365,8 +365,7 @@ function cmdIntentPage(args) {
     record: args.record === undefined ? 0 : Number(args.record),
     offset: args.offset === undefined ? 0 : Number(args.offset),
   });
-  if (args.json) return emit(result, args);
-  process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+  process.stdout.write(JSON.stringify(result) + "\n");
 }
 
 function cmdCheckHeads(args) {

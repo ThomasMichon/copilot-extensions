@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import re
 from typing import Any
 
@@ -63,12 +64,12 @@ def root_goal(source: dict[str, Any], home: Path | None) -> str:
         return f"{label} [Goal unavailable: cannot read canonical effort]"
     goal = section(text, "Goal")
     if goal:
-        if len(goal) > 12000:
+        if len(json.dumps(goal).encode("utf8")) > 12000:
             return f"{label} [Goal exceeds display budget; read canonical {path}#goal in bounded ranges]"
         return f"{goal}\n(Source: {label}#goal)"
     legacy = section(text, "Guiding Intent")
     if legacy:
-        if len(legacy) > 12000:
+        if len(json.dumps(legacy).encode("utf8")) > 12000:
             return f"{label} [Legacy Guiding Intent exceeds display budget; read canonical {path}]"
         return f"{legacy}\n(Source: {label}; legacy Guiding Intent, no Goal)"
     return f"{label} [Goal unavailable: no Goal or Guiding Intent]"

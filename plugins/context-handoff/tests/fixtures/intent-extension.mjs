@@ -17,12 +17,15 @@ const text = "Preserve the complete objective and current holds.\r\n".repeat(700
 await emit("user.message", { content: text, source: "user" }, { id: "operator-one" });
 await emit("user.message", { content: "<skill-context>noise</skill-context>" }, { id: "skill" });
 await emit("user.message", { content: "child instruction" }, { id: "child", agentId: "child" });
+const peer = '<agent-message from="peer" msg-id="2">Research this steer before action.</agent-message>';
+await emit("user.message", { content: "Message from peer", transformedContent: peer,
+  source: "agent-bridge" }, { id: "peer-one" });
 await emit("session.context_cleared");
 await waitFor(() => session.sends.some((message) => message.prompt?.includes("<intent-continuity")));
 const replay = session.sends.find((message) => message.prompt?.includes("<intent-continuity"));
 assert.equal(replay.source, "system");
 const facts = JSON.parse(replay.prompt.split("\n\n")[2]);
-assert.equal(facts.corpus.count, 1);
+assert.equal(facts.corpus.count, 2);
 const reader = session.config.tools.find((tool) => tool.name === "read_intent_corpus");
 assert.ok(reader);
 const segments = [];
@@ -31,10 +34,14 @@ do {
   const result = await reader.handler({ snapshot: facts.corpus.id, ...cursor });
   assert.equal(result.resultType, "success");
   const page = JSON.parse(result.textResultForLlm);
-  segments.push(...page.records.map((record) => record.text));
+  segments.push(...page.records.filter((record) => record.eventId === "operator-one").map((record) => record.text));
   cursor = page.next;
 } while (cursor);
 assert.equal(segments.join(""), text);
+const generate = session.config.tools.find((tool) => tool.name === "generate_handoff_prompt");
+const generated = await generate.handler({}, {});
+assert.ok(generated.textResultForLlm.includes(facts.corpus.id));
+assert.match(generated.textResultForLlm, /Canonical Goal and Intent Corpus/u);
 const before = session.sends.length;
 await emit("session.compaction_complete", { success: false });
 await new Promise((resolve) => setImmediate(resolve));

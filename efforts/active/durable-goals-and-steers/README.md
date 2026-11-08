@@ -183,3 +183,15 @@ root-goal string. Research may refine these choices within the Request.
   `source: "system"` intact. The helper stopped after receipt. This settles
   the origin-filter echo dependency; it is not model-reading, installed
   recorder/reset scheduling, or release qualification.
+- Implementation PR #11432 received a Comment verdict with six actionable
+  findings on its initial head. Corrected paired-owner Goal resolution,
+  missing fresh facts in normal generation, transformed bridge delivery,
+  complete serialized-page budgeting, stale-reference preservation and the
+  legacy display guard. No Comment or old-head verdict was treated as approval.
+- Review correction tests: all 15 corpus/Goal regressions pass; registered
+  extension tests verify normal generation and transformed peer capture.
+  The page-budget correction required the CLI regression to follow all next
+  cursors instead of assuming exactly two pages. Focused agenda tests remain
+  125 passed, 2 platform skips.
+- Extracted durable-intent mechanics into the linked plugin documentation
+  rather than expanding the existing README with a standalone deep section.

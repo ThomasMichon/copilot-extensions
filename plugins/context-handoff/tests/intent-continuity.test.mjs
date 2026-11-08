@@ -98,6 +98,10 @@ test("operator inputs and peer steers stay distinct; noise and child instruction
     "agent-bridge"), "root");
   assert.equal(peer.origin, "peer-steer");
   assert.equal(peer.source, "agent-bridge");
+  const transformed = classifyIntent({ ...message("three", "Message from peer", "agent-bridge"),
+    data: { source: "agent-bridge", content: "Message from peer", transformedContent: peer.text } }, "root");
+  assert.equal(transformed.text, peer.text);
+  assert.equal(transformed.origin, "peer-steer");
   for (const event of [
     { ...message("x", "child instructions"), agentId: "child" },
     message("x", '<skill-context name="example">loaded skill</skill-context>'),
@@ -233,7 +237,8 @@ test("Goal lookup uses the bound effort home and refreshes source text, with exp
   writeFileSync(effort, "# Work\n\n## Goal\n\nFull mission.\n\n## Plan\n\nNot the mission.");
   const execute = (_bin, args, options) => {
     assert.equal(options.allowProvision, false);
-    return args[0] === "state-root" ? f.b : JSON.stringify({
+    return args[0] === "state-root"
+      ? JSON.stringify({ state_root: f.b, requires_external: false, bound: true }) : JSON.stringify({
       active_effort: { active: true, path: "effort.md", participant: "driver", slice: "phase" },
     });
 
@@ -267,15 +272,21 @@ test("the extension-free payload reader returns the exact pinned continuation pa
   const snapshot = store.snapshot();
   const first = store.page(snapshot.id);
   const cli = fileURLToPath(new URL("../extensions/context-handoff/handoff-cli.mjs", import.meta.url));
-  const result = spawnSync(process.execPath, [cli, "intent-page", "--snapshot", snapshot.id,
-    "--record", String(first.next.record), "--offset", String(first.next.offset), "--json"], {
-    cwd: f.a, env: { ...process.env, HOME: f.root, USERPROFILE: f.root },
-    encoding: "utf8", windowsHide: true, timeout: 10000,
-  });
-  assert.equal(result.status, 0, result.stderr);
-  const second = JSON.parse(result.stdout);
-  assert.equal(second.next, null);
-  assert.equal([...first.records, ...second.records].map((v) => v.text).join(""), text);
+  const parts = [...first.records];
+  let cursor = first.next;
+  while (cursor) {
+    const result = spawnSync(process.execPath, [cli, "intent-page", "--snapshot", snapshot.id,
+      "--record", String(cursor.record), "--offset", String(cursor.offset), "--json"], {
+      cwd: f.a, env: { ...process.env, HOME: f.root, USERPROFILE: f.root },
+      encoding: "utf8", windowsHide: true, timeout: 10000,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.ok(Buffer.byteLength(result.stdout.trim(), "utf8") <= 12000);
+    const page = JSON.parse(result.stdout);
+    parts.push(...page.records);
+    cursor = page.next;
+  }
+  assert.equal(parts.map((v) => v.text).join(""), text);
 });
 
 test("bare resume selects the continuing worktree once without provisioning optional tooling", (t) => {
@@ -289,4 +300,60 @@ test("bare resume selects the continuing worktree once without provisioning opti
   assert.equal(resolveIntentCwd(f.a, "resumed-session", execute), f.b);
   assert.equal(resolveIntentCwd(f.a, "resumed-session", () => { throw new Error("unavailable"); }), f.a);
   assert.equal(resolveIntentCwd(f.a, null, () => { throw new Error("must not call"); }), f.a);
+});
+
+test("paired Goal reads use the owning knowledge worktree, not its registered checkout", (t) => {
+  const f = fixture(t), registered = join(f.root, "registered");
+  mkdirSync(registered);
+  writeFileSync(join(f.b, "effort.md"), "# Work\n\n## Goal\n\nPaired worktree mission.\n");
+  writeFileSync(join(registered, "effort.md"), "# Work\n\n## Goal\n\nOther checkout mission.\n");
+  const execute = (_bin, args) => {
+    if (args[0] === "effort-focus") return JSON.stringify({
+      active_effort: { active: true, state: "open", path: "effort.md" },
+    });
+    if (args.includes("--pair")) return JSON.stringify({
+      paired: true, sibling: { path: f.b, role: "knowledge" },
+    });
+    return JSON.stringify({ state_root: registered, requires_external: true, bound: true });
+  };
+  assert.equal(readCanonicalGoal(f.a, execute).goal, "Paired worktree mission.");
+  assert.equal(readCanonicalGoal(f.a, execute).path, join(f.b, "effort.md"));
+});
+
+test("stale bindings retain the original pointer and oversized legacy intent is not injected", (t) => {
+  const f = fixture(t);
+  const execute = (_bin, args) => args[0] === "effort-focus" ? JSON.stringify({
+    active_effort: { active: false, state: "stale", path: "missing.md", reason: "effort is missing" },
+  }) : JSON.stringify({ state_root: f.b, requires_external: false, bound: true });
+  const stale = readCanonicalGoal(f.a, execute);
+  assert.equal(stale.status, "unavailable");
+  assert.equal(stale.path, join(f.b, "missing.md"));
+  assert.equal(stale.bindingReason, "effort is missing");
+  const path = join(f.b, "legacy.md");
+  writeFileSync(path, "# Work\n\n## Guiding Intent\n\n" + "\\\r\n😀".repeat(4000));
+  const active = (_bin, args) => args[0] === "effort-focus" ? JSON.stringify({
+    active_effort: { active: true, state: "open", path: "legacy.md" },
+  }) : JSON.stringify({ state_root: f.b, requires_external: false, bound: true });
+  const legacy = readCanonicalGoal(f.a, active);
+  assert.equal(legacy.status, "legacy-guiding-intent-reference");
+  assert.equal(legacy.goal, null);
+  assert.equal(legacy.path, path);
+});
+
+test("many short escaped steers respect the complete serialized page budget", (t) => {
+  const f = fixture(t), store = new IntentCorpus(f.a, f.options);
+  const text = "\\\r\n😀";
+  for (let i = 0; i < 128; i++) store.capture(classifyIntent(message(String(i), text), "root"));
+  const snapshot = store.snapshot();
+  let cursor = {}, pages = 0, count = 0;
+  do {
+    const page = store.page(snapshot.id, { ...cursor, maxBytes: 512 });
+    assert.ok(Buffer.byteLength(JSON.stringify(page), "utf8") <= 512);
+    assert.ok(page.records.every((record) => record.text === text));
+    pages++;
+    count += page.records.length;
+    cursor = page.next;
+  } while (cursor);
+  assert.ok(pages > 1);
+  assert.equal(count, 128);
 });

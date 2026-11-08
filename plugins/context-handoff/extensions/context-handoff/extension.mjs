@@ -643,8 +643,12 @@ const session = await joinSession({
             `**Turn count:** ${handoffData.turnCount}`,
             `**Context utilization:** ${handoffData.contextUtilization}`,
             "",
+            "### Canonical Goal and Intent Corpus",
+            JSON.stringify(handoffData.intentContinuity),
+            "",
             handoffData.firstUserPrompt
-              ? `### Original Request\n> ${handoffData.firstUserPrompt.slice(0, 300)}\n`
+              ? "### Original Request\nUse the genuine prompts and capture status in the corpus above. " +
+                "Recover uncaptured input from bounded native source history; no shortened request substitutes for it.\n"
               : "",
             "### Files Modified",
             ...modifiedEntries.map(

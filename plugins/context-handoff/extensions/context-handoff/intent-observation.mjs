@@ -81,7 +81,7 @@ export function registerIntentObservation(session, state, {
       const prompt = [
         `<intent-continuity reason="${reason}">`,
         INTENT_RESEARCH_DIRECTIVE,
-        JSON.stringify(data, null, 2),
+        JSON.stringify(data),
         firstPage?.next
           ? "Continue with read_intent_corpus using this snapshot and next cursor until next=null; " +
             "history is not complete at this page."
