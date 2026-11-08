@@ -17,6 +17,7 @@ authors = [{ name = "Thomas Michon" }]
 # now so the packaging/venv is validated against the real dependency, even
 # though the Phase 0 skeleton does not yet import it.
 dependencies = [
+    "agent-copilot-driver-core",
     "textual>=8.2.8",
     # Read the installer-owned catalog (data/plugins.toml). tomllib is stdlib on
     # 3.11+; tomli backports it for 3.10.
@@ -44,6 +45,7 @@ first-party-core = [
 ]
 
 [tool.uv.sources]
+agent-copilot-driver-core = { path = "../libs/copilot-driver-core", editable = true }
 agent-single-instance-lease = { path = "../libs/single-instance-lease", editable = true }
 agent-ssh-manager = { path = "../libs/ssh-manager", editable = true }
 agent-process-telemetry = { path = "../libs/process-telemetry", editable = true }

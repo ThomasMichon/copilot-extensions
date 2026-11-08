@@ -19,6 +19,12 @@ from agent_worktrees.mux_list_result import MuxObservationUnavailable
 
 @pytest.fixture
 def registered(tmp_path, monkeypatch):
+    from agent_remote_driver import mux_observation
+
+    monkeypatch.setattr(
+        mux_observation, "observe_psmux",
+        lambda *a, **kw: mux_observation.Observation("unknown", "pane-unobserved"),
+    )
     monkeypatch.setenv("PSMUX_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(native, "servers", lambda: {101: "123"})
     (tmp_path / "wt-other.pid").write_text("101:123")

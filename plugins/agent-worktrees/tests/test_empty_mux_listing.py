@@ -11,6 +11,7 @@ import pytest
 from agent_procutil import no_window_kwargs
 
 from agent_worktrees import sessions, status_monitor_runtime
+from agent_remote_driver import mux_observation
 from agent_worktrees.mux_list_result import (
     MuxObservationUnavailable,
     confirmed_has_session,
@@ -261,16 +262,28 @@ def test_passive_posix_fallback_normalizes_unavailable_evidence(monkeypatch, err
 
 
 def test_passive_psmux_observation_never_executes(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent_worktrees import psmux_observation
+
+    def unknown(**kwargs):
+        raise MuxObservationUnavailable("PSMux presence is unknown")
+
+    monkeypatch.setattr(psmux_observation, "observe", unknown)
     monkeypatch.setattr(status_monitor_runtime, "_core_helper", lambda _name, local: local)
     monkeypatch.setattr(sessions.platform, "system", lambda: "Windows")
     monkeypatch.setattr(
         subprocess, "run", lambda *a, **kw: pytest.fail("passive PSMux CLI execution"),
     )
+    monkeypatch.setattr(mux_observation, "list_psmux", lambda: None)
+    monkeypatch.setattr(
+        mux_observation, "observe_psmux",
+        lambda *a, **kw: mux_observation.Observation("unknown", "native-query-unavailable"),
+    )
     assert status_monitor_runtime._monitor_list_sessions(r"C:\Tools\PSMux.exe") is None
     assert sessions._list_mux_sessions() is None
     assert sessions._mux_session_activity() == {}
+    assert not sessions.mux_status_many(["fixture"])["fixture"].observed
     with pytest.raises(MuxObservationUnavailable, match="presence is unknown"):
-        sessions.mux_status_many(["fixture"])
+        sessions.mux_status_many(["fixture"], strict=True)
 
 
 def test_unconfirmed_psmux_cannot_admit_a_cold_seed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -278,6 +291,10 @@ def test_unconfirmed_psmux_cannot_admit_a_cold_seed(monkeypatch: pytest.MonkeyPa
     from agent_worktrees import launch_seed_exec, psmux_observation, reclaim
 
     monkeypatch.setattr(sessions.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        mux_observation, "observe_psmux",
+        lambda *a, **kw: mux_observation.Observation("unknown", "native-query-unavailable"),
+    )
     monkeypatch.setattr(reclaim, "resolve_bound_copilots", lambda **kw: [])
 
     def unavailable(**kwargs):
@@ -300,6 +317,41 @@ def test_explicit_strict_presence_uses_native_psmux_evidence(monkeypatch) -> Non
     assert info.exists is True and info.clients == 2
     assert sessions.has_mux_session("fixture", strict=True)
     assert not sessions.has_mux_session("missing", strict=True)
+
+
+def test_explicit_and_display_presence_use_driver_counts_without_cli(monkeypatch) -> None:
+    monkeypatch.setattr(sessions.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda *a, **kw: pytest.fail("passive PSMux CLI"),
+    )
+    monkeypatch.setattr(
+        mux_observation, "observe_psmux",
+        lambda *a, **kw: mux_observation.Observation(
+            "present", clients=3, incarnation="$1:100",
+            panes=(mux_observation.Pane("%2", False, True, "fixture"),),
+        ),
+    )
+    info = sessions.mux_status_many(["fixture"])["fixture"]
+    assert info.exists is True and info.clients == 3
+    assert sessions.mux_status_for_display(["fixture"])["fixture"].clients == 3
+    assert sessions.has_mux_session("fixture")
+    assert sessions.has_mux_session_named("wt-fixture", mux="psmux")
+    assert sessions.mux_active_pane_named("wt-fixture", mux="psmux") == "%2"
+
+
+def test_monitor_uses_driver_identity_and_preserves_partial_unknown(monkeypatch) -> None:
+    monkeypatch.setattr(status_monitor_runtime, "_core_helper", lambda _name, local: local)
+    monkeypatch.setattr(
+        subprocess, "run", lambda *a, **kw: pytest.fail("passive PSMux CLI"),
+    )
+    observations = {"wt-fixture": mux_observation.Observation(
+        "present", clients=3, incarnation="$1:100",
+    )}
+    monkeypatch.setattr(mux_observation, "list_psmux", lambda: observations)
+    assert status_monitor_runtime._monitor_list_sessions("psmux") == {"wt-fixture": (3, "$1:100")}
+    observations["wt-other"] = mux_observation.Observation("unknown", "timeout")
+    assert status_monitor_runtime._monitor_list_sessions("psmux") is None
 
 def test_real_missing_socket_probe_does_not_start_a_server(tmp_path: Path) -> None:
     if sys.platform == "win32":

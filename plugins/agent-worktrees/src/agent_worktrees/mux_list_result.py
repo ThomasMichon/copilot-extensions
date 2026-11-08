@@ -7,8 +7,9 @@ from pathlib import PureWindowsPath
 from subprocess import CompletedProcess
 
 
-class MuxObservationUnavailable(RuntimeError):
-    """The provider cannot safely supply a passive observation."""
+from agent_remote_driver.mux_observation_types import ObservationUnavailable
+
+MuxObservationUnavailable = ObservationUnavailable
 
 
 def is_empty_tmux_listing(binary: str, result: CompletedProcess[str]) -> bool:

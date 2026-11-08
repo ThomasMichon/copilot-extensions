@@ -48,6 +48,41 @@ settles only the unused local handoff and attaches without creating a pane.
 Manager retains terminal attachment, options, UI, status and original native
 admission. This finite operation does not wait for Copilot to exit.
 
+### Finite PSMux observation
+
+`agent_remote_driver.mux_observation` owns native PSMux reads for Driver
+creation, Worktrees presence/listing and Manager discovery/client counts.
+It reads the provider's port/key rendezvous and sends only bounded,
+authenticated `list-panes`/`list-clients` queries over loopback. It never
+executes PSMux, repairs registrations or starts a background observer.
+Fresh responses must identify the requested session and one incarnation.
+Missing port/key/session-ID/PID hints alone never establish absence: Driver
+retains the complete native server/PID-birth coverage reader introduced for
+prompted Resume. A missing live-server registration, unsupported process mode
+or changing inventory remains unknown. Listings share one absence-coverage
+snapshot within their finite budget; live positive rows use their own socket.
+Stale, partial, unreadable, changed, malformed or timed-out observations remain unknown.
+Client counts come from client rows, not PSMux's boolean `session_attached`.
+
+The default namespace uses the native `PSMUX_DATA_DIR` or native home.
+An explicitly namespaced launcher can pair its existing `psmux -L <name>`
+selector with `COPILOT_DRIVER_PSMUX_NAMESPACE=<name>` for observation.
+This Driver selector does not configure the PSMux CLI or isolate its startup
+cleanup; the caller must keep both selectors consistent. No environment
+setting makes native tests safe on a shared host.
+
+The finite CLI advertises `copilot-driver.mux-observation`, version 1 and
+operation `psmux-observe` with its actual interpreter/entrypoint through
+`--describe-contract`. `--observe` consumes at most 4 KiB of JSON with exactly
+`version: 1` and `session`. Its response has the contract/version and
+`status` (`present`, `absent`, `unknown`, `unsupported`), with incarnation,
+client count and pane observations when present. Confirmed present/absent
+exits zero; unknown/unsupported exits 3. Duplicate/unknown properties and
+unknown options are refused. Older independently installed providers without
+the declaration stay unsupported; callers must not downgrade to passive
+PSMux CLI reads. Foreground attach/create and explicit provider writes still
+launch PSMux and retain its startup-cleanup risk.
+
 The explicit headed coordinator now runs in the original caller-owned pane.
 It stages the launch-bound SDK extension, retains the native child handle and
 serves the same Session Host after native session/PID binding. The ordinary

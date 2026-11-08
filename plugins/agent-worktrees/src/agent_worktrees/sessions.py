@@ -1383,7 +1383,9 @@ def has_mux_session(
         return mux_session_name(worktree_id) in observe(timeout=timeout)
     sess_name = mux_session_name(worktree_id)
     if platform.system() == "Windows":
-        cmd = ["psmux", "has-session", "-t", sess_name]
+        from agent_remote_driver.mux_observation import observe_psmux
+
+        return observe_psmux(sess_name, timeout=min(timeout, 5)).presence()
     else:
         cmd = ["tmux", "has-session", "-t", f"={sess_name}"]
     try:
@@ -1405,7 +1407,12 @@ def _list_mux_sessions(*, strict: bool = False) -> dict[str, int] | None:
     from .mux_list_result import is_empty_tmux_listing, parse_session_counts
 
     if platform.system() == "Windows":
-        return None
+        from agent_remote_driver.mux_observation import list_psmux
+
+        observed = list_psmux()
+        if observed is None or any(o.status not in {"present", "absent"} for o in observed.values()):
+            return None
+        return {name: o.clients for name, o in observed.items() if o.status == "present"}
     cmd = ["tmux", "list-sessions", "-F", "#{session_name}:#{session_attached}"]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=5, **no_window_kwargs())
@@ -1475,6 +1482,22 @@ def mux_status_many(worktree_ids: list[str], *, strict: bool = False) -> dict[st
             name = mux_session_name(wt_id)
             result[wt_id] = MuxInfo(exists=name in observed, clients=observed.get(name, 0))
         return result
+
+    if platform.system() == "Windows":
+        from agent_remote_driver.mux_observation import observe_psmux_many
+
+        observations = observe_psmux_many([mux_session_name(wt_id) for wt_id in worktree_ids])
+        for wt_id in worktree_ids:
+            observation = observations[mux_session_name(wt_id)]
+            if observation.status not in {"present", "absent"}:
+                result[wt_id] = MuxInfo(observed=False)
+            else:
+                result[wt_id] = MuxInfo(
+                    exists=observation.status == "present",
+                    clients=observation.clients if observation.status == "present" else 0,
+                )
+        return result
+
     all_sessions = _list_mux_sessions(strict=True) if strict else _list_mux_sessions()
     if all_sessions is not None:
         for wt_id in worktree_ids:
@@ -1754,6 +1777,10 @@ def has_mux_session_named(
     import subprocess
 
     mux_bin = _mux_bin(mux)
+    if _is_psmux(mux_bin):
+        from agent_remote_driver.mux_observation import observe_psmux
+
+        return observe_psmux(session_name).presence()
     target = _mux_named_session_target(session_name, mux_bin)
     try:
         result = subprocess.run(
@@ -2146,6 +2173,12 @@ def mux_active_pane_named(
     import subprocess
 
     mux_bin = _mux_bin(mux)
+    if _is_psmux(mux_bin):
+        from agent_remote_driver.mux_observation import observe_psmux
+
+        observed = observe_psmux(session_name)
+        active = [p.pane_id for p in observed.panes if p.active and not p.dead]
+        return active[0] if observed.status == "present" and len(active) == 1 else None
     target = _mux_named_session_target(session_name, mux_bin)
     if not _is_psmux(mux_bin):
         # display-message takes a pane target, not a session-only target.

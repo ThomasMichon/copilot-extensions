@@ -63,7 +63,7 @@ class PickerScreenWorktreeActionsMixin:
         ``{Open, Stop}`` group and routes the mux+orphan double-binding to
         WARNING/Repair instead (see :meth:`_warning`).
         """
-        if rec.get("mux_live"):
+        if rec.get("mux_live") or rec.get("mux_observation_unknown"):
             return False
         return bool(
             rec.get("session_bare_orphan")
@@ -122,6 +122,9 @@ class PickerScreenWorktreeActionsMixin:
             # Open attaches the live mux (needs the dir); a leaked mux on a gone
             # worktree offers Stop alone to clear it.
             acts = ["Open", "Stop"] if not gone else ["Stop"]
+        elif rec.get("mux_observation_unknown"):
+            # The launcher rechecks before create/join; uncertainty is not residue.
+            acts = ["Open"] if not gone and not rec.get("managed_child") else []
         elif reclaimable:
             restorable = bool(
                 rec.get("last_session_id")
@@ -169,7 +172,8 @@ class PickerScreenWorktreeActionsMixin:
         # non-residue lifecycle states (never beside Reclaim/Repair, where a
         # Cleanup/Sync would race the residue). A gone worktree still offers
         # Cleanup to prune the leftover record.
-        if acts and not warning and not reclaimable and not gone and not rec.get("managed_child"):
+        if (acts and not warning and not reclaimable and not gone
+                and not rec.get("managed_child") and not rec.get("mux_observation_unknown")):
             if rec.get("sync_eligible", rec.get("ff_eligible")):
                 acts.append("Sync")
             if PickerScreenWorktreeActionsMixin._cleanable(rec):

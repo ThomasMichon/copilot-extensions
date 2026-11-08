@@ -202,6 +202,15 @@ must not substitute for bounded tests and timely CI feedback.
 
 ## Focused packet catalog
 
+The manual `installation-context-full.yml` portfolio `mux-continuity` runs the
+native Resume consumer packet on disposable hosted Windows with digest-pinned
+PSMux 3.4.0. It covers cold Open, reattachment to the same pane/child,
+independent attachment preservation and fresh Driver/Worktrees/Manager
+listings. JUnit retains consumer timing properties. `resume-pane` retains its
+PSMux 3.3.8 compatibility packet; neither lane authorizes shared-host probes
+or installation. Dispatch at the exact published candidate ref and retain
+the run's source SHA, not merely its green name.
+
 For contained Windows post-tool entry diagnosis, set
 `AGENT_WORKTREES_PROFILE_ENTRY=1` and select `prepared_post_entry_stage_profile`
 in `tests/test_post_tool_shell.py`. For a fixed-fixture A/B/A comparison, select

@@ -3095,16 +3095,20 @@ def _monitor_sweep(
     stale_sessions: list[str] = []
     if mux_bin:
         live = _monitor_list_sessions(mux_bin)
-        if live is None:
-            if sessions._is_psmux(mux_bin) and roster_publisher is not None:
-                # Publish independent facts without discovering, pruning or painting panes.
+        if sessions._is_psmux(mux_bin):
+            # Observation must not reactivate cleanup-bearing periodic CLI writes.
+            if live is not None and catalog_observer is not None:
+                catalog_observer(set(live))
+            if roster_publisher is not None:
                 publish_project_rosters(
                     picker_projects or set(), interval=interval, project_lock=project_lock,
                     lifecycle_priority=lifecycle_priority, governance=governance,
                     segment_cache=segment_cache, config_cache_for_project=config_cache_for_project,
                     roster_publisher=roster_publisher, warm_list_cache=_warm_list_cache_for_active_project,
                 )
-            if roster_failure is not None and not sessions._is_psmux(mux_bin):
+            return -1 if live is None else len(live)
+        if live is None:
+            if roster_failure is not None:
                 roster_failure(RuntimeError("mux-session enumeration unavailable"))
             return -1
         from .status_monitor_discovery import discover_connected_worktrees

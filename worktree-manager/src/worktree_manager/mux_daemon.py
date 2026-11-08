@@ -277,6 +277,8 @@ def apply_status_options(entry: dict, values: dict) -> bool:
     outcome, but a single option write failing should not skip the rest);
     returns ``True`` only if every write succeeded."""
     mux_bin = entry["mux_bin"]
+    if not mux_discovery.passive_cli_supported(mux_bin):
+        return False
     session = entry["mux_session"]
     values = mux_discovery.initial_status_values(entry, values)
     all_ok = True

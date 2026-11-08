@@ -788,16 +788,23 @@ def _monitor_list_sessions(
 ) -> dict[str, tuple[int, str]] | None:
     """Observe the monitor's selected binary, not a platform-default mux.
 
-    PSMux CLI observation is unsupported because startup can reap live servers.
-    TMux returns ``{session_name: (attached, incarnation)}``; incomplete or
+    PSMux uses Driver's native socket observation, never CLI startup.
+    Returns ``{session_name: (attached, incarnation)}``; incomplete or
     unavailable evidence returns ``None`` so the caller neither prunes nor exits.
     """
     override = _core_helper("_monitor_list_sessions", _monitor_list_sessions)
     if override is not _monitor_list_sessions:
         return override(mux_bin)
     if is_psmux(mux_bin):
-        # Even read-only PSMux CLI commands can reap other running servers.
-        return None
+        from agent_remote_driver.mux_observation import list_psmux
+
+        observed = list_psmux()
+        if observed is None or any(o.status not in {"present", "absent"} for o in observed.values()):
+            return None
+        return {
+            name: (o.clients, o.incarnation)
+            for name, o in observed.items() if o.status == "present"
+        }
     try:
         r = subprocess.run(
             [

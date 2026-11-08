@@ -9,7 +9,7 @@ PSMux client startup for passive observation.
 - **Repo:** copilot-extensions
 - **Branch(es):** managed per-phase PRs targeting `dev`
 - **Created:** 2026-11-08
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [Session Hosting](../../../visions/session-hosting/README.md);
   [Agent Remote Driver](../../../visions/plugins/agent-remote-driver/README.md)
 - **Umbrella issue:** #11544
@@ -86,7 +86,7 @@ The following implementation sequence is agent-recommended.
 
 ### Phase 1 - Review the functional-continuity contract
 
-- [ ] Land this plan after review, retaining complete-flow acceptance.
+- [x] Land this plan after review, retaining complete-flow acceptance (#11547).
 
 ### Phase 2 - Deliver and prove one complete consumer flow
 
@@ -150,6 +150,42 @@ not Manager-specific socket code. Protocol details and compatibility are
 implementation proof obligations, not claims that native qualification passed.
 
 ## Journal
+
+### 2026-11-08 - Candidate ready for disposable native qualification
+
+- Reconciled concurrent #11549 instead of replacing its safe cold-stop proof.
+  Hoisted its complete native inventory into Driver with existing Worktrees
+  imports retained. Missing registrations alone cannot establish absence;
+  incomplete native server coverage stays unknown. Only provider processes
+  are inspected; no unrelated process data is retained.
+- Preserved strict prompted-Resume behavior and added fresh positive pane/client
+  observation for listings and Open. The existing final-cold pane check now
+  uses Driver too, without a passive CLI escape.
+- After reconciliation, the contained upstream strict/listing/admission packet
+  passed 108 cases with one POSIX-only skip. Native qualification remains pending.
+- Implemented finite Driver socket observation, selected-provider PowerShell
+  reads, Worktrees presence/listing and Manager discovery/client refresh.
+  Unknown observations still prevent duplicate creation and destructive recovery.
+- Kept periodic PSMux CLI painting disabled. Fresh monitor catalog/roster
+  publication does not re-enable discovery or provider writes. Foreground
+  attach/create retains the disclosed provider startup risk.
+- Contained checks: Driver wire/creation 41 passed; Worktrees listing/admission
+  117 passed, one POSIX-only skip; monitor preservation three passed; Manager
+  status/wire 107 passed, with discovery/launch regressions separately passing;
+  focused workflow contract passed. Install contract and touched-code lint passed.
+- Native Windows qualification remains unpassed. The focused `mux-continuity`
+  portfolio supplies digest-pinned PSMux 3.4.0 and actual cold Open/reattach,
+  independent-client and consumer-listing assertions. Publish a draft candidate,
+  run that exact branch, then resolve native results before readiness/merge.
+- No shared-host PSMux probe, rollout, service change or retained-source
+  finalization occurred.
+
+### 2026-11-08 - Plan accepted
+
+- #11547 merged after Copilot approval and successful required checks. Pulled
+  forward onto the reviewed plan before implementation.
+- Next: qualify finite Driver-owned native observation and connect the complete
+  Open/resume/list consumer flow. No live shared-host probes or rollout.
 
 ### 2026-11-08 - Kickoff
 

@@ -35,6 +35,8 @@ def test_gate_releases_on_creation_failure_and_keeps_lock_inode(tmp_path, monkey
 
 @pytest.mark.parametrize("failure", [2, 17, "timeout"])
 def test_discovery_failure_never_builds_or_launches_a_backend(monkeypatch, failure):
+    from agent_remote_driver import mux_observation
+
     monkeypatch.setattr(sessions.platform, "system", lambda: "Windows")
     monkeypatch.setattr(sessions, "_mux_bin", lambda mux=None: "psmux")
     monkeypatch.setattr(
@@ -42,13 +44,12 @@ def test_discovery_failure_never_builds_or_launches_a_backend(monkeypatch, failu
         lambda *args, **kwargs: pytest.fail("uncertain discovery is not absence"),
     )
 
-    def run(argv, **kwargs):
+    def observe(*args, **kwargs):
         assert kwargs["timeout"] == 2
-        if failure == "timeout":
-            raise subprocess.TimeoutExpired(argv, 2)
-        return subprocess.CompletedProcess(argv, failure)
+        return mux_observation.Observation("unknown", str(failure))
 
-    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(mux_observation, "observe_psmux", observe)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: pytest.fail("passive PSMux CLI"))
     result = sessions.mux_new_session("a", "checkout", ["copilot"])
     assert result["ok"] is False
     assert result["new_pane"] is None

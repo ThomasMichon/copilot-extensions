@@ -105,14 +105,30 @@ or subsequent orphan reaping. A successful but incomplete listing is another
 failure class ([psmux/psmux#809](https://github.com/psmux/psmux/issues/809)).
 
 The resident Worktrees mux enumeration and batched status reads therefore do
-not execute PSMux. Manager's periodic client observer, native discovery and
-status-target validation also leave it unqueried. These periodic paths do
-not use the action-time native reader: observation is
-explicitly unavailable, not an empty catalog. Independent worktree, Git and
-process facts can still publish. Last-known mux presence retains its original
-timestamp; it is not refreshed into current proof. TMux retains bounded CLI
+not execute PSMux. They use the existing Driver owner's
+[finite native observation](../../../libs/copilot-driver-core/README.md#finite-psmux-observation),
+as do creation/check-or-join and Manager discovery/client refresh. Fresh
+authenticated session/pane replies establish presence and actual client rows
+supply counts. Missing rendezvous needs complete native server coverage to establish absence;
+partial, stale, refused or timed-out queries remain unknown, not an empty
+catalog. Independent worktree, Git and process facts can still publish.
+Last-known mux presence retains its original timestamp when fresh observation
+fails; it is not refreshed into current proof. TMux retains bounded CLI
 observations, but malformed rows, duplicate sessions, diagnostics and failed
 fallback probes cannot establish absence.
+
+Open can reattach to an observed live session without creating or reseeding
+it, and cold Open uses the same Driver check/create lease. Unknown presence
+refuses cold creation/seed rather than guessing that the old session died.
+Manager qualifies observation support from its selected Worktrees interpreter;
+an older provider without that declaration stays unsupported, with no passive
+PSMux CLI fallback. Explicit foreground attach/create and provider writes still
+run PSMux and retain its startup-cleanup risk. This mitigation does not repair
+lost registrations or authorize provider restart, recovery or a host update.
+Fresh observations do not reactivate automatic pane discovery/status-bar
+repainting through the PSMux CLI. Worktrees publishes current roster facts;
+Manager's periodic status-option writes remain refused. Cached in-pane bar
+text is not fresh listing evidence.
 
 Cleanup retains checkouts and tracking records whenever mux presence is
 unknown, including its lock-held recheck and final managed-removal guard.
@@ -140,11 +156,12 @@ and mux-live controls become unavailable along with the badge; preserved raw
 client counts and Git facts do not remain current control evidence. A fresh
 publication restores the normal controls.
 
-This mitigation deliberately freezes automatic PSMux discovery, client-count
-refresh and status painting that requires it. It does **not** make explicit
+This mitigation retains automatic PSMux status-painting restrictions while
+restoring fresh listings and client-count refresh. It does **not** make explicit
 creation, attachment, recovery or shutdown commands harmless, upgrade PSMux,
 repair a running server, or qualify another executable with the same protocol.
-Strict action-time Windows checks instead use a bounded native reader, without
+Strict action-time Windows checks retain the bounded native reader, now
+owned by Driver behind the existing Worktrees compatibility imports, without
 starting PSMux. It enumerates native PSMux/PMux/TMux process identities and
 matches every server to its PID/birth-qualified registration. It sends only a
 fixed authenticated `display-message -p` request directly to each registered
