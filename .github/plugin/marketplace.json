@@ -25,7 +25,7 @@
     {
       "name": "agent-bridge",
       "description": "Live cross-boundary inter-agent communication service - conversation transport, session management, SSE event streaming, agent subprocess spawning, and ACP-over-WebSocket support for external clients",
-      "version": "0.9.367-dev1",
+      "version": "0.9.368-dev1",
       "source": "plugins/agent-bridge"
     },
     {
@@ -152,7 +152,7 @@
     {
       "name": "agent-roles",
       "description": "Sustained agent role charters over existing owners: a fleet monitor (task master) for progress audits and separately authorized corrective steers, and a pull-request reviewer role with independent lanes. Guidance-only, with no task queue, scheduler, daemon or required companion plugin.",
-      "version": "0.1.11-dev1",
+      "version": "0.1.12-dev1",
       "source": "plugins/agent-roles"
     }
   ]
