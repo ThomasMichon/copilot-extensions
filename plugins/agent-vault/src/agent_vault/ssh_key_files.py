@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 from contextlib import contextmanager
+import hashlib
 import os
 import stat
 import time
@@ -52,6 +53,9 @@ class WindowsSecurity:
                 w.DWORD, w.DWORD, w.HANDLE,
             ], w.HANDLE),
             ("MoveFileExW", [w.LPCWSTR, w.LPCWSTR, w.DWORD], w.BOOL),
+            ("CreateMutexW", [ctypes.POINTER(Attributes), w.BOOL, w.LPCWSTR], w.HANDLE),
+            ("WaitForSingleObject", [w.HANDLE, w.DWORD], w.DWORD),
+            ("ReleaseMutex", [w.HANDLE], w.BOOL),
         ):
             function = getattr(self.kernel, name)
             function.argtypes, function.restype = arguments, result
@@ -160,6 +164,36 @@ class WindowsSecurity:
                 raise FileExistsError("SSH key destination already exists")
             raise ctypes.WinError(error)
 
+    @contextmanager
+    def publication_lock(self, directory: Path):
+        from ctypes import wintypes as w
+
+        info = _ordinary(directory, directory=True)
+        identity = f"{self.sid}\n{info.st_dev}:{info.st_ino}"
+        name = "Global\\agent-vault-ssh-key-" + hashlib.sha256(identity.encode("utf-8")).hexdigest()
+        descriptor = w.LPVOID()
+        self.checked(self.security.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            self.descriptor(False), 1, ctypes.byref(descriptor), None,
+        ))
+        try:
+            attributes = self.attributes_type(ctypes.sizeof(self.attributes_type), descriptor, False)
+            handle = self.kernel.CreateMutexW(ctypes.byref(attributes), False, name)
+            self.checked(handle)
+        finally:
+            self.kernel.LocalFree(descriptor)
+        try:
+            result = self.kernel.WaitForSingleObject(handle, 5000)
+            if result == 258:
+                raise TimeoutError("SSH key directory is busy")
+            if result not in (0, 128):
+                raise ctypes.WinError(ctypes.get_last_error())
+            try:
+                yield
+            finally:
+                self.checked(self.kernel.ReleaseMutex(handle))
+        finally:
+            self.kernel.CloseHandle(handle)
+
 
 def _ordinary(path: Path, *, directory: bool):
     info = path.lstat()
@@ -234,9 +268,10 @@ def _write(directory: Path, target: Path, value: bytes, windows):
 
 
 @contextmanager
-def _publication_lock(directory: Path):
+def _publication_lock(directory: Path, windows=None):
     if os.name == "nt":
-        yield
+        with (windows or WindowsSecurity()).publication_lock(directory):
+            yield
         return
     import fcntl
 
@@ -271,7 +306,7 @@ def install(directory: Path, private: bytes, public: bytes) -> dict:
     else:
         directory.mkdir(mode=0o700, exist_ok=True)
     _require(directory, windows, directory=True)
-    with _publication_lock(directory):
+    with _publication_lock(directory, windows):
         return _install_pair(directory, private, public, windows)
 
 
