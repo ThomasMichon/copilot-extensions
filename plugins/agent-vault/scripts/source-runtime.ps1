@@ -102,6 +102,8 @@ function Get-SourceRuntimeFields {
     if ($script:RuntimeProfile) {
         $fields['runtime_profile'] = $script:RuntimeProfile
         $fields['runtime_version'] = $SrcVersion
+    } elseif ($script:SourceRuntimeIdentity) {
+        $fields['runtime_profile'] = 'base'
     }
     return $fields
 }

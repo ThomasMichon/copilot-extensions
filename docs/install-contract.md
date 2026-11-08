@@ -183,6 +183,13 @@ snapshot/redirect receipt remains original; actual profiled runtime identity is
 reported separately. Selecting dependencies adds no activation or credential
 authority.
 
+Collected Vault source updates use the existing version-1 target provider and
+pre-completion slot profile/hash evidence, including an unselected legacy base.
+Retained profile construction still performs native PATH/pruning finalization;
+start/status resolve the active runtime read-only. Legacy command ownership
+matches the full current simple-writer template, preserving early scoped
+dispatch separately from cold provisioning rather than dropping either phase.
+
 Prepared source deployments retain this independent profile dimension:
 `<package-version>+<profile>.source.<commit>.<assembly>`. The coordinator validates
 the full source receipt before admission, after acquiring construction ownership,

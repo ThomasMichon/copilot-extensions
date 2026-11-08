@@ -134,6 +134,12 @@ def test_native_driver_retains_profile_through_request_handoff(profile, monkeypa
     from update_driver import core
 
     monkeypatch.setenv("AGENT_VAULT_INSTALL_PROFILE", "ssh")
+    source_target = json.dumps({
+        "schema": "copilot-extensions.runtime-source-target", "version": 1,
+        "plugin": "agent-vault", "runtime_root": str(tmp_path / "runtime"),
+        "source": None, "profile": "ssh", "runtime_version": "1.0.0+ssh",
+    })
+    monkeypatch.setenv("COPILOT_EXTENSIONS_RUNTIME_SOURCE_TARGET", source_target)
     for name in ("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", "COPILOT_EXTENSIONS_RUNTIME_PUBLICATION"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(adapter, "source_digest", lambda _payload: "a" * 64)
@@ -152,3 +158,60 @@ def test_native_driver_retains_profile_through_request_handoff(profile, monkeypa
     spec, runner = queued[0]
     assert dict(spec.context)["AGENT_VAULT_INSTALL_PROFILE"] == "ssh"
     assert "AGENT_VAULT_INSTALL_PROFILE" in runner.context_keys
+    assert dict(spec.context)["COPILOT_EXTENSIONS_RUNTIME_SOURCE_TARGET"] == source_target
+    assert "COPILOT_EXTENSIONS_RUNTIME_SOURCE_TARGET" in runner.context_keys
+
+
+def test_source_target_preserves_legacy_base_and_refuses_profile_drift_before_write(
+    profile, payload, tmp_path, monkeypatch,
+):
+    import runtime_source_target as target
+    import versioned_runtime_source as source
+
+    digest = source.assembly_hash(payload)
+    identity = source.SourceIdentity(
+        "agent-vault", "1.2.3", "a" * 40, "b" * 40, digest,
+        source.runtime_version("1.2.3", "a" * 40, digest),
+    )
+    (payload / source.SOURCE_FILE).write_text(json.dumps(identity.document()))
+    root = tmp_path / "runtime"
+    original = target.selected(root, payload)
+    assert original["runtime_version"] == identity.runtime_version
+    assert original["source_identity"] == source.manifest_fields(identity)
+    profile.persist_profile(root, "base")
+    planned = target.document(root, target.selected(root, payload))
+    assert planned["runtime_version"] == source.runtime_version("1.2.3+base", "a" * 40, digest)
+    monkeypatch.setenv(target.TARGET_ENV, json.dumps(planned))
+    monkeypatch.setattr(profile, "SCRIPTS", payload / "scripts")
+    before = (root / profile.PROFILE_FILE).read_bytes()
+    with pytest.raises(ValueError, match="changed after target planning"):
+        profile.main(["--root", str(root), "select", "--profile", "ssh", "--persist"])
+    assert (root / profile.PROFILE_FILE).read_bytes() == before
+
+
+def test_source_profile_receipt_is_written_only_before_completion(
+    profile, payload, tmp_path, monkeypatch,
+):
+    import runtime_source_target as target
+    import versioned_runtime as runtime
+
+    root = tmp_path / "runtime"
+    profile.persist_profile(root, "ssh")
+    selected = target.selected(root, payload)
+    slot = root / "versions" / selected["runtime_version"]
+    slot.mkdir(parents=True)
+    complete = False
+    monkeypatch.setattr(runtime, "is_complete", lambda *_a: complete)
+    target.record_profile(slot, selected, "a" * 64)
+    receipt = slot / "runtime-profile.json"
+    before = (receipt.read_bytes(), receipt.stat().st_mtime_ns)
+    complete = True
+    target.record_profile(slot, selected, "a" * 64)
+    assert (receipt.read_bytes(), receipt.stat().st_mtime_ns) == before
+    with pytest.raises(ValueError, match="evidence changed"):
+        target.record_profile(slot, selected, "b" * 64)
+    assert (receipt.read_bytes(), receipt.stat().st_mtime_ns) == before
+    receipt.unlink()
+    with pytest.raises(ValueError, match="refusing mutation"):
+        target.record_profile(slot, selected, "a" * 64)
+    assert not receipt.exists()

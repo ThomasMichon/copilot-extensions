@@ -200,6 +200,10 @@ def _artifact_index(pool):
 
 @pytest.fixture
 def native_inputs(tmp_path_factory):
+    yield from native_profile_inputs(tmp_path_factory)
+
+
+def native_profile_inputs(tmp_path_factory, *, crypto=True):
     tmp_path = tmp_path_factory.mktemp("vp")
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     uv = shutil.which("uv")
@@ -215,9 +219,10 @@ def native_inputs(tmp_path_factory):
     pool = tmp_path / "artifacts"
     pool.mkdir()
     _external_wheel(tmp_path, "psutil", "psutil", pool, uv, env)
-    _external_wheel(tmp_path, "cryptography", "cryptography", pool, uv, env)
-    _external_wheel(tmp_path, "cffi", "cffi", pool, uv, env)
-    _external_wheel(tmp_path, "pycparser", "pycparser", pool, uv, env)
+    if crypto:
+        _external_wheel(tmp_path, "cryptography", "cryptography", pool, uv, env)
+        _external_wheel(tmp_path, "cffi", "cffi", pool, uv, env)
+        _external_wheel(tmp_path, "pycparser", "pycparser", pool, uv, env)
     for package in [payload, *(payload / "libs").iterdir()]:
         if (package / "pyproject.toml").is_file():
             _backend(package)
@@ -233,8 +238,9 @@ def test_native_profile_construction_reuse_update_and_installed_ssh_consumer(nat
 
 
 @pytest.mark.timeout(120)
+@pytest.mark.parametrize("profile", ["ssh", "legacy-base"])
 def test_source_profile_stamp_survives_publisher_and_validates_retained_helpers(
-    native_inputs, monkeypatch,
+    native_inputs, monkeypatch, profile,
 ):
     payload, home, env, pwsh = native_inputs
     plugin = Path(__file__).resolve().parents[2]
@@ -256,7 +262,10 @@ def test_source_profile_stamp_survives_publisher_and_validates_retained_helpers(
         source.runtime_version(version, "a" * 40, digest),
     )
     (payload / "runtime-source.json").write_text(json.dumps(identity.document()))
-    env["AGENT_VAULT_INSTALL_PROFILE"] = "ssh"
+    if profile == "ssh":
+        env["AGENT_VAULT_INSTALL_PROFILE"] = "ssh"
+    else:
+        env.pop("AGENT_VAULT_INSTALL_PROFILE", None)
     installer = payload / "scripts" / "install.ps1"
     _run(_no_service_provision_command(home, installer, pwsh, action="stamp"), env, home)
     root = home / ".agent-vault"
@@ -265,19 +274,28 @@ def test_source_profile_stamp_survives_publisher_and_validates_retained_helpers(
     assert not (root / "current-version").exists()
     shutil.rmtree(payload)
     shutil.rmtree(payload.parents[1] / "libs")
-    env.pop("AGENT_VAULT_INSTALL_PROFILE")
+    env.pop("AGENT_VAULT_INSTALL_PROFILE", None)
     installer = snapshot / "scripts" / "install.ps1"
     _run(_no_service_provision_command(home, installer, pwsh), env, home)
-    selected = source.runtime_version(version + "+ssh", identity.source_commit, digest)
+    selected = (
+        source.runtime_version(version + "+ssh", identity.source_commit, digest)
+        if profile == "ssh" else identity.runtime_version
+    )
     assert (root / "current-version").read_text().strip() == selected
     manifest = json.loads((root / "deploy-manifest.json").read_text())
     assert manifest["source"]["version"] == version and manifest["runtime_version"] == selected
-    assert manifest["runtime_profile"] == "ssh" and manifest["runtime_source"] == identity.document()
+    assert manifest["runtime_profile"] == ("ssh" if profile == "ssh" else "base")
+    assert manifest["runtime_source"] == identity.document()
+    receipt = json.loads((root / "versions" / selected / "runtime-profile.json").read_text())
+    assert receipt["runtimeSource"] == identity.document()
     assert (root / "stamped-version").read_text().strip() == identity.runtime_version
     slot = root / "versions" / selected
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    result = _run([python, "-I", "-B", "-c", CONSUMER, home], env, home)
-    assert json.loads(result.stdout)["installed_runtime"] is True
+    if profile == "ssh":
+        result = _run([python, "-I", "-B", "-c", CONSUMER, home], env, home)
+        assert json.loads(result.stdout)["installed_runtime"] is True
+    else:
+        _run([python, "-I", "-B", "-c", "import agent_vault"], env, home)
     helper = slot / ".runtime-bootstrap" / "runtime_launcher.py"
     helper.write_text("fixture retained-helper corruption\n")
     before = (root / "current-version").read_bytes()
@@ -295,7 +313,8 @@ def _exercise_native_profile(payload, home, env, pwsh):
     root = home / ".agent-vault"
     installer = payload / "scripts" / "install.ps1"
     env["AGENT_VAULT_INSTALL_PROFILE"] = "base"
-    _run(_no_service_provision_command(home, installer, pwsh), env, home)
+    installed = _run(_no_service_provision_command(home, installer, pwsh), env, home)
+    assert "PATH: Added " in installed.stdout
     base = (root / "current-version").read_text().strip()
     base_slot = root / "versions" / base
     before = {str(p.relative_to(base_slot)): (p.read_bytes(), p.stat().st_mtime_ns)
@@ -327,6 +346,7 @@ def _exercise_native_profile(payload, home, env, pwsh):
     project.write_text(project.read_text().replace(f'version = "{version}"', f'version = "{next_version}"'))
     _run(_no_service_provision_command(home, installer, pwsh, action="update"), env, home)
     assert (root / "current-version").read_text().strip() == next_version + "+ssh"
+    assert slot.is_dir() and not base_slot.exists()
     updated_python = root / "versions" / (next_version + "+ssh") / python_member
     result = _run([updated_python, "-I", "-B", "-c", CONSUMER, home], env, home)
     assert json.loads(result.stdout) == {

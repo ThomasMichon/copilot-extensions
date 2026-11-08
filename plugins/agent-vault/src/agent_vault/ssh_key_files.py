@@ -170,7 +170,7 @@ class WindowsSecurity:
 
         info = _ordinary(directory, directory=True)
         identity = f"{self.sid}\n{info.st_dev}:{info.st_ino}"
-        name = "Local\\agent-vault-ssh-key-" + hashlib.sha256(identity.encode("utf-8")).hexdigest()
+        name = "Global\\agent-vault-ssh-key-" + hashlib.sha256(identity.encode("utf-8")).hexdigest()
         descriptor = w.LPVOID()
         self.checked(self.security.ConvertStringSecurityDescriptorToSecurityDescriptorW(
             self.descriptor(False), 1, ctypes.byref(descriptor), None,

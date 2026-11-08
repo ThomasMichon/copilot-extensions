@@ -1,0 +1,17 @@
+{
+  "comment": "Preserve declared early and cold dispatch in shared legacy command ownership.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "budget-guidance",
+      "type": "patch"
+    }
+  ]
+}

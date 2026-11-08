@@ -105,6 +105,7 @@ def fingerprint(payload: Path, profile: str) -> str:
 
 def construction_session(root: Path, payload: Path, version: str, expected_hash: str) -> int:
     import installer_engine as engine
+    from runtime_source_target import record_profile
     from versioned_runtime_construction import retain_helpers
 
     selected = selection(root, payload)
@@ -123,6 +124,7 @@ def construction_session(root: Path, payload: Path, version: str, expected_hash:
         extras=extras, process_retention=True,
         expected_source_identity=selected["source_identity"],
         expected_payload_hash=expected_hash,
+        validate_candidate=lambda slot: record_profile(slot, selected, expected_hash),
     ) as candidate:
         if candidate.payload_hash != expected_hash:
             raise ValueError("Vault candidate differs from its admitted dependency profile")
@@ -199,7 +201,10 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     payload = SCRIPTS.parent
     if args.command == "select":
+        from runtime_source_target import check_target
+
         result = selection(args.root, payload, args.profile)
+        check_target(args.root, result)
         if args.persist:
             persist_profile(args.root, result["profile"])
         print(json.dumps(result, sort_keys=True))

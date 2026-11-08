@@ -127,6 +127,74 @@ def test_spawn_service_is_the_shared_primitive():
     assert launch.spawn_daemon is agent_procutil.spawn_daemon
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows native start/status fallback")
+@pytest.mark.parametrize("action", ["start", "status"])
+def test_native_action_uses_active_profile_not_unbuilt_desire(tmp_path, action):
+    shell = shutil.which("pwsh") or shutil.which("powershell")
+    assert shell, "the selected native control requires PowerShell"
+    root = tmp_path / "vault"
+    active = root / "versions" / "1.0.0+ssh"
+    venv.EnvBuilder(with_pip=False).create(active)
+    package = active / "Lib" / "site-packages" / "agent_vault"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    probe = (
+        "import json,sys\n"
+        "print(json.dumps({'arguments':sys.argv[1:],'runtime':sys.prefix}))\n"
+    )
+    (package / "__main__.py").write_text(probe)
+    (package / "service.py").write_text(probe)
+    (root / "current-version").write_text(active.name)
+    desire = root / "runtime-profile.json"
+    desire.write_text("unbuilt desired profile must not select execution")
+    before = {path: path.read_bytes() for path in (desire, root / "current-version")}
+    resolver = root / "bin" / "resolve-runtime.ps1"
+    resolver.parent.mkdir()
+    resolver.write_text(
+        "param($TraceMode)\n"
+        "if ($TraceMode -cne 'read-only') { throw 'unexpected resolver mutation' }\n"
+        f"$AgentRtPy = '{str(active / 'Scripts' / 'python.exe')}'\n",
+    )
+    runner = tmp_path / "action.ps1"
+    runner.write_text(r"""
+param($Source, $Root, $Action)
+$tokens=$null; $errors=$null
+$ast=[Management.Automation.Language.Parser]::ParseFile($Source,[ref]$tokens,[ref]$errors)
+foreach($name in @('Get-ActiveVaultPython','Invoke-Start','Invoke-Status')) {
+    $node=$ast.FindAll({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst]},$true) |
+        Where-Object Name -eq $name | Select-Object -First 1
+    if (-not $node) { throw "missing native function $name" }
+    Invoke-Expression $node.Extent.Text
+}
+function Get-ScheduledTask {}
+function Test-KeePassXCCli { return $false }
+function Write-Ok($message) { Write-Output $message }
+function Write-Fail($message) { throw $message }
+function Write-Skip($message) {}
+function Write-Warn($message) {}
+$InstallDir=$Root
+$LinkPython=Join-Path $Root 'versions\unbuilt\Scripts\python.exe'
+$Binstub=$BinstubPs1=$BinstubCmd=Join-Path $Root 'absent-binstub'
+$TaskName='fixture'
+$env:AGENT_RT_ROOT='retained-root'
+[void](Get-ActiveVaultPython)
+if ($env:AGENT_RT_ROOT -cne 'retained-root') { throw 'resolver changed caller context' }
+if ($Action -eq 'start') { Invoke-Start } else { Invoke-Status }
+""", encoding="utf-8")
+    result = subprocess.run(
+        [shell, "-NoLogo", "-NoProfile", "-File", str(runner),
+         str(Path(__file__).resolve().parents[1] / "scripts" / "install.ps1"),
+         str(root), action],
+        capture_output=True, text=True, timeout=20, **agent_procutil.no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    observed = json.loads(next(line for line in result.stdout.splitlines() if line.startswith("{")))
+    assert observed == {
+        "arguments": ["start"] if action == "start" else ["--ping"], "runtime": str(active),
+    }
+    assert {path: path.read_bytes() for path in before} == before
+
+
 @pytest.mark.parametrize("linked", ["home", "parent"])
 def test_linked_home_refuses_before_any_launch_artifact(tmp_path, monkeypatch, linked):
     from agent_procutil import _daemon_instance_store as store

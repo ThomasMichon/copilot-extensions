@@ -504,7 +504,7 @@ function Get-VersionedCurrent {
        venv or a fresh box). Used as the gc keep + rollback target. #>
     if (-not $VersionedRuntime) { return '' }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
-    $py = if (Test-Path $LinkPython) { $LinkPython } elseif (Test-Path $VenvPython) { $VenvPython } else { $null }
+    $py = if ($script:RuntimeProfile) { Get-BootstrapPython } elseif (Test-Path $LinkPython) { $LinkPython } elseif (Test-Path $VenvPython) { $VenvPython } else { $null }
     if (-not $py) { return '' }
     $out = & $py $vr --root $InstallDir --link-name '.venv' current 2>$null
     return ("$out").Trim()
@@ -697,6 +697,13 @@ function Invoke-VersionedMarkComplete {
     $actualHash = Get-PayloadHash
     if ($PayloadHash -and $PayloadHash -ne $actualHash) {
         throw 'Payload changed during construction; completion refused'
+    }
+    if ($script:SourceRuntimeIdentity -and -not $script:RuntimeProfile) {
+        [void](Invoke-Hidden -FilePath (Get-BootstrapPython) -ArgList @(
+            '-I', '-B', (Join-Path $ScriptDir 'runtime_source_target.py'),
+            '--root', $InstallDir, '--record-slot', $SrcVersion, '--payload-hash', $actualHash
+        ))
+        if ($LASTEXITCODE -ne 0) { throw 'Vault source-profile completion evidence failed' }
     }
     Complete-RuntimeConstruction -PayloadHash $actualHash -RetainHelpers
     return $true
@@ -946,6 +953,7 @@ function Install-Runtime {
     }
     Write-Ok "Directories: $InstallDir"
 
+    $prevVersion = Get-VersionedCurrent
     [void](Invoke-VersionedSlotClean)
     if ($script:RuntimeConstructionReuse) {
         if (-not (Invoke-VersionedMarkComplete)) { throw 'Retained runtime completion failed' }
@@ -961,6 +969,7 @@ function Install-Runtime {
             }
             if ($script:SourceRuntimeIdentity) { Publish-SourcePayload }
             Write-VaultDeployManifest
+            Complete-RuntimeInstallation -KeepPrev $prevVersion
         }
         return
     }
@@ -1053,6 +1062,11 @@ function Install-Runtime {
     else { Assert-SourceRuntime }
     Write-VaultDeployManifest
 
+    Complete-RuntimeInstallation -KeepPrev $prevVersion
+}
+
+function Complete-RuntimeInstallation {
+    param([string]$KeepPrev)
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     & $LinkPython -I -c 'import agent_vault' 2>$null
@@ -1063,7 +1077,7 @@ function Install-Runtime {
 
     # Versioned layout: prune old slots, keeping current + the previous-good (the
     # slot a not-yet-restarted daemon may still run from) + live-pid-pinned.
-    if ($VersionedRuntime) { Invoke-VersionedGc -KeepPrev $prevVersion }
+    if ($VersionedRuntime) { Invoke-VersionedGc -KeepPrev $KeepPrev }
 
     if (Test-KeePassXCCli) {
         Write-Ok 'Prerequisite: keepassxc-cli found'
@@ -1403,7 +1417,8 @@ function Invoke-Start {
     # SAME idempotent, health-gated user-mode ensure path the CLI's own
     # `agent-vault start` uses (cmd_start -> ensure_service/start_service in
     # cli.py) -- no PowerShell-side process-spawning logic duplicated here.
-    if (-not (Test-Path $LinkPython)) {
+    $startPython = Get-ActiveVaultPython
+    if (-not $startPython -or -not (Test-Path -LiteralPath $startPython)) {
         Write-Fail "agent-vault runtime not installed -- run: install.ps1 -Action install"
         exit 1
     }
@@ -1416,7 +1431,7 @@ function Invoke-Start {
     try {
         [IO.Directory]::SetCurrentDirectory($project)
         $ErrorActionPreference = 'Continue'
-        & $LinkPython -m agent_vault start
+        & $startPython -m agent_vault start
         $code = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $previousPreference
@@ -1424,6 +1439,20 @@ function Invoke-Start {
         [IO.Directory]::SetCurrentDirectory($previousDirectory)
     }
     exit $code
+}
+
+function Get-ActiveVaultPython {
+    $resolver = Join-Path $InstallDir 'bin\resolve-runtime.ps1'
+    if (-not (Test-Path -LiteralPath $resolver)) { return $LinkPython }
+    $previousRoot = $env:AGENT_RT_ROOT
+    try {
+        $env:AGENT_RT_ROOT = $InstallDir
+        $AgentRtPy = $null
+        . $resolver -TraceMode read-only
+        return $AgentRtPy
+    } finally {
+        $env:AGENT_RT_ROOT = $previousRoot
+    }
 }
 
 function Invoke-Stop {
@@ -1471,10 +1500,11 @@ function Invoke-Status {
     if (Test-KeePassXCCli) { Write-Ok 'Prerequisite: keepassxc-cli found' }
     else { Write-Warn 'Prerequisite missing: keepassxc-cli (KeePassXC)' }
 
-    if (Test-Path $LinkPython) {
+    $statusPython = Get-ActiveVaultPython
+    if ($statusPython -and (Test-Path -LiteralPath $statusPython)) {
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
-        $ping = & $LinkPython -m agent_vault.service --ping 2>$null
+        $ping = & $statusPython -m agent_vault.service --ping 2>$null
         $pingCode = $LASTEXITCODE
         $ErrorActionPreference = $prevEAP
         if ($pingCode -eq 0 -and $ping) { Write-Ok ($ping | Out-String).Trim() }
@@ -1723,6 +1753,13 @@ if ($needsInstallLock -and -not (Enter-InstallLock)) {
 }
 
 try {
+    if ($script:SourceRuntimeIdentity -and (Test-Path Env:COPILOT_EXTENSIONS_RUNTIME_SOURCE_TARGET)) {
+        [void](Invoke-Hidden -FilePath (Get-BootstrapPython) -ArgList @(
+            '-I', '-B', (Join-Path $ScriptDir 'runtime_source_target.py'),
+            '--root', $InstallDir, '--check-target'
+        ))
+        if ($LASTEXITCODE -ne 0) { throw 'Vault source target changed before installation' }
+    }
     if ($Action -in @('install', 'update', 'provision', 'stamp')) {
         $profilePresent = Test-VaultRuntimeProfilePresent
     }

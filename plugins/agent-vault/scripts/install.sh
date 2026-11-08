@@ -344,6 +344,7 @@ _versioned_current() {
     [[ "$VERSIONED_RUNTIME" == 1 ]] || { echo ""; return 0; }
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py="$LINK_DIR/bin/python"
+    if [[ -n "${RUNTIME_PROFILE:-}" ]]; then py="$(_bootstrap_python)" || return 1; fi
     [[ -x "$py" ]] || py="$VENV_DIR/bin/python"
     [[ -x "$py" ]] || { echo ""; return 0; }
     "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo ""
@@ -446,6 +447,12 @@ _versioned_mark_complete() {
         printf '%s\n' 'Payload changed during construction; completion refused' >&2
         return 1
     fi
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" && -z "${RUNTIME_PROFILE:-}" ]]; then
+        local py
+        py="$(_bootstrap_python)" || return 1
+        "$py" -I -B "$SCRIPT_DIR/runtime_source_target.py" --root "$INSTALL_DIR" \
+            --record-slot "$SRC_VERSION" --payload-hash "$actual_hash" || return 1
+    fi
     _runtime_construction_complete "$actual_hash"
 }
 
@@ -469,6 +476,7 @@ _write_runtime_manifest() {
                     --payload "$PLUGIN_DIR" --package-version "$PACKAGE_VERSION" --plugin agent-vault \
                     --expected-runtime-version "$SOURCE_RUNTIME_VERSION" \
                     --expected-source-identity "$SOURCE_RUNTIME_IDENTITY" --format shell-fields)" || return 1
+                fields="$fields, \"runtime_profile\": \"base\""
             fi
             write_deploy_manifest agent-vault agent-vault "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" \
                 "$fields" "$SOURCE_MANIFEST_ORIGIN" "$PACKAGE_VERSION"
@@ -714,6 +722,8 @@ _ensure_runtime() {
     }
     _ok "Directories: $INSTALL_DIR"
 
+    local prev_version=""
+    [[ "$VERSIONED_RUNTIME" != 1 ]] || prev_version="$(_versioned_current)"
     _versioned_slot_clean || return 1
     if [[ "$_RUNTIME_CONSTRUCTION_REUSE" == 1 ]]; then
         if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" || -n "${RUNTIME_PROFILE:-}" ]]; then
@@ -726,6 +736,7 @@ _ensure_runtime() {
             fi
             if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then _stamp_source_payload || return 1; fi
             _write_runtime_manifest || return 1
+            _finalize_runtime "$prev_version" || return 1
         fi
         return 0
     fi
@@ -810,6 +821,11 @@ _ensure_runtime() {
         _assert_source_runtime || return 1
     fi
     _write_runtime_manifest || return 1
+    _finalize_runtime "$prev_version"
+}
+
+_finalize_runtime() {
+    local prev_version="$1"
     _check_keepassxc
 
     if "$LINK_PYTHON" -I -c 'import agent_vault' 2>/dev/null; then
@@ -1305,6 +1321,11 @@ esac
 
 case "$ACTION" in
     install|update|provision|stamp)
+        if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" && -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_TARGET+x}" ]]; then
+            target_python="$(_bootstrap_python)" || exit 1
+            "$target_python" -I -B "$SCRIPT_DIR/runtime_source_target.py" \
+                --root "$INSTALL_DIR" --check-target || exit 1
+        fi
         if [[ -n "$PROFILE" || -e "$INSTALL_DIR/runtime-profile.json" || -L "$INSTALL_DIR/runtime-profile.json" ]]; then
             profile_python="$(_bootstrap_python)" || exit 1
             profile_arguments=(--root "$INSTALL_DIR" select)

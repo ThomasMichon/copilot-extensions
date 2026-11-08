@@ -48,6 +48,11 @@ The deploy manifest's `source.version` remains the package version.
 `runtime_profile` and `runtime_version` identify the selected dependency slot.
 Bootstrap compares desired and deployed profiles as well as package version,
 so a healthy SSH runtime is not repeatedly rebuilt as base.
+Start/status use the active runtime even when a later desired update failed.
+Prepared-source updates bind the selected target through the existing
+`COPILOT_EXTENSIONS_RUNTIME_SOURCE_TARGET` contract and verify immutable slot
+profile/completion evidence before reporting current. Explicit profile drift
+is refused before desired-state publication.
 See [native profile setup](../README.md#dependency-profiles).
 
 ## Windows scheduling is separate from activation

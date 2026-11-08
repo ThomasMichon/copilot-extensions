@@ -114,7 +114,8 @@ installation never repairs or broadens their permissions. Links, special files,
 different keys and noncanonical contents are refused without overwriting them.
 Files are flushed and published exclusively, not truncated or replaced.
 Concurrent publication is serialized for the same physical directory: Windows
-uses a TokenUser/SYSTEM-protected kernel mutex; POSIX uses its directory flock.
+uses a cross-session TokenUser/SYSTEM-protected global kernel mutex; POSIX uses
+its directory flock.
 Both waits are bounded, and no persistent lock file is added beside the keys.
 
 Success returns schema version 1, public key/fingerprint, `private_key_path`,
@@ -140,6 +141,11 @@ preserved selection on update and actual installed-runtime key prepare/install.
 A prepared-source stamp/provision control removes its publisher, preserves the
 original source receipt separately from the profiled slot and refuses corrupted
 retained helpers without rewriting the completed runtime.
+It also checks PATH/pruning finalization and unselected legacy-base source
+compatibility. Worktrees' explicitly selected
+`tests/native/test_vault_profile_update.py` passes a collected prepared-source
+step through the real native updater, verifies the profiled completion receipt
+and checks that the next collected plan reports current.
 The copied third-party artifacts and build backend are fixtures; credential IPC
 is substituted. This does not qualify a release feed's artifact age, an operator
 database, installed service, remote enrollment or live synchronization.

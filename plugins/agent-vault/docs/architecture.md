@@ -15,6 +15,7 @@ This document describes the implementation as it exists today. It intentionally 
 | Config resolver | `src/agent_vault/config.py` | Resolves database, group, vault name, port, runtime paths, and config files from env, repo config, extension config, global named vaults, and defaults. |
 | Installer/bootstrap | `scripts/install.ps1`, `scripts/install.sh`, `scripts/bootstrap-check.*` | Creates/stamps the runtime, deploys binstubs, records a deploy manifest, installs platform supervision, and reconciles version drift. |
 | Dependency selection | `scripts/runtime_profile.py` | Persists explicit base/SSH installation policy and passes the selected extra to the canonical immutable constructor while the native lifecycle retains activation and service ownership. |
+| Prepared-source target | `scripts/runtime_source_target.py`, `runtime-source-target.json` | Declares the existing source-target contract, binds planned source/profile to the installer and records slot evidence before canonical completion. |
 | Extensions | `src/agent_vault/extensions.py`, `src/agent_vault/core_ext.py` | Provides opt-in hooks for unlock providers, daemon actions, transports, config/cache sources, CLI commands, startup hooks, and optional core delegation. |
 
 ## Runtime layout and install modes
@@ -54,6 +55,13 @@ Prepared-source assertions, snapshots and redirects retain the original source
 identity/version. Manifest `runtime_version` names the actual profiled slot,
 `runtime_source` retains the original receipt and `source.version` remains the
 package version. No receipt is fabricated by appending a profile to it.
+Collected prepared-source updates use the existing version-1 target contract.
+An unselected legacy base keeps its original source-qualified version; explicitly
+selected profiles keep their independent dimension. Slot `runtime-profile.json`
+binds profile, original source, package version and canonical completion hash.
+Evidence is created only before completion and verified without rewriting on reuse.
+Native start/status resolve the active interpreter read-only, not desired policy.
+Common PATH/pruning finalization also runs after retained profile construction.
 
 ## Configuration model
 
