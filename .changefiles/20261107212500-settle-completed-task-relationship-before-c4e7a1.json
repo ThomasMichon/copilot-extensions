@@ -1,0 +1,9 @@
+{
+  "comment": "Settle a completed task's exact retained worktree relationship before releasing its reservation so dispatch-attempt conclusion can finalize the workspace",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
