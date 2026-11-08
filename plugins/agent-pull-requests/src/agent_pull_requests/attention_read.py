@@ -134,7 +134,7 @@ class AttentionReader:
             not isinstance(workspace, WorkspaceOperations)
             or not callable(workspace.attention_owner)
             or not callable(workspace.feedback_owner)
-            or not callable(workspace.write_context)
+            or not workspace.write_available
             or not workspace.conversations
             or type(historical) is not bool
             or any(type(value) is not int or not 1 <= value <= 86400
@@ -160,8 +160,7 @@ class AttentionReader:
                 or conversation_key({**self.workspace.scope, "number": 1}, self.store.namespace) != self._scope
                 or not all(callable(value) for value in (
                 self.workspace.attention_owner, self.workspace.feedback_owner,
-                self.workspace.write_context,
-                )) or not self.workspace.conversations
+                )) or not self.workspace.write_available or not self.workspace.conversations
             ):
                 raise AttentionUnavailable("attention owners unavailable")
 
