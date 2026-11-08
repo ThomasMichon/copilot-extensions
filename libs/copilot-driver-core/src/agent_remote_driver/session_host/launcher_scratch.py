@@ -53,7 +53,7 @@ def tracked_creation(phase: dict[str, bool]):
 
 def observe_exit(phase: dict[str, bool], process) -> None:
     """Settle an exited Host's exact registry record before removing its root."""
-    phase["cleanup_safe"] = True
+    phase["cleanup_safe"] = False
     receipt = getattr(process, "instance_receipt", None)
     if phase["disposable"] and receipt is not None:
         from agent_procutil.daemon_instances import cleanup_instance

@@ -124,12 +124,15 @@ def test_directory_swapped_for_link_after_inspection_is_not_followed(tmp_path, m
     assert (path / scratch.BREADCRUMB).is_file()
 
 
-def test_incomplete_cleanup_keeps_breadcrumb(tmp_path, monkeypatch):
+@pytest.mark.parametrize("readable", [False, True])
+def test_incomplete_cleanup_keeps_breadcrumb(tmp_path, monkeypatch, readable):
     path = scratch.create_labeled_scratch("partial", "stuck child", root=tmp_path)
     original = (path / scratch.BREADCRUMB).read_bytes()
     (path / "stuck.bin").write_bytes(b"1")
     (path / "free.bin").write_bytes(b"2")
     real_remove = scratch._remove_file
+    if not readable:
+        monkeypatch.setattr(scratch, "_saved_breadcrumb", lambda *args: None)
 
     def refusing_remove(target, st, dir_fd=None):
         if os.path.basename(target) == "stuck.bin":
@@ -139,6 +142,16 @@ def test_incomplete_cleanup_keeps_breadcrumb(tmp_path, monkeypatch):
     monkeypatch.setattr(scratch, "_remove_file", refusing_remove)
     assert not scratch.remove_scratch(path)
     assert sorted(os.listdir(path)) == [scratch.BREADCRUMB, "stuck.bin"]
+    assert (path / scratch.BREADCRUMB).read_bytes() == original
+
+
+def test_unreadable_breadcrumb_is_retained_even_after_other_children_are_gone(tmp_path, monkeypatch):
+    path = scratch.create_labeled_scratch("unreadable", "retain ownership", root=tmp_path)
+    original = (path / scratch.BREADCRUMB).read_bytes()
+    (path / "free.bin").write_bytes(b"1")
+    monkeypatch.setattr(scratch, "_saved_breadcrumb", lambda *args: None)
+    assert not scratch.remove_scratch(path)
+    assert list(path.iterdir()) == [path / scratch.BREADCRUMB]
     assert (path / scratch.BREADCRUMB).read_bytes() == original
 
 

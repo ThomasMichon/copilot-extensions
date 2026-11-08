@@ -1625,6 +1625,8 @@ traversed, and each directory is pinned before it is entered (descriptor-
 relative traversal on POSIX, a no-share-delete handle on Windows) so a
 directory swapped for a link mid-cleanup is never followed. Incomplete
 cleanup keeps the breadcrumb, so retained scratch stays labeled.
+An unreadable breadcrumb is retained even after other children are removed,
+since a failed final directory removal could not restore its contents.
 `create_labeled_scratch` / `remove_scratch` serve callers whose
 scratch outlives one `with` block. Removal rejects raw paths ending in a
 separator, `.` or `..` before inspection, since those suffixes can force

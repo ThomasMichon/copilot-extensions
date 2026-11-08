@@ -290,11 +290,19 @@ def _remove_directory(target: str, st: os.stat_result) -> bool:
     try:
         saved = _saved_breadcrumb(fd, target)
         # The breadcrumb goes last so retained, partly-cleaned scratch stays labeled.
-        if not _clear(fd, target, keep=BREADCRUMB if saved is not None else None):
+        if not _clear(fd, target, keep=BREADCRUMB):
             return False
+        name, dir_fd = _ref(fd, target, BREADCRUMB)
         if saved is not None:
-            name, dir_fd = _ref(fd, target, BREADCRUMB)
             os.unlink(name, dir_fd=dir_fd)
+        else:
+            try:
+                os.stat(name, dir_fd=dir_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                pass
+            else:
+                # Without a saved copy, a failed rmdir could not restore it.
+                return False
     finally:
         # Windows cannot remove a directory while this pin is open.
         os.close(fd)

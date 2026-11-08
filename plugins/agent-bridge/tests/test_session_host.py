@@ -1177,9 +1177,9 @@ def test_launch_session_host_surfaces_crash_tail(tmp_path, monkeypatch):
     assert "diagnosable detail line" in message
 
 
-@pytest.mark.parametrize("cleanup_held", [False, True])
+@pytest.mark.parametrize("cleanup_outcome", ["settled", "held", "error"])
 def test_launch_session_host_fallback_scratch_is_labeled_and_removed_on_crash(
-    tmp_path, monkeypatch, cleanup_held,
+    tmp_path, monkeypatch, cleanup_outcome,
 ):
     """Without ``state_dir`` the fallback lives in labeled scratch and a
     failed launch leaves no ``agbridge-host-*`` directory behind."""
@@ -1201,19 +1201,25 @@ def test_launch_session_host_fallback_scratch_is_labeled_and_removed_on_crash(
         return real_popen([sys.executable, str(crash_script)], **kwargs)
 
     monkeypatch.setattr(launcher.subprocess, "Popen", _fake_popen)
-    if cleanup_held:
+    if cleanup_outcome != "settled":
         from agent_procutil import daemon_instances
 
-        monkeypatch.setattr(
-            daemon_instances, "cleanup_instance",
-            lambda *args, **kwargs: types.SimpleNamespace(status="held"),
-        )
+        def cleanup(*args, **kwargs):
+            if cleanup_outcome == "error":
+                raise OSError("cleanup unavailable")
+            return types.SimpleNamespace(status="held")
 
-    with pytest.raises(RuntimeError, match="exited early"):
+        monkeypatch.setattr(daemon_instances, "cleanup_instance", cleanup)
+
+    error, message = (
+        (OSError, "cleanup unavailable") if cleanup_outcome == "error"
+        else (RuntimeError, "exited early")
+    )
+    with pytest.raises(error, match=message):
         launcher.launch_session_host(["irrelevant-child-argv"], ready_timeout=5.0)
     assert seen and all(name.startswith("agbridge-host-") for name in seen)
     remaining = list(scratch_root.iterdir())
-    if cleanup_held:
+    if cleanup_outcome != "settled":
         assert len(remaining) == 1 and (remaining[0] / "scratch-owner.json").is_file()
     else:
         assert remaining == []
