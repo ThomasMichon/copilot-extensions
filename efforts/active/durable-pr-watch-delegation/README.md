@@ -436,11 +436,19 @@ _Operator-required outcome; agent-recommended slices and validation._
   Preserve original
   receipt/unknown states and observation age; a current content match is not
   original-version proof, persisted DB mapping or full C3/provider acceptance.
+- [ ] Review the [persisted acquisition mapping refinement](comment-observation-correlation.md#persisted-acquisition-mapping-refinement)
+  before changing strict owner or serving schemas. Reuse retained intent and
+  receipt identity; add only bounded acquired evidence under the same owner.
+- [ ] Deliver its explicitly adopted source storage/acquisition/read leaves,
+  preserving original confirmation, unknown outcomes and B3/B4 proof; keep
+  all-publisher, provider and installed acceptance separate.
 - [x] Review the [tracked comment/review consumer refinement](tracked-comment-consumers.md)
   before changing legacy commands (#11525).
-- [ ] Qualify one explicit tracked comment/review source binding
+- [x] Qualify one explicit tracked comment/review source binding
   through the existing workspace selection/receipt owner. Preserve distinct
-  ADO text/vote outcomes and keep unsupported native surfaces explicit.
+  ADO text/vote outcomes and keep unsupported native surfaces explicit
+  (#11530; 33 tracked and 59 Worktrees source cases). Normal/installed host
+  enrollment, protected grants/writers and all-publisher acceptance remain open.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -989,11 +997,17 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
-- [ ] Qualify the explicit tracked comment/review consumer through its actual
+- [ ] Qualify the [persisted acquisition mapping controls](comment-observation-correlation.md#provider-first-delivery-and-validation):
+  same-owner native joins, real-file restart/contention, monotone evidence,
+  capacity and uncertain replacement, no duplicate IO or false feedback,
+  strict old/new/rollback peers and unchanged default hosting.
+- [x] Qualify the explicit tracked comment/review consumer through its actual
   resolution and workspace CLI/tool/client boundary: exact scoped selection,
   final preview and separate submission, original-key restart/lost-result
   recovery, partial comment/vote outcomes, bodyless actions, and unsupported
-  or rolled-back receivers without legacy mutation fallback.
+  or rolled-back receivers without legacy mutation fallback (#11530;
+  33 tracked native/Gateway and 59 legacy/real-configuration/lazy-dispatch
+  source cases). These do not qualify live providers or installed hosts.
 - [x] Qualify the finite acquired comment observation library through actual
   preparation, original native attempt/receipt and acquired generations:
   exact scoped native IDs/actor/content, restart, later edits/deletion,

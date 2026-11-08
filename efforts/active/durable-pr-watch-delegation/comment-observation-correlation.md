@@ -100,3 +100,107 @@ missing/malformed/withdrawn support. Prove byte-identical retained state,
 zero extra acquisition/sends, no false echo/handled progress and unchanged
 baseline receipt/execution behavior. Source fixtures are not a live-provider
 or installed acceptance result.
+
+## Persisted acquisition mapping refinement
+
+This is the next **agent-recommended, review-first** C3 leaf. The read-only
+projection and negotiated consumers above are delivered; they do not yet
+retain their acquired correlation in the existing owner. Do not reconstruct
+that library, turn its read into a write, or infer installed enrollment.
+
+### Reuse the facts already retained
+
+An admitted prepared action already retains its logical comment/write GUIDs,
+source projection and exact body hash. Its enclosing immutable intent owns the
+provider/endpoint/project/repository/native principal/PR scope. Its original
+receipt owns native thread/comment IDs and any qualified original-version
+evidence. Together these already supply the intent-to-native mapping.
+
+The missing fact is the bounded result of correlating that retained action
+with an actual acquired generation. `ConversationStore.observe_workspace`
+currently projects aggregate counts/digests, while `WorkspaceOperations`
+passes a successfully published generation to that existing transaction.
+Extend this handoff rather than introduce a mapping database, a new acquisition
+loop, or an index keyed by untrusted GUID text.
+
+### Existing operation, one bounded observation
+
+Add an explicitly adopted metadata extension under the existing ReplayStore
+owner and review-operation reservation. Each eligible retained prepared action
+may hold one latest acquired-correlation slot, not a second receipt or history
+of bodies. The enclosing intent/action and original receipt supply identity,
+scope and native target; do not copy those facts into another authoritative
+record. Retain only the selected generation reference, original discussion
+interval/completeness, bounded correlation status/reason and, when available,
+normalized current-object digest. The slot is not original-version proof.
+
+Reuse the current projection's target/actor/content validation against the
+actual normalized generation. Consider only retained operations in the exact
+authenticated scope. Missing preparation, bodyless actions, unknown outcomes,
+missing/partial native evidence and divergent objects retain explicit
+unavailable/conflict semantics. Never upgrade an unknown effect from a match.
+Any action-state or receipt change after an observation must invalidate or
+explicitly render that observation historical; a reader must not combine an
+old result with a newer receipt and present it as a new correlation.
+
+Fund the finite per-action bound before storage admission or adoption. Reuse
+the current review operation/count/action limits and whole-envelope byte
+capacity; no unbounded cross-operation scan or body archive. Adoption must
+reserve space for existing eligible actions atomically or refuse unchanged.
+Mapping updates cannot consume the reservation required to persist pending or
+unknown native outcomes. Capacity refusal never evicts another operation,
+receipt, capture or pending watch delivery.
+
+### Acquisition transaction and recovery
+
+For an explicitly selected capable embedding, project the acquired mapping
+inside the existing conversation/review envelope transaction, after successful
+cache publication and journal observation admission. Use that transaction's
+retained actions/receipts, not a caller-supplied mapping or an earlier unlocked
+snapshot. A stale/rejected journal observation must not overwrite mapping
+metadata. Repeated acquisition of the same evidence is idempotent; concurrent
+or older generations cannot replace newer retained evidence or fabricate
+ordering between overlapping intervals.
+
+Cache publication remains a separate commit. Journal/mapping failure does not
+roll back a published generation, imply absent local effects or justify a new
+forge write. Preserve the existing same-generation reconciliation and
+uncertain-replacement behavior. Do not advance conversation event sequence,
+attention freshness, handled positions or ACKs solely because mapping metadata
+changed. Existing acquisition and attention rules still govern their own
+updates; the mapping introduces no echo shortcut.
+
+Read retained mapping through the existing scoped operation/receipt owner,
+without requiring the cached body to survive. Label it retained evidence with
+its original interval, not a live query or a new wall-clock observation.
+Unavailable cache content cannot manufacture a new result. Later edits or
+deletions may change the next acquired slot without changing the original
+confirmed receipt. Original-version feedback and its immutable captures remain
+with B3/B4. Existing retention/terminal obligations are not relaxed.
+
+### Provider-first delivery and validation
+
+1. Land this refinement before changing strict persisted or serving schemas.
+2. Expand explicit data-owner adoption and the finite acquisition transaction,
+   retaining legacy layouts/default behavior. Old strict readers refuse the
+   expanded layout without rewriting it; rollback cannot silently strip slots
+   or unresolved operations. No read, load or submit implicitly adopts storage.
+3. Separately declare the optional executing owner/read contract through the
+   existing discovery seam before consumers request or expose mapping fields.
+   The existing read-only `observe-comment` result remains read-only. Missing,
+   malformed or withdrawn support disables only this optional feature, never
+   triggers GUID search, legacy mutation fallback or automatic downgrade.
+4. Qualify actual preparation/native receipt/acquisition/retention/readback
+   together, keeping all other publishers, providers and installed hosts open.
+
+Focused source controls must cover create/reply/owned-edit, later intentional
+writes on one logical comment, wrong scope/actor/target, copied tags, unknown
+and partial outcomes, later edits/deletion and partial acquisitions. Exercise
+real-file restart, concurrent load/sync, stale and overlapping intervals,
+same-generation retries, cache publication followed by transaction failure,
+uncertain replacement, receipt changes, capacity refusal and reader rollback.
+Assert no duplicate acquisition/send, no original receipt/identity mutation,
+no false echo/handled/ACK/event progress, funded native-outcome persistence
+and bounded work at the admitted operation/action limits. Storage adoption,
+source fixtures and cached readback do not qualify live providers or authorize
+host activation, deployment, backfill, compaction or resource release.
