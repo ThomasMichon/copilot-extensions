@@ -291,6 +291,15 @@ def execute_review(
                     continue
                 actual = _check_candidate(current, operation, baseline)
                 _check_selected_ownership(action, actual, scope["principal_id"])
+                policy_check = context.review_check
+
+                def checked_policy(selected_operation, selected_action, fresh, *, context):
+                    # The native transport can observe fresher inputs after connecting.
+                    actual = _check_candidate(fresh, operation, baseline)
+                    _check_selected_ownership(action, actual, scope["principal_id"])
+                    return policy_check(selected_operation, selected_action, fresh, context=context)
+
+                context.review_check = checked_policy
                 context.review_check(copy.deepcopy(operation), copy.deepcopy(action), copy.deepcopy(current), context=context)
                 context.check()
                 result["stage"] = "intent_fence"

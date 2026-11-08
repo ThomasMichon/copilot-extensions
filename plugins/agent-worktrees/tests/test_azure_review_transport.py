@@ -34,13 +34,15 @@ def backend(tmp_path):
             if "connectionData?" in self.path:
                 body = {"authorizedUser": {"id": "principal"}}
             elif "/iterations?" in self.path:
-                body = {"value": [{"id": 1, "sourceRefCommit": {"commitId": "a" * 40},
+                body = {"value": [{"id": 1, "sourceRefCommit": {"commitId": control.get("head", "a" * 40)},
                                    "commonRefCommit": {"commitId": "b" * 40}}]}
-            elif any(route in self.path for route in ("/threads?", "/statuses?", "/policy/evaluations?")):
+            elif "/threads?" in self.path:
+                body = {"value": copy.deepcopy(control.get("threads", []))}
+            elif any(route in self.path for route in ("/statuses?", "/policy/evaluations?")):
                 body = {"value": []}
             else:
                 body = {"pullRequestId": 42, "repository": {"id": "repository", "project": {"id": "project"}},
-                        "lastMergeSourceCommit": {"commitId": "a" * 40}}
+                        "lastMergeSourceCommit": {"commitId": control.get("head", "a" * 40)}}
             if callable(control.get("on_read")):
                 control["on_read"]()
             if control.get("identity"):
@@ -318,14 +320,19 @@ def test_native_failures_are_finite_secret_free_and_never_retried(backend, monke
     assert time.monotonic() - start < 3 and len(acquired) == 1
 
 
-def test_real_executor_retains_lost_native_effect_across_reopen_without_resend(backend, tmp_path, monkeypatch):
+@pytest.fixture
+def native_execution(backend, tmp_path, monkeypatch):
     root = Path(__file__).resolve().parents[3]
     monkeypatch.syspath_prepend(str(root / "plugins" / "agent-pull-requests" / "src"))
-    from agent_pull_requests.review_executor import execute_review
     from agent_pull_requests.review_workspace import _digest, build_generation
     from agent_pull_requests.watch_replay_store import ReplayStore
 
     scope, _, kwargs, acquired, _, _ = selected(backend)
+    thread = {"id": 3, "status": 1, "comments": [{
+        "id": 5, "content": "original", "author": {"id": "principal"},
+        "commentType": 1, "parentCommentId": 0,
+    }]}
+    backend[3]["threads"] = [copy.deepcopy(thread)]
     evidence = json.loads((root / "plugins" / "agent-pull-requests" / "docs" /
                            "review-evidence.example.json").read_text())
     evidence["scope"] = copy.deepcopy(scope)
@@ -336,7 +343,7 @@ def test_real_executor_retains_lost_native_effect_across_reopen_without_resend(b
     evidence["sections"]["changes"]["revision"]["iteration"] = 1
     evidence["sections"]["discussions"] = {
         "observed_from": "2026-10-30T00:00:03Z", "observed_to": "2026-10-30T00:00:04Z",
-        "data": [], "complete": True, "errors": [],
+        "data": [thread], "complete": True, "errors": [],
     }
     evidence["sections"]["changes"]["data"] = []
     generation = build_generation(evidence)["generation"]
@@ -357,6 +364,15 @@ def test_real_executor_retains_lost_native_effect_across_reopen_without_resend(b
     store = ReplayStore(tmp_path / "replay", "native-owner")
     store.provision()
     store.adopt_review_operations(lifecycle_checkpoint=lambda: None, expires_at=expiry)
+    return store, intent, generation, attachment, kwargs, acquired, expiry
+
+
+def test_real_executor_retains_lost_native_effect_across_reopen_without_resend(backend, tmp_path, native_execution):
+    from agent_pull_requests.review_executor import execute_review
+    from agent_pull_requests.watch_replay_store import ReplayStore
+
+    store, intent, generation, attachment, kwargs, acquired, expiry = native_execution
+    scope = intent["scope"]
     original = kwargs["review_check"]
 
     def policy(operation, *args, **options):
@@ -385,3 +401,35 @@ def test_real_executor_retains_lost_native_effect_across_reopen_without_resend(b
     assert result["status"] == "unknown" and result["entered_writes"] == 0
     assert result["actions"][0]["attempt_id"] == attempt
     assert sum(row[0] == "POST" for row in backend[2]) == 1 and len(acquired) == 1
+
+
+@pytest.mark.parametrize("drift", ["head", "owned_content"])
+def test_executor_rechecks_observed_connect_time_drift_before_dispatch(backend, native_execution, drift):
+    from agent_pull_requests.review_executor import execute_review
+    from agent_pull_requests.review_workspace import _digest
+
+    store, intent, generation, attachment, kwargs, _, expiry = native_execution
+    if drift == "owned_content":
+        intent["actions"] = [{
+            "id": "edit", "kind": "edit_owned_comment", "thread_id": 3, "comment_id": 5,
+            "body": "selected", "expected_content_id": _digest("original"),
+        }]
+    calls = []
+
+    def policy(*args, **kwargs):
+        calls.append(True)
+        if len(calls) == 3:
+            if drift == "head":
+                backend[3]["head"] = "d" * 40
+            else:
+                backend[3]["threads"][0]["comments"][0]["content"] = "newer native edit"
+
+    kwargs["review_check"] = policy
+    factory = native.ado_review_context_factory(intent["scope"], **kwargs)
+    result = execute_review(
+        store, intent, generation, attachment, context_factory=factory,
+        checkpoint=lambda: None, expires_at=expiry, budget_seconds=10,
+    )
+    assert result["status"] in ("unknown", "candidate_changed")
+    assert result["actions"][0]["state"] == "unknown" and result["actions"][0]["attempt_id"]
+    assert len(calls) == 3 and all(row[0] == "GET" for row in backend[2])

@@ -237,6 +237,31 @@ def writes(backend):
     return [call for call in backend.calls if call[0] != "GET"]
 
 
+def test_fresher_native_policy_inputs_recheck_exact_candidate_before_effect(environment):
+    backend = environment[4]
+    original_context = backend.context
+
+    @contextmanager
+    def context():
+        with original_context() as selected:
+            original_perform = selected.perform
+
+            def perform(operation, action):
+                fresh = selected.read_state()
+                fresh["revision"]["head_sha"] = "d" * 40
+                selected.review_check(operation, action, fresh, context=selected)
+                return original_perform(operation, action)
+
+            selected.perform = perform
+            yield selected
+
+    backend.context = context
+    result = run(environment)
+    assert result["status"] == "candidate_changed"
+    assert result["actions"][0]["state"] == "unknown"
+    assert result["actions"][0]["attempt_id"] and writes(backend) == []
+
+
 @pytest.fixture
 def prepared_environment(environment: tuple, prepared_intent: dict) -> tuple:
     store, selected, _, _, _, _ = environment

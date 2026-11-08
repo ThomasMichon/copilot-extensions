@@ -36,7 +36,10 @@ other principals' votes, redirects and ambient proxies are not supported.
 Native state and action policy are rechecked before a selected effect and
 again after connecting, before dispatch, through that same pinned transport.
 The existing executor retains exact-candidate/ownership checks and persists
-its unknown-effect fence before entering the native effect path.
+its unknown-effect fence before entering the native effect path. Its bound
+policy callback reruns those same candidate/discussion/owned-target checks on
+every fresher snapshot supplied by the transport, including the post-connect
+read. Observed drift refuses dispatch while retaining the unknown attempt.
 
 Each HTTPS exchange shares the caller's finite remaining budget, additionally
 bounded by credential expiry. The existing Fleet resolver owns DNS cleanup;
