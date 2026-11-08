@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 SKILL = Path(__file__).resolve().parents[1] / "skills" / "driving-effort-agendas"
+sys.path.insert(0, str(SKILL / "scripts"))
 SPEC = importlib.util.spec_from_file_location(
     "efforts_agenda_inspector", SKILL / "scripts" / "agenda.py"
 )
@@ -40,6 +41,25 @@ def edit(home: Path, name: str, mutate: Callable[[dict[str, Any]], object]) -> N
     data = json.loads(path.read_text())
     mutate(data)
     path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_root_reads_current_goal_and_preserves_legacy_intent(home: Path) -> None:
+    effort = home / "effort.md"
+    effort.write_text("# Work\n\n## Goal\n\n> Ship the requested behavior.\n\n## Plan\n\nNot the goal.")
+    edit(home, "agenda.json", lambda b: b.update(source={"kind": "effort", "ref": "effort.md#plan"}))
+    assert AGENDA.inspect(home).root == (
+        "> Ship the requested behavior.\n(Source: effort:effort.md#goal)"
+    )
+    effort.write_text("# Work\n\n## Goal\n\nNew objective; preserve the hold.\n")
+    assert "New objective; preserve the hold." in AGENDA.inspect(home).root
+    effort.write_text("# Work\n\n## Guiding Intent\n\nLegacy objective.\n")
+    assert "Legacy objective." in AGENDA.inspect(home).root
+    assert "legacy Guiding Intent" in AGENDA.inspect(home).root
+    effort.write_text("# Work\n\n## Goal\n\n" + "constraint " * 2000)
+    assert "exceeds display budget" in AGENDA.inspect(home).root
+    assert str(effort) in AGENDA.inspect(home).root
+    effort.unlink()
+    assert "Goal unavailable" in AGENDA.inspect(home).root
 
 
 def test_next_is_read_only_and_preserves_unknown_metadata(

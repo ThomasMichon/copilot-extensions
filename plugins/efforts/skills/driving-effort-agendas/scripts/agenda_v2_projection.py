@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from agenda import DeferredBranch, Snapshot, _time
+from agenda_goal import root_goal
 from agenda_v2_schema import definition, record
 
 
 def project(
     documents: dict[str, Any], records: dict[str, Any], *, now: datetime | None = None,
+    home: Path | None = None,
 ) -> Snapshot:
     cursor = documents["cursor"]
     frames, items = cursor["frame_state"], cursor["item_state"]
@@ -20,6 +23,12 @@ def project(
         original = record(records, frames[frame_id]["origin_id"], "frame")
         source = original["source"]
         return f"{source['kind']}:{source['ref']}"
+
+    def goal(frame_id: str) -> str:
+        if home is None:
+            return root(frame_id)
+        original = record(records, frames[frame_id]["origin_id"], "frame")
+        return root_goal(original["source"], home)
 
     def stack(identities: list[str]) -> list[str]:
         labels: list[str] = []
@@ -44,7 +53,7 @@ def project(
         due = at >= _time(saved["revisit_at"], "deferred revisit")
         counts = [items[item_id]["decompositions"] for frame_id in saved_frames
                   for item_id in frames[frame_id]["pending"][:1]]
-        branches.append(DeferredBranch(saved["id"], root(saved_frames[0]), stack(saved_frames),
+        branches.append(DeferredBranch(saved["id"], goal(saved_frames[0]), stack(saved_frames),
             resume, saved["decision_ref"], saved["decision_packet_ref"],
             f"Pending decision: {body['decision_ref']}", origin["created_at"], saved["revisit_at"],
             "Recheck current decision and authority; do not replay the saved effect.",
@@ -55,7 +64,7 @@ def project(
     next_revisit = min((branch.revisit_at for branch in branches if not branch.due),
                       key=lambda value: _time(value, "revisit"), default=None)
     identities = cursor["frames"]
-    root_label = root(identities[0]) if identities else branches[0].root if branches else "No active root"
+    root_label = goal(identities[0]) if identities else branches[0].root if branches else "No active root"
     action, exits, outcomes = "Reconcile canonical acceptance independently.", [], {}
     if identities:
         frame = frames[identities[-1]]

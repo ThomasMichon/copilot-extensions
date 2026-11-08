@@ -167,6 +167,40 @@ test("real extension event path suppresses force and resets only root windows", 
   await runExtensionFixture("native-extension.mjs", "mode: auto\nnative_pressure: nudge\n");
 });
 
+test("production extension registers durable capture, reset replay and the complete paged reader", async () => {
+  await runExtensionFixture("intent-extension.mjs", "mode: manual-only\n");
+});
+
+test("bound config overrides launch config, reloads live, and emergency store skips Goal discovery", async () => {
+  const root = await mkdtemp(join(tmpdir(), "intent-bound-"));
+  try {
+    const bound = join(root, "bound");
+    await mkdir(join(root, ".git"));
+    await mkdir(join(root, ".context-handoff"));
+    await writeFile(join(root, ".context-handoff", "config.yaml"), "mode: auto\n");
+    await mkdir(join(bound, ".git"), { recursive: true });
+    await mkdir(join(bound, ".context-handoff"));
+    await writeFile(join(bound, ".context-handoff", "config.yaml"), "mode: off\n");
+    await writeFile(join(bound, "effort.md"), "# Work\n\n## Goal\n\nBound Goal.\n");
+    await writeFile(join(root, "settings.json"), '{"contextManagementTools":true}');
+    const fixture = fileURLToPath(new URL("./fixtures/intent-bound-extension.mjs", import.meta.url));
+    const loader = new URL("./fixtures/intent-bound-loader.mjs", import.meta.url).href;
+    const extension = fileURLToPath(new URL("../extensions/context-handoff/extension.mjs", import.meta.url));
+    for (const variant of ["immediate", "delayed", "file", "task", "checkpoint"]) {
+      await writeFile(join(bound, ".context-handoff", "config.yaml"), "mode: off\n");
+      await writeFile(join(root, "settings.json"), '{"contextManagementTools":true}');
+      const result = spawnSync(process.execPath, ["--experimental-loader", loader, fixture, extension], {
+        cwd: root, encoding: "utf8", windowsHide: true, timeout: 15000,
+        env: { ...process.env, COPILOT_HOME: root, HOME: root, USERPROFILE: root,
+          FIXTURE_BOUND_CWD: bound, FIXTURE_DELAYED_ID: variant === "immediate" ? "" : "true",
+          FIXTURE_CONSUME: ["file", "task", "checkpoint"].includes(variant) ? variant : "",
+          COPILOT_AGENT_SESSION_ID: "" },
+      });
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("native-selected sessions defer automatic pressure nudges to the host by default", async () => {
   await runExtensionFixture("native-defer-extension.mjs", "mode: auto\n");
 });

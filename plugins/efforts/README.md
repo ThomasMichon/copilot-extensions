@@ -9,6 +9,17 @@ participants (machines, CodeSpaces, containers, branches) doing the work. One
 effort, one folder, one README that everyone — human and agent — reads and
 writes.
 
+The top `## Goal` is the canonical current operator objective. Amend it
+immediately when the operator changes the goal, mission or objective; retain
+earlier intent and authority evidence in Request or its sidecar. Agenda reads
+project this current document rather than maintaining another goal string.
+Legacy efforts explicitly fall back to Guiding Intent. Local source references
+resolve relative to the agenda's repository root (or standalone state home);
+detached managed lanes use an absolute canonical effort reference. An unreadable
+or oversized source is visibly labelled unavailable, never replaced with an
+invented objective. Historical accepted observations remain historical; reading
+the current Goal does not rewrite the ledger or prove approval.
+
 The name is deliberately **not** `feature`, `bug`, or `task`: those nouns are
 owned by issue trackers (GitHub, Gitea, Azure DevOps). An effort is the
 planning workspace *around* tracked work — it spawns and references issues, and
