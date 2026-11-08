@@ -145,6 +145,7 @@ PROBES = {
     "test_host_status_coalesced_flow": 1,
     "test_host_status_shared_host_stream": 1,
     "test_host_status_prior_and_rollback_refusal": 1,
+    "test_host_status_legacy_timeout_compatibility": 1,
     "test_live_question_provider_advertises_actual_capability": 1,
     "test_passive_native_correlation_is_exact_and_charged_to_its_budget": 4,
     "test_current_native_roundtrip_and_durable_outcome": 2,

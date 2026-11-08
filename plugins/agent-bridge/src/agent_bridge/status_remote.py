@@ -14,7 +14,7 @@ from .remote_operations import RemoteOperationService
 from .status_store import SafeId, SelectedAgent, Selection, StatusKind, StatusStore
 
 MAX_HOSTS = 16
-_TRANSIENT = (RemoteBridgeError, CarrierRemoteError, CarrierUnavailable, CarrierBackpressure, TimeoutError, OSError)
+_TRANSIENT = (RemoteBridgeError, CarrierRemoteError, CarrierUnavailable, CarrierBackpressure, TimeoutError, asyncio.TimeoutError, OSError)
 _TERMINAL = {"status_replay_gap", "host_status_unsupported", "unsupported_operation", "unsupported_version"}
 
 

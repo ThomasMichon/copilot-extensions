@@ -41,6 +41,10 @@ def test_host_status_prior_and_rollback_refusal(host_status_provider):
             host_status_provider, capability,
         )
 
+
+def test_host_status_legacy_timeout_compatibility(host_status_api, monkeypatch):
+    host_status.test_status_runtime_handles_distinct_legacy_asyncio_timeout(host_status_api, monkeypatch)
+
 import bridge_http52_evidence as evidence
 from bridge_http_retained_probes import capture_request, record_observations
 from http51_receipt_probes import observe as observe_receipt

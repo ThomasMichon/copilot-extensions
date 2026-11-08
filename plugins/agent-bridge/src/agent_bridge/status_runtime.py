@@ -103,5 +103,5 @@ class StatusRuntime:
                     self.error = "status_runtime_unavailable"
             try:
                 await asyncio.wait_for(self.wake.wait(), timeout=5)
-            except TimeoutError:
+            except (TimeoutError, asyncio.TimeoutError):
                 pass

@@ -268,6 +268,28 @@ def test_local_runtime_starts_and_stops_without_a_new_daemon(api):
     asyncio.run(run())
 
 
+def test_status_runtime_handles_distinct_legacy_asyncio_timeout(api, monkeypatch):
+    class LegacyTimeout(Exception):
+        pass
+
+    calls = []
+
+    async def wait_for(*args, **kwargs):
+        calls.append(True)
+        # Close the created wait coroutine because this fixture supplies the outcome.
+        args[0].close()
+        if len(calls) == 1:
+            raise LegacyTimeout()
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(asyncio, "TimeoutError", LegacyTimeout)
+    monkeypatch.setattr(asyncio, "wait_for", wait_for)
+    api.app.state.ready = False
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(api.app.state.status_runtime.run())
+    assert len(calls) == 2
+
+
 def test_host_stream_is_one_hop_cursor_neutral_bounded_and_releases_reader(api, tmp_db):
     async def run():
         selected = StatusStore(tmp_db)
