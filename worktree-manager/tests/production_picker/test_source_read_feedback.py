@@ -507,6 +507,43 @@ def test_provider_refresh_uses_the_validated_replacement_without_reloading_tabs(
     assert screen._source_failure_marker(screen.machine_idx)[0] == "~"
 
 
+@pytest.mark.parametrize("stale_index", [0, 1])
+def test_successful_provider_fetch_preserves_stale_feedback_until_fresh(monkeypatch, stale_index):
+    from worktree_manager.production_picker.picker_tui import derive
+
+    screen, loader, source = screen_and_loader(provider=True)
+    monkeypatch.setattr(data_ssh, "_resolve_provider_source", lambda *_: True)
+    stale = True
+
+    def fetch(current, **_kwargs):
+        rows = [{"id": f"row-{i}", "title": f"Worktree {i}"} for i in range(2)]
+        if stale:
+            rows[stale_index]["_availability"] = {
+                "status": "stale", "reason": "provider returned cached rows",
+            }
+        return [
+            derive.norm(row, current.machine, current.env, source_kind=current.source_kind,
+                        source_id=current.source_id)
+            for row in rows
+        ]
+
+    monkeypatch.setattr(data_ssh, "_fetch", fetch)
+    for stale in (True, False):
+        loader._refresh_one_serial(source, 0)
+        screen.data = loader.records()
+        assert loader.state_for_source(source.source_id) == "ready"
+        assert loader.read_status_for_source(source.source_id)["has_snapshot"]
+        assert [row["title"] for row in screen.data] == ["Worktree 0", "Worktree 1"]
+        if stale:
+            notice, = worktree_read_feedback(screen)
+            assert notice.cached and notice.reason == "provider returned cached rows"
+            assert "Updates paused" in body(screen)
+            assert "~" in screen._machine_group([screen.machine_idx], True).plain
+        else:
+            assert worktree_read_feedback(screen) == []
+            assert screen.worktrees_view.notice_lines() == []
+
+
 @pytest.mark.parametrize("other_action", [None, "Existing action"])
 def test_retry_key_repaints_loading_before_the_background_reload_finishes(monkeypatch, other_action):
     monkeypatch.setattr(PickerScreen, "_tick", lambda self: None)

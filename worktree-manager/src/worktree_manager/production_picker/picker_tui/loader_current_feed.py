@@ -95,11 +95,20 @@ class CurrentFeedMixin:
             "raw": row,
         }
 
-    def _publish_source_records(self, source, records):
+    def _publish_source_records(self, source, records, *, availability=None):
         """Publish a complete roster and its incarnation under the caller's lock."""
+        if availability is None:
+            for record in records:
+                candidate = (record.get("raw") or {}).get("_availability") or {}
+                if candidate.get("status") == "stale":
+                    availability = candidate
+                    break
         self._records[source.cache_key] = records
         self._state[source.cache_key] = "ready"
-        self._error[source.cache_key] = ""
+        self._error[source.cache_key] = (
+            ReadFailure(availability.get("reason") or "Resident refresh is unavailable", kind="content")
+            if availability and availability.get("status") == "stale" else ""
+        )
         self._feed_complete[source.cache_key] = source.instance_id
 
     def read_status_for_source(self, source_id):
@@ -154,13 +163,13 @@ class CurrentFeedMixin:
                 if advisory:
                     self._records[source.cache_key] = records
                     self._state[source.cache_key] = "loading"
+                    available = availability or (rows[0].get("_availability") if rows else None)
+                    self._error[source.cache_key] = (
+                        ReadFailure(available.get("reason") or "Resident refresh is unavailable", kind="content")
+                        if available and available.get("status") == "stale" else ""
+                    )
                 else:
-                    self._publish_source_records(source, records)
-                available = availability or (rows[0].get("_availability") if rows else None)
-                self._error[source.cache_key] = (
-                    ReadFailure(available.get("reason") or "Resident refresh is unavailable", kind="content")
-                    if available and available.get("status") == "stale" else ""
-                )
+                    self._publish_source_records(source, records, availability=availability)
                 self._feed_backoff[source.cache_key] = 0.25
 
     def _feed_error(
