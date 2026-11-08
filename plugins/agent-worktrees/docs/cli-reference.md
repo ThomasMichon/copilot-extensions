@@ -872,21 +872,10 @@ On Windows, the session-start hook selects the first non-WindowsApps `python`
 on PATH that reports Python 3.10 or newer, falling back to the first such
 `python` when none does; the floor then reports `unsupported-interpreter`.
 
-On Windows, the cold hook checks the shared bootstrap killswitch before entering
-the canonical ownership lifecycle with its existing Python interpreter and one
-native installer child. It passes that interpreter to the installer, avoiding
-redundant bootstrap-shell startup and interpreter discovery while keeping both
-installer ownership checks. Explicit installation contexts never enter this
-legacy path. The standalone bootstrap script remains the no-Python/deployed-copy
-fallback; it forwards the supplied interpreter through both ownership admission
-and the staged installer, including paths containing spaces. Stamp diagnostics
-use UTF-8 and stay on stderr, not in session guidance. The lifecycle owner
-enforces the cold stamp's ten-second child deadline, stopping the installer
-tree before releasing its ownership lease rather than killing the owner from
-the hook.
-The stamp copies the same source tree
-through native filesystem APIs; runtime provisioning remains deferred to first
-tool use.
+The session-start compatibility bootstrap does not stamp or provision a missing
+runtime. Explicit setup or the first tool invocation owns installation instead;
+the Windows first-use dispatcher reports its provisioning progress on stderr and
+respects the selected update authority.
 
 ### Terminal identity
 
@@ -1092,7 +1081,7 @@ Repos without `pr.roles` and non-GitHub providers keep their prior behavior.
 | `pr-comment` | Post a general (non-verdict) comment on the active tracked PR: `pr-comment <body>` |
 | `pr-review` | Publish a review verdict on the active tracked PR: `--approve` / `--request-changes` / `--comment`, with an optional `--body` |
 | `attribution-audit` | Config-only check: flags this repo's `pr.head_pattern` for the branch-name leak class (embeds `{machine}` while `pr.source_attribution` isn't `true`; `{worktree_id}` is never flagged -- it isn't part of `pr_head_name`'s rendering contract, so it can't actually leak). Plain mode prints findings and exits 1 if any are found (0 if none); `--json` exits 0 whenever it can report findings (empty or not). A configuration-load failure exits 1 in both modes |
-| `attribution-prepare` | Emit a source marker, or prepare a UTF-8 `--body-file`, for an external PR tool without provider access. Optional `--tag` supplies an adopter-owned label; `--omit-source` honors anonymous publication. Ordinary `--json` retains `version`, `marker`, `body`, `attributed`. The separate `--comment-origin` mode emits compact `agent-worktrees.comment-origin/v1` data, with `--visibility public` (default) or `internal`; it does not compose or publish a comment. Runs from a managed source worktree; leaves files and remote objects unchanged. See the worktree skill's `pr-attribution.md` reference. |
+| `attribution-prepare` | Emit a source marker, or prepare a UTF-8 `--body-file`, for an external PR tool without provider access. Optional `--tag` supplies an adopter-owned label; `--omit-source` honors anonymous publication. Ordinary `--json` retains `version`, `marker`, `body`, `attributed`. Separate `--comment-origin` emits compact origin data; its optional `--capabilities` discovery and exact `--source-root` plus absolute `--config` support independent consumers without borrowing their CWD. Existing calls keep their CWD-based behavior. No comment composition or publication occurs. See [compact comment-origin](../skills/worktree/references/pr-attribution.md#compact-comment-origin-producer) for the actual contracts, privacy and rollback rules. |
 | `identity-vault status/setup/verify` | Local optional shared-key setup for an already configured agent-vault database and independently running service; no project is required. `--vault-argv` supplies exact vault catalog argv as JSON; optional `--vault-context` supplies its owning validated receipt, not worktrees' context. Setup requires a running service and persists non-secret installation-scoped source selection after population and a fresh cache-loader/encryption probe. Status is read-only; verify exercises the persisted normal reader. `--prompt` is explicit; first-owner creation requires both `--initialize-owner --confirm-first-owner`. See [identity-vault](identity-vault.md). |
 | `pr` | Namespace grouping the `pr-*` verbs |
 

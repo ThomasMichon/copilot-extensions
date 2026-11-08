@@ -12,7 +12,7 @@ from typing import Any
 from uuid import uuid4
 
 from .mux_question_backend import LocalMux
-from .mux_question_forms import Form, MuxQuestionError, answer_text, completion_echo, parse_form
+from .mux_question_forms import Form, MuxQuestionError, answer_text, completion_echo, parse_form, stable_screen
 
 CAPABILITY = "mux_question_answers"
 INSPECTION_TTL = 60.0
@@ -73,7 +73,7 @@ class MuxQuestions:
         ):
             raise MuxQuestionError("rendered choices or field label do not match the native schema")
         fingerprint = hashlib.sha256(json.dumps(
-            [binding, evidence, screen], sort_keys=True,
+            [binding, evidence, stable_screen(screen)], sort_keys=True,
         ).encode()).hexdigest()
         prior = db.execute_read(
             "SELECT inspection_id,state FROM mux_question_answers WHERE session_id=? AND fingerprint=?",
@@ -172,7 +172,7 @@ class MuxQuestions:
                 **result, "sender": body.sender, "answer": expected, "phase": "admitted",
             })
             screen = await current(form.cursor)
-            if screen != inspected.screen:
+            if stable_screen(screen) != stable_screen(inspected.screen):
                 raise MuxQuestionError("screen changed since inspection")
             cursor = form.cursor
             while cursor != target:

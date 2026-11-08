@@ -1,5 +1,8 @@
 """External PR bodies preserve managed attribution policy without provider access."""
 
+from __future__ import annotations
+
+import argparse
 from types import SimpleNamespace
 from pathlib import Path
 import json
@@ -24,9 +27,10 @@ def fixture(mode="codename", source="built-in", explicit=False):
         "codename": "bolted-circuit", "codename_source": source,
         "worktree_path": "fixture-root", "sessions": [],
     }, path=Path("fixture-root.yaml"))
-    config = SimpleNamespace(default_repo=SimpleNamespace(pr=SimpleNamespace(
+    repository = SimpleNamespace(pr=SimpleNamespace(
         source_attribution=mode, source_attribution_configured=explicit,
-    )))
+    ))
+    config = SimpleNamespace(default_repo=repository, repos={"fixture": repository})
     return record, config
 
 
@@ -392,3 +396,338 @@ def test_actual_comment_origin_composes_through_independent_profile_owner(
     assert "cn=bolted-circuit" in prepared["body"]
     assert "private-tree" not in prepared["body"] and "agent-worktrees:source" not in prepared["body"]
     assert prepared["effects"] == "none"
+
+
+def _comment_args(*argv: str) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+    cli.add_parsers(parser.add_subparsers(dest="command", required=True))
+    return parser.parse_args(["attribution-prepare", *argv])
+
+
+def test_origin_discovery_uses_real_front_door_without_source_or_configuration(
+    tmp_path: Path,
+) -> None:
+    import os
+    import subprocess
+    import sys
+
+    root = Path(__file__).resolve().parents[1]
+    script = (
+        "from agent_worktrees import attribution_prepare_cli as c;"
+        "from agent_worktrees.__main__ import main;"
+        "exec('def forbidden(*args, **kwargs):\\n raise AssertionError(\"source discovery\")');"
+        "c.cfg.load_config=forbidden;c.tracking.list_records=forbidden;"
+        "c.tracking.find_worktree_id_by_cwd=forbidden;c.git_ops.git=forbidden;"
+        "raise SystemExit(main(['attribution-prepare','--comment-origin','--capabilities']))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script], cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": str(root / "src")},
+        capture_output=True, text=True, timeout=20,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {
+        "schema": "agent-worktrees.comment-origin-capabilities", "version": 1,
+        "origin_protocol": cli.COMMENT_ORIGIN_PROTOCOL,
+        "capabilities": ["explicit_source_root"], "effects": "none",
+    }
+
+
+@pytest.mark.parametrize("registration", [
+    "ordinary", "alias", "duplicate", "nested", "relative", "withdrawn", "private",
+])
+def test_explicit_origin_parser_uses_exact_owner_not_cwd(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    capfd: pytest.CaptureFixture[str], registration: str,
+) -> None:
+    root = tmp_path / "source"
+    nested = root / "nested"
+    nested.mkdir(parents=True)
+    selected = root
+    if registration == "alias":
+        selected = tmp_path / "alias"
+        try:
+            selected.symlink_to(root, target_is_directory=True)
+        except OSError:
+            pytest.skip("directory alias creation unavailable")
+    state = tmp_path / "project"
+    (state / "worktrees").mkdir(parents=True)
+    record = {
+        "worktree_id": "selected", "branch": "worktree/selected", "repo": "fixture",
+        "machine": "fixture-machine", "platform": "linux", "worktree_path": str(selected),
+        "codename": "bolted-circuit",
+        "codename_source": "custom" if registration == "private" else "built-in",
+        "sessions": [],
+    }
+    original = json.dumps(record)
+    path = state / "worktrees/selected.yaml"
+    path.write_text(original, encoding="utf-8")
+    if registration == "duplicate":
+        (state / "worktrees/other.yaml").write_text(json.dumps({
+            **record, "worktree_id": "other", "branch": "worktree/other",
+        }), encoding="utf-8")
+    config_path = state / "config.yaml"
+    config_path.write_text('{"repo_name":"fixture"}', encoding="utf-8")
+    if registration == "withdrawn":
+        path.unlink()
+    _, config = fixture()
+    config.repo_name = "fixture"
+    configs = []
+    monkeypatch.setattr(
+        cli.cfg, "load_config", lambda path, *, project: configs.append((path, project)) or config,
+    )
+    monkeypatch.setattr(cli.cfg, "project_dir", lambda name=None: state)
+    monkeypatch.chdir(tmp_path)
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        raise AssertionError("explicit origin must not use CWD, Git or source mutation")
+
+    from agent_worktrees import __main__ as native
+
+    monkeypatch.setattr(cli.tracking, "find_worktree_id_by_cwd", forbidden)
+    monkeypatch.setattr(cli.tracking, "save_record", forbidden)
+    monkeypatch.setattr(cli.git_ops, "git", forbidden)
+    monkeypatch.setattr(native, "_resolve_active_project", forbidden)
+    requested = nested if registration == "nested" else Path("source") if registration == "relative" else root
+    argv = [
+        "attribution-prepare",
+        "--comment-origin", "--source-root", str(requested),
+        "--config", str(config_path), "--json",
+    ]
+    if registration == "alias":
+        argv = ["attribution-prepare", "--comment-origin", f"--source-root={requested}",
+                f"--config={config_path}", "--json"]
+    refused = registration in {"duplicate", "nested", "relative", "withdrawn", "private"}
+    assert native.main(argv) == (
+        1 if refused else 0
+    )
+    result = json.loads(capfd.readouterr().out)
+    if refused:
+        assert "error" in result and "origin" not in result
+    else:
+        assert result["origin"] == {"codename": "bolted-circuit"}
+    assert configs == [(config_path, "fixture")]
+    if registration == "withdrawn":
+        assert not path.exists()
+    else:
+        assert path.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.parametrize("argv", [
+    ["--capabilities"],
+    ["--source-root", "/source"],
+    ["--comment-origin", "--capabilities", "--config", "/config"],
+    ["--comment-origin", "--capabilities", "--source-root", "/source"],
+    ["--comment-origin", "--capabilities", "--visibility", "public"],
+    ["--comment-origin", "--capabilities", "--body-file", "unread.md"],
+    ["--comment-origin", "--source-root", "/source"],
+    ["--comment-origin", "--source-root", "/source", "--config", "relative.yaml"],
+    ["--comment-origin", "--source-root", "/source", "--config", "/missing-config.yaml"],
+])
+def test_new_origin_modes_reject_ambiguous_or_ambient_inputs_before_resolution(
+    monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], argv: list[str],
+) -> None:
+    def forbidden(*args: object, **kwargs: object) -> None:
+        raise AssertionError("invalid origin selection must refuse before owner reads")
+
+    monkeypatch.setattr(cli.cfg, "load_config", forbidden)
+    monkeypatch.setattr(cli.tracking, "find_worktree_id_by_cwd", forbidden)
+    assert cli.cmd_attribution_prepare(_comment_args(*argv, "--json")) == 1
+    assert "error" in json.loads(capfd.readouterr().out)
+
+
+@pytest.mark.parametrize("repositories", [1, 2])
+@pytest.mark.parametrize("ambient", ["none", "global", "active"])
+def test_explicit_origin_uses_real_unnamed_config_without_ambient_project(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    capfd: pytest.CaptureFixture[str], repositories: int, ambient: str,
+) -> None:
+    root = tmp_path / "source"
+    root.mkdir()
+    state = tmp_path / "project"
+    (state / "worktrees").mkdir(parents=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    (state / "worktrees/selected.yaml").write_text(json.dumps({
+        "worktree_id": "selected", "branch": "worktree/selected", "repo": "fixture",
+        "machine": "fixture-machine", "platform": "linux", "worktree_path": str(root),
+        "codename": "bolted-circuit", "codename_source": "built-in", "sessions": [],
+    }), encoding="utf-8")
+    config_path = state / "config.yaml"
+    config_path.write_text(json.dumps({
+        "machine": "fixture-machine", "platform": "linux",
+        "repos": {
+            name: {"anchor": str(root)} for name in (
+                ["fixture"] if repositories == 1 else ["fixture", "other"]
+            )
+        },
+    }), encoding="utf-8")
+    monkeypatch.setenv("AGENT_HOME", str(home))
+    active = "unrelated" if ambient == "active" else None
+    monkeypatch.setattr(cli.cfg, "_ACTIVE_PROJECT", active)
+    global_config = home / "global.yaml"
+    if ambient == "global":
+        global_config.write_text('{"repo_name":"unrelated"}', encoding="utf-8")
+    monkeypatch.setattr(cli.cfg, "global_config_path", lambda: global_config)
+    projects = []
+    monkeypatch.setattr(cli.cfg, "project_dir", lambda name=None: projects.append(name) or state)
+    monkeypatch.chdir(tmp_path)
+    assert cli.cmd_attribution_prepare(_comment_args(
+        "--comment-origin", "--source-root", str(root), "--config", str(config_path), "--json",
+    )) == (0 if repositories == 1 else 1)
+    result = json.loads(capfd.readouterr().out)
+    if repositories == 1:
+        assert result["origin"] == {"codename": "bolted-circuit"}
+        assert "fixture" in projects
+    else:
+        assert "error" in result and "origin" not in result
+    assert cli.cfg.active_project() == active
+
+
+def test_unresolved_selected_project_cannot_borrow_another_privacy_policy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str],
+) -> None:
+    root = tmp_path / "source"
+    policy = root / ".copilot-extensions" / "agent-worktrees"
+    policy.mkdir(parents=True)
+    (policy / "config.yaml").write_text('{"pr":{"source_attribution":false}}', encoding="utf-8")
+    other = tmp_path / "other"
+    other.mkdir()
+    state = tmp_path / "project"
+    (state / "worktrees").mkdir(parents=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    (state / "worktrees/selected.yaml").write_text(json.dumps({
+        "worktree_id": "selected", "branch": "worktree/selected", "repo": "producer",
+        "machine": "fixture-machine", "platform": "linux", "worktree_path": str(root),
+        "codename": "bolted-circuit", "codename_source": "built-in", "sessions": [],
+    }), encoding="utf-8")
+    config_path = state / "config.yaml"
+    config_path.write_text(json.dumps({
+        "repo_name": "producer", "machine": "fixture-machine", "platform": "linux",
+        "repos": {
+            "producer": {},
+            "other": {"anchor": str(other), "pr": {"source_attribution": "codename"}},
+        },
+    }), encoding="utf-8")
+    monkeypatch.setenv("AGENT_HOME", str(home))
+    monkeypatch.setattr(cli.cfg, "_ACTIVE_PROJECT", None)
+    monkeypatch.setattr(cli.cfg, "global_config_path", lambda: home / "absent-global.yaml")
+    monkeypatch.setattr(cli.cfg, "_resolve_anchor_from_registry", lambda *args: "")
+    monkeypatch.setattr(cli.cfg, "project_dir", lambda name=None: state)
+    monkeypatch.chdir(tmp_path)
+    assert cli.cmd_attribution_prepare(_comment_args(
+        "--comment-origin", "--source-root", str(root), "--config", str(config_path), "--json",
+    )) == 1
+    result = json.loads(capfd.readouterr().out)
+    assert "error" in result and "bolted-circuit" not in str(result)
+
+
+@pytest.mark.parametrize("failure", ["unreadable", "invalid"])
+def test_selected_privacy_read_failure_cannot_restore_default_attribution(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    capfd: pytest.CaptureFixture[str], failure: str,
+) -> None:
+    import builtins
+
+    root = tmp_path / "source"
+    policy = root / ".copilot-extensions" / "agent-worktrees"
+    policy.mkdir(parents=True)
+    policy_path = policy / "config.yaml"
+    policy_path.write_text('{"pr":{"source_attribution":false}}', encoding="utf-8")
+    state = tmp_path / "project"
+    (state / "worktrees").mkdir(parents=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    (state / "worktrees/selected.yaml").write_text(json.dumps({
+        "worktree_id": "selected", "branch": "worktree/selected", "repo": "producer",
+        "machine": "fixture-machine", "platform": "linux", "worktree_path": str(root),
+        "codename": "bolted-circuit", "codename_source": "built-in", "sessions": [],
+    }), encoding="utf-8")
+    config_path = state / "config.yaml"
+    config_path.write_text(json.dumps({
+        "repo_name": "producer", "machine": "fixture-machine", "platform": "linux",
+        "repos": {"producer": {"anchor": str(root)}},
+    }), encoding="utf-8")
+    monkeypatch.setenv("AGENT_HOME", str(home))
+    monkeypatch.setattr(cli.cfg, "_ACTIVE_PROJECT", None)
+    monkeypatch.setattr(cli.cfg, "global_config_path", lambda: home / "absent-global.yaml")
+    monkeypatch.setattr(cli.cfg, "project_dir", lambda name=None: state)
+    monkeypatch.chdir(tmp_path)
+    args = _comment_args(
+        "--comment-origin", "--source-root", str(root), "--config", str(config_path), "--json",
+    )
+    assert cli.cmd_attribution_prepare(args) == 0
+    assert json.loads(capfd.readouterr().out)["privacy"] == "anonymous"
+    if failure == "invalid":
+        policy_path.write_text("[", encoding="utf-8")
+    else:
+        original_open = builtins.open
+
+        def unavailable(file, *args, **kwargs):
+            if file == policy_path:
+                raise PermissionError("selected policy unavailable")
+            return original_open(file, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "open", unavailable)
+    assert cli.cmd_attribution_prepare(args) == 1
+    result = json.loads(capfd.readouterr().out)
+    assert "error" in result and "bolted-circuit" not in str(result)
+
+
+@pytest.mark.parametrize("selector", ["GIT_DIR", "GIT_COMMON_DIR"])
+def test_actual_origin_policy_ignores_foreign_git_repository_selectors(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    capfd: pytest.CaptureFixture[str], selector: str,
+) -> None:
+    import os
+    import subprocess
+
+    root, other = tmp_path / "source", tmp_path / "other"
+    clean_environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    for repository, anonymous in ((root, True), (other, False)):
+        policy = repository / ".copilot-extensions" / "agent-worktrees"
+        policy.mkdir(parents=True)
+        (policy / "config.yaml").write_text(json.dumps({
+            "pr": {"source_attribution": False if anonymous else "codename"},
+        }), encoding="utf-8")
+        for argv in (
+            ["init", "--template=", "-b", "main"],
+            ["add", ".copilot-extensions/agent-worktrees/config.yaml"],
+            ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+             "commit", "-m", "fixture policy"],
+            ["update-ref", "refs/remotes/origin/main", "HEAD"],
+            ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"],
+        ):
+            subprocess.run(
+                ["git", *argv], cwd=repository, env=clean_environment, check=True,
+                capture_output=True, timeout=20,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+    state = tmp_path / "project"
+    (state / "worktrees").mkdir(parents=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    (state / "worktrees/selected.yaml").write_text(json.dumps({
+        "worktree_id": "selected", "branch": "worktree/selected", "repo": "producer",
+        "machine": "fixture-machine", "platform": "linux", "worktree_path": str(root),
+        "codename": "bolted-circuit", "codename_source": "built-in", "sessions": [],
+    }), encoding="utf-8")
+    config_path = state / "config.yaml"
+    config_path.write_text(json.dumps({
+        "repo_name": "producer", "machine": "fixture-machine", "platform": "linux",
+        "repos": {"producer": {"anchor": str(root)}},
+    }), encoding="utf-8")
+    monkeypatch.setenv("AGENT_HOME", str(home))
+    monkeypatch.setenv(selector, str(other / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(other))
+    monkeypatch.setattr(cli.cfg, "_ACTIVE_PROJECT", None)
+    monkeypatch.setattr(cli.cfg, "global_config_path", lambda: home / "absent-global.yaml")
+    monkeypatch.setattr(cli.cfg, "project_dir", lambda name=None: state)
+    monkeypatch.chdir(tmp_path)
+    assert cli.cmd_attribution_prepare(_comment_args(
+        "--comment-origin", "--source-root", str(root), "--config", str(config_path), "--json",
+    )) == 0
+    result = json.loads(capfd.readouterr().out)
+    assert result["privacy"] == "anonymous" and result["origin"] is None

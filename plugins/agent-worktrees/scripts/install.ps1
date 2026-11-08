@@ -221,6 +221,7 @@ if ($Action -eq 'publish-runtime-helpers' -and (
 )) {
     throw 'Helper publication requires its existing admitted lifecycle.'
 }
+# agent-worktrees:first-use-driver-nonblocking-v1
 # === command-lifecycle: admission before staging ===
 if ($Action -in @('install', 'update', 'provision', 'stamp', 'uninstall', 'repair', 'dev', 'dev-release', 'publish-runtime-helpers')) {
     $admissionProject = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT -and
@@ -233,9 +234,9 @@ if ($Action -in @('install', 'update', 'provision', 'stamp', 'uninstall', 'repai
     } else { $ExecutionContext.SessionState.Path.CurrentFileSystemLocation.ProviderPath }
     $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT = $admissionProject
     $nativeDriverRequired = $Action -in @(
-        'install', 'update', 'provision', 'repair', 'dev', 'dev-release', 'uninstall'
+        'install', 'update', 'provision', 'stamp', 'repair', 'dev', 'dev-release', 'uninstall'
     ) -and $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1'
-    $minimumAdmissionMinor = if ($nativeDriverRequired) { 11 } else { 10 }
+    $minimumAdmissionMinor = if ($nativeDriverRequired -and $Action -ne 'stamp') { 11 } else { 10 }
     $admissionRequirement = "Python 3.$minimumAdmissionMinor+"
     $admissionProbe = @'
 import json,sys
@@ -401,6 +402,16 @@ print(json.dumps(sys.executable, ensure_ascii=True))
         if ($ProvisionMissingRuntime) { $driverArguments += '--provision-missing-runtime' }
         if ($RemoveConfig) { $driverArguments += '--remove-config' }
         $driverParticipant = $env:AGENT_WORKTREES_NATIVE_INSTALLATION -eq '1'
+        if ($env:AGENT_WORKTREES_FIRST_USE_NO_WAIT -eq '1' -and -not $driverParticipant) {
+            $driverArguments += '--fail-if-busy'
+        }
+        if ($env:AGENT_WORKTREES_FIRST_USE_NO_WAIT -eq '1' -and $env:AGENT_WORKTREES_FIRST_USE_EXPECTED_SNAPSHOT) {
+            if ($env:AGENT_WORKTREES_FIRST_USE_EXPECTED_SNAPSHOT -ceq '::absent::') {
+                $driverArguments += '--expect-no-snapshot'
+            } else {
+                $driverArguments += @('--selected-snapshot', $env:AGENT_WORKTREES_FIRST_USE_EXPECTED_SNAPSHOT)
+            }
+        }
         if ($driverParticipant) { $driverArguments += '--check-native' }
         $driverPreviousErrorAction = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'

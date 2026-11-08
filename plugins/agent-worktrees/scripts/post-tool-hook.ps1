@@ -124,7 +124,7 @@ function Invoke-PostToolHook {
         . $factsReader
         $readResult = Invoke-PreparedPostToolRead -Raw $Raw
         if ($null -ne $readResult) {
-            if ($readResult.Count) { [Console]::Out.Write((ConvertTo-Json -InputObject $readResult -Compress)) }
+            if ($readResult.Count) { [Console]::Out.Write((ConvertTo-PreparedWorktreesJson -InputObject $readResult)) }
             return
         }
     }
