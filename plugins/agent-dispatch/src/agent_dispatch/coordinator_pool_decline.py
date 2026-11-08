@@ -91,12 +91,16 @@ def register(app: FastAPI, queue: TaskQueue, bus: EventBus, control_auth: Callab
         return _closeout_response(result)
 
     @app.post("/tasks/{task_id}/pool-decline/settlement")
-    def settlement(task_id: str, body: DeclineBindingBody) -> dict:
+    def settlement(task_id: str, body: DeclineBindingBody, request: Request) -> dict:
         # Bound to an already committed disposition; the queue proves retirement itself.
-        try:
-            result = queue.settle_pool_decline(task_id, **body.model_dump(exclude={"version"}))
-        except TaskError as exc:
-            raise HTTPException(409, detail=str(exc)) from exc
+        gate = request.app.state.drain_gate
+        with gate.track_claim():
+            if gate.draining:
+                raise HTTPException(409, detail="worker decline settlement is inhibited while draining")
+            try:
+                result = queue.settle_pool_decline(task_id, **body.model_dump(exclude={"version"}))
+            except TaskError as exc:
+                raise HTTPException(409, detail=str(exc)) from exc
         return _closeout_response(result)
 
 

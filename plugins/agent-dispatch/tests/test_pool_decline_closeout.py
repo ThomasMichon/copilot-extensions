@@ -572,6 +572,60 @@ def test_drain_waits_for_observation_and_closeout_commit(q, api, ready, monkeypa
     assert gate.claims == 0 and q.get(task_id).status == Status.QUEUED
 
 
+def test_draining_refuses_settlement_before_queue_reconciliation(q, api, ready, monkeypatch):
+    from tests.test_pool_placement import headers
+
+    task_id, binding, _, _ = ready
+    monkeypatch.setattr(q, "settle_pool_decline", lambda *a, **k: pytest.fail("settled while draining"))
+    assert api.post("/drain", headers=headers("data"), json={"timeout": 1, "poll": .05}).json()["drained"]
+    result = api.post(f"/tasks/{task_id}/pool-decline/settlement", headers=headers("data"),
+                      json={"version": 1, **binding})
+    assert result.status_code == 409 and "draining" in result.json()["detail"]
+    assert api.app.state.drain_gate.claims == 0
+
+
+def test_drain_waits_for_admitted_settlement(q, api, ready, monkeypatch):
+    from tests.test_pool_placement import headers
+
+    task_id, binding, _, _ = ready
+    closed = q.close_pool_decline(task_id, **binding)
+    entered, finish, draining = Event(), Event(), Event()
+    gate = api.app.state.drain_gate
+    set_draining, settle = gate.set_draining, q.settle_pool_decline
+
+    def settling(*args, **kwargs):
+        entered.set()
+        assert finish.wait(5)
+        assert gate.claims == 1
+        return settle(*args, **kwargs)
+
+    def observe_drain(value):
+        set_draining(value)
+        if value:
+            draining.set()
+
+    monkeypatch.setattr(q, "settle_pool_decline", settling)
+    monkeypatch.setattr(gate, "set_draining", observe_drain)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        settlement = executor.submit(
+            api.post, f"/tasks/{task_id}/pool-decline/settlement", headers=headers("data"),
+            json={"version": 1, **binding},
+        )
+        try:
+            assert entered.wait(5)
+            drain = executor.submit(
+                api.post, "/drain", headers=headers("data"), json={"timeout": 5, "poll": .05},
+            )
+            assert draining.wait(5)
+            assert gate.claims == 1 and not drain.done()
+        finally:
+            finish.set()
+        result = settlement.result(timeout=5)
+        assert result.status_code == 200 and result.json()["closeout"] == closed.receipt
+        assert drain.result(timeout=5).json()["drained"]
+    assert gate.claims == 0
+
+
 def test_historical_api_replay_does_not_announce_a_later_task_as_queued(q, api, ready, monkeypatch):
     from agent_dispatch.events import EventBus
     from tests.test_pool_placement import headers
