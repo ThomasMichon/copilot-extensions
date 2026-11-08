@@ -463,6 +463,22 @@ def test_resident_freshness_and_stale_label_reach_fleet_rows(tmp_path, capsys):
     assert not any("wsl" in line and "roster)" in line for line in lines)
 
 
+def test_unproven_current_reply_is_not_shown_as_a_plain_count(tmp_path, capsys):
+    """An older resident answers ``quality: "current"`` without the freshness
+    proof or an availability label; the human view still qualifies it."""
+    config = _fake_config(tmp_path, machine="atlas-core", platform="wsl")
+    reply = {"worktrees": [], "projection": {"quality": "current", "observed_at": 1.0}}
+    proc = SimpleNamespace(returncode=0, stdout=json.dumps(reply), stderr="")
+    with patch.object(fleet.cfg, "load_config", return_value=config), \
+         patch.object(fleet.cfg, "load_machines_yaml", return_value=_three_targets()), \
+         patch.object(fleet.cfg, "project_name", return_value="agent-worktrees"), \
+         patch.object(fleet.subprocess, "run", return_value=proc):
+        assert fleet.run_fleet([]) == 0
+    hosts = [line for line in capsys.readouterr().out.splitlines() if line.startswith("  ")]
+    assert len(hosts) == 3
+    assert all("0 worktree(s) (stale roster)" in line for line in hosts)
+
+
 def test_runtime_without_passive_or_saved_roster_is_a_gap(tmp_path):
     """An older host runtime that rejects ``--passive`` (argparse exit 2), or
     a host with no resident and no saved roster (exit 1 with a JSON error),

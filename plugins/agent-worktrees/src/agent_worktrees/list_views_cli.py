@@ -352,9 +352,11 @@ def run_fleet(argv: list[str]) -> int:
         total += n
         availability = row.get("availability")
         status = availability.get("status") if isinstance(availability, dict) else None
+        # Anything not provably current (including an older resident's
+        # unlabeled reply) is qualified, never shown as a plain count.
         saved = (
-            " (saved roster)" if status == "advisory"
-            else " (stale roster)" if availability else ""
+            "" if delegate_cli.host_roster_is_current(row)
+            else " (saved roster)" if status == "advisory" else " (stale roster)"
         )
         print(f"  {label:30} {n} worktree(s){saved}")
     print(f"\n{total} worktree(s) across {len(rows)} host(s).")

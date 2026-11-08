@@ -484,6 +484,38 @@ def test_run_delegates_execute_skips_delegate_of_saved_caller_roster(monkeypatch
     assert payload["executed"] == []
 
 
+def test_run_delegates_probes_passively_so_a_proven_current_roster_authorizes(monkeypatch):
+    """The delegates snapshot reads rosters passively like `fleet`: only a
+    passive reply carries the freshness proof, so a demand read would leave
+    every caller `unknown` and nothing eligible."""
+    hosts = _fleet_hosts({"projection": _CURRENT}, [])
+    probes: list[list[str]] = []
+
+    def _probe(*args, **kwargs):
+        probes.append(list(kwargs["extra_args"]))
+        return hosts.pop(0)
+
+    monkeypatch.setattr(delegate_cli.cfg, "project_name", lambda: "agent-worktrees")
+    monkeypatch.setattr(delegate_cli.cfg, "load_config", lambda: _FLEET_CONFIG)
+    monkeypatch.setattr(
+        delegate_cli.list_views_cli, "_fleet_targets",
+        lambda config: [
+            ("atlas-core", "wsl", "atlas-core-wsl", "bash", True),
+            ("ember", "linux", "ember", "bash", False),
+        ],
+    )
+    monkeypatch.setattr(delegate_cli.list_views_cli, "_probe_host", _probe)
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        assert delegate_cli.run_delegates(["--json"]) == 0
+    payload = json.loads(buf.getvalue())
+
+    assert probes == [["--passive", "--all"], ["--passive", "--all"]]
+    assert [row["id"] for row in payload["eligible"]] == [_DELEGATE_ID]
+    assert payload["eligible"][0]["delegate_finalizable_reason"] == "host-gone"
+
+
 def test_cmd_list_stream_emits_classified_rows_progressively(monkeypatch):
     args = SimpleNamespace(
         mux_details=False,

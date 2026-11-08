@@ -322,7 +322,10 @@ def _fleet_snapshot(
     include_all: bool,
 ) -> list[dict[str, Any]]:
     config = cfg.load_config()
-    extra_args = ["--all"] if include_all else []
+    # Passive like `fleet`: the snapshot never starts, awaits or wakes a host's
+    # status-monitor, and only a passive reply carries the freshness proof that
+    # `host_roster_is_current` requires before a caller can authorize finalization.
+    extra_args = ["--passive", *(["--all"] if include_all else [])]
     rows = [
         list_views_cli._probe_host(
             machine_key,
