@@ -85,6 +85,7 @@ class AdoReviewContext:
             raise ValueError("an actual private credential binding reference is required")
         self.reader = _BoundReader(self)
         self.remaining = None
+        self._permission_url = None
 
     @property
     def scope(self):
@@ -110,6 +111,7 @@ class AdoReviewContext:
             url == self.reader.base + "?api-version=7.1"
             or url.startswith(self.reader.base + "/")
             or method == "GET" and url == policy_url
+            or method == "GET" and url == self._permission_url
         ):
             raise ValueError("review request is outside the selected native PR")
         result = self.request(
@@ -183,6 +185,30 @@ class AdoReviewContext:
                 "complete": evaluations.complete, "data": list(evaluations.records), "error": evaluations.error,
             },
         }
+
+    def require_review_permissions(self, current: dict) -> None:
+        """Evaluate native effective caller permission through the pinned read owner."""
+        from .azure_review_permissions import require_review_permissions
+
+        def read(url: str) -> dict:
+            previous = self._permission_url
+            self._permission_url = url
+            try:
+                result = self.call("GET", url, None)
+            finally:
+                self._permission_url = previous
+            if result.status != 200 or result.continuation:
+                raise ReviewContextUnavailable("native permission read is incomplete")
+            return result.body
+
+        try:
+            require_review_permissions(read, scope=self.scope, pr=current["pr"])
+        except (ValueError, KeyError, TypeError, UnicodeError):
+            raise ReviewContextUnavailable("native review permission information is unavailable") from None
+
+    def check_review(self, operation: dict, action: dict, current: dict) -> None:
+        """Check the selected owner's policy; native factories extend its prerequisites."""
+        self.review_check(operation, action, current, context=self)
 
     @staticmethod
     def marker(operation, action):

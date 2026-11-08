@@ -392,6 +392,12 @@ _Operator-required outcome; agent-recommended slices and validation._
   actions and feedback without credential acquisition for preparation or
   storage-only recovery. Native verifier/source and host enrollment remain
   separate; legacy per-context embedding is retained.
+- [ ] Deliver the finite native effective-permission evaluator through the
+  existing pinned ADO transport: resolve actual Git namespace/action semantics,
+  require repository and exact native target-branch read/review permission
+  before the attempt fence and at dispatch, and preserve unknown attempts on
+  later denial. Actual credential-source grant/audience verification, current
+  custodian admission and strict normal-host enrollment remain separate.
 - [ ] Deliver the actual protected write-owner prerequisite through its
   existing owners, then bind one explicitly selected authenticated host route.
   Injected factories and observation credentials do not satisfy these exits;
@@ -951,6 +957,13 @@ or silently expanding a bounded source claim.
   bounds and unchanged source/resource ownership.
 
 ## Validation Plan
+
+- [ ] Qualify native effective-permission evaluation with contained namespace/
+  action/result parsing, nested/case/Unicode target refs, repository/branch
+  denial, incomplete responses, one pinned material generation and executor
+  denial before/after the durable fence. Preserve legacy embedding,
+  candidate/owned-target guards and unknown-effect no-resend semantics; source
+  controls do not establish live native grants or installed host adoption.
 
 - [x] Qualify the finite request-local workspace factory (#11452): 151 coupled
   lifetime/workspace/selection/owned-edit/attention cases pass with verified
