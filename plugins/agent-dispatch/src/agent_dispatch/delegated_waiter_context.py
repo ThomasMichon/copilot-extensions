@@ -35,11 +35,14 @@ def capture() -> tuple[dict | None, dict[str, str]]:
     if not raw:
         root = os.environ.get(INSTALL_DIR_ENV, "")
         intrinsic = {}
-        if (
-            root and Path(root).is_absolute()
-            and normalized_path(Path(root)) == normalized_path(legacy_install_dir())
-        ):
-            intrinsic[INSTALL_DIR_ENV] = root
+        if root:
+            root_path = Path(root)
+            if (
+                root_path.is_absolute()
+                and normalized_path(root_path) == normalized_path(legacy_install_dir())
+            ):
+                # Eligibility compares the original caller value, not its normalized spelling.
+                intrinsic[INSTALL_DIR_ENV] = root
         return None, intrinsic
     context = _validated_context({"root": str(install_dir()), "receipt": raw})
     return (

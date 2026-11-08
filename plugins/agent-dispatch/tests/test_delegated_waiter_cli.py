@@ -61,7 +61,10 @@ def test_capability_matrix(clean_context, monkeypatch, coordinator, owner):
     assert prefix is not None if spec else prefix is None
 
 
-def test_legacy_default_install_root_negotiates(clean_context, monkeypatch, tmp_path):
+@pytest.mark.parametrize("root_form", ["canonical", "redundant_segments"])
+def test_legacy_default_install_root_negotiates(
+    clean_context, monkeypatch, tmp_path, root_form,
+):
     from contextlib import nullcontext
     from agent_dispatch.delegated_waiter_context import capture
 
@@ -69,6 +72,8 @@ def test_legacy_default_install_root_negotiates(clean_context, monkeypatch, tmp_
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     root = str(tmp_path / ".agent-dispatch")
+    if root_form == "redundant_segments":
+        root = str(tmp_path / "unused" / ".." / ".agent-dispatch")
     monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", root)
     client = SimpleNamespace(health=lambda: {"delegated_run_waiters": {
         "protocol": PROTOCOL, "coordinator_id": "queue",

@@ -1300,6 +1300,10 @@ callback an implicit credential store.
   default-plus-token refusal. An actual source-bound Python `-I` process
   confirms those routing decisions without mocks or service effects.
   Ruff `F,E9`, install-contract and documentation-consistency checks pass.
+- The equivalent-root spelling control also passes: retain the original
+  environment value after proving normalized equivalence, because the
+  credential guard compares that original value exactly. The expanded
+  focused selection passes all 71 cases without skips.
 - These are unit/simple-process results, not full deployed-consumer evidence.
   Preserve the still-open installed consumer, configured-credential,
   live-service/fleet and retained-resource gates. No additional hosted run,
