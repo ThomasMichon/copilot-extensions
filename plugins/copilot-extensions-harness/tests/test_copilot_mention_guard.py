@@ -814,7 +814,7 @@ def test_native_hook_process_counts_and_latency(
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("event", ["read", "shell-read"])
 def test_windows_wrapper_module_attribution(
-    tmp_path: Path, shell: str, event: str,
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], shell: str, event: str,
 ) -> None:
     executable = shutil.which(shell)
     if not executable:
@@ -861,10 +861,11 @@ def test_windows_wrapper_module_attribution(
         assert result.returncode == 0, result.stderr
         assert result.stdout == result.stderr == ""
         samples.append({"variant": variant, "process_seconds": elapsed})
-    print(json.dumps({
-        "shell": shell, "event": event, "baseline_revision": revision,
-        "fixed_fixture_aba": samples,
-    }))
+    with capsys.disabled():
+        print(json.dumps({
+            "shell": shell, "event": event, "baseline_revision": revision,
+            "fixed_fixture_aba": samples,
+        }))
 
 
 @pytest.mark.portfolio_tier("T2")
