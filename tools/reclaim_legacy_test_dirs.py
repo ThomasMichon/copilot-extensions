@@ -30,7 +30,7 @@ deletes anything a person did not explicitly select from a reviewed inventory:
    older than ``--min-age-hours``. It is then renamed aside; the renamed tree
    must be the same directory with an unchanged fingerprint and no detected
    live user before removal. Any mismatch or inspection failure refuses the
-   target and restores its name.
+   target and attempts to restore its name, reporting any restoration failure.
 
 Stop test and capture writers for the selected set before applying a plan.
 Liveness: on Windows the rename refuses sharing violations, but is not a lock
@@ -158,6 +158,14 @@ def _native(path: Path) -> str:
 
 def _identity(info: os.stat_result) -> list[int]:
     return [int(info.st_dev), int(info.st_ino)]
+
+
+def _present(path: Path) -> bool:
+    try:
+        os.lstat(_native(path))
+    except FileNotFoundError:
+        return False
+    return True
 
 
 def survey(path: Path) -> Survey:
@@ -376,18 +384,23 @@ def reclaim(candidate: Candidate, planned: dict[str, Any]) -> None:
         return
     tombstone = path.with_name(f"{path.name}.reclaiming-{os.getpid()}")
     try:
+        if _present(tombstone):
+            candidate.status, candidate.reason = "refused", "quarantine path already exists"
+            return
         os.rename(_native(path), _native(tombstone))
     except OSError as exc:
-        reason = "in use by a live process" if os.name == "nt" else f"rename failed: {exc.strerror or exc}"
-        candidate.status, candidate.reason = "refused", reason
+        candidate.status, candidate.reason = "refused", f"quarantine/rename failed: {exc.strerror or exc}"
         return
 
-    def restore(reason: str) -> None:
-        candidate.status, candidate.reason = "refused", reason
+    def restore(reason: str, *, partial: bool = False) -> None:
+        candidate.status, candidate.reason = "partial" if partial else "refused", reason
         try:
+            if _present(path):
+                candidate.errors.append(f"original path exists; inspect {tombstone}")
+                return
             os.rename(_native(tombstone), _native(path))
         except OSError as exc:
-            candidate.errors.append(f"restore failed, tree left at {tombstone}: {exc.strerror or exc}")
+            candidate.errors.append(f"restore failed; inspect {tombstone}: {exc.strerror or exc}")
 
     try:
         info = os.lstat(tombstone)
@@ -397,30 +410,49 @@ def reclaim(candidate: Candidate, planned: dict[str, Any]) -> None:
     if _identity(info) != planned["identity"]:
         restore("renamed tree is not the reviewed directory")
         return
-    found = survey(tombstone)
+    try:
+        found = survey(tombstone)
+    except (OSError, ValueError) as exc:
+        restore(f"renamed tree inspection failed: {exc}")
+        return
     if found.problem or found.fingerprint != planned["fingerprint"]:
         restore(found.problem or "changed since the plan was reviewed")
         return
-    use, why = in_use(tombstone, frozenset(planned.get("accepted_uninspectable", ())))
+    try:
+        use, why = in_use(tombstone, frozenset(planned.get("accepted_uninspectable", ())))
+    except (OSError, ValueError) as exc:
+        restore(f"renamed tree inspection failed: {exc}")
+        return
     if use is not False:
         restore(why)
         return
-    _remove(tombstone, candidate.errors)
-    if not os.path.lexists(_native(tombstone)):
+    try:
+        _remove(tombstone, candidate.errors)
+    except (OSError, ValueError) as exc:
+        candidate.errors.append(f"removal interrupted: {exc}")
+    try:
+        remaining = _present(tombstone)
+    except OSError as exc:
+        candidate.status, candidate.reason = "partial", "removal outcome could not be verified"
+        candidate.errors.append(f"inspect {tombstone}: {exc}")
+        return
+    if not remaining:
         candidate.status = "reclaimed"
         return
-    candidate.status, candidate.reason = "partial", "some entries could not be removed; removed entries are gone"
-    if os.path.lexists(_native(path)):
-        candidate.errors.append(f"remainder left at {tombstone}")
-        return
-    try:
-        os.rename(_native(tombstone), _native(path))
-    except OSError as exc:
-        candidate.errors.append(f"remainder left at {tombstone}: {exc.strerror or exc}")
+    restore("removal incomplete; some entries may already be gone", partial=True)
 
 
 def _key(path: Path | str) -> str:
     return os.path.normcase(os.path.abspath(str(path)))
+
+
+def inspect_candidate(checkout: Path, path: Path, *, min_age: float, now: float,
+                      accepted: frozenset[str] = frozenset()) -> Candidate:
+    try:
+        return evaluate(checkout, path, min_age=min_age, now=now, accepted=accepted)
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        return Candidate(checkout=str(checkout), path=str(path), status="refused",
+                         reason=f"inspection failed: {exc}")
 
 
 def inventory(repo: Path, checkouts: list[Path] | None, *, min_age: float, now: float,
@@ -436,9 +468,13 @@ def inventory(repo: Path, checkouts: list[Path] | None, *, min_age: float, now: 
     for checkout in registered:
         for name in LEGACY_NAMES:
             path = checkout / name
-            if os.path.lexists(path):
-                candidates.append(evaluate(checkout, path, min_age=min_age, now=now,
-                                           accepted=accepted))
+            try:
+                present = _present(path)
+            except OSError:
+                present = True
+            if present:
+                candidates.append(inspect_candidate(checkout, path, min_age=min_age, now=now,
+                                                    accepted=accepted))
     return candidates
 
 
@@ -509,8 +545,8 @@ def apply_plan(plan_path: Path, *, min_age: float, now: float) -> list[Candidate
             results.append(Candidate(checkout=str(checkout), path=str(path), status="refused",
                                      reason="not a legacy directory of a registered worktree"))
             continue
-        candidate = evaluate(checkout, path, min_age=min_age, now=now,
-                             accepted=frozenset(planned.get("accepted_uninspectable", ())))
+        candidate = inspect_candidate(checkout, path, min_age=min_age, now=now,
+                                      accepted=frozenset(planned.get("accepted_uninspectable", ())))
         if candidate.status != "refused":
             reclaim(candidate, planned)
         results.append(candidate)

@@ -105,14 +105,14 @@ during finalize is excluded.
       supported reclamation command.
 
 ### Track B — Stop unsealed bytecode growth (#10966)
-- [ ] Apply the #10812 selector pattern (call `cache_arguments`, reuse
+- [x] Apply the #10812 selector pattern (call `cache_arguments`, reuse
       `installed-<digest>`) to remaining random-minting launchers:
       worktree-manager runtime launchers, payload-invocation shim
       templates, budget-guidance bin, agent-worktrees hook/payload
       runtime scripts, and installer-embedded launchers.
-- [ ] Where a launcher must still use an unsealed namespace, delete it
+- [x] Where a launcher must still use an unsealed namespace, delete it
       after the child exits.
-- [ ] Supported `python-cache prune [--apply]` in `agent_procutil`
+- [x] Supported `python-cache prune [--apply]` in `agent_procutil`
       (exposed via agent-worktrees CLI): removes `unsealed-*` dirs that
       contain only `.pyc`/`__pycache__`, are older than a grace period, and
       are not held by a live process; never touches `installed-*`.
@@ -196,3 +196,14 @@ The per-track Plan and Validation Plan define implementation and acceptance.
 - Driving #11126 (A), #11122 (B) and #11125 (D) through review and CI.
   Reconciled the existing Windows-wrapper emitted-source declaration as a
   checker prerequisite without relaxing producer/epoch admission.
+
+### 2026-11-08 — Track B merged
+- #11122 merged to `dev` as `fca1943b4788bcb6c7cf15343edf95f9fe9c9e52`
+  after required CI, current-head approval and resolution of review threads.
+  Its source worktree was finalized.
+- Pruning/lazy-dispatch regressions: 67 passed on Windows; focused Linux
+  coverage: 25 passed. Generated shim, Manager, Vault and Index adoption
+  lanes passed, along with contract/generation/lint/size checks.
+- No installed-runtime rollout or real-cache pruning ran. The 24-hour
+  creation-rate observation is still pending an authorized rollout; a
+  source merge does not start that measurement or prove deployment.

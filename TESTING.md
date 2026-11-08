@@ -8352,9 +8352,10 @@ the runner no longer writes them. Reclaiming them is guided, never a sweep:
    metadata fingerprint.
 3. Stop test/capture writers for the selected set, then run
    `--apply-plan plan.json --confirm-writers-stopped`. It re-verifies each target, renames it aside,
-   re-verifies again and only then deletes it. Any change since review, a live
-   or unverifiable process user, or an inspection error restores the tree and
-   reports the refusal; partial outcomes are reported per target.
+   re-verifies again and only then deletes it. Failed checks refuse and attempt
+   restoration without replacing a newly existing original path. Partial or
+   unverifiable removal is not reported as success; retained quarantine paths
+   and restoration errors are reported per target.
 
 Only Git-ignored, untracked, link-free trees older than `--min-age-hours`
 (default 24) qualify. Socket, FIFO and device entries always refuse, even

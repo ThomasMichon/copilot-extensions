@@ -127,6 +127,105 @@ def test_environment_only_tree_is_ready_and_reclaimed_from_plan(repo, tmp_path, 
     assert not list(repo.glob(".test-venvs.reclaiming-*"))
 
 
+def test_existing_quarantine_is_not_overwritten(repo, tmp_path, capsys):
+    target = _legacy(repo)
+    code, plan = _plan(repo, tmp_path, target, capsys=capsys)
+    assert code == 0
+    quarantine = target.with_name(f"{target.name}.reclaiming-{os.getpid()}")
+    quarantine.mkdir()
+    before = quarantine.stat().st_ino
+    code, report = _run("--apply-plan", plan, "--confirm-writers-stopped", capsys=capsys)
+    assert code == 1 and report["candidates"][0]["status"] == "refused"
+    assert target.is_dir() and quarantine.stat().st_ino == before
+
+
+@pytest.mark.parametrize("collision", [False, True])
+def test_post_rename_inspection_error_reports_restore_or_collision(
+    repo, tmp_path, capsys, monkeypatch, collision,
+):
+    target = _legacy(repo)
+    code, plan = _plan(repo, tmp_path, target, capsys=capsys)
+    assert code == 0
+    survey = reclaim.survey
+    created = []
+
+    def failing_survey(path):
+        if ".reclaiming-" in path.name:
+            if collision:
+                target.mkdir()
+                created.append(target.stat().st_ino)
+            raise PermissionError("inspection denied")
+        return survey(path)
+
+    monkeypatch.setattr(reclaim, "survey", failing_survey)
+    code, report = _run("--apply-plan", plan, "--confirm-writers-stopped", capsys=capsys)
+    assert code == 1 and report["candidates"][0]["status"] == "refused"
+    assert target.is_dir()
+    if collision:
+        assert target.stat().st_ino == created[0] and not list(target.iterdir())
+        assert report["candidates"][0]["errors"]
+        assert len(list(repo.glob(".test-venvs.reclaiming-*"))) == 1
+    else:
+        assert (target / "linux" / "plugin" / "python").is_file()
+        assert not list(repo.glob(".test-venvs.reclaiming-*"))
+
+
+def test_removal_exception_reports_irreversible_partial_outcome(repo, tmp_path, capsys, monkeypatch):
+    target = _legacy(repo)
+    code, plan = _plan(repo, tmp_path, target, capsys=capsys)
+    assert code == 0
+
+    def interrupted(path, _errors):
+        (path / "linux" / "plugin" / "python").unlink()
+        raise OSError("storage failure")
+
+    monkeypatch.setattr(reclaim, "_remove", interrupted)
+    code, report = _run("--apply-plan", plan, "--confirm-writers-stopped", capsys=capsys)
+    assert code == 1 and report["candidates"][0]["status"] == "partial"
+    assert target.is_dir() and not (target / "linux" / "plugin" / "python").exists()
+    assert (target / "linux" / "plugin" / "pyvenv.cfg").is_file()
+    assert "removal interrupted" in report["candidates"][0]["errors"][0]
+
+
+def test_unverifiable_removal_outcome_is_not_reported_as_success(repo, tmp_path, capsys, monkeypatch):
+    target = _legacy(repo)
+    code, plan = _plan(repo, tmp_path, target, capsys=capsys)
+    assert code == 0
+    removed = []
+    lstat = reclaim.os.lstat
+
+    def inaccessible(path, *args, **kwargs):
+        if removed and ".reclaiming-" in os.fspath(path):
+            raise PermissionError("outcome unreadable")
+        return lstat(path, *args, **kwargs)
+
+    monkeypatch.setattr(reclaim.os, "lstat", inaccessible)
+    monkeypatch.setattr(reclaim, "_remove", lambda _path, _errors: removed.append(True))
+    code, report = _run("--apply-plan", plan, "--confirm-writers-stopped", capsys=capsys)
+    removed.clear()
+    assert code == 1 and report["candidates"][0]["status"] == "partial"
+    assert "could not be verified" in report["candidates"][0]["reason"]
+    assert len(list(repo.glob(".test-venvs.reclaiming-*"))) == 1
+
+
+def test_later_inspection_timeout_retains_earlier_results(repo, tmp_path, capsys, monkeypatch):
+    first, second = _legacy(repo), _legacy(repo, ".test-runs")
+    code, plan = _plan(repo, tmp_path, first, "--select", second, capsys=capsys)
+    assert code == 0
+    evaluate = reclaim.evaluate
+
+    def timeout(checkout, path, **kwargs):
+        if path == second:
+            raise subprocess.TimeoutExpired("git", 30)
+        return evaluate(checkout, path, **kwargs)
+
+    monkeypatch.setattr(reclaim, "evaluate", timeout)
+    code, report = _run("--apply-plan", plan, "--confirm-writers-stopped", capsys=capsys)
+    assert code == 1
+    assert [row["status"] for row in report["candidates"]] == ["reclaimed", "refused"]
+    assert not first.exists() and second.is_dir()
+
+
 @pytest.mark.parametrize("field,value", [
     ("identity", None),
     ("discard_unclassified", "false"),
@@ -409,7 +508,7 @@ def test_partial_removal_is_reported_and_remainder_restored(repo, tmp_path, caps
     code, report = _run("--apply-plan", plan, "--confirm-writers-stopped", capsys=capsys)
     [result] = report["candidates"]
     assert code == 1 and result["status"] == "partial"
-    assert "removed entries are gone" in result["reason"]
+    assert "entries may already be gone" in result["reason"]
     assert (target / "linux" / "plugin" / "pyvenv.cfg").is_file()
     assert not (target / "linux" / "plugin" / "python").exists()
 
@@ -420,7 +519,7 @@ def test_open_handle_blocks_reclaim_on_windows(repo, tmp_path, capsys):
     code, plan = _plan(repo, tmp_path, target, capsys=capsys)
     with open(target / "linux" / "plugin" / "python", "rb"):
         _code, report = _run("--apply-plan", plan, "--confirm-writers-stopped", capsys=capsys)
-    assert report["candidates"][0]["reason"] == "in use by a live process"
+    assert "rename failed" in report["candidates"][0]["reason"]
     assert target.is_dir()
 
 
