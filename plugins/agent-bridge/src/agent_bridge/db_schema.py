@@ -6,6 +6,8 @@ import sqlite3
 
 from .db_core import SCHEMA_VERSION, _SCHEMA_SQL, _SESSIONS_ENSURE_COLUMNS, log
 from .owner_membership_schema import ensure_schema as ensure_membership_indexes
+from .mux_question_schema import ensure_schema as ensure_mux_question_schema
+from .mux_question_schema import validate_schema as validate_mux_question_schema
 
 
 def validate_cold_recovery_schema(conn: sqlite3.Connection) -> None:
@@ -83,6 +85,8 @@ class _SchemaMixin:
                     validate_exact_live_schema(conn)
                 if recorded is not None and recorded["version"] >= 41:
                     validate_creation_writer_schema(conn)
+                if recorded is not None and recorded["version"] >= 43:
+                    validate_mux_question_schema(conn)
             conn.executescript(_SCHEMA_SQL)
             # Check/set schema version
             row = conn.execute("SELECT version FROM schema_version").fetchone()
@@ -97,6 +101,7 @@ class _SchemaMixin:
                 ensure_creation_launch_schema(conn)
                 ensure_provider_launch_schema(conn)
                 ensure_creation_writer_schema(conn)
+                ensure_mux_question_schema(conn)
                 validate_schema(conn)
                 validate_inbox_schema(conn)
                 validate_consumer_schema(conn)
@@ -106,6 +111,7 @@ class _SchemaMixin:
                 validate_creation_launch_schema(conn)
                 validate_provider_launch_schema(conn)
                 validate_creation_writer_schema(conn)
+                validate_mux_question_schema(conn)
                 conn.execute(
                     "INSERT INTO schema_version (version) VALUES (?)",
                     (SCHEMA_VERSION,),
@@ -125,6 +131,7 @@ class _SchemaMixin:
             validate_creation_launch_schema(conn)
             validate_provider_launch_schema(conn)
             validate_creation_writer_schema(conn)
+            validate_mux_question_schema(conn)
             validate_exact_live_schema(conn)
             conn.commit()
 
@@ -900,3 +907,10 @@ class _SchemaMixin:
             conn.execute("UPDATE schema_version SET version=?", (42,))
             conn.commit()
             log.info("Schema migrated to version 42: retained acquisition Worktrees writer")
+
+        if from_version < 43:
+            ensure_mux_question_schema(conn)
+            validate_mux_question_schema(conn)
+            conn.execute("UPDATE schema_version SET version=?", (43,))
+            conn.commit()
+            log.info("Schema migrated to version 43: durable mux question answer admission")

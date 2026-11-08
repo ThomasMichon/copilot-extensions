@@ -240,12 +240,22 @@ alongside its PID and process-birth identity. Changing the selected runtime does
 not relabel an incumbent process. Legacy beacons without this additive field
 remain readable, but do not establish which build is running.
 
-On Windows, install/update/repair registers future login starts and separately
-ensures the selected interpreter through the owned headless daemon launcher;
-it never starts through an incumbent task's `IgnoreNew` gate or stops that task.
-Disabled configuration creates/starts nothing and leaves existing registrations
-alone. Code application and selected-process readiness do not depend on old
-beacon compatibility or channel cleanup.
+On Windows, install/update preserve scheduling by default: no missing login task
+is created and existing/custom registrations are not rewritten. Explicit
+installation-local scheduling opt-in remains supported. The existing on-demand
+`ensure_owner_running` launcher remains independent of Task Scheduler; capability
+activation (`connection_owner.enabled`) is not scheduling consent.
+Normal install/update with desired task absence still reconciles an independently
+enabled selected Owner; only the explicit `task-retire` command is strictly
+registration-only. Unknown capability status cannot report complete readiness.
+An observed disabled task holds installer startup; without the ScheduledTasks
+module, install remains usable and defers startup to on-demand use instead of
+guessing the task's enablement. Query errors are not successful absence.
+Disabled capability configuration creates/starts nothing and leaves existing
+registrations alone unless task-only retirement is deliberately requested.
+Code application does not depend on old beacon compatibility or channel cleanup.
+See [Windows scheduling](docs/configuration.md#windows-scheduling) for opt-in,
+registration-only retirement, independent holds and state-preservation limits.
 
 An immutable-slot Owner freezes its principal-owned completion identity at
 birth, using the slot's retained runtime helper. A verified selection inequality

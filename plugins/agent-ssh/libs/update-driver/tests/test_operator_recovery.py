@@ -40,12 +40,18 @@ def test_operator_repair_releases_legacy_without_historical_evidence(
     failed = status(failed_id, root=root)
     # Pending work was already accepted before the interruption.
     with closing(sqlite3.connect(root / "queue.sqlite3")) as db, db:
-        db.execute("UPDATE requests SET state='pending' WHERE id=?", (failed_id,))
+        db.execute(
+            "UPDATE requests SET state='pending',error=NULL,started_at=NULL,finished_at=NULL WHERE id=?",
+            (failed_id,),
+        )
     pending = enqueue(
         RequestSpec("fixture", argv=("next",)), runner=failed.runner, root=root,
     )
     with closing(sqlite3.connect(root / "queue.sqlite3")) as db, db:
-        db.execute("UPDATE requests SET state='interrupted' WHERE id=?", (failed_id,))
+        db.execute(
+            """UPDATE requests SET state='interrupted',error='old preparation failure',
+            started_at=1,finished_at=2 WHERE id=?""", (failed_id,),
+        )
 
     def unavailable() -> str:
         pytest.fail("operator authorization must not require kernel boot evidence")
