@@ -357,7 +357,9 @@ def _prepare_venv(name: str, uv: str, *, reinstall: bool, environment: dict[str,
             cmd = [uv, "pip", "install", "--python", str(py)]
             # Manager embeds first-party imports that must outlive retained build inputs.
             cmd.extend([spec] if name == "worktree-manager" else ["-e", spec])
-            if name in ("agent-index", "agent-worktrees"):
+            if name == "agent-index":
+                cmd.extend(["-e", str(REPO / "fleet-manager") + "[auth]"])
+            if name == "agent-worktrees":
                 cmd.extend(["-e", str(REPO / "fleet-manager") + "[auth]"])
             if name == "agent-dispatch":
                 cmd.extend(["-e", str(REPO / "plugins" / "agent-pull-requests") + "[fleet]"])
