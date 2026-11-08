@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
 from .client import DispatchError
 from .queue import SpawnState, Status
-from .supervisor_conclusion import _CONCLUSION_HELD, _CONCLUSION_PENDING
+from .queue_spawn_conclusion import CLAIM_HELD_REARM_CAPABILITY, claim_blocked_rearm_payload
+from .supervisor_conclusion import _CONCLUSION_HELD
 
-#: The Worktrees conclusion reason for a workspace preserved by a live claim.
-_CLAIM_BLOCKED_REASON = "outstanding-obligations"
 #: Bound the per-cycle held-cleanup revisits like other conclusion passes.
 _REARM_PER_CYCLE = 10
 
@@ -52,36 +50,25 @@ def settle_completed_relationship(supervisor: Any, reservation: dict, task: dict
     return False
 
 
-def _claim_blocked_rearm(payload: dict) -> dict | None:
-    """Return a pending retry payload when only a live claim preserved cleanup."""
-    component = payload.get("worktree_cleanup")
-    if isinstance(component, dict):
-        outcome = component.get("outcome")
-        if (
-            component.get("state") != _CONCLUSION_HELD
-            or not isinstance(outcome, dict)
-            or outcome.get("reason") != _CLAIM_BLOCKED_REASON
-        ):
-            return None
-        return {
-            **payload,
-            "action": "pending",
-            "worktree_cleanup": {
-                **component,
-                "state": _CONCLUSION_PENDING,
-                "attempts": 0,
-                "next_attempt_at": 0,
-            },
-        }
-    if payload.get("reason") != _CLAIM_BLOCKED_REASON:
-        return None
-    return {
-        **payload,
-        "action": "pending",
-        "reason": "relationship-settled",
-        "attempts": 0,
-        "next_attempt_at": 0,
-    }
+def _rearm_supported(supervisor: Any) -> bool:
+    """Check the coordinator advertises the fenced re-arm before settling anything.
+
+    An older or rolled-back coordinator lacks the route; cleanup then stays
+    held (never lost) and remains recoverable through control-authorized
+    ``recover-held-cleanup`` until the coordinator is upgraded.
+    """
+    try:
+        health = supervisor.client.health()
+    except DispatchError:
+        return False
+    if isinstance(health, dict) and health.get(CLAIM_HELD_REARM_CAPABILITY) == 1:
+        return True
+    log.warning(
+        "coordinator does not advertise %s; claim-held cleanup stays held "
+        "(recover through recover-held-cleanup or upgrade the coordinator)",
+        CLAIM_HELD_REARM_CAPABILITY,
+    )
+    return False
 
 
 def rearm_claim_held_cleanup(supervisor: Any) -> int:
@@ -102,14 +89,15 @@ def rearm_claim_held_cleanup(supervisor: Any) -> int:
     for res in held:
         if type(res.get("task_relationship_event_id")) is not int:
             continue
-        pending = _claim_blocked_rearm(supervisor._conclusion_retry_payload(res))
-        if pending is not None:
-            candidates.append((str(res["key"]), res, pending))
+        if claim_blocked_rearm_payload(supervisor._conclusion_retry_payload(res)) is not None:
+            candidates.append((str(res["key"]), res))
+    if not candidates or not _rearm_supported(supervisor):
+        return 0
     candidates.sort(key=lambda item: item[0])
     cursor = getattr(supervisor, "_claim_held_rearm_cursor", "")
     split = next((i for i, item in enumerate(candidates) if item[0] > cursor), 0)
     rearmed = 0
-    for key, res, pending in (candidates[split:] + candidates[:split])[:_REARM_PER_CYCLE]:
+    for key, res in (candidates[split:] + candidates[:split])[:_REARM_PER_CYCLE]:
         supervisor._claim_held_rearm_cursor = key
         try:
             task = supervisor.client.get(res["task_id"])
@@ -121,9 +109,7 @@ def rearm_claim_held_cleanup(supervisor: Any) -> int:
             continue
         try:
             supervisor._conclusion_client.rearm_claim_held_conclusion(
-                key,
-                expected_detail=res["conclusion_detail"],
-                conclusion_detail=json.dumps(pending, sort_keys=True, separators=(",", ":")),
+                key, expected_detail=res["conclusion_detail"],
             )
         except DispatchError:
             log.exception("could not re-arm claim-held cleanup for %s", key)

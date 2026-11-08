@@ -20,6 +20,7 @@ from agent_dispatch.assignment_workspace import AssignmentWorkspace
 from agent_dispatch.client import DispatchClient, DispatchError
 from agent_dispatch.coordinator import create_app
 from agent_dispatch.queue import Status, TaskError, TaskQueue
+from agent_dispatch.queue_spawn_conclusion import CLAIM_HELD_REARM_CAPABILITY
 from agent_dispatch.queue_task_relationships import WRITER
 from agent_dispatch.task_obligations import read_snapshot
 from agent_dispatch.task_relationships import AssignmentSubject
@@ -574,14 +575,7 @@ def test_supervisor_settles_exact_relationship_only_after_independent_completion
     assert len(owner.claims) == 1
 
 
-@pytest.mark.parametrize("claimed", [False, True])
-def test_claim_held_retired_cleanup_rearms_only_after_confirmation(
-    assignment, independent_readiness, claimed,
-):
-    from agent_dispatch.supervisor import Supervisor
-    from agent_dispatch.supervisor_relationship_settlement import rearm_claim_held_cleanup
-
-    queue, owner, workspace, task = assignment
+def _settled_retired_attempt(queue, workspace, task, reason="outstanding-obligations"):
     start_managed(queue, workspace, task)
     (reservation,) = queue.list_reservations(task_id=task.id)
     queue.complete(task.id, workspace.worker_id, result={"answer": "proposed"})
@@ -594,9 +588,39 @@ def test_claim_held_retired_cleanup_rearms_only_after_confirmation(
         "reason": "retired-body-cleanup",
         "worktree_cleanup": {
             "state": "held", "attempts": 1,
-            "outcome": {"action": "preserved", "reason": "outstanding-obligations"},
+            "outcome": {"action": "preserved", "reason": reason},
         },
     })
+    return reservation, held_detail
+
+
+def _rearm_supervisor(queue, task, health, get=None):
+    from agent_dispatch.supervisor import Supervisor
+
+    return SimpleNamespace(
+        client=SimpleNamespace(
+            health=lambda: health,
+            get=get or (lambda task_id: asdict(queue.get(task_id))),
+            reconcile_task_relationship=queue.reconcile_task_relationship,
+        ),
+        _pool_reservations=lambda **filters: [
+            asdict(r) for r in queue.list_reservations(task_id=task.id)
+            if r.conclusion_state == filters["conclusion_state"]
+        ],
+        _conclusion_retry_payload=Supervisor._conclusion_retry_payload,
+        _conclusion_client=queue,
+        _matches_pool=lambda _task: True,
+    )
+
+
+@pytest.mark.parametrize("claimed", [False, True])
+def test_claim_held_retired_cleanup_rearms_only_after_confirmation(
+    assignment, independent_readiness, claimed,
+):
+    from agent_dispatch.supervisor_relationship_settlement import rearm_claim_held_cleanup
+
+    queue, owner, workspace, task = assignment
+    reservation, held_detail = _settled_retired_attempt(queue, workspace, task)
     if claimed:
         queue.retire_spawn(
             reservation.key, exact_absence=True, conclusion_state="pending",
@@ -614,19 +638,7 @@ def test_claim_held_retired_cleanup_rearms_only_after_confirmation(
             reservation.key, exact_absence=True, conclusion_state="held",
             conclusion_detail=held_detail,
         )
-    supervisor = SimpleNamespace(
-        client=SimpleNamespace(
-            get=lambda task_id: asdict(queue.get(task_id)),
-            reconcile_task_relationship=queue.reconcile_task_relationship,
-        ),
-        _pool_reservations=lambda **filters: [
-            asdict(r) for r in queue.list_reservations(task_id=task.id)
-            if r.conclusion_state == filters["conclusion_state"]
-        ],
-        _conclusion_retry_payload=Supervisor._conclusion_retry_payload,
-        _conclusion_client=queue,
-        _matches_pool=lambda _task: True,
-    )
+    supervisor = _rearm_supervisor(queue, task, {CLAIM_HELD_REARM_CAPABILITY: 1})
 
     assert rearm_claim_held_cleanup(supervisor) == 0
     assert queue.get_reservation(reservation.key).conclusion_state == "held"
@@ -644,6 +656,55 @@ def test_claim_held_retired_cleanup_rearms_only_after_confirmation(
     assert granted
     assert rearm_claim_held_cleanup(supervisor) == 0
     assert len(owner.claims) == 1
+
+
+@pytest.mark.parametrize("unsettled", ["other-hold", "relationship-bound"])
+def test_queue_rearm_derives_payload_and_refuses_unqualified_holds(
+    assignment, independent_readiness, unsettled,
+):
+    queue, owner, workspace, task = assignment
+    reason = "dirty-worktree" if unsettled == "other-hold" else "outstanding-obligations"
+    reservation, held_detail = _settled_retired_attempt(queue, workspace, task, reason)
+    queue.retire_spawn(
+        reservation.key, exact_absence=True, conclusion_state="held",
+        conclusion_detail=held_detail,
+    )
+    queue.confirm(task.id)
+    if unsettled == "other-hold":
+        assert queue.reconcile_task_relationship(task.id)["state"] == "closed"
+        match = "not held only for a task claim"
+    else:
+        assert queue.task_relationship(task.id)["state"] == "bound"
+        match = "task relationship is not settled"
+
+    with pytest.raises(TaskError, match=match):
+        queue.rearm_claim_held_conclusion(reservation.key, expected_detail=held_detail)
+    held = queue.get_reservation(reservation.key)
+    assert (held.conclusion_state, held.conclusion_detail) == ("held", held_detail)
+
+
+def test_claim_held_rearm_waits_for_coordinator_capability(assignment, independent_readiness):
+    from agent_dispatch.supervisor_relationship_settlement import rearm_claim_held_cleanup
+
+    queue, owner, workspace, task = assignment
+    reservation, held_detail = _settled_retired_attempt(queue, workspace, task)
+    queue.retire_spawn(
+        reservation.key, exact_absence=True, conclusion_state="held",
+        conclusion_detail=held_detail,
+    )
+    queue.confirm(task.id)
+
+    def unexpected_get(_task_id):
+        raise AssertionError("settled a relationship the coordinator cannot re-arm")
+
+    legacy = _rearm_supervisor(queue, task, {"task_relationships": {"version": 1}}, unexpected_get)
+    assert rearm_claim_held_cleanup(legacy) == 0
+    assert queue.get_reservation(reservation.key).conclusion_state == "held"
+    assert queue.task_relationship(task.id)["state"] == "bound"
+
+    upgraded = _rearm_supervisor(queue, task, {CLAIM_HELD_REARM_CAPABILITY: 1})
+    assert rearm_claim_held_cleanup(upgraded) == 1
+    assert queue.get_reservation(reservation.key).conclusion_state == "pending"
 
 
 def test_claim_held_rearm_bounds_attempts_and_rotates_past_failures():
@@ -671,7 +732,7 @@ def test_claim_held_rearm_bounds_attempts_and_rotates_past_failures():
         raise DispatchError(503, "coordinator unavailable")
 
     supervisor = SimpleNamespace(
-        client=SimpleNamespace(get=failing_get),
+        client=SimpleNamespace(get=failing_get, health=lambda: {CLAIM_HELD_REARM_CAPABILITY: 1}),
         _pool_reservations=lambda **_filters: list(reversed(rows)),
         _conclusion_retry_payload=Supervisor._conclusion_retry_payload,
     )

@@ -42,6 +42,44 @@ def _conclusion_payload(raw: object) -> dict[str, object]:
     return payload
 
 
+#: Worktrees' conclusion reason for a workspace preserved only by a live claim.
+CLAIM_BLOCKED_REASON = "outstanding-obligations"
+#: ``/health`` key advertising the fenced claim-held cleanup re-arm route.
+CLAIM_HELD_REARM_CAPABILITY = "claim_held_cleanup_rearm"
+
+
+def claim_blocked_rearm_payload(payload: dict) -> dict | None:
+    """Return a pending retry payload when only a live claim preserved cleanup."""
+    component = payload.get("worktree_cleanup")
+    if isinstance(component, dict):
+        outcome = component.get("outcome")
+        if (
+            component.get("state") != "held"
+            or not isinstance(outcome, dict)
+            or outcome.get("reason") != CLAIM_BLOCKED_REASON
+        ):
+            return None
+        return {
+            **payload,
+            "action": "pending",
+            "worktree_cleanup": {
+                **component,
+                "state": "pending",
+                "attempts": 0,
+                "next_attempt_at": 0,
+            },
+        }
+    if payload.get("reason") != CLAIM_BLOCKED_REASON:
+        return None
+    return {
+        **payload,
+        "action": "pending",
+        "reason": "relationship-settled",
+        "attempts": 0,
+        "next_attempt_at": 0,
+    }
+
+
 class SpawnConclusionMixin:
     """``TaskQueue`` mixin: spawn-reservation conclusion-claim lifecycle."""
 
@@ -128,14 +166,17 @@ class SpawnConclusionMixin:
         key: str,
         *,
         expected_detail: str,
-        conclusion_detail: str,
         claimant_machine: str | None = None,
         now: float | None = None,
     ) -> SpawnReservation:
         """Atomically re-pend retired cleanup held only for a now-settled task claim.
 
-        Compare-and-swap on the exact held detail; an unexpired cleanup lease
-        refuses, and a spent lease is cleared so the ordinary retry can claim it.
+        Compare-and-swap on the exact held detail. Only a Worktrees
+        claim-blocked hold qualifies, the task must be ``COMPLETED`` and the
+        reservation's exact retained relationship must already be closed or
+        absent; the pending payload is derived from the stored detail. An
+        unexpired cleanup lease refuses, and a spent lease is cleared so the
+        ordinary retry can claim it. Other holds stay with control recovery.
         """
         ts = self._now(now)
         with self._connect() as conn:
@@ -153,6 +194,28 @@ class SpawnConclusionMixin:
             ):
                 conn.execute("COMMIT")
                 raise TaskError(f"reservation {key} held cleanup changed")
+            pending = claim_blocked_rearm_payload(_conclusion_payload(row["conclusion_detail"]))
+            if pending is None:
+                conn.execute("COMMIT")
+                raise TaskError(f"reservation {key} cleanup is not held only for a task claim")
+            event_id = row["task_relationship_event_id"]
+            relationship = (
+                conn.execute(
+                    "SELECT task_relationship FROM task_events WHERE task_id = ? AND id = ?"
+                    " AND task_relationship IS NOT NULL",
+                    (row["task_id"], event_id),
+                ).fetchone()
+                if type(event_id) is int
+                else None
+            )
+            state = (
+                _conclusion_payload(relationship["task_relationship"]).get("state")
+                if relationship
+                else None
+            )
+            if state not in {"closed", "absent"}:
+                conn.execute("COMMIT")
+                raise TaskError(f"reservation {key} task relationship is not settled")
             if row["cleanup_claim_token"]:
                 try:
                     expires_at = float(row["cleanup_claim_expires_at"] or 0)
@@ -171,7 +234,7 @@ class SpawnConclusionMixin:
                 "UPDATE spawn_reservations SET updated_at = ?, conclusion_state = 'pending', "
                 "conclusion_detail = ?, cleanup_claim_token = NULL, "
                 "cleanup_claim_expires_at = NULL WHERE key = ?",
-                (ts, conclusion_detail, key),
+                (ts, json.dumps(pending, sort_keys=True, separators=(",", ":")), key),
             )
             updated = conn.execute(
                 "SELECT * FROM spawn_reservations WHERE key = ?", (key,),

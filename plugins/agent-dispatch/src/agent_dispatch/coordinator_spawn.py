@@ -181,7 +181,6 @@ class RearmClaimHeldConclusionBody(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     expected_detail: str
-    conclusion_detail: str
     claimant_machine: str | None = None
 
 
@@ -702,7 +701,6 @@ def register_spawn_routes(
             lambda: queue.rearm_claim_held_conclusion(
                 key,
                 expected_detail=body.expected_detail,
-                conclusion_detail=body.conclusion_detail,
                 claimant_machine=body.claimant_machine,
             )
         )

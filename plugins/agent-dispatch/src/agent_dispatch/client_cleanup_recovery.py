@@ -21,12 +21,11 @@ class CleanupRecoveryClientMixin:
         ))
 
     def rearm_claim_held_conclusion(
-        self, key: str, *, expected_detail: str, conclusion_detail: str,
-        claimant_machine: str | None = None,
+        self, key: str, *, expected_detail: str, claimant_machine: str | None = None,
     ) -> dict:
         return self._unwrap(self._http.post(
             f"/spawn-reservations/{key}/conclusion/rearm-claim-held",
-            json={"expected_detail": expected_detail, "conclusion_detail": conclusion_detail,
+            json={"expected_detail": expected_detail,
                   **({"claimant_machine": claimant_machine} if claimant_machine is not None else {})},
         ))
 
