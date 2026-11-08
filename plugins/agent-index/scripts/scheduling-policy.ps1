@@ -6,7 +6,7 @@ function Initialize-IndexSchedulingPolicy {
     $path = if ($env:AGENT_INDEX_INSTALLATION_CONFIG) { $env:AGENT_INDEX_INSTALLATION_CONFIG }
         else { Join-Path $InstallDir 'installation.json' }
     if (Test-Path -LiteralPath $path) {
-        $document = Get-Content -LiteralPath $path -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $document = Get-Content -LiteralPath $path -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
         if ($document.version -ne 1 -or -not [IO.Path]::IsPathRooted([string]$document.installation.root) -or
             [IO.Path]::GetFullPath([string]$document.installation.root).TrimEnd('\') -ine $InstallDir.TrimEnd('\')) {
             throw 'Index installation policy must name version 1 and this exact installation root'
@@ -60,7 +60,8 @@ function Initialize-IndexSchedulingPolicy {
 }
 
 function Test-IndexStartAllowed {
-    param([string]$Name)
+    param([string]$Name, [switch]$Refresh)
+    if ($Refresh) { Initialize-IndexSchedulingPolicy }
     if ($Name -eq $TaskName -and -not $script:IndexStartService) { return $false }
     if ($Name -eq $EngineTaskName -and -not $script:IndexStartEngine) { return $false }
     $observed = $script:IndexObservedTasks[$Name]

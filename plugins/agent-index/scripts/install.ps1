@@ -2164,13 +2164,16 @@ function Restart-EngineDaemon {
     # is the ONE place a restart is intended -- the explicit engine-runtime update
     # path, decoupled from the service `update` (which must never bounce the engine).
     if ($NoService) { Write-Skip 'Engine daemon restart skipped (-NoService)'; return }
-    if (-not (Test-IndexStartAllowed -Name $EngineTaskName)) { Write-Skip 'Engine start is held'; return }
+    if (-not (Test-IndexStartAllowed -Name $EngineTaskName -Refresh)) { Write-Skip 'Engine start is held'; return }
     # If the operator opted into the advanced task tier, bounce the task; otherwise
     # restart the detached engine user-mode (NO scheduled task, NO elevation).
     if ($null -ne $script:IndexObservedTasks[$EngineTaskName]) {
+        if (-not (Test-IndexStartAllowed -Name $EngineTaskName -Refresh)) { Write-Skip 'Engine restart is held'; return }
         Assert-IndexTaskOwned -Name $EngineTaskName -Observed $script:IndexObservedTasks[$EngineTaskName]
         Stop-ScheduledTask -TaskPath '\' -TaskName $EngineTaskName -ErrorAction Stop
         Start-Sleep -Seconds 1
+        if (-not (Test-IndexStartAllowed -Name $EngineTaskName -Refresh)) { Write-Skip 'Engine restart is held'; return }
+        Assert-IndexTaskOwned -Name $EngineTaskName -Observed $script:IndexObservedTasks[$EngineTaskName]
         Start-ScheduledTask -TaskPath '\' -TaskName $EngineTaskName -ErrorAction Stop
         Write-Ok "Engine daemon restarted via task: $EngineTaskName"
     } elseif (Test-Path $EngineVenvPython) {
@@ -2181,9 +2184,11 @@ function Restart-EngineDaemon {
             throw 'Primary index runtime not installed -- explicitly install it before restarting the engine; engine runtime preserved'
         }
         $cacheArgs = @(Get-IndexPythonCacheArgs -Root $InstallDir)
+        if (-not (Test-IndexStartAllowed -Name $EngineTaskName -Refresh)) { Write-Skip 'Engine restart is held'; return }
         & $managePy -I @cacheArgs -X utf8 -m agent_index engine stop 2>&1 | Out-Host
         if ($LASTEXITCODE -ne 0) { throw 'Primary index runtime failed to stop the engine' }
         Start-Sleep -Seconds 1
+        if (-not (Test-IndexStartAllowed -Name $EngineTaskName -Refresh)) { Write-Skip 'Engine restart is held'; return }
         & $managePy -I @cacheArgs -X utf8 -m agent_index engine start --strict 2>&1 | Out-Host
         if ($LASTEXITCODE -ne 0) { throw 'Primary index runtime failed to restart the engine' }
         Write-Ok 'Engine daemon restarted (user-mode, new engine runtime loaded)'
@@ -2563,7 +2568,7 @@ function Ensure-ServiceRunning {
     # primitive (`agent-index deploy`), which spawns a DETACHED user-mode daemon
     # and flips routing -- robust to a stale/dead active.json. Never a task.
     if ($NoService) { Write-Skip 'Service ensure skipped (-NoService)'; return }
-    if (-not (Test-IndexStartAllowed -Name $TaskName)) { Write-Skip 'Service start is held'; return }
+    if (-not (Test-IndexStartAllowed -Name $TaskName -Refresh)) { Write-Skip 'Service start is held'; return }
     # A client runs NO local indexer daemon: its MCP/CLI reach the designated
     # host's service over the trusted SSH transport (config.client_url ->
     # configured endpoint). Only a host runs a local service. This mirrors the
@@ -2586,10 +2591,12 @@ function Ensure-ServiceRunning {
     # 5.1 from turning the command's stderr (progress, warnings) into a
     # terminating error under this script's 'Stop', and ends with the body.
     $code = Invoke-WithEnvFile -Path $EnvFile -Body {
+        if (-not (Test-IndexStartAllowed -Name $TaskName -Refresh)) { Write-Skip 'Service start is held'; return 'held' }
         $ErrorActionPreference = 'Continue'
         & $activePy -I -X utf8 -m agent_index deploy 2>&1 | Out-Host
         $LASTEXITCODE
     }
+    if ($code -eq 'held') { return }
     if (Test-ServiceHealthy) { Write-Ok 'Service ensured (user-mode daemon)' }
     else { Write-Warn "Service ensure attempted (deploy exit $code) -- endpoint not yet healthy (it may still be starting)" }
 }
@@ -2599,7 +2606,7 @@ function Ensure-EngineRunning {
     # Host-side durable embedding engine, user-mode (NO scheduled task). Left warm
     # if already serving; else started detached from the durable venv.
     if ($NoService) { Write-Skip 'Engine ensure skipped (-NoService)'; return }
-    if (-not (Test-IndexStartAllowed -Name $EngineTaskName)) { Write-Skip 'Engine start is held'; return }
+    if (-not (Test-IndexStartAllowed -Name $EngineTaskName -Refresh)) { Write-Skip 'Engine start is held'; return }
     if ((Get-RequiredRuntimeRole) -ne 'host') { Write-Skip 'Engine ensure skipped (not a configured host)'; return }
     if (-not (Test-Path $EngineVenvPython)) { Write-Skip 'Engine runtime not provisioned -- engine not ensured'; return }
     # Manage the engine from the active (updated) index runtime: the durable
@@ -2611,11 +2618,13 @@ function Ensure-EngineRunning {
     Write-EngineFiles
     # As in Ensure-ServiceRunning, 'Continue' is scoped to the body.
     $code = Invoke-WithEnvFile -Path $EngineEnvFile -Extra @{ AGENT_INDEX_ENGINE_HOME = $EngineHome } -Body {
-        if (Test-EnginePort) { return 'serving' }
+        if (-not (Test-IndexStartAllowed -Name $EngineTaskName -Refresh)) { Write-Skip 'Engine start is held'; return 'held' }
+        if (-not $RequireReady -and (Test-EnginePort)) { return 'serving' }
         $ErrorActionPreference = 'Continue'
         & $managePy -I -X utf8 -m agent_index engine start --strict 2>&1 | Out-Host
         $LASTEXITCODE
     }
+    if ($code -eq 'held') { return }
     if ($code -eq 'serving') { Write-Skip 'Engine already serving -- leaving the warm engine untouched' }
     elseif ($code -eq 0) { Write-Ok 'Engine ensured (user-mode durable daemon)' }
     elseif ($RequireReady) { throw "Engine start exited $code -- the required durable engine is not serving" }
@@ -2640,7 +2649,7 @@ function Invoke-ServiceCutover {
     # routing, drains, and retires the old -- so activation moves the service to the
     # new version with no operator step (invariant #1). No live service -> start one.
     if ($NoService) { Write-Skip 'Service cutover skipped (-NoService)'; return }
-    if (-not (Test-IndexStartAllowed -Name $TaskName)) { Write-Skip 'Service start is held'; return }
+    if (-not (Test-IndexStartAllowed -Name $TaskName -Refresh)) { Write-Skip 'Service start is held'; return }
     if (-not (Test-IndexPublicationFresh -Version $SrcVersion -AllowDowngrade $Force)) {
         Write-Skip 'Newer runtime or stamp superseded service deployment'
         return
@@ -2657,6 +2666,7 @@ function Invoke-ServiceCutover {
     if (-not (Test-Path $LinkPython)) { throw 'Required service runtime is unavailable; service was not updated' }
     Write-ServiceFiles
     Invoke-WithEnvFile -Path $EnvFile -Body {
+        if (-not (Test-IndexStartAllowed -Name $TaskName -Refresh)) { Write-Skip 'Service start is held'; return }
         Write-Step 'Deploying the selected service runtime through its native owner...'
         $previousPreference = $ErrorActionPreference
         try {
