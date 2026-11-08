@@ -206,7 +206,14 @@ A wait timeout, refused or lost reply, or unsettled claim retains the claim
 and checkout, records a visible blocker where the claim is still current, and
 exits nonzero. Rerunning the same command converges: once the task is no longer
 claimed at the declined generation, it settles from the committed receipt and
-finalizes without a second decision or requeue. The claim is never
+finalizes without a second decision or requeue. If Dispatch has already
+placed the requeued task elsewhere, the current task no longer names the
+original decline; the worker then reads
+`GET /tasks/{task_id}/pool-decline/recovery?worker_id=&native_id=&generation=`
+(advertised as `worker_decline_binding_recovery_versions: [1]`), which returns
+the exact original binding and workspace only behind its committed closeout
+receipt, and settles/finalizes that binding. A recovered workspace other than
+the caller's own refuses. The claim is never
 force-released and unrelated obligations are never waived. If another worker
 reclaims the task before settlement, the old claim remains visible as retained
 responsibility for the relationship owner rather than being released.
