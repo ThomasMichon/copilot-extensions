@@ -181,6 +181,31 @@ def test_first_use_reports_an_unsettled_queue_without_retrying(adapter, tmp_path
     assert [(item.id, item.state) for item in core.status(root=root)] == [(request.id, "pending")]
 
 
+def test_first_use_reports_an_abandoned_running_request_without_retrying(
+    adapter, tmp_path, monkeypatch, capsys,
+):
+    import sqlite3
+    from contextlib import closing
+
+    root = tmp_path / "driver"
+    request = core.enqueue(
+        core.RequestSpec("fixture", cwd=str(tmp_path)),
+        runner=core.TrustedRunner((sys.executable, "-c", "raise SystemExit(4)"), str(tmp_path)),
+        root=root,
+    )
+    with closing(sqlite3.connect(root / "queue.sqlite3")) as db, db:
+        db.execute("UPDATE requests SET state='running',started_at=1 WHERE id=?", (request.id,))
+    before = core.status(root=root)
+    monkeypatch.setattr(adapter, "_admission_digest", lambda _args: "a" * 64)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", raising=False)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_RUNTIME_PUBLICATION", raising=False)
+
+    with pytest.raises(core.InterruptedError, match="unsettled"):
+        adapter._foreground(_arguments(tmp_path, action="stamp", fail_if_busy=True), core)
+    assert "::agent-worktrees-driver-busy::" not in capsys.readouterr().err
+    assert core.status(root=root) == before
+
+
 def test_first_use_reselects_a_snapshot_changed_before_custody(adapter, tmp_path, monkeypatch, capsys):
     from contextlib import nullcontext
 
@@ -303,6 +328,59 @@ def test_real_stamp_obeys_selected_authority(tmp_path, mode, interpreter):
     else:
         assert result.returncode == 0, result.stdout + result.stderr
         assert marker.is_file() and (home / ".local" / "bin" / "agent-worktrees.cmd").is_file()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native first-use driver")
+@pytest.mark.parametrize("interpreter", ["current", "python310"])
+def test_real_first_use_reports_abandoned_running_work(tmp_path, interpreter):
+    import sqlite3
+    from contextlib import closing
+
+    python = Path(sys.executable)
+    if interpreter == "python310":
+        value = os.environ.get("COPILOT_EXTENSIONS_TEST_PYTHON_310")
+        if not value:
+            pytest.skip("Python 3.10 test interpreter not supplied")
+        python = Path(value)
+    shell = shutil.which("powershell.exe")
+    if not shell:
+        pytest.skip("Windows PowerShell is unavailable")
+    area = tmp_path.parent.resolve() / ("abandoned-" + uuid.uuid4().hex[:8])
+    area.mkdir()
+    home, project, temporary = (area / name for name in ("h", "p", "t"))
+    for path in (home, project, temporary):
+        path.mkdir()
+    root = home / ".copilot-extensions" / "update-driver"
+    request = core.enqueue(
+        core.RequestSpec("fixture", cwd=str(project)),
+        runner=core.TrustedRunner((str(python), "-c", "raise SystemExit(4)"), str(project)),
+        root=root,
+    )
+    with closing(sqlite3.connect(root / "queue.sqlite3")) as db, db:
+        db.execute("UPDATE requests SET state='running',started_at=1 WHERE id=?", (request.id,))
+    before = core.status(root=root)
+    environment = {
+        key: os.environ[key] for key in (
+            "PATH", "SystemRoot", "WINDIR", "COMSPEC", "PATHEXT", "ProgramFiles", "ProgramFiles(x86)",
+        ) if key in os.environ
+    }
+    environment.update(
+        HOME=str(home), USERPROFILE=str(home), APPDATA=str(area / "appdata"),
+        LOCALAPPDATA=str(area / "localappdata"), TEMP=str(temporary), TMP=str(temporary),
+        PYTHONUTF8="1", PYTHONDONTWRITEBYTECODE="1",
+    )
+    result = subprocess.run(
+        [str(python), "-I", "-S", "-B", str(SCRIPTS / "runtime_install_driver.py"),
+         "--payload", str(SCRIPTS.parent), "--root", str(home / ".agent-worktrees"),
+         "--shell", shell, "--action", "stamp", "--fail-if-busy"],
+        cwd=project, env=environment, capture_output=True, text=True, encoding="utf-8",
+        errors="replace", timeout=90, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode != 0
+    assert "unsettled running work; recovery required" in result.stderr
+    assert "::agent-worktrees-driver-busy::" not in result.stderr
+    assert core.status(root=root) == before
+    assert not (home / ".agent-worktrees").exists()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native first-use locking")
