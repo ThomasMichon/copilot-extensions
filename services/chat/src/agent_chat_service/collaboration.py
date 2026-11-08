@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     import sqlite3
@@ -138,7 +138,11 @@ def receipt(
 ) -> dict[str, Any]:
     result: dict[str, Any] = {"event": store._event(row), "duplicate": duplicate}
     if value is not None:
-        result.update(collaboration=value, thread_root=metadata(store, row["id"])["thread_root"])
+        # _post inserts metadata or validates its exact stored value before forming a receipt.
+        result.update(
+            collaboration=value,
+            thread_root=cast("sqlite3.Row", metadata(store, row["id"]))["thread_root"],
+        )
     return result
 
 

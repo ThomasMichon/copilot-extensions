@@ -14,6 +14,10 @@ from pathlib import Path
 import sys
 import threading
 from types import ModuleType
+from typing import Any, Iterator, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from installer_engine import ReadyCandidate
 
 from .catalog import _resource, installed_catalog
 from .client import ClientError
@@ -101,7 +105,7 @@ def _client_slot() -> Path:
     return slot
 
 
-def _prepare_client(data: dict) -> None:
+def _prepare_client(data: dict[str, Any]) -> None:
     """Called by canonical construction only, before immutable completion."""
     if set(data) != {"slot", "frozen_plugin"} or data["slot"] != str(_client_slot()):
         raise ClientError("construction_slot_invalid", "Chat construction has inconsistent inputs.")
@@ -174,14 +178,18 @@ def validate_service() -> None:
 def client_candidate(
     root: Path, version: str, *, project: Path, uv: Path, python: Path,
     wait_timeout: float = 180, child_timeout: float = 180,
-):
+) -> Iterator[ReadyCandidate]:
     """Retain a completed client candidate without publishing or selecting it.
 
     ``project`` supplies complete independent source-distribution build inputs
     and the unchanged declared local library layout, not a live runtime.
     """
     engine = _engine()
-    with engine.numbered_candidate(
+    if TYPE_CHECKING:
+        from installer_engine import numbered_candidate
+    else:
+        numbered_candidate = engine.numbered_candidate
+    with numbered_candidate(
         root, version, plugin=project, uv=uv, base_python=python,
         extras=("client",), local_packages=_CLIENT_PACKAGES,
         health_module="agent_chat_service.construction", health_callable="validate_client",

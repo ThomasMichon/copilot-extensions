@@ -2,15 +2,20 @@ import json
 import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from typing import Any, Callable, Iterator, ParamSpec, TypeVar
 
 import pytest
 
 import agent_chat_service.store as store_module
 from agent_chat_service import ChatError, ChatStore, __version__, json_bytes, strict_json
 
+P = ParamSpec("P")
+R = TypeVar("R")
+
 
 @pytest.fixture
-def store(tmp_path):
+def store(tmp_path: Path) -> Iterator[ChatStore]:
     instance = ChatStore(tmp_path / "data", "example-installation")
     try:
         yield instance
@@ -18,36 +23,46 @@ def store(tmp_path):
         instance.close()
 
 
-def rpc(store, op, **fields):
+def rpc(store: ChatStore, op: str, **fields: Any) -> dict[str, Any]:
     return store.dispatch({"op": op, **fields})
 
 
-def join(store, codename="agent-a", channel="room", **metadata):
+def join(
+    store: ChatStore, codename: str = "agent-a", channel: str = "room", **metadata: Any,
+) -> dict[str, Any]:
     return rpc(store, "join", channel=channel, actor={"codename": codename, **metadata})
 
 
-def post(store, request_id="request-1", text="hello", channel="room", codename="agent-a"):
+def post(
+    store: ChatStore, request_id: str = "request-1", text: str = "hello",
+    channel: str = "room", codename: str = "agent-a",
+) -> dict[str, Any]:
     return rpc(store, "post", channel=channel, codename=codename,
                text=text, request_id=request_id)
 
 
-def read(store, codename="agent-a", channel="room", **fields):
+def read(
+    store: ChatStore, codename: str = "agent-a", channel: str = "room", **fields: Any,
+) -> dict[str, Any]:
     return rpc(store, "read", channel=channel, codename=codename, **fields)
 
 
-def scan(store, after=None, epoch=None, **fields):
+def scan(
+    store: ChatStore, after: list[dict[str, Any]] | None = None,
+    epoch: str | None = None, **fields: Any,
+) -> dict[str, Any]:
     return rpc(store, "scan", codename="agent-a", epoch=epoch, timeout=0,
                after=after or [{"channel": "room", "event_id": 0}], **fields)
 
 
-def expect(code, function, *args, **kwargs):
+def expect(code: str, function: Callable[P, R], *args: P.args, **kwargs: P.kwargs) -> None:
     with pytest.raises(ChatError) as caught:
         function(*args, **kwargs)
     assert caught.value.code == code
     assert caught.value.as_dict() == {"error": code, "message": str(caught.value)}
 
 
-def test_independent_nonconsuming_pages_and_forward_cas(store):
+def test_independent_nonconsuming_pages_and_forward_cas(store: ChatStore) -> None:
     join(store)
     join(store, "agent-b")
     events = [post(store, str(number))["event"] for number in range(3)]
@@ -64,7 +79,7 @@ def test_independent_nonconsuming_pages_and_forward_cas(store):
            expected_cursor=events[1]["id"], next_cursor=events[0]["id"])
 
 
-def test_restart_dedup_snapshot_identity_and_monotonic_events(store, tmp_path):
+def test_restart_dedup_snapshot_identity_and_monotonic_events(store: ChatStore, tmp_path: Path) -> None:
     join(store, machine="example-host", session_id="session-1")
     original = post(store)["event"]
     join(store, session_id="session-2")
@@ -84,7 +99,7 @@ def test_restart_dedup_snapshot_identity_and_monotonic_events(store, tmp_path):
         reopened.close()
 
 
-def test_expected_owner_leave_succession_and_inactive_cursor(store):
+def test_expected_owner_leave_succession_and_inactive_cursor(store: ChatStore) -> None:
     actor = join(store, machine="example-host", worktree_id="example-worktree",
                  session_id="session-1")["actor"]
     event = post(store)["event"]
@@ -101,7 +116,9 @@ def test_expected_owner_leave_succession_and_inactive_cursor(store):
     assert not rpc(store, "leave", channel="absent", codename="absent")["active"]
 
 
-def test_committed_post_retry_after_leave_is_reconciled_without_rejoining(store, tmp_path):
+def test_committed_post_retry_after_leave_is_reconciled_without_rejoining(
+    store: ChatStore, tmp_path: Path,
+) -> None:
     join(store, session_id="session-1")
     original = post(store)["event"]
     rpc(store, "leave", channel="room", codename="agent-a")
@@ -118,7 +135,7 @@ def test_committed_post_retry_after_leave_is_reconciled_without_rejoining(store,
         reopened.close()
 
 
-def test_post_failure_rolls_back_counter_event_and_request_identity(store):
+def test_post_failure_rolls_back_counter_event_and_request_identity(store: ChatStore) -> None:
     join(store)
     retained = post(store)["event"]
     before = dict(store._db.execute("SELECT key, value FROM settings"))
@@ -138,7 +155,7 @@ def test_post_failure_rolls_back_counter_event_and_request_identity(store):
     assert post(store, "failed-request")["duplicate"]
 
 
-def test_full_quota_keeps_dedup_leave_and_cursor_available(store):
+def test_full_quota_keeps_dedup_leave_and_cursor_available(store: ChatStore) -> None:
     store.max_events = 1
     join(store)
     original = post(store)["event"]
@@ -151,7 +168,7 @@ def test_full_quota_keeps_dedup_leave_and_cursor_available(store):
     assert read(store)["messages"] == []
 
 
-def test_concurrent_retries_commit_one_effect(store):
+def test_concurrent_retries_commit_one_effect(store: ChatStore) -> None:
     join(store)
     with ThreadPoolExecutor(max_workers=8) as executor:
         futures = [executor.submit(post, store) for _ in range(8)]
@@ -160,7 +177,7 @@ def test_concurrent_retries_commit_one_effect(store):
     assert len(read(store)["messages"]) == 1
 
 
-def test_scan_paging_contains_no_bodies_or_semantic_progress(store):
+def test_scan_paging_contains_no_bodies_or_semantic_progress(store: ChatStore) -> None:
     join(store)
     join(store, channel="other")
     events = [post(store, "one")["event"],
@@ -183,7 +200,7 @@ def test_scan_paging_contains_no_bodies_or_semantic_progress(store):
            first["epoch"])
 
 
-def test_pending_hint_crash_keeps_exact_body_unread(store, tmp_path):
+def test_pending_hint_crash_keeps_exact_body_unread(store: ChatStore, tmp_path: Path) -> None:
     join(store)
     original = post(store, text="recover this exact body")["event"]
     hint = scan(store)
@@ -200,7 +217,7 @@ def test_pending_hint_crash_keeps_exact_body_unread(store, tmp_path):
         reopened.close()
 
 
-def test_unicode_and_escaped_pages_never_advance_omitted_events(store):
+def test_unicode_and_escaped_pages_never_advance_omitted_events(store: ChatStore) -> None:
     join(store, machine="\U00010000" * 250, repo="\U00010001" * 250,
          worktree_id="\U00010002" * 250, session_id="\U00010003" * 250)
     for number in range(100):
@@ -216,7 +233,7 @@ def test_unicode_and_escaped_pages_never_advance_omitted_events(store):
     assert read(store)["cursor"] == 0
 
 
-def test_shared_waiter_bound_is_released(store):
+def test_shared_waiter_bound_is_released(store: ChatStore) -> None:
     join(store)
     held = [store._waiters.acquire(False) for _ in range(store.max_waiters)]
     try:
@@ -231,7 +248,9 @@ def test_shared_waiter_bound_is_released(store):
 
 
 @pytest.mark.parametrize("end", ["leave-rejoin", "close"])
-def test_held_scan_observes_membership_or_store_end(store, monkeypatch, end):
+def test_held_scan_observes_membership_or_store_end(
+    store: ChatStore, monkeypatch: pytest.MonkeyPatch, end: str,
+) -> None:
     join(store)
     started = threading.Event()
     result = []
@@ -273,7 +292,9 @@ def test_held_scan_observes_membership_or_store_end(store, monkeypatch, end):
 @pytest.mark.parametrize("transition", [
     "leave-rejoin", "active-rejoin", "other-leave-rejoin", "failed-leave",
 ])
-def test_held_membership_generation_is_independent_of_clock(store, monkeypatch, op, transition):
+def test_held_membership_generation_is_independent_of_clock(
+    store: ChatStore, monkeypatch: pytest.MonkeyPatch, op: str, transition: str,
+) -> None:
     monkeypatch.setattr(store_module, "_utc", lambda: "2000-01-01T00:00:00Z")
     joined_at = join(store)["membership"]["joined_at"]
     join(store, channel="other")
@@ -327,7 +348,7 @@ def test_held_membership_generation_is_independent_of_clock(store, monkeypatch, 
         thread.join(3)
 
 
-def test_database_busy_is_explicit_without_partial_post(store, tmp_path):
+def test_database_busy_is_explicit_without_partial_post(store: ChatStore, tmp_path: Path) -> None:
     join(store)
     blocker = sqlite3.connect(tmp_path / "data" / "chat.sqlite3", isolation_level=None)
     try:
@@ -353,7 +374,9 @@ def test_database_busy_is_explicit_without_partial_post(store, tmp_path):
     {"op": "scan", "codename": "agent-a", "epoch": None,
      "after": [{"channel": "room", "event_id": 0}], "timeout": 0},
 ])
-def test_drain_freezes_all_rpc_without_mutating_conversation(store, payload):
+def test_drain_freezes_all_rpc_without_mutating_conversation(
+    store: ChatStore, payload: dict[str, Any],
+) -> None:
     join(store)
     event = post(store)["event"]
     before = list(store._db.iterdump())
@@ -377,7 +400,9 @@ def test_drain_freezes_all_rpc_without_mutating_conversation(store, payload):
 
 @pytest.mark.parametrize("op", ["wait", "scan"])
 @pytest.mark.parametrize("rollback", [False, True])
-def test_drain_fences_held_waits_even_after_immediate_undrain(tmp_path, monkeypatch, op, rollback):
+def test_drain_fences_held_waits_even_after_immediate_undrain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, op: str, rollback: bool,
+) -> None:
     store = ChatStore(tmp_path / "data", "example-installation", max_waiters=1)
     join(store)
     entered = threading.Event()
@@ -428,7 +453,9 @@ def test_drain_fences_held_waits_even_after_immediate_undrain(tmp_path, monkeypa
         thread.join(3)
 
 
-def test_drain_waits_for_existing_write_commit_and_restart_preserves_it(store, tmp_path, monkeypatch):
+def test_drain_waits_for_existing_write_commit_and_restart_preserves_it(
+    store: ChatStore, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     join(store)
     prepared, release, draining, drained = (threading.Event() for _ in range(4))
     original_post = store._post
@@ -469,7 +496,9 @@ def test_drain_waits_for_existing_write_commit_and_restart_preserves_it(store, t
 
 
 @pytest.mark.parametrize("op", ["wait", "scan"])
-def test_waiter_failure_releases_lifecycle_count_and_capacity(store, monkeypatch, op):
+def test_waiter_failure_releases_lifecycle_count_and_capacity(
+    store: ChatStore, monkeypatch: pytest.MonkeyPatch, op: str,
+) -> None:
     join(store)
 
     def fail(*args):
@@ -501,7 +530,7 @@ def test_waiter_failure_releases_lifecycle_count_and_capacity(store, monkeypatch
     "negative-infinity", "numeric-overflow", "surrogate-value", "surrogate-key",
     "invalid-utf8", "multiple-values", "oversized-body", "deep-nesting",
 ])
-def test_strict_serialized_inputs_are_bounded_and_unambiguous(body):
+def test_strict_serialized_inputs_are_bounded_and_unambiguous(body: bytes) -> None:
     expect("invalid", strict_json, body)
 
 
@@ -518,13 +547,15 @@ def test_strict_serialized_inputs_are_bounded_and_unambiguous(body):
     {"op": "wait", "channel": "room", "codename": "agent-a", "timeout": 301},
     {"op": "wait", "channel": "room", "codename": "agent-a", "batch_ms": 5001},
 ])
-def test_invalid_operation_fields_and_controls_are_explicit(store, payload):
+def test_invalid_operation_fields_and_controls_are_explicit(
+    store: ChatStore, payload: object,
+) -> None:
     join(store)
     expect("invalid", store.dispatch, payload)
     assert read(store)["cursor"] == 0
 
 
-def test_legacy_epoch_upgrade_preserves_events_and_semantic_cursor(store, tmp_path):
+def test_legacy_epoch_upgrade_preserves_events_and_semantic_cursor(store: ChatStore, tmp_path: Path) -> None:
     join(store)
     original = post(store)["event"]
     rpc(store, "cursor", channel="room", codename="agent-a",
@@ -549,7 +580,9 @@ def test_legacy_epoch_upgrade_preserves_events_and_semantic_cursor(store, tmp_pa
 
 @pytest.mark.parametrize("field", ["max_channels", "max_actors", "max_memberships",
                                    "max_channel_members"])
-def test_membership_capacity_is_finite_and_inactive_rows_are_retained(store, field):
+def test_membership_capacity_is_finite_and_inactive_rows_are_retained(
+    store: ChatStore, field: str,
+) -> None:
     setattr(store, field, 1)
     join(store)
     if field == "max_channels":
@@ -565,13 +598,13 @@ def test_membership_capacity_is_finite_and_inactive_rows_are_retained(store, fie
     "text", ["", " ", "\0", "x\0y", "\u00e9" * 4097, "\ud800", 1],
     ids=["empty", "whitespace", "nul", "embedded-nul", "oversized-utf8", "surrogate", "nonstring"],
 )
-def test_message_byte_and_unicode_bounds(store, text):
+def test_message_byte_and_unicode_bounds(store: ChatStore, text: str) -> None:
     join(store)
     expect("invalid", post, store, text=text)
     assert post(store, text="\u00e9" * 4096)["event"]["text"] == "\u00e9" * 4096
 
 
-def test_actor_aggregate_and_request_id_bounds(store):
+def test_actor_aggregate_and_request_id_bounds(store: ChatStore) -> None:
     metadata = {key: "x" * 1000 for key in ("machine", "environment", "repo", "worktree_id")}
     join(store, **metadata)
     expect("invalid", join, store, session_id="s" * 200)
@@ -580,7 +613,9 @@ def test_actor_aggregate_and_request_id_bounds(store):
     assert post(store, "r" * 128)["event"]["request_id"] == "r" * 128
 
 
-def test_quiet_wait_and_plural_post_batch_do_not_consume_reading(store, monkeypatch):
+def test_quiet_wait_and_plural_post_batch_do_not_consume_reading(
+    store: ChatStore, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import time
 
     join(store)
