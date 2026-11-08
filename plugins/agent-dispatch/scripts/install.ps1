@@ -2909,6 +2909,15 @@ if (`$ResolveOnly) {
 if (-not `$_cache.StartsWith('\\?\')) {
     `$_cache = if (`$_cache.StartsWith('\\')) { '\\?\UNC\' + `$_cache.Substring(2) } else { '\\?\' + `$_cache }
 }
+# Reuse the sealed installed-<digest> bytecode cache when install evidence is valid.
+`$_mintedCache = `$_cache
+try {
+    `$_selectedCache = & `$_py -I -B -X ('pycache_prefix=' + `$_cache) -c "import json,os,sys; from agent_procutil.python_cache import cache_arguments as c; p=c(sys.argv[1],runtime=sys.executable)[1].split('=',1)[1]; print(json.dumps(p if os.path.basename(p).startswith('installed-') else ''))" `$_root 2>`$null
+    if (`$LASTEXITCODE -eq 0 -and @(`$_selectedCache).Count -eq 1) {
+        `$_selectedCache = [string](`$_selectedCache | ConvertFrom-Json)
+        if (`$_selectedCache) { `$_cache = `$_selectedCache }
+    }
+} catch {}
 `$env:PYTHONUTF8 = '1'
 `$env:AGENT_DISPATCH_INSTALL_DIR = '$($InstallDir -replace "'","''")'
 Set-Location -LiteralPath `$PSScriptRoot
@@ -2965,6 +2974,7 @@ try {
     # coordinator alive without the tee rather than let logging kill the service.
     & `$_py -X ('pycache_prefix=' + `$_cache) -m agent_dispatch serve *> `$null
 }
+if (`$_cache -eq `$_mintedCache) { try { [IO.Directory]::Delete(`$_mintedCache, `$true) } catch {} }
 "@
     [System.IO.File]::WriteAllText($launcher, $launcherBody, $utf8NoBom)
 
@@ -3594,6 +3604,15 @@ if (`$ResolveOnly) {
 if (-not `$_cache.StartsWith('\\?\')) {
     `$_cache = if (`$_cache.StartsWith('\\')) { '\\?\UNC\' + `$_cache.Substring(2) } else { '\\?\' + `$_cache }
 }
+# Reuse the sealed installed-<digest> bytecode cache when install evidence is valid.
+`$_mintedCache = `$_cache
+try {
+    `$_selectedCache = & `$_py -I -B -X ('pycache_prefix=' + `$_cache) -c "import json,os,sys; from agent_procutil.python_cache import cache_arguments as c; p=c(sys.argv[1],runtime=sys.executable)[1].split('=',1)[1]; print(json.dumps(p if os.path.basename(p).startswith('installed-') else ''))" `$_root 2>`$null
+    if (`$LASTEXITCODE -eq 0 -and @(`$_selectedCache).Count -eq 1) {
+        `$_selectedCache = [string](`$_selectedCache | ConvertFrom-Json)
+        if (`$_selectedCache) { `$_cache = `$_selectedCache }
+    }
+} catch {}
 `$env:PYTHONUTF8 = '1'
 `$env:AGENT_DISPATCH_INSTALL_DIR = '$($InstallDir -replace "'","''")'
 Set-Location -LiteralPath `$PSScriptRoot
@@ -3707,6 +3726,7 @@ try {
     # Teeing to the log failed -- keep the supervisor alive without the tee.
     & `$_py -X ('pycache_prefix=' + `$_cache) -m agent_dispatch @argsList *> `$null
 }
+if (`$_cache -eq `$_mintedCache) { try { [IO.Directory]::Delete(`$_mintedCache, `$true) } catch {} }
 "@
     [System.IO.File]::WriteAllText($launcher, $launcherBody, $utf8NoBom)
     return $launcher

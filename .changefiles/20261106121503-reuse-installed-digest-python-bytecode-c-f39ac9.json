@@ -1,0 +1,33 @@
+{
+  "comment": "Reuse installed-<digest> Python bytecode caches in the remaining shims and installer launchers, delete self-minted unsealed caches after waited children exit, and add a dry-run-by-default 'agent-worktrees python-cache prune' command",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "budget-guidance",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

@@ -271,7 +271,6 @@ def test_generated_task_launcher_routes_late_imports_outside_the_slot(tmp_path, 
     assert host, "native PowerShell is required"
     env = {key: value for key, value in os.environ.items() if not key.upper().startswith("PYTHON")}
     before = {path: path.read_bytes() for path in slot.rglob("*") if path.is_file()}
-    cached_before = None
     previous_cache = None
     for _ in range(2):
         result = subprocess.run(
@@ -290,12 +289,10 @@ def test_generated_task_launcher_routes_late_imports_outside_the_slot(tmp_path, 
         assert {path: path.read_bytes() for path in slot.rglob("*") if path.is_file()} == before
         _cache_args(["-X", "pycache_prefix=" + observed["cache"]], root)
         cached = Path(observed["cached"])
-        current = (cached.read_bytes(), cached.stat().st_mtime_ns, cached.stat().st_ino)
-        if cached_before is not None:
-            assert (previous_cache.read_bytes(), previous_cache.stat().st_mtime_ns,
-                    previous_cache.stat().st_ino) == cached_before
-            assert cached != previous_cache
-        cached_before = current
+        # Without install evidence the launcher mints a private cache and
+        # removes it once the waited service exits.
+        assert not Path(observed["cache"]).exists()
+        assert cached != previous_cache
         previous_cache = cached
     module = site / "zdd/private_peer.py"
     module_stat = module.stat()
@@ -308,8 +305,29 @@ def test_generated_task_launcher_routes_late_imports_outside_the_slot(tmp_path, 
     assert result.returncode == 0, result.stderr
     observed = json.loads(result.stdout)
     assert observed["value"] == 84 and Path(observed["cached"]) != previous_cache
-    assert (previous_cache.read_bytes(), previous_cache.stat().st_mtime_ns,
-            previous_cache.stat().st_ino) == cached_before
+    assert not Path(observed["cache"]).exists()
+
+    # Valid install evidence selects the sealed installed-<digest> cache, which
+    # is reused across launches and never deleted by the launcher.
+    sealed = root / "cache" / "python" / ("installed-" + "0" * 64)
+    helper = site / "agent_procutil"
+    helper.mkdir()
+    (helper / "__init__.py").write_text("", encoding="utf-8")
+    (helper / "python_cache.py").write_text(
+        "def cache_arguments(root, runtime=None):\n"
+        f"    return ['-X', 'pycache_prefix=' + {str(sealed)!r}]\n",
+        encoding="utf-8",
+    )
+    for _ in range(2):
+        result = subprocess.run(
+            [host, "-NoProfile", "-File", str(harness)], env=env,
+            capture_output=True, text=True, timeout=15, **agent_procutil.no_window_kwargs(),
+        )
+        assert result.returncode == 0, result.stderr
+        observed = json.loads(result.stdout)
+        assert Path(observed["cache"]) == sealed
+        assert Path(observed["cached"]).is_file()
+    assert [path.name for path in sealed.parent.iterdir()] == [sealed.name]
 
 
 def test_relative_home_override_is_passed_resolved(monkeypatch, tmp_path):
