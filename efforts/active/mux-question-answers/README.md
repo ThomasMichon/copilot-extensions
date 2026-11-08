@@ -220,3 +220,18 @@ runtime remediation, elevated operation or destructive cleanup is authorized.
 - The declared capture portfolio now includes these four additional controls,
   for 316 cases. Requalify, audit the complete delivery graph and request review
   before source merge; release and both installed proofs remain open.
+
+### 2026-11-07 - Combined delivery source qualified
+
+- The four new controls passed through the exact capture collector before the
+  complete run. Source-pinned run 42427151265 then passed all 316 cases,
+  independent no-write verification, immutable historical guards and export.
+- The native publication owner imported 157 verified current outputs.
+  Independent contract validation passed two contracts and 1,068 retained
+  fixtures against the rebased contribution base.
+- The whole-surface audit now follows ordinary and retained serving factories,
+  question-owner replacement, writable preparation, read-only admission and
+  writable adoption alongside all answer, audit and native-preference paths.
+  Earlier source qualification is not substituted for this combined proof.
+- Request a fresh review of the qualified head, then require full PR CI and
+  actual merge before following promotion and both authorized installed proofs.
