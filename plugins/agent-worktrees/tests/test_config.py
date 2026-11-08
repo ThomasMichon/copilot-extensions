@@ -32,7 +32,8 @@ def test_native_ordinary_four_tiers_use_registered_context(tmp_path, monkeypatch
     registry = repos.ReposRegistry(repos={
         name: repos.RepoEntry(
             name=name, remote=f"https://example.test/{name}/shared.git", repo_class="worktree",
-            paths={"windows": str(root)}, default_branch="main",
+            paths={platform: str(root) for platform in ("windows", "wsl", "linux")},
+            default_branch="main",
         )
         for name, root in (("sample", base), ("knowledge", knowledge))
     })
@@ -3739,7 +3740,8 @@ def knowledge_acquisition_sources(tmp_path, monkeypatch):
         paths.append(path)
     registry = tmp_path / "repos.yaml"
     registry.write_text(
-        f"repos:\n  knowledge:\n    class: worktree\n    windows: '{knowledge}'\n",
+        f"repos:\n  knowledge:\n    class: worktree\n    windows: '{knowledge}'\n"
+        f"    linux: '{knowledge}'\n    wsl: '{knowledge}'\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(repos, "read_registry", _knowledge_read_registry)
@@ -4198,7 +4200,8 @@ def control_plane_acquisition_sources(monkeypatch):
         return [SimpleNamespace(anchor="control-anchor", origin="harness"),
                 SimpleNamespace(anchor="knowledge-anchor", origin="knowledge")]
 
-    def contribution(anchor, origin):
+    def contribution(anchor, origin, **kwargs):
+        assert kwargs.get("state_repo", "") == ""
         calls.append(("contribution", anchor, origin))
         return f"{origin}:{anchor}"
 
