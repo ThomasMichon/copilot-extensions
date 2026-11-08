@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+from typing import Any, Callable, Iterator
 
 import pytest
 
@@ -17,12 +18,13 @@ from agent_chat_service.client import MAX_PENDING, reader_lock
 class LocalTransport:
     identity = "example-conversation"
 
-    def __init__(self, store):
+    def __init__(self, store: ChatStore) -> None:
+        self.calls: list[dict[str, Any]]
         self.store, self.calls = store, []
-        self.before = None
-        self.after = None
+        self.before: Callable[[dict[str, Any]], None] | None = None
+        self.after: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]] | None = None
 
-    def call(self, request):
+    def call(self, request: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(copy.deepcopy(request))
         if self.before:
             self.before(request)
@@ -34,7 +36,7 @@ class LocalTransport:
 
 
 @pytest.fixture
-def pair(tmp_path):
+def pair(tmp_path: Path) -> Iterator[tuple[Client, LocalTransport, ChatStore]]:
     store = ChatStore(tmp_path / "store", "example-installation")
     transport = LocalTransport(store)
     client = Client(transport, {"codename": "agent-a"}, tmp_path / "client")

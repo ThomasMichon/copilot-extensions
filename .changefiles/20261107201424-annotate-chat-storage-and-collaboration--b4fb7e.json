@@ -1,5 +1,5 @@
 {
-  "comment": "Annotate Chat storage, client, transport, hosting and fixture contracts while preserving validation and native behavior",
+  "comment": "Annotate Chat storage, client, transport, hosting, canonical publication and fixture contracts with scoped checker dependencies while preserving validation and native behavior",
   "changes": [
     {
       "plugin": "agent-chat-service",

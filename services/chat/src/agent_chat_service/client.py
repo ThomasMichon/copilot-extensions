@@ -8,7 +8,7 @@ import re
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator, Protocol
+from typing import Any, Callable, Iterator, Protocol
 
 from .store import (
     ChatError, MAX_BODY_BYTES, MAX_PAGE_BYTES, json_bytes, strict_json, validate_request,
@@ -57,24 +57,28 @@ def reader_lock(path: Path) -> Iterator[None]:
         if os.name == "nt":
             import msvcrt
             try:
-                msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+                locking: Callable[[int, int, int], None] = getattr(msvcrt, "locking")
+                locking(stream.fileno(), getattr(msvcrt, "LK_NBLCK"), 1)
             except OSError:
                 raise ClientError("reader_busy", "Another local client operation owns this viewer.") from None
             try:
                 yield
             finally:
                 stream.seek(0)
-                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+                unlocking: Callable[[int, int, int], None] = getattr(msvcrt, "locking")
+                unlocking(stream.fileno(), getattr(msvcrt, "LK_UNLCK"), 1)
         else:
             import fcntl
             try:
-                fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                flock: Callable[[int, int], None] = getattr(fcntl, "flock")
+                flock(stream.fileno(), getattr(fcntl, "LOCK_EX") | getattr(fcntl, "LOCK_NB"))
             except OSError:
                 raise ClientError("reader_busy", "Another local client operation owns this viewer.") from None
             try:
                 yield
             finally:
-                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+                unlock: Callable[[int, int], None] = getattr(fcntl, "flock")
+                unlock(stream.fileno(), getattr(fcntl, "LOCK_UN"))
 
 
 def emit(value: dict[str, Any], stream: TextOutput) -> None:

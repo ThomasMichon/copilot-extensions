@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 import sys
 import time
-from typing import Any, NoReturn
+from typing import Any, NoReturn, cast
 
 from .client import ClientError
 from .store import ChatError, strict_json
@@ -137,7 +137,7 @@ def resolve_workspace(
         participant = {
             "machine": row_owner, "repo": row["repo"], "kind": "worktree", "id": worktree_id,
         }
-        owner_ref = "/".join((row_owner, row["repo"], worktree_id))
+        owner_ref = "/".join((cast(str, row_owner), row["repo"], cast(str, worktree_id)))
         label = row.get("codename")
         if label is not None and (not isinstance(label, str) or _LABEL.fullmatch(label) is None):
             _refuse("workspace_response_invalid")

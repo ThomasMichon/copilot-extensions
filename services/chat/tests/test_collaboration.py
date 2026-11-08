@@ -1,25 +1,31 @@
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from typing import Any, Callable, NoReturn, TypeVar
 
 import pytest
 
 from agent_chat_service import ChatError, ChatStore, Client, ClientError, json_bytes
 from agent_chat_service.store import validate_request
-from test_client import pair as pair
+from test_client import LocalTransport, pair as pair
 from test_store import expect, join, post, read, rpc, store as store
 
+R = TypeVar("R")
 
-def annotation(kind="question", **fields):
+
+def annotation(kind: str = "question", **fields: Any) -> dict[str, Any]:
     return {"schema": "agent-chat.collaboration", "version": 1, "kind": kind, **fields}
 
 
-def collaborate(store, request_id="question", *, codename="agent-a", channel="room",
-                text="Please review", **fields):
+def collaborate(
+    store: ChatStore, request_id: str = "question", *, codename: str = "agent-a",
+    channel: str = "room", text: str = "Please review", **fields: Any,
+) -> dict[str, Any]:
     return rpc(store, "post", channel=channel, codename=codename, text=text,
                request_id=request_id, collaboration=annotation(**fields))
 
 
-def inbox(store, codename="agent-b", **controls):
+def inbox(store: ChatStore, codename: str = "agent-b", **controls: Any) -> dict[str, Any]:
     return rpc(store, "inbox", channel="room", codename=codename, **controls)
 
 
@@ -33,7 +39,7 @@ def inbox(store, codename="agent-b", **controls):
     {"evidence": ["x" * 512] * 8}, {"kind": "answer"}, {"kind": "review"},
     {"kind": "resolve"},
 ])
-def test_metadata_refuses_invalid_fields_and_bounds(fields):
+def test_metadata_refuses_invalid_fields_and_bounds(fields: dict[str, Any]) -> None:
     request = {
         "op": "post", "channel": "room", "codename": "agent-a", "text": "hello",
         "request_id": "original", "collaboration": annotation(**fields),
@@ -41,7 +47,7 @@ def test_metadata_refuses_invalid_fields_and_bounds(fields):
     expect("invalid", validate_request, request)
 
 
-def test_structured_identity_recovery_and_legacy_shapes(store, tmp_path):
+def test_structured_identity_recovery_and_legacy_shapes(store: ChatStore, tmp_path: Path) -> None:
     join(store)
     join(store, "agent-b")
     plain = post(store, text='{"kind":"question","to":["agent-b"]}')["event"]
@@ -63,7 +69,7 @@ def test_structured_identity_recovery_and_legacy_shapes(store, tmp_path):
         with_store.close()
 
 
-def test_relationships_refuse_wrong_targets_without_mutation(store):
+def test_relationships_refuse_wrong_targets_without_mutation(store: ChatStore) -> None:
     join(store)
     join(store, "agent-b")
     join(store, "agent-a", channel="other")
@@ -84,7 +90,7 @@ def test_relationships_refuse_wrong_targets_without_mutation(store):
     assert store._db.execute("SELECT count(*) FROM events").fetchone()[0] == before
 
 
-def test_metadata_indexes_and_quota_rollback_atomically(store):
+def test_metadata_indexes_and_quota_rollback_atomically(store: ChatStore) -> None:
     join(store)
     join(store, "agent-b")
     before = dict(store._db.execute("SELECT key, value FROM settings"))
@@ -109,7 +115,7 @@ def test_metadata_indexes_and_quota_rollback_atomically(store):
     expect("capacity", collaborate, store, "overflow")
 
 
-def test_pending_survives_noise_cursors_membership_and_reopen(store, tmp_path):
+def test_pending_survives_noise_cursors_membership_and_reopen(store: ChatStore, tmp_path: Path) -> None:
     join(store)
     join(store, "agent-b")
     question = collaborate(store, to=["agent-b"])
@@ -132,7 +138,7 @@ def test_pending_survives_noise_cursors_membership_and_reopen(store, tmp_path):
         reopened.close()
 
 
-def test_answers_resolution_and_supersession_have_distinct_effects(store):
+def test_answers_resolution_and_supersession_have_distinct_effects(store: ChatStore) -> None:
     for name in ("agent-a", "agent-b", "agent-c"):
         join(store, name)
     question = collaborate(store, to=["agent-b"])["event"]["id"]
@@ -152,7 +158,7 @@ def test_answers_resolution_and_supersession_have_distinct_effects(store):
     assert len(thread["entries"]) == 5
 
 
-def test_captured_pages_remain_nonconsuming_despite_later_answers(store):
+def test_captured_pages_remain_nonconsuming_despite_later_answers(store: ChatStore) -> None:
     join(store)
     join(store, "agent-b")
     questions = [collaborate(store, str(n), to=["agent-b"]) for n in range(3)]
@@ -169,7 +175,7 @@ def test_captured_pages_remain_nonconsuming_despite_later_answers(store):
     expect("invalid", inbox, store, after=1)
 
 
-def test_byte_bounded_pending_and_recent_pages_never_skip_or_consume(store):
+def test_byte_bounded_pending_and_recent_pages_never_skip_or_consume(store: ChatStore) -> None:
     join(store)
     join(store, "agent-b")
     questions = [
@@ -198,7 +204,7 @@ def test_byte_bounded_pending_and_recent_pages_never_skip_or_consume(store):
            epoch=page["epoch"], head=5, recent_limit=0, max_bytes=1024)
 
 
-def test_plain_thread_root_and_superseding_reply_preserve_relationship(store):
+def test_plain_thread_root_and_superseding_reply_preserve_relationship(store: ChatStore) -> None:
     join(store)
     join(store, "agent-b")
     root = post(store)["event"]
@@ -218,7 +224,7 @@ def test_plain_thread_root_and_superseding_reply_preserve_relationship(store):
            event_id=amendment["event"]["id"], epoch=page["epoch"], head=root["id"])
 
 
-def test_concurrent_annotated_retry_commits_one_effect_and_order_is_content(store):
+def test_concurrent_annotated_retry_commits_one_effect_and_order_is_content(store: ChatStore) -> None:
     for name in ("agent-a", "agent-b", "agent-c"):
         join(store, name)
     with ThreadPoolExecutor(max_workers=4) as workers:
@@ -233,11 +239,13 @@ def test_concurrent_annotated_retry_commits_one_effect_and_order_is_content(stor
 @pytest.mark.parametrize("damage", [
     "missing", "changed", "boolean-version", "boolean-root", "extra", "lost",
 ])
-def test_annotated_pending_requires_complete_receipt_before_recovery(pair, damage):
+def test_annotated_pending_requires_complete_receipt_before_recovery(
+    pair: tuple[Client, LocalTransport, ChatStore], damage: str,
+) -> None:
     client, transport, store = pair
     value = annotation()
 
-    def uncertain(request, result):
+    def uncertain(request: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
         if damage == "missing":
             result.pop("collaboration")
         elif damage == "changed":
@@ -268,10 +276,12 @@ def test_annotated_pending_requires_complete_receipt_before_recovery(pair, damag
     assert store._db.execute("SELECT count(*) FROM events").fetchone()[0] == 1
 
 
-def test_unsupported_structured_service_never_falls_back_to_plaintext(pair):
+def test_unsupported_structured_service_never_falls_back_to_plaintext(
+    pair: tuple[Client, LocalTransport, ChatStore],
+) -> None:
     client, transport, _ = pair
 
-    def unsupported(request):
+    def unsupported(request: dict[str, Any]) -> NoReturn:
         assert request["op"] == "post" and "collaboration" in request
         raise ClientError("invalid", "Unsupported operation fields.", status=400)
 
@@ -291,14 +301,16 @@ def test_unsupported_structured_service_never_falls_back_to_plaintext(pair):
     "metadata", "attention", "continuation", "boolean-position", "empty-more",
     "count", "boolean-count",
 ])
-def test_client_refuses_invalid_views_without_mutating_semantic_progress(pair, tmp_path, damage):
+def test_client_refuses_invalid_views_without_mutating_semantic_progress(
+    pair: tuple[Client, LocalTransport, ChatStore], tmp_path: Path, damage: str,
+) -> None:
     _, transport, store = pair
     join(store, "agent-b")
     viewer = Client(transport, {"codename": "agent-b"}, tmp_path / "viewer")
     for number in range(3):
         collaborate(store, str(number), to=["agent-b"])
 
-    def corrupt(request, result):
+    def corrupt(request: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
         if damage == "fields":
             result["cursor"] = 1
         elif damage == "version":
@@ -339,11 +351,14 @@ def test_client_refuses_invalid_views_without_mutating_semantic_progress(pair, t
     assert viewer.inbox("room", **first["next"])["entries"][0]["event"]["id"] == 2
 
 
-def seed_unrelated(store, start, count, *, structured, codename="agent-a",
-                   channel="room", recipients=None, kind="question"):
+def seed_unrelated(
+    store: ChatStore, start: int, count: int, *, structured: bool,
+    codename: str = "agent-a", channel: str = "room", recipients: list[str] | None = None,
+    kind: str = "question",
+) -> None:
     with store._transaction():
         for number in range(start, start + count):
-            request = {
+            request: dict[str, Any] = {
                 "channel": channel, "codename": codename, "text": "unrelated context",
                 "request_id": f"noise-{channel}-{number}",
             }
@@ -354,10 +369,10 @@ def seed_unrelated(store, start, count, *, structured, codename="agent-a",
             store._post(request)
 
 
-def sqlite_work(store, operation):
+def sqlite_work(store: ChatStore, operation: Callable[[], R]) -> tuple[int, R]:
     steps = 0
 
-    def progress():
+    def progress() -> int:
         nonlocal steps
         steps += 1
         return 0
@@ -370,7 +385,7 @@ def sqlite_work(store, operation):
     return steps, result
 
 
-def test_empty_inbox_work_does_not_grow_with_unrelated_questions(store):
+def test_empty_inbox_work_does_not_grow_with_unrelated_questions(store: ChatStore) -> None:
     for name in ("agent-a", "agent-b", "agent-c"):
         join(store, name)
     own = collaborate(store, "own", codename="agent-b", to=["agent-c"])
@@ -393,7 +408,7 @@ def test_empty_inbox_work_does_not_grow_with_unrelated_questions(store):
     assert read(store, "agent-b")["cursor"] == 0
 
 
-def test_inbox_work_ignores_other_channel_correspondence(store):
+def test_inbox_work_ignores_other_channel_correspondence(store: ChatStore) -> None:
     for channel in ("room", "other"):
         for name in ("agent-a", "agent-b"):
             join(store, name, channel=channel)
@@ -406,14 +421,14 @@ def test_inbox_work_ignores_other_channel_correspondence(store):
     assert large <= small + 1000, (small, large)
 
 
-def test_sparse_thread_work_and_pagination_ignore_unrelated_history(store):
+def test_sparse_thread_work_and_pagination_ignore_unrelated_history(store: ChatStore) -> None:
     join(store)
     join(store, "agent-b")
     root = post(store)["event"]
     child = collaborate(store, "child", kind="notice", reply_to=root["id"])["event"]
     seed_unrelated(store, 0, 100, structured=False)
 
-    def whole_thread():
+    def whole_thread() -> dict[str, Any]:
         return rpc(store, "thread", channel="room", codename="agent-b",
                    event_id=child["id"], limit=2)
 
@@ -434,16 +449,18 @@ def test_sparse_thread_work_and_pagination_ignore_unrelated_history(store):
 
 
 @pytest.mark.parametrize("attention", ["reply", "review"])
-def test_inbox_lookahead_work_is_bounded_before_merging_pending_branches(store, attention):
+def test_inbox_lookahead_work_is_bounded_before_merging_pending_branches(
+    store: ChatStore, attention: str,
+) -> None:
     join(store)
     join(store, "agent-b")
     if attention == "reply":
-        def seed(start, count):
+        def seed(start: int, count: int) -> None:
             seed_unrelated(store, start, count, structured=True, recipients=["agent-b"])
     else:
         question = collaborate(store, "own", codename="agent-b", to=["agent-a"])["event"]["id"]
 
-        def seed(start, count):
+        def seed(start: int, count: int) -> None:
             with store._transaction():
                 for number in range(start, start + count):
                     store._post({
@@ -466,7 +483,7 @@ def test_inbox_lookahead_work_is_bounded_before_merging_pending_branches(store, 
     assert read(store, "agent-b")["cursor"] == 0
 
 
-def test_pending_question_lookup_work_ignores_other_participants_answers(store):
+def test_pending_question_lookup_work_ignores_other_participants_answers(store: ChatStore) -> None:
     for name in ("agent-a", "agent-b", "agent-c"):
         join(store, name)
     question = collaborate(store, "question", to=["agent-b"])["event"]
@@ -496,15 +513,18 @@ def test_pending_question_lookup_work_ignores_other_participants_answers(store):
     assert read(store, "agent-b")["cursor"] == 0
 
 
-def seed_settled(store, start, count, settlement):
+def seed_settled(store: ChatStore, start: int, count: int, settlement: str) -> None:
     asker, answerer = (
         ("agent-a", "agent-b") if settlement == "answered" else ("agent-b", "agent-a")
     )
-    def append(number, codename, suffix, value):
-        return store._post({
+    def append(
+        number: int, codename: str, suffix: str, value: dict[str, Any],
+    ) -> int:
+        event_id: int = store._post({
             "channel": "room", "codename": codename, "text": "settled correspondence",
             "request_id": f"{settlement}-{number}-{suffix}", "collaboration": value,
         })["event"]["id"]
+        return event_id
 
     with store._transaction():
         for number in range(start, start + count):
@@ -517,7 +537,9 @@ def seed_settled(store, start, count, settlement):
 
 
 @pytest.mark.parametrize("settlement", ["answered", "resolved", "superseded"])
-def test_inbox_examination_is_bounded_over_settled_history(store, settlement):
+def test_inbox_examination_is_bounded_over_settled_history(
+    store: ChatStore, settlement: str,
+) -> None:
     join(store)
     join(store, "agent-b")
     seed_settled(store, 0, 100, settlement)
@@ -544,8 +566,8 @@ def test_inbox_examination_is_bounded_over_settled_history(store, settlement):
 
 @pytest.mark.parametrize("damage", ["normal", "stalled", "past-head"])
 def test_inbox_scan_continuations_preserve_captured_pending_without_skips(
-    pair, tmp_path, damage,
-):
+    pair: tuple[Client, LocalTransport, ChatStore], tmp_path: Path, damage: str,
+) -> None:
     _, transport, store = pair
     join(store, "agent-b")
     seed_settled(store, 0, 101, "answered")
@@ -556,7 +578,7 @@ def test_inbox_scan_continuations_preserve_captured_pending_without_skips(
     ]
     viewer = Client(transport, {"codename": "agent-b"}, tmp_path / "viewer")
 
-    def corrupt(request, result):
+    def corrupt(request: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
         if damage == "stalled":
             result["next"]["after"] = request.get("after", 0)
         else:
