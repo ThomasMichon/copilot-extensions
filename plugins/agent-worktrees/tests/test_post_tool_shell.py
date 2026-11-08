@@ -996,7 +996,8 @@ def test_post_tool_send_debits_allocation_and_connect_from_one_budget(tmp_path, 
         sender = sender.replace(original, replacement)
     source = source[:start] + sender + source[end:]
     script = tmp_path / "sender-budget.ps1"
-    script.write_text(source + r"""
+    managed = str(PLUGIN / "scripts" / "managed-session.ps1").replace("'", "''")
+    script.write_text(f". '{managed}'\n" + source + r"""
 $ErrorActionPreference = 'Stop'
 $script:clock = [pscustomobject]@{ ElapsedMilliseconds = [int]$env:ALLOCATION_MS }
 $script:connectWaits = [Collections.Generic.List[int]]::new()
@@ -1144,7 +1145,7 @@ def test_prepared_post_entry_baseline_comparison(prepared_read_event, shell, sam
     fixture = prepared_read_event
     scripts = fixture["payload_root"] / "scripts"
     fixture["env"]["AGENT_WORKTREES_NUDGE_CALLS"] = "1000"
-    names = ("post-tool-hook.ps1", "hook-facts.ps1")
+    names = ("post-tool-hook.ps1", "hook-facts.ps1", "managed-session.ps1")
     candidate = {name: (scripts / name).read_bytes() for name in names}
     command = json.loads((PLUGIN / "hooks.json").read_text())["hooks"]["postToolUse"][0]["powershell"]
     harness = fixture["harness"].read_text(encoding="utf-8")
@@ -1227,6 +1228,96 @@ def test_prepared_post_entry_baseline_comparison(prepared_read_event, shell, sam
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("process")
 @pytest.mark.effect("filesystem")
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows prepared JSON compatibility")
+@pytest.mark.parametrize(("shell", "old_engine"), [
+    ("pwsh", False), ("pwsh", True), ("powershell.exe", False),
+])
+def test_prepared_json_engine_retains_shell_semantics(tmp_path, shell, old_engine):
+    from agent_procutil import no_window_kwargs
+
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    values = {
+        "array": [{}, [], None, True, False, 42, 1.25, "\u00e9\u4e2d\U0001f680"],
+        "integer": 9223372036854775807,
+        "iso": "2026-01-02T03:04:05Z",
+        "epoch": "/Date(0)/",
+        "text": "quote'\"\\\n\t",
+    }
+    inputs = [
+        json.dumps(values),
+        '{"__type":null,"value":42}',
+        json.dumps({"nested": {"__type": "ordinary-data", "value": values}}),
+        r'{"epoch":"\/Date(0)\/","offset":"\/Date(0+0500)\/"}',
+        '{"small":1e-100,"big":1.234567890123456789e30,'
+        '"long":0.12345678901234567890123456789}',
+        '{"A":1,"a":2,"":3,"value":1,"value":2}',
+    ]
+    managed_path = PLUGIN / "scripts" / "managed-session.ps1"
+    if old_engine:
+        managed_source = managed_path.read_text(encoding="utf-8")
+        context_name = "Microsoft.PowerShell.Commands.JsonObject+ConvertToJsonContext"
+        assert managed_source.count(f"'{context_name}'") == 1
+        managed_path = tmp_path / "old-engine-managed.ps1"
+        managed_path.write_text(
+            managed_source.replace(f"'{context_name}'", "'UnavailablePreparedJsonContext'"),
+            encoding="utf-8",
+        )
+    managed = str(managed_path).replace("'", "''")
+    script = tmp_path / "prepared-json.ps1"
+    script.write_text(
+        "$ErrorActionPreference='Stop'\n"
+        "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false,$true)\n"
+        f". '{managed}'\n"
+        "function ConvertFrom-Json { throw 'JSON cmdlet initialization was requested' }\n"
+        f"$script:expectedFallbackCalls={len(inputs) if old_engine else 0}\n"
+        "$script:preparedJsonFallbackCalls=0\n"
+        + r"""
+function ConvertTo-Json {
+    param([object]$InputObject, [int]$Depth, [switch]$Compress)
+    if (-not $script:expectedFallbackCalls) { throw 'JSON cmdlet initialization was requested' }
+    $script:preparedJsonFallbackCalls++
+    & ($ExecutionContext.InvokeCommand.GetCommand('ConvertTo-Json',
+        [Management.Automation.CommandTypes]::Cmdlet)) @PSBoundParameters
+}
+foreach ($raw in [Console]::In.ReadToEnd().Split("`n")) {
+    $value = ConvertFrom-ManagedWorktreesJson $raw
+    [Console]::Out.WriteLine((ConvertTo-PreparedWorktreesJson -InputObject $value -Depth 100))
+    $reference = if ($PSVersionTable.PSVersion.Major -ge 6) {
+        & ($ExecutionContext.InvokeCommand.GetCommand('ConvertFrom-Json',
+            [Management.Automation.CommandTypes]::Cmdlet)) -InputObject $raw -AsHashtable
+    } else { $script:managedWorktreesJson.DeserializeObject($raw) }
+    [Console]::Out.WriteLine((& ($ExecutionContext.InvokeCommand.GetCommand('ConvertTo-Json',
+        [Management.Automation.CommandTypes]::Cmdlet)) -InputObject $reference -Depth 100 -Compress))
+}
+foreach ($invalid in @('[]', '{"value":', '{}{}')) {
+    $rejected = $false
+    try { $null = ConvertFrom-ManagedWorktreesJson $invalid } catch { $rejected = $true }
+    if (-not $rejected) { throw 'malformed prepared JSON was accepted' }
+}
+if ($script:preparedJsonFallbackCalls -ne $script:expectedFallbackCalls) {
+    throw 'unexpected JSON command fallback count'
+}
+""",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-File", str(script)],
+        input="\n".join(inputs), text=True, encoding="utf-8", capture_output=True,
+        timeout=10, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == ""
+    rows = [json.loads(line) for line in result.stdout.splitlines()]
+    assert len(rows) == len(inputs) * 2
+    for actual, expected in zip(rows[::2], rows[1::2]):
+        assert actual == expected
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
 @pytest.mark.effect("network")
 @pytest.mark.skipif(
     os.name != "nt" or os.environ.get("AGENT_WORKTREES_PROFILE_ENTRY") != "1",
@@ -1262,11 +1353,12 @@ def test_prepared_post_entry_stage_profile(prepared_read_event, shell, mode):
             "        $__entryStageMs = $__entryStageClock.Elapsed.TotalMilliseconds\n"
             f"        $__entryStageRow = $script:entryProfile['{name}']\n"
             "        if ($null -eq $__entryStageRow) {\n"
-            "            $__entryStageRow = @{ count = 0; inclusive_ms = 0.0 }\n"
+            "            $__entryStageRow = @{ count = 0; inclusive_ms = 0.0; samples_ms = @() }\n"
             f"            $script:entryProfile['{name}'] = $__entryStageRow\n"
             "        }\n"
             "        $__entryStageRow.count++\n"
             "        $__entryStageRow.inclusive_ms += $__entryStageMs\n"
+            "        $__entryStageRow.samples_ms += $__entryStageMs\n"
             "    }"
         )
         return (
@@ -1274,11 +1366,22 @@ def test_prepared_post_entry_stage_profile(prepared_read_event, shell, mode):
             + suffix + section[closing:] + text[end:]
         )
 
+    def instrument_load(text, statement, name):
+        assert text.count(statement) == 1
+        return text.replace(
+            statement,
+            "$__loadClock = [Diagnostics.Stopwatch]::StartNew()\n"
+            + statement
+            + f"\n$script:entryProfile['{name}'] = @{{ count = 1; "
+            "inclusive_ms = $__loadClock.Elapsed.TotalMilliseconds }\n",
+        )
+
     if mode == "stages":
         managed = (PLUGIN / "scripts" / "managed-session.ps1").read_text(encoding="utf-8")
         for name, first in (
             ("Get-ManagedWorktreesRuntimeRoot", "    $runtimeRoot ="),
             ("ConvertFrom-ManagedWorktreesJson", "    if (-not $Text."),
+            ("ConvertTo-PreparedWorktreesJson", "    if (-not $script:"),
             ("Get-PreparedWorktreesPath", "    if ($Path -isnot"),
             ("Test-PreparedWorktreesStamp", "    $canonical ="),
             ("Test-PreparedWorktreesContent", "    $stream ="),
@@ -1299,21 +1402,24 @@ def test_prepared_post_entry_stage_profile(prepared_read_event, shell, mode):
         copied_facts = scripts / "hook-facts.ps1"
         facts = copied_facts.read_text(encoding="utf-8")
         for name, first in (
+            ("ConvertTo-PostToolFactMap", "    $map ="),
             ("Read-PostToolBoundedJson", "    $stream ="),
             ("Read-PostToolHookFacts", "    $stream ="),
+            ("Get-PostToolRuntimeRoot", "    if ($env:COPILOT_EXTENSIONS_CONTEXT)"),
+            ("Invoke-PreparedPostToolRead", "    try {"),
             ("Send-PostToolReadDemand", "    $client ="),
             ("Invoke-PreparedPostToolReminders", "    try {\n        $binding ="),
         ):
             facts = instrument(facts, name, first)
         copied_facts.write_text(facts, encoding="utf-8")
         copied_entry = scripts / "post-tool-hook.ps1"
-        copied_entry.write_text(
-            instrument(
-                copied_entry.read_text(encoding="utf-8"),
-                "Invoke-PostToolHook", "    $admission =",
-            ),
-            encoding="utf-8",
+        entry = instrument(
+            copied_entry.read_text(encoding="utf-8"),
+            "Invoke-PostToolHook", "    $admission =",
         )
+        entry = instrument_load(entry, "    . $admission", "load-managed-session")
+        entry = instrument_load(entry, "        . $factsReader", "load-hook-facts")
+        copied_entry.write_text(entry, encoding="utf-8")
 
     meta = r"""
 $process = [Diagnostics.Process]::GetCurrentProcess()
@@ -1324,7 +1430,9 @@ try {
 """
     meta += (
         "[Console]::Error.WriteLine('profile_stages=' + "
-        "(ConvertTo-Json -Compress -Depth 5 -InputObject $script:entryProfile))\n"
+        "(& ($ExecutionContext.InvokeCommand.GetCommand('ConvertTo-Json', "
+        "[Management.Automation.CommandTypes]::Cmdlet)) -Compress -Depth 6 "
+        "-InputObject $script:entryProfile))\n"
         if mode == "stages" else "[Console]::Error.WriteLine('profile_stages={}')\n"
     )
     if mode == "startup":
@@ -1338,6 +1446,8 @@ try {
         )
     else:
         harness = fixture["harness"].read_text(encoding="utf-8")
+        if mode == "stages":
+            harness = instrument_load(harness, ". $s;", "load-post-tool")
         probe_start = harness.index("$counterPath='")
         probe_end = harness.index("[Console]::Error.WriteLine('entry_seconds='", probe_start)
         harness = harness[:probe_start] + harness[probe_end:]
@@ -1383,6 +1493,13 @@ try {
         if mode == "stages":
             assert stages["Test-PreparedManagedWorktreesSession"]["count"] == 1
             assert stages["Get-PreparedWorktreesPath"]["count"] > 0
+            assert stages["ConvertTo-PreparedWorktreesJson"]["count"] > 0
+            for name in ("load-post-tool", "load-managed-session", "load-hook-facts"):
+                assert stages[name]["count"] == 1
+                assert stages[name]["inclusive_ms"] >= 0
+            for name, stage in stages.items():
+                if not name.startswith("load-"):
+                    assert len(stage["samples_ms"]) == stage["count"]
         print(json.dumps({
             "shell": shell, "mode": mode, "process_seconds": elapsed,
             "entry_seconds": float(fields["entry_seconds"]),
@@ -2862,6 +2979,7 @@ def test_prepared_agenda_helpers_mirror_python_policy_lane_and_window(tmp_path):
         path.mkdir()
     script = """
 $ErrorActionPreference = 'Stop'
+. $env:TEST_MANAGED_SCRIPT
 . $env:TEST_FACTS_SCRIPT
 function Get-PreparedWorktreesPath { param($Path) return $Path }
 $results = [Collections.Generic.List[object]]::new()
@@ -2898,12 +3016,13 @@ $ticks += Update-PostToolAgendaWindow $env:TEST_STATE 'wt' 300.0
 """
     env = dict(
         os.environ, TEST_FACTS_SCRIPT=str(PLUGIN / "scripts" / "hook-facts.ps1"),
+        TEST_MANAGED_SCRIPT=str(PLUGIN / "scripts" / "managed-session.ps1"),
         TEST_STATE=str(state), TEST_PROJECT=str(project), TEST_WORKSPACE=str(workspace),
     )
     env.pop("AGENT_WORKTREES_AGENDA_NUDGE", None)
     response = subprocess.run(
         [shell, "-NoProfile", "-NonInteractive", "-Command", script],
-        capture_output=True, text=True, timeout=60, env=env, **no_window_kwargs(),
+        capture_output=True, text=True, timeout=10, env=env, **no_window_kwargs(),
     )
     assert response.returncode == 0, response.stderr
     output = json.loads(response.stdout)

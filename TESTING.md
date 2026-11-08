@@ -182,7 +182,11 @@ set to a full lowercase commit ID and `AGENT_WORKTREES_PROFILE_BASELINE_REPO`
 to its readable source checkout. Only private fixture copies are swapped;
 the baseline checkout is read through `git show`, never modified. Both shells
 retain real receiver/count assertions and the ordinary test deadlines.
-Stage spans are inclusive; neither these diagnostics nor their finite timings
+Stage mode reports each library dot-load and per-call samples for conversion,
+membership, bounded reads, reminders and sending. Nested function spans are
+inclusive; do not sum them. Select `prepared_json_engine_retains_shell_semantics`
+for JSON value parity and the older-engine command fallback without enabling
+profiling. Neither these diagnostics nor their finite timings
 establish installed or whole-roster throughput.
 
 `python-selection-native.yml` supplies real Python 3.9 and supported Python
