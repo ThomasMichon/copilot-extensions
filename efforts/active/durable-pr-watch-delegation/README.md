@@ -392,7 +392,7 @@ _Operator-required outcome; agent-recommended slices and validation._
   actions and feedback without credential acquisition for preparation or
   storage-only recovery. Native verifier/source and host enrollment remain
   separate; legacy per-context embedding is retained.
-- [ ] Deliver the finite native effective-permission evaluator through the
+- [x] Deliver the finite native effective-permission evaluator (#11462) through the
   existing pinned ADO transport: resolve actual Git namespace/action semantics,
   require repository and exact native target-branch read/review permission
   before the attempt fence and at dispatch, and preserve unknown attempts on
@@ -958,7 +958,8 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
-- [ ] Qualify native effective-permission evaluation with contained namespace/
+- [x] Qualify native effective-permission evaluation (#11462; 216 coupled
+  source cases) with contained namespace/
   action/result parsing, nested/case/Unicode target refs, repository/branch
   denial, incomplete responses, one pinned material generation and executor
   denial before/after the durable fence. Preserve legacy embedding,
@@ -1149,6 +1150,36 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-07 - Deliver native effective review-permission evaluation
+
+- #11462 actually merged as `ee2fc4f817681598a999b091b12806f033e536cd`
+  after corrected-head Copilot approval `5816104058` with no open issues and
+  latest required CI `42437653463` / `128601798356` passed. Managed completion
+  reconciled only the merged source and retained its backup.
+- The existing pinned provider resolves actual Git namespace/action semantics
+  and separately evaluates read and review permission for the repository and
+  exact native PR target branch. Both complete positive results are required
+  for each action bit, without an administrator shortcut, write probe,
+  credential reacquisition or undocumented combined-mask assumption.
+- The first review exposed rejection of native translator-backed Git
+  definitions. The regression failed before correction; both boolean native
+  forms now preserve the documented logical token. Primary contained TLS
+  exercises the translator-backed form. Final native parser/TLS tests pass
+  71 cases, with 145 executor/feedback/request-local lifetime cases; bounded
+  cleanup is verified. Ruff, docs, module size, installation contracts and
+  source pre-commit pass. Pending runtime type admission is not qualified.
+- Pre-fence denial leaves an unattempted action; later denial preserves its
+  original unknown attempt. Existing action/candidate/owned-target policy,
+  legacy context embedding and normal-host read-only defaults remain intact.
+  These finite source controls are not live permission or installed proof.
+- Re-read the complete current Plan/Validation and close only these finite
+  evaluator leaves. Continue the separate authoritative credential-source
+  grant/audience and current-custodian verifier before strict host enrollment.
+  All-forge publishers, acquisition/DB mapping, full attention, provider/
+  retention/CLI/Dispatch/installed/shadow acceptance and #11128 remain open.
+  No host/backend activation, deployment, production effects or resource
+  release occurred.
 
 ### 2026-11-07 - Refine current authority and request-local writer design
 
