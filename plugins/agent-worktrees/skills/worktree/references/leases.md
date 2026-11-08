@@ -112,6 +112,13 @@ timestamp within that parent's safe interval. The receiver rejects root service
 records, malformed/unknown envelopes and any successor to service custody in
 this protocol generation. Retirement is not implemented.
 
+The bounded `acceptance_margin_seconds` freezes the admission-time clock policy
+for both the adoption boundary and its task predecessor history. Reading the
+same permanent record with another client's clock-skew configuration cannot
+invalidate it. This margin is historical validation metadata, not a custody
+TTL or authority: a future admitted writer must record its actual selected
+canonical policy, never accept a caller's margin as permission to adopt.
+
 Task acquire/borrow, renew, transfer and release refuse permanent custody.
 The CLI returns exit **3** with `code: service_custody_conflict` for task
 mutations; elapsed time or using the former task's holder/token cannot override

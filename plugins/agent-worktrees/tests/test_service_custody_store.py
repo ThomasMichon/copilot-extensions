@@ -48,7 +48,10 @@ def adopted(tmp_path):
     client = GitLeaseStore(settings, now=lambda: BASE)
     task = client.acquire("machine", "service-host", "task-owner")
     renewed = client.renew("machine", "service-host", task.oid)
-    record = custody_record(predecessor=renewed.oid)
+    record = custody_record(
+        predecessor=renewed.oid,
+        accepted_at=format_timestamp(BASE + timedelta(seconds=50)),
+    )
     oid = append_raw(remote, task.ref, renewed.oid, serialize_custody(record))
     return remote, settings, renewed, record, oid
 
@@ -71,6 +74,30 @@ def test_canonical_mixed_history_survives_client_restart_and_elapsed_years(adopt
         client.list()
     assert client.squash_stale(retention_days=1) == []
     assert remote_oid(remote, task.ref) == oid
+
+
+@pytest.mark.parametrize("client_margin", [10, 30, 120])
+def test_custody_freezes_acceptance_and_predecessor_history_margin(adopted, client_margin):
+    remote, settings, task, record, oid = adopted
+    git("--git-dir", str(remote), "update-ref", task.ref, task.oid, oid)
+    stamp = format_timestamp(BASE + timedelta(seconds=50))
+    transferred = replace(
+        task.record, event="transfer", lease_id="c" * 32, holder="next-owner",
+        issued_at=stamp, renewed_at=stamp,
+        expires_at=format_timestamp(BASE + timedelta(seconds=110)),
+    )
+    parent = append_raw(remote, task.ref, task.oid, serialize_record(transferred))
+    record = replace(
+        record, predecessor=parent,
+        accepted_at=format_timestamp(BASE + timedelta(seconds=60)),
+    )
+    adopted_oid = append_raw(remote, task.ref, parent, serialize_custody(record))
+    reader = GitLeaseStore(replace(settings, clock_skew_seconds=client_margin))
+    snapshot = reader.inspect_resource("machine", "service-host")
+    assert snapshot.record == record and snapshot.oid == adopted_oid
+    with pytest.raises(ServiceCustodyConflict):
+        reader.release("machine", "service-host", adopted_oid)
+    assert remote_oid(remote, task.ref) == adopted_oid
 
 
 @pytest.mark.parametrize("operation", ["acquire", "borrow", "renew", "release", "transfer"])

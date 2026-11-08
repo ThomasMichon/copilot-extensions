@@ -25,6 +25,7 @@ from .lease_protocol import (
     Resource,
     ReturnedGeneration,
     format_timestamp,
+    parse_record,
     parse_timestamp,
     ref_for,
     record_payload,
@@ -37,8 +38,9 @@ from .lease_protocol import (
 )
 from .service_custody_protocol import (
     CoordinationRecord,
+    SENTINEL as CUSTODY_SENTINEL,
     ServiceCustodyRecord,
-    parse_coordination_record,
+    parse_custody,
 )
 
 
@@ -115,6 +117,13 @@ class ServiceCustodySnapshot:
 
 
 ResourceSnapshot = LeaseSnapshot | ServiceCustodySnapshot
+
+
+def parse_coordination_record(message: str, expected: Resource) -> CoordinationRecord:
+    """Keep task codec admission with its existing store owner."""
+    if message.startswith(CUSTODY_SENTINEL + "\n"):
+        return parse_custody(message, expected)
+    return parse_record(message, expected)
 
 
 class GitLeaseStore:
@@ -662,10 +671,17 @@ class GitLeaseStore:
 
         previous: CoordinationRecord | None = None
         parent_oid = ""
+        head_record = chain[0][1]
+        # Freeze the admission-time history policy once custody is permanent.
+        history_margin = (
+            head_record.acceptance_margin_seconds
+            if isinstance(head_record, ServiceCustodyRecord)
+            else self.settings.clock_skew_seconds
+        )
         for current_oid, current in reversed(chain):
             validate_transition(
                 previous, current, parent_oid=parent_oid,
-                clock_skew_seconds=self.settings.clock_skew_seconds,
+                clock_skew_seconds=history_margin,
             )
             previous = current
             parent_oid = current_oid

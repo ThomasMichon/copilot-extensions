@@ -11,8 +11,9 @@ from agent_worktrees.lease_history import validate_transition
 from agent_worktrees.lease_protocol import (
     ProtocolError, canonical_json, format_timestamp, parse_record, resource, serialize_record,
 )
+from agent_worktrees.lease_store import parse_coordination_record
 from agent_worktrees.service_custody_protocol import (
-    SENTINEL, parse_coordination_record, parse_custody, serialize_custody,
+    SENTINEL, parse_custody, serialize_custody,
 )
 from service_custody_support import BASE, PARENT, custody_record, task_record
 
@@ -42,6 +43,9 @@ def test_distinct_envelope_preserves_task_semantics_and_resource_slot():
     ("adoption_id", "invalid\x00"), ("predecessor", ""), ("predecessor", None),
     ("approved_digest", "receipt"), ("provider_receipt", "g" * 64),
     ("controller_receipt", []), ("accepted_at", "2026-08-06"),
+    ("acceptance_margin_seconds", True), ("acceptance_margin_seconds", -1),
+    ("acceptance_margin_seconds", 604801), ("acceptance_margin_seconds", 1.5),
+    ("acceptance_margin_seconds", None),
 ])
 def test_custody_malformed_fields_fail_closed(name, value):
     message = serialize_custody(custody_record(**{name: value}))
@@ -95,6 +99,19 @@ def test_custody_requires_exact_live_parent_and_safe_acceptance_time():
         transition(None, custody_record())
     with pytest.raises(ProtocolError, match="live task lease"):
         transition(replace(task_record(), state="released", event="release"), custody_record())
+
+
+def test_historical_adoption_uses_recorded_margin_not_inspecting_client():
+    service = custody_record(accepted_at=format_timestamp(BASE + timedelta(seconds=50)))
+    for client_margin in (0, 10, 30, 120):
+        validate_transition(
+            task_record(), service, parent_oid=PARENT, clock_skew_seconds=client_margin,
+        )
+    with pytest.raises(ProtocolError, match="safe deadline"):
+        validate_transition(
+            task_record(), replace(service, acceptance_margin_seconds=11),
+            parent_oid=PARENT, clock_skew_seconds=0,
+        )
 
 
 def test_extracted_task_history_retains_every_existing_event():

@@ -173,3 +173,18 @@ upstream history and the custody entry were both preserved. Focused lint,
 changed-module size, final-diff blob size and install-contract checks passed.
 This remains a receiver expansion, not completion of the canonical-owner or
 provider admission plan items.
+
+The receiver PR's review found that historical custody depended on each
+inspecting client's clock-skew setting. The follow-up records the actual
+acceptance margin and freezes that policy for the complete custody-headed
+history, including predecessor transfer/takeover validation. It does not relax
+ordinary task admission. The latest pull-forward also retains the newly landed
+released-only acquisition and version-2 return-evidence checks.
+
+Follow-up qualification is not complete: 17 protocol and 42 pure controls
+passed before the final codec-owner adjustment. The larger real-Git packet
+exhausted its unchanged group deadline and cannot be counted as a pass; both
+fresh CLI cases then passed in isolation. The new upstream return-proof
+successor/compaction regression exhausted its unchanged 30-second item deadline
+during its long operation sequence. Preserve every generation, stale-fence and
+actual-GC assertion while making that qualification bounded before publication.

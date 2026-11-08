@@ -11,7 +11,6 @@ from .lease_protocol import (
     ProtocolError,
     Resource,
     canonical_json,
-    parse_record,
     parse_timestamp,
     resource,
     validate_holder,
@@ -43,6 +42,7 @@ class ServiceCustodyRecord:
     provider_receipt: str
     controller_receipt: str
     accepted_at: str
+    acceptance_margin_seconds: int
 
 
 CoordinationRecord = LeaseRecord | ServiceCustodyRecord
@@ -91,11 +91,7 @@ def parse_custody(message: str, expected: Resource | None = None) -> ServiceCust
         if not isinstance(raw[name], str) or not _DIGEST.fullmatch(raw[name]):
             raise ProtocolError(f"service custody {name} must be a SHA-256 digest")
     parse_timestamp(raw["accepted_at"])
+    margin = raw["acceptance_margin_seconds"]
+    if type(margin) is not int or not 0 <= margin <= 604800:
+        raise ProtocolError("service custody acceptance margin is outside the protocol bound")
     return ServiceCustodyRecord(**raw)
-
-
-def parse_coordination_record(message: str, expected: Resource) -> CoordinationRecord:
-    """Unknown envelopes fail closed, never becoming an absent task lease."""
-    if message.startswith(SENTINEL + "\n"):
-        return parse_custody(message, expected)
-    return parse_record(message, expected)

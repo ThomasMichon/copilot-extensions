@@ -29,7 +29,7 @@ def validate_transition(
         accepted = parse_timestamp(current.accepted_at)
         if accepted < parse_timestamp(previous.renewed_at):
             raise ProtocolError("service adoption precedes its task parent")
-        if accepted > previous.expires() - timedelta(seconds=clock_skew_seconds):
+        if accepted > previous.expires() - timedelta(seconds=current.acceptance_margin_seconds):
             raise ProtocolError("service adoption occurred after the task safe deadline")
         return
     validate_task_transition(previous, current, clock_skew_seconds=clock_skew_seconds)

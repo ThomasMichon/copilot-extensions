@@ -45,5 +45,6 @@ def custody_record(**changes) -> ServiceCustodyRecord:
         provider_receipt="2" * 64,
         controller_receipt="3" * 64,
         accepted_at=format_timestamp(BASE + timedelta(seconds=10)),
+        acceptance_margin_seconds=10,
     )
     return replace(value, **changes)
