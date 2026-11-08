@@ -110,8 +110,9 @@ def expected_files(repo: Path) -> dict[Path, str | bytes]:
             parts = imported.split(".")
             if imported in REPOSITORY_ADAPTERS:
                 raise ValueError(f"admission toolkit imports repository adapter: {imported}")
+            # setuptools supplies distutils on Python 3.12 and newer.
             if parts[0] not in known_names | sys.stdlib_module_names | {
-                "packaging", "tomli", "setuptools",
+                "packaging", "tomli", "setuptools", "distutils",
             }:
                 raise ValueError(f"undeclared toolkit dependency: {imported} in {path}")
             pending.extend(".".join(parts[:end]) for end in range(1, len(parts) + 1))

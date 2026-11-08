@@ -9146,6 +9146,14 @@ $env:AGENT_WORKTREES_LIST_WARM_NATIVE = '1'
 python tools\run-plugin-tests.py agent-worktrees --allow-explicit-tiers -k test_native_resident_warm_two_cycle_git_budget
 ```
 
+The Windows deep-build control in `tools/test_standalone_python_artifacts.py`
+builds the real Worktrees wheel from a source root whose wheel staging paths
+exceed the native path limit, then compares every packaged runtime resource
+against its source bytes. The ordinary Worktrees and Manager wheel/sdist
+round trips separately cover the shared build helper's existing consumers.
+The metadata-only control simulates the public distutils missing-wheel
+exception; a real no-wheel toolchain check remains a separate validation.
+
 The agent-worktrees native lean-provision and namespace-package health-gate
 regressions materialize the real release payload and install it through UV and
 the canonical seasoning adapter. Preparation retains registry metadata, wheels,
