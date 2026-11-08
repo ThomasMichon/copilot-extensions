@@ -146,7 +146,7 @@ def test_conclude_dispatch_attempt_requests_exact_managed_removal(monkeypatch):
     assert result["action"] == "removed"
 
 
-def _conclusion_retry_cli(monkeypatch, rows):
+def _conclusion_retry_cli(monkeypatch, rows, record=('{"ok": false}', 1)):
     calls = []
 
     def run(cmd, **_kwargs):
@@ -154,7 +154,9 @@ def _conclusion_retry_cli(monkeypatch, rows):
         if "list" in cmd:
             return _completed(json.dumps({"worktrees": rows}))
         if "record" in cmd:
-            return _completed('{"ok": false}', returncode=1)
+            if isinstance(record, BaseException):
+                raise record
+            return _completed(record[0], returncode=record[1])
         return _completed('{"action":"already-primed","managed_gc_eligible":false}')
 
     monkeypatch.setattr(
@@ -165,12 +167,10 @@ def _conclusion_retry_cli(monkeypatch, rows):
     return calls
 
 
-@pytest.mark.parametrize("rows", [
-    [{"id": "wt-review", "repo": "widgets", "path": "/fixture/wt-review", "status": "complete"}],
-    [],
-], ids=["primed-terminal", "absent"])
-def test_conclude_dispatch_attempt_retry_reaches_idempotent_conclusion(monkeypatch, rows):
-    calls = _conclusion_retry_cli(monkeypatch, rows)
+def test_conclude_dispatch_attempt_retry_reaches_idempotent_conclusion(monkeypatch):
+    calls = _conclusion_retry_cli(monkeypatch, [
+        {"id": "wt-review", "repo": "widgets", "path": "/fixture/wt-review", "status": "complete"},
+    ])
 
     result = embody.conclude_dispatch_attempt(
         "wt-review", "session-review", "dispatch-task:task-1:1",
@@ -179,6 +179,24 @@ def test_conclude_dispatch_attempt_retry_reaches_idempotent_conclusion(monkeypat
 
     assert "conclude-disposable" in calls[-1]
     assert result["action"] == "already-primed"
+
+
+@pytest.mark.parametrize("record", [
+    ('{"version": 1, "ok": false, "code": "record-missing"}', 1),
+    subprocess.TimeoutExpired(["agent-worktrees", "record"], 5),
+    ("not json", 0),
+], ids=["confirmed-missing", "lookup-timeout", "malformed"])
+def test_conclude_dispatch_attempt_preserves_workspace_without_identity_row(monkeypatch, record):
+    # Absence is project-scoped at best, while the owner's conclusion searches
+    # every project, so a missing row never proves the expected identity.
+    calls = _conclusion_retry_cli(monkeypatch, [], record=record)
+
+    with pytest.raises(embody.DisposableConclusionError, match="workspace preserved"):
+        embody.conclude_dispatch_attempt(
+            "wt-review", "session-review", "dispatch-task:task-1:1",
+            project="widgets", worktree_path="/fixture/wt-review",
+        )
+    assert not any("conclude-disposable" in cmd for cmd in calls)
 
 
 def test_conclude_dispatch_attempt_terminal_row_still_checks_identity(monkeypatch):
