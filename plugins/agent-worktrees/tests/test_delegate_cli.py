@@ -13,6 +13,8 @@ from agent_worktrees import list_cli
 from agent_worktrees import list_views_cli
 from agent_worktrees import sessions, tracking
 
+_FRESH = {"refreshed_age_s": 1.0, "bound_s": 90.0}
+
 
 def _row(
     worktree_id: str,
@@ -308,7 +310,7 @@ def test_build_list_json_payload_adds_delegate_annotations(monkeypatch):
 
 
 def test_run_fleet_json_annotates_delegate_graph(monkeypatch):
-    current = {"quality": "current", "observed_at": 1.0}
+    current = {"quality": "current", "observed_at": 1.0, "freshness": _FRESH}
     hosts = [
         {
             "machine": "atlas-core",
@@ -367,7 +369,7 @@ def test_run_fleet_json_annotates_delegate_graph(monkeypatch):
     assert delegate["delegate_finalizable"] is True
 
 
-_CURRENT = {"quality": "current", "observed_at": 1.0}
+_CURRENT = {"quality": "current", "observed_at": 1.0, "freshness": _FRESH}
 _SAVED = {
     "projection": {"quality": "advisory", "observed_at": 1.0},
     "availability": {"status": "advisory", "reason": "resident not running"},
@@ -397,7 +399,22 @@ def _fleet_hosts(caller_host: dict, caller_rows: list[dict]) -> list[dict]:
     ({"projection": _CURRENT, "availability": {"status": "stale", "reason": "x"}},
      "unknown", False, "host-roster-advisory"),
     ({}, "unknown", False, "host-roster-advisory"),
-], ids=["current", "saved", "stale", "unlabeled"])
+    ({"projection": {"quality": "current", "observed_at": 1.0}},
+     "unknown", False, "host-roster-advisory"),
+    ({"projection": {**_CURRENT, "freshness": {"refreshed_age_s": 91.0, "bound_s": 90.0}}},
+     "unknown", False, "host-roster-advisory"),
+    ({"projection": {**_CURRENT, "freshness": {"refreshed_age_s": None, "bound_s": 90.0}}},
+     "unknown", False, "host-roster-advisory"),
+    ({"projection": {**_CURRENT, "freshness": {"refreshed_age_s": True, "bound_s": 90.0}}},
+     "unknown", False, "host-roster-advisory"),
+    ({"projection": {**_CURRENT, "freshness": {"refreshed_age_s": float("nan"), "bound_s": 90.0}}},
+     "unknown", False, "host-roster-advisory"),
+    ({"projection": {**_CURRENT, "freshness": {"refreshed_age_s": -1.0, "bound_s": 90.0}}},
+     "unknown", False, "host-roster-advisory"),
+], ids=[
+    "current", "saved", "stale", "unlabeled", "unproven-freshness", "overdue",
+    "never-refreshed", "bool-age", "nan-age", "negative-age",
+])
 def test_run_fleet_infers_gone_caller_only_from_current_roster(
     monkeypatch, caller_host, state, finalizable, reason,
 ):

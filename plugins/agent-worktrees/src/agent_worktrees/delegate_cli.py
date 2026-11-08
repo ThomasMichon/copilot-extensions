@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import math
 import shlex
 import subprocess
 import sys
@@ -253,19 +254,36 @@ def delegate_graph_overlays(
     return overlays
 
 
+def _finite_seconds(value: Any) -> bool:
+    return (
+        type(value) in (int, float)
+        and math.isfinite(value)
+        and value >= 0
+    )
+
+
 def host_roster_is_current(host: dict[str, Any]) -> bool:
     """True only for a reachable fleet host row read from a current publication.
 
     A saved (``availability.status: "advisory"``) or stale-labeled roster, or
     a reply without current-roster provenance (as from an older runtime or a
-    cached listing), may omit or misstate a caller that exists now."""
+    cached listing), may omit or misstate a caller that exists now. A passive
+    read is also current only while the resident proves it republished the
+    roster within its freshness bound (``projection.freshness``): an older
+    runtime that cannot prove this stays non-authoritative."""
     projection = host.get("projection")
-    return (
+    if not (
         host.get("reachable") is True
         and host.get("availability") is None
         and isinstance(projection, dict)
         and projection.get("quality") == "current"
-    )
+    ):
+        return False
+    freshness = projection.get("freshness")
+    if not isinstance(freshness, dict):
+        return False
+    age, bound = freshness.get("refreshed_age_s"), freshness.get("bound_s")
+    return _finite_seconds(age) and _finite_seconds(bound) and age <= bound
 
 
 def annotate_fleet_hosts(hosts: list[dict[str, Any]]) -> list[dict[str, Any]]:

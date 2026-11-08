@@ -268,7 +268,9 @@ def run_fleet(argv: list[str]) -> int:
         "attempt that never starts, waits for or wakes a host's status-monitor, "
         "otherwise that host's "
         "saved roster labeled by the row's `availability` (status advisory) "
-        "and `projection.observed_at`; a host without a saved roster, or whose "
+        "and `projection.observed_at`; a resident roster not republished "
+        "within the resident's freshness bound (`projection.freshness`) is "
+        "labeled `availability` status stale; a host without a saved roster, or whose "
         "older runtime rejects `--passive`, is a partial row. Registration is "
         "not checked per host: confirm a host's empty list against that "
         "host's `repos list --strict --json`. Rows carry both the lifecycle "
@@ -348,7 +350,12 @@ def run_fleet(argv: list[str]) -> int:
             continue
         n = len(row.get("worktrees", []))
         total += n
-        saved = " (saved roster)" if row.get("availability") else ""
+        availability = row.get("availability")
+        status = availability.get("status") if isinstance(availability, dict) else None
+        saved = (
+            " (saved roster)" if status == "advisory"
+            else " (stale roster)" if availability else ""
+        )
         print(f"  {label:30} {n} worktree(s){saved}")
     print(f"\n{total} worktree(s) across {len(rows)} host(s).")
     return 0

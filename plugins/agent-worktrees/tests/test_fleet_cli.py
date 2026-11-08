@@ -421,6 +421,48 @@ def test_every_host_read_is_passive_and_saved_rows_keep_provenance(tmp_path):
         assert row["projection"]["observed_at"] == 1700000000.0
 
 
+def test_resident_freshness_and_stale_label_reach_fleet_rows(tmp_path, capsys):
+    """A resident roster read passively carries ``projection.freshness``; one
+    not republished within the resident's bound is labeled stale and named
+    apart from a saved roster in the human view."""
+    config = _fake_config(tmp_path, machine="atlas-core", platform="wsl")
+    fresh = {"quality": "current", "observed_at": 1.0,
+             "freshness": {"refreshed_age_s": 5.0, "bound_s": 90.0}}
+    replies = {
+        "local": {"worktrees": [], "projection": fresh},
+        "ember": {
+            "worktrees": [{"id": "w1"}],
+            "projection": {**fresh, "freshness": {"refreshed_age_s": 95.0, "bound_s": 90.0}},
+            "availability": {"status": "stale", "reason": "current roster refresh overdue"},
+        },
+        "atlas-core": {
+            "worktrees": [],
+            "projection": {"quality": "advisory", "observed_at": 1.0},
+            "availability": {"status": "advisory", "reason": "resident not running"},
+        },
+    }
+
+    def _fake_run(cmd, **_kwargs):
+        reply = replies["local" if cmd[0] != "ssh" else cmd[-2]]
+        return SimpleNamespace(returncode=0, stdout=json.dumps(reply), stderr="")
+
+    result = _run_json(["--json"], _three_targets(), config, run_side_effect=_fake_run)
+    rows = {(row["machine"], row["env"]): row for row in result["hosts"]}
+    assert rows[("atlas-core", "wsl")]["projection"]["freshness"]["refreshed_age_s"] == 5.0
+    assert rows[("ember", "linux")]["availability"]["status"] == "stale"
+    assert rows[("ember", "linux")]["projection"]["freshness"]["bound_s"] == 90.0
+
+    with patch.object(fleet.cfg, "load_config", return_value=config), \
+         patch.object(fleet.cfg, "load_machines_yaml", return_value=_three_targets()), \
+         patch.object(fleet.cfg, "project_name", return_value="agent-worktrees"), \
+         patch.object(fleet.subprocess, "run", side_effect=_fake_run):
+        assert fleet.run_fleet([]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert any("ember" in line and "(stale roster)" in line for line in lines)
+    assert any("windows" in line and "(saved roster)" in line for line in lines)
+    assert not any("wsl" in line and "roster)" in line for line in lines)
+
+
 def test_runtime_without_passive_or_saved_roster_is_a_gap(tmp_path):
     """An older host runtime that rejects ``--passive`` (argparse exit 2), or
     a host with no resident and no saved roster (exit 1 with a JSON error),

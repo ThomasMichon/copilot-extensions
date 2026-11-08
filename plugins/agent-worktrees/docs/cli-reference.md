@@ -170,11 +170,15 @@ Coverage is explicit, never inferred:
   published the project, or predates the demand-free read and rejects it, the
   host returns its saved roster and the row carries `availability`
   (`status: "advisory"`) and
-  `projection.observed_at`: saved rows that may be stale. A host with no saved
+  `projection.observed_at`: saved rows that may be stale. A resident answer
+  carries `projection.freshness` (`refreshed_age_s`, `bound_s`); when the
+  resident has not republished the project within that bound (for example its
+  demand lapsed, or its sweep loop stalled), the row is labeled
+  `availability.status: "stale"`. A host with no saved
   roster, or an older runtime that rejects `--passive` as an unrecognized
-  argument, becomes a `reachable: false` gap. A saved roster never proves a
-  delegate's caller gone or terminal: a caller missing from it is `unknown`,
-  and the delegate is not finalizable (`host-roster-advisory`). Every child
+  argument, becomes a `reachable: false` gap. A saved or stale roster never
+  proves a delegate's caller gone or terminal: a caller missing from it is
+  `unknown`, and the delegate is not finalizable (`host-roster-advisory`). Every child
   also runs with stdin closed and `AGENT_WORKTREES_NO_SELFPROVISION=1`, so a
   host without a usable runtime reports a gap instead of provisioning one.
 - **Local deadline only.** `--timeout` bounds the SSH connect and the local
@@ -1231,6 +1235,18 @@ demand (the request carries `passive: true`, which the resident honors by
 neither renewing scan demand nor waking its producer for an unpublished
 project); otherwise the saved roster labeled `availability.status: "advisory"`
 with its `projection.observed_at`, or a JSON error (exit 1) when none is saved.
+A resident's passive answer adds `projection.freshness`: the age of that
+resident's last successful publication of the project (`refreshed_age_s`,
+`null` if it has not published it since election) and its bound (`bound_s`,
+the larger of 45 seconds and three monitor intervals). The age is measured
+when the read is served, so a stalled sweep loop ages out rather than vouching
+for an old roster; an unpublished-since-election or overdue roster is labeled
+`availability.status: "stale"`. Worktree state-change notifications (every
+tracking-record save, such as create, resume, status and finalize, and every
+retirement removal) and mux lifecycle changes (a managed-mux session's live or
+attached-client change, or a registered session vanishing from the mux listing)
+wake the resident and republish the affected project on the next sweep without
+renewing its demand.
 A resident that predates the marker rejects it as an invalid request; the
 passive read then also returns the labeled saved roster, never a demand read. It
 cannot be combined with `--follow`, `--glance` or `--refresh`, and the feed
@@ -1270,7 +1286,9 @@ explicit legacy/detail host rows as `delegates` (the delegate worktree ids plus
 their own finalizable/not-finalizable verdicts); current rows omit that graph.
 `fleet` and `delegates` accept a host's roster as proof that a caller is gone
 or terminal only when it is a current publication (`projection.quality:
-"current"` with no `availability` label). A saved, stale, or unlabeled roster
+"current"` with no `availability` label) whose `projection.freshness` proves a
+republish within its bound (finite, non-negative `refreshed_age_s` no greater
+than `bound_s`). A saved, stale, unproven, or unlabeled roster
 (for example from an older runtime) leaves a missing caller `unknown` and never
 authorizes finalization (`delegate_finalizable: false`, reason
 `host-roster-advisory`).

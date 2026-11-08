@@ -632,6 +632,29 @@ def test_sweep_without_managed_mux_cache_observes_only_the_direct_scan(tmp_path,
     assert observed == [{"wt-a"}]  # unchanged when managed_mux_cache is None
 
 
+def test_sweep_reports_vanished_mux_sessions_for_roster_republish(tmp_path, monkeypatch):
+    reg = tmp_path / "reg"
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
+    m._register_session_for_monitor("wt-a", "/w/a", session_incarnation="$1:100")
+    m._register_session_for_monitor("wt-gone", "/w/gone", session_incarnation="$2:200")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {"wt-a": (1, "$1:100")})
+    monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    _capture_set(monkeypatch)
+    ended: list[str] = []
+
+    m._monitor_sweep("tmux", "T", "P", set(), session_ended=ended.append)
+
+    assert ended == ["/w/gone"]
+    assert not (reg / "wt-gone").exists()
+
+    ended.clear()
+    m._monitor_sweep("tmux", "T", "P", set(), session_ended=ended.append)
+
+    assert ended == []  # a live session never reports; a pruned one reports once
+
+
 def test_sweep_routes_manager_owned_status_through_mux_status_v1(tmp_path, monkeypatch):
     from agent_worktrees import mux_link
 
@@ -728,6 +751,7 @@ def test_sweep_prunes_manager_owned_registry_entries_from_the_unmanaged_lane(tmp
         }
     )
     observed: list[set[str]] = []
+    ended: list[str] = []
 
     served = m._monitor_sweep(
         "tmux",
@@ -736,11 +760,13 @@ def test_sweep_prunes_manager_owned_registry_entries_from_the_unmanaged_lane(tmp
         set(),
         catalog_observer=observed.append,
         managed_mux_cache=cache,
+        session_ended=ended.append,
     )
 
     assert served == 1
     assert observed == [{"wt-managed"}]
     assert not (reg / "wt-managed").exists()
+    assert ended == []  # handed to the manager while still live: not a deactivation
     assert len(pushed) == 1
     assert pushed[0]["session_name"] == "wt-managed"
 
@@ -4831,7 +4857,7 @@ def test_idle_exit_rechecks_new_conditions_after_acquiring_cutover_guard(tmp_pat
 def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, monkeypatch, kind, idle_gap):
     from zdd import lifecycle
 
-    from agent_worktrees import hook_ipc, monitor_roots, self_retire, status_monitor_cutover as smc
+    from agent_worktrees import hook_ipc, monitor_roots, resident_push, self_retire, status_monitor_cutover as smc
     from agent_worktrees import runtime_monitor_retirements as retirements
     from agent_worktrees.status_monitor_handover import MonitorHandover
 
@@ -4969,8 +4995,14 @@ def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, mo
 
     def sweep(*args, **kwargs):
         sweeps.append(clock["now"])
+        swept_projects.append(set(kwargs["picker_projects"]))
         return 0
 
+    swept_projects = []
+    monkeypatch.setattr(
+        resident_push, "changed_path_project",
+        lambda path, **_kw: "changed-project" if path == str(tmp_path) else None,
+    )
     monkeypatch.setattr(m, "_monitor_sweep", sweep)
     deadline = None
 
@@ -5000,6 +5032,12 @@ def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, mo
     assert gap["injected"] is idle_gap
     assert changes == ([str(tmp_path), str(tmp_path)] if kind == "worktreeChanged" else [])
     assert sweeps == list(range(0, 271, 30))
+    # Each change event republishes its project on the next sweep, never
+    # renewing demand: idle expiry above is unchanged.
+    changed_at = {0, 3} if kind == "worktreeChanged" else set()
+    assert swept_projects == [
+        {"changed-project"} if index in changed_at else set() for index in range(len(sweeps))
+    ]
     exits = [event for event in lifecycle.read_events(tmp_path / "routing")
              if event["action"] == "monitor-exit"]
     assert [event["detail"]["phase"] for event in exits] == ["cleanup-begin", "cleanup-complete"]
@@ -5458,9 +5496,9 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
     bound = []
     real_bind = resident_push.bind
 
-    def _spy_bind(wake_event, segment_cache):
+    def _spy_bind(wake_event, segment_cache, **kwargs):
         bound.append((wake_event, segment_cache))
-        real_bind(wake_event, segment_cache)
+        real_bind(wake_event, segment_cache, **kwargs)
 
     monkeypatch.setattr(resident_push, "bind", _spy_bind)
 
@@ -5610,9 +5648,9 @@ def test_fresh_snapshot_survives_busy_mutation_admission(tmp_path, monkeypatch, 
         locks.append(kwargs["context_lock"])
         return real_linker(*args, **kwargs)
 
-    def bind(wake, cache):
+    def bind(wake, cache, **kwargs):
         caches.append(cache)
-        real_bind(wake, cache)
+        real_bind(wake, cache, **kwargs)
 
     monkeypatch.setattr(allocation_link_runtime, "AllocationLinkRuntime", linker)
     monkeypatch.setattr(resident_push, "bind", bind)
@@ -5689,9 +5727,9 @@ def test_status_monitor_binds_and_unbinds_resident_push(tmp_path, monkeypatch):
     bound = []
     real_bind = resident_push.bind
 
-    def _spy_bind(wake_event, segment_cache):
+    def _spy_bind(wake_event, segment_cache, **kwargs):
         bound.append((wake_event, segment_cache))
-        real_bind(wake_event, segment_cache)
+        real_bind(wake_event, segment_cache, **kwargs)
 
     monkeypatch.setattr(resident_push, "bind", _spy_bind)
     reset_calls = []
