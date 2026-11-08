@@ -66,6 +66,12 @@ lean `install.{ps1,sh} provision` path and then dispatches. For normal ongoing
 updates, use `agent-worktrees update`; it refreshes payloads and reconciles
 runtimes rather than requiring hand-run `copilot plugin update` plus init.
 
+On Windows, stamping and first-use provisioning respect the selected update
+authority. If the update driver is busy, first use releases its provisioning lock
+and retries for up to 120 seconds; an unsettled queue requires recovery instead.
+An older selected installer without this nonblocking first-use contract is
+refused: run an explicit install or repair from a current payload.
+
 Runtime source fingerprints exclude generated `.egg-info` and `.dist-info`
 metadata beneath package source roots. Building a wheel therefore does not
 make unchanged source appear different on the next update. Real source and

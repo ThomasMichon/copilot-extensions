@@ -1,0 +1,9 @@
+{
+  "comment": "Fence Windows stamp and first-use admission under the update driver",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
