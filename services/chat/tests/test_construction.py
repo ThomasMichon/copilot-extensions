@@ -3,12 +3,20 @@ import hashlib
 from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
-from typing import Any, Iterator, NoReturn
+from typing import Any, Iterator, NoReturn, TypedDict
 
 import pytest
 
 from agent_chat_service import construction
 from agent_chat_service.client import ClientError
+
+
+class CandidateArguments(TypedDict):
+    project: Path
+    uv: Path
+    python: Path
+    wait_timeout: float
+    child_timeout: float
 
 
 def test_construction_floor_refuses_before_resource_loading(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -56,7 +64,7 @@ def test_client_policy_delegates_one_canonical_candidate(
     monkeypatch.setattr(
         construction, "_engine", lambda: SimpleNamespace(numbered_candidate=numbered_candidate),
     )
-    arguments = {
+    arguments: CandidateArguments = {
         "project": tmp_path / "project", "uv": tmp_path / "uv", "python": tmp_path / "python",
         "wait_timeout": 12, "child_timeout": 34,
     }

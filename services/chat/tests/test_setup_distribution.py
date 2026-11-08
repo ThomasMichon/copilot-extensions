@@ -5,6 +5,7 @@ import shutil
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -42,6 +43,7 @@ def test_independent_sdist_refuses_missing_construction_input(
 def test_installed_constructor_preserves_the_separate_bootstrap_floor(
     tmp_path: Path, installed_chat: SimpleNamespace,
 ) -> None:
+    result: dict[str, Any]
     probe = """
 import importlib,json,sys
 from pathlib import Path
@@ -142,6 +144,7 @@ def independent_inputs(
 def test_installed_constructor_builds_chat_client_from_independent_inputs(
     tmp_path: Path, installed_chat: SimpleNamespace, chat_library_sdists: dict[str, Path],
 ) -> None:
+    result: dict[str, Any]
     project = independent_inputs(tmp_path, installed_chat, chat_library_sdists)
     uv = shutil.which("uv")
     assert uv is not None
