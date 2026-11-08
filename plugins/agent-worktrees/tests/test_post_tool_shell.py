@@ -545,6 +545,62 @@ def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config, request):
         runtime.shutdown()
 
 
+def _instrument_prepared_sender(source):
+    start = source.index("function Send-PostToolReadDemand")
+    end = source.index("function Get-PostToolRuntimeRoot", start)
+    sender = source[start:end]
+    allocation = "$client = [Net.Sockets.TcpClient]::new([Net.Sockets.AddressFamily]::InterNetwork)"
+    connect = "if (-not $client.ConnectAsync([Net.IPAddress]::Loopback, $port).Wait($remaining)) { return }"
+    write = "$null = $client.GetStream().WriteAsync($bytes, 0, $bytes.Length).Wait($remaining)"
+    for original, replacement in (
+        ("$client = $null", "$script:senderDiagnostic = @{ phase = 'entered' }; $client = $null"),
+        (
+            allocation,
+            "$script:senderDiagnostic.phase = 'allocating'\n" + allocation + "\n"
+            "$script:senderDiagnostic.phase = 'allocated'\n"
+            "$script:senderDiagnostic.allocation_ms = $clock.ElapsedMilliseconds",
+        ),
+        (
+            connect,
+            "$script:senderDiagnostic.phase = 'connecting'\n" + connect + "\n"
+            "$script:senderDiagnostic.phase = 'connected'\n"
+            "$script:senderDiagnostic.connected_ms = $clock.ElapsedMilliseconds",
+        ),
+        (
+            write,
+            "$script:senderDiagnostic.phase = 'writing'\n"
+            "$script:senderDiagnostic.write_complete = "
+            "$client.GetStream().WriteAsync($bytes, 0, $bytes.Length).Wait($remaining)\n"
+            "$script:senderDiagnostic.phase = 'write-returned'",
+        ),
+        (
+            "} catch {} finally {",
+            "} catch {\n"
+            " $script:senderDiagnostic.error_type = $_.Exception.GetType().FullName\n"
+            " $script:senderDiagnostic.error_hresult = $_.Exception.HResult\n"
+            "} finally {\n"
+            " if ($null -ne $clock) { $script:senderDiagnostic.elapsed_ms = $clock.ElapsedMilliseconds }",
+        ),
+    ):
+        assert sender.count(original) == 1, original
+        sender = sender.replace(original, replacement)
+    return source[:start] + sender + source[end:]
+
+
+def _trace_prepared_sender(fixture):
+    path = fixture["payload_root"] / "scripts" / "hook-facts.ps1"
+    path.write_text(_instrument_prepared_sender(path.read_text(encoding="utf-8")), encoding="utf-8")
+    harness = fixture["harness"]
+    source = harness.read_text(encoding="utf-8")
+    terminal = "InvariantCulture)); exit 0"
+    assert source.count(terminal) == 1
+    harness.write_text(source.replace(terminal, (
+        "InvariantCulture));\n"
+        "[Console]::Error.WriteLine('sender_diagnostics=' + "
+        "(ConvertTo-Json -Compress -InputObject $script:senderDiagnostic)); exit 0"
+    )), encoding="utf-8")
+
+
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("process")
 @pytest.mark.effect("filesystem")
@@ -593,7 +649,8 @@ def test_registered_prepared_cell_post_tool_uses_selected_original_owners(
             + harness,
             encoding="utf-8",
         )
-    invalidated, notices, synchronous = [], [], []
+    _trace_prepared_sender(fixture)
+    invalidated, notices, synchronous, connections = [], [], [], []
     received, release = threading.Event(), threading.Event()
     policy = main._ResidentHookPolicy(main._load_hook_client_module())
     target = str(fixture["home"] / "changed")
@@ -603,6 +660,10 @@ def test_registered_prepared_cell_post_tool_uses_selected_original_owners(
     )
 
     class Server(HookIpcServer):
+        def _on_request_accepted(self):
+            super()._on_request_accepted()
+            connections.append(time.monotonic())
+
         def _on_read_demand(self, request):
             super()._on_read_demand(request)
             notices.append(request)
@@ -737,7 +798,10 @@ def test_registered_prepared_cell_post_tool_uses_selected_original_owners(
             received.wait(2)
             assert not server.has_recent_hook_demand()
         else:
-            assert received.wait(2), "selected original IPC owner received no notification"
+            assert received.wait(2), (
+                "selected original IPC owner received no notification",
+                {"sender": result.stderr, "accepted_connections": len(connections)},
+            )
             assert len(notices) == 1
             expected_kind = {
                 "native": "nativeToolMutation", "batch": "nativeToolBatchMutation",
@@ -970,7 +1034,6 @@ ConvertTo-Json -Compress -InputObject @{ old = $old; prepared = $prepared }
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("process")
 @pytest.mark.effect("filesystem")
-@pytest.mark.skipif(os.name != "nt", reason="Native Windows sender deadline arithmetic")
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("allocation_ms", [60, 110])
 def test_post_tool_send_debits_allocation_and_connect_from_one_budget(tmp_path, shell, allocation_ms):
@@ -981,7 +1044,7 @@ def test_post_tool_send_debits_allocation_and_connect_from_one_budget(tmp_path, 
         if os.environ.get("AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP") == "1":
             pytest.fail(f"Required native membership shell {shell} is unavailable")
         pytest.skip(f"{shell} is unavailable")
-    source = (PLUGIN / "scripts" / "hook-facts.ps1").read_text(encoding="utf-8")
+    source = _instrument_prepared_sender((PLUGIN / "scripts" / "hook-facts.ps1").read_text(encoding="utf-8"))
     start = source.index("function Send-PostToolReadDemand")
     end = source.index("function Get-PostToolRuntimeRoot", start)
     sender = source[start:end]
@@ -1036,7 +1099,7 @@ Send-PostToolReadDemand -Discovery @{
 }
 ConvertTo-Json -Compress -InputObject @{
     connect = @($script:connectWaits); write = @($script:writeWaits)
-    wire = $script:wire; disposed = $script:disposed
+    wire = $script:wire; disposed = $script:disposed; diagnostic = $script:senderDiagnostic
 }
 """, encoding="utf-8")
     result = subprocess.run(
@@ -1051,9 +1114,16 @@ ConvertTo-Json -Compress -InputObject @{
         assert value["connect"] == [40]
         assert value["write"] == [25]
         assert json.loads(value["wire"])["kind"] == "readHookDemand"
+        assert value["diagnostic"] == {
+            "phase": "write-returned", "allocation_ms": 60, "connected_ms": 75,
+            "elapsed_ms": 75, "write_complete": True,
+        }
     else:
         assert value["connect"] == value["write"] == []
         assert value["wire"] is None
+        assert value["diagnostic"] == {
+            "phase": "allocated", "allocation_ms": 110, "elapsed_ms": 110,
+        }
 
 
 @pytest.mark.portfolio_tier("T2")
