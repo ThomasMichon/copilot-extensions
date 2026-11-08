@@ -55,26 +55,32 @@ def _host(shell):
     return host
 
 
-def _fixture(tmp_path, plugin):
+def _fixture(tmp_path, plugin, *, layout="mixed"):
     home = tmp_path / "home"
     root = home / ("." + plugin)
     root.mkdir(parents=True)
     (home / ".ssh" / "config.d").mkdir(parents=True)
     (home / ".ssh" / "config.d" / "static.conf").write_bytes(b"Host fixture\n HostName localhost\n")
-    for directory in (".venv", "versions", "snapshots"):
+    directories = {
+        "mixed": (".venv", "versions", "snapshots"),
+        "legacy": (".venv",),
+        "versioned": ("versions", "snapshots"),
+    }[layout]
+    for directory in directories:
         (root / directory).mkdir()
         generation = root / directory if directory == ".venv" else root / directory / "1.2.3"
         generation.mkdir(exist_ok=True)
         (generation / "runtime").write_bytes(b"reconstructible code")
-    (root / ".venv" / "pyvenv.cfg").write_text(
-        f"home = {Path(sys.executable).parent}\n", encoding="utf-8",
-    )
+    if ".venv" in directories:
+        (root / ".venv" / "pyvenv.cfg").write_text(
+            f"home = {Path(sys.executable).parent}\n", encoding="utf-8",
+        )
     for name in ("current-version", "last-known-good", "payload-dir", "stamped-version"):
         (root / name).write_bytes(b"runtime selector")
     (root / "deploy-manifest.json").write_text(json.dumps({
         "schema_version": 3, "service": plugin,
         "source": {"plugin": plugin, "kind": "local", "path": str(ROOT / "plugins" / plugin), "version": "1.2.3", "repo": "copilot-extensions"},
-        "venv": str(root / "versions" / "1.2.3"),
+        "venv": str(root / ".venv" if layout == "legacy" else root / "versions" / "1.2.3"),
         "runtime": "python", "deployed_at": "2026-01-01T00:00:00Z", "deployed_by": "fixture",
     }), encoding="utf-8")
     if plugin == "agent-codespaces":
@@ -148,6 +154,27 @@ def test_codespaces_legacy_exclusions_are_preserved_state_and_guard_uninstall(
     assert path.read_bytes() == before
     profile = json.loads((payload / "scripts" / "uninstall-profile.json").read_text())
     assert path.name not in profile["root_entries"]
+
+
+@pytest.mark.parametrize("scoped", (False, True))
+def test_codespaces_uninstall_observes_each_distinct_state_root_once(
+    tmp_path, monkeypatch, scoped,
+):
+    module = _policy("agent-codespaces")
+    home = tmp_path / "home"
+    legacy = home / ".agent-codespaces"
+    root = tmp_path / "scoped" if scoped else legacy
+    expected = list(dict.fromkeys((root, legacy)))
+    for directory in expected:
+        directory.mkdir(parents=True)
+        (directory / "connection-owner.predecessors.json").write_text(
+            "{}", encoding="utf-8",
+        )
+    monkeypatch.setattr(Path, "home", lambda: home)
+    observed = []
+    monkeypatch.setattr(module, "check_predecessors", lambda path, payload: observed.append(path))
+    module.check_under_custody(root, ROOT / "plugins" / "agent-codespaces", "agent-codespaces")
+    assert observed == [directory / "connection-owner.predecessors.json" for directory in expected]
 
 
 @pytest.mark.portfolio_tier("T2")
@@ -384,10 +411,14 @@ def _assert_retained(root, durable):
     assert (root.resolve().parent / ".ssh" / "config.d" / "static.conf").read_bytes() == b"Host fixture\n HostName localhost\n"
 
 
-@pytest.mark.parametrize("plugin", PLUGINS)
+@pytest.mark.parametrize(("plugin", "layout"), [
+    ("agent-codespaces", "legacy"),
+    ("agent-codespaces", "versioned"),
+    *[(plugin, "mixed") for plugin in PLUGINS if plugin != "agent-codespaces"],
+])
 @pytest.mark.parametrize("shell", ("pwsh", "bash"))
-def test_native_success_removes_runtime_and_preserves_all_state(tmp_path, plugin, shell):
-    home, root, durable = _fixture(tmp_path, plugin)
+def test_native_success_removes_runtime_and_preserves_all_state(tmp_path, plugin, layout, shell):
+    home, root, durable = _fixture(tmp_path, plugin, layout=layout)
     identity = root.stat().st_ino
     result = _run(tmp_path, plugin, shell, home, root)
     # Do not skip or substitute a fake remover when the canonical uninstall
