@@ -141,6 +141,58 @@ def test_unproven_handle_retires_as_qualified_empty_history(queue, handle):
     assert evidence.qualified_empty and not evidence.retired
 
 
+def _next_attempt(queue, task, handle, now):
+    row, _ = queue.reserve_spawn(task.id, now=now)
+    queue.record_spawn(row.key, session_handle=handle, now=now)
+    queue.settle_spawn(row.key, detail="historical")
+    with queue._connect() as conn:
+        conn.execute(
+            "UPDATE spawn_reservations SET startup_complete=0, startup_fenced=0,"
+            " conversation_retired=0, release_requested=0 WHERE key=?", (row.key,),
+        )
+    return row
+
+
+@pytest.mark.parametrize("newer_at", [1000.0, 900.0])
+def test_open_tasks_latest_attempt_is_chosen_numerically(queue, newer_at):
+    task, newer = _legacy(queue, "attempts", handle="native-ten", concluded=False)
+    older = _next_attempt(queue, task, "native-nine", 1100.0)
+    with queue._connect() as conn:
+        for row, attempt, at in ((newer, 10, newer_at), (older, 9, 1000.0)):
+            conn.execute(
+                "UPDATE spawn_reservations SET attempt=?, key=?, reserved_at=? WHERE key=?",
+                (attempt, f"dispatch-task:{task.id}:{attempt}", at, row.key),
+            )
+    result = queue.fence_legacy_history(before=2000.0, apply=True, **ATTESTED)
+    assert result["fenced"] == 1 and result["excluded"] == {"resumable_task_native": 1}
+    assert _accountable(queue, f"dispatch-task:{task.id}:10")
+    assert not _accountable(queue, f"dispatch-task:{task.id}:9")
+
+
+def test_unresolved_transport_protects_a_shared_native(queue):
+    task, older = _legacy(queue, "transport", handle="native-shared", concluded=False)
+    newer = _next_attempt(queue, task, "native-shared", 1100.0)
+    with queue._connect() as conn:
+        conn.execute(
+            "INSERT INTO execution_send_custody VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("scope", "send", "example", "test", 1, task.id, newer.key, 1, "resume",
+             "identity", "unknown", "", 1100.0, 1100.0),
+        )
+        conn.execute("UPDATE tasks SET status='completed' WHERE id=?", (task.id,))
+    result = queue.fence_legacy_history(before=2000.0, apply=True, **ATTESTED)
+    assert result["fenced"] == 0 and result["excluded"] == {"transport": 2}
+    assert _accountable(queue, older.key)
+
+
+def test_completed_startup_with_unproven_handle_is_unclassifiable(queue):
+    _, row = _legacy(queue, "completed", handle="local-body:done")
+    with queue._connect() as conn:
+        conn.execute("UPDATE spawn_reservations SET startup_complete=1 WHERE key=?", (row.key,))
+    result = queue.fence_legacy_history(before=2000.0, apply=True, **ATTESTED)
+    assert result["fenced"] == 0 and result["excluded"] == {"unclassifiable": 1}
+    assert _accountable(queue, row.key)
+
+
 @pytest.mark.parametrize("live", ["active", "release_pending", "open_latest"])
 def test_conflicting_live_evidence_protects_every_recorded_identity(queue, live):
     if live == "active":

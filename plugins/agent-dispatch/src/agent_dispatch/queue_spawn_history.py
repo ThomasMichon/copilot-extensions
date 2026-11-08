@@ -123,6 +123,10 @@ class SpawnHistoryMixin:
             native = reservation_native_identity(conn, history)
         except (TaskError, ValueError):
             return None
+        if native is None and row["session_handle"] and row["startup_complete"]:
+            # Only a fenced, never-completed startup may retire an unproven
+            # handle as qualified-empty history.
+            return None
         return frozenset({row["session_handle"], native, history["native_session_id"]} - {None})
 
     @staticmethod
@@ -156,17 +160,31 @@ class SpawnHistoryMixin:
                 tuple(Status.CONCLUDED),
             )
         }
-        latest: dict[str, set[str]] = {}
+        latest: dict[str, tuple[tuple[int, float, str], set[str]]] = {}
+        transport: set[str] = set()
         for row in rows:
             raw = set(identities[row["key"]] or ()) | cls._recorded_identities(accounting, row)
             if row["state"] in SpawnState.ACTIVE or row["native_release_pending"]:
                 for native in raw:
                     protected[native] = "shared_live_native"
-            if row["task_id"] in open_tasks and raw:
-                latest[row["task_id"]] = raw
-        for raw in latest.values():
+            history = {**dict(row), "native_session_id": accounting.receipts.get(row["key"])}
+            try:
+                unresolved = accounting.transport.accountable(history)
+            except (TaskError, ValueError):
+                unresolved = True  # conflicting evidence cannot prove the transport settled
+            if unresolved:
+                transport |= raw
+            # Order by numeric attempt, not scan order: timestamps can tie or regress.
+            order = (row["attempt"] or 0, row["reserved_at"] or 0.0, row["key"])
+            if row["task_id"] in open_tasks and raw and (
+                row["task_id"] not in latest or order > latest[row["task_id"]][0]
+            ):
+                latest[row["task_id"]] = (order, raw)
+        for _, raw in latest.values():
             for native in raw:
                 protected.setdefault(native, "resumable_task_native")
+        for native in transport:
+            protected.setdefault(native, "transport")
         return protected
 
     @staticmethod
