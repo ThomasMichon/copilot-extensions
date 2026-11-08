@@ -122,10 +122,11 @@ def test_removal_error_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert target.is_dir()
 
 
-def _args(root: Path, *extra: str) -> argparse.Namespace:
+def _args(root: Path | None, *extra: str) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     prune.add_parsers(parser.add_subparsers(dest="command"))
-    return parser.parse_args(["python-cache", "prune", "--root", str(root), *extra])
+    roots = ["--root", str(root)] if root is not None else []
+    return parser.parse_args(["python-cache", "prune", *roots, *extra])
 
 
 def test_cli_json_dry_run(
@@ -169,6 +170,37 @@ def test_root_scan_error_is_reported(tmp_path: Path, monkeypatch: pytest.MonkeyP
     report = prune.prune_unsealed(tmp_path, apply=True, liveness=PROVEN)
 
     assert [(c.status, c.reason.split(":")[0]) for c in report.candidates] == [("error", "PermissionError")]
+
+
+@pytest.mark.parametrize("error", [PermissionError(13, "denied"), OSError(5, "I/O failure")])
+def test_default_discovery_reports_inaccessible_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    error: OSError,
+) -> None:
+    cache = tmp_path / ".agent-example" / "cache" / "python"
+    target = _bytecode_dir(cache, "unsealed-" + "a" * 32)
+    (tmp_path / ".agent-empty").mkdir()
+    (tmp_path / ".agent-file").write_text("not a runtime", encoding="utf-8")
+    original = os.stat
+
+    def inspect(path, *args, **kwargs):
+        if isinstance(path, (str, os.PathLike)) and Path(prune._display(os.fspath(path))) == cache:
+            raise error
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(prune.os, "stat", inspect)
+    monkeypatch.setattr(prune, "live_unsealed_names", lambda: PROVEN)
+
+    assert prune.cmd_python_cache(_args(None, "--apply", "--json")) == 1
+
+    payload = json.loads(capsys.readouterr().out)
+    report, = payload["roots"]
+    assert Path(report["cache_root"]) == cache
+    assert report["summary"]["error"] == 1
+    candidate, = report["candidates"]
+    assert candidate["reason"].startswith(type(error).__name__)
+    assert target.is_dir()
 
 
 def test_linked_runtime_cache_root_is_skipped(tmp_path: Path) -> None:

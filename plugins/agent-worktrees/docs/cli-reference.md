@@ -1635,6 +1635,8 @@ It is conservative and fails closed:
   in the meantime the candidate becomes `error` (`changed-during-removal`).
   Any I/O error, including on the cache root itself, marks an `error` entry,
   leaves the rest in place, and makes the command exit 1.
+  Default discovery skips absent cache paths, but reports inaccessible caches
+  through the same error entries rather than silently omitting them.
 - `python-cache` needs no project, so it runs from any directory.
 
 ## Installation & Config

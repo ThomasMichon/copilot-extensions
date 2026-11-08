@@ -408,8 +408,11 @@ def default_cache_roots(home: str | os.PathLike[str] | None = None) -> list[Path
             cache = runtime_root / "cache" / "python"
             try:
                 os.stat(cache, follow_symlinks=False)
-            except OSError:
+            except (FileNotFoundError, NotADirectoryError):
                 continue
+            except OSError:
+                # Let the normal root inspection report inaccessible caches.
+                pass
             candidates.append(cache)
     return candidates
 
