@@ -1206,6 +1206,15 @@ if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and -not `$_pyt
         '\\?\UNC\' + `$_pythonCache.Substring(2)
     } else { '\\?\' + `$_pythonCache }
 }
+# Reuse the sealed installed-<digest> bytecode cache when install evidence is valid.
+`$_mintedCache = `$_pythonCache
+try {
+    `$_selectedCache = & `$_py -I -B -X ('pycache_prefix=' + `$_pythonCache) -c "import json,os,sys; from agent_procutil.python_cache import cache_arguments as c; p=c(sys.argv[1],runtime=sys.executable)[1].split('=',1)[1]; print(json.dumps(p if os.path.basename(p).startswith('installed-') else ''))" `$_root 2>`$null
+    if (`$LASTEXITCODE -eq 0 -and @(`$_selectedCache).Count -eq 1) {
+        `$_selectedCache = [string](`$_selectedCache | ConvertFrom-Json)
+        if (`$_selectedCache) { `$_pythonCache = `$_selectedCache }
+    }
+} catch {}
 `$_supportsContext = & `$_py -I -B -c "import importlib.util; print(int(importlib.util.find_spec('agent_vault.service_arguments') is not None))"
 if (`$LASTEXITCODE -ne 0) { throw 'Vault service argument capability could not be read' }
 `$_serviceArguments = @('--foreground', '--persistent')
@@ -1213,7 +1222,9 @@ if (([string]`$_supportsContext).Trim() -ceq '1') {
     `$_serviceArguments += @('--configuration-root', '$($serviceConfigurationRoot -replace "'","''")')
 }
 & `$_py -X "pycache_prefix=`$_pythonCache" -m agent_vault.service @_serviceArguments @args
-exit `$LASTEXITCODE
+`$_exitCode = `$LASTEXITCODE
+if (`$_pythonCache -eq `$_mintedCache) { try { [IO.Directory]::Delete(`$_mintedCache, `$true) } catch {} }
+exit `$_exitCode
 "@, [Text.UTF8Encoding]::new($true))
     if ($policy -eq 'enabled') {
         $desiredTaskAction = New-ScheduledTaskAction `
