@@ -74,6 +74,31 @@ def test_application_inputs_preserve_materialized_local_dependencies(tmp_path, m
     assert (dependencies["widget"] / "src" / "widget" / "__init__.py").read_bytes() == module.read_bytes()
 
 
+@pytest.mark.parametrize("backends", [0, 1, 2])
+def test_native_backend_receipt_selection_preserves_launcher_stages(tmp_path, backends):
+    from test_headed_worktrees_copilot import _backend_execution
+
+    documents = {}
+    for name in ("launcher", *(f"backend-{index}" for index in range(backends))):
+        path = tmp_path / (name + ".execution.json")
+        document = json.dumps({"events": [{
+            "phase": "process-spawned",
+            "details": {"boundary": "launcher-command" if name == "launcher" else "backend-command"},
+        }]})
+        path.write_text(document, encoding="utf-8")
+        documents[path] = document
+    if backends > 1:
+        with pytest.raises(AssertionError, match="more than one native backend"):
+            _backend_execution(tmp_path)
+    elif backends:
+        path, receipt = _backend_execution(tmp_path)
+        assert path.name == "backend-0.execution.json"
+        assert receipt["events"][0]["details"]["boundary"] == "backend-command"
+    else:
+        assert _backend_execution(tmp_path) is None
+    assert {path: path.read_text(encoding="utf-8") for path in tmp_path.iterdir()} == documents
+
+
 @pytest.mark.timeout(300)
 def test_fresh_application_admits_its_current_native_runtime(tmp_path, monkeypatch):
     _qualify_native_application(tmp_path, monkeypatch)
@@ -88,9 +113,19 @@ def test_fresh_application_owns_native_broker_fresh_and_resume(tmp_path, monkeyp
     _qualify_native_application(tmp_path, monkeypatch, broker=True)
 
 
+@pytest.mark.timeout(900)
+@pytest.mark.skipif(
+    os.name != "nt" or os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1",
+    reason="Explicitly select the installed public Windows Worktrees embodiment lane",
+)
+def test_public_embody(tmp_path, monkeypatch):
+    _qualify_native_application(tmp_path, monkeypatch, broker="embody")
+
+
 def _qualify_native_application(tmp_path, monkeypatch, *, broker=False):
     started = time.monotonic()
-    deadline = started + 300
+    construction_budget = 420 if broker == "embody" else 300
+    deadline = started + construction_budget
     print("Application construction starting", flush=True)
     sys.path.insert(0, str(ROOT / "tools"))
     import build_python_artifacts as builder
@@ -226,7 +261,17 @@ def _qualify_native_application(tmp_path, monkeypatch, *, broker=False):
         ], cwd=caller, env=environment, deadline=deadline)
     assert json.loads(described.stdout)["contract"] == "agent-worktrees.native-seed"
     print(f"Application packaged admission checked: {time.monotonic() - started:.2f}s", flush=True)
-    if broker:
+    if broker == "embody":
+        assert time.monotonic() < deadline, "Public caller preparation exceeded 420 seconds"
+        from test_manager_application_launch import _qualify_manager_application
+
+        manager = tmp_path / "manager"
+        manager.mkdir()
+        _qualify_manager_application(
+            manager, monkeypatch, "embody", worktrees_python=python,
+            worktrees_root=root, worktrees_environment=environment,
+        )
+    elif broker:
         assert time.monotonic() < deadline, "Application construction exceeded 300 seconds"
         native_root = tmp_path / "native-flow"
         native_root.mkdir()
