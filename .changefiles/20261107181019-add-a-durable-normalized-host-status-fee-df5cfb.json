@@ -1,0 +1,9 @@
+{
+  "comment": "Add a bounded durable host status feed with coalesced inbox subscriptions and shared remote source streams",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

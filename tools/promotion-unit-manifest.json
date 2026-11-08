@@ -4934,7 +4934,7 @@
         "plugins/agent-bridge/src/agent_bridge/agent_registry_common.py": "73de7083d14afe3d31b96702efc137fb15f7a948bc97e3b915f5547a82898d40",
         "plugins/agent-bridge/src/agent_bridge/agent_registry_namespace.py": "7db1a66a003e7a976c7d0b6d60c953b77a3b856e3e9cf02dddafb48c8bc74876",
         "plugins/agent-bridge/src/agent_bridge/caller_session.py": "18bf4f33a1742113d8d6c1a02986853a03a542d92e9c40eb3edbbea93301e698",
-        "plugins/agent-bridge/src/agent_bridge/client.py": "ca4c2ad22a01ae705e3281fbdcbe9d328182543681abd4df07c7721e4e23187d",
+        "plugins/agent-bridge/src/agent_bridge/client.py": "a174b5404dab599d354de11dd77276750a9f327bcde210502f12a93aef2c81bb",
         "plugins/agent-bridge/src/agent_bridge/client_answers.py": "16e6813233eadd52aea57dc9869775179e2c277611707528a3b24a5b59fd512a",
         "plugins/agent-bridge/src/agent_bridge/client_cli_mode.py": "70058bd55121a268307177aaa9b1e4ef1447b7b69334832e29da5eff4f37690d",
         "plugins/agent-bridge/src/agent_bridge/client_drain.py": "e390fd1720c7187caa4dfeabe1d46ea771e0292d53d038186021d7c7ac980723",
@@ -5324,7 +5324,9 @@
         "tools/promotion_unit_tests/test_live_question_answers.py": "51b9c884787883d6fec7ce81db0075d0d13f54b32df71d3bff6c92227a9134bf",
         "plugins/agent-bridge/src/agent_bridge/live_question_validation.py": "61900a7eb7acbdf924fabaabf1175ddfbe337672971a3ec4ac9016c4d720fdba",
         "plugins/agent-bridge/src/agent_bridge/mux_question_forms.py": "d7c57186148fc9538f6f18eaf87ba1abab42e60ba31f6b4e7d3d163e0d7a19b2",
-        "tools/promotion_unit_tests/test_mux_question_forms.py": "a3040e5cbffffbb723e7030a826af8a1a3efc65dc17732ad86f51955099fb375"
+        "tools/promotion_unit_tests/test_mux_question_forms.py": "a3040e5cbffffbb723e7030a826af8a1a3efc65dc17732ad86f51955099fb375",
+        "plugins/agent-bridge/src/agent_bridge/client_status.py": "1d6a2a05e68d3208244dac65b700db5234c5b351bf39900b66539f0210ba5d52",
+        "plugins/agent-bridge/src/agent_bridge/status_schema.py": "ee1657cc5af74c24f502665abc9a68e66190a1529bc95069f597e283308f6242"
     },
     "coverage_targets": [
         "plugins/agent-dispatch/src/agent_dispatch/queue_submission_consumer.py",

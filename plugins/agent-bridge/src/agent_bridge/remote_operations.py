@@ -252,6 +252,7 @@ class CarrierRequestRouter:
             "live_session.resolve",
             "session.events",
             "session.events.ack",
+            "host.status",
         }
     )
 
@@ -413,6 +414,9 @@ class CarrierRequestRouter:
     ) -> Envelope | AsyncIterator[Envelope]:
         try:
             operation, payload = self._validate_request(envelope)
+            if operation == "host.status":
+                from .status_carrier import prepare_stream
+                return await prepare_stream(envelope, self._client())
             if operation == "session.create":
                 client = self._client()
                 return Envelope(

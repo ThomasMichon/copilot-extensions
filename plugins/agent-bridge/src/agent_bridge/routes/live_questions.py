@@ -61,6 +61,8 @@ async def poll_questions(
     db = request.app.state.db
     if _questions(request).current(session_id, row) is None:
         raise HTTPException(409, "native registration is not current")
+    from ..status_producers import question_snapshot
+    question_snapshot(db, session_id, body)
     controls = db.claim_live_controls(
         session_id, time.time(), CONTROL_MAX_AGE_SECONDS, questions_only=True,
     )
