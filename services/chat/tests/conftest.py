@@ -1,5 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
+import subprocess
 from contextlib import nullcontext
+from contextlib import AbstractContextManager
 import http.server
 import json
 import os
@@ -11,7 +13,7 @@ import sys
 import threading
 import time
 from types import SimpleNamespace
-from typing import Any, Generator, Iterator, Sequence
+from typing import Any, Callable, Generator, Iterator, Sequence
 
 import pytest
 
@@ -44,6 +46,8 @@ def pytest_collection_modifyitems(
         mapping = membership(original)
     except ValueError as error:
         raise pytest.UsageError(str(error)) from error
+    selected: list[pytest.Item]
+    deferred: list[pytest.Item]
     selected, deferred = [], []
     for item, node in zip(items, original):
         (selected if profile == "full" or mapping[node] == "acceptance" else deferred).append(item)
@@ -106,12 +110,14 @@ def pytest_runtest_logreport(report: pytest.TestReport) -> None:
 
 
 @pytest.fixture
-def caller_observer(monkeypatch):
+def caller_observer(monkeypatch: pytest.MonkeyPatch) -> Iterator[object]:
     support = Path(__file__).resolve().parents[3] / "libs" / "agent-procutil" / "tests"
     monkeypatch.syspath_prepend(str(support))
     import test_caller_owned_native as observer
 
-    with nullcontext() if os.name == "nt" else observer._linux_observer():
+    if os.name != "nt":
+        observe: Callable[[], AbstractContextManager[None]] = observer._linux_observer
+    with nullcontext() if os.name == "nt" else observe():
         yield observer
 
 
@@ -121,7 +127,7 @@ def run_artifact(
 ) -> str:
     environment = dict(os.environ)
     environment.pop("PYTHONPATH", None)
-    result = run_caller_owned(
+    result: subprocess.CompletedProcess[str] = run_caller_owned(
         list(map(str, argv)), cwd=cwd, env=environment,
         timeout=timeout, input_text=input_text,
         max_stdout_bytes=4 * 1024 * 1024, max_stderr_bytes=4 * 1024 * 1024,
@@ -325,6 +331,7 @@ def rpc_endpoint(tmp_path: Path) -> Iterator[SimpleNamespace]:
     expected = expected_prefix + "synthetic-credential"
 
     class Handler(http.server.BaseHTTPRequestHandler):
+        _headers_buffer: list[bytes]
         def log_message(self, *_: object) -> None:
             pass
 

@@ -7,7 +7,7 @@ from pathlib import Path
 import socket
 import threading
 import time
-from typing import Any, Iterator
+from typing import Any, Iterator, NoReturn
 
 import pytest
 
@@ -201,7 +201,7 @@ def test_retained_storage_refuses_replacement_without_creating_history(
             from types import SimpleNamespace
             original = Path.lstat
 
-            def redirected(path, *args, **kwargs):
+            def redirected(path: Path, *args: Any, **kwargs: Any) -> os.stat_result | SimpleNamespace:
                 info = original(path, *args, **kwargs)
                 return SimpleNamespace(st_mode=info.st_mode, st_file_attributes=0x400) \
                     if path == database else info
@@ -437,7 +437,7 @@ def test_failed_endpoint_publication_retires_host_and_removes_own_attempt(
     config = configuration(tmp_path)
     publish = endpoint_rendezvous.write_endpoint
 
-    def fail_after_publish(*args, **kwargs):
+    def fail_after_publish(*args: Any, **kwargs: Any) -> NoReturn:
         publish(*args, **kwargs)
         raise OSError("synthetic publication failure")
 

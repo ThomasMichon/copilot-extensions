@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, IO, TYPE_CHECKING, cast
 from unittest.mock import patch
 
 import pytest
@@ -184,8 +184,11 @@ def test_offline_status_and_capability_never_execute_provider_or_network(tmp_pat
     assert not marker.exists()
 
 def test_actual_installed_cli_death_releases_reader_lock_before_outer_cleanup(
-    rpc_endpoint, tmp_path, installed_chat, fixed_rpc_provider, caller_observer,
-):
+    rpc_endpoint: SimpleNamespace, tmp_path: Path, installed_chat: SimpleNamespace,
+    fixed_rpc_provider: list[str], caller_observer: object,
+) -> None:
+    if TYPE_CHECKING:
+        import test_caller_owned_native as caller_observer
     from agent_procutil import direct_python, no_window_kwargs, spawn_sync_in_kill_on_close_job
 
     path = configuration(tmp_path, rpc_endpoint.endpoint)
@@ -314,8 +317,8 @@ runpy.run_path(original,run_name="__main__")
                 pin.kill()
             finally:
                 pin.close()
-        process.stdout.close()
-        process.stderr.close()
+        cast(IO[str] | IO[bytes], process.stdout).close()
+        cast(IO[str] | IO[bytes], process.stderr).close()
 
 
 @pytest.mark.parametrize("mode", ["server-error", "redirect", "oversized", "wrong-type"])

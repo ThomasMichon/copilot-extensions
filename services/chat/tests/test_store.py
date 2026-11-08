@@ -3,7 +3,7 @@ import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any, Callable, Iterator, NoReturn, ParamSpec, TypeVar
+from typing import Any, Callable, Iterator, NoReturn, ParamSpec, TypeVar, cast
 
 import pytest
 
@@ -609,7 +609,7 @@ def test_actor_aggregate_and_request_id_bounds(store: ChatStore) -> None:
     join(store, **metadata)
     expect("invalid", join, store, session_id="s" * 200)
     for request_id in ("", "x" * 129, "\n", 1):
-        expect("invalid", post, store, request_id)
+        expect("invalid", post, store, cast(str, request_id))
     assert post(store, "r" * 128)["event"]["request_id"] == "r" * 128
 
 

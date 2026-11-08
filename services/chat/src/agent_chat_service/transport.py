@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import http as http
 import http.client
 import ipaddress
 import math

@@ -184,7 +184,9 @@ def test_byte_bounded_pending_and_recent_pages_never_skip_or_consume(store: Chat
     ]
     first = inbox(store, limit=1, recent_limit=4)
     budget = max(1024, len(json_bytes(first)) + 32)
-    controls = {"limit": 100, "max_bytes": budget, "recent_limit": 4}
+    controls: dict[str, Any] = {"limit": 100, "max_bytes": budget, "recent_limit": 4}
+    pending: list[int]
+    recent: list[int]
     pending, recent = [], []
     for _ in range(10):
         page = inbox(store, **controls)
@@ -279,6 +281,7 @@ def test_annotated_pending_requires_complete_receipt_before_recovery(
 def test_unsupported_structured_service_never_falls_back_to_plaintext(
     pair: tuple[Client, LocalTransport, ChatStore],
 ) -> None:
+    caught: pytest.ExceptionInfo[ClientError] | pytest.ExceptionInfo[ChatError]
     client, transport, _ = pair
 
     def unsupported(request: dict[str, Any]) -> NoReturn:
@@ -598,7 +601,7 @@ def test_inbox_scan_continuations_preserve_captured_pending_without_skips(
     captured = page["epoch"], page["head"]
     collaborate(store, "later-answer", codename="agent-b", kind="answer", reply_to=pending[0])
     collaborate(store, "outside-capture", to=["agent-b"])
-    seen = []
+    seen: list[int] = []
     requests = 0
     while True:
         assert (page["epoch"], page["head"]) == captured

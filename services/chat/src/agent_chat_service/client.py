@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-import os
+import os as os
 import re
 import uuid
 from contextlib import contextmanager
