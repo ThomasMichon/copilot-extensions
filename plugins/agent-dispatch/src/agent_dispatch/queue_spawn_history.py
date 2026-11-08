@@ -16,6 +16,7 @@ Composed into :class:`agent_dispatch.queue.TaskQueue`; relies on
 from __future__ import annotations
 
 import collections
+import json
 import math
 from typing import Any
 
@@ -49,7 +50,7 @@ class SpawnHistoryMixin:
                 " ORDER BY s.reserved_at, s.key",
             ).fetchall()
             identities = {row["key"]: self._history_identities(conn, accounting, row) for row in rows}
-            protected = self._protected_identities(conn, rows, identities)
+            protected = self._protected_identities(conn, accounting, rows, identities)
             excluded: collections.Counter[str] = collections.Counter()
             eligible: list[Any] = []
             for row in rows:
@@ -73,10 +74,14 @@ class SpawnHistoryMixin:
             timestamp = self._now(None)
             by_task: dict[str, list[str]] = collections.defaultdict(list)
             for row in eligible:
+                # Mirror the recovery paths' completed-release marker so carried-session
+                # selection and binding evidence both see the conversation as retired.
+                retire = bool(identities[row["key"]])
                 conn.execute(
                     "UPDATE spawn_reservations SET startup_fenced=1, conversation_retired=?,"
-                    " updated_at=? WHERE key=?",
-                    (1 if identities[row["key"]] else row["conversation_retired"], timestamp, row["key"]),
+                    " release_requested=?, updated_at=? WHERE key=?",
+                    (1 if retire else row["conversation_retired"],
+                     1 if retire else row["release_requested"], timestamp, row["key"]),
                 )
                 by_task[row["task_id"]].append(row["key"])
             recheck = ReservationAccountability(conn)
@@ -112,7 +117,7 @@ class SpawnHistoryMixin:
     def _history_identities(
         conn: Any, accounting: ReservationAccountability, row: Any,
     ) -> frozenset[str] | None:
-        """Every native identity a row may refer to; ``None`` when the evidence conflicts."""
+        """Every identity a row may refer to; ``None`` when the evidence conflicts."""
         history = {**dict(row), "native_session_id": accounting.receipts.get(row["key"])}
         try:
             native = reservation_native_identity(conn, history)
@@ -121,8 +126,25 @@ class SpawnHistoryMixin:
         return frozenset({row["session_handle"], native, history["native_session_id"]} - {None})
 
     @staticmethod
+    def _recorded_identities(accounting: ReservationAccountability, row: Any) -> set[str]:
+        """Every independently recorded identity, without validating that they agree."""
+        found = {row["session_handle"], accounting.receipts.get(row["key"])}
+        try:
+            info = json.loads(row["agent_info"]) if row["agent_info"] else None
+        except ValueError:
+            info = None
+        if isinstance(info, dict):
+            connection = info.get("connection")
+            found |= {
+                info.get("native_session_id"), info.get("acp_session_id"), info.get("session_id"),
+                connection.get("native_session_id") if isinstance(connection, dict) else None,
+            }
+        return {value for value in found if isinstance(value, str) and value}
+
+    @classmethod
     def _protected_identities(
-        conn: Any, rows: list[Any], identities: dict[str, frozenset[str] | None],
+        cls, conn: Any, accounting: ReservationAccountability, rows: list[Any],
+        identities: dict[str, frozenset[str] | None],
     ) -> dict[str, str]:
         """Identities still owned by live work, a task owner or an open task's latest native."""
         protected: dict[str, str] = {}
@@ -134,18 +156,16 @@ class SpawnHistoryMixin:
                 tuple(Status.CONCLUDED),
             )
         }
-        latest: dict[str, Any] = {}
+        latest: dict[str, set[str]] = {}
         for row in rows:
-            known = identities[row["key"]]
-            raw = {row["session_handle"]} - {None} if known is None else known
+            raw = set(identities[row["key"]] or ()) | cls._recorded_identities(accounting, row)
             if row["state"] in SpawnState.ACTIVE or row["native_release_pending"]:
                 for native in raw:
                     protected[native] = "shared_live_native"
             if row["task_id"] in open_tasks and raw:
-                latest[row["task_id"]] = row
-        for row in latest.values():
-            known = identities[row["key"]]
-            for native in ({row["session_handle"]} - {None} if known is None else known):
+                latest[row["task_id"]] = raw
+        for raw in latest.values():
+            for native in raw:
                 protected.setdefault(native, "resumable_task_native")
         return protected
 
@@ -172,7 +192,7 @@ class SpawnHistoryMixin:
         history = {**dict(row), "native_session_id": accounting.receipts.get(row["key"])}
         if accounting.transport.accountable(history):
             return "transport"
-        for native in sorted(identities):
+        for native in sorted(identities | SpawnHistoryMixin._recorded_identities(accounting, row)):
             if native in protected:
                 return protected[native]
         return None

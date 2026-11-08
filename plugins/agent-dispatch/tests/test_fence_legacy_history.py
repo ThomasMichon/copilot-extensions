@@ -11,17 +11,22 @@ from tests._helpers import RepoDefaultingQueue as TaskQueue
 ATTESTED = {"permitted": True, "confirmed_no_live_holder": True, "reason": "operator verified"}
 
 
-def _legacy(queue, title, *, handle=None, finish="settle", now=1000.0, concluded=True):
+def _legacy(queue, title, *, handle=None, finish="settle", now=1000.0, concluded=True,
+            driver=None, worktree=None):
     task = queue.create(title)
-    reservation, _ = queue.reserve_spawn(task.id, now=now)
+    reservation, _ = queue.reserve_spawn(task.id, now=now, driver=driver)
     if handle:
-        queue.record_spawn(reservation.key, session_handle=handle, now=now)
-    getattr(queue, f"{finish}_spawn")(reservation.key, detail="historical")
+        queue.record_spawn(reservation.key, session_handle=handle, worktree=worktree, now=now)
+    getattr(queue, "settle_spawn" if finish == "deferred" else f"{finish}_spawn")(
+        reservation.key, detail="historical",
+    )
     with queue._connect() as conn:  # emulate rows predating startup columns
         conn.execute(
             "UPDATE spawn_reservations SET startup_complete=0, startup_fenced=0,"
             " conversation_retired=0, release_requested=0 WHERE key=?", (reservation.key,),
         )
+        if finish == "deferred":
+            conn.execute("UPDATE spawn_reservations SET state='deferred' WHERE key=?", (reservation.key,))
         if concluded:
             conn.execute("UPDATE tasks SET status='completed' WHERE id=?", (task.id,))
     return task, reservation
@@ -112,6 +117,48 @@ def test_receipt_identities_are_retired_and_protected(queue):
     assert queue.get_reservation(receipt_only.key).conversation_retired
     assert not _accountable(queue, receipt_only.key)
     assert _accountable(queue, shared.key)
+
+
+@pytest.mark.parametrize("finish", ["settle", "deferred"])
+def test_fenced_conversation_is_not_carried_into_a_successor(queue, finish):
+    task, old = _legacy(queue, "carried", handle="native-carried", worktree="wt-carried", finish=finish)
+    assert queue.fence_legacy_history(before=2000.0, apply=True, **ATTESTED)["fenced"] == 1
+    with queue._connect() as conn:
+        conn.execute("UPDATE tasks SET status='queued' WHERE id=?", (task.id,))
+    successor, _ = queue.reserve_spawn(task.id, now=3000.0)
+    assert successor.worktree == "wt-carried"
+    assert successor.session_handle is None and successor.conversation_retired
+
+
+@pytest.mark.parametrize("handle", ["local-body:lost", "bare-legacy-handle"])
+def test_unproven_handle_retires_as_qualified_empty_history(queue, handle):
+    from agent_dispatch.ordinary_native_bindings import native_binding_evidence
+    task, row = _legacy(queue, "unproven", handle=handle, worktree="wt-unproven")
+    assert queue.fence_legacy_history(before=2000.0, apply=True, **ATTESTED)["fenced"] == 1
+    with queue._connect() as conn:
+        history = conn.execute("SELECT * FROM spawn_reservations WHERE key=?", (row.key,)).fetchone()
+        evidence = native_binding_evidence(conn, history, queue.get(task.id), require_owned_workspace=False)
+    assert evidence.qualified_empty and not evidence.retired
+
+
+@pytest.mark.parametrize("live", ["active", "release_pending", "open_latest"])
+def test_conflicting_live_evidence_protects_every_recorded_identity(queue, live):
+    if live == "active":
+        task = queue.create("live")
+        row, _ = queue.reserve_spawn(task.id, now=1000.0, driver="cli")
+        queue.record_spawn(row.key, session_handle="handle-live", now=1000.0)
+    else:
+        _, row = _legacy(queue, "live", handle="handle-live", driver="cli",
+                         concluded=live != "open_latest")
+        if live == "release_pending":
+            with queue._connect() as conn:
+                conn.execute("UPDATE spawn_reservations SET native_release_pending=1 WHERE key=?", (row.key,))
+    _receipt(queue, row, "native-conflicting")
+    _, older = _legacy(queue, "older", handle="native-conflicting", driver="cli", now=900.0)
+    result = queue.fence_legacy_history(before=2000.0, apply=True, **ATTESTED)
+    assert result["fenced"] == 0
+    assert set(result["excluded"]) & {"shared_live_native", "resumable_task_native"}
+    assert _accountable(queue, older.key)
 
 
 def test_http_requires_control_identity(queue, monkeypatch):
