@@ -3,9 +3,13 @@
 Back to the [canonical effort](README.md) and
 [Author/Reviewer amendment](author-reviewer-perspectives.md#terminal-retention).
 This is an **agent-recommended, review-first source refinement** of P1/P2,
-not implemented storage, serving support or authority to delete retained state.
+not serving support or authority to delete retained state.
 It closes the design gap between a metadata tombstone and coordinated
 body/cache/outbox/effect retention.
+The first [internal source embedding](../../../plugins/agent-pull-requests/docs/terminal-retention.md)
+adds adopted terminal intent, admission/drain and minimal replay notification.
+It does not compact retained bodies or qualify an installed host; the complete
+delivery and validation gates below remain the acceptance contract.
 
 ## Existing seams and the unsafe shortcut
 
