@@ -2932,6 +2932,12 @@ own scopes. No source/resource/physical custody or updater authority transfers.
   Its existing error-envelope parser now lives in `engine_progress`, which
   already owns stderr/JSON-boundary handling, with the old private import
   retained. Engine client is 995 lines; no baseline or guard was weakened.
+- The next review identified missing/malformed JSON fallback loss, not a
+  clean verdict despite zero inline issues. Four real-process controls
+  reproduced lost local and remote stdout/stderr, including malformed output
+  with exit zero. The explicit Finalize diagnostic path now retains both
+  streams as a failed result; ordinary engine-client callers are unchanged.
+  The expanded focused consumer/custody/transport packet passes 183 cases.
 
 ### 2026-11-05 - Planned #5898 terminal/mux receiving
 

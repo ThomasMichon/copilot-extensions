@@ -74,6 +74,33 @@ def test_finalize_retains_the_real_process_refusal_output(remote, monkeypatch):
     assert not maintenance._result_ok("finalize", result)
 
 
+@pytest.mark.parametrize("remote,stdout,exit_code", [
+    (False, "engine refused before JSON", 1),
+    (False, '{"unfinished":', 0),
+    (True, "remote refused before JSON", 1),
+    (True, '{"unfinished":', 0),
+])
+def test_finalize_retains_both_streams_when_json_is_unusable(remote, stdout, exit_code, monkeypatch):
+    from worktree_manager import engine_client
+
+    stderr = "original refusal context\nfinal diagnostic line"
+    script = (
+        "import sys;"
+        f"print({stdout!r});print({stderr!r},file=sys.stderr);sys.exit({exit_code})"
+    )
+    command = [sys.executable, "-c", script]
+    if remote:
+        from worktree_manager.production_picker.picker_tui import data_ssh
+        monkeypatch.setattr(data_ssh, "remote_op_argv", lambda *_a, **_kw: command)
+    else:
+        monkeypatch.setattr(engine_client, "engine_base_command", lambda: command)
+    result = maintenance._make_task(
+        "finalize", "fixture-wt", "fixture", "Win", not remote, project="fixture",
+    )()
+    assert not maintenance._result_ok("finalize", result)
+    assert stdout in result["detail"] and stderr in result["detail"]
+
+
 @pytest.mark.parametrize("with_reason", [True, False])
 def test_actual_finalize_confirmation_refusal_and_full_details(monkeypatch, with_reason):
     from worktree_manager.production_picker.picker_tui.configuration_form import CommandResultScreen

@@ -27,6 +27,7 @@ import threading
 from agent_procutil import no_window_flags
 
 from ... import engine_client
+from ...engine_progress import failed_json_result
 from .. import context
 from .source_identity import local_key
 
@@ -52,16 +53,21 @@ def _ssh_json(argv, timeout=120, *, preserve_failure_detail=False):
     out = proc.stdout or ""
     i = out.find("{")
     if i < 0:
+        if preserve_failure_detail:
+            return failed_json_result(out, proc.stderr, reason="remote command returned no JSON")
         err = (proc.stderr or out or "").strip().splitlines()
         return {"ok": False, "reason": err[-1] if err else f"exit {proc.returncode}"}
     try:
         obj, _ = json.JSONDecoder().raw_decode(out[i:])
-        if preserve_failure_detail and proc.returncode and isinstance(obj, dict) and proc.stderr:
+        if (preserve_failure_detail and isinstance(obj, dict) and proc.stderr
+                and (proc.returncode or obj.get("success") is False or obj.get("error"))):
             obj["detail"] = "\n".join(
                 str(part) for part in (obj.get("detail"), proc.stderr.strip()) if part
             )
         return obj
     except ValueError:
+        if preserve_failure_detail:
+            return failed_json_result(out, proc.stderr, reason="unparseable remote result")
         return {"ok": False, "reason": "unparseable remote result"}
 
 

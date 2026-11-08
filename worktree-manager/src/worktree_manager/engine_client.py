@@ -18,6 +18,7 @@ from worktree_identity import parse_machine_identity
 from . import agent_plugin_runtime, picker_review
 from .engine_sessions import list_worktree_session_snapshot as list_worktree_session_snapshot
 from .engine_progress import error_from_envelope as _error_from_envelope
+from .engine_progress import json_with_failure_detail
 from .engine_posix_process import EngineCleanupError as EngineCleanupError
 from .worktree_rows_contract import (
     _int_field as _int_field,
@@ -256,19 +257,16 @@ def _run(
         raise EngineError(f"{ENGINE_BIN} {' '.join(args)} timed out") from e
     except OSError as e:
         raise EngineError(f"could not run {ENGINE_BIN}: {e}") from e
+    if preserve_failure_detail and allow_nonzero:
+        return json_with_failure_detail(proc.stdout, proc.stderr, failed=proc.returncode != 0)
     if proc.returncode != 0 and allow_nonzero:
         try:
-            result = json.loads(proc.stdout)
+            json.loads(proc.stdout)
         except (ValueError, TypeError):
             detail = _error_from_envelope(proc.stdout) or (proc.stderr or "").strip()
             raise EngineError(
                 f"{ENGINE_BIN} {' '.join(args)} failed "
                 f"(exit {proc.returncode}): {detail or 'no output'}")
-        if preserve_failure_detail and isinstance(result, dict) and proc.stderr:
-            result["detail"] = "\n".join(
-                str(part) for part in (result.get("detail"), proc.stderr.strip()) if part
-            )
-            return json.dumps(result)
     elif proc.returncode != 0:
         detail = _error_from_envelope(proc.stdout) or (proc.stderr or "").strip()
         raise EngineError(
