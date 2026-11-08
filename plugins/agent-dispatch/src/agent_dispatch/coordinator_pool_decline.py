@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .events import EventBus
 from .queue import TaskError, TaskQueue
+from .queue_pool_decline import PoolDeclineCloseout
 
 POOL_DECLINE_PROTOCOL = "pool_worker_decline/v1"
 
@@ -87,4 +88,20 @@ def register(app: FastAPI, queue: TaskQueue, bus: EventBus, control_auth: Callab
         if result.applied:
             bus.publish({"type": "task.queued", "task_id": task_id})
             bus.publish({"type": "spawn.release_requested", "reservation_key": body.reservation_key})
-        return {"protocol": POOL_DECLINE_PROTOCOL, "version": 1, "closeout": result.receipt}
+        return _closeout_response(result)
+
+    @app.post("/tasks/{task_id}/pool-decline/settlement")
+    def settlement(task_id: str, body: DeclineBindingBody) -> dict:
+        # Bound to an already committed disposition; the queue proves retirement itself.
+        try:
+            result = queue.settle_pool_decline(task_id, **body.model_dump(exclude={"version"}))
+        except TaskError as exc:
+            raise HTTPException(409, detail=str(exc)) from exc
+        return _closeout_response(result)
+
+
+def _closeout_response(result: PoolDeclineCloseout) -> dict:
+    response = {"protocol": POOL_DECLINE_PROTOCOL, "version": 1, "closeout": result.receipt}
+    if result.relationship is not None:
+        response["task_relationship"] = result.relationship
+    return response

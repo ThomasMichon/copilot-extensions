@@ -21,6 +21,26 @@ _pending_cleanup: list[OwnedCleanupError] = []
 _cleanup_lock = threading.Lock()
 
 
+def _refusal_detail(arguments: list[str], value: object, stderr: str | None) -> str:
+    """Keep the selected owner's own bounded refusal so a retained claim names its cause."""
+    detail = value.get("error") if isinstance(value, dict) else None
+    if detail and isinstance(value.get("message"), str) and value["message"].strip():
+        detail = f"{detail}: {value['message'].strip()}"
+    if not detail:
+        lines = (stderr or "").strip().splitlines()
+        detail = lines[-1] if lines else None
+    if not detail:
+        return ""
+    operation = next(
+        (arguments[i + 1] for i, arg in enumerate(arguments[:-1])
+         if arg == "resource-relationship"),
+        "record" if "record" in arguments else "request",
+    )
+    if isinstance(detail, dict):
+        detail = detail.get("message") or json.dumps(detail, sort_keys=True)
+    return f" ({operation}: {str(detail)[:512]})"
+
+
 class WorktreeRelationshipWriter:
     """Finite owner calls behind an independently qualified writer admission.
 
@@ -239,7 +259,10 @@ class WorktreeRelationshipWriter:
                     )
                 value = json.loads(result.stdout or "{}")
                 if result.returncode or not isinstance(value, dict) or value.get("error"):
-                    raise TaskError("selected Worktrees relationship result is unconfirmed")
+                    raise TaskError(
+                        "selected Worktrees relationship result is unconfirmed"
+                        + _refusal_detail(arguments, value, result.stderr)
+                    )
                 return value
             except OwnedCleanupError as exc:
                 # This module outlives failed construction, queue/HTTP translation

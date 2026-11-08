@@ -13,8 +13,15 @@ from .queue_records import TaskError
 CONTRACT = "agent-worktrees.dispatch-worker-closeout"
 
 
-def observe(task: dict, reservation: dict, decline: dict) -> dict:
-    """Read only from the actual allocation host's selected runtime, or retain custody."""
+def observe(task: dict, reservation: dict, decline: dict, relationship: dict | None = None) -> dict:
+    """Read only from the actual allocation host's selected runtime, or retain custody.
+
+    A retained task relationship means the workspace still holds the exact task
+    claim that only this disposition can settle, so the owner is observed through
+    nonfinalizing readiness instead of requiring prior finalization.
+    """
+    if relationship is not None:
+        return _observe_ready(task, reservation, decline, relationship)
     machine = reservation["execution_machine"]
     local = remote_dispatch.local_machine()
     if not local or not machine or normalize_host(local) != normalize_host(machine):
@@ -81,3 +88,39 @@ def observe(task: dict, reservation: dict, decline: dict) -> dict:
     ):
         raise TaskError("worker decline owner observation changed its allocation; custody retained")
     return value
+
+
+def _observe_ready(task: dict, reservation: dict, decline: dict, relationship: dict) -> dict:
+    """Readiness excepts only the exact bound task claim; it never finalizes."""
+    from .submission_readiness_observation import observe as observe_ready
+
+    request = relationship.get("request") if isinstance(relationship, dict) else None
+    receipt = relationship.get("receipt") if isinstance(relationship, dict) else None
+    workspace = request.get("workspace") if isinstance(request, dict) else None
+    if (
+        relationship.get("state") != "bound"
+        or not isinstance(receipt, dict) or not isinstance(receipt.get("ref"), str)
+        or not isinstance(workspace, dict)
+        or request.get("task_id") != task["id"]
+        or request.get("reservation_key") != reservation["key"]
+        or reservation["worktree_ownership"] != "created"
+        or reservation["allocation_reservation_key"] not in (None, reservation["key"])
+        or not isinstance(workspace.get("machine"), str)
+        or not isinstance(reservation["execution_machine"], str)
+        or normalize_host(workspace["machine"]) != normalize_host(reservation["execution_machine"])
+        or workspace.get("project") != reservation["allocation_project"]
+        or workspace.get("worktree") != reservation["worktree"]
+        or workspace.get("path") != reservation["worktree_path"]
+        or workspace.get("creation_nonce") != reservation["creation_nonce"]
+    ):
+        raise TaskError("worker decline lacks its original bound task relationship; custody retained")
+    return observe_ready(
+        {"workspace": workspace, "task_id": task["id"], "owner_session_id": decline["native_id"]},
+        {
+            "task_id": task["id"], "reservation_key": reservation["key"],
+            "attempt": reservation["attempt"], "driver": reservation["driver"],
+            "supervisor": reservation["reserved_by"],
+            "creator_machine": reservation["execution_machine"], "ownership": "created",
+        },
+        receipt["ref"],
+    )

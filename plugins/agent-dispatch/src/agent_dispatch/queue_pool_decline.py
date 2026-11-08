@@ -31,12 +31,15 @@ class PoolWorkerDecline:
 class PoolDeclineCloseout:
     receipt: dict
     applied: bool
+    relationship: dict | None = None
 
 
 class _QueueOwner(Protocol):
     def _connect(self) -> sqlite3.Connection: ...
     def _fetch(self, conn: sqlite3.Connection, task_id: str) -> Task | None: ...
     def _now(self, now: float | None) -> float: ...
+    def task_relationship(self, task_id: str, *, event_id: int | None = None) -> dict | None: ...
+    def reconcile_task_relationship(self, task_id: str, *, event_id: int | None = None) -> dict: ...
     def _audit(
         self, conn: sqlite3.Connection, task_id: str, *, ts: float,
         from_status: str, to_status: str, worker: str | None, note: str,
@@ -107,6 +110,17 @@ class PoolDeclineMixin:
         return close(
             self, task_id, worker_id=worker_id, native_id=native_id, generation=generation,
             startup_revision=startup_revision, reservation_key=reservation_key, now=now,
+        )
+
+    def settle_pool_decline(
+        self: _QueueOwner, task_id: str, worker_id: str, *, native_id: str,
+        generation: int, startup_revision: int, reservation_key: str,
+    ) -> PoolDeclineCloseout:
+        """Retry claim settlement only behind this exact binding's committed disposition."""
+        from .queue_pool_decline_closeout import settle
+        return settle(
+            self, task_id, worker_id=worker_id, native_id=native_id, generation=generation,
+            startup_revision=startup_revision, reservation_key=reservation_key,
         )
 
     def pool_worker_decline(
