@@ -69,7 +69,7 @@ def allocate_selection(
 ) -> dict:
     from .workspace_operations import WorkspaceUnavailable
 
-    if workspace.prepared_reviews is not True or workspace.selection_preparer is None or not workspace.write_available:
+    if workspace.prepared_reviews is not True or workspace.selection_preparer is None:
         raise WorkspaceUnavailable("pre-approval selection receiver unavailable")
     original = review_intent.intent(payload["intent"])
     if original["scope"] != scope:

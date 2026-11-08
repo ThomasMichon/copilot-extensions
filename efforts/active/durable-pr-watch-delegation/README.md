@@ -1162,6 +1162,8 @@ callback an implicit credential store.
 
 ## Journal
 
+- [2026-11-07 - Preparation-only producer sequencing](journal/2026/11.07%20preparation-only.md)
+
 ### 2026-11-07 - Deliver native effective review-permission evaluation
 
 - #11462 actually merged as `ee2fc4f817681598a999b091b12806f033e536cd`
