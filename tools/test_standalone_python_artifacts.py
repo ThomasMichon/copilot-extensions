@@ -12,6 +12,7 @@ import zipfile
 import os
 import runpy
 import venv
+import uuid
 
 import pytest
 
@@ -333,9 +334,13 @@ def test_nonembedded_and_special_install_paths_keep_the_stock_owner(tmp_path, mo
     helpers = runpy.run_path(str(ROOT / "libs/versioned-runtime/standalone_build.py"))
     classes = helpers["commands"](source, package, tmp_path / "libs/versioned-runtime")
     if mode == "legacy":
-        assert "install_lib" not in classes and "egg_info" not in classes
+        assert "egg_info" not in classes
         distribution = Distribution({"cmdclass": classes})
-        assert distribution.get_command_class("install_lib") is install_lib
+        selected = distribution.get_command_class("install_lib")
+        if os.name == "nt":
+            assert issubclass(selected, install_lib) and selected.install is install_lib.install
+        else:
+            assert selected is install_lib
         return
     command = classes["install_lib"](Distribution({"name": "fixture", "version": "1.0"}))
     command.ensure_finalized()
@@ -348,6 +353,36 @@ def test_nonembedded_and_special_install_paths_keep_the_stock_owner(tmp_path, mo
     elif mode == "dry-run":
         command.dry_run = True
     assert command.install() is marker
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended path syntax")
+def test_native_build_paths_normalize_local_and_unc_roots():
+    helper = runpy.run_path(str(ROOT / "libs/versioned-runtime/standalone_build.py"))
+    native = helper["_native_build_path"]
+    assert native("C:\\project", "build\\lib\\.\\pkg") == "\\\\?\\C:\\project\\build\\lib\\pkg"
+    assert native("C:\\project", "\\\\?\\C:\\other\\build\\.\\pkg") == "\\\\?\\C:\\other\\build\\pkg"
+    assert native("C:\\project", "\\\\server\\share\\build\\.\\pkg") == (
+        "\\\\?\\UNC\\server\\share\\build\\pkg"
+    )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows wheel command selection")
+def test_native_metadata_loads_when_wheel_command_is_unavailable(tmp_path, monkeypatch):
+    from setuptools import Distribution
+    from setuptools._distutils.errors import DistutilsModuleError
+
+    original = Distribution.get_command_class
+
+    def command_class(self, name):
+        if name == "bdist_wheel":
+            raise DistutilsModuleError("wheel command unavailable")
+        return original(self, name)
+
+    monkeypatch.setattr(Distribution, "get_command_class", command_class)
+    helper = runpy.run_path(str(ROOT / "libs/versioned-runtime/standalone_build.py"))
+    classes = helper["commands"](tmp_path, "fleet_manager", tmp_path)
+    assert "bdist_wheel" not in classes
+    assert "build_py" in classes and "sdist" in classes
 
 
 def _source(root, component):
@@ -573,6 +608,44 @@ def test_standalone_resource_substitution_refused_even_with_fresh_manifest(tmp_p
             component="fleet-manager", candidate_root=tmp_path,
         )
     assert archive.is_file()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native wheel staging paths")
+def test_worktrees_wheel_preserves_resources_in_deep_windows_build(tmp_path):
+    root = tmp_path.parent / ("d" + uuid.uuid4().hex[:8])
+    padding = max(1, 105 - len(str(root)) - 3)
+    project = root / ("x" * padding) / "p"
+    native_project = Path("\\\\?\\" + str(project))
+    shutil.copytree(
+        ROOT / "plugins" / "agent-worktrees", native_project,
+        ignore=shutil.ignore_patterns(
+            "__pycache__", "*.egg-info", ".venv", ".test-runs", "build", "dist", "tests", "docs",
+        ),
+    )
+    relative = (
+        "agent_worktrees/_runtime_assets/scripts/_runtime_admission/libs/"
+        "agent-procutil/src/agent_procutil/windows_broker_installation.py"
+    )
+    assert len(str(project / "build" / "bdist.win-amd64" / "wheel" / relative)) >= 260
+    expected = {
+        name: path.read_bytes()
+        for name, path in __import__("plugin_runtime_resources").application_resources(
+            ROOT / "plugins" / "agent-worktrees", "agent_worktrees",
+        ).items()
+    }
+    assert relative in expected
+    archives = root / "wheels"
+    archives.mkdir()
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c",
+         "import setuptools.build_meta as backend; backend.build_wheel(__import__('sys').argv[1])",
+         str(archives)],
+        cwd=project, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, (result.stdout + result.stderr)[-6000:]
+    with zipfile.ZipFile(next(archives.glob("*.whl"))) as archive:
+        assert {name: archive.read(name) for name in expected} == expected
 
 
 @pytest.mark.parametrize("relative,package", [
