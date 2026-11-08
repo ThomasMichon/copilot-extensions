@@ -8,8 +8,12 @@ from contextlib import nullcontext
 import importlib.util
 import json
 import os
+import shlex
+import shutil
 import subprocess
 import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -296,12 +300,14 @@ def test_native_result_requires_actual_caller_and_pinned_prerequisites(mutation)
 
 
 @pytest.mark.parametrize("prerequisites", [True, False])
+@pytest.mark.parametrize("preparation", ["success", "failure", "cancelled"])
 def test_native_execution_gates_consumer_and_sanitizes_uploaded_files(
-    tmp_path, monkeypatch, prerequisites,
+    tmp_path, monkeypatch, prerequisites, preparation,
 ):
     root, output = tmp_path / "candidate", tmp_path / "evidence"
     root.mkdir()
     monkeypatch.setenv("UV_DEFAULT_INDEX", "https://feed.example.invalid/pypi/simple/")
+    monkeypatch.setenv("WINDOWS_QUALIFICATION_NATIVE_PREPARATION", preparation)
     monkeypatch.setattr(worker.platform, "system", lambda: "Windows")
     monkeypatch.setattr(worker, "Transport", lambda *args: SimpleNamespace(
         git=lambda *args: SimpleNamespace(stdout="b" * 40),
@@ -331,8 +337,17 @@ def test_native_execution_gates_consumer_and_sanitizes_uploaded_files(
     value = request()
     value["selection"] = {"kind": "packet", "name": "native-worktrees-embody"}
     actual = worker.execute(root, value, output)
-    assert actual["outcome"] == ("qualified" if prerequisites else "failed")
-    assert bool(calls) is prerequisites
+    qualified = prerequisites and preparation == "success"
+    assert actual["outcome"] == ("qualified" if qualified else "failed")
+    assert bool(calls) is qualified
+    if preparation != "success":
+        assert actual["phases"][-1]["name"] == "native-prerequisites"
+        assert actual["phases"][-1]["status"] == "failed"
+        assert actual["tests"] == []
+        contract.validate_result(
+            actual, value, run_id=actual["run_id"], control_sha=actual["control_sha"],
+            run_attempt=actual["run_attempt"],
+        )
     for path in output.rglob("*"):
         if path.is_file():
             assert "feed.example.invalid" not in path.read_text("utf-8")
@@ -578,7 +593,7 @@ def test_tool_entry_uses_candidate_environment_schema_not_controller_schema(tmp_
     }.items():
         monkeypatch.setenv(name, content)
     monkeypatch.setattr(sys, "path", sys.path.copy())
-    monkeypatch.delitem(sys.modules, "plugin_test_environment")
+    monkeypatch.delitem(sys.modules, "plugin_test_environment", raising=False)
     monkeypatch.setattr(sys, "argv", [
         str(worker.__file__), "tools", "--candidate", str(root), "--output", str(tmp_path / "out"),
     ])
@@ -656,7 +671,10 @@ def test_manual_workflow_never_adds_required_ci_or_candidate_write_credentials()
                     "Execute typed selection through canonical bounded owners",
                     "Sanitize native evidence independently after worker interruption",
                 }
-                assert set(step["env"]) == {"UV_DEFAULT_INDEX"}
+                assert set(step["env"]) == (
+                    {"UV_DEFAULT_INDEX"} if step["name"].startswith("Sanitize") else
+                    {"UV_DEFAULT_INDEX", "WINDOWS_QUALIFICATION_NATIVE_PREPARATION"}
+                )
                 assert step["env"]["UV_DEFAULT_INDEX"] == (
                     "${{ needs.admit.outputs.packet == 'native-worktrees-embody' && "
                     "secrets.WINDOWS_QUALIFICATION_INDEX_URL || '' }}"
@@ -665,3 +683,50 @@ def test_manual_workflow_never_adds_required_ci_or_candidate_write_credentials()
                     assert step["if"] == (
                         "always() && needs.admit.outputs.packet == 'native-worktrees-embody'"
                     )
+
+
+@pytest.mark.parametrize("workflow", ["windows-qualification", "validate-and-promote"])
+@pytest.mark.parametrize("responses", [(504, 504, 200), (504, 504, 504), (404,)])
+@pytest.mark.portfolio_tier("T2")
+def test_pinned_native_download_retries_only_transient_failures(tmp_path, workflow, responses):
+    from windows_qualification_transport import command
+    curl = shutil.which("curl.exe") or shutil.which("curl")
+    if curl is None:
+        pytest.skip("curl is unavailable")
+    source = Path(__file__).resolve().parents[1] / f".github/workflows/{workflow}.yml"
+    line = next(line.strip() for line in source.read_text("utf-8").splitlines()
+                if line.strip().startswith("curl.exe --fail"))
+    argv = shlex.split(line)
+    attempts = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            status = responses[min(len(attempts), len(responses) - 1)]
+            attempts.append(status)
+            body = b"pinned archive" if status == 200 else b"download unavailable"
+            self.send_response(status)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    archive = tmp_path / "native.zip"
+    try:
+        actual = command([
+            curl, *argv[1:argv.index("--output")], "--noproxy", "127.0.0.1",
+            "--output", str(archive), f"http://127.0.0.1:{server.server_port}/archive",
+        ], cwd=tmp_path, check=False)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert attempts == list(responses)
+    assert (actual.returncode == 0) is (responses[-1] == 200)
+    if actual.returncode == 0:
+        assert archive.read_bytes() == b"pinned archive"
