@@ -204,6 +204,7 @@ def _run(
     stream_progress: bool = False,
     environment: dict[str, str] | None = None,
     engine_command: list[str] | None = None,
+    preserve_failure_detail: bool = False,
 ) -> str:
     """Run ``agent-worktrees [--project <p>] <args>`` and return stdout.
 
@@ -256,12 +257,17 @@ def _run(
         raise EngineError(f"could not run {ENGINE_BIN}: {e}") from e
     if proc.returncode != 0 and allow_nonzero:
         try:
-            json.loads(proc.stdout)
+            result = json.loads(proc.stdout)
         except (ValueError, TypeError):
             detail = _error_from_envelope(proc.stdout) or (proc.stderr or "").strip()
             raise EngineError(
                 f"{ENGINE_BIN} {' '.join(args)} failed "
                 f"(exit {proc.returncode}): {detail or 'no output'}")
+        if preserve_failure_detail and isinstance(result, dict) and proc.stderr:
+            result["detail"] = "\n".join(
+                str(part) for part in (result.get("detail"), proc.stderr.strip()) if part
+            )
+            return json.dumps(result)
     elif proc.returncode != 0:
         detail = _error_from_envelope(proc.stdout) or (proc.stderr or "").strip()
         raise EngineError(
@@ -288,6 +294,7 @@ def run_json(project: str | None, args: list[str], *,
              stream_progress: bool = False,
              environment: dict[str, str] | None = None,
              engine_command: list[str] | None = None,
+             preserve_failure_detail: bool = False,
              max_bytes: int | None = None) -> dict:
     """Run a ``--json`` verb; bound its UTF-8 stdout to ``max_bytes``, then parse it."""
     raw = _run(
@@ -295,6 +302,7 @@ def run_json(project: str | None, args: list[str], *,
         stream_progress=stream_progress,
         **({"environment": environment} if environment is not None else {}),
         **({"engine_command": engine_command} if engine_command is not None else {}),
+        **({"preserve_failure_detail": True} if preserve_failure_detail else {}),
     )
     if max_bytes is not None and len(raw.encode("utf-8", errors="surrogatepass")) > max_bytes:
         raise EngineError(
