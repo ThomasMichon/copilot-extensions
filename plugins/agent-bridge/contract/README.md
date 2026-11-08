@@ -6,6 +6,17 @@ The registry is repository-side evidence; no runtime component reads it.
 
 ## Current HTTP-52 owner-membership evidence
 
+The optional `live_delivery_observation: 1` expansion retains HTTP generation
+52 and every prior introduction floor. Eighteen additional source cases cover
+fresh/partial/stale pending input, SDK acceptance versus root consumption,
+post-admission evidence loss, strict timeout and mixed-mode refusal, actual
+parser/HTTP and module-process loopback reads, and model-free extension event
+and capability behavior. The capture owner registers the delivery store,
+client, router, CLI and extension helper as semantic sources. This is not
+proof of native model transmission, installed extension reload or deployment.
+Prepare the expanded source declarations before the genuine current-generation
+capture; hashes alone are not new execution evidence.
+
 Owner membership introduces HTTP generation 52 and
 `OWNER_MEMBERSHIP_PROTOCOL_VERSION = 52`. Its named
 `bridge-owner-membership-v1` contract remains version 1. Both declarations are
@@ -13,7 +24,7 @@ retained: generation-aware clients can recognize the endpoint's introduction,
 while passive callers still require its exact named capability. Minimum HTTP
 support and every earlier feature's introduction floor remain unchanged.
 
-The current capture owner is `tools/capture_bridge_http52.py`, using 45 actual
+The current capture owner is `tools/capture_bridge_http52.py`, using the declared
 parser, authenticated ASGI, canonical producer, transport and payload cases
 with a new independent HTTP-52 vector. Retained test-function names do not
 select capture identity: the owning generation, source-bound request, protocol
@@ -795,6 +806,17 @@ capture itself runs the existing contained plugin runner with an exact
 model-free ASGI/owned-process probe portfolio. A missing, skipped, failed or
 duplicated required probe refuses publication. No real model, workspace owner,
 service installer or production target is used.
+
+The expanded HTTP-52 portfolio shares one 20-minute Windows aggregate deadline
+across both contained-runner groups, including preparation and cleanup. Its
+individual pytest cases retain their 120-second limit. Earlier capture owners
+retain their existing deadlines; no probe is omitted to fit the budget.
+The Windows source-audited retained-writer fixtures allow 30 seconds for
+their cold lineage subprocesses. Production retains its ten-second deadline;
+these fixtures prove serializer/custody behavior, not production latency.
+Each contained runner receives only the remaining aggregate budget for its
+sub-suite and plugin limits. The receipt portfolio includes an actual module
+CLI subprocess, whose launch and source entrypoint are bound as the `cli` role.
 
 Independent expected cases are in `inputs/http47/capture-cases.json`.
 The generated primary packet records actual observations, including graceful,

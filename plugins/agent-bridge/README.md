@@ -233,6 +233,10 @@ Explicit HTTP/client `qualified_peer: true` opts into tuple-only resolution
 and the new protocol; qualified CLI forwarding supplies it. Prefix text alone
 never upgrades a legacy exact-ID request to a newer carrier operation.
 Qualified peer sends return their admission receipt without waiting by default.
+Local represented sends may use `--wait` for finite model-facing consumption or
+fresh pending-input evidence, independently of turn completion. Re-observe an
+existing message with `delivery-receipt`; see
+[delivery observations](docs/delegation-contract.md#model-facing-delivery-and-pending-input).
 `--wait-reply` opts into receipt-backed post-consumption reply evidence, requiring
 HTTP protocol 39 at both bridges and remote operation version 5. Qualified
 addressing without a reply wait retains protocol-35/version-4 compatibility.
