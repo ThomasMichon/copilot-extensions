@@ -6,17 +6,23 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import AbstractSet, Any
+import os
+import time
 
 from agent_pull_requests.watch_gateway import WatchScopeBinding
 from agent_pull_requests.generation_cache import GenerationCache
 from agent_pull_requests.native_read import NativeReadHandler
 from agent_pull_requests.review_workspace import _scope
+from agent_pull_requests.review_selection_store import ReviewSelectionStore
 from agent_pull_requests.watch_observer import NativeObservationBinding
 from agent_pull_requests.watch_replay import ConsumerScope
 from agent_pull_requests.watch_replay_store import ReplayServiceIdentity, ReplayStore, json_object
 from agent_pull_requests.workspace_operations import WorkspaceOperations
 from fleet_manager.gateway_service_channel import origin
 from fleet_manager.gateway_service_context import identifier
+from single_instance_lease import SingleInstance
+
+from .preparation import PreparationConfig
 
 _LIMIT = 1024 * 1024
 
@@ -65,6 +71,7 @@ class WorkspaceConfig:
     readers: tuple[tuple[str, str, NativeReadHandler], ...]
     cache_bytes: int
     cache_generations: int
+    preparations: tuple[tuple[str, str, PreparationConfig], ...] = ()
 
     def cache(self, store: ReplayStore) -> GenerationCache:
         return GenerationCache(
@@ -76,11 +83,21 @@ class WorkspaceConfig:
         self, store: ReplayStore, checkpoint: Callable[[], None], seconds: int,
     ) -> dict[tuple[str, str], WorkspaceOperations]:
         cache = self.cache(store)
+        preparations = {
+            (principal, target): config.select(
+                dict(reader.scope), checkpoint, seconds,
+            )
+            for principal, target, config in self.preparations
+            for p, t, reader in self.readers if (p, t) == (principal, target)
+        }
         return {
             (principal, target): WorkspaceOperations(
                 store, cache, scope=dict(reader.scope), read_owner=reader,
                 binding_ref=reader.binding_ref, checkpoint=checkpoint,
                 max_work_seconds=seconds, conversations=True,
+                prepared_reviews=(principal, target) in preparations,
+                selection_preparer=preparations.get((principal, target)),
+                selection_preparer_deadline=preparations.get((principal, target)) is not None,
             )
             for principal, target, reader in self.readers
         }
@@ -120,6 +137,31 @@ class HostConfig:
             self.root.is_symlink() or self.root.exists() and any(self.root.iterdir())
         ):
             raise ValueError("workspace provisioning requires a fresh dedicated root")
+        if self.workspaces is not None and self.workspaces.preparations:
+            lease = SingleInstance(self.root, service="agent-pull-requests-watch")
+            pid, deadline = os.getpid(), time.monotonic() + self.operation_seconds
+
+            def lifecycle() -> None:
+                if not lease.held or os.getpid() != pid or time.monotonic() >= deadline:
+                    raise ValueError("fresh preparation lifecycle exclusion unavailable")
+
+            with lease:
+                if self.root.is_symlink() or any(
+                    entry != lease.lock_path for entry in self.root.iterdir()
+                ):
+                    raise ValueError("workspace provisioning requires a fresh dedicated root")
+                lifecycle()
+                store.provision(conversations=True)
+                expires_at = int(time.time()) + self.operation_seconds
+                store.adopt_prepared_reviews(
+                    lifecycle_checkpoint=lifecycle, expires_at=expires_at, checkpoint=lifecycle,
+                )
+                ReviewSelectionStore(store).adopt(
+                    lifecycle_checkpoint=lifecycle, expires_at=expires_at, checkpoint=lifecycle,
+                )
+                self.workspaces.cache(store).provision()
+                lifecycle()
+            return
         store.provision(conversations=self.workspaces is not None)
         if self.workspaces is not None:
             self.workspaces.cache(store).provision()
@@ -137,8 +179,9 @@ def _workspaces(value: object, bindings: list[WatchScopeBinding],
     scopes = {(b.principal, b.target): b.scope for b in bindings}
     native = {(b.account, b.repo): b for b in observations}
     readers: list[tuple[str, str, NativeReadHandler]] = []
+    preparations: list[tuple[str, str, PreparationConfig]] = []
     for raw in _collection(selected["bindings"]):
-        entry = _fields(raw, {"principal", "target", "command", "scope"})
+        entry = _fields(raw, {"principal", "target", "command", "scope"}, {"preparation"})
         key = (entry["principal"], entry["target"])
         if key not in scopes or any((p, t) == key for p, t, _ in readers):
             raise ValueError("workspace requires one existing admitted caller/target")
@@ -155,7 +198,20 @@ def _workspaces(value: object, bindings: list[WatchScopeBinding],
             repo=admitted.repo, scope=scope, binding_ref=entry["target"],
             max_work_seconds=seconds,
         )))
-    return WorkspaceConfig(tuple(readers), cache_bytes, cache_generations)
+        if "preparation" in entry:
+            preparation = _fields(entry["preparation"], {
+                "command", "source_root", "source_config", "profile_home",
+                "visibility", "allow_anonymous",
+            })
+            preparations.append((*key, PreparationConfig(
+                command=_argv(preparation["command"]),
+                source_root=_path(preparation["source_root"]),
+                source_config=_path(preparation["source_config"]),
+                profile_home=_path(preparation["profile_home"]),
+                visibility=preparation["visibility"],
+                allow_anonymous=preparation["allow_anonymous"],
+            )))
+    return WorkspaceConfig(tuple(readers), cache_bytes, cache_generations, tuple(preparations))
 
 
 def load_config(path: Path) -> HostConfig:
