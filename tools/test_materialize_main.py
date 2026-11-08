@@ -126,7 +126,10 @@ def _invocation_preparation_source(tmp_path: Path) -> Path:
     return canonical
 
 
-def test_packaged_manager_preparer_imports_in_isolated_python(tmp_path: Path) -> None:
+@pytest.mark.parametrize("bundle", [
+    "scripts/runtime-source-tools", "scripts/runtime-input-provider/tools",
+])
+def test_packaged_manager_preparer_imports_in_isolated_python(tmp_path: Path, bundle: str) -> None:
     repo = Path(__file__).resolve().parents[1]
     source, payload = _invocation_preparation_source(tmp_path), tmp_path / "payload"
     consumer = source / "worktree-manager"
@@ -135,10 +138,12 @@ def test_packaged_manager_preparer_imports_in_isolated_python(tmp_path: Path) ->
     shutil.copyfile(manifest, consumer / manifest.name)
     shutil.copyfile(repo / "worktree-manager/launch-wrapper-assets.json",
                     consumer / "launch-wrapper-assets.json")
-    tools = source / "tools"
-    tools.mkdir(exist_ok=True)
-    for name in json.loads(manifest.read_text())["files"]:
-        shutil.copyfile(repo / "tools" / name, tools / name)
+    declaration = json.loads(manifest.read_text())
+    for group in declaration.get("groups", [declaration]):
+        for name in group["files"]:
+            target = source / group["canonicalDir"] / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(repo / group["canonicalDir"] / name, target)
     shutil.copytree(
         repo / "worktree-manager/scripts", payload / "scripts",
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
@@ -159,8 +164,8 @@ def test_packaged_manager_preparer_imports_in_isolated_python(tmp_path: Path) ->
               for path in source.rglob("*") if path.is_file()}
     script = """
 import pathlib, sys
-payload, source, output = map(pathlib.Path, sys.argv[1:])
-sys.path.insert(0, str(payload / "scripts/runtime-source-tools"))
+payload, source, output = map(pathlib.Path, sys.argv[1:4])
+sys.path.insert(0, str(payload / sys.argv[4]))
 import prepare_runtime_source
 prepare_runtime_source._materialize(source, "sample", output)
 assert b"sample.cli" in (output / "bin/sample.ps1").read_bytes()
@@ -185,15 +190,18 @@ def selected_helper(path, *args, **kwargs):
 runpy.run_path = selected_helper
 run(str(payload / "setup.py"))
 resources = observed["cmdclass"]["resources"]
-for name in ("generate.py", "runtime_admission.py"):
-    assert assets[pathlib.Path("scripts/libs/payload-invocation") / name] == (
-        source / "libs/payload-invocation" / name
-    )
-    assert "_runtime_assets/scripts/libs/payload-invocation/" + name in resources
+for directory in ("scripts/libs/payload-invocation",
+                  "scripts/runtime-input-provider/libs/payload-invocation"):
+    for name in ("generate.py", "runtime_admission.py"):
+        assert assets[pathlib.Path(directory) / name] == (
+            source / "libs/payload-invocation" / name
+        )
+        assert "_runtime_assets/" + directory + "/" + name in resources
 print("copied-manager-generation-ok")
 """
     result = subprocess.run(
-        [sys.executable, "-I", "-B", "-c", script, str(payload), str(source), str(tmp_path / "prepared")],
+        [sys.executable, "-I", "-B", "-c", script, str(payload), str(source),
+         str(tmp_path / "prepared"), bundle],
         cwd=tmp_path, capture_output=True, text=True, timeout=10,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
