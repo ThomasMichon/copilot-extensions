@@ -181,10 +181,21 @@ history, including predecessor transfer/takeover validation. It does not relax
 ordinary task admission. The latest pull-forward also retains the newly landed
 released-only acquisition and version-2 return-evidence checks.
 
-Follow-up qualification is not complete: 17 protocol and 42 pure controls
-passed before the final codec-owner adjustment. The larger real-Git packet
-exhausted its unchanged group deadline and cannot be counted as a pass; both
-fresh CLI cases then passed in isolation. The new upstream return-proof
-successor/compaction regression exhausted its unchanged 30-second item deadline
-during its long operation sequence. Preserve every generation, stale-fence and
-actual-GC assertion while making that qualification bounded before publication.
+Follow-up qualification covers all 126 selected cases on the revised source,
+using native Windows and the isolated runner's unchanged 30-second item and
+300-second group limits. All 17 released-only/return-proof task cases passed,
+including four independent real-Git phases for generation stability, successor/
+transfer/renew preservation, final release and stale-fence refusal, and actual
+compaction, reflog expiry and GC. Canonical history prefixes are copied into
+each case's private remote; the effects under test remain real.
+
+The 20 custody Git/process cases passed in independent 14- and 6-case groups,
+including all three inspecting-client margins and fresh CLI inventory/refusal.
+A residual legacy/protocol group timed out after 37 named passing outcomes;
+its unfinished sweep-race case and unstarted controls then passed in a bounded
+52-case group, including the nine new return-proof parser cases. Together these
+cover all 59 pure protocol controls and 30 legacy lease-store/CLI cases.
+The timed-out groups remain failed attempts, not aggregate-budget passes.
+Focused lint, install-contract, changed-module and committed-blob checks passed.
+This evidence still does not qualify installed provider compatibility, native
+effect admission or live adoption, and enables no custody writer.
