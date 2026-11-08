@@ -178,7 +178,11 @@ caller-routing scrub without manufacturing a namespaced receipt.
 Vault is also an opt-in same-cell peer target. Its environment uses the native
 Vault owner's installation identity, home/run/cache/endpoint geometry and
 service suffix, not the caller's database, cached context or endpoint overrides.
-Native invariant casing is retained on Windows, including Unicode paths.
+Windows service identity is normalized using the owning launcher's invariant
+casing rules, including Unicode paths, rather than preserving original casing.
+Linux C/UTF-8 qualification retains the owning `tr` pipeline's byte-oriented
+normalization, not Python's Unicode `.lower()`. These are native-platform
+identities, not a promise of identical suffixes across operating systems.
 This opt-in Vault target supports native Windows and Linux; other native
 platforms refuse before owner execution rather than assuming equivalent
 suffix or service semantics. Ordinary peer targets and Vault entrypoints keep

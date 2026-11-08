@@ -138,7 +138,7 @@ def test_vault_rebinds_native_owner_without_caller_credential_selection(
     }
     env = peer_launch.peer_environment(context, inherited)
     suffix = env["AGENT_VAULT_PIPE"].removeprefix(r"\\.\pipe\agent-vault-")
-    assert len(suffix) == 12 and all(value in "0123456789abcdef" for value in suffix)
+    assert suffix == "f" * 12
     assert env["AGENT_VAULT_HOME"] == str(root)
     assert env["AGENT_VAULT_VALIDATED_CONTEXT"] == context["installReceipt"]
     assert env["AGENT_VAULT_INSTALLATION_ID"] == "example-cell/agent-vault"
