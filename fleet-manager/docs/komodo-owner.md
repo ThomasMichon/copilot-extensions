@@ -69,6 +69,11 @@ which owns newly created files. An elevated host may retain an ordinary real
 UID for caller signalling without making its root-owned files ordinary-user
 owned. Named and opened files must still match that effective owner, with no
 group/other permission bits; Windows token/ACL handling is unchanged.
+Runtime selection, existing-only state recovery, the resource lock and pending
+publication files use that same effective owner. They cannot require a
+different real-UID owner for a directory the private-state reader must open.
+The shared Gateway runtime-evidence and SSH lease checks follow the same
+private-state contract.
 
 The native child receives the OS default executable path, never ambient `PATH`.
 The existing host authority still authenticates the Docker binary and its
