@@ -1,5 +1,8 @@
 """External PR bodies preserve managed attribution policy without provider access."""
 
+from __future__ import annotations
+
+import argparse
 from types import SimpleNamespace
 from pathlib import Path
 import json
@@ -392,3 +395,140 @@ def test_actual_comment_origin_composes_through_independent_profile_owner(
     assert "cn=bolted-circuit" in prepared["body"]
     assert "private-tree" not in prepared["body"] and "agent-worktrees:source" not in prepared["body"]
     assert prepared["effects"] == "none"
+
+
+def _comment_args(*argv: str) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+    cli.add_parsers(parser.add_subparsers(dest="command", required=True))
+    return parser.parse_args(["attribution-prepare", *argv])
+
+
+def test_origin_discovery_uses_real_front_door_without_source_or_configuration(
+    tmp_path: Path,
+) -> None:
+    import os
+    import subprocess
+    import sys
+
+    root = Path(__file__).resolve().parents[1]
+    script = (
+        "from agent_worktrees import attribution_prepare_cli as c;"
+        "from agent_worktrees.__main__ import main;"
+        "exec('def forbidden(*args, **kwargs):\\n raise AssertionError(\"source discovery\")');"
+        "c.cfg.load_config=forbidden;c.tracking.list_records=forbidden;"
+        "c.tracking.find_worktree_id_by_cwd=forbidden;c.git_ops.git=forbidden;"
+        "raise SystemExit(main(['attribution-prepare','--comment-origin','--capabilities']))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script], cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": str(root / "src")},
+        capture_output=True, text=True, timeout=20,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {
+        "schema": "agent-worktrees.comment-origin-capabilities", "version": 1,
+        "origin_protocol": cli.COMMENT_ORIGIN_PROTOCOL,
+        "capabilities": ["explicit_source_root"], "effects": "none",
+    }
+
+
+@pytest.mark.parametrize("registration", [
+    "ordinary", "alias", "duplicate", "nested", "relative", "withdrawn", "private",
+])
+def test_explicit_origin_parser_uses_exact_owner_not_cwd(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    capfd: pytest.CaptureFixture[str], registration: str,
+) -> None:
+    root = tmp_path / "source"
+    nested = root / "nested"
+    nested.mkdir(parents=True)
+    selected = root
+    if registration == "alias":
+        selected = tmp_path / "alias"
+        try:
+            selected.symlink_to(root, target_is_directory=True)
+        except OSError:
+            pytest.skip("directory alias creation unavailable")
+    state = tmp_path / "project"
+    (state / "worktrees").mkdir(parents=True)
+    record = {
+        "worktree_id": "selected", "branch": "worktree/selected", "repo": "fixture",
+        "machine": "fixture-machine", "platform": "linux", "worktree_path": str(selected),
+        "codename": "bolted-circuit",
+        "codename_source": "custom" if registration == "private" else "built-in",
+        "sessions": [],
+    }
+    original = json.dumps(record)
+    path = state / "worktrees/selected.yaml"
+    path.write_text(original, encoding="utf-8")
+    if registration == "duplicate":
+        (state / "worktrees/other.yaml").write_text(json.dumps({
+            **record, "worktree_id": "other", "branch": "worktree/other",
+        }), encoding="utf-8")
+    config_path = state / "config.yaml"
+    config_path.write_text("fixture", encoding="utf-8")
+    if registration == "withdrawn":
+        path.unlink()
+    _, config = fixture()
+    config.repo_name = "fixture"
+    configs = []
+    monkeypatch.setattr(cli.cfg, "load_config", lambda path: configs.append(path) or config)
+    monkeypatch.setattr(cli.cfg, "project_dir", lambda name=None: state)
+    monkeypatch.chdir(tmp_path)
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        raise AssertionError("explicit origin must not use CWD, Git or source mutation")
+
+    from agent_worktrees import __main__ as native
+
+    monkeypatch.setattr(cli.tracking, "find_worktree_id_by_cwd", forbidden)
+    monkeypatch.setattr(cli.tracking, "save_record", forbidden)
+    monkeypatch.setattr(cli.git_ops, "git", forbidden)
+    monkeypatch.setattr(native, "_resolve_active_project", forbidden)
+    requested = nested if registration == "nested" else Path("source") if registration == "relative" else root
+    argv = [
+        "attribution-prepare",
+        "--comment-origin", "--source-root", str(requested),
+        "--config", str(config_path), "--json",
+    ]
+    if registration == "alias":
+        argv = ["attribution-prepare", "--comment-origin", f"--source-root={requested}",
+                f"--config={config_path}", "--json"]
+    refused = registration in {"duplicate", "nested", "relative", "withdrawn", "private"}
+    assert native.main(argv) == (
+        1 if refused else 0
+    )
+    result = json.loads(capfd.readouterr().out)
+    if refused:
+        assert "error" in result and "origin" not in result
+    else:
+        assert result["origin"] == {"codename": "bolted-circuit"}
+    assert configs == [config_path]
+    if registration == "withdrawn":
+        assert not path.exists()
+    else:
+        assert path.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.parametrize("argv", [
+    ["--capabilities"],
+    ["--source-root", "/source"],
+    ["--comment-origin", "--capabilities", "--config", "/config"],
+    ["--comment-origin", "--capabilities", "--source-root", "/source"],
+    ["--comment-origin", "--capabilities", "--visibility", "public"],
+    ["--comment-origin", "--capabilities", "--body-file", "unread.md"],
+    ["--comment-origin", "--source-root", "/source"],
+    ["--comment-origin", "--source-root", "/source", "--config", "relative.yaml"],
+    ["--comment-origin", "--source-root", "/source", "--config", "/missing-config.yaml"],
+])
+def test_new_origin_modes_reject_ambiguous_or_ambient_inputs_before_resolution(
+    monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str], argv: list[str],
+) -> None:
+    def forbidden(*args: object, **kwargs: object) -> None:
+        raise AssertionError("invalid origin selection must refuse before owner reads")
+
+    monkeypatch.setattr(cli.cfg, "load_config", forbidden)
+    monkeypatch.setattr(cli.tracking, "find_worktree_id_by_cwd", forbidden)
+    assert cli.cmd_attribution_prepare(_comment_args(*argv, "--json")) == 1
+    assert "error" in json.loads(capfd.readouterr().out)

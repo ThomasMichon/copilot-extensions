@@ -56,6 +56,8 @@ def add_parsers(sub) -> None:
     parser.add_argument("--config")
     parser.add_argument("--comment-origin", action="store_true", help="Emit compact comment-origin JSON, not a PR marker")
     parser.add_argument("--visibility", choices=("public", "internal"), help="Comment destination visibility (default: public)")
+    parser.add_argument("--source-root", type=Path, help="Exact managed producer root; requires comment-origin mode and absolute --config")
+    parser.add_argument("--capabilities", action="store_true", help="Discover comment-origin support without resolving source or configuration")
 
 
 def prepare_comment_origin(
@@ -136,10 +138,33 @@ def cmd_attribution_prepare(args: argparse.Namespace) -> int:
     try:
         comment_origin = getattr(args, "comment_origin", False)
         visibility = getattr(args, "visibility", None)
+        source_root = getattr(args, "source_root", None)
+        capabilities = getattr(args, "capabilities", False)
         if comment_origin and (args.body_file or args.tag or args.omit_source):
             raise ValueError("comment origin cannot compose a PR body, tag or omission override")
         if not comment_origin and visibility is not None:
             raise ValueError("visibility requires comment-origin mode")
+        if (source_root is not None or capabilities) and not comment_origin:
+            raise ValueError("source-root and capabilities require comment-origin mode")
+        if capabilities:
+            if source_root is not None or args.config is not None or visibility is not None:
+                raise ValueError("comment-origin discovery cannot select source, config or visibility")
+            print(json.dumps({
+                "schema": "agent-worktrees.comment-origin-capabilities", "version": 1,
+                "origin_protocol": COMMENT_ORIGIN_PROTOCOL,
+                "capabilities": ["explicit_source_root"], "effects": "none",
+            }))
+            return 0
+        if source_root is not None:
+            config_path = Path(args.config) if args.config else None
+            if config_path is None or not config_path.is_absolute() or not config_path.is_file():
+                raise ValueError("explicit comment origin requires an existing absolute config")
+            config = cfg.load_config(config_path)
+            result = resolve_comment_origin(
+                source_root, config, visibility=visibility or "public",
+            )
+            print(json.dumps(result))
+            return 0
         config = cfg.load_config(Path(args.config) if args.config else None)
         cwd = Path.cwd()
         worktree_id = tracking.find_worktree_id_by_cwd(str(cwd), project=config.repo_name)
