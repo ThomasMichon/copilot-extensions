@@ -1,0 +1,9 @@
+{
+  "comment": "Annotate Chat storage and collaboration source contracts without changing request validation",
+  "changes": [
+    {
+      "plugin": "agent-chat-service",
+      "type": "patch"
+    }
+  ]
+}
