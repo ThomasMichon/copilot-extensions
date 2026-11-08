@@ -99,6 +99,8 @@ class CurrentFeedMixin:
     def _source_read_error(records, availability=None):
         candidates = [availability]
         for record in records:
+            if not isinstance(record, dict):
+                return ReadFailure("Source record is invalid", kind="content")
             raw = record.get("raw", {})
             if not isinstance(raw, dict):
                 return ReadFailure("Source row metadata is invalid", kind="content")

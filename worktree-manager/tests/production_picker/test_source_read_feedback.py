@@ -557,13 +557,16 @@ def test_advisory_feed_keeps_stale_feedback_without_claiming_authoritative_rows(
     assert loader.state_for_source(source.source_id) == "loading"
 
 
-@pytest.mark.parametrize("metadata", [{"raw": ["invalid"]}, {"raw": {"_availability": "invalid"}}])
-def test_roster_publication_retains_invalid_availability_as_a_read_failure(metadata):
+@pytest.mark.parametrize("record", [
+    ["invalid"], {"id": "one", "raw": ["invalid"]},
+    {"id": "one", "raw": {"_availability": "invalid"}},
+])
+def test_roster_publication_retains_invalid_availability_as_a_read_failure(record):
     _screen, loader, source = screen_and_loader(provider=True)
     with loader._lock:
-        loader._publish_source_records(source, [{"id": "one", **metadata}])
+        loader._publish_source_records(source, [record])
     status = loader.read_status_for_source(source.source_id)
-    assert "metadata is invalid" in str(status["error"])
+    assert "is invalid" in str(status["error"])
     assert status["failure_kind"] == "content"
 
 
