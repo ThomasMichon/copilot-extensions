@@ -398,6 +398,10 @@ _Operator-required outcome; agent-recommended slices and validation._
   before the attempt fence and at dispatch, and preserve unknown attempts on
   later denial. Actual credential-source grant/audience verification, current
   custodian admission and strict normal-host enrollment remain separate.
+- [ ] Review and deliver [preparation without writer enrollment](comment-producer-enrollment.md#preparation-without-writer-enrollment)
+  through the existing allocation and trusted source/profile owners. Qualify
+  the preparation-only receiver before explicit standalone-host adoption;
+  no preview implies protected submission or verifies the raw Azure source.
 - [ ] Deliver the actual protected write-owner prerequisite through its
   existing owners, then bind one explicitly selected authenticated host route.
   Injected factories and observation credentials do not satisfy these exits;
@@ -957,6 +961,13 @@ or silently expanding a bounded source claim.
   bounds and unchanged source/resource ownership.
 
 ## Validation Plan
+
+- [ ] Qualify preparation-only CLI/client/Gateway allocation and original
+  recovery with the actual preparer, zero protected acquisitions/sends,
+  independent submission refusal, unchanged writer/default behavior and
+  current/prior receiver rollback. Verify executing source/profile packaging
+  before standalone-host preparation is advertised; preserve the separately
+  open credential-source and protected-writer acceptance.
 
 - [x] Qualify native effective-permission evaluation (#11462; 216 coupled
   source cases) with contained namespace/
