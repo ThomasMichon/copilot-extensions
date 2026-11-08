@@ -151,6 +151,27 @@ implementation proof obligations, not claims that native qualification passed.
 
 ## Journal
 
+### 2026-11-08 - Native boundary diagnosis
+
+- Disposable PSMux 3.4.0 proved cold Open, same-pane reattach, two independent
+  clients, fresh consumer listings and exact retirement. Its concurrent
+  warm-server case remained uncertain after dispatch; no creation was replayed.
+- The same packet on PSMux 3.3.8 passed both concurrent launch cases but
+  exposed unsupported identity fields in its client-list formatter. Restricted
+  client rows to its supported session name and added a final authenticated
+  identity marker, matching the pane rows before accepting any client count.
+  Missing, changed or trailing identity boundaries remain unknown.
+- Focused synthetic wire regressions passed 23 cases. Native failure output
+  now retains bounded fixed-query replies and complete-inventory reasons,
+  excluding authentication, requests and pane argv. This is diagnostic evidence,
+  not a relaxation of the native acceptance deadline.
+- Earlier acquisition failures occurred before tests; the public release-API
+  fallback retains the same pinned digest. Required CI also found a stale
+  process-launch census after removing a launcher subprocess; corrected the
+  census to the actual three sites without exempting any remaining launch.
+- Exact-source native qualification, required CI and review remain pending.
+  No shared-host observation, installation or deployment occurred.
+
 ### 2026-11-08 - Candidate ready for disposable native qualification
 
 - Reconciled concurrent #11549 instead of replacing its safe cold-stop proof.

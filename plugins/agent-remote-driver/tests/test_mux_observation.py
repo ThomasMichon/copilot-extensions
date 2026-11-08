@@ -18,7 +18,8 @@ from agent_procutil import no_window_kwargs
 
 
 _PANE = b"P\twt-fixture\t$7:100\t%2\t0\t1\tC:\\fixture with spaces\n"
-_CLIENT = b"C\twt-fixture\t$7:100\n"
+_CLIENT = b"C\twt-fixture\n"
+_IDENTITY = b"I\twt-fixture\t$7:100\n"
 
 @pytest.fixture(autouse=True)
 def private_native_inventory(monkeypatch):
@@ -69,7 +70,7 @@ def native_endpoint(root, response, *, delay=0, mutate=None, namespace=""):
 def test_fresh_authenticated_presence_and_real_client_count_without_cli(tmp_path, monkeypatch):
     monkeypatch.setattr(mux_creation.subprocess, "run", lambda *a, **k: pytest.fail("passive CLI"))
     monkeypatch.setenv("PSMUX_DATA_DIR", str(tmp_path))
-    with native_endpoint(tmp_path, b"OK\n" + _PANE + _CLIENT * 3) as captured:
+    with native_endpoint(tmp_path, b"OK\n" + _PANE + _CLIENT * 3 + _IDENTITY) as captured:
         observed = mux.observe_psmux("wt-fixture")
     assert observed.presence() and observed.clients == 3
     assert observed.incarnation == "$7:100"
@@ -77,11 +78,16 @@ def test_fresh_authenticated_presence_and_real_client_count_without_cli(tmp_path
     scheme = b"AU" + b"TH "
     assert captured[0] == scheme + b"synthetic-key\n"
     assert captured[1].startswith(b"list-panes ") and b"list-clients " in captured[1]
+    client_query = captured[1].split(b"list-clients ", 1)[1].split(b" ; ", 1)[0]
+    assert client_query == b'-F "C\t#{session_name}"'
+    assert captured[1].endswith(
+        b'display-message -p "I\t#{session_name}\t#{session_id}:#{session_created}"\n'
+    )
     assert (tmp_path / "wt-fixture.key").read_text() == "synthetic-key"
 
 
 def test_zero_clients_is_live_not_absent(tmp_path):
-    with native_endpoint(tmp_path, b"OK\r\n" + _PANE):
+    with native_endpoint(tmp_path, b"OK\r\n" + _PANE + _IDENTITY):
         observed = mux.observe_psmux("wt-fixture", data_dir=tmp_path)
     assert observed.presence() and observed.clients == 0
 
@@ -91,7 +97,7 @@ def test_explicit_namespace_scopes_listing_and_keeps_logical_identity(tmp_path, 
     monkeypatch.setenv("COPILOT_DRIVER_PSMUX_NAMESPACE", "private-fixture")
     (tmp_path / "other__wt-fixture.pid").write_text("123", encoding="ascii")
     (tmp_path / "unrelated.pid").write_text("456", encoding="ascii")
-    with native_endpoint(tmp_path, b"OK\n" + _PANE, namespace="private-fixture"):
+    with native_endpoint(tmp_path, b"OK\n" + _PANE + _IDENTITY, namespace="private-fixture"):
         observed = mux.list_psmux()
     assert set(observed) == {"wt-fixture"}
     assert observed["wt-fixture"].presence()
@@ -104,12 +110,19 @@ def test_explicit_namespace_scopes_listing_and_keeps_logical_identity(tmp_path, 
     b"ERROR: Invalid session key\n",
     b"OK\n",
     b"OK\nERROR: unknown command\n",
-    b"OK\n" + _PANE.replace(b"wt-fixture", b"wt-other"),
-    b"OK\n" + _PANE + _CLIENT.replace(b"$7:100", b"$8:101"),
-    b"OK\n" + _PANE + _PANE,
-    b"OK\n" + _PANE.replace(b"\t0\t1\t", b"\tbad\t1\t"),
+    b"OK\n" + _PANE.replace(b"wt-fixture", b"wt-other") + _IDENTITY,
+    b"OK\n" + _PANE + _IDENTITY.replace(b"$7:100", b"$8:101"),
+    b"OK\n" + _PANE + _PANE + _IDENTITY,
+    b"OK\n" + _PANE.replace(b"\t0\t1\t", b"\tbad\t1\t") + _IDENTITY,
+    b"OK\n" + _PANE + _CLIENT,
+    b"OK\n" + _PANE + _IDENTITY + _CLIENT,
+    b"OK\n" + _PANE + _CLIENT.replace(b"wt-fixture", b"wt-other") + _IDENTITY,
+    b"OK\n" + _PANE + _IDENTITY * 2,
     b"OK\n" + b"x" * (mux._LIMIT + 1),
-], ids=["auth", "empty", "error", "name", "incarnation", "duplicate-pane", "malformed", "oversized"])
+], ids=[
+    "auth", "empty", "error", "name", "incarnation", "duplicate-pane", "malformed",
+    "missing-end", "trailing-client", "foreign-client", "duplicate-end", "oversized",
+])
 def test_invalid_or_unconfirmed_wire_never_means_absence(tmp_path, response):
     with native_endpoint(tmp_path, response):
         observed = mux.observe_psmux("wt-fixture", data_dir=tmp_path)
@@ -165,11 +178,11 @@ def test_native_coverage_identity_reads_its_own_process_without_a_subprocess(mon
 
 def test_timeout_and_changed_rendezvous_preserve_unknown(tmp_path):
     started = time.monotonic()
-    with native_endpoint(tmp_path, b"OK\n" + _PANE, delay=0.15):
+    with native_endpoint(tmp_path, b"OK\n" + _PANE + _IDENTITY, delay=0.15):
         observed = mux.observe_psmux("wt-fixture", data_dir=tmp_path, timeout=0.05)
     assert observed.status == "unknown" and time.monotonic() - started < 2
     with native_endpoint(
-        tmp_path, b"OK\n" + _PANE,
+        tmp_path, b"OK\n" + _PANE + _IDENTITY,
         mutate=lambda: (tmp_path / "wt-fixture.key").write_text("replacement", encoding="ascii"),
     ):
         observed = mux.observe_psmux("wt-fixture", data_dir=tmp_path)
@@ -179,7 +192,7 @@ def test_timeout_and_changed_rendezvous_preserve_unknown(tmp_path):
 def test_creation_check_joins_from_wire_without_native_subprocess(tmp_path, monkeypatch):
     monkeypatch.setenv("PSMUX_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(mux_creation.subprocess, "run", lambda *a, **k: pytest.fail("passive CLI"))
-    with native_endpoint(tmp_path, b"OK\n" + _PANE):
+    with native_endpoint(tmp_path, b"OK\n" + _PANE + _IDENTITY):
         assert mux_creation.has_session("psmux.exe", "wt-fixture")
     (tmp_path / "wt-fixture.port").write_text("invalid", encoding="ascii")
     with pytest.raises(mux.ObservationUnavailable):

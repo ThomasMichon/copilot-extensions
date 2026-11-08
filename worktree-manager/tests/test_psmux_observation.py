@@ -92,7 +92,10 @@ def test_shipped_open_check_uses_real_finite_provider_without_psmux(tmp_path, st
                         scheme = b"AU" + b"TH "
                         assert reader.readline() == scheme + b"synthetic-key\n"
                         assert reader.readline().startswith(b"list-panes ")
-                        stream.sendall(b"OK\nP\twt-fixture\t$7:100\t%2\t0\t1\tC:\\fixture\n")
+                        stream.sendall(
+                            b"OK\nP\twt-fixture\t$7:100\t%2\t0\t1\tC:\\fixture\n"
+                            b"I\twt-fixture\t$7:100\n"
+                        )
             except Exception as exc:
                 failures.append(exc)
 

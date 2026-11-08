@@ -21,7 +21,8 @@ _LIMIT = 256 * 1024
 _QUERY = (
     'list-panes -s -F "P\t#{session_name}\t#{session_id}:#{session_created}'
     '\t#{pane_id}\t#{pane_dead}\t#{pane_active}\t#{pane_current_path}" ; '
-    'list-clients -F "C\t#{session_name}\t#{session_id}:#{session_created}"\n'
+    'list-clients -F "C\t#{session_name}" ; '
+    'display-message -p "I\t#{session_name}\t#{session_id}:#{session_created}"\n'
 ).encode("ascii")
 
 
@@ -96,18 +97,21 @@ def _parse(body: str, session: str) -> Observation:
     panes: list[Pane] = []
     identities: set[str] = set()
     clients = 0
+    complete = False
     for line in body.splitlines():
         if not line:
             continue
         fields = line.split("\t")
-        if (
-            len(fields) not in {3, 7} or fields[1] != session
-            or not re.fullmatch(r"\$[0-9]+:[0-9]+", fields[2])
-        ):
+        if complete or len(fields) < 2 or fields[1] != session:
+            raise ValueError("Unconfirmed native session")
+        if fields[0] == "C" and len(fields) == 2:
+            clients += 1
+            continue
+        if len(fields) < 3 or not re.fullmatch(r"\$[0-9]+:[0-9]+", fields[2]):
             raise ValueError("Unconfirmed native session")
         identities.add(fields[2])
-        if fields[0] == "C" and len(fields) == 3:
-            clients += 1
+        if fields[0] == "I" and len(fields) == 3:
+            complete = True
         elif (
             fields[0] == "P" and len(fields) == 7
             and re.fullmatch(r"%[0-9]+", fields[3])
@@ -116,7 +120,7 @@ def _parse(body: str, session: str) -> Observation:
             panes.append(Pane(fields[3], fields[4] == "1", fields[5] == "1", fields[6]))
         else:
             raise ValueError("Malformed native observation")
-    if not panes or len(identities) != 1 or len({p.pane_id for p in panes}) != len(panes):
+    if not complete or not panes or len(identities) != 1 or len({p.pane_id for p in panes}) != len(panes):
         raise ValueError("Unconfirmed native session identity")
     return Observation("present", incarnation=identities.pop(), clients=clients, panes=tuple(panes))
 

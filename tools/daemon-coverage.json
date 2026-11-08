@@ -403,7 +403,7 @@
       "r:plugins/budget-guidance/scripts/installation-context/shell-caller-owned.ps1::<script>::Process.Start": 1,
       "r:plugins/agent-worktrees/scripts/native-seed-boundary.ps1::<script>::Process.Start": 3,
       "r:worktree-manager/bin/pane-wrapper.ps1::<script>::Process.Start": 2,
-      "r:worktree-manager/bin/launch-session.ps1::<script>::Process.Start": 4,
+      "r:worktree-manager/bin/launch-session.ps1::<script>::Process.Start": 3,
       "r:fleet-manager/src/fleet_manager/host_profile.py::_parser::Popen": 1,
       "fm:gateway_transport.py::_addresses::Popen": 1,
       "b:acquisition_authority.py::worktree_command::create_subprocess_exec": 1,

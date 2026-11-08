@@ -96,7 +96,39 @@ def _wait_for(check, label, consoles, launches=()):
         root = Path(launches[0]["env"]["TEMP"])
         for path in sorted((root / "worktree-setup-logs").glob("*.log")):
             output += f"\n{path.name}:\n{path.read_text('utf-8-sig')[-4096:]}"
+        output += _native_observation_diagnostics(launches)
     raise AssertionError(f"{label}\n{output}")
+
+
+def _native_observation_diagnostics(launches):
+    """Retain bounded fixed-query replies, never authentication or pane argv."""
+    from agent_remote_driver import mux_inventory, mux_observation
+
+    output = ""
+    for launch in launches:
+        env = launch["env"]
+        if not env.get("COPILOT_DRIVER_PSMUX_NAMESPACE"):
+            continue
+        root = Path(env["PSMUX_DATA_DIR"])
+        base = env["COPILOT_DRIVER_PSMUX_NAMESPACE"] + "__" + launch["name"]
+        try:
+            port = int(mux_observation._read(root / (base + ".port")))
+            key = mux_observation._read(root / (base + ".key")).decode("utf-8").strip()
+            body = mux_observation._exchange(port, key, time.monotonic() + .25)
+            output += f"\n{launch['name']}/fixed-reply: {body[:4096]!r}"
+            observed = mux_observation._parse(body, launch["name"])
+            output += f"\n{launch['name']}/parsed: {observed!r}"
+        except (OSError, ValueError) as error:
+            output += f"\n{launch['name']}/query: {type(error).__name__}: {error}"
+    if launches and launches[0]["env"].get("COPILOT_DRIVER_PSMUX_NAMESPACE"):
+        try:
+            result = mux_inventory.observe(timeout=.5, data_dir=Path(
+                launches[0]["env"]["PSMUX_DATA_DIR"],
+            ))
+            output += f"\ncomplete-native-inventory: {result!r}"
+        except mux_observation.ObservationUnavailable as error:
+            output += f"\ncomplete-native-inventory: {error}"
+    return output
 
 
 def _private_psmux(root, binary, namespace, env):
