@@ -7,8 +7,10 @@ selected existing KeePass database. It returns **only public metadata**:
 {"version":1,"status":"reused","public_key":"ssh-ed25519 <base64>","fingerprint":"SHA256:<digest>"}
 ```
 
-Use the owning payload's session-catalog command. The optional `ssh` extra
-(`agent-vault[ssh]`) supplies cryptographic generation and pair validation;
+Use the owning payload's session-catalog command. Select the native installer's
+[`ssh` dependency profile](../README.md#dependency-profiles), which installs
+the optional `agent-vault[ssh]` extra in a separate immutable runtime. It supplies
+cryptographic generation and pair validation;
 missing support produces `crypto_unavailable`, not a replacement key or
 fallback implementation. Other Vault commands do not require the extra.
 
@@ -111,6 +113,9 @@ directories and `0600` files. Existing locations must already meet that contract
 installation never repairs or broadens their permissions. Links, special files,
 different keys and noncanonical contents are refused without overwriting them.
 Files are flushed and published exclusively, not truncated or replaced.
+Concurrent publication is serialized for the same physical directory: Windows
+uses a TokenUser/SYSTEM-protected kernel mutex; POSIX uses its directory flock.
+Both waits are bounded, and no persistent lock file is added beside the keys.
 
 Success returns schema version 1, public key/fingerprint, `private_key_path`,
 `public_key_path` and `status` (`installed`, `reused` or `recovered`).
@@ -126,6 +131,18 @@ declarative-setup/provider-custody contract. It does not make Vault a dependency
 of ordinary agent-ssh transports or change their in-band key lifecycle.
 
 ## Qualification
+
+The explicitly selected `tests/native/test_runtime_profile.py` packet enters the
+real native installer and canonical constructor with actual UV, isolated homes
+and a loopback artifact-index fixture carrying explicit upload timestamps.
+It checks separate base/SSH slots, unchanged completed base bytes, reuse,
+preserved selection on update and actual installed-runtime key prepare/install.
+A prepared-source stamp/provision control removes its publisher, preserves the
+original source receipt separately from the profiled slot and refuses corrupted
+retained helpers without rewriting the completed runtime.
+The copied third-party artifacts and build backend are fixtures; credential IPC
+is substituted. This does not qualify a release feed's artifact age, an operator
+database, installed service, remote enrollment or live synchronization.
 
 `tests/test_ssh_key.py` covers validation, explicit initialization, ordinary
 reuse, failures, uncertain completion, same-service concurrency and the actual

@@ -42,6 +42,9 @@ param(
     [switch]$Purge,
     [switch]$Force,
 
+    [ValidateSet('base', 'ssh')]
+    [string]$Profile,
+
     # Preview mode for the 'uninstall' action: print what WOULD be removed
     # without touching the filesystem or scheduled task.
     [switch]$DryRun
@@ -55,6 +58,20 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
         throw 'Required installer human-output initializer is unavailable.'
     }
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
+}
+
+if (-not $Profile -and $env:AGENT_VAULT_INSTALL_PROFILE) {
+    if ($env:AGENT_VAULT_INSTALL_PROFILE -cnotin @('base', 'ssh')) {
+        throw 'Unsupported Vault installation profile'
+    }
+    $Profile = $env:AGENT_VAULT_INSTALL_PROFILE
+}
+if ($Profile) {
+    if ($Profile -cnotin @('base', 'ssh')) { throw 'Unsupported Vault installation profile' }
+    if ($Action -notin @('install', 'update', 'stamp', 'provision')) {
+        throw 'Vault dependency selection requires install, update, stamp or provision'
+    }
+    $env:AGENT_VAULT_INSTALL_PROFILE = $Profile
 }
 
 # Retain the native selector before activation, driver handoff or self-staging
@@ -599,7 +616,19 @@ function Ensure-UvIndex {
 # the recorded footprint is, because the same installer is invoked from the
 # same place.
 # === install-contract:v4 marker/toss helpers (#935) ===
+function Test-VaultRuntimeProfilePresent {
+    try {
+        [void][IO.File]::GetAttributes((Join-Path $InstallDir 'runtime-profile.json'))
+        return $true
+    } catch [IO.FileNotFoundException] {
+        return $false
+    } catch [IO.DirectoryNotFoundException] {
+        return $false
+    }
+}
+
 function Get-BootstrapPython {
+    if ($script:RuntimeProfilePython) { return $script:RuntimeProfilePython }
     <# Construction supervision must run outside the candidate being built.
        Probe a native launcher, then real PATH interpreters (not Store aliases). #>
     $launcher = Get-Command py -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -615,6 +644,17 @@ function Get-BootstrapPython {
 }
 
 function Get-PayloadHash {
+    if ($script:RuntimeProfile) {
+        $py = Get-BootstrapPython
+        $result = Invoke-Hidden -FilePath $py -ArgList @(
+            '-I', '-B', (Join-Path $ScriptDir 'runtime_profile.py'),
+            '--root', $InstallDir, 'fingerprint'
+        )
+        if ($LASTEXITCODE -ne 0 -or $result.Trim() -cnotmatch '^[0-9a-f]{64}$') {
+            throw 'Vault dependency-profile fingerprint is unavailable'
+        }
+        return $result.Trim()
+    }
     <# Cheap payload fingerprint for the completion marker (#935): sha256 of
        pyproject.toml + the vendored-lib version set. Never throws -> '' on error. #>
     try {
@@ -644,6 +684,7 @@ function Invoke-VersionedSlotClean {
         if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
         Invoke-Expression $helpers
     }
+    if ($script:RuntimeProfile) { $vr = Join-Path $ScriptDir 'runtime_profile.py' }
     $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
         -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
         -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
@@ -898,6 +939,7 @@ function Install-Runtime {
         Write-Fail 'uv is required but could not be resolved or acquired'
         exit 1
     }
+    if ($script:RuntimeProfile) { $env:AGENT_VAULT_INSTALL_UV = $uvPath }
 
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
@@ -907,7 +949,7 @@ function Install-Runtime {
     [void](Invoke-VersionedSlotClean)
     if ($script:RuntimeConstructionReuse) {
         if (-not (Invoke-VersionedMarkComplete)) { throw 'Retained runtime completion failed' }
-        if ($script:SourceRuntimeIdentity) {
+        if ($script:SourceRuntimeIdentity -or $script:RuntimeProfile) {
             if (-not (Test-RuntimeHealthy)) { throw 'Retained runtime slot failed its health gate; not activating' }
             Assert-SourceRuntime
             Write-Binstubs
@@ -917,7 +959,7 @@ function Install-Runtime {
                 ([IO.File]::ReadAllText($selected)).Trim() -ne $SrcVersion) {
                 if (-not (Invoke-VersionedActivate)) { throw 'Source runtime activation failed' }
             }
-            Publish-SourcePayload
+            if ($script:SourceRuntimeIdentity) { Publish-SourcePayload }
             Write-VaultDeployManifest
         }
         return
@@ -1662,6 +1704,16 @@ $ScriptDir = $PSScriptRoot
 . (Join-Path $ScriptDir 'source-runtime.ps1')
 $PackageVersion = $SrcVersion
 $SourceRuntimeIdentity = $null
+$RuntimeProfile = ''
+$RuntimeProfilePython = ''
+$profilePresent = $false
+if ($Action -in @('install', 'update', 'provision', 'stamp')) {
+    $profilePresent = Test-VaultRuntimeProfilePresent
+}
+if ($Action -in @('install', 'update', 'provision', 'stamp') -and ($Profile -or $profilePresent)) {
+    $RuntimeProfilePython = Resolve-NativeBootstrapPython -MinimumMinor 11 -Action $Action -Root $InstallDir
+    if (-not $RuntimeProfilePython) { throw 'Vault dependency profiles require an existing Python 3.11+ bootstrap interpreter' }
+}
 if ($Action -in @('install', 'update', 'provision', 'stamp')) { Initialize-SourceRuntime }
 $needsInstallLock = ($Action -in @('install', 'update', 'stamp', 'provision', 'schedule')) -or
     ($Action -eq 'uninstall' -and -not $DryRun)
@@ -1671,6 +1723,29 @@ if ($needsInstallLock -and -not (Enter-InstallLock)) {
 }
 
 try {
+    if ($Action -in @('install', 'update', 'provision', 'stamp')) {
+        $profilePresent = Test-VaultRuntimeProfilePresent
+    }
+    if ($Action -in @('install', 'update', 'provision', 'stamp') -and ($Profile -or $profilePresent)) {
+        if (-not $RuntimeProfilePython) {
+            $RuntimeProfilePython = Resolve-NativeBootstrapPython -MinimumMinor 11 -Action $Action -Root $InstallDir
+        }
+        $py = Get-BootstrapPython
+        if (-not $py) { throw 'Vault dependency selection requires a bootstrap Python interpreter' }
+        $arguments = @('-I', '-B', (Join-Path $ScriptDir 'runtime_profile.py'),
+            '--root', $InstallDir, 'select')
+        if (-not $DryRun) { $arguments += '--persist' }
+        if ($Profile) { $arguments += @('--profile', $Profile) }
+        $selected = Invoke-Hidden -FilePath $py -ArgList $arguments
+        if ($LASTEXITCODE -ne 0) { throw 'Vault dependency selection failed' }
+        $selected = $selected | ConvertFrom-Json
+        $RuntimeProfile = $selected.profile
+        $SrcVersion = $selected.runtime_version
+        $VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
+        $VenvPython = Join-Path $VenvDir 'Scripts\python.exe'
+        $LinkDir = $VenvDir
+        $LinkPython = $VenvPython
+    }
     if ($Action -in @('install', 'update', 'provision', 'stamp')) { Assert-SourceRuntime }
     if ($Action -in @('install', 'update', 'provision') -and -not $DryRun) {
         . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')

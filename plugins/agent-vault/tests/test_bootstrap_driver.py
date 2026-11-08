@@ -223,6 +223,51 @@ def test_healthy_bootstrap_never_requires_driver_or_environment_helper(tmp_path)
     assert {str(p.relative_to(home)): p.read_bytes() for p in home.rglob("*") if p.is_file()} == before
 
 
+@pytest.mark.parametrize("condition", ["current", "base-runtime", "malformed-desire", "profile-directory"])
+def test_native_bootstrap_preserves_or_reconciles_selected_ssh_profile(tmp_path, condition):
+    home, project = tmp_path / "home", tmp_path / "project"
+    home.mkdir()
+    project.mkdir()
+    plugin = _make_fake_plugin(tmp_path, "agent-vault")
+    scripts = Path(__file__).resolve().parents[1] / "scripts"
+    for name in ("runtime_profile.py", "versioned_runtime_native.ps1"):
+        shutil.copyfile(scripts / name, plugin / "scripts" / name)
+    installation = _make_fake_install(home, "agent-vault")
+    version = "1.0.1+base" if condition == "base-runtime" else "1.0.1+ssh"
+    (installation / "deploy-manifest.json").write_text(json.dumps({
+        "source": {"version": "1.0.1"}, "runtime_version": version,
+        "runtime_profile": "base" if condition == "base-runtime" else "ssh",
+    }))
+    if condition == "profile-directory":
+        (installation / "runtime-profile.json").mkdir()
+    else:
+        (installation / "runtime-profile.json").write_text(
+            "{" if condition == "malformed-desire" else json.dumps({
+                "schema": "agent-vault.runtime-profile", "version": 1, "profile": "ssh",
+            }),
+        )
+    (installation / "current-version").write_text(version)
+    python = installation / "versions" / version / (
+        "Scripts/python.exe" if os.name == "nt" else "bin/python"
+    )
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"interpreter metadata fixture")
+    python.chmod(0o755)
+    env = _clean_env({
+        "HOME": str(home), "USERPROFILE": str(home),
+        "BOOTSTRAP_KILLSWITCH_STATE_FILE": str(home / "killswitch.json"),
+    })
+    before = {str(p.relative_to(home)): p.read_bytes() for p in home.rglob("*") if p.is_file()}
+    result = subprocess.run(
+        native_bootstrap(plugin, project, home), env=env, cwd=project,
+        capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+    assert json.loads(result.stdout) == {}, result.stdout + result.stderr
+    assert result.returncode == (3 if condition in {"malformed-desire", "profile-directory"} else 0), result.stderr
+    assert (project / "handoff").exists() is (condition == "base-runtime")
+    assert {str(p.relative_to(home)): p.read_bytes() for p in home.rglob("*") if p.is_file()} == before
+
+
 @pytest.mark.parametrize("failure", [
     "empty-owner", "wrong-owner", "malformed-deployment", "nonstring-version", "missing-version",
 ])

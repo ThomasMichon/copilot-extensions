@@ -25,6 +25,31 @@ Missing files contribute nothing. Strict readers refuse malformed-present JSON,
 non-object documents and invalid known fields rather than using defaults.
 Non-strict legacy reads tolerate malformed configuration as empty.
 
+## Dependency selection
+
+The native installer's `-Profile base|ssh` / `--profile base|ssh` selection is
+installation policy, not a database selector or portable `.agent-vault.json`
+field. It is persisted under the selected runtime home as `runtime-profile.json`:
+
+```json
+{"schema":"agent-vault.runtime-profile","version":1,"profile":"ssh"}
+```
+
+Omitting the option preserves this desired state; with no file, ordinary setup
+keeps its existing base behavior. Explicit source-owned driver handoff retains
+`AGENT_VAULT_INSTALL_PROFILE` for this installation request. Neither that input
+nor the persisted profile enables Vault, selects a database, starts a credential
+operation or authorizes enrollment. Malformed/unsupported profile files refuse
+rather than being overwritten. The same transaction lock protects selection
+and construction. A failed build retains desired state but leaves the active
+runtime unchanged.
+
+The deploy manifest's `source.version` remains the package version.
+`runtime_profile` and `runtime_version` identify the selected dependency slot.
+Bootstrap compares desired and deployed profiles as well as package version,
+so a healthy SSH runtime is not repeatedly rebuilt as base.
+See [native profile setup](../README.md#dependency-profiles).
+
 ## Windows scheduling is separate from activation
 
 The **global native settings file** (selected above) accepts

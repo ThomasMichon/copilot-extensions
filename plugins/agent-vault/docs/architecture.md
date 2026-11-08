@@ -14,6 +14,7 @@ This document describes the implementation as it exists today. It intentionally 
 | SSH key preparation | `src/agent_vault/ssh_key.py` | Validates and reuses a whole Ed25519 pair; separately confirmed first creation uses one existing create-only protected-field write. Returns public metadata, not private material or enrollment authority. |
 | Config resolver | `src/agent_vault/config.py` | Resolves database, group, vault name, port, runtime paths, and config files from env, repo config, extension config, global named vaults, and defaults. |
 | Installer/bootstrap | `scripts/install.ps1`, `scripts/install.sh`, `scripts/bootstrap-check.*` | Creates/stamps the runtime, deploys binstubs, records a deploy manifest, installs platform supervision, and reconciles version drift. |
+| Dependency selection | `scripts/runtime_profile.py` | Persists explicit base/SSH installation policy and passes the selected extra to the canonical immutable constructor while the native lifecycle retains activation and service ownership. |
 | Extensions | `src/agent_vault/extensions.py`, `src/agent_vault/core_ext.py` | Provides opt-in hooks for unlock providers, daemon actions, transports, config/cache sources, CLI commands, startup hooks, and optional core delegation. |
 
 ## Runtime layout and install modes
@@ -40,6 +41,19 @@ There are two setup paths:
 2. **Stamp** writes a payload snapshot marker plus self-provisioning binstub without building the venv. The session-start hook uses this when no manifest exists so the command is available quickly; the first real command provisions the venv and then dispatches.
 
 The runtime is standalone: neither installer nor CLI requires an `agent-worktrees` repo registration.
+
+Explicit [base/SSH profiles](../README.md#dependency-profiles) add a separate
+immutable slot dimension (`<package>+<profile>`, or
+`<package>+<profile>.source.<commit>.<assembly>`). Unselected legacy base installs
+retain their existing slot and cheap bootstrap path. Desired selection lives
+under the installation root, while canonical completion/origin evidence binds
+the full source and selected extras. The existing attached construction adapter
+retains a completed candidate through native setup; the profile helper does not
+own service startup or credential operations.
+Prepared-source assertions, snapshots and redirects retain the original source
+identity/version. Manifest `runtime_version` names the actual profiled slot,
+`runtime_source` retains the original receipt and `source.version` remains the
+package version. No receipt is fabricated by appending a profile to it.
 
 ## Configuration model
 

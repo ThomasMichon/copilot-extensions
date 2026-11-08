@@ -94,6 +94,36 @@ The native qualification portfolio is documented in `libs/update-driver/README.m
 3. **For selected KeePass-backed use, install KeePassXC** with `keepassxc-cli` on PATH (or at `C:\Program Files\KeePassXC\keepassxc-cli.exe` on Windows). This is not a prerequisite for loading the plugin or inactive readiness.
 4. **Point the CLI at a database** with `KPDB`, a named vault, or a repo-local `.agent-vault.json`.
 
+## Dependency profiles
+
+Native setup can explicitly select `base` or `ssh`. SSH key generation and pair
+validation need the `ssh` profile; ordinary Vault use does not. For example:
+
+```powershell
+pwsh -File plugins\agent-vault\scripts\install.ps1 -Action install -Profile ssh
+```
+
+```bash
+bash plugins/agent-vault/scripts/install.sh install --profile ssh
+```
+
+The same selection works with `stamp`, `provision` and `update`. Stamping records
+the desired profile without acquiring dependencies; first use constructs it.
+The installation-owned `runtime-profile.json` preserves selection across ordinary
+updates. With no explicit or recorded selection, existing base setup is unchanged.
+Use `base` explicitly to select a new base runtime without the optional crypto
+dependency; existing encrypted-cache/KEK consumers may still need that dependency.
+Profile construction requires an existing Python 3.11+ bootstrap interpreter.
+
+Profiles use separate immutable version slots and the canonical retained-input
+constructor. A failed SSH build never selects a base substitute or modifies a
+completed runtime. Package metadata remains unchanged; `deploy-manifest.json`
+records the actual `runtime_version` and `runtime_profile`. Prepared deployments
+retain their original `runtime_source` receipt separately from the profile.
+Selection does not opt into runtime activation, unlock a database, configure
+credentials or change service policy. See [SSH key custody](docs/ssh-key-preparation.md)
+and the [configuration reference](docs/configuration.md#dependency-selection).
+
 ## Source-qualified runtimes
 
 Both native installers accept canonically prepared `runtime-source.json`

@@ -647,24 +647,55 @@ def stamped_snapshot(tmp_path_factory):
     )
 
 
-def _no_service_provision_command(home: Path, installer: Path, pwsh: str) -> list[str]:
+def _no_service_provision_command(
+    home: Path, installer: Path, pwsh: str, *, action: str = "provision",
+) -> list[str]:
     runner = home / "tmp" / "provision.ps1"
     runner.write_text(
-        "param($Installer, $InstallRoot)\n"
+        "param($Installer, $InstallRoot, $Action)\n"
         "function Get-ScheduledTask {}\n"
         "function Stop-ScheduledTask { throw 'unexpected service mutation' }\n"
         "function Start-ScheduledTask { throw 'unexpected service mutation' }\n"
         "function Register-ScheduledTask { throw 'unexpected service mutation' }\n"
         "function Set-ScheduledTask { throw 'unexpected service mutation' }\n"
         "function Unregister-ScheduledTask { throw 'unexpected service mutation' }\n"
-        "& $Installer provision -NoService -InstallDir $InstallRoot\n"
+        "& $Installer $Action -NoService -InstallDir $InstallRoot\n"
         "exit $LASTEXITCODE\n",
         encoding="utf-8",
     )
     return [
         pwsh, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-        str(runner), str(installer), str(home / ".agent-vault"),
+        str(runner), str(installer), str(home / ".agent-vault"), action,
     ]
+
+
+@pytest.mark.parametrize("profile", ["base", "ssh"])
+def test_native_profile_stamp_persists_selection_without_runtime_or_uv(tmp_path, profile):
+    pwsh = shutil.which("pwsh") or shutil.which("powershell")
+    if not pwsh:
+        pytest.skip("PowerShell is unavailable")
+    payload = _stage_payload(tmp_path)
+    home = tmp_path / "home"
+    env = _isolated_install_env(home)
+    _stamp_uv_guard(tmp_path, env)
+    command = [
+        pwsh, "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+        "-File", str(payload / "scripts" / "install.ps1"), "stamp", "-Profile", profile,
+    ]
+    result = subprocess.run(
+        command, env=env, cwd=home, capture_output=True, text=True,
+        timeout=60, **agent_procutil.no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    root = home / ".agent-vault"
+    assert json.loads((root / "runtime-profile.json").read_text()) == {
+        "schema": "agent-vault.runtime-profile", "version": 1, "profile": profile,
+    }
+    snapshot = Path((root / "payload-dir").read_text().strip())
+    assert (snapshot / "scripts" / "runtime_profile.py").is_file()
+    assert not (root / "current-version").exists()
+    assert not list((root / "versions").glob("*/pyvenv.cfg"))
+    assert _uv_events(env) == []
 
 
 @pytest.mark.timeout(60)

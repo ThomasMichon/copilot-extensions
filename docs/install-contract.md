@@ -175,6 +175,14 @@ source admission, completion and activation primitives. Explicit optional-profil
 failure leaves the active selector intact, never a successful base-only downgrade.
 See the plugin README's **Optional restricted SSH runtime** for provisioning.
 
+Vault's explicit [base/SSH selection](../plugins/agent-vault/README.md#dependency-profiles)
+uses the same independent profile dimension and installation-owned desired state,
+with the canonical numbered-candidate constructor and existing attached native
+adapter. Unselected legacy base setup retains its prior behavior. Its source
+snapshot/redirect receipt remains original; actual profiled runtime identity is
+reported separately. Selecting dependencies adds no activation or credential
+authority.
+
 Prepared source deployments retain this independent profile dimension:
 `<package-version>+<profile>.source.<commit>.<assembly>`. The coordinator validates
 the full source receipt before admission, after acquiring construction ownership,
