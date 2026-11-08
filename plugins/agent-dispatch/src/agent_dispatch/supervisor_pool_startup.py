@@ -240,5 +240,6 @@ def _close_decline(
     if governance is not None and governance.get("status") != "ready":
         return False
     owner.client.close_pool_decline(task["id"], decline)
+    # The worker settles its exact claim, then finalizes, after this confirmed requeue.
     log.info("worker decline closeout observed for %s; native retirement remains pending", current["key"])
     return True

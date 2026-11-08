@@ -8,8 +8,8 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent reviewed plan and implementation PRs targeting `dev`
 - **Created:** 2026-11-07
-- **Status:** Active
-- **Vision:** [Efforts](../../../visions/plugins/efforts/README.md), durable
+- **Status:** Done
+- **Vision:** [Efforts](../../../../visions/plugins/efforts/README.md), durable
   effort contract and compact effort handoff
 - **Umbrella issue:** [#11403](https://github.com/ThomasMichon/copilot-extensions/issues/11403)
 
@@ -40,8 +40,8 @@ The extension already observes root `user.message`,
 The current prompt observer retains a first prompt in module state, which is
 not a durable steer history. Agenda projections currently label a root by its
 source reference rather than presenting the canonical effort Goal.
-Existing [continuity behavior](../../../plugins/context-handoff/README.md) and
-[agenda companion](../../../plugins/efforts/skills/driving-effort-agendas/SKILL.md)
+Existing [continuity behavior](../../../../plugins/context-handoff/README.md) and
+[agenda companion](../../../../plugins/efforts/skills/driving-effort-agendas/SKILL.md)
 remain authoritative for lifecycle, ownership and optional adoption.
 
 ## Request
@@ -96,11 +96,11 @@ Implementation choices and sequencing below are agent recommendations.
 - [x] Include canonical Goal/corpus pointers in generated and consumed handoffs.
 - [x] Document standalone behavior, privacy/storage scope and supported replay
       boundaries; add changefiles for every affected plugin.
-- [ ] Land implementation through review and required CI.
+- [x] Land implementation through review and required CI.
 
 ### Phase 4 - Source closeout
-- [ ] Record actual merged PRs and observed release state separately from adoption.
-- [ ] Resolve validation, close tracking and archive the completed source campaign.
+- [x] Record actual merged PRs and observed release state separately from adoption.
+- [x] Resolve validation, close tracking and archive the completed source campaign.
       Installed rollout and host smoke belong to each adopter's existing authority.
 
 ## Validation Plan
@@ -114,10 +114,10 @@ Implementation choices and sequencing below are agent recommendations.
       without Goal remain usable with an explicit fallback.
 - [x] Exercise corpus paging/order and ensure no constraints disappear silently
       when history exceeds one message/read budget.
-- [ ] Run affected-plugin tests and required lint/customization/contract checks
+- [x] Run affected-plugin tests and required lint/customization/contract checks
       through existing bounded runners; document meaningful host-proof limits.
-- [ ] Complete documentation-impact and publication-safety review.
-- [ ] Verify every source PR merged after accepted review and required CI;
+- [x] Complete documentation-impact and publication-safety review.
+- [x] Verify every source PR merged after accepted review and required CI;
       report release and installed adoption separately, never infer live rollout.
 
 ## Proposal
@@ -241,3 +241,14 @@ root-goal string. Research may refine these choices within the Request.
   fresh synthetic Goal reads and disconnect/resume replay. Display labels and
   transformed content are distinguished by the native host. This qualifies
   event delivery, not semantic reading by the model or installed adoption.
+- Source implementation #11432 merged as `b0f90686cc` after the accepted
+  current-head Copilot Comment verdict, resolved findings and required CI
+  run 42439906865. Post-merge Dev CI 42440302374 also passed. Together with
+  reviewed plan #11408, this completes the source campaign.
+- Documentation-impact and public-artifact review are complete: durable
+  behavior lives in the plugin documentation; no private tracker or adopter
+  details are required by the source record. The current native proof covers
+  delivery and exact replay, not semantic reading or every host/platform.
+- At source closeout, automatic promotion is still in flight; no release or
+  installed-adoption claim follows from the Dev merge. Adopters retain their
+  existing release/update authority and installed qualification gates.

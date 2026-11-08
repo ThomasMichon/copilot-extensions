@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import subprocess
+import time
 
 from . import procutil
 from .bridge_remote import normalize_host
@@ -13,6 +14,8 @@ from .client_errors import DispatchError, DispatchUpgradeRequired
 from .loop_commands import _resolve_cli_module
 
 CONTRACT = "agent-worktrees.dispatch-worker-closeout"
+DISPOSITION_WAIT_SECONDS = 600.0
+DISPOSITION_POLL_SECONDS = 5.0
 
 
 def _finalize(binding: dict, worktree: str) -> None:
@@ -68,6 +71,66 @@ def _finalize(binding: dict, worktree: str) -> None:
         raise DispatchError(502, "own-workspace closeout outcome is unconfirmed; custody retained")
 
 
+def _retry_binding(task: dict, native: str, generation: int, worker: str, worktree: str) -> dict | None:
+    """Recognize this exact worker's already-recorded decline after Dispatch moved on."""
+    decline = task.get("worker_decline")
+    reservation = task.get("spawn_reservation")
+    if (
+        task.get("status") == "claimed" and task.get("generation") == generation
+    ) or not isinstance(decline, dict) or not isinstance(reservation, dict):
+        return None
+    if (
+        decline.get("task_id") != task.get("id") or decline.get("native_id") != native
+        or decline.get("generation") != generation or type(decline.get("generation")) is not int
+        or decline.get("worker_id") != worker
+        or decline.get("reservation_key") != reservation.get("key")
+        or reservation.get("worktree") != worktree
+    ):
+        return None
+    return decline
+
+
+def _await_disposition(client, task_id: str, decline: dict) -> None:
+    """Dispatch alone commits exclusions, unassignment and unbound requeue."""
+    deadline = time.monotonic() + DISPOSITION_WAIT_SECONDS
+    while True:
+        task = client.get(task_id)
+        if task.get("status") != "claimed" or task.get("generation") != decline["generation"]:
+            return
+        if time.monotonic() >= deadline:
+            raise DispatchError(
+                409, "worker decline disposition is not yet confirmed; custody retained;"
+                " rerun decline to converge",
+            )
+        time.sleep(DISPOSITION_POLL_SECONDS)
+
+
+def _settle(client, task_id: str, decline: dict) -> dict | None:
+    """Return the settled claim, or None for a disposition that never retained one."""
+    relationship = client.settle_pool_decline(task_id, decline)["task_relationship"]
+    if relationship is None:
+        return None
+    if relationship.get("state") != "closed":
+        detail = relationship.get("error")
+        raise DispatchError(
+            409, "worker decline requeued but its task claim is not yet settled"
+            + (f" ({detail[:512]})" if isinstance(detail, str) else "")
+            + "; workspace and claim retained; rerun decline to converge",
+        )
+    return relationship
+
+
+def _finish(client, task_id: str, decline: dict, worktree: str) -> bool:
+    if _settle(client, task_id, decline) is None:
+        # Legacy ordering finalized the workspace before Dispatch requeued it.
+        return False
+    _finalize({
+        "task_id": task_id, "native_id": decline["native_id"], "generation": decline["generation"],
+        "startup_revision": decline["startup_revision"], "reservation_key": decline["reservation_key"],
+    }, worktree)
+    return True
+
+
 def cmd_decline(args: argparse.Namespace) -> int:
     core = _resolve_cli_module()
     native = args.owner_session_id
@@ -80,8 +143,18 @@ def cmd_decline(args: argparse.Namespace) -> int:
     machine, worktree = core._identity(args)
     if not machine or not worktree:
         raise DispatchError(409, "decline requires the invoking worker's own machine/worktree")
+    worker = f"{machine}/{worktree}"
     with core._client(args, allow_ssh_failover=False) as client:
         task = client.get(args.task_id)
+        retry = _retry_binding(task, native, args.pool_generation, worker, worktree)
+        if retry is not None:
+            # A lost reply or unsettled claim converges without a second requeue.
+            settled = _finish(client, args.task_id, retry, worktree)
+            return core._emit({
+                "decline": retry, "workspace_closeout": "finalized", "task_release": False,
+                "process_retirement": False, "routing": "requeued",
+                **({"task_relationship": "closed"} if settled else {}),
+            })
         reservation = task.get("spawn_reservation")
         if (
             task.get("id") != args.task_id or task.get("status") != "claimed"
@@ -111,10 +184,28 @@ def cmd_decline(args: argparse.Namespace) -> int:
             "startup_revision": reservation.get("startup_revision"),
             "reservation_key": reservation.get("key"),
         }
-        worker = f"{machine}/{worktree}"
+        relationship = client.pool_decline_relationship(args.task_id, reservation.get("key"))
         decline = client.prepare_pool_decline(
             args.task_id, worker, **binding, exclusions=exclusions, note=args.note,
         )
+        if relationship is not None:
+            # Readiness retains the exact task claim; finalization follows settlement.
+            try:
+                _await_disposition(client, args.task_id, decline)
+            except DispatchError as exc:
+                try:
+                    client.record_pool_decline_blocker(
+                        args.task_id, worker, **binding, detail=str(exc)[:4096],
+                    )
+                except DispatchError:
+                    pass
+                raise
+            if not _finish(client, args.task_id, decline, worktree):
+                raise DispatchError(502, "worker decline disposition omitted its task claim; custody retained")
+            return core._emit({
+                "decline": decline, "workspace_closeout": "finalized", "task_release": False,
+                "process_retirement": False, "routing": "requeued", "task_relationship": "closed",
+            })
         try:
             _finalize({"task_id": args.task_id, **binding}, worktree)
         except (DispatchError, OSError, RuntimeError, subprocess.SubprocessError) as exc:
