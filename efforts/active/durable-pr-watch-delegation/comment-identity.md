@@ -135,6 +135,9 @@ than being reconstructed from today's worktree or an equal-content comment.
 4. **C3 - Observation/receipt correlation:** qualify actual preparation ->
    original native attempt -> retained outcome -> acquisition/mapping, including
    lost results and copied tags, through the existing owners.
+   The [finite acquired-observation refinement](comment-observation-correlation.md)
+   separates original confirmation, cached current-content correlation and
+   original-version proof without adding a mapping database or native query.
 5. **C4 - Adopter qualification:** update consumer guidance and qualify supported
    selected installations/providers separately. A source merge does not enroll
    a host or authorize live feedback, credentials, deployment or backfill.
