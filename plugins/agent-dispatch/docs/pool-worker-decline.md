@@ -197,7 +197,10 @@ order, advertised as `worker_decline_readiness_closeout_versions: [1]`:
    the worker's own binding. Neither route can requeue again.
 5. The worker waits up to ten minutes for the receipt, requires the settled
    claim, then runs normal own-worker finalization. Output reports
-   `routing: requeued` and `task_relationship: closed`.
+   `routing: requeued` and `task_relationship: closed`. A lost task read
+   during the wait (transport failure, server error or invalid response) is
+   unconfirmed, not a refusal: polling continues until the deadline, and the
+   timeout blocker names the last failure. Confirmed client errors stop at once.
 
 A wait timeout, refused or lost reply, or unsettled claim retains the claim
 and checkout, records a visible blocker where the claim is still current, and
