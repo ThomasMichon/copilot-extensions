@@ -81,11 +81,11 @@ does not consume a following option. Worktrees and Driver share the native
 value-option table and preserve split `-C` directory values when detecting
 the selected conversation or validating a retained headed command.
 
-This does not turn unknown mux state into absence or permit a cold seed.
+This does not turn unknown mux state into absence or bypass cold-seed checks.
 Admission-only execution cannot claim a pending prompt; a changed prompt
 blocks the launch. Staged seed handoff and special native-head recovery retain
-their cold-stop checks. In particular, negative PSMux evidence remains
-unqualified under the recovery policy below.
+their cold-stop checks. Failed PSMux CLI queries remain unqualified; the
+action-time native reader described below can establish stopped mux state.
 
 > **Windows over SSH:** the interactive TUI picker auto-falls back to a simpler
 > flow (a ConPTY limitation), but the muxed-session model is the same. See
@@ -106,8 +106,8 @@ failure class ([psmux/psmux#809](https://github.com/psmux/psmux/issues/809)).
 
 The resident Worktrees mux enumeration and batched status reads therefore do
 not execute PSMux. Manager's periodic client observer, native discovery and
-status-target validation also leave it unqueried. There is no qualified
-non-mutating PSMux observation adapter in these paths yet: observation is
+status-target validation also leave it unqueried. These periodic paths do
+not use the action-time native reader: observation is
 explicitly unavailable, not an empty catalog. Independent worktree, Git and
 process facts can still publish. Last-known mux presence retains its original
 timestamp; it is not refreshed into current proof. TMux retains bounded CLI
@@ -144,10 +144,27 @@ This mitigation deliberately freezes automatic PSMux discovery, client-count
 refresh and status painting that requires it. It does **not** make explicit
 creation, attachment, recovery or shutdown commands harmless, upgrade PSMux,
 repair a running server, or qualify another executable with the same protocol.
-Explicit strict action-time checks retain their existing query path; they are
-not passive reads or qualified as harmless. A silent failed PSMux presence
-query is now unknown, not confirmed absence, and cannot authorize a cold
-replacement. Failed reachability does not make a mux-homed process reclaimable.
+Strict action-time Windows checks instead use a bounded native reader, without
+starting PSMux. It enumerates native PSMux/PMux/TMux process identities and
+matches every server to its PID/birth-qualified registration. It sends only a
+fixed authenticated `display-message -p` request directly to each registered
+loopback server, including warm servers, to confirm its current name, PID and
+client count. A second native census and registration read must agree before
+absence can admit a prompted Resume. The normal bound-Copilot check still
+applies independently, including to a bare process.
+
+The reader has a five-second total budget, bounded registration/reply sizes
+and process counts. It never writes registrations, starts a server, repairs
+an orphan, attaches a client, paints status or sends pane input. An unreadable
+process, unsupported command-line mode, missing live-server registration,
+PID reuse, rename, duplicate names across namespaces, authentication failure,
+incomplete reply or changing inventory remains unknown.
+`PSMUX_DATA_DIR` must be absolute when set; live
+servers whose registrations are outside that selected directory also prevent
+a complete result. This conservative action-time support does not re-enable
+periodic discovery or change cleanup authority. A silent failed PSMux CLI
+presence query still cannot authorize a cold replacement, and failed
+reachability does not make a mux-homed process reclaimable.
 
 For an affected host:
 

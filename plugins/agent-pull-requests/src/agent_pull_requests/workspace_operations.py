@@ -31,11 +31,14 @@ from .workspace_selection import (
     supports_owned_edits, supports_selection,
 )
 from .review_workspace import MAX_GENERATION_BYTES, _generation, _scope, compare_generations
+from .workspace_comment_mapping import (
+    available as mapping_available, contract as mapping_contract, supports as supports_mapping,
+)
 
 PROTOCOL = "agent-pull-requests.workspace/v1"
 CHUNK_BYTES = 8192
 OPERATIONS = ("capabilities", "load", "sync", "lookup", "chunk", "inspect", "submit", "events", "receipt",
-              "allocate", "observe-comment")
+              "allocate", "observe-comment", "retained-comment")
 
 
 def prepared_review_contract() -> dict[str, object]:
@@ -58,7 +61,7 @@ def supports_prepared_review(value: object) -> bool:
 
 
 def needs_prepared_review(operation: str, payload: object) -> bool:
-    return operation in ("receipt", "observe-comment") or (
+    return operation in ("receipt", "observe-comment", "retained-comment") or (
         operation == "submit" and isinstance(payload, dict) and isinstance(payload.get("intent"), dict)
         and payload["intent"].get("version") == 2
     )
@@ -84,6 +87,7 @@ class WorkspaceOperations:
                  attention_owner: Callable[[dict], AttentionInputs] | None = None,
                  feedback_owner: Callable[[dict], FeedbackInputs] | None = None,
                  prepared_reviews: bool = False,
+                 comment_mappings: bool = False,
                  selection_preparer: Callable[..., Callable[..., dict]] | None = None,
                  selection_preparer_deadline: bool = False,
                  selection_owned_edits: bool = False,
@@ -102,6 +106,8 @@ class WorkspaceOperations:
             or not math.isfinite(max_work_seconds) or max_work_seconds <= 0
             or type(conversations) is not bool
             or type(prepared_reviews) is not bool
+            or type(comment_mappings) is not bool
+            or comment_mappings and not (conversations and prepared_reviews)
             or type(selection_owned_edits) is not bool
             or type(selection_preparer_deadline) is not bool
             or selection_preparer_deadline and selection_preparer is None
@@ -135,6 +141,7 @@ class WorkspaceOperations:
         self.attention_owner = attention_owner
         self.feedback_owner = feedback_owner
         self.prepared_reviews = prepared_reviews
+        self.comment_mappings = comment_mappings
         self.selection_preparer = selection_preparer
         self.selection_preparer_deadline = selection_preparer_deadline
         self.selection_owned_edits = selection_owned_edits
@@ -199,6 +206,7 @@ class WorkspaceOperations:
             "inspect": ({"number", "operation_id"}, set()),
             "receipt": ({"number", "operation_id", "action_id"}, set()),
             "observe-comment": ({"number", "operation_id", "action_id", "generation_id"}, set()),
+            "retained-comment": ({"number", "operation_id", "action_id"}, set()),
             "submit": ({"number", "intent", "source_attachment", "budget_seconds"}, set()),
             "allocate": ({"number", "intent", "source_attachment", "budget_seconds"}, set()),
             "events": ({"number", "after", "limit"}, set()),
@@ -239,6 +247,7 @@ class WorkspaceOperations:
                 prepared and self.selection_preparer is not None
                 and ReviewSelectionStore(self.store).supported(expires_at=expires_at, checkpoint=check)
             )
+            mapping = mapping_available(self, expires_at=expires_at, checkpoint=check)
             return {
                 "protocol": PROTOCOL,
                 "operations": [
@@ -247,6 +256,7 @@ class WorkspaceOperations:
                     and (name != "events" or self.conversations)
                     and (name not in ("receipt", "observe-comment") or prepared)
                     and (name != "allocate" or selection)
+                    and (name != "retained-comment" or mapping)
                 ],
                 "generation_versions": [1], "owner_store_versions": [2],
                 **({"conversation_contract": conversation_contract} if self.conversations else {}),
@@ -257,6 +267,7 @@ class WorkspaceOperations:
                    if isinstance(self.read_owner, NativeReadHandler) else {}),
                 **({"prepared_review_contract": prepared_review_contract()} if prepared else {}),
                 **({"comment_observation_contract": comment_observation_contract()} if prepared else {}),
+                **({"comment_mapping_contract": mapping_contract()} if mapping else {}),
                 **({"selection_contract": selection_contract()} if selection else {}),
                 **({"owned_edit_selection_contract": owned_edit_contract()}
                    if selection and self.selection_owned_edits is True else {}),
@@ -328,6 +339,7 @@ class WorkspaceOperations:
                     ConversationStore(self.store).observe_workspace(
                         generation, expires_at=expires_at, checkpoint=check,
                         attention=attention,
+                        comment_mappings=mapping_available(self, expires_at=expires_at, checkpoint=check),
                     )
                     if publication["status"] == "published"
                     else {"status": "not_observed", "reason": "cache_publication_not_confirmed"}
@@ -371,6 +383,15 @@ class WorkspaceOperations:
                 payload["operation_id"], scope, payload["action_id"],
                 expires_at=expires_at, checkpoint=check,
             )
+        elif operation == "retained-comment":
+            from .review_comment_mapping import CommentMappingStore
+            if not mapping_available(self, expires_at=expires_at, checkpoint=check):
+                raise WorkspaceUnavailable("retained comment receiver unavailable")
+            result = CommentMappingStore(self.store).read(
+                payload["operation_id"], scope, payload["action_id"],
+                expires_at=expires_at, checkpoint=check,
+            )
+            result["effects"] = "none"
         elif operation == "observe-comment":
             if self.prepared_reviews is not True or self.store.review_intent_versions(
                 expires_at=expires_at, checkpoint=check,
@@ -498,6 +519,7 @@ class NativeWorkspaceClient:
         self._selection_contract: object = None
         self._owned_edit_contract: object = None
         self._observation_contract: object = None
+        self._mapping_contract: object = None
         self._prepared_lock = threading.Lock()
         self._discovery_epoch = 0
 
@@ -520,6 +542,13 @@ class NativeWorkspaceClient:
                 self._selection_contract = None
                 self._owned_edit_contract = None
                 self._observation_contract = None
+                self._mapping_contract = None
+        if operation == "retained-comment":
+            current()
+            with self._prepared_lock:
+                supported = supports_mapping(self._mapping_contract)
+            if not supported:
+                raise WorkspaceUnavailable("retained comment capability required")
         if operation == "observe-comment":
             current()
             with self._prepared_lock:
@@ -557,6 +586,10 @@ class NativeWorkspaceClient:
                 self._observation_contract = (
                     copy.deepcopy(result.get("comment_observation_contract"))
                     if "observe-comment" in result.get("operations", []) else None
+                )
+                self._mapping_contract = (
+                    copy.deepcopy(result.get("comment_mapping_contract"))
+                    if "retained-comment" in result.get("operations", []) else None
                 )
         return result
 

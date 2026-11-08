@@ -209,8 +209,12 @@ the same admitted journal/envelope transaction. Discussion normalization and
 native-ID indexing occur once per acquired generation; repeated targets also
 reuse one object digest. Bounded existing-operation/action lookup follows.
 No provider query or background loop is added.
-Default acquisition remains unchanged; the current workspace load/sync host
-does not yet select this option.
+Default acquisition remains unchanged. An embedding may explicitly construct
+`WorkspaceOperations(..., conversations=True, prepared_reviews=True,
+comment_mappings=True)` to select this projection in actual load/sync after
+confirmed cache publication. Selection never adopts storage. Missing adoption
+keeps baseline acquisition available without mapping; the transaction rechecks
+adoption before persisting selected metadata.
 
 Slots retain only generation identity, original discussion interval and
 completeness/error count, correlation outcome/reason and an available
@@ -230,10 +234,12 @@ commit; uncertainty never authorizes another forge write.
 returns body-free retained evidence through the same scoped owner without a
 cache/body dependency. Missing slots remain null. Native confirmation and
 unknown outcomes are unchanged; a normalized object digest is not original
-native-version proof. This finite library/data leaf introduces no workspace
-request or advertised reader capability. Baseline workspace inspection omits
-the new storage metadata. Negotiated serving, actual host handoff and
-provider/installed acceptance remain separate.
+native-version proof. The optional workspace
+[`retained-comment` reader](workspace-tools.md#retained-acquired-comment-reader)
+exposes this metadata only through its separately negotiated contract and
+explicit executing-owner selection. Baseline workspace inspection still omits
+the new storage metadata. Normal host handoff and provider/installed acceptance
+remain separate.
 
 ## Optional pre-approval selection retention
 

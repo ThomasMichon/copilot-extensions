@@ -557,7 +557,7 @@ class PickerApp(App):
     PickerScreen > #nf-chrome { width: 100%; height: 2; }
     PickerScreen > #nf-machine { width: 100%; height: auto; }
     PickerScreen > #nf-buttons { width: 100%; height: auto; }
-    PickerScreen > #nf-notices { width: 100%; height: 2; overflow: hidden; }
+    PickerScreen > #nf-notices { width: 100%; height: 0; overflow: hidden; }
     PickerScreen > #nf-body-data   { width: 100%; height: 1fr; }
     PickerScreen > #nf-footer { width: 100%; height: 2; }
     /* NF5-5 native OptionList data body: picker palette + the amber cursor

@@ -13,6 +13,7 @@ from .watch_replay_client import ReplayClient, ReplayClientError
 from .watch_replay_store import json_object
 from .workspace_selection import needs_owned_edits, selection_contract, supports_owned_edits, supports_selection
 from .review_comment_observation import contract as comment_observation_contract, supports as supports_comment_observation
+from .workspace_comment_mapping import supports as supports_mapping, valid_result as valid_mapping_result
 from .workspace_operations import (
     CHUNK_BYTES, MAX_GENERATION_BYTES, PROTOCOL, NativeWorkspaceClient, encoded, materialize,
     needs_prepared_review, prepared_review_contract, supports_prepared_review,
@@ -136,6 +137,16 @@ class WorkspaceClient:
                 **(unavailable if isinstance(unavailable, dict) else {}),
                 "observe-comment": "unsupported_comment_observation_contract",
             }
+        if "retained-comment" in value["operations"] and (
+            not supports_mapping(value.get("comment_mapping_contract"))
+            or not supports_prepared_review(value.get("prepared_review_contract"))
+        ):
+            value["operations"] = [name for name in value["operations"] if name != "retained-comment"]
+            unavailable = value.get("unavailable_operations")
+            value["unavailable_operations"] = {
+                **(unavailable if isinstance(unavailable, dict) else {}),
+                "retained-comment": "unsupported_comment_mapping_contract",
+            }
         if epoch != self._discovery_epoch:
             raise WorkspaceClientError("workspace_discovery_superseded")
         self._capabilities = copy.deepcopy(value)
@@ -169,6 +180,10 @@ class WorkspaceClient:
             self._capabilities.get("comment_observation_contract"),
         ):
             raise WorkspaceClientError("comment_observation_contract_required", outcome_unknown=False)
+        if operation == "retained-comment" and not supports_mapping(
+            self._capabilities.get("comment_mapping_contract"),
+        ):
+            raise WorkspaceClientError("comment_mapping_contract_required", outcome_unknown=False)
         if operation == "allocate" and not supports_selection(self._capabilities.get("selection_contract")):
             raise WorkspaceClientError("selection_contract_required", outcome_unknown=False)
         if needs_owned_edits(operation, payload) and not supports_owned_edits(
@@ -202,6 +217,8 @@ class WorkspaceClient:
             or value["result"].get("fresh_native_read") is not False
         ):
             raise WorkspaceClientError("invalid_comment_observation_response", outcome_unknown=False)
+        if operation == "retained-comment" and not valid_mapping_result(value, payload):
+            raise WorkspaceClientError("invalid_retained_comment_response", outcome_unknown=False)
         if operation == "allocate":
             from .review_selection_store import ReviewSelectionStore
             try:

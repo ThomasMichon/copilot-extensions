@@ -155,6 +155,14 @@ class CommentMappingStore:
             raise ValueError("existing replay owner required")
         self.owner = owner
 
+    def supported(
+        self, *, expires_at: int, checkpoint: Callable[[], None] | None = None,
+    ) -> bool:
+        return self.owner._review_transaction(
+            lambda document: document.get(EXTENSION) == 1,
+            expires_at=expires_at, checkpoint=checkpoint, persist=False,
+        )
+
     def adopt(
         self, *, lifecycle_checkpoint: Callable[[], None], expires_at: int,
         checkpoint: Callable[[], None] | None = None,

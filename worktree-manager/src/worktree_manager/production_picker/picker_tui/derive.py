@@ -724,8 +724,6 @@ def norm(
         disp_title = f"⚠ {disp_title}"
     if (w.get("_projection") or {}).get("quality") == "advisory":
         disp_title = f"[advisory] {disp_title}"
-    elif (w.get("_availability") or {}).get("status") == "stale":
-        disp_title = f"[stale] {disp_title}"
     source = source_identity.metadata(source_kind, source_id, source_label)
     source.update(source_metadata or {})
     capabilities = dict(source_capabilities or {})
