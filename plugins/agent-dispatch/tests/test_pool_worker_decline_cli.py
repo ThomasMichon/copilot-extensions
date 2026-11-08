@@ -384,3 +384,59 @@ def test_unsettled_claim_for_another_reservation_refuses_before_decision(governe
     assert g.q.pool_worker_decline(g.task_id) is None and not order
     assert all(r.method == "GET" for r in requests)
     assert g.q.task_relationship(g.task_id)["state"] == "bound"
+
+
+@pytest.mark.parametrize("governed", [False], indirect=True)
+def test_rerun_after_replacement_placement_recovers_exact_original_binding(governed_cli, monkeypatch, capsys):
+    g, args, order, requests, _ = governed_cli
+    monkeypatch.setattr(worker, "DISPOSITION_WAIT_SECONDS", 0)
+    with pytest.raises(DispatchError, match="not yet confirmed"):
+        args.func(args)
+    # Dispatch settled the claim, but the worker never finalized its workspace.
+    assert g.q.close_pool_decline(g.task_id, **g.binding).relationship["state"] == "closed"
+    requeued = g.q.get(g.task_id)
+    g.q.retire_spawn(g.binding["reservation_key"], exact_absence=True, conclusion_state="skipped")
+    g.q.publish_pool_catalog_scope(
+        "host-a", "linux", "publisher-0", generation=1, expected_revision=1,
+        registration_revision=g.q.pool_registration_revision(), expected_cohort_revision=1,
+        input_revision="fresh-pool", definitions=(closeout.pool(),), now=requeued.not_before,
+    )
+    replacement, admitted = g.q.reserve_spawn(
+        g.task_id, reserved_by="allocator", driver="cli",
+        pool_catalog_revision=g.q.pool_catalog_snapshot().revision, now=requeued.not_before,
+    )
+    assert admitted and replacement.key != g.binding["reservation_key"]
+    assert g.q.pool_worker_decline(g.task_id) is None
+    placed = g.q.get(g.task_id)
+    requests.clear()
+    for _ in range(2):
+        assert args.func(args) == 0
+        emitted = json.loads(capsys.readouterr().out)
+        assert emitted["task_relationship"] == "closed"
+        assert emitted["decline"]["reservation_key"] == g.binding["reservation_key"]
+    assert order == [("finalize", placed.status, "closed")] * 2
+    assert g.q.get(g.task_id) == placed
+    assert not any(
+        r.method == "POST" and r.url.path.endswith(("/closeout", "/pool-decline")) for r in requests
+    )
+
+
+@pytest.mark.parametrize("governed", [False], indirect=True)
+def test_recovery_refuses_another_incarnation_or_unsettled_decline(governed_cli):
+    g, _, _, _, app = governed_cli
+    from tests.test_pool_placement import headers
+    url = f"/tasks/{g.task_id}/pool-decline/recovery"
+    body = {"worker_id": g.binding["worker_id"], "native_id": "native",
+            "generation": g.binding["generation"]}
+    g.q.prepare_pool_decline(
+        g.task_id, **g.binding, exclusions=["worktree:tree"], note="The pool lacks the required tool.",
+    )
+    assert app.get(url, headers=headers("data"), params=body).status_code == 404
+    g.q.close_pool_decline(g.task_id, **g.binding)
+    found = app.get(url, headers=headers("data"), params=body)
+    assert found.status_code == 200
+    assert found.json()["decline"]["reservation_key"] == g.binding["reservation_key"]
+    assert found.json()["worktree"] == "tree"
+    for change in ({"native_id": "other"}, {"generation": g.binding["generation"] + 1},
+                   {"worker_id": "host-a/other"}):
+        assert app.get(url, headers=headers("data"), params={**body, **change}).status_code == 404

@@ -168,6 +168,39 @@ class PoolDeclineClientMixin:
             raise DispatchError(409, "worker decline task relationship is unresolved; custody retained")
         return value
 
+    def recover_pool_decline(
+        self, task_id: str, worker_id: str, native_id: str, generation: int,
+    ) -> tuple[dict, str] | None:
+        """Recover this exact incarnation's settled decline after a replacement placement."""
+        contract = _validate_contract(self.health().get("pool_placement"))
+        versions = contract.get("worker_decline_binding_recovery_versions")
+        if not isinstance(versions, list) or not any(type(v) is int and v == 1 for v in versions):
+            raise DispatchUpgradeRequired("running coordinator lacks worker decline binding recovery")
+        expected = {"worker_id": worker_id, "native_id": native_id, "generation": generation}
+        try:
+            result = self._unwrap(self._http.get(
+                f"/tasks/{task_id}/pool-decline/recovery", params=expected,
+            ))
+        except DispatchError as exc:
+            if exc.status_code == 404:
+                return None
+            raise
+        except ValueError as exc:
+            raise DispatchError(502, "worker decline recovery is unconfirmed; custody retained") from exc
+        decline = result.get("decline") if isinstance(result, dict) else None
+        worktree = result.get("worktree") if isinstance(result, dict) else None
+        if (
+            not isinstance(result, dict) or result.get("protocol") != "pool_worker_decline/v1"
+            or type(result.get("version")) is not int or result["version"] != 1
+            or not isinstance(decline, dict) or decline.get("task_id") != task_id
+            or any(decline.get(key) != value for key, value in expected.items())
+            or type(decline.get("startup_revision")) is not int or decline["startup_revision"] < 1
+            or not isinstance(decline.get("reservation_key"), str) or not decline["reservation_key"]
+            or not isinstance(worktree, str) or not worktree
+        ):
+            raise DispatchError(502, "worker decline recovery response is unconfirmed; custody retained")
+        return decline, worktree
+
     def settle_pool_decline(self, task_id: str, decline: dict) -> dict:
         """Converge settlement behind the committed disposition; never requeue here."""
         contract = _validate_contract(self.health().get("pool_placement"))
