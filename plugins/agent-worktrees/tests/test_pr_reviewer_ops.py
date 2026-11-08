@@ -4,6 +4,11 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
+import pytest
+
 from agent_worktrees import pr_ops, pr_reviewer_ops
 
 
@@ -201,3 +206,72 @@ def test_original_selected_recovery_needs_neither_current_tracking_nor_config(mo
     monkeypatch.setattr(pr_ops, "_load_record_or_none", forbidden)
     result = pr_reviewer_ops.pr_review("original", event="APPROVED", publication=Recovery())
     assert result["publication"] == {"phase": "recover", "original": True}
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+@pytest.mark.parametrize("phase", ["preview", "submit"])
+def test_selected_main_resolves_real_project_config_and_tracking(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, explicit: bool, phase: str,
+) -> None:
+    import yaml
+    from conftest import _pr_git
+    from agent_worktrees import __main__ as cli, config as cfg, installer, output, repos, tracking
+    from agent_worktrees.pr_selected_publication import PROTOCOL
+
+    home, anchor = tmp_path / "home", tmp_path / "anchor"
+    home.mkdir()
+    anchor.mkdir()
+    _pr_git("init", "--initial-branch=main", cwd=anchor)
+    monkeypatch.setattr(cfg, "_home", lambda: home)
+    monkeypatch.setattr(repos, "_repos_yaml_path", lambda: tmp_path / "repos.yaml")
+    monkeypatch.setattr(installer, "projects_yaml_path", lambda: tmp_path / "projects.yaml")
+    repos.write_registry(repos.ReposRegistry(repos={
+        "selected-project": repos.RepoEntry(
+            name="selected-project", repo_class="worktree", agent=True,
+            paths={platform: str(anchor) for platform in ("windows", "wsl", "linux")},
+        ),
+    }))
+    installer.write_projects_registry({"schema_version": 2, "projects": {"selected-project": {}}})
+    local = cfg.project_dir("selected-project")
+    local.mkdir(parents=True)
+    (local / "config.yaml").write_text(yaml.safe_dump({
+        "srcroot": str(tmp_path), "machine": "example", "platform": cfg.detect_platform(),
+        "repos": {"selected-project": {
+            "anchor": str(anchor), "worktree_root": str(tmp_path / "worktrees"),
+            "pr": {"enabled": True, "provider": "gitea", "api_base": "https://example.com"},
+        }},
+    }), encoding="utf-8")
+    tracking.create_new_record(
+        "selected-worktree", "worktree/example", str(anchor), "selected-project",
+        "example", "linux", cfg.tracking_dir("selected-project"),
+    )
+    path = cfg.tracking_dir("selected-project") / "selected-worktree.yaml"
+    record = tracking.load_record(path)
+    record.prs.append(tracking.PRRecord(state="open", number=7, provider="gitea", repo="owner/repo"))
+    tracking.save_record(record, path)
+    monkeypatch.chdir(tmp_path if explicit else anchor)
+    cfg.set_active_project(None)
+    seen = []
+
+    class Selected:
+        protocol = PROTOCOL
+
+        def __init__(self) -> None:
+            self.phase = phase
+
+        def execute(
+            self, *, worktree_id: str, target: dict | None, command: str, body: str, event: str,
+        ) -> dict:
+            seen.append(target)
+            assert cfg.active_project() == "selected-project"
+            assert worktree_id == "selected-worktree" and command == "pr-comment"
+            return {"publication": {"phase": phase}}
+
+    argv = ["pr-comment", "selected-worktree", "selected text", "--json"]
+    if explicit:
+        argv = ["--project", "selected-project", *argv]
+    with output.capture_json_output() as stream:
+        code = cli.main(argv, publication=Selected())
+    assert code == 0, stream.getvalue()
+    assert json.loads(stream.getvalue())["publication"]["phase"] == phase
+    assert seen == [{"provider": "gitea", "api_base": "https://example.com", "repo": "owner/repo", "number": 7}]

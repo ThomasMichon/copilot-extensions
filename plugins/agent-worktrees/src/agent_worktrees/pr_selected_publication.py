@@ -28,12 +28,22 @@ class Publication(Protocol):
 def dispatch(argv: list[str], publication: Publication) -> int:
     from . import __main__ as core, pr_state_cli
 
+    argv, project = core._extract_project_flag(argv)
     handlers = {
         "pr-comment": pr_state_cli.cmd_pr_comment, "pr-review": pr_state_cli.cmd_pr_review,
     }
     if not argv or argv[0] not in handlers:
         output.err("Selected publication applies only to pr-comment or pr-review.")
         return 1
+    if publication.phase != "recover":
+        try:
+            if not core.front_door_cli.resolve_invocation_project(
+                argv, project, core._resolve_active_project, core._cwd_is_inside_project,
+                core._is_no_project_invocation,
+            ):
+                raise ValueError("selected publication requires its resolved invocation project")
+        except (OSError, ValueError, RuntimeError) as exc:
+            return output._json_error(str(exc)) if "--json" in argv else (output.err(str(exc)) or 1)
     command = argv[0]
     commands = {
         **(getattr(core, "COMMAND_MAP", None) or {}),

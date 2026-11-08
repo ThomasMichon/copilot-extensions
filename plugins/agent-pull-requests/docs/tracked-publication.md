@@ -43,7 +43,9 @@ not attempt a protected write and retry through an ordinary command.
 
 Only the selected comment/review invocation accepts this binding, with an
 explicit original worktree ID. Preparation/submission reads local tracking
-and configuration without live reconciliation or credential acquisition.
+and configuration under the normal CWD/`--project` invocation resolution,
+without live reconciliation or credential acquisition. Recovery parses that
+existing flag but does not resolve or load the current project.
 Changed or terminal associations refuse rather than retargeting the operation.
 The host's one-shot client lifetime must already permit synchronous CLI use;
 an existing running event loop is not taken over.

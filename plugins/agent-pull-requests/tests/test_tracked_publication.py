@@ -38,6 +38,7 @@ def tracked(environment: tuple, tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         provider=target["provider"], api_base=target["api_base"],
     )))
     monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
+    monkeypatch.setattr(cfg, "_ACTIVE_PROJECT", "selected-project")
     record = tracking.WorktreeRecord(
         worktree_id="selected-worktree", branch="worktree/example", worktree_path=str(tmp_path),
         repo=target["repo"], machine="example", platform="linux", started_at="", last_resumed_at="",
