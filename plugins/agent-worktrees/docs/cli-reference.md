@@ -1262,7 +1262,10 @@ renewing its demand.
 These events reuse the existing push wake, whose single flag coalesces a burst
 into at most one immediate follow-up sweep. Changed paths are deduplicated, up
 to 256 per sweep; an overflow or an unresolvable path republishes every project
-the resident has published rather than growing a queue. Resolving a path uses
+the resident has published rather than growing a queue. A changed project stays
+queued until a publication succeeds, for at most three sweeps, so a transient
+mux-listing failure or deferral does not lose the event; after that it ages to
+stale like any other unrefreshed roster. Resolving a path uses
 only in-memory caches and the projects registry (no Git or subprocess). Each
 affected project is then published at most once per sweep through the same
 sequential, project-locked path as a demand-driven publication, with the same

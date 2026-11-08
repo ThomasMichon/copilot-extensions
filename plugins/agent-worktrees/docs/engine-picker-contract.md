@@ -480,7 +480,9 @@ that predate the field reject it as `invalid-request`; a passive client then
 returns the labeled advisory saved roster, never a demand read.
 Worktree state-change notifications (`worktreeChanged`) queue the changed
 path and wake the resident; the next sweep republishes the resolved project
-(or every published project when unresolved) without recording demand. Mux
+(or every published project when unresolved) without recording demand. The
+project stays queued until a publication succeeds, for at most three sweeps,
+so a sweep that fails or defers before publishing does not drop the event. Mux
 lifecycle feeds the same queue: a managed-mux observation whose committed
 facts change (for example `live` or attached clients) notifies its worktree
 path, and a sweep that prunes a registered direct-lane session missing from the

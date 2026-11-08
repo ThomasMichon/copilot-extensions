@@ -303,9 +303,9 @@ def test_change_events_select_projects_to_republish_without_recording_demand(dem
     owner.note_changed("/wt/a")
     assert wakes == [1] and owner.demand_projects() == set()
     assert owner.take_changed_projects({"/wt/a": "a"}.get) == {"a"}
+    owner.publish("a", [], observed_at=1)
     assert owner.take_changed_projects({"/wt/a": "a"}.get) == set()
 
-    owner.publish("a", [], observed_at=1)
     owner.publish("b", [], observed_at=1)
 
     def broken(_path):
@@ -323,6 +323,23 @@ def test_change_events_select_projects_to_republish_without_recording_demand(dem
     owner.close_admission()
     owner.note_changed("/wt/a")
     assert owner.take_changed_projects({"/wt/a": "a"}.get) == set()
+
+
+def test_change_event_survives_sweeps_that_fail_before_publishing(demand_owner):
+    owner, _clock, _wakes = demand_owner
+    resolve = {"/wt/a": "a"}.get
+    owner.note_changed("/wt/a")
+    # A transient listing failure or deferral takes the event without publishing.
+    for _sweep in range(runtime._CHANGED_RETRY_SWEEPS):
+        assert owner.take_changed_projects(resolve) == {"a"}
+    # Retries are bounded; the unrefreshed roster then simply ages to stale.
+    assert owner.take_changed_projects(resolve) == set()
+
+    owner.note_changed("/wt/a")
+    assert owner.take_changed_projects(resolve) == {"a"}
+    owner.publish("a", [], observed_at=1)
+    assert owner.take_changed_projects(resolve) == set()
+    assert owner.demand_projects() == set()
 
 
 def test_concurrent_unavailable_readers_coalesce_per_project_and_reactivate(demand_owner):

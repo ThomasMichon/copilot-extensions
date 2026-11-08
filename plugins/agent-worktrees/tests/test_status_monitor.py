@@ -5037,9 +5037,13 @@ def test_idle_exit_retains_recent_completed_tool_hooks_then_expires(tmp_path, mo
     assert gap["injected"] is idle_gap
     assert changes == ([str(tmp_path), str(tmp_path)] if kind == "worktreeChanged" else [])
     assert sweeps == list(range(0, 271, 30))
-    # Each change event republishes its project on the next sweep, never
-    # renewing demand: idle expiry above is unchanged.
-    changed_at = {0, 3} if kind == "worktreeChanged" else set()
+    # Each change event republishes its project without renewing demand: idle
+    # expiry above is unchanged. This stub never publishes, so each event is
+    # retried for a bounded number of sweeps rather than lost.
+    from agent_worktrees import worktrees_runtime as worktrees_runtime_module
+
+    retries = range(worktrees_runtime_module._CHANGED_RETRY_SWEEPS)
+    changed_at = {event + n for event in (0, 3) for n in retries} if kind == "worktreeChanged" else set()
     assert swept_projects == [
         {"changed-project"} if index in changed_at else set() for index in range(len(sweeps))
     ]

@@ -27,6 +27,7 @@ CAPABILITY = "worktrees-current-v1"
 _DEMAND_LINGER_SECONDS = 30.0
 _FRESHNESS_FLOOR_SECONDS = 45.0
 _CHANGED_PATH_LIMIT = 256
+_CHANGED_RETRY_SWEEPS = 3
 _FIELDS = frozenset(
     {
         "contract_version",
@@ -147,6 +148,8 @@ class WorktreesRuntime:
         self._freshness_bound = float(freshness_bound)
         self._changed_paths: set[str] = set()
         self._changed_all = False
+        # Changed projects awaiting a successful publication -> sweeps taken.
+        self._changed_pending: dict[str, int] = {}
         self._wake = wake
         self._now = now
         self._elected = elected
@@ -207,6 +210,7 @@ class WorktreesRuntime:
                 self._unready_demand.clear()
                 # A (re)elected resident proves freshness only by its own publishes.
                 self._refreshed.clear()
+                self._changed_pending.clear()
             self.feed.activate()
             self.agendas.activate()
             self.observations.activate()
@@ -220,6 +224,7 @@ class WorktreesRuntime:
         with self._lock:
             self._admitting = False
             self._reason = reason
+            self._changed_pending.clear()
         self.feed.close(reason)
         self.native_observations.close_admission()
         self.agendas.close(reason)
@@ -506,6 +511,7 @@ class WorktreesRuntime:
                 self._publication_errors.pop(project, None)
                 self._unready_demand.discard(project)
                 self._refreshed[project] = started
+                self._changed_pending.pop(project, None)
         self.feed.changed(project)
 
     def note_changed(self, path: str | None) -> None:
@@ -528,28 +534,44 @@ class WorktreesRuntime:
             self._wake.set()
 
     def take_changed_projects(self, resolve: Callable[[str], str | None]) -> set[str]:
-        """Drain queued change events into projects; unresolved paths mean all."""
+        """Return projects with unpublished change events; unresolved paths mean all.
+
+        A changed project stays pending until a publication succeeds, so a
+        sweep that fails or defers before publishing (for example a transient
+        mux-listing failure) does not lose its event. Retries are bounded to
+        ``_CHANGED_RETRY_SWEEPS`` sweeps per event; after that the project
+        simply ages to stale like any unrefreshed roster.
+        """
         with self._lock:
             paths, everything = self._changed_paths, self._changed_all
             self._changed_paths, self._changed_all = set(), False
             published = set(self._refreshed)
-        if not paths and not everything:
-            return set()
-        published |= self.store.published_projects()
-        if everything:
-            return published
         projects: set[str] = set()
-        unresolved = False
-        for path in paths:
-            try:
-                project = resolve(path)
-            except Exception:
-                project = None
-            if isinstance(project, str) and project:
-                projects.add(project)
-            else:
-                unresolved = True
-        return projects | published if unresolved else projects
+        if paths or everything:
+            published |= self.store.published_projects()
+            unresolved = everything
+            for path in () if everything else paths:
+                try:
+                    project = resolve(path)
+                except Exception:
+                    project = None
+                if isinstance(project, str) and project:
+                    projects.add(project)
+                else:
+                    unresolved = True
+            if unresolved:
+                projects |= published
+        with self._lock:
+            if not self._admitting:
+                return set()
+            for project in projects:
+                self._changed_pending[project] = 0
+            for project, sweeps in list(self._changed_pending.items()):
+                if sweeps >= _CHANGED_RETRY_SWEEPS:
+                    del self._changed_pending[project]
+                else:
+                    self._changed_pending[project] = sweeps + 1
+            return set(self._changed_pending)
 
     def publication_failed(self, project: str, error: Exception) -> None:
         project = _identity(project, name="project")
