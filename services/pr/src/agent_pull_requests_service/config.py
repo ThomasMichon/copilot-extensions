@@ -5,14 +5,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import AbstractSet, Any
+from typing import AbstractSet, Any, TypedDict
 import os
 import time
 
 from agent_pull_requests.watch_gateway import WatchScopeBinding
 from agent_pull_requests.generation_cache import GenerationCache
 from agent_pull_requests.native_read import NativeReadHandler
-from agent_pull_requests.review_comment_mapping import CommentMappingStore
 from agent_pull_requests.review_workspace import _scope
 from agent_pull_requests.review_selection_store import ReviewSelectionStore
 from agent_pull_requests.watch_observer import NativeObservationBinding
@@ -26,6 +25,34 @@ from single_instance_lease import SingleInstance
 from .preparation import PreparationConfig
 
 _LIMIT = 1024 * 1024
+
+
+class _MappingOptions(TypedDict, total=False):
+    comment_mappings: bool
+
+
+def _mapping_store() -> Any:
+    try:
+        from agent_pull_requests.review_comment_mapping import CommentMappingStore
+        from agent_pull_requests.workspace_comment_mapping import contract
+    except ModuleNotFoundError as error:
+        if error.name not in {
+            "agent_pull_requests.review_comment_mapping",
+            "agent_pull_requests.workspace_comment_mapping",
+        }:
+            raise
+        return None
+    expected = {
+        "protocol": "agent-pull-requests.retained-comment-reader/v1",
+        "result_protocol": "agent-pull-requests.retained-comment-observation/v1",
+        "storage_extension": "review_comment_mapping_version:1",
+        "acquisition": "workspace-projection/v1",
+        "effects": "none",
+    }
+    value = contract()
+    return CommentMappingStore if isinstance(value, dict) and all(
+        value.get(name) == selected for name, selected in expected.items()
+    ) else None
 
 
 def _path(value: object) -> Path:
@@ -85,6 +112,10 @@ class WorkspaceConfig:
         self, store: ReplayStore, checkpoint: Callable[[], None], seconds: int,
     ) -> dict[tuple[str, str], WorkspaceOperations]:
         cache = self.cache(store)
+        mappings = self.comment_mappings if self.comment_mappings and _mapping_store() else ()
+        mapping_options: dict[tuple[str, str], _MappingOptions] = {
+            key: {"comment_mappings": True} for key in mappings
+        }
         preparations = {
             (principal, target): config.select(
                 dict(reader.scope), checkpoint, seconds,
@@ -98,7 +129,7 @@ class WorkspaceConfig:
                 binding_ref=reader.binding_ref, checkpoint=checkpoint,
                 max_work_seconds=seconds, conversations=True,
                 prepared_reviews=(principal, target) in preparations,
-                comment_mappings=(principal, target) in self.comment_mappings,
+                **mapping_options.get((principal, target), {}),
                 selection_preparer=preparations.get((principal, target)),
                 selection_preparer_deadline=preparations.get((principal, target)) is not None,
             )
@@ -136,6 +167,9 @@ class HostConfig:
 
     def provision(self) -> None:
         store = self.store()
+        mapping_store = _mapping_store() if self.workspaces and self.workspaces.comment_mappings else None
+        if self.workspaces and self.workspaces.comment_mappings and mapping_store is None:
+            raise ValueError("selected comment mapping core unsupported")
         if self.workspaces is not None and (
             self.root.is_symlink() or self.root.exists() and any(self.root.iterdir())
         ):
@@ -162,8 +196,8 @@ class HostConfig:
                 ReviewSelectionStore(store).adopt(
                     lifecycle_checkpoint=lifecycle, expires_at=expires_at, checkpoint=lifecycle,
                 )
-                if self.workspaces.comment_mappings:
-                    CommentMappingStore(store).adopt(
+                if mapping_store is not None:
+                    mapping_store(store).adopt(
                         lifecycle_checkpoint=lifecycle, expires_at=expires_at, checkpoint=lifecycle,
                     )
                 self.workspaces.cache(store).provision()

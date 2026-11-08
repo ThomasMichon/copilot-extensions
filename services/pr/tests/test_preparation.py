@@ -17,7 +17,7 @@ from single_instance_lease import SingleInstance
 
 from agent_pull_requests.review_workspace import _digest, build_generation
 from agent_pull_requests.owner_read import OwnerReadBudgetExceeded, OwnerReadUnavailable
-from agent_pull_requests.workspace_operations import WorkspaceUnavailable
+from agent_pull_requests.workspace_operations import WorkspaceOperations, WorkspaceUnavailable
 from agent_pull_requests_service.config import HostConfig, load_config
 from agent_pull_requests_service import hosting
 from agent_pull_requests_service.preparation import NativePreparation
@@ -482,3 +482,39 @@ def test_host_mapping_selection_does_not_spread_to_other_admitted_routes(
     assert "retained-comment" not in _execute(
         operations[("caller-b", "repository-b")], "capabilities", {},
     )["operations"]
+
+
+@pytest.mark.parametrize("support", ["missing-store", "missing-receiver", "incompatible"])
+def test_optional_mapping_core_skew_preserves_baseline_and_refuses_fresh_adoption(
+    prepared_host: tuple[HostConfig, Path, Path], monkeypatch: pytest.MonkeyPatch, support: str,
+) -> None:
+    from agent_pull_requests import workspace_comment_mapping
+    from agent_pull_requests_service import config as configuration_module
+
+    config, _, _ = prepared_host
+    assert config.workspaces is not None
+    selected = replace(config, workspaces=replace(
+        config.workspaces, comment_mappings=(("caller-a", "repository-a"),),
+    ))
+    if support == "incompatible":
+        contract = workspace_comment_mapping.contract()
+        monkeypatch.setattr(workspace_comment_mapping, "contract", lambda: {**contract, "effects": "write"})
+    else:
+        module = "review_comment_mapping" if support == "missing-store" else "workspace_comment_mapping"
+        monkeypatch.setitem(sys.modules, "agent_pull_requests." + module, None)
+    with pytest.raises(ValueError, match="core unsupported"):
+        selected.provision()
+    assert not config.root.exists()
+    config.provision()
+    before = config.store().path.read_bytes()
+    def prior_constructor(*args: Any, **kwargs: Any) -> Any:
+        assert "comment_mappings" not in kwargs
+        return WorkspaceOperations(*args, **kwargs)
+
+    monkeypatch.setattr(configuration_module, "WorkspaceOperations", prior_constructor)
+    for hosted in (config, selected):
+        operations = _operations(hosted)
+        capabilities = _execute(operations, "capabilities", {})
+        assert "allocate" in capabilities["operations"] and "load" in capabilities["operations"]
+        assert "retained-comment" not in capabilities["operations"]
+    assert config.store().path.read_bytes() == before

@@ -350,6 +350,11 @@ set `"comment_mappings": true` alongside `principal`, `target`, `command`, `scop
 and `preparation`. Absence or explicit `false` preserves prior behavior.
 Only a JSON boolean is accepted; enabling mappings without preparation hosting
 refuses passively. This is a trusted host selection, never a remote request field.
+The host resolves the executing PR core's existing retained-reader declaration
+before selecting its new constructor input. A missing or incompatible optional
+core leaves baseline serving intact and receives no new keyword. Explicit fresh
+mapping provisioning instead refuses before creating state; it cannot claim to
+adopt an unavailable contract.
 
 Explicit **fresh** provisioning adopts the existing bounded
 `review_comment_mapping_version:1` extension under the same writer exclusion
