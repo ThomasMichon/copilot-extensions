@@ -99,20 +99,6 @@ resolve_runtime() {
     . "$RUNTIME_RESOLVER"
 }
 
-scoped_identity_suffix() {
-    local normalized="$1"
-    normalized="$(printf '%s' "$normalized" | tr '\\' '/' | tr '[:upper:]' '[:lower:]')"
-    if command -v sha256sum >/dev/null 2>&1; then
-        printf '%s' "$normalized" | sha256sum | awk '{print substr($1,1,12)}'
-        return 0
-    fi
-    if command -v shasum >/dev/null 2>&1; then
-        printf '%s' "$normalized" | shasum -a 256 | awk '{print substr($1,1,12)}'
-        return 0
-    fi
-    printf '%s' "$normalized" | cksum | awk '{print $1}'
-}
-
 run_runtime() {
     apply_runtime_env "$RUNTIME_ROOT" "$CONTEXT" "$INSTALLATION_ID" "$SERVICE_SUFFIX"
     if [[ -n "${AGENT_VAULT_PINNED_CONTEXT+x}" ]]; then

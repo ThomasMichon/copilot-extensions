@@ -1,3 +1,18 @@
+function Get-RuntimeServiceSuffix {
+    param([Parameter(Mandatory)][string]$RuntimeRoot)
+    $normalizedRoot = [IO.Path]::GetFullPath($RuntimeRoot).ToLowerInvariant()
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        return (
+            [BitConverter]::ToString(
+                $sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($normalizedRoot))
+            )
+        ).Replace('-', '').Substring(0, 12).ToLowerInvariant()
+    } finally {
+        $sha.Dispose()
+    }
+}
+
 function Set-RuntimeEnvironment {
     param(
         [Parameter(Mandatory)][string]$RuntimeRoot,
