@@ -136,7 +136,8 @@ def _project(result: dict, selected: dict, version: int, generation: dict | None
     result["native_actor_id"] = actor
     if actor != result["scope"]["principal_id"]:
         return outcome("conflict", "native_actor_changed")
-    if comment.get("commentType") not in (1, "text") or type(comment.get("commentType")) is bool:
+    kind = comment.get("commentType")
+    if not (type(kind) is int and kind == 1 or kind == "text"):
         return outcome("conflict", "native_comment_not_text")
     if selected["kind"] in ("comment", "reply") and (
         type(comment.get("parentCommentId")) is not int or comment["parentCommentId"] != 0

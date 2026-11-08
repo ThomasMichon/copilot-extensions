@@ -207,20 +207,26 @@ async function retainedBridgeRequest(method, path, body) {
 
 // Session metadata (machine, worktree, ...), resolved off the event loop from
 // load. Registration waits for it -- never readiness: see serializedRegister.
-const metadataReady = resolveMetadataAsync()
+const metadataReady = resolveMetadataAsync({ sessionId: state.sessionId })
   .then((meta) => {
     state.meta = meta;
     if (!meta.machine && !meta.receiving_scope_id) extLog("logical machine owner unresolved; session-only registration with bounded retries");
   })
   .catch((e) => extLog(`metadata resolution failed (degrading, session unaffected): ${e.message}`));
 // A worktree or repo the load-time lookup missed is looked up again (with
-// backoff) before heartbeats, once that first lookup settled.
+// backoff) on heartbeats, once that first lookup settled. That lookup may wait
+// on a slow CLI, so it never holds the liveness registration: whatever it fills
+// in is registered as soon as it lands.
 let metadataSettled = false;
 metadataReady.finally(() => { metadataSettled = true; });
-const refreshMetadata = metadataRefresher(state);
+const refreshMetadata = metadataRefresher(state, resolveMetadataAsync, Date.now, { log: extLog });
 async function heartbeat() {
-  if (metadataSettled && await refreshMetadata().catch(() => false)) {
-    extLog(`resolved this session's worktree (${state.meta?.worktree_id || "?"}) after registration`);
+  if (metadataSettled) {
+    refreshMetadata().then((filled) => {
+      if (!filled) return undefined;
+      extLog(`resolved this session's worktree (${state.meta?.worktree_id || "?"}) after registration`);
+      return register();
+    }).catch(() => {});
   }
   return register();
 }
