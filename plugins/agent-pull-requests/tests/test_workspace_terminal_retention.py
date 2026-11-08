@@ -20,6 +20,7 @@ from agent_pull_requests.generation_cache import GenerationCache
 from agent_pull_requests.review_workspace import EVIDENCE_SCHEMA, build_generation
 from agent_pull_requests.terminal_retention import TerminalAdmissionClosed, TerminalRetentionStore
 from agent_pull_requests.watch_replay import ObservationTarget
+from agent_pull_requests.watch_replay_store import ReplayStore
 
 pytestmark = pytest.mark.parametrize("environment", [True], indirect=True)
 
@@ -272,3 +273,46 @@ def test_failed_publications_do_not_consume_generation_binding_capacity(
         assert len(retained) == len(before) + 3
     else:
         assert retained == before
+
+
+@pytest.mark.parametrize("failure", ["after_publication", "owner_write"])
+def test_cache_pointer_never_precedes_its_durable_epoch_binding(workspace, monkeypatch, failure):
+    from agent_pull_requests import watch_replay_store as storage
+
+    operations, evidence, _, _, initial, _ = workspace
+    load(operations, initial["id"])
+    current = operations.cache.lookup(initial["scope"])["generation"]
+    for section in evidence["sections"].values():
+        section.update(observed_from="2026-10-30T00:00:20Z", observed_to="2026-10-30T00:00:21Z")
+    published = False
+    publish, write = GenerationCache.publish, storage._atomic_write_json
+
+    def interrupted(cache, generation, **kwargs):
+        nonlocal published
+        result = publish(cache, generation, **kwargs)
+        assert result["status"] == "published"
+        published = True
+        if failure == "after_publication":
+            raise OSError("synthetic stop immediately after durable cache pointer")
+        return result
+
+    def fail_owner_write(path, document):
+        if published:
+            raise OSError("synthetic later owner-file write failure")
+        write(path, document)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(GenerationCache, "publish", interrupted)
+        patch.setattr(storage, "_atomic_write_json", fail_owner_write)
+        with pytest.raises(OSError):
+            load(operations, current["id"])
+    surviving = operations.cache.lookup(initial["scope"])["generation"]
+    assert surviving["id"] != current["id"]
+    owner = operations.store
+    operations.store = ReplayStore(
+        owner.root, owner.namespace, service_identity=owner.service_identity, terminal_retention=True,
+    )
+    assert execute(operations, "lookup", {"number": 42})["descriptor"]["id"] == surviving["id"]
+    assert execute(operations, "chunk", {
+        "number": 42, "generation_id": surviving["id"], "offset": 0,
+    })["data"]

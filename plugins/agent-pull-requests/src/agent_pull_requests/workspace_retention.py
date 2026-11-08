@@ -113,17 +113,19 @@ class WorkspaceRetention:
         if not generation["complete"]:
             return {"status": "not_published", "effects": "none"}, observation
 
-        def publish(document: dict) -> dict:
+        def publish(document: dict, commit: Callable[[], None]) -> dict:
             previous = copy.deepcopy(document["terminal_retention"]["generations"])
             bind_generation(document, generation, observation["cursor"])
             owner._validate_owner(document)  # Reserve metadata before cache IO.
+            if document["terminal_retention"]["generations"] != previous:
+                commit()
             publication = cache.publish(generation, expected_current=expected_current)
             if publication["status"] not in ("published", "unconfirmed"):
                 document["terminal_retention"]["generations"] = previous
             return publication
 
         publication = owner._review_transaction(
-            publish, expires_at=expires_at, checkpoint=checkpoint,
+            publish, expires_at=expires_at, checkpoint=checkpoint, staged=True,
         )
         return publication, observation
 

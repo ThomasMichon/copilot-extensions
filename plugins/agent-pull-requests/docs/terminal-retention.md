@@ -86,6 +86,13 @@ complete generation. Partial refreshes are not published. Definite cache
 `full`, `conflict` or `failed` outcomes discard newly reserved generation
 bindings; potentially visible `unconfirmed` outcomes retain their binding for
 exact readback. Neither case evicts an existing binding.
+The existing replay transaction durably persists a new binding reservation
+before the separate cache pointer can become visible, retaining replay custody
+across both bounded stages. Interruption immediately after cache publication,
+or a later owner-file write failure, therefore leaves the surviving generation
+readable under its original epoch after restart. A pre-publication interruption
+can leave a funded binding with no cache object; exact retry reuses it and
+does not infer publication or permit a send.
 
 Lock order is the short workspace lifecycle condition, replay transaction,
 materialization lock, then cache transaction. Request accounting releases the

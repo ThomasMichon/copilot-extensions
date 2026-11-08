@@ -319,7 +319,7 @@ class ReplayStore:
             self.check_current(expires_at, checkpoint)
             return {"status": "adopted", "version": 2}
 
-    def _review_transaction(self, operation, *, expires_at, checkpoint=None, persist=True):
+    def _review_transaction(self, operation, *, expires_at, checkpoint=None, persist=True, staged=False):
         if checkpoint is not None and not callable(checkpoint):
             raise ValueError("invalid request checkpoint")
         self.check_current(expires_at, checkpoint)
@@ -329,13 +329,21 @@ class ReplayStore:
             if document.get("schema") != OWNER_SCHEMA:
                 raise ReplayStoreInvalid("review operations require explicit owner adoption")
             self._validate_owner(document)
-            result = operation(document)
-            self._validate_owner(document)
-            self.check_current(expires_at, checkpoint)
-            if persist:
+
+            def commit():
+                self._validate_owner(document)
                 lock.assert_owned()
                 self.check_current(expires_at, checkpoint)
                 _atomic_write_json(self.path, document)
+                self.check_current(expires_at, checkpoint)
+
+            # A bounded cache mutation may require a durable owner reservation
+            # before its separate pointer write, without releasing replay custody.
+            result = operation(document, commit) if staged else operation(document)
+            self._validate_owner(document)
+            self.check_current(expires_at, checkpoint)
+            if persist:
+                commit()
             self.check_current(expires_at, checkpoint)
             return copy.deepcopy(result)
 
