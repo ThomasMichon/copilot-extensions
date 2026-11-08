@@ -436,12 +436,15 @@ _Operator-required outcome; agent-recommended slices and validation._
   Preserve original
   receipt/unknown states and observation age; a current content match is not
   original-version proof, persisted DB mapping or full C3/provider acceptance.
-- [ ] Review the [persisted acquisition mapping refinement](comment-observation-correlation.md#persisted-acquisition-mapping-refinement)
+- [x] Review the [persisted acquisition mapping refinement](comment-observation-correlation.md#persisted-acquisition-mapping-refinement)
   before changing strict owner or serving schemas. Reuse retained intent and
-  receipt identity; add only bounded acquired evidence under the same owner.
+  receipt identity; add only bounded acquired evidence under the same owner
+  (#11538; storage/acquisition/read implementation remains open).
 - [ ] Deliver its explicitly adopted source storage/acquisition/read leaves,
   preserving original confirmation, unknown outcomes and B3/B4 proof; keep
   all-publisher, provider and installed acceptance separate.
+  The finite data-owner/library transaction and scoped retained read are
+  separate from actual workspace load/sync enrollment and negotiated serving.
 - [x] Review the [tracked comment/review consumer refinement](tracked-comment-consumers.md)
   before changing legacy commands (#11525).
 - [x] Qualify one explicit tracked comment/review source binding

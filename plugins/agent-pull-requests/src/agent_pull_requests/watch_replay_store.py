@@ -164,6 +164,15 @@ class ReplayStore:
         names = {"schema", "version", "namespace", "service", "replay", "reviews", "capacities"}
         prepared = "review_intent_version" in document
         selections = "review_selection_version" in document
+        mappings = "review_comment_mapping_version" in document
+        if mappings:
+            names.add("review_comment_mapping_version")
+            if (
+                type(document["review_comment_mapping_version"]) is not int
+                or document["review_comment_mapping_version"] != 1
+                or not prepared or version not in (3, 4, 5, 6)
+            ):
+                raise ReplayStoreInvalid("unsupported acquired comment mapping storage contract")
         if selections:
             names.add("review_selection_version")
             if (
@@ -216,6 +225,7 @@ class ReplayStore:
             document["reviews"], receipt_bytes=capacities["receipt_bytes"], review_bytes=capacities["review_bytes"],
             versions=(1, 2) if prepared else (1,),
             selections=selections,
+            mappings=mappings,
         )
         if version in (3, 4, 5, 6):
             from .conversation_journal import ConversationJournal
@@ -359,6 +369,7 @@ class ReplayStore:
                 return {"status": "existing", "operation": previous}
             operation = review_intent.new_operation(
                 selected, created_at=self.clock(), receipt_bytes=document["capacities"]["receipt_bytes"],
+                mappings=document.get("review_comment_mapping_version") == 1,
             )
             document["reviews"].append(operation)
             return {"status": "admitted", "operation": operation}
@@ -432,6 +443,8 @@ class ReplayStore:
             if any(row["state"] != "confirmed" for row in operation["actions"][:operation["actions"].index(state)]):
                 return {"status": "blocked_by_previous", "new_attempt": False, "action": state}
             state.update(state="unknown", attempt_id=str(uuid.uuid4()))
+            from .review_comment_mapping import invalidate
+            invalidate(operation, action_id)
             return {"status": "in_flight", "new_attempt": True, "action": state}
 
         return self._review_transaction(begin, expires_at=expires_at, checkpoint=checkpoint)
@@ -475,6 +488,8 @@ class ReplayStore:
             action["state"] = "confirmed" if confirm and review_intent.confirms(
                 validated, chosen, operation["intent"]["scope"],
             ) else "unknown"
+            from .review_comment_mapping import invalidate
+            invalidate(operation, action_id)
             return action
         return self._review_transaction(record, expires_at=expires_at, checkpoint=checkpoint)
 

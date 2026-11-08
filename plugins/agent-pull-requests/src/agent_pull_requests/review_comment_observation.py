@@ -80,7 +80,28 @@ def observe_prepared_comment(
     return projected
 
 
-def _project(result: dict, selected: dict, version: int, generation: dict | None) -> dict:
+def _acquired(generation: dict, scope: dict) -> tuple:
+    """Normalize once for all selected actions in one already-acquired generation."""
+    section = generation["sections"]["discussions"]
+    if section["data"] is None:
+        return None, None, None, "discussions_unavailable"
+    try:
+        for field in ("observed_from", "observed_to"):
+            review_intent.text(section[field], 128)
+        normalized = _section("discussions", section, scope)
+        threads = _threads(normalized["data"])
+    except (ValueError, TypeError):
+        return None, None, None, "discussions_invalid"
+    comments = {
+        (thread_id, comment["id"]): comment
+        for thread_id, thread in threads.items() for comment in thread["comments"]
+    }
+    return normalized, threads, comments, None
+
+
+def _project(
+    result: dict, selected: dict, version: int, generation: dict | None, *, acquired: tuple | None = None,
+) -> dict:
     def outcome(status: str, reason: str) -> dict:
         return {**result, "status": status, "reason": reason}
 
@@ -92,16 +113,9 @@ def _project(result: dict, selected: dict, version: int, generation: dict | None
     )
     if generation is None:
         return outcome("unavailable", "generation_missing")
-    section = generation["sections"]["discussions"]
-    if section["data"] is None:
-        return outcome("unavailable", "discussions_unavailable")
-    try:
-        for field in ("observed_from", "observed_to"):
-            review_intent.text(section[field], 128)
-        normalized = _section("discussions", section, result["scope"])
-        threads = _threads(normalized["data"])
-    except (ValueError, TypeError):
-        return outcome("unavailable", "discussions_invalid")
+    normalized, threads, comments, error = acquired if acquired is not None else _acquired(generation, result["scope"])
+    if error is not None:
+        return outcome("unavailable", error)
     result["observation"] = {
         "observed_from": normalized["observed_from"], "observed_to": normalized["observed_to"],
         "complete": normalized["complete"], "error_count": len(normalized["errors"]),
@@ -119,7 +133,7 @@ def _project(result: dict, selected: dict, version: int, generation: dict | None
     thread = threads.get(ids["thread_id"])
     if thread is None:
         return outcome("unavailable", "native_thread_missing")
-    comment = next((row for row in thread["comments"] if row["id"] == ids["comment_id"]), None)
+    comment = comments.get((ids["thread_id"], ids["comment_id"]))
     if comment is None:
         return outcome("unavailable", "native_comment_missing")
     result["current_object_id"] = _digest({
