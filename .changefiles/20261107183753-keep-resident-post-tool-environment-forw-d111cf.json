@@ -1,0 +1,9 @@
+{
+  "comment": "Keep resident post-tool environment forwarding compatible with Windows PowerShell generic JSON dictionaries and preserve caller switch assertions",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

@@ -2758,6 +2758,19 @@ def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path,
             "}\n"
             "Invoke-PostToolHook -Raw '{\"toolName\":\"view\"}'\n"
             "Invoke-PostToolHook -Raw '{\"toolName\":\"empty\"}'\n"
+            "$nativeReader = ${function:ConvertFrom-PostToolJson}\n"
+            "function ConvertFrom-PostToolJson {\n"
+            "  param([string]$Text)\n"
+            "  $value = & $nativeReader $Text\n"
+            "  if ($value -is [pscustomobject]) {\n"
+            "    $dictionary = [Collections.Generic.Dictionary[string,object]]::new()\n"
+            "    foreach ($p in $value.PSObject.Properties) { $dictionary.Add($p.Name, $p.Value) }\n"
+            "    return ,$dictionary\n"
+            "  }\n"
+            "  return ,$value\n"
+            "}\n"
+            "Invoke-PostToolHook -Raw '{\"toolName\":\"dictionary\"}'\n"
+            "${function:ConvertFrom-PostToolJson} = $nativeReader\n"
             "$deny = Invoke-ResidentPostTool -Endpoint "
             "(Get-Content (Join-Path $env:USERPROFILE '.agent-worktrees/status-monitor.lock') "
             "-Raw | ConvertFrom-Json | ForEach-Object {"
@@ -2786,6 +2799,7 @@ def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path,
         env = os.environ.copy()
         env["USERPROFILE"] = str(tmp_path)
         env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+        env["AGENT_WORKTREES_NUDGE"] = "off"
         result = subprocess.run(
             [shell, "-NoProfile", "-NonInteractive", "-File", str(harness)],
             capture_output=True, text=True, encoding="utf-8", env=env, timeout=15,
@@ -2796,13 +2810,18 @@ def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path,
         assert result.stdout == (
             '{"additionalContext":"resident"}'
             '{"additionalContext":"resident"}'
+            '{"additionalContext":"resident"}'
             'local-fallbackcell-client'
         )
+        metadata = {"environment": {
+            key: env[key] for key in (
+                "AGENT_WORKTREES_NUDGE", "AGENT_WORKTREES_AGENDA_NUDGE",
+                "AGENT_WORKTREES_NUDGE_CALLS", "AGENT_WORKTREES_NUDGE_MINUTES",
+            ) if key in env
+        }}
         assert seen == [
-            ("postToolUse", {"toolName": "view"}),
-            ("postToolUse", {"toolName": "view"}),
-            ("postToolUse", {"toolName": "empty"}),
-            ("postToolUse", {"toolName": "deny"}),
+            ("postToolUse", {"toolName": name, "_agentWorktrees": metadata})
+            for name in ("view", "view", "empty", "dictionary", "deny")
         ]
         bin_dir = root / "bin"
         bin_dir.mkdir()
@@ -2830,7 +2849,7 @@ def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path,
         assert manifest_result.returncode == 0, manifest_result.stderr
         assert manifest_result.stderr == ""
         assert json.loads(manifest_result.stdout) == {"additionalContext": payload["text"]}
-        assert seen[-1] == ("postToolUse", payload)
+        assert seen[-1] == ("postToolUse", {**payload, "_agentWorktrees": metadata})
         (bin_dir / SCRIPT.name).unlink()
         (bin_dir / "hook_client.py").write_text(
             "import json,sys\n"
@@ -2888,6 +2907,7 @@ def test_real_shell_json_values_and_legacy_metadata_compatibility(tmp_path, admi
         '{"small":1e-100,"big":1.234567890123456789e30,'
         '"long":0.12345678901234567890123456789}',
         json.dumps({"nested": {"__type": "ordinary-data", "value": values}}),
+        '{"_agentWorktrees":{"environment":{"AGENT_WORKTREES_NUDGE":"on"}}}',
     ]
     seen = []
 
@@ -2908,6 +2928,7 @@ def test_real_shell_json_values_and_legacy_metadata_compatibility(tmp_path, admi
         env = os.environ.copy()
         env["USERPROFILE"] = str(tmp_path)
         env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+        env["AGENT_WORKTREES_NUDGE"] = "off"
         reference_harness = tmp_path / "legacy-json.ps1"
         expected_requests = []
         for payload in raw_payloads:
@@ -2945,6 +2966,14 @@ def test_real_shell_json_values_and_legacy_metadata_compatibility(tmp_path, admi
             assert legacy.stderr == ""
             expected = [json.loads(line) for line in legacy.stdout.splitlines()]
             assert len(expected) == 2
+            metadata = {"environment": {
+                key: env[key] for key in (
+                    "AGENT_WORKTREES_NUDGE", "AGENT_WORKTREES_AGENDA_NUDGE",
+                    "AGENT_WORKTREES_NUDGE_CALLS", "AGENT_WORKTREES_NUDGE_MINUTES",
+                ) if key in env
+            }}
+            for value in expected:
+                value.setdefault("_agentWorktrees", metadata)
             assert json.loads(result.stdout) == expected[1], payload
             expected_requests.append(("postToolUse", expected[0]))
         assert seen == expected_requests
