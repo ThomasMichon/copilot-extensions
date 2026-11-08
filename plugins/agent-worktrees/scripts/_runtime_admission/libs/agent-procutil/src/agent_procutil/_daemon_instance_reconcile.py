@@ -16,9 +16,14 @@ def reconcile(
         raise ValueError("daemon reconciliation deadline must be finite and positive")
     if type(terminate) is not bool:
         raise ValueError("daemon reconciliation termination policy must be boolean")
+    scope_key = None
     if runtime_root is not None:
         runtime_root = Path(runtime_root)
-        if not runtime_root.is_absolute() or runtime_root.resolve() != runtime_root:
+        scope_key = store._runtime_scope_key(runtime_root)
+        if (
+            not runtime_root.is_absolute()
+            or store._runtime_scope_key(runtime_root.resolve()) != scope_key
+        ):
             raise ValueError("daemon reconciliation runtime scope must be absolute and unredirected")
     root = Path(root) if root is not None else store.registry_root()
     if not store._inventory_exists(root):
@@ -49,7 +54,9 @@ def reconcile(
                 visited = path.stem
                 try:
                     candidate = store._read(path)
-                    if runtime_root is not None and Path(candidate["runtime_root"]) != runtime_root:
+                    if scope_key is not None and (
+                        store._runtime_scope_key(candidate["runtime_root"]) != scope_key
+                    ):
                         continue
                     finite_production = (
                         candidate["purpose"] == "production"

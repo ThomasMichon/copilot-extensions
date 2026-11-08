@@ -789,7 +789,9 @@ def cleanup(
                 record = _read(path)
             except FileNotFoundError:
                 return result("missing", "record-absent")
-            if runtime_root is not None and Path(record["runtime_root"]) != Path(runtime_root):
+            if runtime_root is not None and (
+                _runtime_scope_key(record["runtime_root"]) != _runtime_scope_key(runtime_root)
+            ):
                 return result("held", "runtime-scope-mismatch")
             if record["state"] not in ("reserved", "bound", "running", "finished", "cleaning"):
                 return result("held", "unknown-state")
@@ -911,10 +913,14 @@ def cleanup(
         return result("held", type(error).__name__)
 
 
+def _runtime_scope_key(runtime_root):
+    return os.fsencode(os.path.normcase(os.fspath(Path(runtime_root))))
+
+
 def _cursor_path(root, runtime_root=None):
     if runtime_root is None:
         return root / ".reconcile.cursor"
-    scope = os.fsencode(os.path.normcase(os.fspath(runtime_root)))
+    scope = _runtime_scope_key(runtime_root)
     return root / (".reconcile." + hashlib.sha256(scope).hexdigest() + ".cursor")
 
 
