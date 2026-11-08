@@ -290,6 +290,53 @@ def test_unconfirmed_disposition_retains_claim_then_rerun_converges_once(governe
 
 
 @pytest.mark.parametrize("governed", [False], indirect=True)
+def test_unconfirmed_disposition_reads_keep_polling_until_requeue(governed_cli, monkeypatch, capsys):
+    g, args, order, requests, _ = governed_cli
+    await_disposition = worker._await_disposition
+    failures = [
+        httpx.ConnectError("lost"), DispatchError(503, "unavailable"), ValueError("invalid json"),
+    ]
+
+    def lossy_observation(client, task_id, decline):
+        real_get = client.get
+
+        def get(identifier, **kwargs):
+            if failures:
+                raise failures.pop(0)
+            return real_get(identifier, **kwargs)
+
+        monkeypatch.setattr(client, "get", get)
+        g.q.close_pool_decline(task_id, **g.binding)
+        await_disposition(client, task_id, decline)
+
+    monkeypatch.setattr(worker, "_await_disposition", lossy_observation)
+    assert args.func(args) == 0
+    assert json.loads(capsys.readouterr().out)["task_relationship"] == "closed"
+    assert not failures and order == [("finalize", Status.QUEUED, "closed")]
+
+
+@pytest.mark.parametrize("governed", [False], indirect=True)
+def test_persistently_lost_disposition_reads_record_blocker_and_retain_claim(governed_cli, monkeypatch):
+    g, args, order, requests, _ = governed_cli
+    monkeypatch.setattr(worker, "DISPOSITION_WAIT_SECONDS", 0)
+    await_disposition = worker._await_disposition
+
+    def lost_observation(client, task_id, decline):
+        def get(identifier, **kwargs):
+            raise httpx.ReadTimeout("observation lost")
+
+        monkeypatch.setattr(client, "get", get)
+        await_disposition(client, task_id, decline)
+
+    monkeypatch.setattr(worker, "_await_disposition", lost_observation)
+    with pytest.raises(DispatchError, match="not yet confirmed .*observation lost.*custody retained"):
+        args.func(args)
+    assert not order and g.q.get(g.task_id).status == Status.CLAIMED
+    assert g.q.task_relationship(g.task_id)["state"] == "bound"
+    assert "observation lost" in g.q.pool_worker_decline(g.task_id).blocker
+
+
+@pytest.mark.parametrize("governed", [False], indirect=True)
 def test_old_coordinator_with_retained_claim_refuses_before_decision(governed_cli, monkeypatch):
     g, args, order, requests, app = governed_cli
 

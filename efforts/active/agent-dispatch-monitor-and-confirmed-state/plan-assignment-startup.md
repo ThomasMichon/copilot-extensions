@@ -178,6 +178,10 @@ Canonical component of [this same Active effort](README.md). This is not a child
       specifies actual resident observation without direct fallback and Bridge's
       independently selected lineage writer; its implementation and qualification
       remain open.
+      Worker decline settlement ([journal](journal/2026/11.07-worker-decline-settlement.md))
+      merged in [#11486](https://github.com/ThomasMichon/copilot-extensions/pull/11486)
+      as `2a38d6cd30`; decline retry after a replacement placement is tracked in
+      [#11490](https://github.com/ThomasMichon/copilot-extensions/issues/11490).
 - [x] Land actual direct-worker and allocator-workspace assignment claims in
       [#10413](https://github.com/ThomasMichon/copilot-extensions/pull/10413),
       merged as `6626b8426e` after current-head clean Copilot review and required

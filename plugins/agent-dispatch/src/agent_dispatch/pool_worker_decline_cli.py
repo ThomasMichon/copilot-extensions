@@ -8,6 +8,8 @@ import os
 import subprocess
 import time
 
+import httpx
+
 from . import procutil
 from .bridge_remote import normalize_host
 from .client_errors import DispatchError, DispatchUpgradeRequired
@@ -93,14 +95,29 @@ def _retry_binding(task: dict, native: str, generation: int, worker: str, worktr
 def _await_disposition(client, task_id: str, decline: dict) -> None:
     """Dispatch alone commits exclusions, unassignment and unbound requeue."""
     deadline = time.monotonic() + DISPOSITION_WAIT_SECONDS
+    unobserved = None
     while True:
-        task = client.get(task_id)
-        if task.get("status") != "claimed" or task.get("generation") != decline["generation"]:
-            return
+        try:
+            task = client.get(task_id)
+        except DispatchError as exc:
+            if exc.status_code < 500:
+                raise
+            unobserved = exc
+        except (httpx.TransportError, ValueError) as exc:
+            # The decision is already committed; a lost read is unconfirmed, not a refusal.
+            unobserved = exc
+        else:
+            if not isinstance(task, dict):
+                unobserved = "invalid task observation"
+            elif task.get("status") != "claimed" or task.get("generation") != decline["generation"]:
+                return
+            else:
+                unobserved = None
         if time.monotonic() >= deadline:
             raise DispatchError(
-                409, "worker decline disposition is not yet confirmed; custody retained;"
-                " rerun decline to converge",
+                409, "worker decline disposition is not yet confirmed"
+                + (f" (last observation failed: {str(unobserved)[:512]})" if unobserved else "")
+                + "; custody retained; rerun decline to converge",
             )
         time.sleep(DISPOSITION_POLL_SECONDS)
 
