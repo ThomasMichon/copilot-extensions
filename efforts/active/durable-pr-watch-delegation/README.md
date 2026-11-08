@@ -1194,6 +1194,123 @@ callback an implicit credential store.
   No host/backend activation, deployment, production effects or resource
   release occurred.
 
+### 2026-11-08 - Qualify the integrated source consumer before publication
+
+- Integrated #11231 with the current source dependencies without dropping
+  either journal history. Fresh static lint, generated-copy, module-size,
+  installation-contract and diff checks pass.
+- Fifteen focused driver, native entry, guarded-journal and real TCP controls
+  pass in 345.77 seconds, including cold start, rollover, durable-commit
+  admission, rollback and exact-instance retirement. The canonical runner
+  completed preparation and cleanup in 402.50 seconds overall.
+- The integrated original
+  `test_normal_payload_init_refreshes_receipt_and_upgrades_live_owner` passes
+  locally in 660.44 seconds, with 681.66 seconds overall including preparation
+  and cleanup. Its startup, upgrade, restart, state-preservation and cleanup
+  assertions ran with the existing 120-second cutover, 900-second test and
+  150-second cleanup limits. No native-account override was enabled.
+- This qualifies the composed source consumer, not the previously installed
+  owner or a general latency guarantee. The earlier hosted pass remains scoped
+  to its recorded source; its completed approval was not reused. Review, CI,
+  promotion, authorized installed adoption and all parent/resource gates remain.
+
+### 2026-11-08 - Pass the original focused hosted Windows lifecycle case
+
+- [Focused Windows run 42434040443](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42434040443)
+  qualified source `834856ee875cc9f7b2ed62bd59401d162327c365` under its protected
+  controller. The request-bound artifact identifies exactly the original
+  `test_normal_payload_init_refreshes_receipt_and_upgrades_live_owner`: passed
+  in 229.621 seconds, with no skipped or incomplete selection. Its original
+  startup, upgrade, restart, state-preservation and governed-cleanup assertions
+  completed without enlarging their clocks.
+- This is Windows Server 2025 source evidence with the reported outer test
+  runtime Python 3.12.10. It does not replace the failed local installed-profile
+  evidence or qualify every runtime/platform. The approved hosted loop's
+  stopping condition is satisfied; retain its source/request/run evidence and
+  append-only transport history rather than launching another attempt.
+- Complete dependent source regressions and normal review/CI/promotion before
+  treating the improvement as released. Local installed-owner acceptance,
+  authorized rollout and the larger parent/resource gates remain open.
+
+### 2026-11-08 - Qualify the paired-read candidate through the focused Windows lane
+
+- #11231 retains bounded concurrent fresh target/predecessor reads only after
+  the private journal matches its guarded current document. Both reads finish
+  before the action, including on failure. Existing nested SDK validation
+  scopes remain serial to preserve their shared changed-file observations.
+  Thirteen focused boundary cases pass across the original and residual
+  selections; no cached authority or expanded deadline was introduced.
+- The original local lifecycle remains unqualified. Phase output now preserves
+  its first failure before cleanup can obscure it; the latest run exceeded
+  120 seconds during committed-owner health at first startup, then completed
+  governed cleanup. Earlier successful startup runs do not establish reliable
+  whole-lifecycle acceptance.
+- The operator approved a progress-based source fix/retest loop through the
+  existing owner-only `windows-qualification.yml`, selecting the original
+  normal-payload lifecycle case and stopping when it passes. Preserve the
+  original test/cutover/cleanup clocks, committed source identity, request/run
+  evidence and the lane's protected-controller and append-only transport rules.
+  Unchanged or unobserved attempts are not progress.
+- Hosted source evidence does not replace local installed-owner acceptance.
+  Source review, CI, promotion, authorized rollout and all parent delegation,
+  provider and retained-resource gates remain outstanding.
+
+### 2026-11-07 - Pass first startup and isolate the remaining upgrade race
+
+- #11231 now composes freshly validated journal target/instance evidence within
+  each action instead of reconstructing it again. Actual health/control
+  exchanges keep fresh completion and native-birth checks on both sides;
+  selection publication checks before and after the write under its metadata
+  locks. No proof cache or cutover deadline change was introduced.
+- Nine focused journal/selection/archive controls pass. The original Windows
+  scenario then passed first startup: binding took about 36 seconds and native
+  publication about 68 seconds. The whole lifecycle still failed during upgrade,
+  after predecessor drain, on a changing JSON read; route rollback subsequently
+  exhausted its remaining deadline. This is progress, not lifecycle acceptance.
+- The canonical JSON reader now names the file in changing-read diagnostics
+  without altering its refusal or handoff semantics; all sixteen focused JSON
+  and lock-handoff controls pass. A narrowed normal-init/startup/upgrade
+  diagnostic retains named phases, the original 120-second cutover and governed
+  cleanup to identify the actual race rather than repeat a broad packet blindly.
+- Source work remains useful WIP. Required review, CI, promotion, authorized
+  installation and installed-owner acceptance remain outstanding, as do
+  Bridge #11153 and the parent delegation/provider/fleet/resource gates.
+
+### 2026-11-07 - Retain the unresolved native startup deadline separately from hashing work
+
+- #11231's bounded path-walker improvements preserve full snapshot traversal,
+  exact digests, native identity and metadata fences, reparse rejection and
+  joined descriptor cleanup. Ten focused controls and strict Linux/Windows
+  typing pass. These source results do not establish lifecycle acceptance.
+- The original normal-upgrade scenario still fails at first startup, before
+  upgrade, within its unchanged 120-second cutover budget. The successor
+  bound after about 75 seconds; rollback and exact-instance observations
+  remain explicit failure evidence, not successful activation.
+- Retain the tested source work without publishing a complete-fix claim.
+  Further direction must distinguish reducing validation work within the
+  existing budget from deliberately changing the bounded latency contract.
+  No deadline, verification rule, installed runtime, delegation activation
+  or retained-resource disposition has been changed by that distinction.
+
+### 2026-11-07 - Diagnose the actual installed first-owner startup failure
+
+- The released `0.3.227-dev1` payload's own normal-upgrade test was exercised
+  in an isolated Windows profile with canonical repository process containment.
+  Initial installation completed, but first owner startup exhausted its
+  original 120-second cutover budget before the upgrade step. Normal cleanup
+  also timed out during reconciliation; recorded test processes have exited.
+  This is failed installed-profile evidence, not native-account acceptance.
+- A read-only profile of running invocation capture took 14.811 seconds;
+  its two snapshot-content traversals consumed 11.238 seconds. This identifies
+  repeated completion validation as measurable cost, not the complete cause
+  of the transaction failure or a controlled speedup comparison.
+- #11231 owns bounded diagnosis and source correction. Preserve fresh
+  governance, completed-slot mutation/link/race refusals, one-writer custody,
+  pending subscriptions and exact process-exit evidence within existing
+  budgets. Do not retry the unchanged broad test, patch deployed copies or
+  treat larger limits as a fix. Bridge #11153 and all parent adoption,
+  delegation, provider and fleet requirements remain separate and open.
+
 ### 2026-11-07 - Refine current authority and request-local writer design
 
 - #11450 actually merged as `fe70e2d4b898d3a835d8f452d9c51d72146738b4`
@@ -1679,6 +1796,65 @@ callback an implicit credential store.
   open. Continue actual publication-owner inventory and contained opaque-body
   consumer qualification, retaining allocation, correlation and separately
   authorized adoption as unfinished work.
+
+### 2026-11-07 - Preserve the partial authorized Windows update
+
+- The operator separately authorized a normal unified update on one Windows
+  target followed by isolated installed PR-owner validation, preserving
+  updater serialization, configuration, credentials, sessions and subscriptions.
+  Other machines, fleet deployment, UAC, forced takeover, delegation activation
+  and retained-resource cleanup remain outside that grant.
+- Durable worker launch was refused by the caller's Windows Job. The supported
+  supervised mode then reused the same pending request and completed through
+  the canonical serialized executor, without weakening containment. The full
+  update returned exit 6; this is partial installation, not successful rollout.
+- PR-owner `0.3.227-dev1` is selected. Its actual installed version, root help
+  and watch help commands all pass. Those entry checks do not certify complete
+  installed-cell or deployed-delegation acceptance.
+- Bridge selected `0.9.348-dev1` but its successor failed startup on the missing
+  acquisition Worktrees writer trigger; the healthy `0.9.304.dev1` incumbent
+  remains undrained. Existing #11144 / contributor PR #11153 owns that repair.
+  Supplied actual upgrade evidence and the precise contract-registry CI
+  refusal to the author rather than opening a competing patch.
+- MCP rolled back because four attached sessions were busy; unconfirmed
+  retirement remains retained. Do not force those sessions or retire their
+  runtimes. Continue after the existing Bridge fix clears review, CI and
+  release, then reconcile the ordinary update and remaining installed proof.
+  Parent requirements and all retained-resource holds remain open.
+
+### 2026-11-07 - Confirm normal release of the qualified PR-owner repair
+
+- Normal promotion `42314791785` completed successfully, including candidate
+  freezing, eligible source coverage, first-party construction and attestation,
+  real Windows Resume startup, exact source-unit reuse, publication readback
+  and non-administrative candidate merge.
+- Published Main `2f10aac90cc7c1ee8e6a644eb3d626678a6adc8f` contains all four
+  PR-owner implementation files from #10953 byte-for-byte. The compact Efforts
+  template from #11167 is unchanged apart from its normal release-version
+  stamp and remains 4,049 bytes. #11160 closed on the earlier actual hosted
+  candidate-freezing proof; full promotion now supplies distinct release proof.
+- The parent digest still has eighty-three open Plan/Validation items.
+  Release does not establish installed adoption, configured credentials,
+  deployed delegation, image/provider/fleet operation or retained-resource
+  settlement. No local runtime, profile, policy or service was changed.
+- Continue with the remaining source and installed-adoption obligations under
+  their existing owners and effect bounds. The completed disposable hosted
+  qualification grant does not authorize another run or a local rollout.
+
+### 2026-11-06 - Land the bounded projection repair and retain release proof
+
+- #11167 merged as `3f29614f05a93fdd979a9e71b2735aab297aa768` after
+  exact-head Copilot approval with no findings and required CI `42312927520`
+  passed. The source worktree reconciled its merged PR and pulled forward
+  through the normal managed path.
+- Current parent digest and touched-section readback confirm all eighty-three
+  open Plan/Validation items remain; no parent requirement changed or closed.
+  The native/Dispatch journal outcomes now landed with this meaningful source
+  contribution, rather than a journal-only PR.
+- Keep #11160 open until normal hosted candidate composition confirms its
+  blocker cleared. Post-merge CI `42313550089` is in progress; release and
+  any separately authorized installed proof remain pending. No retry, runtime
+  rollout, resource release or custody override follows from this merge.
 
 ### 2026-11-06 - Repair the actual release-candidate projection blocker
 
