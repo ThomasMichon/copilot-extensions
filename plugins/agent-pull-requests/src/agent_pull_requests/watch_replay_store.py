@@ -8,7 +8,7 @@ import stat
 import time
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TypeVar
 
@@ -601,8 +601,23 @@ class ReplayStore:
     def observation_targets(
         self, *, expires_at: int, checkpoint: Callable[[], None] | None = None,
     ) -> tuple[ObservationTarget, ...]:
+        document = None
+
+        def prepare(current: dict) -> None:
+            nonlocal document
+            document = current
+
+        def targets(core: WatchReplay) -> tuple[ObservationTarget, ...]:
+            from .terminal_retention import replay_epoch
+            return tuple(
+                replace(target, retention_epoch=replay_epoch(document, target))
+                for target in core.observation_targets()
+            )
+
         return self._transaction(
-            lambda core: core.observation_targets(), expires_at=expires_at, checkpoint=checkpoint,
+            targets if self.terminal_retention else lambda core: core.observation_targets(),
+            expires_at=expires_at, checkpoint=checkpoint,
+            prepare=prepare if self.terminal_retention else None,
         )
 
     def observe(
@@ -612,14 +627,15 @@ class ReplayStore:
         """Trusted owner-only input, never a serving operation."""
         def prepare(document: dict) -> None:
             nonlocal snapshot
-            from .terminal_retention import terminal_snapshot
-            snapshot = terminal_snapshot(document, target) or snapshot
+            from .terminal_retention import replay_observation
+            snapshot = replay_observation(document, target, snapshot)
 
         return self._transaction(
             lambda core: core.observe(
                 target.account, target.repo, target.number, snapshot,
                 registration_ids=target.registration_ids,
-            ), expires_at=expires_at, checkpoint=checkpoint,
+            ) if snapshot is not None else {"status": "stale_observation"},
+            expires_at=expires_at, checkpoint=checkpoint,
             prepare=prepare if self.terminal_retention else None,
         )
 
@@ -628,7 +644,10 @@ class ReplayStore:
         checkpoint: Callable[[], None] | None = None,
     ) -> ObservationTarget | None:
         return self._transaction(
-            lambda core: core.waiting_target(target),
+            lambda core: (
+                replace(current, retention_epoch=target.retention_epoch)
+                if (current := core.waiting_target(target)) is not None else None
+            ),
             expires_at=expires_at, checkpoint=checkpoint,
         )
 

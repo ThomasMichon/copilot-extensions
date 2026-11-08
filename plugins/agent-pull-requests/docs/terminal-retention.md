@@ -20,8 +20,9 @@ readers. Neither a callback label nor the source API proves that transition.
 The orthogonal `terminal_retention_version: 1` contract stores its records,
 generation/epoch bindings and capacity in `watch-replay.json`. Its protocol is
 `agent-pull-requests.terminal-retention/v1`, independent of package version.
-The reservation defaults to 8 MiB, with at most 1024 retirement records and
-1024 generation bindings. Full capacity refuses without eviction, borrowing
+The reservation defaults to 8 MiB, with at most 1024 retirement records,
+1024 authoritative live admissions and 1024 generation bindings. Full capacity
+refuses without eviction, borrowing
 another reservation or rebuilding the cache. Pending deliveries and original
 operation/attempt/receipt records are never discarded.
 
@@ -57,6 +58,10 @@ the existing owner needs an explicit bounded recovery policy, not a collector-
 invented timeout. A later native replay poll also uses the retained terminal
 facts instead of reintroducing a native snapshot body. Only exact ACK/cancel
 continues to settle a delivery; terminal observation and drain do neither.
+ReplayStore captures the full-scope epoch on its actual pre-IO observation
+target and preserves it when refreshing waiting registrations. A result
+superseded by reopen uses only the matching retained body-free terminal facts,
+or reports stale observation; it never falls through to the old native body.
 
 ## Admission, drain and reopen
 
@@ -73,6 +78,14 @@ body-bearing cache object or returning its descriptor. An accepted complete
 live acquisition binds its generation to the current epoch before cache
 publication. Late observations and old-epoch generations cannot republish or
 serve a buffered body after reopen.
+
+The last complete live admission is retained separately from partial journal
+evidence. A transient missing page can update that evidence without fencing
+previously valid lookup/chunk reads or preventing sync from reacquiring a
+complete generation. Partial refreshes are not published. Definite cache
+`full`, `conflict` or `failed` outcomes discard newly reserved generation
+bindings; potentially visible `unconfirmed` outcomes retain their binding for
+exact readback. Neither case evicts an existing binding.
 
 Lock order is the short workspace lifecycle condition, replay transaction,
 materialization lock, then cache transaction. Request accounting releases the

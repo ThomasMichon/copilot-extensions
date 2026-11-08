@@ -203,7 +203,9 @@ def test_no_implicit_adoption_eviction_timeout_policy_or_terminal_inference(owne
         return
     if control == "capacity":
         owner._review_transaction(
-            lambda document: document["capacities"].update(terminal_retention_bytes=100), expires_at=100,
+            lambda document: document["capacities"].update(
+                terminal_retention_bytes=len(json.dumps(document["terminal_retention"]).encode()) + 32,
+            ), expires_at=100,
         )
     elif control == "deadline":
         captured = target(register(owner, deadline=None))
@@ -271,3 +273,36 @@ def test_later_replay_poll_uses_body_free_terminal_facts_without_changing_origin
     new = next(event for event in pending if event["registration_id"] == later["registration_id"])
     assert new["merged"] is True and "snapshot" not in new
     assert "must not reappear" not in json.dumps(pending)
+
+
+@pytest.mark.parametrize("started", ["live", "terminal", "uncaptured"])
+def test_delayed_native_replay_read_cannot_reintroduce_retired_bodies_after_reopen(
+    owner, evidence, started,
+):
+    observe(owner, evidence)
+    if started == "live":
+        receipt = register(owner)
+        captured = owner.observation_targets(expires_at=100)[0]
+    evidence["sections"]["pull_request"]["data"]["status"] = "completed"
+    observe(owner, evidence, second=2)
+    if started != "live":
+        receipt = register(owner)
+        captured = owner.observation_targets(expires_at=100)[0]
+    if started == "uncaptured":
+        captured = target(receipt)
+    evidence["sections"]["pull_request"]["data"]["status"] = "active"
+    observe(owner, evidence, second=4)
+    refreshed = owner.waiting_target(captured, expires_at=100)
+    assert refreshed.retention_epoch == captured.retention_epoch
+    before = owner.path.read_bytes()
+    result = owner.observe(
+        refreshed, PRSnapshot(merged=True, native_snapshot={"body": "retired content"}),
+        expires_at=100,
+    )
+    pending = owner.execute(CONSUMER, "pending", {}, expires_at=100)
+    assert "retired content" not in json.dumps(pending)
+    if started == "uncaptured":
+        assert result["status"] == "stale_observation"
+        assert owner.path.read_bytes() == before and not pending["events"]
+    else:
+        assert len(pending["events"]) == 1 and "snapshot" not in pending["events"][0]

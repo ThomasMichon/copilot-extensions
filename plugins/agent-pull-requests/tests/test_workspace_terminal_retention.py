@@ -223,3 +223,52 @@ def test_admitted_native_sender_is_joined_and_retains_receipt_without_starting_n
     assert operation["actions"][1]["state"] == "unattempted"
     assert len(backend.threads) == 1 and backend.vote is None
     assert drain(operations, current["scope"], result["cursor"], time.monotonic() + 1)["drain"] == "drained"
+
+
+def test_partial_refresh_preserves_authoritative_live_reads_and_sync_reacquisition(workspace):
+    operations, evidence, _, _, initial, _ = workspace
+    load(operations, initial["id"])
+    current = operations.cache.lookup(initial["scope"])["generation"]
+    evidence["sections"]["reviewers"]["complete"] = False
+    for section in evidence["sections"].values():
+        section.update(observed_from="2026-10-30T00:00:20Z", observed_to="2026-10-30T00:00:21Z")
+    partial = load(operations, current["id"])
+    assert partial["publication"]["status"] == "not_published"
+    assert execute(operations, "lookup", {"number": 42})["descriptor"]["id"] == current["id"]
+    assert execute(operations, "chunk", {
+        "number": 42, "generation_id": current["id"], "offset": 0,
+    })["data"]
+    request = {
+        "number": 42, "expected_current": current["id"],
+        "previous_id": current["id"], "budget_seconds": 10,
+    }
+    assert execute(operations, "sync", request)["publication"]["status"] == "not_published"
+    evidence["sections"]["reviewers"]["complete"] = True
+    for section in evidence["sections"].values():
+        section.update(observed_from="2026-10-30T00:00:30Z", observed_to="2026-10-30T00:00:31Z")
+    complete = execute(operations, "sync", request)
+    assert complete["publication"]["status"] == "published"
+    assert complete["conversation"]["cursor"]["epoch"] == 1
+
+
+@pytest.mark.parametrize("status", ["full", "conflict", "failed", "unconfirmed"])
+def test_failed_publications_do_not_consume_generation_binding_capacity(
+    workspace, monkeypatch, status,
+):
+    operations, evidence, _, _, initial, _ = workspace
+    load(operations, initial["id"])
+    current = operations.cache.lookup(initial["scope"])["generation"]
+    before = json.loads(operations.store.path.read_bytes())["terminal_retention"]["generations"]
+    monkeypatch.setattr(GenerationCache, "publish", lambda *a, **k: {"status": status})
+    for second in (10, 20, 30):
+        for section in evidence["sections"].values():
+            section.update(
+                observed_from=f"2026-10-30T00:00:{second:02d}Z",
+                observed_to=f"2026-10-30T00:00:{second + 1:02d}Z",
+            )
+        assert load(operations, current["id"])["publication"]["status"] == status
+    retained = json.loads(operations.store.path.read_bytes())["terminal_retention"]["generations"]
+    if status == "unconfirmed":
+        assert len(retained) == len(before) + 3
+    else:
+        assert retained == before

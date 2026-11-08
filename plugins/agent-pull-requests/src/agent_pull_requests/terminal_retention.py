@@ -32,15 +32,40 @@ def validate(document: dict, namespace: str) -> None:
         document["terminal_retention_version"] != 1
         or type(document["terminal_retention_version"]) is not int
         or not isinstance(state, dict)
-        or set(state) != {"protocol", "records", "generations"}
+        or set(state) != {"protocol", "records", "generations", "admissions"}
         or state["protocol"] != PROTOCOL
         or any(not isinstance(state[name], list) or len(state[name]) > MAX_RECORDS
-               for name in ("records", "generations"))
+               for name in ("records", "generations", "admissions"))
     ):
         raise ValueError("invalid terminal retention contract")
     identities = set()
     targets = {}
     journal = ConversationJournal(document["conversations"])
+    admitted = set()
+    for row in state["admissions"]:
+        if not isinstance(row, dict) or set(row) != {"scope", "cursor", "target"}:
+            raise ValueError("invalid authoritative admission")
+        scope = _scope(row["scope"])
+        key = conversation_key(scope, namespace)
+        cursor = Cursor(**row["cursor"])
+        current = journal._find(key)
+        if (
+            scope != row["scope"] or key in admitted or cursor.sequence < 1
+            or current is None or current["epoch"] != cursor.epoch
+            or current["sequence"] < cursor.sequence
+        ):
+            raise ValueError("authoritative admission differs from conversation epoch")
+        admitted.add(key)
+        target = row["target"]
+        if not isinstance(target, dict) or set(target) != {"account", "repo", "number"}:
+            raise ValueError("invalid authoritative watch binding")
+        ConsumerScope("terminal-observer", target["account"], target["repo"])
+        if type(target["number"]) is not int or target["number"] != scope["number"]:
+            raise ValueError("authoritative watch target differs from selected PR")
+        binding = encoded(target)
+        if binding in targets and targets[binding] != scope:
+            raise ValueError("terminal watch binding is ambiguous across full scopes")
+        targets[binding] = scope
     for row in state["records"]:
         if not isinstance(row, dict) or set(row) != {
             "scope", "cursor", "evidence", "operations", "deliveries", "drain", "target",
@@ -132,14 +157,13 @@ def require_live(
     if state is None:
         return None
     scope = _scope(scope)
-    record = ConversationJournal(document["conversations"])._find(
-        conversation_key(scope, document["namespace"]),
-    )
-    if record is None or (
-        not record["current"]["complete"] or record["current"]["state"] != "open"
+    admission = next((row for row in state["admissions"] if row["scope"] == scope), None)
+    if admission is None or any(
+        row["scope"] == scope and row["cursor"]["epoch"] == admission["cursor"]["epoch"]
+        for row in state["records"]
     ):
         raise TerminalAdmissionClosed("live conversation epoch unavailable")
-    current_epoch = record["epoch"]
+    current_epoch = admission["cursor"]["epoch"]
     if epoch is not None and epoch != current_epoch:
         raise TerminalAdmissionClosed("selected conversation epoch changed")
     if operation_id is not None and any(
@@ -160,10 +184,8 @@ def bind_generation(document: dict, generation: dict, cursor: dict) -> None:
     if state is None:
         return
     epoch = require_live(document, generation["scope"], epoch=cursor["epoch"])
-    current = ConversationJournal(document["conversations"])._find(
-        conversation_key(generation["scope"], document["namespace"]),
-    )
-    if {"epoch": current["epoch"], "sequence": current["sequence"]} != cursor:
+    current = next(row for row in state["admissions"] if row["scope"] == generation["scope"])
+    if current["cursor"] != cursor:
         raise TerminalAdmissionClosed("publication observation is no longer current")
     row = {"scope": copy.deepcopy(generation["scope"]), "generation_id": generation["id"], "epoch": epoch}
     previous = next(
@@ -256,26 +278,59 @@ def observe_terminal(
     return copy.deepcopy(row)
 
 
-def terminal_snapshot(document: dict, target: ObservationTarget) -> PRSnapshot | None:
-    """Later native replay polls cannot reintroduce a retired snapshot's bodies."""
+def observe_live(document: dict, scope: dict, record: dict, target: ObservationTarget) -> None:
+    """Keep admission authority distinct from later partial journal evidence."""
+    if type(target) is not ObservationTarget or target.number != scope["number"]:
+        raise ValueError("actual captured live observation target required")
+    state = document["terminal_retention"]
+    value = Observation.restore(record["current"])
+    if not value.complete or value.state != "open":
+        return
+    row = {
+        "scope": copy.deepcopy(scope),
+        "cursor": {"epoch": record["epoch"], "sequence": record["sequence"]},
+        "target": {"account": target.account, "repo": target.repo, "number": target.number},
+    }
+    previous = next((item for item in state["admissions"] if item["scope"] == scope), None)
+    if previous is not None:
+        previous.update(row)
+    else:
+        state["admissions"].append(row)
+
+
+def replay_epoch(document: dict, target: ObservationTarget) -> tuple[str, int] | None:
     state = document.get("terminal_retention")
     if state is None:
         return None
     binding = {"account": target.account, "repo": target.repo, "number": target.number}
     journal = ConversationJournal(document["conversations"])
-    for row in state["records"]:
+    for row in state["admissions"] + state["records"]:
         if row["target"] != binding:
             continue
         current = journal._find(conversation_key(row["scope"], document["namespace"]))
-        if current is None or current["epoch"] != row["cursor"]["epoch"]:
-            continue
-        value = Observation.restore(current["current"])
-        if value.terminal:
+        if current is not None:
+            from .review_workspace import _digest
+            return _digest(row["scope"]), current["epoch"]
+    return None
+
+
+def replay_observation(
+    document: dict, target: ObservationTarget, snapshot: PRSnapshot,
+) -> PRSnapshot | None:
+    """Preserve the pre-IO epoch; never promote an old read into reopened content."""
+    current_epoch = replay_epoch(document, target)
+    if current_epoch is None:
+        return snapshot
+    from .review_workspace import _digest
+    for row in document["terminal_retention"]["records"]:
+        identity = (_digest(row["scope"]), row["cursor"]["epoch"])
+        if identity == target.retention_epoch or identity == current_epoch:
+            value = Observation.restore(row["evidence"])
             return PRSnapshot(
                 pr_state="closed", merged=value.state == "merged",
                 head_sha=value.candidate.head, provider=value.key.provider,
             )
-    return None
+    return snapshot if target.retention_epoch == current_epoch else None
 
 
 class TerminalRetentionStore:
@@ -304,7 +359,9 @@ class TerminalRetentionStore:
                     raise ValueError("terminal capacity differs from adopted layout")
                 return {"status": "already_adopted", "protocol": PROTOCOL}
             document["terminal_retention_version"] = 1
-            document["terminal_retention"] = {"protocol": PROTOCOL, "records": [], "generations": []}
+            document["terminal_retention"] = {
+                "protocol": PROTOCOL, "records": [], "generations": [], "admissions": [],
+            }
             document["capacities"]["terminal_retention_bytes"] = retention_bytes
             self.owner._validate_owner(document)
             lifecycle_checkpoint()

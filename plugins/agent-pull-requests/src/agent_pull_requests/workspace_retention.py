@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import copy
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -109,11 +110,17 @@ class WorkspaceRetention:
             return {"status": "retired", "effects": "none"}, observation
         if observation["status"] not in ("observed", "unchanged"):
             return {"status": "not_published", "effects": "none"}, observation
+        if not generation["complete"]:
+            return {"status": "not_published", "effects": "none"}, observation
 
         def publish(document: dict) -> dict:
+            previous = copy.deepcopy(document["terminal_retention"]["generations"])
             bind_generation(document, generation, observation["cursor"])
             owner._validate_owner(document)  # Reserve metadata before cache IO.
-            return cache.publish(generation, expected_current=expected_current)
+            publication = cache.publish(generation, expected_current=expected_current)
+            if publication["status"] not in ("published", "unconfirmed"):
+                document["terminal_retention"]["generations"] = previous
+            return publication
 
         publication = owner._review_transaction(
             publish, expires_at=expires_at, checkpoint=checkpoint,

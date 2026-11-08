@@ -212,12 +212,14 @@ class ConversationStore:
                 document["attention"] = state.snapshot()
             document["conversations"] = journal.snapshot()
             if "terminal_retention" in document and result["status"] in ("observed", "unchanged"):
-                from .terminal_retention import observe_terminal
+                from .terminal_retention import observe_live, observe_terminal
                 if value.terminal:
                     result["retirement"] = observe_terminal(
                         document, generation["scope"], journal._find(key), terminal_target,
                         clock=self.owner.clock,
                     )
+                elif value.complete and value.state == "open":
+                    observe_live(document, generation["scope"], journal._find(key), terminal_target)
             if comment_mappings and result["status"] in ("observed", "unchanged"):
                 from .review_comment_mapping import observe
                 observe(document, generation)
