@@ -872,21 +872,10 @@ On Windows, the session-start hook selects the first non-WindowsApps `python`
 on PATH that reports Python 3.10 or newer, falling back to the first such
 `python` when none does; the floor then reports `unsupported-interpreter`.
 
-On Windows, the cold hook checks the shared bootstrap killswitch before entering
-the canonical ownership lifecycle with its existing Python interpreter and one
-native installer child. It passes that interpreter to the installer, avoiding
-redundant bootstrap-shell startup and interpreter discovery while keeping both
-installer ownership checks. Explicit installation contexts never enter this
-legacy path. The standalone bootstrap script remains the no-Python/deployed-copy
-fallback; it forwards the supplied interpreter through both ownership admission
-and the staged installer, including paths containing spaces. Stamp diagnostics
-use UTF-8 and stay on stderr, not in session guidance. The lifecycle owner
-enforces the cold stamp's ten-second child deadline, stopping the installer
-tree before releasing its ownership lease rather than killing the owner from
-the hook.
-The stamp copies the same source tree
-through native filesystem APIs; runtime provisioning remains deferred to first
-tool use.
+The session-start compatibility bootstrap does not stamp or provision a missing
+runtime. Explicit setup or the first tool invocation owns installation instead;
+the Windows first-use dispatcher reports its provisioning progress on stderr and
+respects the selected update authority.
 
 ### Terminal identity
 
