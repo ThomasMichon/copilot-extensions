@@ -37,7 +37,12 @@ ACTION_LIMIT = 400
 # Harness-injected turns arrive without a source; they are continuity plumbing, not operator intent.
 INJECTED_PREFIXES = ("[Context Handoff", "Continue the task in a fresh context window", "<system_", "<session_memory")
 # Bridged turns carry only a header in ``content``; the delivered text is enveloped in ``transformedContent``.
-BRIDGE_ENVELOPE = re.compile(r'<agent-message\b[^>]*?\bfrom="([^"]*)"[^>]*>(.*?)</agent-message>', re.S)
+# The body is literal (only attributes are escaped), so read through the final closing tag.
+BRIDGE_ENVELOPE = re.compile(r"<agent-message\b([^>]*)>(.*)</agent-message>", re.S)
+BRIDGE_ATTR = re.compile(r'([a-z][a-z-]*)="([^"]*)"')
+# Generated routing guidance the bridge appends inside a reply-to envelope; transport, not intent.
+BRIDGE_REPLY_GUIDANCE = re.compile(
+    r"\n\n\(To reply, use the exact argv\[0\] from the agent-bridge session command catalog[^\n]*\)\s*$")
 TODO_STATUS = {"done": "done", "in_progress": "current", "blocked": "waiting", "pending": "queued"}
 
 
@@ -76,6 +81,11 @@ def _requests(events: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     return requests, facts
 
 
+def _unescape_attr(value: str) -> str:
+    """Undo the bridge's attribute escaping; the body is never escaped."""
+    return value.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", '"').replace("&amp;", "&")
+
+
 def _request(data: dict[str, Any]) -> dict[str, Any] | None:
     """A typed operator turn, or a bridged turn's enveloped text attributed to its sender."""
     source, sender = data.get("source"), None
@@ -85,7 +95,11 @@ def _request(data: dict[str, Any]) -> dict[str, Any] | None:
         envelope = BRIDGE_ENVELOPE.search(data.get("transformedContent") or "")
         if envelope is None:
             return None
-        sender, content = envelope.group(1).strip() or "unknown", envelope.group(2).replace("\r\n", "\n").strip()
+        attrs = {name: _unescape_attr(value) for name, value in BRIDGE_ATTR.findall(envelope.group(1))}
+        if attrs.get("kind", "prompt") != "prompt":
+            return None  # notify and status-check deliveries explicitly ask for no new work
+        sender = attrs.get("from", "").strip() or "unknown"
+        content = BRIDGE_REPLY_GUIDANCE.sub("", envelope.group(2).replace("\r\n", "\n").rstrip()).strip()
     else:
         return None
     if not content or content.startswith(INJECTED_PREFIXES):
