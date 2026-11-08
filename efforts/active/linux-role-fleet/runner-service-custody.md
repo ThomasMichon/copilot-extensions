@@ -198,3 +198,37 @@ The timed-out groups remain failed attempts, not aggregate-budget passes.
 Focused lint, install-contract, changed-module and committed-blob checks passed.
 This evidence still does not qualify installed provider compatibility, native
 effect admission or live adoption, and enables no custody writer.
+
+### 2026-11-08 UTC - Canonical in-flight effect source prepared
+
+The existing local policy authority and node journal do not fence the Git
+coordination slot. The next source slice therefore uses the protocol's approved
+bounded in-flight extension in that same slot, rather than a second journal.
+An exact live task fence can admit one provider attempt; its unsettled state
+blocks task mutations and adoption independently of task expiry or controller
+liveness. Only explicit original-owner settlement restores the unchanged task
+projection. The original effect and terminal receipt remain inspectable after
+later task transitions and are excluded from stale-history compaction.
+
+This is a trusted-embedding source API, not a provider authorization service.
+The embedding still authenticates current authority, exact native identity and
+request scope, and verifies actual native/backend settlement before recording
+terminal evidence. Labels and evidence digests do not do that verification.
+There is no service-effect grant, effect CLI writer, adoption/retirement writer,
+provider deployment, new controller or live transition.
+
+Native Windows qualification covers 128 distinct selected passing cases:
+103 pure effect/custody/task protocol controls, 15 real effect-store/process
+cases and 10 existing mixed-custody/task/compaction regressions. The effect cases
+include both separate-process CAS winners, lost admission/settlement replies,
+fresh-process inventory, explicit native-exit settlement, wrong-owner/stale
+fences and retained receipts after task release. The initial race workers failed
+before their barriers because they imported test-only modules not present on
+their process path. Self-contained workers fixed that fixture; both races then
+passed, and the 13 non-race cases passed with named JUnit outcomes. The failed
+attempt is not credited as a passing aggregate. All runner item/group limits
+remain unchanged.
+
+No parent checklist item closes. Actual provider guards, forced/local/outage
+paths, qualified executing generations and rollback, Gateway/Fleet binding,
+incumbent-preserving ARC admission and authorized live acceptance remain open.
