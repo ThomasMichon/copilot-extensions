@@ -3064,14 +3064,9 @@ def _monitor_sweep(
     config_cache_for_project=None,
     roster_publisher=None,
     roster_failure=None,
-    session_ended=None,
 ) -> int:
-    """One coalescing pass over the Step 4 served-session union.
-
-    ``session_ended(path)`` hears of each registered worktree whose mux session
-    vanished from this pass, so its roster republishes without waiting for demand.
-    """
-    from . import config_cache as _config_cache, list_cli as _list_cli, mux_status_link as _mux_status_link, status_bar_cli as _status_bar_cli, status_monitor_runtime as _smr, status_updater_cli as _status_updater_cli
+    """One coalescing pass over the Step 4 served-session union."""
+    from . import config_cache as _config_cache, list_cli as _list_cli, mux_status_link as _mux_status_link, resident_push as _resident_push, status_bar_cli as _status_bar_cli, status_monitor_runtime as _smr, status_updater_cli as _status_updater_cli
     from .worktrees_producer import publish_project_rosters
 
     _monitor_list_sessions = _self_override("_monitor_list_sessions", _smr._monitor_list_sessions)
@@ -3128,13 +3123,8 @@ def _monitor_sweep(
         observed_sessions |= unmanaged_live_wt
     if stale_sessions:
         _status_monitor_recheck(governance, "pre-mutation:prune-registry")
-        ended_paths = [registry.get(s) for s in stale_sessions if s not in live] if session_ended else []
+        _resident_push.notify_ended(registry, stale_sessions, live)
         _monitor_prune_registry_sessions(reg_dir, registry, stale_sessions, ctx_done, incarnations, published)
-        for path in filter(None, ended_paths):
-            try:
-                session_ended(path)
-            except Exception:
-                pass
     if mux_bin:
         served = [(s, p) for s, p in registry.items() if s in unmanaged_live_wt and p]
         if catalog_observer is not None:

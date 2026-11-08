@@ -71,6 +71,19 @@ def notify(path: str | None) -> None:
         pass
 
 
+def notify_ended(registry: dict[str, str], sessions, live) -> None:
+    """:func:`notify` each registered worktree whose mux session left ``live``.
+
+    The sweep calls this before pruning ``sessions`` from ``registry``, so a
+    mux deactivation republishes its project's roster without waiting for
+    demand. A session still live (handed to the manager) has not ended.
+    """
+    for sess in sessions:
+        path = registry.get(sess)
+        if path and sess not in live:
+            notify(path)
+
+
 def changed_path_project(path: str, *, session_projects, segment_cache) -> str | None:
     """Map a notified worktree path to its project without changing the active one.
 

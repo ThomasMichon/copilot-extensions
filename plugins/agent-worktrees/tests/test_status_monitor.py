@@ -643,14 +643,17 @@ def test_sweep_reports_vanished_mux_sessions_for_roster_republish(tmp_path, monk
     monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
     _capture_set(monkeypatch)
     ended: list[str] = []
+    from agent_worktrees import resident_push
 
-    m._monitor_sweep("tmux", "T", "P", set(), session_ended=ended.append)
+    monkeypatch.setattr(resident_push, "notify", ended.append)
+
+    m._monitor_sweep("tmux", "T", "P", set())
 
     assert ended == ["/w/gone"]
     assert not (reg / "wt-gone").exists()
 
     ended.clear()
-    m._monitor_sweep("tmux", "T", "P", set(), session_ended=ended.append)
+    m._monitor_sweep("tmux", "T", "P", set())
 
     assert ended == []  # a live session never reports; a pruned one reports once
 
@@ -752,6 +755,9 @@ def test_sweep_prunes_manager_owned_registry_entries_from_the_unmanaged_lane(tmp
     )
     observed: list[set[str]] = []
     ended: list[str] = []
+    from agent_worktrees import resident_push
+
+    monkeypatch.setattr(resident_push, "notify", ended.append)
 
     served = m._monitor_sweep(
         "tmux",
@@ -760,7 +766,6 @@ def test_sweep_prunes_manager_owned_registry_entries_from_the_unmanaged_lane(tmp
         set(),
         catalog_observer=observed.append,
         managed_mux_cache=cache,
-        session_ended=ended.append,
     )
 
     assert served == 1

@@ -901,7 +901,6 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                         **({"cleanup_owner": segment_cache} if core.git_ops._windows_observation() else {}),
                     ),
                     roster_failure=worktrees_runtime.producer_failed,
-                    session_ended=resident_push.notify,
                 )
                 wait_for_lifecycle_priority(lifecycle_priority)
                 with state_lock:
