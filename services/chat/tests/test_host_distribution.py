@@ -3,6 +3,8 @@ import os
 from pathlib import Path
 import subprocess
 import time
+from types import SimpleNamespace
+from typing import Any
 
 from endpoint_rendezvous import read_endpoint
 from agent_procutil import spawn_sync_in_kill_on_close_job
@@ -12,8 +14,8 @@ from test_hosting import configuration
 
 
 def test_fresh_installed_host_source_removed_independent_participants_and_crash_restart(
-    tmp_path, installed_chat,
-):
+    tmp_path: Path, installed_chat: SimpleNamespace,
+) -> None:
     run = installed_chat.run
     target = installed_chat.service_target
     interpreter = installed_chat.service_python
@@ -146,7 +148,7 @@ for payload in json.loads(sys.stdin.buffer.read(65537)):
 print(json.dumps(results),flush=True)
 """
 
-    def requests(endpoint, values):
+    def requests(endpoint: dict[str, str], values: list[dict[str, Any]]) -> Any:
         result = run_owned([
             str(interpreter), "-I", "-c", probe,
             json.dumps(endpoint), config["token_file"],
@@ -169,7 +171,7 @@ print(json.dumps(results),flush=True)
         }), encoding="utf-8")
         clients[name] = [str(installed_chat.console), "--config", str(path)]
 
-    def client(name, *args):
+    def client(name: str, *args: str) -> Any:
         return json.loads(run([*clients[name], *args], cwd=tmp_path))
 
     post = {"op": "post", "channel": "room", "codename": "agent-a",

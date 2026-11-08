@@ -1,7 +1,9 @@
 from contextlib import contextmanager
 import hashlib
+from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
+from typing import Any, Iterator, NoReturn
 
 import pytest
 
@@ -9,10 +11,10 @@ from agent_chat_service import construction
 from agent_chat_service.client import ClientError
 
 
-def test_construction_floor_refuses_before_resource_loading(monkeypatch):
+def test_construction_floor_refuses_before_resource_loading(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(construction.sys, "version_info", (3, 10))
 
-    def refuse():
+    def refuse() -> NoReturn:
         pytest.fail("unsupported bootstrap must not load or inspect construction resources")
 
     monkeypatch.setattr(construction, "installed_catalog", refuse)
@@ -26,7 +28,7 @@ def test_construction_floor_refuses_before_resource_loading(monkeypatch):
     "installer_engine_process", "installer_dependency_policy",
     "installer_wheel_inputs", "installer_wheel_snapshot",
 ])
-def test_occupied_import_scope_is_not_replaced(monkeypatch, name):
+def test_occupied_import_scope_is_not_replaced(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
     monkeypatch.setattr(construction.sys, "version_info", (3, 11))
     monkeypatch.setattr(construction, "installed_catalog", lambda: {})
     monkeypatch.setattr(construction, "_ENGINE", None)
@@ -39,12 +41,14 @@ def test_occupied_import_scope_is_not_replaced(monkeypatch, name):
     assert dict(sys.modules) == before
 
 
-def test_client_policy_delegates_one_canonical_candidate(tmp_path, monkeypatch):
-    calls = []
+def test_client_policy_delegates_one_canonical_candidate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[object] = []
     candidate = object()
 
     @contextmanager
-    def numbered_candidate(*args, **kwargs):
+    def numbered_candidate(*args: object, **kwargs: object) -> Iterator[object]:
         calls.append((args, kwargs))
         yield candidate
         calls.append("settled")
@@ -73,7 +77,7 @@ def test_client_policy_delegates_one_canonical_candidate(tmp_path, monkeypatch):
     assert calls[-1] == "settled" and not root.exists()
 
 
-def installed_slot(tmp_path, monkeypatch):
+def installed_slot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, bytes]:
     slot = tmp_path / "versions" / "1.2.3"
     package = slot / "site" / "agent_chat_service"
     package.mkdir(parents=True)
@@ -89,11 +93,11 @@ def installed_slot(tmp_path, monkeypatch):
     return slot, value
 
 
-def test_completed_slot_cannot_prepare_bootstrap(tmp_path, monkeypatch):
+def test_completed_slot_cannot_prepare_bootstrap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     slot, _ = installed_slot(tmp_path, monkeypatch)
     marker = slot / "completion"
     marker.touch()
-    runtime = ModuleType("agent_chat_service._versioned_runtime")
+    runtime: Any = ModuleType("agent_chat_service._versioned_runtime")
     runtime.marker_path = lambda root, version: marker
     monkeypatch.setitem(sys.modules, runtime.__name__, runtime)
     with pytest.raises(ClientError) as caught:
@@ -103,7 +107,9 @@ def test_completed_slot_cannot_prepare_bootstrap(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("damage", ["missing", "changed", "unexpected"])
-def test_installed_health_refuses_bootstrap_drift(tmp_path, monkeypatch, damage):
+def test_installed_health_refuses_bootstrap_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str,
+) -> None:
     slot, value = installed_slot(tmp_path, monkeypatch)
     bootstrap = slot / ".runtime-bootstrap"
     bootstrap.mkdir()

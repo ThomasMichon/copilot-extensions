@@ -231,7 +231,7 @@ def test_authenticated_health_probes_serving_identity_and_drain_without_store_op
         with pytest.raises(hosting.HostError, match="host_unready"):
             hosting.probe_health(config, str(host.run_dir))
 
-        def trickle(handler):
+        def trickle(handler: hosting._Handler) -> None:
             handler.send_response(200)
             handler.send_header("Content-Type", "application/json")
             handler.send_header("Content-Length", "4096")
@@ -464,7 +464,7 @@ def test_close_retains_custody_until_held_transaction_and_workers_retire(
                           "actor": {"codename": "agent-a"}})[0] == 200
         original = host.store._post
 
-        def held_post(request):
+        def held_post(request: dict[str, Any]) -> dict[str, Any]:
             entered.set()
             assert release.wait(5)
             return original(request)
@@ -510,7 +510,7 @@ def test_busy_health_is_structured_and_recovers_after_transaction(
                           "actor": {"codename": "agent-a"}})[0] == 200
         original = host.store._post
 
-        def held_post(request):
+        def held_post(request: dict[str, Any]) -> dict[str, Any]:
             entered.set()
             assert release.wait(5)
             return original(request)

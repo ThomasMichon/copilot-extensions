@@ -488,7 +488,7 @@ def test_pending_question_lookup_work_ignores_other_participants_answers(store: 
         join(store, name)
     question = collaborate(store, "question", to=["agent-b"])["event"]
 
-    def seed(start, count):
+    def seed(start: int, count: int) -> None:
         with store._transaction():
             for number in range(start, start + count):
                 store._post({

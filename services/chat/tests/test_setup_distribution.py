@@ -3,6 +3,8 @@
 import json
 import shutil
 import sys
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -16,7 +18,9 @@ from agent_procutil.owned_process import run_caller_owned
     "src/agent_chat_service/installer_wheel_inputs.py",
     "src/agent_chat_service/installer_wheel_snapshot.py",
 ])
-def test_independent_sdist_refuses_missing_construction_input(tmp_path, installed_chat, missing):
+def test_independent_sdist_refuses_missing_construction_input(
+    tmp_path: Path, installed_chat: SimpleNamespace, missing: str,
+) -> None:
     shutil.unpack_archive(installed_chat.sdist, tmp_path, "gztar")
     project, = tmp_path.iterdir()
     project.joinpath(*missing.split("/")).unlink()
@@ -35,7 +39,9 @@ def test_independent_sdist_refuses_missing_construction_input(tmp_path, installe
     assert "missing" in result.stderr or "FileNotFoundError" in result.stderr
 
 
-def test_installed_constructor_preserves_the_separate_bootstrap_floor(tmp_path, installed_chat):
+def test_installed_constructor_preserves_the_separate_bootstrap_floor(
+    tmp_path: Path, installed_chat: SimpleNamespace,
+) -> None:
     probe = """
 import importlib,json,sys
 from pathlib import Path
@@ -80,8 +86,8 @@ print(json.dumps({"construction":"ready","artifact_contained":True}))
 
 
 def test_installed_construction_refuses_foreign_imports_without_mutation(
-    tmp_path, installed_chat,
-):
+    tmp_path: Path, installed_chat: SimpleNamespace,
+) -> None:
     probe = """
 import json,sys
 from types import ModuleType
@@ -113,7 +119,9 @@ print(json.dumps({"foreign_imports_preserved":len(names)}))
     )) == {"foreign_imports_preserved": 9}
 
 
-def independent_inputs(tmp_path, installed_chat, chat_library_sdists):
+def independent_inputs(
+    tmp_path: Path, installed_chat: SimpleNamespace, chat_library_sdists: dict[str, Path],
+) -> Path:
     inputs = tmp_path / "inputs"
     project = inputs / "services" / "chat"
     for destination, archive in (
@@ -132,8 +140,8 @@ def independent_inputs(tmp_path, installed_chat, chat_library_sdists):
 
 
 def test_installed_constructor_builds_chat_client_from_independent_inputs(
-    tmp_path, installed_chat, chat_library_sdists,
-):
+    tmp_path: Path, installed_chat: SimpleNamespace, chat_library_sdists: dict[str, Path],
+) -> None:
     project = independent_inputs(tmp_path, installed_chat, chat_library_sdists)
     uv = shutil.which("uv")
     assert uv is not None
@@ -236,8 +244,8 @@ print(json.dumps({"construction":"complete","reused":True,"selected":False}))
 
 
 def test_installed_selected_manual_client_update_death_recovery_and_removal(
-    tmp_path, installed_chat, chat_library_sdists,
-):
+    tmp_path: Path, installed_chat: SimpleNamespace, chat_library_sdists: dict[str, Path],
+) -> None:
     project = independent_inputs(tmp_path, installed_chat, chat_library_sdists)
     uv = shutil.which("uv")
     assert uv is not None

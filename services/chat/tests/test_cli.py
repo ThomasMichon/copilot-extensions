@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -17,7 +18,7 @@ from agent_chat_service.transport import GatewayTransport
 from agent_procutil.owned_process import run_caller_owned
 
 
-def configuration(root: Path, endpoint: str, *, codename="agent-a") -> Path:
+def configuration(root: Path, endpoint: str, *, codename: str = "agent-a") -> Path:
     path = root / (codename + ".json")
     path.write_text(json.dumps({
         "schema": "agent-chat.client", "version": 1,
@@ -28,7 +29,9 @@ def configuration(root: Path, endpoint: str, *, codename="agent-a") -> Path:
     return path
 
 
-def cli(path, *args, text=None, expected=0):
+def cli(
+    path: str | Path, *args: str, text: str | None = None, expected: int = 0,
+) -> Any:
     result = run_caller_owned(
         [sys.executable, "-m", "agent_chat_service.cli", "--config", str(path), *args],
         input_text=text, timeout=20,
@@ -38,7 +41,7 @@ def cli(path, *args, text=None, expected=0):
     return json.loads(result.stdout if expected == 0 else result.stderr)
 
 
-def parsed_cli(path, *args, text=None):
+def parsed_cli(path: str | Path, *args: str, text: str | None = None) -> Any:
     output, error = io.StringIO(), io.StringIO()
     with io.TextIOWrapper(io.BytesIO((text or "").encode("utf-8")), encoding="utf-8") as stream:
         with redirect_stdout(output), redirect_stderr(error), patch.object(sys, "stdin", stream):
@@ -48,8 +51,9 @@ def parsed_cli(path, *args, text=None):
 
 
 def test_real_cli_provider_http_store_and_independent_forward_read(
-    rpc_endpoint, tmp_path, installed_chat, fixed_rpc_provider,
-):
+    rpc_endpoint: SimpleNamespace, tmp_path: Path, installed_chat: SimpleNamespace,
+    fixed_rpc_provider: list[str],
+) -> None:
     path = configuration(tmp_path, rpc_endpoint.endpoint)
     other = configuration(tmp_path, rpc_endpoint.endpoint, codename="agent-b")
     for config_path in (path, other):
@@ -62,7 +66,9 @@ def test_real_cli_provider_http_store_and_independent_forward_read(
     ))
     catalog = json.loads(installed_chat.run([str(installed_chat.console), "catalog"], cwd=tmp_path))
 
-    def installed(config_path, *args, text=None, console=False):
+    def installed(
+        config_path: Path, *args: str, text: str | None = None, console: bool = False,
+    ) -> Any:
         argv = [str(installed_chat.console)] if console else catalog["commands"][0]["argv"]
         output = installed_chat.run(
             [*argv, "--config", str(config_path), *args],
@@ -130,10 +136,13 @@ def test_real_cli_provider_http_store_and_independent_forward_read(
      {"epoch": "0" * 32, "head": 12, "after": 1, "recent_after": 0, "recent_limit": 5},
      '{"epoch":"' + "0" * 32 + '","head":12,"after":1,"recent_after":0,"recent_limit":5}'),
 ])
-def test_cli_dispatch_preserves_exact_client_controls(args, method, positional, controls, text):
+def test_cli_dispatch_preserves_exact_client_controls(
+    args: list[str], method: str, positional: list[object],
+    controls: dict[str, Any], text: str | None,
+) -> None:
     calls = []
 
-    def invoke(*values, **fields):
+    def invoke(*values: object, **fields: Any) -> dict[str, str]:
         calls.append((list(values), fields))
         return {"dispatched": method}
 
@@ -142,7 +151,9 @@ def test_cli_dispatch_preserves_exact_client_controls(args, method, positional, 
     assert calls == [(positional, controls)]
 
 
-def test_cli_lost_post_response_retains_original_and_explicit_recovery_deduplicates(rpc_endpoint, tmp_path):
+def test_cli_lost_post_response_retains_original_and_explicit_recovery_deduplicates(
+    rpc_endpoint: SimpleNamespace, tmp_path: Path,
+) -> None:
     path = configuration(tmp_path, rpc_endpoint.endpoint)
     cli(path, "join", "room")
     rpc_endpoint.state.mode = "drop-post"
@@ -158,7 +169,7 @@ def test_cli_lost_post_response_retains_original_and_explicit_recovery_deduplica
     assert rpc_endpoint.store._db.execute("SELECT count(*) FROM events").fetchone()[0] == 1
 
 
-def test_offline_status_and_capability_never_execute_provider_or_network(tmp_path):
+def test_offline_status_and_capability_never_execute_provider_or_network(tmp_path: Path) -> None:
     path = configuration(tmp_path, "http://127.0.0.1:1")
     marker = tmp_path / "provider-was-called"
     config = json.loads(path.read_text("utf-8"))
@@ -240,7 +251,7 @@ runpy.run_path(original,run_name="__main__")
             f"leaf_ready={bool(caller_observer._read(tmp_path / 'leaf.json'))}; "
             f"descendants={[(child.pid, child.name(), child.ppid(), child.cmdline()) for child in caller_observer.psutil.Process(process.pid).children(recursive=True)]}."
         )
-        def ready():
+        def ready() -> list[dict[str, Any]] | None:
             records = [
                 caller_observer._read(tmp_path / f"{role}.json") for role in ("provider", "leaf")
             ]
@@ -308,7 +319,7 @@ runpy.run_path(original,run_name="__main__")
 
 
 @pytest.mark.parametrize("mode", ["server-error", "redirect", "oversized", "wrong-type"])
-def test_http_failures_are_not_retried_or_redirected(rpc_endpoint, mode):
+def test_http_failures_are_not_retried_or_redirected(rpc_endpoint: SimpleNamespace, mode: str) -> None:
     transport = GatewayTransport({
         "endpoint": rpc_endpoint.endpoint, "token_command": [sys.executable],
     }, runner=lambda *args, **kwargs: b"synthetic-credential")
@@ -318,7 +329,7 @@ def test_http_failures_are_not_retried_or_redirected(rpc_endpoint, mode):
     assert len(rpc_endpoint.state.requests) == 1
 
 
-def test_http_response_bound_is_separate_from_request_bound(rpc_endpoint):
+def test_http_response_bound_is_separate_from_request_bound(rpc_endpoint: SimpleNamespace) -> None:
     transport = GatewayTransport({
         "endpoint": rpc_endpoint.endpoint, "token_command": [sys.executable],
     }, runner=lambda *args, **kwargs: b"synthetic-credential")
@@ -328,8 +339,8 @@ def test_http_response_bound_is_separate_from_request_bound(rpc_endpoint):
 
 @pytest.mark.parametrize("mode", ["trickle-header", "trickle-body"])
 def test_http_total_deadline_releases_viewer_lock_despite_continuing_traffic(
-    rpc_endpoint, tmp_path, monkeypatch, mode,
-):
+    rpc_endpoint: SimpleNamespace, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str,
+) -> None:
     import io
     import agent_chat_service.transport as transport_module
 
