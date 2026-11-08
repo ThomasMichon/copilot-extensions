@@ -149,6 +149,77 @@ unsupported paths, no writes from default/read-only configuration, no credential
 leakage and no replay after unknown effects. Source controls are not installed
 controller support, actual native permission verification or live enrollment.
 
+#### Current authority and request-local material
+
+The existing Fleet `RelayCredentialProvider` calls the mandatory custodian
+verifier with the raw relay response and its selected `RelayPolicy`; it does
+not implement that verifier. The credential-relay server's similarly named
+`RelayPolicy` only filters relay actions/hosts. Neither policy supplies native
+review permission. Keep the two owners distinct rather than using the relay
+allowlist as the missing verifier.
+
+Verification has separate inputs: the selected credential source's
+authoritative account, audience, granted-access and expiry information; native
+effective permissions for the exact target/principal; and the current
+custodian's admission/revocation state. Bind them to the actual acquired
+material, not copied request fields. The existing raw Azure relay response
+alone does not supply all those facts. Unsupported source formats remain
+unavailable; do not infer grants by decoding an unverified token, from a
+successful read, from `.default` in the acquisition request, or from the
+requested action list. Broader native grants may remain behind the finite
+request restrictions; those restrictions are not token downscoping.
+
+Use the native provider's read-only permission evaluation for effective
+principal permission, with the same pinned material and finite IO owner.
+For ADO, the documented
+[Has Permissions GET](https://learn.microsoft.com/en-us/rest/api/azure/devops/security/permissions/has-permissions?view=azure-devops-rest-7.1)
+evaluates the caller against security tokens. Resolve the relevant native
+namespace/action semantics through the supported provider contract, select
+the exact repository/target token, and require complete positive results with
+no administrator shortcut. A positive result is not OAuth grant or token
+audience verification. Missing, denied, ambiguous or unsupported permission
+information refuses review; never use a write as a permission probe.
+
+Current local ownership remains with the admitted credential custodian.
+`LaunchScope.check()` only establishes that the service process has not
+withdrawn; neither it nor `ReviewScope` is native authorization. The native
+factory's mandatory `checkpoint(material)` must recheck the selected
+custodian's current admission and the same material generation at each
+existing dispatch boundary. Do not substitute host readiness, an unexpired
+Gateway session or a permanently successful callback. This is not a new
+credential lease registry or an additional operator sign-off ceremony.
+
+The workspace also needs an explicitly selected **request-local factory
+resolver** before normal-host enrollment. Its current
+`lambda: write_context(number)` invokes the embedding again for each action
+and feedback reconciliation; constructing `ado_review_context_factory` there
+would reacquire credentials inside one submission. Instead resolve that
+factory lazily once on the first protected-context request, then reuse it for
+all contexts in that workspace execution, including feedback. Retain the
+existing per-context embedding unchanged as a separate compatibility path;
+select at most one path and never silently downgrade the request-local one.
+The resolver receives the selected native scope and the enclosing request's
+checkpoint/deadline. It cannot extend the budget or cache material across
+concurrent requests or the host lifetime.
+
+Do not acquire review credentials for capabilities, preparation, original
+selection/receipt lookup, or a confirmed-operation replay needing no protected
+readback. A later execution may acquire material for read-only reconciliation
+of an unknown action, but may not resend that action or replace its original
+attempt/receipt. Within each execution, expiry, rotation, withdrawal or denial
+cannot trigger replacement acquisition. Current authorization gates access
+without rewriting approved content.
+
+Deliver and qualify this finite workspace lifetime seam before extending the
+strict standalone host parser. Native verifier/source adoption remains its
+own prerequisite, not something an injected resolver completes. Focused
+controls must prove one acquisition across multiple actions and feedback,
+zero acquisition on storage-only recovery, independent concurrent requests,
+denial/rotation without reacquisition, unchanged legacy embedding, and
+unknown-action reconciliation without resend. Missing or withdrawn whole-path
+support refuses before acquisition; all network work retains the existing
+bounded transport and drain owner.
+
 ### Recovery, compatibility and lifecycle
 
 Continue the existing original-operation key and final prepared selection.
