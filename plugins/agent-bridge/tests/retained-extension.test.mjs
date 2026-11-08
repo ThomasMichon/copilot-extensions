@@ -6,6 +6,7 @@ import * as path from "node:path";
 import * as delivery from "../extensions/agent-bridge/delivery.mjs";
 import * as retained from "../extensions/agent-bridge/retained-delivery.mjs";
 import * as questions from "../extensions/agent-bridge/questions.mjs";
+import * as deliveryState from "../extensions/agent-bridge/delivery-state.mjs";
 import { isRemoteDriverSource } from "../extensions/agent-bridge/remote-driver.mjs";
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
@@ -86,6 +87,7 @@ async function load(selected, version = 50, {
     "./delivery.mjs": delivery,
     "./retained-delivery.mjs": retained,
     "./questions.mjs": questions,
+    "./delivery-state.mjs": deliveryState,
     "./remote-driver.mjs": {
       isRemoteDriverSource,
       createHeadedDriverSession: async (native, options) => {
