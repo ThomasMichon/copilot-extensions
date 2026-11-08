@@ -10,9 +10,13 @@ import re
 import sys
 import uuid
 from pathlib import Path
-from typing import Mapping, TypedDict, cast
+from typing import TYPE_CHECKING, Mapping, TypedDict, cast
 
-if __package__:
+if TYPE_CHECKING:
+    from attribution_profile import (
+        Profile, ProfileError, Signature, _object, decorate, load_profile, resolve,
+    )
+elif __package__:
     from .attribution_profile import (
         Profile, ProfileError, Signature, _object, decorate, load_profile, resolve,
     )
