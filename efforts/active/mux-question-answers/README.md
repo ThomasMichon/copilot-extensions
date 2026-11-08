@@ -378,3 +378,25 @@ runtime remediation, elevated operation or destructive cleanup is authorized.
 - Adopter installation, actual synthetic answers and same-session
   continuation remain separate pending gates. Preserve current rollout
   custody, bounded inspection approvals and pre-existing sessions.
+
+### 2026-11-07 - POSIX incoming-publication prerequisite
+
+- Took the source-only #11476 correction: a missing sibling socket behind a
+  retained POSIX link refused incoming startup before native listener
+  inspection. Live installation and broader handover remain separate.
+- Retain link identity and raw target when the resolved same-directory socket
+  is absent. Existing non-socket/foreign targets, actual inspection I/O errors
+  and changed-link admission still refuse.
+- The real private publication control also exposed premature activation when
+  the new candidate reused the missing target name. Reserve that retained name
+  and construct a distinct candidate before guarded route/handle publication.
+- The canonical private POSIX container packet passed 80 tests with two
+  platform/explicit-tier skips; Windows passed 71 with 11 skips. Source lint,
+  all 13 installation contracts and all 41 enforced typing projects passed.
+  MCP itself remains outside current strict typing admission.
+- Refresh the current source footprint without changing contract revision 36.
+  Updated incoming-publication documentation describes the exact snapshot and
+  candidate-name behavior without claiming installed acceptance.
+- Detour exit: normal source review and release for #11476, then resume the
+  separately authorized update and synthetic-answer gates. No pre-existing
+  handle, route or session was deleted or changed for qualification.
