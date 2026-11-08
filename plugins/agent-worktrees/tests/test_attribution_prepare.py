@@ -27,9 +27,10 @@ def fixture(mode="codename", source="built-in", explicit=False):
         "codename": "bolted-circuit", "codename_source": source,
         "worktree_path": "fixture-root", "sessions": [],
     }, path=Path("fixture-root.yaml"))
-    config = SimpleNamespace(default_repo=SimpleNamespace(pr=SimpleNamespace(
+    repository = SimpleNamespace(pr=SimpleNamespace(
         source_attribution=mode, source_attribution_configured=explicit,
-    )))
+    ))
+    config = SimpleNamespace(default_repo=repository, repos={"fixture": repository})
     return record, config
 
 
@@ -582,3 +583,42 @@ def test_explicit_origin_uses_real_unnamed_config_without_ambient_project(
     else:
         assert "error" in result and "origin" not in result
     assert cli.cfg.active_project() == active
+
+
+def test_unresolved_selected_project_cannot_borrow_another_privacy_policy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capfd: pytest.CaptureFixture[str],
+) -> None:
+    root = tmp_path / "source"
+    policy = root / ".copilot-extensions" / "agent-worktrees"
+    policy.mkdir(parents=True)
+    (policy / "config.yaml").write_text('{"pr":{"source_attribution":false}}', encoding="utf-8")
+    other = tmp_path / "other"
+    other.mkdir()
+    state = tmp_path / "project"
+    (state / "worktrees").mkdir(parents=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    (state / "worktrees/selected.yaml").write_text(json.dumps({
+        "worktree_id": "selected", "branch": "worktree/selected", "repo": "producer",
+        "machine": "fixture-machine", "platform": "linux", "worktree_path": str(root),
+        "codename": "bolted-circuit", "codename_source": "built-in", "sessions": [],
+    }), encoding="utf-8")
+    config_path = state / "config.yaml"
+    config_path.write_text(json.dumps({
+        "repo_name": "producer", "machine": "fixture-machine", "platform": "linux",
+        "repos": {
+            "producer": {},
+            "other": {"anchor": str(other), "pr": {"source_attribution": "codename"}},
+        },
+    }), encoding="utf-8")
+    monkeypatch.setenv("AGENT_HOME", str(home))
+    monkeypatch.setattr(cli.cfg, "_ACTIVE_PROJECT", None)
+    monkeypatch.setattr(cli.cfg, "global_config_path", lambda: home / "absent-global.yaml")
+    monkeypatch.setattr(cli.cfg, "_resolve_anchor_from_registry", lambda *args: "")
+    monkeypatch.setattr(cli.cfg, "project_dir", lambda name=None: state)
+    monkeypatch.chdir(tmp_path)
+    assert cli.cmd_attribution_prepare(_comment_args(
+        "--comment-origin", "--source-root", str(root), "--config", str(config_path), "--json",
+    )) == 1
+    result = json.loads(capfd.readouterr().out)
+    assert "error" in result and "bolted-circuit" not in str(result)

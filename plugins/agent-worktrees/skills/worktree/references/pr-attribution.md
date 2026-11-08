@@ -263,6 +263,8 @@ Both references must be absolute; the configuration file must exist.
 Select `repo_name`, or the sole configured repository, from that explicit
 file before loading policy layers. Multiple unnamed repositories refuse;
 global defaults and active-project identity cannot choose this producer.
+The selected repository's policy must actually resolve; another repository's
+default policy cannot authorize the producer when its own anchor is unavailable.
 The exact-root resolver above owns registration and privacy checks. It never
 falls back to an enclosing worktree or the service's CWD. Missing, ambiguous,
 withdrawn or unauthorized source data refuses without allocating or modifying

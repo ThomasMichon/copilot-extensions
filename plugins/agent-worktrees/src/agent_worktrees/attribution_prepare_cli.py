@@ -28,6 +28,8 @@ def resolve_comment_origin(
         if len(config.repos) != 1:
             raise ValueError("selected producer requires one unambiguous configured project")
         project = next(iter(config.repos))
+    if project not in config.repos:
+        raise ValueError("selected producer project policy is unavailable")
     tracking_path = cfg.tracking_dir(project)
     matches = [
         record.worktree_id
