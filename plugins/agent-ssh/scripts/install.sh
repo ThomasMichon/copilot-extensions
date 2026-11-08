@@ -1015,7 +1015,7 @@ _assert_source_runtime_identity || exit 1
 case "$ACTION:${DRY_RUN:-0}" in
     install:0|update:0|provision:0)
         . "$SCRIPT_DIR/installer-instance-reconcile.sh"
-        reconcile_installer_instances "$SCRIPT_DIR"
+        reconcile_installer_instances "$SCRIPT_DIR" "" "$INSTALL_DIR"
         ;;
 esac
 # Cheap 'stamp': splat the binstub + payload marker, defer the venv build to first

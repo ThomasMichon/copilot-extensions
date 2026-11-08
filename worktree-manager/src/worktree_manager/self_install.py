@@ -923,7 +923,7 @@ def self_install(
         ):
             from installer_instance_reconcile import reconcile_installer_instances
 
-            reconcile_installer_instances(_runtime_scripts())
+            reconcile_installer_instances(_runtime_scripts(), runtime_root=r)
         candidate_options = {key: value for key, value in (
             ("python", _base_python), ("uv", _uv), ("wheel_inputs", _wheel_inputs),
             ("local_packages", _local_packages), ("validate_candidate", _validate_candidate),

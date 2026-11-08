@@ -3064,7 +3064,7 @@ if ($Action -notin @('uninstall', 'stamp', 'engine', 'engine-update') -and
 try {
 if ($Action -in @('install', 'update', 'provision')) {
     . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
-    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot -RuntimeRoot $InstallDir
 }
 switch ($Action) {
     'install' {
