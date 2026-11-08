@@ -130,6 +130,8 @@ def test_actual_stop_keeps_selected_slot_immutable_with_cold_warm_cache(
         f"$env:AGENT_INDEX_ENGINE_HOME = {_literal(engine)}\n"
         f"Set-Location -LiteralPath {_literal(tmp_path)}\n"
         "function Get-ScheduledTask { return $null }\n"
+        "function Test-IndexStartAllowed { param($Name); $true }\n"
+        "$script:IndexObservedTasks = @{}\n"
         "function Stop-ScheduledTask { throw 'Forbidden task stop' }\n"
         + _function("Get-IndexPythonCacheArgs") + "\n"
     )
@@ -146,7 +148,7 @@ def test_actual_stop_keeps_selected_slot_immutable_with_cold_warm_cache(
     previous = None
     cache_root = Path(python_cache_args(root)[1].partition("=")[2]).parent
     for _cycle in range(2):
-        result = _run_ps(script)
+        result = _run_ps(script, script_dir=tmp_path)
         assert result.returncode == 23, result.stderr
         records = [json.loads(line) for line in result.stdout.splitlines() if line.startswith("{")]
         assert [record["args"] for record in records] == (
@@ -178,7 +180,7 @@ def test_actual_stop_keeps_selected_slot_immutable_with_cold_warm_cache(
     probe_stat = probe.stat()
     probe.write_text("VALUE = 'fresh selected runtime'\n", encoding="utf-8")
     os.utime(probe, ns=(probe_stat.st_atime_ns, probe_stat.st_mtime_ns))
-    result = _run_ps(script)
+    result = _run_ps(script, script_dir=tmp_path)
     assert result.returncode == 23, result.stderr
     records = [json.loads(line) for line in result.stdout.splitlines() if line.startswith("{")]
     assert records and all(record["value"] == "fresh selected runtime" for record in records)
@@ -297,6 +299,8 @@ def test_no_task_ensure_uses_primary_manager_and_restores_engine_context(tmp_pat
         "$env:AGENT_INDEX_ENGINE_PORT = 'caller-port'\n"
         "$env:AGENT_INDEX_INSTALL_DIR = 'primary-root'\n"
         "function Get-ActiveSlotPython { return 'primary-python' }\n"
+        "function Test-IndexStartAllowed { param($Name); $true }\n"
+        "function Get-RequiredRuntimeRole { 'host' }\n"
         "function Test-Path {\n"
         " param($Path, $LiteralPath)\n"
         " if ($LiteralPath) { return $true }\n"
