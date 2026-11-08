@@ -5288,8 +5288,7 @@ def _current_session_ids() -> set[str]:
 # ── Lazy dispatch (agent-cli-lazy-dispatch effort, Phase 1) ────────────────
 # Command -> (module, handler); modules expose add_parsers/register_cli. Regenerate by importing
 # agent_worktrees.__main__ once (pays the full cost, offline), then for each
-# add_parsers-owning module, building a throwaway
-# `argparse.ArgumentParser().add_subparsers()` and calling that module's own
+# parser module, building throwaway argparse subparsers and calling its own
 # `add_parsers(sub)` to see which command names land in `sub.choices`;
 # Cross-check COMMAND_MAP module/name; exclude inline build_parser parsers
 # (activity, activity-log, stage-update,
@@ -5356,6 +5355,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'handoff-head-observation': ('handoff_head_observation', 'cmd_observation'),
     'history-digest': ('session_metadata_cli', 'cmd_history_digest'),
     'hygiene': ('maintenance_cli', 'cmd_hygiene'),
+    'python-cache': ('python_cache_prune', 'cmd_python_cache'),
     'install': ('installation_cli', 'cmd_install'),
     'install-status': ('context_cli', 'cmd_install_status'),
     'installer-readiness': ('context_cli', 'cmd_installer_readiness'),
@@ -6129,6 +6129,7 @@ def _load_full_command_surface() -> None:
         "backfill-sessions": cmd_backfill_sessions,
         "doctor": cmd_doctor,
         "hygiene": cmd_hygiene,
+        "python-cache": __import__(f"{__package__}.python_cache_prune", fromlist=["cmd_python_cache"]).cmd_python_cache,
         "list-sessions": cmd_list_sessions,
         "handoff-head-observation": handoff_head_observation.cmd_observation,
         "head-session": cmd_head_session,

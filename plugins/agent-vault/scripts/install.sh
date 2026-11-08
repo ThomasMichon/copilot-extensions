@@ -842,6 +842,8 @@ _install_service() {
             AGENT_VAULT_INSTALLATION_ID="$INSTALLATION_ID" \
             "$LINK_PYTHON" -X "pycache_prefix=$INSTALL_DIR/cache/python/unsealed-$cache_id" -m agent_vault.service --export-handoff 2>/dev/null
         )" || handoff_json=""
+        # One-shot child has exited; drop the cache namespace it minted.
+        rm -rf -- "$INSTALL_DIR/cache/python/unsealed-$cache_id" 2>/dev/null || true
     fi
 
     service_configuration="$("$LINK_PYTHON" -I -B -X utf8 -c \
