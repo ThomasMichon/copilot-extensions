@@ -372,7 +372,9 @@ class WorkspaceOperations:
                 expires_at=expires_at, checkpoint=check,
             )
         elif operation == "observe-comment":
-            if self.prepared_reviews is not True:
+            if self.prepared_reviews is not True or self.store.review_intent_versions(
+                expires_at=expires_at, checkpoint=check,
+            ) != (1, 2):
                 raise WorkspaceUnavailable("prepared comment observation receiver unavailable")
             result = observe_prepared_comment(
                 self.store, cache, payload["operation_id"], scope, payload["action_id"],

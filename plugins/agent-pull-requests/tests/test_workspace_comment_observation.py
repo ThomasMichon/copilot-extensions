@@ -25,6 +25,48 @@ from test_workspace_tools import invoke_cli
 pytestmark = pytest.mark.parametrize("environment", [True], indirect=True)
 
 
+@pytest.mark.parametrize("transport", ["direct", "native", "gateway"])
+def test_receiver_rechecks_actual_prepared_storage_for_direct_and_stale_clients(
+    environment: tuple, integration: tuple, transport: str,
+) -> None:
+    store, selected, generation, _, backend, _ = environment
+    gateway, client, native, _, _, _ = integration
+    store.admit_review(selected, expires_at=native.expires_at())
+    legacy = store.path.read_bytes()
+    store.adopt_prepared_reviews(lifecycle_checkpoint=lambda: None, expires_at=native.expires_at())
+    native.operations.prepared_reviews = True
+    payload = {"number": 42, "operation_id": selected["operation_id"],
+               "action_id": selected["actions"][0]["id"], "generation_id": generation["id"]}
+
+    async def scenario() -> None:
+        discovered = (await client.capabilities() if transport == "gateway"
+                      else native.exchange("capabilities", {}))
+        assert "observe-comment" in discovered["operations"]
+        # A fixture-owned receiver replacement selects intact prior state, with
+        # only legacy operations; its caller still retains the previous capability.
+        store.path.write_bytes(legacy)
+        before = retained_bytes(store)
+        with pytest.raises((WorkspaceUnavailable, WorkspaceClientError)) as refused:
+            if transport == "gateway":
+                await client.exchange("observe-comment", payload)
+            elif transport == "native":
+                native.exchange("observe-comment", payload)
+            else:
+                native.operations.execute(
+                    "observe-comment", payload, expires_at=native.expires_at(), checkpoint=backend.checkpoint,
+                )
+        if isinstance(refused.value, WorkspaceClientError):
+            assert refused.value.outcome_unknown is False
+        actual = native.operations.execute(
+            "capabilities", {}, expires_at=native.expires_at(), checkpoint=backend.checkpoint,
+        )
+        assert "observe-comment" not in actual["operations"]
+        assert retained_bytes(store) == before and backend.calls == []
+        await gateway.drain(timeout=2)
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("transport", ["native", "gateway"])
 @pytest.mark.parametrize("kind", ["comment", "reply", "edit_owned_comment"])
 def test_actual_cli_original_receipts_and_acquisition_join_without_writer_or_more_reads(
