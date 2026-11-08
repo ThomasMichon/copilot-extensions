@@ -39,7 +39,8 @@ The existing executor retains exact-candidate/ownership checks and persists
 its unknown-effect fence before entering the native effect path. Its bound
 policy callback reruns those same candidate/discussion/owned-target checks on
 every fresher snapshot supplied by the transport, including the post-connect
-read. Observed drift refuses dispatch while retaining the unknown attempt.
+read, plus the original captured-target check when feedback is selected.
+Observed drift refuses dispatch while retaining the unknown attempt.
 The executor restores the original policy callback after each action,
 including refusal and early exits, so an owner can reuse one pinned context
 without retaining a prior action's guard.

@@ -295,6 +295,8 @@ def execute_review(
 
                 def checked_policy(selected_operation, selected_action, fresh, *, context):
                     # The native transport can observe fresher inputs after connecting.
+                    if tracking is not None:
+                        tracking.check_target(fresh)
                     actual = _check_candidate(fresh, operation, baseline)
                     _check_selected_ownership(action, actual, scope["principal_id"])
                     return policy_check(selected_operation, selected_action, fresh, context=context)
