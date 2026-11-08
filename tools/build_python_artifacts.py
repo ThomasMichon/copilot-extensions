@@ -716,7 +716,7 @@ def build_wheel(
         elif python:
             cmd += ["--python", python]
         cmd.append(str(source_dir))
-        build_env = sanitize_subprocess_env()
+        build_env = sanitize_subprocess_env() | dict.fromkeys(("TMP", "TEMP", "TMPDIR"), staging)
         if normalize_timestamps:
             build_env["SOURCE_DATE_EPOCH"] = _ARTIFACT_SOURCE_DATE_EPOCH
         if toolchain is not None:

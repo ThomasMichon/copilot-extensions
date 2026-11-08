@@ -124,6 +124,24 @@ def instance_store(tmp_path, monkeypatch):
     return root, runtime
 
 
+def test_native_validation_refusal_cancels_exact_reservation(instance_store):
+    import os
+    import sys
+
+    from agent_procutil import no_window_flags
+    from agent_procutil.daemon_instances import spawn_instance
+
+    root, runtime = instance_store
+    with pytest.raises(ValueError):
+        spawn_instance(
+            [sys.executable, "-c", "pass"],
+            instance=DaemonInstanceSpec("fixture", runtime, Path(__file__).resolve()),
+            env={**os.environ, "INVALID": "embedded\0null"},
+            creationflags=no_window_flags(),
+        )
+    assert store.inspect(root) == []
+
+
 def test_unattended_policy_is_explicit_not_inferred_from_paths(tmp_path):
     production = DaemonInstanceSpec("fixture", tmp_path, Path(__file__).resolve())
     disposable = DaemonInstanceSpec(
