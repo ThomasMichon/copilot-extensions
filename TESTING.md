@@ -7995,6 +7995,13 @@ absence after contained-worker death within the original 360-second budget.
 real native containment timeout against a file-backed daemon protocol stub.
 That fatal-worker regression is not a real Docker fault-injection proof.
 
+The Index local-serving observation controls run with
+`python tools/run-plugin-tests.py agent-index --test-file tests/test_serving_observation.py --test-file tests/native/test_serving_observation_native.py --allow-explicit-tiers`.
+The native case launches and settles an isolated host, then verifies its routed
+PID through the actual owner probe. The unit controls keep missing, foreign,
+changing and unready evidence `unknown`; they do not prove a service cutover
+or inactive-host ownership.
+
 The standalone runner accepts the legacy `agent-index-service` and
 `agent-dispatch-service` component names as aliases for `services/index` and
 `services/dispatch`, respectively. It normalizes aliases before environment

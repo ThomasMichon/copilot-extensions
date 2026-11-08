@@ -657,6 +657,13 @@ service update.
 The installer requires a zero native deployment exit and then validates the
 selected generation and routed PID through the runtime's existing owned-health
 reader. Old-service HTTP success cannot certify the incoming generation.
+The optional `agent_index.serving_observation` owner probe reads the local
+routing and owned-health evidence independently of the current repository's
+role. It reports a generation only while the routed PID, native start identity
+and service instance remain consistent; a missing, foreign, changing or
+unreachable route is `unknown`, never proof of an inactive host. The probe
+does not start a service, change selection or touch the durable engine; an
+unknown observation is not a veto on a separately authorized installation.
 POSIX install/update/provision invokes the native owner independently of
 systemd availability and propagates failure instead of falling back to
 ensure-running. Repository activation gates and construction profiles are
