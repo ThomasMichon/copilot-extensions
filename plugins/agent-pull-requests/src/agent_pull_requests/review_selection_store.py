@@ -119,6 +119,7 @@ class ReviewSelectionStore:
         operation = review_intent.new_operation(
             prepared, created_at=self.owner.clock(),
             receipt_bytes=document["capacities"]["receipt_bytes"],
+            mappings=document.get("review_comment_mapping_version") == 1,
         )
         operation["selection"] = {"input_id": _digest(original), "stage": "prepared"}
         operation["reserved_bytes"] += len(review_intent.encoded(operation["selection"])) + 32

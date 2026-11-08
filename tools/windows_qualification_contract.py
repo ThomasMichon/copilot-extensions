@@ -11,7 +11,8 @@ WORKFLOW = "windows-qualification.yml"
 TRANSPORT_REF = "refs/qualification/windows-inputs"
 TRANSPORT_MARKER = "windows-qualification-transport-v1"
 SUPPORT_PATH = "tools/windows-qualification-support.json"
-PACKETS = ("bridge-http52",)
+PACKETS = ("bridge-http52", "native-worktrees-embody")
+NATIVE_VERSIONS = {"copilot": "1.0.105", "psmux": "3.3.8"}
 SHA = re.compile(r"[0-9a-f]{40}")
 NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
 REQUEST_ID = re.compile(r"[0-9a-f]{32}")
@@ -143,9 +144,16 @@ def validate_result(
     cases = value.get("tests")
     if not isinstance(cases, list):
         raise ValueError("missing actual test outcomes")
-    if value["outcome"] == "qualified" and expected["selection"]["kind"] != "packet":
+    native = expected["selection"] == {"kind": "packet", "name": "native-worktrees-embody"}
+    if value["outcome"] == "qualified" and (expected["selection"]["kind"] != "packet" or native):
         if not cases or any(case.get("outcome") != "passed" for case in cases):
             raise ValueError("empty, failed or skipped selection cannot qualify")
+        if native and (
+            len(cases) != 1 or cases[0].get("name") != "test_public_embody"
+            or not cases[0].get("class", "").endswith("test_native_seed_application")
+            or value.get("native_prerequisites") != NATIVE_VERSIONS
+        ):
+            raise ValueError("native caller or prerequisite identity mismatch")
     if value["outcome"] == "qualified":
         required = {
             "plugin": {"source-and-selection", "canonical-plugin-tests", "test-runtime"},
@@ -157,12 +165,17 @@ def validate_result(
                 "test-runtime",
             },
         }[expected["selection"]["kind"]]
+        if native:
+            required = {
+                "source-and-selection", "native-prerequisites",
+                "native-worktrees-public-caller", "test-runtime",
+            }
         phases = value.get("phases", [])
         if {phase.get("name") for phase in phases} != required or any(
             phase.get("status") != "passed" for phase in phases
         ):
             raise ValueError("required qualification phases are incomplete")
-        if expected["selection"]["kind"] == "packet" and (
+        if expected["selection"]["kind"] == "packet" and not native and (
             value.get("packet", {}).get("source_commit") != expected["source_sha"]
             or value.get("packet", {}).get("generation") != 52
             or not value.get("packet", {}).get("case_count")

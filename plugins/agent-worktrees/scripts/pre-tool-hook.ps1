@@ -14,7 +14,7 @@ function Write-PreToolUnavailable([string]$Boundary) {
 function ConvertFrom-PreToolJson([string]$Text) {
     if (-not $Text.TrimStart().StartsWith('{')) { throw 'Expected a JSON object' }
     if ($PSVersionTable.PSVersion.Major -ge 6) {
-        return ConvertFrom-Json -InputObject $Text -AsHashtable -ErrorAction Stop
+        return ,(ConvertFrom-ManagedWorktreesJson $Text)
     }
     if (-not $script:preToolJson) {
         [void][Reflection.Assembly]::Load('System.Web.Extensions, Version=4.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35')

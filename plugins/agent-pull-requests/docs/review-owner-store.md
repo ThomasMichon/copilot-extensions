@@ -184,6 +184,57 @@ with its existing owner. See the
 [reviewed correlation contract](../../../efforts/active/durable-pr-watch-delegation/comment-observation-correlation.md)
 for the separately unfinished receiver, provider and installed qualification.
 
+### Optional retained acquired-comment metadata
+
+`CommentMappingStore(existing_store).adopt(lifecycle_checkpoint=...,
+expires_at=..., checkpoint=...)` explicitly adds
+`review_comment_mapping_version: 1` to an already prepared-review and
+conversation-capable owner. The existing lifecycle owner must exclude old
+strict file readers; they refuse the extension before replacement. Adoption
+does not enable a host or downgrade old data.
+
+Eligible existing and newly retained prepared actions receive one nullable
+`comment_observations` slot under their enclosing review operation. Logical
+and write identity, native scope/actor/target and original confirmation remain
+in the existing intent/receipt, not copied into another mapping database.
+Each acquired slot is at most 2 KiB; its maximum growth is reserved separately
+from native receipt growth within the existing review capacity. Existing
+operation/action limits still apply. Adoption either funds all existing slots
+or refuses unchanged. Legacy and bodyless actions receive no slots.
+
+An actual acquisition embedding may explicitly select
+`ConversationStore.observe_workspace(..., comment_mappings=True)` after
+successful cache publication. It reuses the normalized read-only join inside
+the same admitted journal/envelope transaction. Discussion normalization and
+native-ID indexing occur once per acquired generation; repeated targets also
+reuse one object digest. Bounded existing-operation/action lookup follows.
+No provider query or background loop is added.
+Default acquisition remains unchanged; the current workspace load/sync host
+does not yet select this option.
+
+Slots retain only generation identity, original discussion interval and
+completeness/error count, correlation outcome/reason and an available
+normalized object digest. Stale/rejected journal observations cannot change
+them; older or overlapping discussion evidence cannot replace a known newer
+slot. Repeating the same evidence reconciles idempotently. Changed native
+objects with independently valid newer section timestamps can replace a
+positive slot with explicit unavailability even when duplicate IDs or malformed
+objects make the join unusable; the timestamps do not certify its contents.
+Changed native
+attempt/receipt state invalidates its prior slot, rather than combining old
+correlation with a new receipt. No mapping-only update advances conversation,
+attention, echo, handled or ACK state. Cache publication is still a separate
+commit; uncertainty never authorizes another forge write.
+
+`CommentMappingStore.read(operation_id, scope, action_id, expires_at=...)`
+returns body-free retained evidence through the same scoped owner without a
+cache/body dependency. Missing slots remain null. Native confirmation and
+unknown outcomes are unchanged; a normalized object digest is not original
+native-version proof. This finite library/data leaf introduces no workspace
+request or advertised reader capability. Baseline workspace inspection omits
+the new storage metadata. Negotiated serving, actual host handoff and
+provider/installed acceptance remain separate.
+
 ## Optional pre-approval selection retention
 
 `ReviewSelectionStore(existing_store)` uses the same file, operation lock,
