@@ -126,3 +126,62 @@ runtime remediation, elevated operation or destructive cleanup is authorized.
 - [2026-11-07/08 - Source qualification and release](journal/2026/11.08%20source-and-release.md):
   original 2026-11-07/08 entries, reviewed source and release evidence, and
   the POSIX prerequisite; both installed acceptance gates remain open.
+
+Compatibility anchors for the former inline journal, newest first:
+
+### 2026-11-07 - POSIX incoming-publication prerequisite
+[Read entry](journal/2026/11.08%20source-and-release.md#2026-11-07---posix-incoming-publication-prerequisite).
+
+### 2026-11-07 - Correction released through ordinary promotion
+[Read entry](journal/2026/11.08%20source-and-release.md#2026-11-07---correction-released-through-ordinary-promotion).
+
+### 2026-11-07 - Reviewed correction merged
+[Read entry](journal/2026/11.08%20source-and-release.md#2026-11-07---reviewed-correction-merged).
+
+### 2026-11-07 - Required unit admission correction
+[Read entry](journal/2026/11.08%20source-and-release.md#2026-11-07---required-unit-admission-correction).
+
+### 2026-11-07 - Final native correction qualified
+[Read entry](journal/2026/11.08%20source-and-release.md#2026-11-07---final-native-correction-qualified).
+
+### 2026-11-07 - Bounded historical-checker cost correction
+[Read entry](journal/2026/11.08%20source-and-release.md#2026-11-07---bounded-historical-checker-cost-correction).
+
+### 2026-11-07 - Delayed native rendering controls
+[Read entry](journal/2026/11.08%20source-and-release.md#2026-11-07---delayed-native-rendering-controls).
+
+### 2026-11-07 - Reconciled concurrent source
+[Read entry](journal/2026/11.08%20source-and-release.md#2026-11-07---reconciled-concurrent-source).
+
+### 2026-11-07 - Installed corrections source qualified
+[Read entry](journal/2026/11.08%20source-and-release.md#2026-11-07---installed-corrections-source-qualified).
+
+### 2026-11-07 - Installed qualification corrections
+[Read entry](journal/2026/11.08%20source-and-release.md#2026-11-07---installed-qualification-corrections).
+
+### 2026-11-07 - Reviewed implementation merged
+[Read entry](journal/2026/11.08%20source-and-release.md#2026-11-07---reviewed-implementation-merged).
+
+### 2026-11-07 - Combined delivery source qualified
+[Read entry](journal/2026/11.08%20source-and-release.md#2026-11-07---combined-delivery-source-qualified).
+
+### 2026-11-07 - Restored-serving and storage review corrections
+[Read entry](journal/2026/11.08%20source-and-release.md#2026-11-07---restored-serving-and-storage-review-corrections).
+
+### 2026-11-07 - Corrected source qualified
+[Read entry](journal/2026/11.08%20source-and-release.md#2026-11-07---corrected-source-qualified).
+
+### 2026-11-07 - Completion-evidence review correction
+[Read entry](journal/2026/11.08%20source-and-release.md#2026-11-07---completion-evidence-review-correction).
+
+### 2026-11-07 - Complete current source qualification
+[Read entry](journal/2026/11.08%20source-and-release.md#2026-11-07---complete-current-source-qualification).
+
+### 2026-11-07 - Whole-surface admission audit
+[Read entry](journal/2026/11.08%20source-and-release.md#2026-11-07---whole-surface-admission-audit).
+
+### 2026-11-07 - Reviewed plan and private native controls
+[Read entry](journal/2026/11.08%20source-and-release.md#2026-11-07---reviewed-plan-and-private-native-controls).
+
+### 2026-11-07 - Contract and scope
+[Read entry](journal/2026/11.08%20source-and-release.md#2026-11-07---contract-and-scope).
