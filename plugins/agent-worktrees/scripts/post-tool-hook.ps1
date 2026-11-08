@@ -60,7 +60,7 @@ function Invoke-ResidentPostTool {
         if ($null -ne $value) { $forwarded[$key] = $value }
     }
     if ($payload -is [Collections.IDictionary]) {
-        if (-not $payload.Contains('_agentWorktrees')) { $payload['_agentWorktrees'] = @{ environment = $forwarded } }
+        if (-not $payload.ContainsKey('_agentWorktrees')) { $payload['_agentWorktrees'] = @{ environment = $forwarded } }
     } elseif ($null -eq $payload.PSObject.Properties['_agentWorktrees']) {
         $payload | Add-Member -NotePropertyName '_agentWorktrees' -NotePropertyValue @{ environment = $forwarded }
     }
@@ -116,10 +116,10 @@ function Invoke-ResidentPostTool {
 
 function Invoke-PostToolHook {
     param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Raw)
-    $admission = Join-Path $PSScriptRoot 'managed-session.ps1'
+    $admission = [IO.Path]::Combine($PSScriptRoot, 'managed-session.ps1')
     if (-not [IO.File]::Exists($admission)) { return }
     . $admission
-    $factsReader = Join-Path $PSScriptRoot 'hook-facts.ps1'
+    $factsReader = [IO.Path]::Combine($PSScriptRoot, 'hook-facts.ps1')
     if ([IO.File]::Exists($factsReader)) {
         . $factsReader
         $readResult = Invoke-PreparedPostToolRead -Raw $Raw
@@ -128,7 +128,6 @@ function Invoke-PostToolHook {
             return
         }
     }
-    if (-not (Test-ManagedWorktreesSession -Raw $Raw)) { return }
     $utf8 = [Text.UTF8Encoding]::new($false, $true)
     $OutputEncoding = $utf8
     [Console]::OutputEncoding = $utf8
@@ -138,6 +137,7 @@ function Invoke-PostToolHook {
         Set-Location -LiteralPath ([IO.Path]::GetPathRoot($PSScriptRoot)) -ErrorAction Stop
     }
     [IO.Directory]::SetCurrentDirectory((Get-Location).Path)
+    if (-not (Test-ManagedWorktreesSession -Raw $Raw)) { return }
     $contextual = -not [string]::IsNullOrWhiteSpace($env:COPILOT_EXTENSIONS_CONTEXT)
     if (-not $contextual) {
         try {

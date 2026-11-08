@@ -9,7 +9,9 @@ waiting out the full periodic sweep interval.
 
 from __future__ import annotations
 
+import os
 import threading
+import types
 
 import pytest
 
@@ -66,14 +68,33 @@ def test_notify_never_raises_even_if_the_bound_cache_is_broken():
         def invalidate(self, path):
             raise RuntimeError("boom")
 
+    changed = []
     wake_event = threading.Event()
-    resident_push.bind(wake_event, _BrokenCache())
+    resident_push.bind(wake_event, _BrokenCache(), changed=changed.append)
 
     resident_push.notify("/some/worktree/path")  # must not raise
 
-    # The wake-event set() never ran because invalidate() raised first --
-    # best-effort means "don't crash the caller", not "guarantee delivery".
-    assert not wake_event.is_set()
+    # A broken cache must not swallow the event: the roster still learns of
+    # the change and the loop still wakes.
+    assert changed == ["/some/worktree/path"]
+    assert wake_event.is_set()
+
+
+def test_notify_forwards_each_change_to_the_bound_roster_queue():
+    changed = []
+
+    def _broken_queue(path):
+        changed.append(path)
+        raise RuntimeError("queue fixture broken")
+
+    wake_event = threading.Event()
+    resident_push.bind(wake_event, object(), changed=_broken_queue)
+
+    resident_push.notify("/some/worktree/path")
+    resident_push.notify("")
+
+    assert changed == ["/some/worktree/path", None]
+    assert wake_event.is_set()
 
 
 def test_reset_clears_bound_state():
@@ -84,3 +105,32 @@ def test_reset_clears_bound_state():
     resident_push.notify("/some/worktree/path")  # safe no-op post-reset
 
     assert not wake_event.is_set()
+
+
+def test_project_resolver_maps_paths_from_caches_then_registry(tmp_path, monkeypatch):
+    from agent_worktrees import status_updater_cli
+
+    served = tmp_path / "served"
+    observed = tmp_path / "observed"
+    anchor = tmp_path / "repo"
+    looked_up = []
+
+    def reverse_lookup(path):
+        looked_up.append(path)
+        return "anchored" if path == anchor else None
+
+    monkeypatch.setattr(status_updater_cli, "_reverse_lookup_project", reverse_lookup)
+    cache = types.SimpleNamespace(
+        project_for_observation_path=lambda path: "observed" if path == str(observed) else None,
+    )
+    resolve = resident_push.project_resolver(
+        {os.path.normcase(os.path.realpath(served)): "served"}, cache,
+    )
+
+    assert resolve(str(served)) == "served"
+    assert resolve(str(observed)) == "observed"
+    assert resolve(str(tmp_path / "repo.worktrees" / "wt-1")) == "anchored"
+    assert resolve(str(tmp_path / "elsewhere")) is None
+    # A segment cache without the observation lookup falls through to the registry.
+    assert resident_push.project_resolver({}, object())(str(observed)) is None
+    assert looked_up[0] == anchor

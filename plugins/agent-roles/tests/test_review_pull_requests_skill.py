@@ -6,6 +6,7 @@ import copy
 import json
 import re
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -39,7 +40,7 @@ def _missing_refusals(text: str) -> set[str]:
     return set(REFUSALS) - rows
 
 
-def _validate_unobserved_example(example: dict) -> None:
+def _validate_unobserved_example(example: dict[str, Any]) -> None:
     """Check only this synthetic unobserved fixture, not operational state."""
     assert example["example_only"] is True
     assert example["example_format_version"] == 1

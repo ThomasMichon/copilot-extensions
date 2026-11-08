@@ -398,10 +398,18 @@ _Operator-required outcome; agent-recommended slices and validation._
   before the attempt fence and at dispatch, and preserve unknown attempts on
   later denial. Actual credential-source grant/audience verification, current
   custodian admission and strict normal-host enrollment remain separate.
-- [ ] Review and deliver [preparation without writer enrollment](comment-producer-enrollment.md#preparation-without-writer-enrollment)
-  through the existing allocation and trusted source/profile owners. Qualify
-  the preparation-only receiver before explicit standalone-host adoption;
-  no preview implies protected submission or verifies the raw Azure source.
+- [x] Supply the finite [preparation-only receiver](comment-producer-enrollment.md#preparation-without-writer-enrollment)
+  through the existing allocation and trusted source/profile owners (#11471).
+  Retain exact selection contracts and original previews without a writer;
+  submission remains independently unavailable.
+- [ ] Deliver the [canonical helper and native source-discovery prerequisites](comment-producer-enrollment.md#canonical-helper-delivery-and-native-source-discovery)
+  before expanding strict standalone configuration. Direct wheel/sdist/release
+  delivery and actual executing exact-root discovery are separate from
+  fixture imports or installed enrollment.
+- [ ] Supply explicitly selected standalone preparation-only hosting using
+  those actual source/profile dependencies. Qualify the executing provider before
+  advertising support; no preview verifies protected-source grants or
+  closes writer enrollment.
 - [ ] Deliver the actual protected write-owner prerequisite through its
   existing owners, then bind one explicitly selected authenticated host route.
   Injected factories and observation credentials do not satisfy these exits;
@@ -962,12 +970,18 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
-- [ ] Qualify preparation-only CLI/client/Gateway allocation and original
+- [x] Qualify preparation-only CLI/client/Gateway allocation and original
   recovery with the actual preparer, zero protected acquisitions/sends,
   independent submission refusal, unchanged writer/default behavior and
-  current/prior receiver rollback. Verify executing source/profile packaging
-  before standalone-host preparation is advertised; preserve the separately
-  open credential-source and protected-writer acceptance.
+  current/prior receiver rollback (#11471; 107 coupled source cases).
+- [ ] Qualify the [canonical helper delivery and native discovery controls](comment-producer-enrollment.md#canonical-helper-delivery-and-native-source-discovery):
+  outside-checkout wheel consumption, sibling-free sdist rebuild, canonical
+  bytes/import isolation and actual exact-root current/prior parser/discovery
+  refusal, with no credential or forge effects.
+- [ ] Verify actual executing source/profile packaging and the strict
+  current/prior standalone-host configuration/process seam before
+  preparation-only hosting is advertised. Preserve the separately open
+  credential-source, protected-writer and installed/provider acceptance.
 
 - [x] Qualify native effective-permission evaluation (#11462; 216 coupled
   source cases) with contained namespace/
@@ -1161,6 +1175,25 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-08 - Merge the qualified fresh-validation source improvement
+
+- #11472 merged at `57952d35f1d98800bf8b4980d29a3d7007dbd741`
+  after final-head Copilot approval `5816236964` with no open issues and
+  required CI `42440720357` passed. The two changed canonical unit-source
+  admissions and two runtime-admission generated SDK copies are synchronized;
+  the unit inventory, coverage targets and budget are unchanged.
+- The integrated original normal-payload lifecycle passes locally within its
+  original limits, alongside the focused driver, native entry, guarded-journal
+  and real TCP controls recorded below. This closes the source correction
+  slice, not #11231's installed acceptance or any broader parent outcome.
+- #11153's separate Bridge migration prerequisite has also merged. Next,
+  confirm both fixes in a promoted release before the already-authorized
+  same-machine unified update and isolated installed-owner qualification.
+  Preserve the prior partial-update evidence, existing sessions and pending
+  state; no force, live delegation activation, fleet effect or retained-resource
+  release is implied. #6007 and its installed/service/provider/resource rows
+  remain open.
 
 - [2026-11-07 - Preparation-only producer sequencing](journal/2026/11.07%20preparation-only.md)
 
