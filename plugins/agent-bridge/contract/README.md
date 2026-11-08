@@ -811,9 +811,9 @@ The expanded HTTP-52 portfolio shares one 20-minute Windows aggregate deadline
 across both contained-runner groups, including preparation and cleanup. Its
 individual pytest cases retain their 120-second limit. Earlier capture owners
 retain their existing deadlines; no probe is omitted to fit the budget.
-The Windows source-audited retained-serializer fixture allows 30 seconds for
-its cold lineage subprocess. Production retains its ten-second deadline;
-this fixture proves serializer/custody behavior, not production latency.
+The Windows source-audited retained-writer fixtures allow 30 seconds for
+their cold lineage subprocesses. Production retains its ten-second deadline;
+these fixtures prove serializer/custody behavior, not production latency.
 Each contained runner receives only the remaining aggregate budget for its
 sub-suite and plugin limits. The receipt portfolio includes an actual module
 CLI subprocess, whose launch and source entrypoint are bound as the `cli` role.
