@@ -53,6 +53,30 @@ def lane(tmp_path: Path) -> Path:
     return tmp_path
 
 
+def test_managed_root_tracks_external_canonical_goal_without_ledger_rewrite(tmp_path: Path) -> None:
+    effort = tmp_path / "canonical.md"
+    effort.write_text("# Work\n\n## Goal\n\nInitial mission.\n\n## Plan\n\nWork.")
+    home = tmp_path / "detached-lane"
+    home.mkdir()
+    source = board()
+    source["source"] = {"kind": "effort", "ref": str(effort)}
+    STORE.mutate(home, v2({"operation": "init", "worktree": "fixture-lane", "board": source,
+        "baseline_context": context("input"), "resource_caps": CAPS}, 0, "init"))
+    before = STORE.read(home)
+    accepted = STORE.delivery_record(home)[1]
+    assert "Initial mission." in before["snapshot"]["root"]
+    effort.write_text("# Work\n\n## Goal\n\nAmended mission with current limits.\n")
+    after = STORE.read(home)
+    assert "Amended mission with current limits." in after["snapshot"]["root"]
+    assert after["revision"] == before["revision"]
+    assert after["records"] == before["records"]
+    assert after["documents"] == before["documents"]
+    assert STORE.delivery_record(home)[1] == accepted
+    assert accepted["snapshot"]["root"] == f"effort:{effort}"
+    exporter = importlib.import_module("agenda_export")
+    assert exporter._delivery_matches(accepted, after, accepted["source"], exporter._Budget())
+
+
 def current(home: Path) -> tuple[str, str, str]:
     cursor = STORE.read(home)["documents"]["cursor"]
     frame = cursor["frames"][-1]

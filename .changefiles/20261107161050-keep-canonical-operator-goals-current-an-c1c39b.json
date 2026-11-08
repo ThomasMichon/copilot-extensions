@@ -1,0 +1,9 @@
+{
+  "comment": "Keep canonical operator Goals current and project them into agenda roots",
+  "changes": [
+    {
+      "plugin": "efforts",
+      "type": "patch"
+    }
+  ]
+}

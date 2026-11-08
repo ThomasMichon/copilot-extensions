@@ -167,6 +167,10 @@ test("real extension event path suppresses force and resets only root windows", 
   await runExtensionFixture("native-extension.mjs", "mode: auto\nnative_pressure: nudge\n");
 });
 
+test("production extension registers durable capture, reset replay and the complete paged reader", async () => {
+  await runExtensionFixture("intent-extension.mjs", "mode: manual-only\n");
+});
+
 test("native-selected sessions defer automatic pressure nudges to the host by default", async () => {
   await runExtensionFixture("native-defer-extension.mjs", "mode: auto\n");
 });

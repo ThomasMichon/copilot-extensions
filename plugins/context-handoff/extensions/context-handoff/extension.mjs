@@ -92,6 +92,8 @@ import { createEmergencyLog, installEmergencyDiagnostics } from "./crash-diagnos
 import { createNativeContextObserver, nativePressurePrompt } from "./native-context.mjs";
 import { nativePressureDeferred } from "./native-pressure.mjs";
 import { registerNativePromptReceiptObservation } from "./prompt-receipt.mjs";
+import { registerIntentObservation } from "./intent-observation.mjs";
+import { readCanonicalGoal } from "./intent-goal.mjs";
 import {
   formatAuthorizationEvidence,
   formatHandoffMarkdown,
@@ -203,6 +205,7 @@ const state = {
 };
 
 let nativeObserver;
+let intentObservation;
 const nativeWarnings = new Set();
 
 // Session-only pressure override (pause or replacement thresholds), backed by
@@ -273,6 +276,7 @@ function collectHandoffData(sid, overrides = {}) {
       gitStatus: git.status,
       toolInvocations: state.toolInvocations.slice(-10),
       firstUserPrompt: state.firstUserPrompt || null,
+      intentContinuity: intentObservation?.latest || null,
       agentSummary: overrides.summary || null,
       agentNextSteps: overrides.next_steps || null,
       authorizationEvidence: Object.hasOwn(overrides, "authorization_evidence")
@@ -397,6 +401,7 @@ async function autoForceHandoff(sid, cwd) {
   let markdown;
   try {
     const { data } = collectHandoffData(sid);
+    data.intentContinuity = await intentObservation.facts();
     markdown = formatHandoffMarkdown(data, null);
   } catch (error) {
     session.log(
@@ -493,7 +498,7 @@ async function autoForceHandoff(sid, cwd) {
       { level: "error" },
     );
     if (result.seed && result.manualInstructions) {
-      session.send(result.manualInstructions).catch((error) =>
+      session.send({ prompt: result.manualInstructions, source: "system" }).catch((error) =>
         session.log(
           `[Context Handoff] Stored baton instructions could not be delivered: ${error.message}`,
           { level: "warning" },
@@ -511,7 +516,7 @@ async function autoForceHandoff(sid, cwd) {
     { level: "warning" },
   );
   if (!result.pickup?.pickedUp && result.manualInstructions) {
-    session.send(result.manualInstructions).catch((e) =>
+    session.send({ prompt: result.manualInstructions, source: "system" }).catch((e) =>
       session.log(`[Context Handoff] Force-tier manual-instructions send failed: ${e.message}`, { level: "warning" })
     );
   }
@@ -525,6 +530,34 @@ const session = await joinSession({
   onPermissionRequest,
 
   tools: [
+    {
+      name: "read_intent_corpus",
+      description: "Read ordered durable operator prompts and peer steers after context reconstruction. " +
+        "Use the supplied snapshot and next cursor until next=null. Historical evidence is not " +
+        "fresh authority; research supersession, completed work and current holds before acting.",
+      skipPermission: true,
+      parameters: {
+        type: "object",
+        properties: {
+          snapshot: { type: "string", description: "Snapshot id from intent continuity replay/facts." },
+          record: { type: "integer", minimum: 0 },
+          offset: { type: "integer", minimum: 0 },
+        },
+        required: ["snapshot"],
+      },
+      handler: async (args) => {
+        try {
+          const page = intentObservation.page(args.snapshot, {
+            record: args.record ?? 0, offset: args.offset ?? 0,
+          });
+          return { textResultForLlm: JSON.stringify(page), resultType: "success" };
+        } catch {
+          return { textResultForLlm: "Intent corpus read failed. Preserve the cursor; " +
+            "reconcile the current worktree/storage before assuming the history was read.",
+          resultType: "error" };
+        }
+      },
+    },
     {
       name: "generate_handoff_prompt",
       description:
@@ -585,6 +618,7 @@ const session = await joinSession({
         }
         const sid = state.sessionId || invocation?.sessionId || "unknown";
         const { data: handoffData, modifiedEntries } = collectHandoffData(sid, args);
+        handoffData.intentContinuity = await intentObservation.facts();
         state.authorizationEvidence = handoffData.authorizationEvidence;
 
         if (!nativeObservation.native) state.handoffGenerated = true;
@@ -952,7 +986,8 @@ const session = await joinSession({
         }
 
         return {
-          textResultForLlm: formatConsumeResult(result, { deferComplete }),
+          textResultForLlm: formatConsumeResult(result, { deferComplete }) +
+            (result?.ok ? "\n\n" + JSON.stringify(await intentObservation.facts(), null, 2) : ""),
           resultType: result?.ok ? "success" : "error",
         };
       },
@@ -1206,6 +1241,7 @@ const session = await joinSession({
         void ctx;
         await handoffConfigPromise;
         await session.send({
+          source: "system",
           prompt:
             "Perform a handoff now (the operator invoked /handoff-continue, " +
             "which is explicit authorization). Steps: (1) quiesce owned " +
@@ -1284,6 +1320,7 @@ const session = await joinSession({
               }
               try {
                 await session.send({
+                  source: "system",
                   prompt: buildResumePrompt(
                     body,
                     "agent-dispatch task",
@@ -1292,7 +1329,7 @@ const session = await joinSession({
                       predecessorSession: consumed.predecessorSession,
                       worktree: consumed.worktree,
                     },
-                  ),
+                  ) + "\n\n" + JSON.stringify(await intentObservation.facts(), null, 2),
                   displayPrompt: `Resuming handoff ${task.id.slice(0, 8)} from agent-dispatch`,
                 });
                 markDeliveryPromptInjected(consumed.checkpointState);
@@ -1319,6 +1356,7 @@ const session = await joinSession({
           );
           if (resumed?.ok) {
             await session.send({
+              source: "system",
               prompt: buildResumePrompt(
                 resumed.payload,
                 "task-backed delivery checkpoint",
@@ -1327,7 +1365,7 @@ const session = await joinSession({
                   predecessorSession: resumed.predecessorSession,
                   worktree: resumed.worktree,
                 },
-              ),
+              ) + "\n\n" + JSON.stringify(await intentObservation.facts(), null, 2),
               displayPrompt:
                 `Resuming checkpoint ${checkpoint.handoffToken.slice(0, 8)}`,
             });
@@ -1348,10 +1386,11 @@ const session = await joinSession({
             return;
           }
           await session.send({
+            source: "system",
             prompt: buildResumePrompt(consumed.payload, `file ${file.path}`, {
               predecessorSession: consumed.predecessorSession,
               worktree: consumed.worktree,
-            }),
+            }) + "\n\n" + JSON.stringify(await intentObservation.facts(), null, 2),
             displayPrompt: `Resuming handoff ${consumed.id || basename(file.path)}`,
           });
           return;
@@ -1372,6 +1411,7 @@ const session = await joinSession({
       handler: async () => {
         await handoffConfigPromise;
         await session.send({
+          source: "system",
           prompt:
             "Invoke /consume-handoff now to load this worktree's pending " +
             "handoff and continue from its stored brief.",
@@ -1443,7 +1483,14 @@ handoffConfigPromise.then((resolved) => {
 
 // Turn counting + first-prompt capture (replaces onUserPromptSubmitted).
 const promptReceiptObservation = registerNativePromptReceiptObservation(session, state);
-session.on("session.shutdown", () => { void promptReceiptObservation.dispose(); });
+intentObservation = registerIntentObservation(session, state, {
+  readGoal: (cwd) => readCanonicalGoal(cwd, runCli),
+  allowAutomaticReplay: async () => (await handoffConfigPromise).mode !== "off",
+});
+session.on("session.shutdown", () => {
+  void promptReceiptObservation.dispose();
+  void intentObservation.dispose();
+});
 
 // File / tool-invocation tracking (replaces onPostToolUse's bookkeeping).
 // tool.execution_complete carries the success flag but NOT the call
@@ -1846,7 +1893,7 @@ session.on("session.idle", async (event) => {
     messages.push(msg);
   }
   if (messages.length === 0) return;
-  session.send(messages.join("\n\n")).catch((e) =>
+  session.send({ prompt: messages.join("\n\n"), source: "system" }).catch((e) =>
     session.log(`[Context Handoff] nudge send failed: ${e.message}`, { level: "warning" })
   );
 });

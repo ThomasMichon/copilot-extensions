@@ -160,7 +160,7 @@ files in this repo.**
    effort home's `efforts/TEMPLATE.md` to the new effort's `README.md`. If the
    repo template is missing, run `efforts-setup`; that template is scaffolded
    from this skill's `assets/TEMPLATE.md`.
-4. **Fill the header + Guiding Intent + Request** — capture the operator's ask
+4. **Fill Goal + header + Guiding Intent + Request** — capture the operator's ask
    **verbatim**; don't paraphrase the premise away. Then **validate the
    capture** before moving on (see *Validate the capture* below) — this
    requirement applies here and at every later rewrite.
@@ -172,6 +172,16 @@ files in this repo.**
 7. **Commit** the effort file on the working branch.
 
 ## Validate the capture, then demarcate enhancements
+
+Whenever the operator states or amends a goal, mission or objective, update the
+effort's top `## Goal` immediately, before further substantive work. Keep their
+words verbatim where public-safe, retain earlier intent in Request/its sidecar,
+and record supersession without deleting history or inventing new authority.
+Goal is the canonical current objective; agendas and compact handoffs reference
+it, not a copied phase/task label. For a legacy effort without Goal, explicitly
+use Guiding Intent until the next intent amendment adds Goal. After a reset,
+read current Goal and research accumulated steers against current state,
+completed work, holds and later amendments before acting.
 
 Every creation or later rewrite capturing operator intent must be re-read
 against the actual words: do not omit constraints, soften decisions or silently

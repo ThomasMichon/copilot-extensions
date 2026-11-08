@@ -1,0 +1,9 @@
+{
+  "comment": "Persist operator prompts and peer steers with paged reset and handoff replay",
+  "changes": [
+    {
+      "plugin": "context-handoff",
+      "type": "patch"
+    }
+  ]
+}
