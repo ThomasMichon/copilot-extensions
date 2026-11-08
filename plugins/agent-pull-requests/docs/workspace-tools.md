@@ -229,7 +229,8 @@ extension `review_comment_mapping_version:1`, acquisition
 `workspace-projection/v1`, and `effects: none`.
 
 Native/service clients and the tool façade require the optional declaration
-before dispatch. The receiver rechecks its actual selection and storage, even
+before dispatch. Required contract values are validated; additive metadata is
+ignored. The receiver rechecks its actual selection and storage, even
 for direct or stale clients. Prior, missing, malformed, withdrawn or rolled-back
 support disables only this optional reader; baseline commands retain their
 existing schemas and behavior. No baseline field is repurposed, no command

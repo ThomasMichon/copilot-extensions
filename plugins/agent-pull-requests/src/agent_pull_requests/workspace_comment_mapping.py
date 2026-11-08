@@ -16,7 +16,7 @@ def contract() -> dict[str, str]:
 
 
 def supports(value: object) -> bool:
-    return isinstance(value, dict) and value == contract()
+    return isinstance(value, dict) and all(value.get(name) == expected for name, expected in contract().items())
 
 
 def available(operations, *, expires_at, checkpoint) -> bool:
@@ -30,7 +30,12 @@ def available(operations, *, expires_at, checkpoint) -> bool:
     )
 
 
-def valid_result(value: dict, payload: dict) -> bool:
+def valid_result(value: object, payload: dict) -> bool:
+    if (
+        not isinstance(value, dict) or not isinstance(value.get("result"), dict)
+        or not isinstance(value.get("scope"), dict)
+    ):
+        return False
     result = value["result"]
     return (
         result.get("protocol") == contract()["result_protocol"]

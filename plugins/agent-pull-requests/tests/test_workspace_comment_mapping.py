@@ -240,9 +240,42 @@ def test_optional_negotiation_precedes_new_strict_requests(
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("transport", ["native", "gateway"])
+def test_additive_discovery_metadata_keeps_the_actual_retained_reader_available(
+    environment, prepared_workspace, monkeypatch, capsys, transport,
+) -> None:
+    store, selected, _, _, backend, _ = environment
+    gateway, client, native, _, _, _ = prepared_workspace
+    store.admit_review(selected, expires_at=native.expires_at())
+    enable(native)
+    execute = native.operations.execute
+
+    def receiver(operation, payload, **kwargs):
+        result = execute(operation, payload, **kwargs)
+        if operation == "capabilities":
+            result["comment_mapping_contract"]["additional_hint"] = "optional_future_metadata"
+        return result
+
+    monkeypatch.setattr(native.operations, "execute", receiver)
+    before = retained_bytes(store)
+    code, retained = invoke_cli(WorkspaceTools(native if transport == "native" else client), "retained-comment", {
+        "number": 42, "operation_id": selected["operation_id"], "action_id": selected["actions"][0]["id"],
+    }, monkeypatch, capsys)
+    assert code == 0 and retained["result"]["mapping"] is None, retained
+    assert retained_bytes(store) == before and backend.calls == []
+    asyncio.run(gateway.drain(timeout=2))
+
+
+@pytest.mark.parametrize("value", [None, [], {}, {"result": []}, {"result": {}, "scope": []}])
+def test_retained_result_validator_returns_false_for_malformed_envelopes(environment, value) -> None:
+    from agent_pull_requests.workspace_comment_mapping import valid_result
+    assert valid_result(value, {"operation_id": "selected", "action_id": "finding"}) is False
+
+
 @pytest.mark.parametrize("change", [
     "operation_id", "action_id", "scope", "protocol", "effects",
     "original_version_proven", "feedback_progress", "fresh_native_read",
+    "missing-result", "result-list", "missing-scope", "scope-list",
 ])
 def test_gateway_retained_response_is_bound_and_cannot_claim_live_or_handled_progress(
     environment, prepared_workspace, monkeypatch, change,
@@ -257,7 +290,11 @@ def test_gateway_retained_response_is_bound_and_cannot_claim_live_or_handled_pro
         response = await request(*args, **kwargs)
         if args[1].endswith("/retained-comment"):
             value = json.loads(response.body)
-            if change == "scope":
+            if change.startswith("missing-"):
+                value.pop(change.removeprefix("missing-"))
+            elif change.endswith("-list"):
+                value[change.removesuffix("-list")] = []
+            elif change == "scope":
                 value["result"]["scope"]["principal_id"] = "another-principal"
             else:
                 value["result"][change] = "different"
@@ -273,7 +310,11 @@ def test_gateway_retained_response_is_bound_and_cannot_claim_live_or_handled_pro
             await client.exchange("retained-comment", {
                 "number": 42, "operation_id": selected["operation_id"], "action_id": selected["actions"][0]["id"],
             })
-        assert refused.value.code == "invalid_retained_comment_response" and refused.value.outcome_unknown is False
+        assert refused.value.code == (
+            "workspace_scope_changed" if change.startswith("missing-") or change.endswith("-list")
+            else "invalid_retained_comment_response"
+        )
+        assert refused.value.outcome_unknown is False
         assert retained_bytes(store) == before and backend.calls == []
         await gateway.drain(timeout=2)
 
