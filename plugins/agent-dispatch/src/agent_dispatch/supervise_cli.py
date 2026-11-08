@@ -90,6 +90,8 @@ def _write_supervisor_cycle_start(
         payload["lane_readiness"] = {
             "capability": CAPABILITY, "settings_identity": readiness_identity,
         }
+    else:
+        payload.pop("lane_readiness", None)
     temporary = path.with_suffix(f".{os.getpid()}.tmp")
     temporary.write_text(json.dumps(payload), encoding="utf-8")
     os.replace(temporary, path)

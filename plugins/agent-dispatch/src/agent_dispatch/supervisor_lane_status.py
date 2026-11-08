@@ -204,6 +204,7 @@ def observation(root: Path, profile: Path, arguments: list[str]) -> dict | None:
     if not is_locked(lock):
         return None
     holder = read_holder_pid(lock)
+    holder_start = process_start_token(holder) if type(holder) is int and holder > 0 else None
     directory = root / "run"
     prefix = runtime_status_path(scope + ":instance:", directory=directory).stem.removesuffix(".status")
     paths = list(directory.glob(prefix + "*.status.json"))
@@ -213,9 +214,10 @@ def observation(root: Path, profile: Path, arguments: list[str]) -> dict | None:
     for candidate in paths:
         value, failure = read_status(candidate)
         if failure:
-            raise RuntimeError("classic lane status is unavailable: " + failure)
+            continue
         generation = value.get("generation") if isinstance(value, dict) else None
-        if isinstance(generation, dict) and generation.get("pid") == holder:
+        if (isinstance(generation, dict) and generation.get("pid") == holder
+                and holder_start and generation.get("start_token") == holder_start):
             matching.append(candidate)
     if not matching:
         return {"status": "starting", "pid": holder}
@@ -226,7 +228,7 @@ def observation(root: Path, profile: Path, arguments: list[str]) -> dict | None:
     if error:
         raise RuntimeError("classic lane status is unavailable: " + error)
     if payload is None:
-        return None
+        return {"status": "starting", "pid": holder}
     details = payload.get("lane_readiness")
     generation = payload.get("generation")
     if not isinstance(details, dict) or details.get("capability") != CAPABILITY:
@@ -238,7 +240,7 @@ def observation(root: Path, profile: Path, arguments: list[str]) -> dict | None:
         raise RuntimeError("classic native generation is malformed")
     native_state = identity_state(pid, birth)
     if native_state in {"dead", "reused"}:
-        return None
+        return {"status": "starting", "pid": holder}
     if native_state != "matching" or process_start_token(pid) != generation.get("start_token"):
         raise RuntimeError("classic native generation is unconfirmed")
     registry = Path(details.get("registry_root", ""))
@@ -268,7 +270,7 @@ def observation(root: Path, profile: Path, arguments: list[str]) -> dict | None:
         or _path_name(Path(details.get("profile", "")).absolute()) != _path_name(profile.absolute())
         or details.get("profile_generation") != hashlib.sha256(profile.read_bytes()).hexdigest()
     ):
-        return {"status": "incumbent", "pid": pid}
+        return {"status": "incumbent", "pid": pid, "native_observed": True}
     started, completed = payload.get("cycle_started_at"), payload.get("updated_at")
     ready = (
         type(payload.get("cycle_id")) is int and payload["cycle_id"] > 0
@@ -276,7 +278,7 @@ def observation(root: Path, profile: Path, arguments: list[str]) -> dict | None:
         and math.isfinite(started) and math.isfinite(completed)
         and started <= completed <= time.time()
     )
-    return {"status": "ready" if ready else "starting", "pid": pid}
+    return {"status": "ready" if ready else "starting", "pid": pid, "native_observed": True}
 
 
 def master_observation(root: Path, arguments: list[str]) -> dict | None:
@@ -340,7 +342,9 @@ def master_observation(root: Path, arguments: list[str]) -> dict | None:
 
 def require_observed_incumbents(root: Path) -> None:
     if os.name != "nt":
-        return
+        raise RuntimeError(
+            "classic incumbent discovery is unavailable on this platform; no duplicate was started"
+        )
     from .supervisor_processes import _is_supervisor_runtime, iter_windows_processes
 
     processes = [row for row in iter_windows_processes() if _is_supervisor_runtime(row, root)]
@@ -353,12 +357,14 @@ def require_observed_incumbents(root: Path) -> None:
     for path in paths:
         payload, error = read_status(path)
         if error:
-            raise RuntimeError("incumbent classic status is unavailable")
+            continue
         details = payload.get("lane_readiness", {}) if payload else {}
+        if not isinstance(details, dict):
+            continue
         profile = details.get("profile")
         if isinstance(profile, str) and Path(profile).is_absolute():
             result = observation(root, Path(profile), [])
-            if result is not None:
+            if result is not None and result.get("native_observed"):
                 known.add(result.get("pid"))
     if any(row.pid not in known for row in processes):
         raise RuntimeError(
@@ -410,7 +416,8 @@ def ensure(root: Path, profile: Path, arguments: list[str], *, timeout=60.0, gen
             if result is not None and result["status"] == "ready":
                 return result
             if result is None and child is None:
-                require_observed_incumbents(root)
+                if arguments[1:2] != ["serve"] or os.name == "nt":
+                    require_observed_incumbents(root)
                 environment = dict(os.environ, **{PROFILE_ENV: str(profile), GENERATION_ENV: generation})
                 child = spawn_dispatch_daemon(
                     [resolve_own_runtime_python(), "-m", "agent_dispatch", *arguments],

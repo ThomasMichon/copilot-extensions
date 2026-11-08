@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -86,6 +87,43 @@ $script:Tasks=@()
 if($script:Removed -ne 0 -or $script:Tasks.Count){throw 'missing task recreated'}
 """)
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Source policy consumer")
+@pytest.mark.parametrize("state", ["Ready", "Disabled"])
+def test_enabled_source_reconcile_preserves_existing_custom_tasks(tmp_path, monkeypatch, state):
+    from agent_dispatch import installation_policy
+    from agent_dispatch.install_paths import installation_suffix
+    from agent_procutil import owned_process
+
+    policy(tmp_path, "enabled")
+    suffix = "-" + installation_suffix(tmp_path)
+    tasks = [
+        {"TaskName": "agent-dispatch" + suffix, "TaskPath": "\\Operator\\", "State": "Ready",
+         "Actions": [{"Execute": "operator.exe", "Arguments": "custom", "WorkingDirectory": str(tmp_path)}]},
+        {"TaskName": "agent-dispatch-supervisor" + suffix, "TaskPath": "\\Operator\\", "State": state,
+         "Actions": [{"Execute": "operator.exe", "Arguments": "custom", "WorkingDirectory": str(tmp_path)}]},
+    ]
+    prefix = f"$global:Tasks=ConvertFrom-Json {quote(json.dumps(tasks))}; "
+    prefix += """
+function Get-ScheduledTask {param($TaskName,$ErrorAction) $global:Tasks}
+function Register-ScheduledTask {throw 'existing custom task must not be rewritten'}
+function Unregister-ScheduledTask {throw 'existing custom task must not be retired'}
+function Enable-ScheduledTask {throw 'disabled custom task must not be enabled'}
+function Start-ScheduledTask {throw 'policy reconciliation must not start a task'}
+function Stop-ScheduledTask {throw 'policy reconciliation must not stop a task'}
+"""
+    original = owned_process.run_caller_owned
+
+    def scheduler_boundary(command, **options):
+        assert command[-2] == "-Command"
+        return original([*command[:-1], prefix + command[-1]], **options)
+
+    monkeypatch.setattr(owned_process, "run_caller_owned", scheduler_boundary)
+    result = installation_policy.windows_policy(tmp_path, reconcile=True)
+    assert result["start_coordinator"] is True
+    assert result["start_supervisor"] is (state != "Disabled")
+    assert result["windows_scheduled_task"] == "enabled"
 
 
 def test_task_only_retirement_preserves_files_and_never_starts_or_stops(tmp_path):

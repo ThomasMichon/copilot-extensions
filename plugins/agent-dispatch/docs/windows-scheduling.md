@@ -42,7 +42,9 @@ Keep private preferences in this local file, not in public source.
   selected slot and invoke the existing `_ensure-coordinator` or `__source-start`
   application owner.
   Custom launcher content and disabled tasks stay unchanged; known generated
-  launchers are updated for the selected runtime.
+  launchers are updated for the selected runtime. Existing custom registrations
+  are not required to match the generated action when nothing changes; exact
+  ownership validation still applies to new registrations and retirement.
 * **absent**: retires only identity-validated coordinator/supervisor-family
   registrations. Normal installation still ensures independently enabled
   incoming capabilities; absence is not `NoService` or `NoSupervisor`.
@@ -102,6 +104,18 @@ A classic lane observes selected-version/profile supersession at a cycle
 boundary and leaves its loop without stopping its workers. The incoming ensure
 waits for its own completed cycle. There is no migration to a master daemon.
 Existing `serve` mode retains its own role and singleton contract.
+Generated scheduled activation uses that same profile-bound ensure and lease,
+not an unmarked classic loop. Admission output has a separate log so the
+resident's native lifetime owner can open its own log independently.
+
+Discovery skips unreadable predecessor files, but a held lease without a
+readable, native-custody-validated current record remains starting/unknown.
+Historical inventory must account for every live incumbent. When native
+incumbent absence cannot be established on a platform, a new classic start
+refuses; an already observed ready owner can still be reused. This does not
+disable standalone classic commands or select a master as a substitute.
+Master cycle-start publication never inherits a predecessor's optional
+readiness identity when the new incarnation did not supply one.
 
 Old readers can ignore the optional extension; old writers remain usable
 through their existing compatibility lifecycle, but cannot supply new readiness

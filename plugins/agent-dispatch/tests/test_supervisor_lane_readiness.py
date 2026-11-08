@@ -189,6 +189,108 @@ def test_downlevel_master_status_is_not_claimed_as_new_readiness(native, monkeyp
         lock.release()
 
 
+def test_unmarked_master_restart_does_not_inherit_predecessor_settings(native, monkeypatch):
+    lane, root, _, _, _, _, records = native
+    from agent_dispatch import config, supervise_cli, supervisor_registration
+    from agent_dispatch.single_instance import SingleInstance, lock_path_for
+    from agent_dispatch.supervisor_status_io import runtime_status_path
+    from agent_procutil import daemon_instances
+
+    monkeypatch.setattr(supervisor_registration, "registration_scope", lambda _: ("fixture", "default"))
+    monkeypatch.setattr(daemon_instances, "inspect_instances", lambda *args: records)
+    records[:] = [{
+        "state": "running", "pid": str(os.getpid()), "birth": "fixture-birth",
+        "runtime_root": str(root),
+    }]
+    scope = "supervisor:fixture:default"
+    lock = SingleInstance(lock_path_for(config.run_dir(), scope))
+    assert lock.acquire()
+    try:
+        path = runtime_status_path(scope)
+        path.write_text(json.dumps({
+            "generation": {"pid": os.getpid() + 100000, "start_token": "predecessor"},
+            "lane_readiness": {"capability": lane.CAPABILITY, "settings_identity": "old-settings"},
+            "cycle_id": 99, "cycle_started_at": 1.0, "updated_at": 2.0,
+        }))
+        supervise_cli._write_supervisor_cycle_start(scope, 1, 3.0)
+        supervise_cli._write_supervisor_runtime_status(
+            scope, SimpleNamespace(completed_at=4.0, running=[], backing_off=[]),
+        )
+        current = json.loads(path.read_text())
+        assert current["generation"]["pid"] == os.getpid()
+        assert "lane_readiness" not in current
+        with pytest.raises(RuntimeError, match="support is unavailable"):
+            lane.master_observation(root, ["supervise", "serve", "--interval", "17"])
+    finally:
+        lock.release()
+
+
+def test_corrupt_predecessor_does_not_poison_valid_current_discovery(native, monkeypatch):
+    lane, root, profile, argv, guard, _, _ = native
+    from agent_dispatch import supervisor_processes
+
+    with lane.LaneStatus(root, profile, argv, guard) as status:
+        status.start()
+        status.complete()
+        status.path.with_name(status.path.name.replace("a" * 32, "b" * 32)).write_text("{")
+        assert lane.observation(root, profile, argv)["status"] == "ready"
+        monkeypatch.setattr(lane, "os", SimpleNamespace(name="nt"))
+        monkeypatch.setattr(supervisor_processes, "iter_windows_processes", lambda: [
+            SimpleNamespace(pid=os.getpid()),
+        ])
+        monkeypatch.setattr(supervisor_processes, "_is_supervisor_runtime", lambda *_: True)
+        lane.require_observed_incumbents(root)
+        monkeypatch.setattr(supervisor_processes, "iter_windows_processes", lambda: [
+            SimpleNamespace(pid=os.getpid()), SimpleNamespace(pid=os.getpid() + 100000),
+        ])
+        with pytest.raises(RuntimeError, match="no supported profile readiness"):
+            lane.require_observed_incumbents(root)
+
+
+def test_corrupt_current_record_keeps_held_lease_unknown_not_absent(native, monkeypatch):
+    lane, root, profile, argv, guard, _, _ = native
+    from agent_dispatch import supervisor_processes
+
+    with lane.LaneStatus(root, profile, argv, guard) as status:
+        status.start()
+        historical = json.loads(status.path.read_text())
+        historical["generation"] = {"pid": os.getpid() + 100000, "start_token": "old"}
+        status.path.with_name(status.path.name.replace("a" * 32, "b" * 32)).write_text(json.dumps(historical))
+        status.path.write_text("{")
+        result = lane.observation(root, profile, argv)
+        assert result["status"] == "starting"
+        assert not result.get("native_observed")
+        monkeypatch.setattr(lane, "os", SimpleNamespace(name="nt"))
+        monkeypatch.setattr(supervisor_processes, "iter_windows_processes", lambda: [
+            SimpleNamespace(pid=os.getpid()),
+        ])
+        monkeypatch.setattr(supervisor_processes, "_is_supervisor_runtime", lambda *_: True)
+        with pytest.raises(RuntimeError, match="no supported profile readiness"):
+            lane.require_observed_incumbents(root)
+
+
+@pytest.mark.parametrize("ready", [False, True])
+def test_nonwindows_classic_refuses_unprovable_absence_but_reuses_observed_owner(native, monkeypatch, ready):
+    lane, root, profile, argv, _, _, _ = native
+    from agent_dispatch import action_controls, procutil
+
+    monkeypatch.setattr(lane, "os", SimpleNamespace(name="posix"))
+    monkeypatch.setattr(action_controls, "action_decision", lambda *_, **__: (
+        SimpleNamespace(inhibited=False, error=None)
+    ))
+    monkeypatch.setattr(lane, "observation", lambda *_: (
+        {"status": "ready", "pid": 123} if ready else None
+    ))
+    monkeypatch.setattr(procutil, "spawn_dispatch_daemon", lambda *_, **__: (
+        pytest.fail("unobserved POSIX classic absence must not start a duplicate")
+    ))
+    if ready:
+        assert lane.ensure(root, profile, argv, timeout=0)["pid"] == 123
+    else:
+        with pytest.raises(RuntimeError, match="discovery is unavailable"):
+            lane.ensure(root, profile, argv, timeout=0)
+
+
 def test_unobserved_classic_incumbent_prevents_duplicate_without_retirement(native, monkeypatch):
     lane, root, _, _, _, _, _ = native
     from agent_dispatch import supervisor_processes

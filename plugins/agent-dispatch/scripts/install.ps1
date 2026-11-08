@@ -3652,6 +3652,12 @@ if (`$ResolveOnly) {
     Write-Output `$_py
     exit 0
 }
+`$_profilePath = [IO.Path]::GetFullPath(`$EnvFile)
+`$_profileHasher = [Security.Cryptography.SHA256]::Create()
+try {
+    `$_profileGeneration = ([BitConverter]::ToString(`$_profileHasher.ComputeHash(
+        [IO.File]::ReadAllBytes(`$_profilePath)))).Replace('-', '').ToLowerInvariant()
+} finally { `$_profileHasher.Dispose() }
 `$_cacheId = [Guid]::NewGuid().ToString('N')
 `$_cache = [IO.Path]::GetFullPath((Join-Path `$_root "cache\python\unsealed-`$_cacheId"))
 if (-not `$_cache.StartsWith('\\?\')) {
@@ -3783,13 +3789,18 @@ try {
         Out-File -FilePath `$logFile -Append -Encoding utf8
 } catch { }
 `$ErrorActionPreference = 'Continue'
+`$_encodedArguments = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(
+    (ConvertTo-Json -InputObject @(`$argsList) -Compress)))
+`$_ensure = 'import base64,json,sys; from pathlib import Path; from agent_dispatch.supervisor_lane_status import ensure; ensure(Path(sys.argv[1]),Path(sys.argv[2]),json.loads(base64.b64decode(sys.argv[3])),generation=sys.argv[4])'
+`$_admissionLog = Resolve-WritableLog (Join-Path `$PSScriptRoot 'supervise-admission.log') `$_slot
 try {
-    & `$_py -X ('pycache_prefix=' + `$_cache) -m agent_dispatch @argsList 2>&1 | Out-File -FilePath `$logFile -Append -Encoding utf8
+    & `$_py -I -B -X ('pycache_prefix=' + `$_cache) -c `$_ensure `$PSScriptRoot `$_profilePath `$_encodedArguments `$_profileGeneration 2>&1 | Out-File -FilePath `$_admissionLog -Append -Encoding utf8
 } catch {
-    # Teeing to the log failed -- keep the supervisor alive without the tee.
-    & `$_py -X ('pycache_prefix=' + `$_cache) -m agent_dispatch @argsList *> `$null
+    # A log failure does not select a different admission or lifetime owner.
+    & `$_py -I -B -X ('pycache_prefix=' + `$_cache) -c `$_ensure `$PSScriptRoot `$_profilePath `$_encodedArguments `$_profileGeneration *> `$null
 }
 if (`$_cache -eq `$_mintedCache) { try { [IO.Directory]::Delete(`$_mintedCache, `$true) } catch {} }
+exit `$LASTEXITCODE
 "@
     [System.IO.File]::WriteAllText($launcher, $launcherBody, $utf8NoBom)
     return $launcher

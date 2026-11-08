@@ -191,16 +191,15 @@ function Get-DispatchSchedulingPolicy {
 function Register-DispatchExistingLauncherTasks {
     param([string]$Root, [string]$Coordinator, [string]$Supervisor, $Policy)
     if ($Policy.windows_scheduled_task -ne 'enabled') { throw 'Scheduled activation requires enabled intent' }
-    if (-not (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue)) {
-        throw 'ScheduledTasks registration capability is unavailable'
-    }
     foreach ($name in @($Coordinator, $Supervisor)) {
         $allowed = if ($name -eq $Coordinator) { $Policy.start_coordinator } else { $Policy.start_supervisor }
         if (-not $allowed) { continue }
         $existing = Get-DispatchNativeTask $name -Required
         if ($existing) {
-            Assert-DispatchOwnedTask $existing $Root $Coordinator $Supervisor
             continue
+        }
+        if (-not (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue)) {
+            throw 'ScheduledTasks registration capability is unavailable'
         }
         $filename = if ($name -eq $Coordinator) { 'serve-service.ps1' } else { 'supervise-service.ps1' }
         $launcher = Join-Path $Root $filename
