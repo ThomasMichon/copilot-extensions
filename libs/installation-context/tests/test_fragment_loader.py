@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import importlib.util
+import os
+import shutil
+import subprocess
 import sys
 from pathlib import Path, PureWindowsPath
 from types import ModuleType
@@ -85,3 +88,49 @@ def test_fragment_loader_reads_from_the_lexical_physical_parent(
     context_module._load_fragments()
     assert reads == [(str(script.parent / "fixture.py"), "utf-8")]
     assert context_module.bootstrap_fixture_loaded is True
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native paths")
+@pytest.mark.parametrize(("source", "expected"), [
+    (r"C:\fixture\fragment.py", r"\\?\C:\fixture\fragment.py"),
+    (r"\\server\share\fragment.py", r"\\?\UNC\server\share\fragment.py"),
+    (r"\\?\C:\fixture\fragment.py", r"\\?\C:\fixture\fragment.py"),
+    (r"\\?\GLOBALROOT\Device\HarddiskVolume3\fragment.py",
+     r"\\?\GLOBALROOT\Device\HarddiskVolume3\fragment.py"),
+])
+def test_native_fragment_preserves_windows_path_identity(
+    context_module: ModuleType, source: str, expected: str,
+) -> None:
+    assert str(context_module._native_fragment(Path(source))) == expected
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native paths")
+def test_fragment_loader_reads_deep_ordinary_windows_path(
+    context_module: ModuleType, tmp_path: Path,
+) -> None:
+    directory = tmp_path.resolve()
+    while len(str(directory)) < 215:
+        directory /= "d" * min(60, 215 - len(str(directory)) - 1)
+    entry = directory / "installation_context.py"
+    longest = directory / "_installation_context_runtime_slot_ownership.py"
+    assert len(str(entry)) < 260 <= len(str(longest))
+    value = str(directory)
+    native = Path("\\\\?\\UNC\\" + value[2:] if value.startswith("\\\\") else "\\\\?\\" + value)
+    native.mkdir(parents=True)
+    try:
+        for name in ("installation_context.py", *context_module._FRAGMENT_FILES):
+            shutil.copyfile(ENTRY.parent / name, native / name)
+        code = (
+            "import importlib.util,sys;"
+            "s=importlib.util.spec_from_file_location('fixture_context',sys.argv[1]);"
+            "m=importlib.util.module_from_spec(s);sys.modules[s.name]=m;"
+            "s.loader.exec_module(m);print('loaded')"
+        )
+        result = subprocess.run(
+            [sys.executable, "-I", "-B", "-c", code, str(entry)],
+            capture_output=True, text=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "loaded"
+    finally:
+        shutil.rmtree(native)
