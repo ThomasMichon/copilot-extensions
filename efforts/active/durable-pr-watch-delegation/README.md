@@ -402,14 +402,16 @@ _Operator-required outcome; agent-recommended slices and validation._
   through the existing allocation and trusted source/profile owners (#11471).
   Retain exact selection contracts and original previews without a writer;
   submission remains independently unavailable.
-- [ ] Deliver the [canonical helper and native source-discovery prerequisites](comment-producer-enrollment.md#canonical-helper-delivery-and-native-source-discovery)
+- [x] Deliver the [canonical helper and native source-discovery prerequisites](comment-producer-enrollment.md#canonical-helper-delivery-and-native-source-discovery)
   before expanding strict standalone configuration. Direct wheel/sdist/release
   delivery and actual executing exact-root discovery are separate from
-  fixture imports or installed enrollment.
-- [ ] Supply explicitly selected standalone preparation-only hosting using
+  fixture imports or installed enrollment. Native discovery merged in #11488
+  and canonical helper packaging in #11500; this closes only the finite source
+  prerequisites, not normal-host or installed enrollment.
+- [x] Supply explicitly selected standalone preparation-only hosting using
   those actual source/profile dependencies. Qualify the executing provider before
   advertising support; no preview verifies protected-source grants or
-  closes writer enrollment.
+  closes writer enrollment (#11507; finite source qualification only).
 - [ ] Deliver the actual protected write-owner prerequisite through its
   existing owners, then bind one explicitly selected authenticated host route.
   Injected factories and observation credentials do not satisfy these exits;
@@ -974,14 +976,16 @@ or silently expanding a bounded source claim.
   recovery with the actual preparer, zero protected acquisitions/sends,
   independent submission refusal, unchanged writer/default behavior and
   current/prior receiver rollback (#11471; 107 coupled source cases).
-- [ ] Qualify the [canonical helper delivery and native discovery controls](comment-producer-enrollment.md#canonical-helper-delivery-and-native-source-discovery):
+- [x] Qualify the [canonical helper delivery and native discovery controls](comment-producer-enrollment.md#canonical-helper-delivery-and-native-source-discovery):
   outside-checkout wheel consumption, sibling-free sdist rebuild, canonical
   bytes/import isolation and actual exact-root current/prior parser/discovery
-  refusal, with no credential or forge effects.
-- [ ] Verify actual executing source/profile packaging and the strict
+  refusal, with no credential or forge effects (#11488/#11500; bounded source
+  and artifact controls, not installed enrollment).
+- [x] Verify actual executing source/profile packaging and the strict
   current/prior standalone-host configuration/process seam before
   preparation-only hosting is advertised. Preserve the separately open
-  credential-source, protected-writer and installed/provider acceptance.
+  credential-source, protected-writer and installed/provider acceptance
+  (#11507; 88 standalone and 119 coupled source cases).
 
 - [x] Qualify native effective-permission evaluation (#11462; 216 coupled
   source cases) with contained namespace/

@@ -6,19 +6,19 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, budget posture, coordinator-first delegation, publication safety, WSL environment setup, and CLI customization",
-    "version": "1.25.28-dev1"
+    "version": "1.25.29-dev1"
   },
   "plugins": [
     {
       "name": "agent-worktrees",
       "description": "Worktree isolation system for concurrent Copilot CLI sessions - lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
-      "version": "1.25.28-dev1",
+      "version": "1.25.29-dev1",
       "source": "plugins/agent-worktrees"
     },
     {
       "name": "agent-pull-requests",
       "description": "Cross-repository pull-request CLI for API-driven status/create/merge/wait flows, addressed directly by owner/repo with no local checkout required. Deployed as a self-contained versioned runtime via the shared vendored installer engine, with a real agent-pull-requests binstub; initially mediated through agent-worktrees account resolution.",
-      "version": "0.3.250-dev1",
+      "version": "0.3.251-dev1",
       "source": "plugins/agent-pull-requests",
       "defaultEnabled": false
     },
@@ -44,7 +44,7 @@
     {
       "name": "agent-containers",
       "description": "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver with trusted OpenSSH and restricted provider-exec transport",
-      "version": "0.2.233-dev1",
+      "version": "0.2.234-dev1",
       "source": "plugins/agent-containers"
     },
     {
@@ -92,7 +92,7 @@
     {
       "name": "agent-dispatch",
       "description": "Portable durable agent task-loop + per-host coordinator: a single-writer SQLite work queue (eight-state model with owner-preserving suspension, capability-gated atomic claim, affinity routing, liveness-reconciled recovery) so agents coordinate without push latency or an account per agent.",
-      "version": "0.18.309-dev1",
+      "version": "0.18.310-dev1",
       "source": "plugins/agent-dispatch"
     },
     {
@@ -104,7 +104,7 @@
     {
       "name": "copilot-extensions-harness",
       "description": "Operator harness for the copilot-extensions repo. Primary: help any consumer identify which local scripts/processes belong to this suite and enforce never-monkey-patch (file a bug upstream or auto-update instead). Secondary: portable contribution, deployment, and clean-room validation guidance plus an ambient pointer to the general-purpose, organization-neutral contribution boundary.",
-      "version": "0.1.30-dev1",
+      "version": "0.1.31-dev1",
       "source": "plugins/copilot-extensions-harness"
     },
     {
@@ -134,7 +134,7 @@
     {
       "name": "ai-attribution",
       "description": "Ambient publication and AI-attribution safety for git repositories, with portable operator policy, host-qualified local remote hints, an idempotent setup skill, and an on-demand publication workflow. Payload-only: dependency-free Bash and PowerShell session-start hooks plus skills.",
-      "version": "0.1.8-dev1",
+      "version": "0.1.9-dev1",
       "source": "plugins/ai-attribution"
     },
     {

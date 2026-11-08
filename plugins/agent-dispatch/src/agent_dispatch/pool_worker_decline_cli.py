@@ -172,6 +172,20 @@ def cmd_decline(args: argparse.Namespace) -> int:
                 "process_retirement": False, "routing": "requeued",
                 **({"task_relationship": "closed"} if settled else {}),
             })
+        if task.get("status") != "claimed" or task.get("generation") != args.pool_generation:
+            # A replacement placement detaches the original decline from current
+            # state; recover it only by exact binding behind its committed receipt.
+            recovered = client.recover_pool_decline(args.task_id, worker, native, args.pool_generation)
+            if recovered is not None:
+                decline, recovered_worktree = recovered
+                if recovered_worktree != worktree:
+                    raise DispatchError(409, "recovered worker decline names another workspace; custody retained")
+                settled = _finish(client, args.task_id, decline, worktree)
+                return core._emit({
+                    "decline": decline, "workspace_closeout": "finalized", "task_release": False,
+                    "process_retirement": False, "routing": "requeued",
+                    **({"task_relationship": "closed"} if settled else {}),
+                })
         reservation = task.get("spawn_reservation")
         if (
             task.get("id") != args.task_id or task.get("status") != "claimed"

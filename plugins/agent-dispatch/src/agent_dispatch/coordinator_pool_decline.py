@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Callable
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from .events import EventBus
@@ -69,6 +69,23 @@ def register(app: FastAPI, queue: TaskQueue, bus: EventBus, control_auth: Callab
             raise HTTPException(409, detail=str(exc)) from exc
         bus.publish({"type": "task.worker_decline_blocked", "task_id": task_id})
         return {"protocol": POOL_DECLINE_PROTOCOL, "version": 1, "decline": asdict(result)}
+
+    @app.get("/tasks/{task_id}/pool-decline/recovery")
+    def recovery(
+        task_id: str, worker_id: str = Query(min_length=1), native_id: str = Query(min_length=1),
+        generation: int = Query(ge=1, le=2**63 - 2),
+    ) -> dict:
+        # Read-only: returns a binding only behind its committed closeout receipt.
+        found = queue.recover_pool_decline(
+            task_id, worker_id=worker_id, native_id=native_id, generation=generation,
+        )
+        if found is None:
+            raise HTTPException(404, detail="no settled worker decline for this exact incarnation")
+        decline, worktree = found
+        return {
+            "protocol": POOL_DECLINE_PROTOCOL, "version": 1,
+            "decline": asdict(decline), "worktree": worktree,
+        }
 
     @app.post("/tasks/{task_id}/pool-decline/closeout", dependencies=[Depends(control_auth)])
     def closeout(task_id: str, body: DeclineBindingBody, request: Request) -> dict:
