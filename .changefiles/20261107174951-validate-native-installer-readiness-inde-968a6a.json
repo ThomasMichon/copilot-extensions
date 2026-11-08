@@ -1,0 +1,9 @@
+{
+  "comment": "Validate native installer readiness independently of caller repository preferences",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}
