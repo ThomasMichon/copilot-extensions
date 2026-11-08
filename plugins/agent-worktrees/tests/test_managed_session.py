@@ -681,7 +681,7 @@ def test_registered_pre_tool_entry_reuses_prepared_membership(tmp_path, monkeypa
     session.mkdir(parents=True)
     payload = {
         "sessionId": "pre-tool", "cwd": str(workspace),
-        "toolName": "edit" if case == "write" else "view",
+        "toolName": "view" if case == "read" else "edit",
         "toolArgs": {"path": "non-ascii-\u00e9.txt", "text": "quote'\"\\\n\t"},
     }
     assert module.admitted(payload, home=tmp_path)
