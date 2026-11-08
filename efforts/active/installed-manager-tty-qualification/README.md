@@ -314,3 +314,22 @@ inventory; unsupported execution must not be reported as a successful gate.
 - These fixes still require current-head native qualification and a passing
   source review before merge. Main activation and actual frozen-candidate
   publication remain separate obligations.
+
+### 2026-11-07 - Negative control distinguishes launch rejection from cleanup failure
+
+- The review-fixed source `eb57a2414ad5867bc5e944419fd4777feb34f7d7`
+  passed real hosted native qualification in run 42438047426, attempt 1
+  (actual test 143.850 seconds), and required unit/guard CI passed.
+- Fresh review resolved the first two findings but identified a remaining
+  High-severity case: generic cleanup or infrastructure exceptions could be
+  credited as the negative control's expected launch failure.
+- The negative control now accepts only a dedicated rejection with a nonzero
+  controlled consumer exit and documented rejection text, after successful
+  terminal cleanup. Job accounting and terminal teardown failures retain
+  uncertain custody through the existing unreaped-process exception contract.
+- The coordinator independently passed all five focused regressions through
+  the canonical isolated runner, including actual cleanup exception types,
+  nested-owner retention, expected rejection and bounded native CMD invocation.
+  Scoped lint and whitespace checks passed.
+- Current-head native qualification, fresh review and required CI remain
+  necessary. No Main-controller activation or operator update is claimed.

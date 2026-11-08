@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tarfile
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import tomllib
@@ -105,6 +106,66 @@ def _git_environment(environment=None):
     finally:
         if inserted:
             sys.path.remove(source)
+
+
+class _InstalledLaunchRejected(RuntimeError):
+    pass
+
+
+class _ConsumerExited(Exception):
+    def __init__(self, label, code, control):
+        super().__init__(label)
+        self.label, self.code, self.control = label, code, control
+
+
+def _classify_consumer_exit(error, output):
+    text = _visible(output)
+    if (
+        error.control and error.label == "rendered project Picker" and error.code != 0
+        and "No usable Worktree Manager is available right now." in text
+    ):
+        raise _InstalledLaunchRejected("Controlled installed Manager launch rejected: " + text[-2000:])
+    raise RuntimeError(f"Consumer exited {error.code} before {error.label}: {text[-2000:]}")
+
+
+def _confirm_job_empty(job, timeout, label):
+    from plugin_test_containment import UnreapedProcessError
+
+    try:
+        job.terminate_and_wait(timeout)
+    except UnreapedProcessError:
+        raise
+    except (OSError, RuntimeError, AssertionError) as error:
+        raise UnreapedProcessError(f"{label} cleanup could not be confirmed", job=job) from error
+
+
+@contextmanager
+def _owned_console(argv, *, env, cwd):
+    from _terminal_console_fixture import Console
+    from plugin_test_containment import UnreapedProcessError
+
+    console = Console(argv, env=env, cwd=cwd)
+    unreaped = False
+    exited = None
+    try:
+        yield console
+    except UnreapedProcessError:
+        unreaped = True
+        raise
+    except _ConsumerExited as error:
+        exited = error
+    finally:
+        if not unreaped:
+            job = console.job
+            if job is not None:
+                _confirm_job_empty(job, 5, "terminal Job")
+                console.job = None
+            try:
+                console.close()
+            except (OSError, RuntimeError, AssertionError) as error:
+                raise UnreapedProcessError("Terminal cleanup could not be confirmed", job=job) from error
+    if exited is not None:
+        _classify_consumer_exit(exited, console.output)
 
 
 def _slot_census(root, diagnostics):
@@ -213,8 +274,14 @@ def _run(arguments, env, cwd, diagnostics, label, *, timeout=None):
                 time.sleep(.1)
             receipt["exit_code"] = process.returncode
         finally:
-            job.terminate_and_wait(10)
-            process.wait(timeout=5)
+            _confirm_job_empty(job, 10, label)
+            try:
+                process.wait(timeout=5)
+            except (OSError, RuntimeError, subprocess.TimeoutExpired) as error:
+                from plugin_test_containment import UnreapedProcessError
+
+                raise UnreapedProcessError(f"{label} root retirement could not be confirmed",
+                                          job=job) from error
             receipt.update(settled=True, native_job_empty=True, finished_at_ns=time.time_ns())
             receipt.update(stdout_bytes=out.stat().st_size, stderr_bytes=err.stat().st_size,
                            elapsed_seconds=time.monotonic() - started)
@@ -400,11 +467,9 @@ def _project_entry_command(shell, stub):
 
 
 def _witness(shell, stub, env, project, diagnostics, manager_python, engine_python, *, control=False):
-    from _terminal_console_fixture import Console
-
     argv = _project_entry_command(shell, stub)
     captured = b""
-    with Console(argv, env=env, cwd=project) as console:
+    with _owned_console(argv, env=env, cwd=project) as console:
         pinned = {}
 
         def wait(predicate, label):
@@ -413,7 +478,7 @@ def _witness(shell, stub, env, project, diagnostics, manager_python, engine_pyth
                 if predicate():
                     return
                 if console.exited(console.process.process):
-                    raise RuntimeError(f"{shell}: exited before {label}: {_visible(console.output)[-2000:]}")
+                    raise _ConsumerExited(label, console.wait(1000), control)
                 if console.read_error:
                     raise RuntimeError(console.read_error)
                 time.sleep(.025)
@@ -474,7 +539,7 @@ def _witness(shell, stub, env, project, diagnostics, manager_python, engine_pyth
             label = shell + ("-negative" if control else "")
             (diagnostics / (label + ".terminal.txt")).write_bytes(captured)
             if console.job is not None:
-                console.job.terminate_and_wait(5)
+                _confirm_job_empty(console.job, 5, label)
                 console.job = None
             (diagnostics / (label + ".custody.json")).write_text(json.dumps({
                 "pid": console.process.pid, "birth": console.birth(console.process.process),
@@ -586,7 +651,7 @@ def _negative_control(manager_python, launch):
         except UnreapedProcessError as error:
             unreaped = error
             raise
-        except (RuntimeError, TimeoutError, AssertionError):
+        except _InstalledLaunchRejected:
             return True
         return False
     finally:
@@ -931,16 +996,12 @@ def test_representative_harness_is_admissible_without_agent_launch_intent(tmp_pa
 
 def test_native_cmd_project_binstub_handles_space_path(tmp_path):
     """Actual CMD/ConPTY invocation only, not installation or Picker acceptance."""
-    from _terminal_console_fixture import Console
-
     directory = tmp_path / "project command"
     directory.mkdir()
     stub = directory / "fixture project.cmd"
     stub.write_bytes(b"@echo off\r\necho NATIVE PROJECT COMMAND REACHED\r\nexit /b 7\r\n")
-    with Console(_project_entry_command("cmd", stub), env=dict(os.environ), cwd=directory) as console:
+    with _owned_console(_project_entry_command("cmd", stub), env=dict(os.environ), cwd=directory) as console:
         code = console.wait(5000)
-        console.job.terminate_and_wait(5)
-        console.job = None
     assert code == 7, console.output.decode("utf-8", "replace")
     assert b"NATIVE PROJECT COMMAND REACHED" in console.output
 
@@ -953,7 +1014,8 @@ def test_unreaped_error_preserves_enclosing_sandboxes_and_original_exception(tmp
     from plugin_test_containment import TestSandbox as Sandbox
     from plugin_test_containment import UnreapedProcessError
 
-    for mode in ("ordinary", "diagnostic-copy-fails", "receipt-write-fails"):
+    for mode in ("ordinary", "diagnostic-copy-fails", "receipt-write-fails",
+                 "job-timeout", "job-runtime", "job-assertion"):
         namespace = runpy.run_path(str(REPO / "tools" / "run-manager-runtime-acceptance.py"))
         accept = namespace["_installed_tty_acceptance"]
         owner = accept.__globals__
@@ -964,15 +1026,36 @@ def test_unreaped_error_preserves_enclosing_sandboxes_and_original_exception(tmp
         monkeypatch.setitem(owner, "isolated_environment", lambda *_args, **_kwargs: {})
         job = object()
         original = UnreapedProcessError("controlled unconfirmed cleanup", job=job)
+        raw_error = {
+            "job-timeout": TimeoutError, "job-runtime": RuntimeError,
+            "job-assertion": AssertionError,
+        }.get(mode)
+        if raw_error is not None:
+            raw_error = raw_error("controlled native cleanup failure")
+
+            class FailedJob:
+                error = raw_error
+
+                def terminate_and_wait(self, _timeout):
+                    raise self.error
+            job = FailedJob()
         observed = {}
 
-        def unsettled(_arguments, _observed=observed, _error=original, **options):
+        def unsettled(_arguments, _observed=observed, _error=original,
+                      _raw_error=raw_error, _job=job, **options):
             sandbox = options["sandbox"]
             _observed["inner"] = sandbox
             (sandbox / "pending-owner.txt").write_text("no process launched; test-owned state")
             (sandbox / "diagnostics").mkdir()
             (sandbox / "diagnostics" / "failure.txt").write_text("controlled diagnostic")
-            raise _error
+            if _raw_error is None:
+                _observed["raised"] = _error
+                raise _error
+            try:
+                _confirm_job_empty(_job, 5, "controlled Job")
+            except UnreapedProcessError:
+                _observed["raised"] = sys.exc_info()[1]
+                raise
 
         monkeypatch.setitem(owner, "run_contained", unsettled)
         if mode == "diagnostic-copy-fails":
@@ -994,7 +1077,9 @@ def test_unreaped_error_preserves_enclosing_sandboxes_and_original_exception(tmp
                     output = FailedReceipt()
                 identity, _ = _receipt_fixture()
                 accept(root, output, identity)
-            assert caught.value is original and caught.value.job is job
+            assert caught.value is observed["raised"] and caught.value.job is job
+            if raw_error is not None:
+                assert caught.value.__cause__ is raw_error
             assert outer.retained and Path(outer.name).is_dir()
             assert (observed["inner"] / "pending-owner.txt").is_file()
             if mode != "receipt-write-fails":
@@ -1022,6 +1107,74 @@ def test_negative_control_does_not_accept_unreaped_error(tmp_path):
     assert caught.value is original
     assert interpreter.read_bytes() == b"unit fixture"
     assert not interpreter.with_suffix(".negative-control").exists()
+
+
+def test_negative_control_accepts_only_documented_installed_consumer_rejection(tmp_path):
+    import pytest
+
+    interpreter = tmp_path / "python.exe"
+    interpreter.write_bytes(b"unit fixture")
+    for kind in (RuntimeError, TimeoutError, AssertionError):
+        original = kind("controlled infrastructure failure")
+
+        def fail(error=original):
+            raise error
+
+        with pytest.raises(kind) as caught:
+            _negative_control(interpreter, fail)
+        assert caught.value is original
+        assert interpreter.read_bytes() == b"unit fixture"
+    output = b"No usable Worktree Manager is available right now.\n"
+    refusal = _ConsumerExited("rendered project Picker", 1, True)
+    assert _negative_control(interpreter, lambda: _classify_consumer_exit(refusal, output))
+    for exit_error in (
+        _ConsumerExited("rendered project Picker", 0, True),
+        _ConsumerExited("rendered project Picker", 1, False),
+        _ConsumerExited("keyboard-driven quit dialog", 1, True),
+    ):
+        with pytest.raises(RuntimeError) as caught:
+            _negative_control(
+                interpreter, lambda error=exit_error: _classify_consumer_exit(error, output),
+            )
+        assert not isinstance(caught.value, _InstalledLaunchRejected)
+
+
+def test_terminal_teardown_errors_remain_unreaped_not_negative_success(tmp_path, monkeypatch):
+    import _terminal_console_fixture
+    import pytest
+    from plugin_test_containment import TestSandbox as Sandbox
+    from plugin_test_containment import UnreapedProcessError
+
+    for kind in (TimeoutError, RuntimeError, AssertionError):
+        raw_error = kind("controlled terminal teardown failure")
+
+        class FailedConsole:
+            job = None
+            output = b"No usable Worktree Manager is available right now.\n"
+            error = raw_error
+
+            def __init__(self, *_args, **_kwargs):
+                pass
+
+            def close(self):
+                raise self.error
+        monkeypatch.setattr(_terminal_console_fixture, "Console", FailedConsole)
+        owner = Sandbox(prefix="terminal-unit-", dir=tmp_path)
+        try:
+            with pytest.raises(UnreapedProcessError) as caught, owner as raw:
+                root = Path(raw)
+                interpreter = root / "python.exe"
+                interpreter.write_bytes(b"unit fixture")
+
+                def rejected(cwd=root):
+                    with _owned_console(["unit"], env={}, cwd=cwd):
+                        raise _ConsumerExited("rendered project Picker", 1, True)
+                _negative_control(interpreter, rejected)
+            assert caught.value.__cause__ is raw_error
+            assert owner.retained and (root / "python.exe").is_file()
+        finally:
+            # No native console was launched in this bookkeeping regression.
+            owner._rmtree(owner.name)
 
 
 def test_inherited_git_context_cannot_redirect_private_repository(tmp_path, monkeypatch):
