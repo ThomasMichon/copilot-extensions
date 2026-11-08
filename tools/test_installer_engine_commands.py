@@ -120,14 +120,21 @@ def fixtures(product, root=None, root_text=None, payload_text=None, publisher=No
         # supplies fixtures, and the production helper selects payload-local.
         branch = ("agent-vault", "agent-ssh", "agent-pull-requests").index(product)
         sh_writer = engine_sh.split("write_simple_binstub() {", 1)[1]
-        cold_sh = re.findall(r"<<'DISPATCH'\n(.*?)\nDISPATCH", sh_writer, re.S)[branch]
+        cold_sh = re.findall(
+            r"cold_dispatch=\"\$\(cat <<'DISPATCH'\n(.*?)\nDISPATCH", sh_writer, re.S,
+        )[branch]
+        early_sh = re.findall(
+            r"early_dispatch=\"\$\(cat <<'DISPATCH'\n(.*?)\nDISPATCH", sh_writer, re.S,
+        )
         ps_writer = engine_ps.split("function Write-SimpleBinstub {", 1)[1]
         cold_ps = re.findall(r"\$coldDispatcher = @'\n(.*?)\n'@", ps_writer, re.S)[branch]
+        early_ps = re.findall(r"\$earlyDispatcher = @'\n(.*?)\n'@", ps_writer, re.S)
         values_sh = {
             "command_name": product, "module_name": module, "runtime_root_literal": quote(root_sh),
             "snapshot_installer_literal": "scripts/install.sh",
             "no_self_provision_env": product.replace("-", "_").upper() + "_NO_SELFPROVISION",
             "cold_dispatch": cold_sh,
+            "early_dispatch": early_sh[0] if branch == 0 and early_sh else "",
         }
         result.append((product, interpolate(
             heredoc(engine_sh, "EOF", "write_simple_binstub"), values_sh,
@@ -136,6 +143,7 @@ def fixtures(product, root=None, root_text=None, payload_text=None, publisher=No
             "runtimeRootLiteral": root_ps, "snapshotInstallerLiteral": r"scripts\install.ps1",
             "moduleLiteral": module, "commandLiteral": product, "CommandName": product,
             "NoSelfProvisionEnv": values_sh["no_self_provision_env"], "coldDispatcher": cold_ps,
+            "earlyDispatcher": early_ps[0] if branch == 0 and early_ps else "",
         }
         result += [
             (product + ".ps1", ps_template(engine_ps, "ps1Content", "Write-SimpleBinstub", values_ps)),
@@ -284,6 +292,15 @@ def test_comments_and_marker_substrings_are_not_ownership(product):
 @pytest.mark.parametrize("product", PRODUCTS)
 def test_wrong_root_is_retained(product):
     assert owned(product, dict(fixtures(product)), root=Path.home() / "another-installation") == ()
+
+
+@pytest.mark.parametrize("name", ("agent-vault", "agent-vault.ps1"))
+def test_vault_early_dispatch_is_required_for_exact_command_ownership(name):
+    contents = dict(fixtures("agent-vault"))
+    assert name in owned("agent-vault", contents)
+    assert "invocation-contract" in contents[name]
+    contents[name] = contents[name].replace("invocation-contract", "unknown-command", 1)
+    assert name not in owned("agent-vault", contents)
 
 
 @pytest.mark.parametrize("product", ("agent-bridge", "agent-dispatch", "agent-worktrees"))
