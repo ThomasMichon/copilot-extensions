@@ -29,7 +29,9 @@ class _HttpClient(BridgeClient):
         super().__init__("http://testserver", "fixture-token", connect_grace=0)
         self.http = TestClient(app)
 
-    def _request(self, method, path, data=None, *, params=None, request_timeout=None, allow_retry=True):
+    def _request(self, method, path, data=None, *, params=None, request_timeout=None,
+                 allow_retry=True, _endpoint=None):
+        assert _endpoint in (None, self._base)
         response = self.http.request(method, path, json=data, params=params)
         if response.status_code >= 400:
             raise BridgeClientError(response.status_code, response.json().get("detail"))
@@ -749,10 +751,12 @@ def test_waited_client_defaults_cover_operation_and_read_deadlines(monkeypatch, 
     captured = {}
     client = BridgeClient("http://testserver", "fixture-token", connect_grace=0)
 
-    def request(method, path, data=None, *, request_timeout=None, allow_retry=True):
+    def request(method, path, data=None, *, request_timeout=None, allow_retry=True, _endpoint=None):
         if path == "/health":
+            assert _endpoint in (None, client._base)
             return {"protocol_version": HTTP_PROTOCOL_VERSION,
                     "min_protocol_version": HTTP_PROTOCOL_MIN_SUPPORTED}
+        assert _endpoint == client._base
         captured.update(data=data, read_timeout=request_timeout)
         assert allow_retry is False
         return {"message_id": 1}

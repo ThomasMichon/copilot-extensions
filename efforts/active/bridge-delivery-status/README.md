@@ -3,7 +3,7 @@
 - **Slug:** `bridge-delivery-status`
 - **Repo:** `ThomasMichon/copilot-extensions`
 - **Created:** 2026-11-07
-- **Status:** Draft
+- **Status:** Active
 - **Umbrella issue:** [#11448](https://github.com/ThomasMichon/copilot-extensions/issues/11448)
 - **Related:** #6394, #4023; independent registration #11445 and roster #11298
 
@@ -24,13 +24,15 @@ and the existing service's lifecycle rather than introducing another daemon.
 | Participant | Role | Reached via |
 |-------------|------|-------------|
 | bridge-status-owner | Accountable source owner; proposal, implementation, review and merge | Issue #11448 and resulting PRs |
+| subscription-worker | Bounded source delegate: Phase C and remote source composition; no rollout | Parent owner and issue #11448 |
 | adopting-supervisor | Consumer acceptance after separately authorized installation | Public contract feedback on #11448; adopter-owned deployment |
 
 ## Coordination
 
 - **Topology:** dependency-ordered, individually green PRs.
 - **Host:** bridge-status-owner.
-- **Delegates:** none declared.
+- **Delegates:** subscription-worker owns independent host feed/coalescing source
+  in an isolated worktree; the host retains delivery receipts and final acceptance.
 - **Ownership:** #6394 retains original inbox repair and its existing
   follow-ups; #11445 retains registration recovery; #11298 retains passive
   roster freshness. Coordinate overlapping source instead of duplicating work.
@@ -118,14 +120,14 @@ and review findings; they do not extend action or deployment authority.
 ### Phase A - Confirm event and receipt seams
 
 - [x] Establish receipt, native hook, represented SSE and remote multiplexing baseline.
-- [ ] Complete source mapping of host fanout, pending attention and selected-runtime compatibility seams.
-- [ ] Record the exact supported model-facing consumption guarantee and any unavailable stronger signal.
+- [x] Complete source mapping of host fanout, pending attention and selected-runtime compatibility seams.
+- [x] Record the exact supported model-facing consumption guarantee and any unavailable stronger signal.
 
 ### Phase B - Delivery observation
 
-- [ ] Expose freshness-qualified current question/permission attention beside exact receipts.
-- [ ] Add finite delivery waiting and strict CLI/current-prior capability behavior.
-- [ ] Preserve default admission, reply waits, idempotency, exact targeting and retained-inbox ownership.
+- [x] Expose freshness-qualified current question/permission attention beside exact receipts.
+- [x] Add finite delivery waiting and strict CLI/current-prior capability behavior.
+- [x] Preserve default admission, reply waits, idempotency, exact targeting and retained-inbox ownership.
 - [ ] Merge the independently green provider/consumer slice after required review and checks.
 
 ### Phase C - Host feed and coalescing
@@ -144,10 +146,10 @@ and review findings; they do not extend action or deployment authority.
 ## Validation Plan
 
 - [ ] Re-read public capture against the request: no weakened coalescing, push, cost or authority constraint.
-- [ ] Land this proposal through review before implementing new behavior.
-- [ ] Focused unit/contract tests cover exact receipt ordering, consume-before-return, duplicate/nested/unrelated events, stale attention and blocked/unblocked transitions.
-- [ ] Real parser/HTTP/extension fixtures prove finite delivery waits, no false delivery or reply, and unsupported-contract refusal before effects across supported skew/rollback.
-- [ ] Fresh database/extension fixtures prove first-touch behavior, not only reconciliation.
+- [x] Land this proposal through review before implementing new behavior.
+- [x] Delivery controls cover exact receipt ordering, consume-before-return, duplicate/nested/unrelated events, stale attention and blocked/unblocked transitions.
+- [x] Real parser/HTTP/extension fixtures prove finite delivery waits, no false delivery or reply, and unsupported-contract refusal before effects across supported skew/rollback.
+- [x] Fresh delivery database/extension fixtures prove first-touch behavior, not only reconciliation.
 - [ ] Coalescing tests prove one unread notice, cursor-neutral paging, partial/full acknowledgement, concurrent-event rearm and restart recovery.
 - [ ] Host stream tests prove selection/root filtering, unavailable evidence, bounded queues, replay gaps and one stream per host.
 - [ ] Required local lint, source contract checks, review and exact-head CI pass for each implementation PR.
@@ -162,6 +164,34 @@ Each implementation PR includes documentation/contract impact and its actual
 validation evidence, including honest reasons for unavailable native lanes.
 
 ## Journal
+
+### 2026-11-07 - Delivery source qualified before publication
+
+- Genuine HTTP-52 capture and a separate no-write replay each passed all 334
+  required cases against source checkpoint `4e247f0760`.
+  The contract checker passed with two contracts and 1,073 fixtures.
+- The complete portfolio exposed a portable receiving-bundle omission; the
+  new extension module is now in the canonical packaged-assets manifest.
+  Both joined portable consumers pass, alongside 18 delivery controls.
+- Fifteen capture transport/binding controls retain complete-portfolio,
+  finite aggregate-budget and actual CLI launch/entry/parent verification.
+  The Windows module reader uses the shared direct-interpreter convention,
+  preserving its selected venv without a redirector ancestry gap.
+- Source qualification is not an installed release, review, merge or deployment.
+  Subscription publication and separately authorized adoption remain open.
+
+### 2026-11-07 - Proposal reviewed; delivery implementation
+
+- #11449 merged after Copilot approval and required green checks.
+- Transitioned source owner from Phase A to Phase B. A bounded source delegate
+  owns independent Phase C/remote composition; the parent retains completion.
+- Delivery observations use existing mechanical consumption, not an unavailable
+  model-transmission callback. Fresh metadata-only attention is separate from
+  durable receipts; joining mid-turn preserves unknown absence.
+- Initial implementation is local-only; qualified remote delivery waiting remains
+  explicit unsupported-before-send pending its separate provider composition.
+- Focused testing exposed old HTTP test adapters missing endpoint-pin arguments;
+  repair retains and asserts that guard instead of disabling it.
 
 ### 2026-11-07 - Initial proposal
 

@@ -16,6 +16,31 @@ import bridge_http52_evidence as evidence
 from bridge_http_retained_probes import capture_request, record_observations
 from http51_receipt_probes import observe as observe_receipt
 from http51_live_cli_probes import observe as observe_live_cli
+from test_live_delivery_state import (
+    delivery_api as delivery_api,
+    test_accepted_behind_question_is_explicit_not_failed_and_keyed_retry_is_one_row
+    as test_accepted_behind_question_is_explicit_not_failed_and_keyed_retry_is_one_row,
+    test_consumption_releases_wait_without_turn_end_or_reply
+    as test_consumption_releases_wait_without_turn_end_or_reply,
+    test_missing_partial_stale_or_reincarnated_observer_is_unknown
+    as test_missing_partial_stale_or_reincarnated_observer_is_unknown,
+    test_receipt_loss_after_admission_cannot_be_reported_as_refused
+    as test_receipt_loss_after_admission_cannot_be_reported_as_refused,
+    test_invalid_wait_refuses_before_admission as test_invalid_wait_refuses_before_admission,
+    test_combined_reply_or_startup_wait_is_refused_before_admission
+    as test_combined_reply_or_startup_wait_is_refused_before_admission,
+    test_current_client_refuses_unsupported_provider_before_send
+    as test_current_client_refuses_unsupported_provider_before_send,
+    test_invalid_cli_timeout_is_parser_error_before_client_creation
+    as test_invalid_cli_timeout_is_parser_error_before_client_creation,
+    test_observation_rejects_duplicate_categories as test_observation_rejects_duplicate_categories,
+    test_real_cli_parser_send_and_existing_receipt_share_one_http_ledger
+    as test_real_cli_parser_send_and_existing_receipt_share_one_http_ledger,
+    test_module_cli_observes_over_loopback_without_starting_service
+    as test_module_cli_observes_over_loopback_without_starting_service,
+    test_extension_pending_snapshot_and_capability_wire
+    as test_extension_pending_snapshot_and_capability_wire,
+)
 from test_mux_questions import (
     mux_api as mux_api,
     test_http_choice_and_freeform_are_verified_audited_and_single_use
