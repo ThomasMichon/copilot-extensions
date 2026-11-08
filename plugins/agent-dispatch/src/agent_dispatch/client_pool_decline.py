@@ -155,8 +155,13 @@ class PoolDeclineClientMixin:
         except ValueError as exc:
             raise DispatchError(502, "task relationship read is unconfirmed; custody retained") from exc
         request = value.get("request") if isinstance(value, dict) else None
-        if value is None or not isinstance(request, dict) or request.get("reservation_key") != reservation_key:
+        if value is None:
             return None
+        if not isinstance(request, dict) or request.get("reservation_key") != reservation_key:
+            # Mirrors coordinator closeout: another allocation's unsettled claim retains custody.
+            if isinstance(value, dict) and value.get("state") in {"closed", "absent"}:
+                return None
+            raise DispatchError(409, "worker decline lacks its original task relationship; custody retained")
         if not supported:
             raise DispatchUpgradeRequired("running coordinator lacks decline readiness ordering; custody retained")
         if value.get("state") != "bound":

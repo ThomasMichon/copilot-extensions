@@ -307,3 +307,24 @@ def test_old_coordinator_with_retained_claim_refuses_before_decision(governed_cl
         args.func(args)
     assert g.q.pool_worker_decline(g.task_id) is None and not order
     assert all(r.method == "GET" for r in requests)
+
+
+@pytest.mark.parametrize("governed", [False], indirect=True)
+def test_unsettled_claim_for_another_reservation_refuses_before_decision(governed_cli, monkeypatch):
+    g, args, order, requests, app = governed_cli
+
+    def rewrite(request, response):
+        if request.url.path.endswith("/relationship"):
+            value = response.json()
+            value["request"]["reservation_key"] = "replacement-reservation"
+            return httpx.Response(200, json=value)
+        return response
+
+    monkeypatch.setattr(cli, "_client", lambda *a, **k: controls.connected(
+        app, requests, control=False, rewrite=rewrite,
+    ))
+    with pytest.raises(DispatchError, match="original task relationship"):
+        args.func(args)
+    assert g.q.pool_worker_decline(g.task_id) is None and not order
+    assert all(r.method == "GET" for r in requests)
+    assert g.q.task_relationship(g.task_id)["state"] == "bound"
