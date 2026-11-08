@@ -68,8 +68,12 @@ def reconcile_terminal(
     except (ReviewContextUnavailable, TimeoutError, OSError, ValueError):
         result["errors"] = ["original_protected_recovery_unavailable"]
     retained = store.inspect(scope, operation_id, expires_at=expires_at, checkpoint=checkpoint)
+    unknown = any(action["state"] == "unknown" for action in retained["actions"])
     return {
         **result,
-        "status": "unknown" if any(action["state"] == "unknown" for action in retained["actions"]) else "retained",
+        "status": (
+            "escalation_required" if unknown and store.owner.clock() >= retained["recovery"]["deadline_at"]
+            else "unknown" if unknown else "retained"
+        ),
         "actions": retained["actions"],
     }

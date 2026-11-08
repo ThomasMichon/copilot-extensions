@@ -13,6 +13,7 @@ from test_workspace_terminal_retention import (
     load, terminal, drain,
 )
 from test_review_owner_store import prepared_intent as prepared_intent
+from test_workspace_comment_preparation import comment_preparer as comment_preparer
 from agent_pull_requests.attention import Cursor
 from agent_pull_requests.review_workspace import _digest
 from agent_pull_requests.terminal_retention import TerminalAdmissionClosed
@@ -177,8 +178,31 @@ def test_full_review_budget_refuses_compaction_without_eviction_or_other_reserva
 
 
 def test_original_feedback_capture_remains_bound_without_claiming_handled_progress(workspace: tuple) -> None:
+    from agent_pull_requests.attention import Interest
+    from agent_pull_requests.attention_acquisition import AttentionInputs
+    from agent_pull_requests.attention_read import AttentionReader
+    from agent_pull_requests.conversation_store import ConversationStore
+    from agent_pull_requests.review_feedback import FeedbackInputs
+    from agent_pull_requests.workspace_conversation import observation_interval
+
     prepared = prepare(workspace, capture=True)
     operations, recovery, intent, _, _, _, _ = prepared
+    interests = (Interest("maintainer", True, "consumer-a"),)
+    operations.attention_owner = lambda generation: AttentionInputs(
+        generation["id"], interests, True, False, False, False, False,
+    )
+    operations.feedback_owner = lambda generation: FeedbackInputs(generation["id"], interests, 60)
+    current = operations.cache.lookup(intent["scope"])["generation"]
+    _, terminal_value = terminal(operations, current, second=22)
+
+    def observe_attention(value: dict) -> None:
+        operations.store.clock = lambda: observation_interval(value["sections"])[1] + 1
+        ConversationStore(operations.store).observe_workspace(
+            value, expires_at=expires(), terminal_target=operations.retention_target(value["scope"]),
+            attention=operations.attention_owner(value),
+        )
+
+    observe_attention(terminal_value)
     before = json.loads(operations.store.path.read_bytes())
     compact(prepared)
     after = json.loads(operations.store.path.read_bytes())
@@ -186,6 +210,16 @@ def test_original_feedback_capture_remains_bound_without_claiming_handled_progre
     assert after["attention"] == before["attention"]
     assert after["feedback_captures"]["records"][0]["readback"] is None
     assert recovery.inspect(intent["scope"], intent["operation_id"], expires_at=expires())["actions"][0]["state"] == "unknown"
+    reader = AttentionReader(operations, consumer="consumer-a", max_age_seconds=60, aging_seconds=30, historical=True)
+    before_read = operations.store.path.read_bytes()
+    result = reader.execute("read", {"limit": 16, "after": None}, expires_at=expires(), checkpoint=lambda: None)
+    assert result["items"][0]["status"] == "terminal"
+    assert operations.store.path.read_bytes() == before_read
+    _, reopened = terminal(operations, current, state="active", second=30)
+    observe_attention(reopened)
+    result = reader.execute("read", {"limit": 16, "after": None}, expires_at=expires(), checkpoint=lambda: None)
+    assert result["items"][0]["status"] == "unavailable"
+    assert result["items"][0]["reasons"] == ("feedback-reconciliation-pending",)
 
 
 def test_compaction_rejoins_actual_admission_even_after_a_prior_persisted_drain(workspace: tuple) -> None:
@@ -330,6 +364,95 @@ def test_original_partial_native_receipt_cannot_be_replaced_by_a_different_match
     state = recovery.inspect(intent["scope"], intent["operation_id"], expires_at=expires())["actions"][0]
     assert state["receipt"]["platform_ids"] == {"thread_id": 99}
     assert state["attempt_id"] == before["attempt_id"]
+
+
+@pytest.mark.parametrize("target_thread", [100, 200])
+def test_compacted_unknown_native_identity_still_guards_actual_reopened_edit_allocation(
+    workspace: tuple, comment_preparer: tuple, target_thread: int,
+) -> None:
+    from agent_pull_requests.review_selection_store import ReviewSelectionStore
+    from agent_pull_requests.review_workspace import _record
+    from agent_pull_requests.terminal_retention import bind_generation
+
+    prepared = prepare(workspace)
+    operations, _, intent, _, _, _, backend = prepared
+    state = json.loads(operations.store.path.read_bytes())["reviews"][0]["actions"][0]
+    operations.store.record_review_receipt(
+        intent["operation_id"], intent["scope"], state["id"], state["attempt_id"],
+        {"origin": "response", "platform_ids": {"thread_id": target_thread}, "proof": None},
+        expires_at=expires(), confirm=False,
+    )
+    compact(prepared)
+    thread = {
+        "id": 100, "status": 1, "comments": [{
+            "id": 1, "parentCommentId": 0, "commentType": 1, "content": "Current legacy text.",
+            "author": {"id": intent["scope"]["principal_id"]},
+        }],
+    }
+    backend.threads = [thread]
+    current = operations.cache.lookup(intent["scope"])["generation"]
+    current["sections"]["discussions"]["data"] = [_record("discussions", thread)]
+    observation, reopened = terminal(operations, current, state="active", second=30)
+    operations.store._review_transaction(
+        lambda document: bind_generation(document, reopened, observation["cursor"]), expires_at=expires(),
+    )
+    operations.store.adopt_prepared_reviews(lifecycle_checkpoint=lambda: None, expires_at=expires())
+    selections = ReviewSelectionStore(operations.store)
+    selections.adopt(lifecycle_checkpoint=lambda: None, expires_at=expires())
+    chosen = copy.deepcopy(intent)
+    chosen.update(operation_id="new-reopened-edit", generation_id=reopened["id"])
+    chosen["actions"] = [{
+        "id": "edit", "kind": "edit_owned_comment", "body": "Selected new edit.", "thread_id": 100,
+        "comment_id": 1, "expected_content_id": _digest("Current legacy text."),
+    }]
+    attachment = copy.deepcopy(workspace[5])
+    attachment["generation_id"] = reopened["id"]
+    compose, composed = comment_preparer
+    before = operations.store.path.read_bytes()
+
+    def allocate() -> dict:
+        return selections.allocate(
+            chosen, compose=compose, expires_at=expires(), generation=reopened, source_attachment=attachment,
+        )
+
+    if target_thread == 100:
+        with pytest.raises(ValueError, match="unresolved native effect"):
+            allocate()
+        assert operations.store.path.read_bytes() == before and not composed["results"]
+    else:
+        assert allocate()["status"] == "prepared"
+
+
+@pytest.mark.parametrize("boundary", ["read", "record"])
+def test_original_deadline_crossed_during_protected_readback_escalates_immediately(
+    workspace: tuple, monkeypatch: pytest.MonkeyPatch, boundary: str,
+) -> None:
+    prepared = prepare(workspace)
+    operations, recovery, intent, admitted, _, policies, backend = prepared
+    backend.threads = [matching_thread(intent, admitted)]
+    compact(prepared)
+    deadline = policies[intent["operation_id"]]["deadline_at"]
+    if boundary == "read":
+        request = backend.request
+
+        def delayed(*args, **kwargs):
+            result = request(*args, **kwargs)
+            if "/threads?" in args[1]:
+                operations.store.clock = lambda: deadline
+            return result
+
+        monkeypatch.setattr(backend, "request", delayed)
+    else:
+        record = recovery.record
+
+        def delayed_record(*args, **kwargs):
+            operations.store.clock = lambda: deadline
+            return record(*args, **kwargs)
+
+        monkeypatch.setattr(recovery, "record", delayed_record)
+    result = reconcile(prepared)
+    assert result["status"] == "escalation_required"
+    assert result["actions"][0]["state"] == "unknown" and result["actions"][0]["receipt"] is None
 
 
 def test_reopen_preserves_historical_recovery_but_cannot_resume_old_compactor(workspace: tuple) -> None:

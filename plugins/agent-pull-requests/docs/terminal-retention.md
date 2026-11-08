@@ -147,6 +147,12 @@ become `retired`; unknown and confirmed remain distinct. No body, source
 manifest or executable intent survives in the compact record. Body-free
 feedback captures keep their original binding without claiming handled progress
 or original-version proof. Existing frozen delivery payloads are untouched.
+Attention projection joins those original captures to compact operations;
+unknown recovery still reports reconciliation pending after reopen.
+Owned-edit allocation also checks compact unknown receipts under the same full
+scope, including partial native target IDs. A compact confirmed prepared
+target without its retired original preparation refuses rather than becoming
+an unrelated legacy comment.
 
 At most 1024 compact operations use the existing bounded review reservation
 alongside active operations, including reserved receipt growth. A short
@@ -168,6 +174,8 @@ reads remain unknown under the original recovery deadline. There is no
 perform/send path, no new attempt and no feedback advance. No replay-file
 lock is held over native IO; the receipt is checked again against the same
 original unknown attempt when it commits.
+Crossing the original deadline during IO or receipt commit reports escalation
+on that same invocation while retaining the unresolved attempt.
 
 This leaf removes selected bodies from the owner file only after actual drain.
 It does **not** retire cache pointers/objects, server buffers or
