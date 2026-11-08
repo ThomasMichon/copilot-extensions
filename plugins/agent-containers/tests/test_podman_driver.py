@@ -129,6 +129,48 @@ def test_foreign_or_recreated_member_is_never_mutated(engine, monkeypatch, chang
     assert len(engine) == 1 and "inspect" in engine[0][0]
 
 
+@pytest.mark.parametrize("state, command", [
+    ("paused", "unpause"), ("exited", "start"), ("created", "start"),
+])
+def test_start_uses_state_specific_command_on_pinned_member(engine, monkeypatch, state, command):
+    original = podman_driver.run_caller_owned
+
+    def inspect_state(argv, **kwargs):
+        if "inspect" in argv:
+            row = document()
+            row["State"]["Status"] = state
+            engine.append((argv, None, kwargs["timeout"]))
+            return subprocess.CompletedProcess(argv, 0, json.dumps([row]), "")
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(podman_driver, "run_caller_owned", inspect_state)
+    podman_driver.PodmanDriver(request()).handle("start", {
+        "name": "example-1", "id": MEMBER_ID,
+    })
+    assert [argv for argv, _, _ in engine] == [
+        ["podman", "container", "inspect", MEMBER_ID], ["podman", command, MEMBER_ID],
+    ]
+
+
+def test_failed_unpause_is_not_replayed_as_start(engine, monkeypatch):
+    def fail(argv, **kwargs):
+        engine.append((argv, None, kwargs["timeout"]))
+        if "inspect" in argv:
+            row = document()
+            row["State"]["Status"] = "paused"
+            return subprocess.CompletedProcess(argv, 0, json.dumps([row]), "")
+        return subprocess.CompletedProcess(argv, 125, "", "synthetic unpause failure")
+
+    monkeypatch.setattr(podman_driver, "run_caller_owned", fail)
+    with pytest.raises(podman_driver.PodmanError, match="did not replay"):
+        podman_driver.PodmanDriver(request()).handle("start", {
+            "name": "example-1", "id": MEMBER_ID,
+        })
+    assert [argv for argv, _, _ in engine] == [
+        ["podman", "container", "inspect", MEMBER_ID], ["podman", "unpause", MEMBER_ID],
+    ]
+
+
 def test_creation_failure_is_not_replayed_or_removed(engine, monkeypatch):
     original = podman_driver.run_caller_owned
 
@@ -231,7 +273,9 @@ def test_real_provider_and_driver_process_roundtrip(tmp_path, monkeypatch):
     root = tmp_path / "engine"
     root.mkdir()
     script = Path(__file__).with_name("fake_podman.py").read_text(encoding="utf-8")
-    for verb in ("container", "image", "pull", "run", "ps", "start", "stop", "rm", "exec", "cp"):
+    for verb in (
+        "container", "image", "pull", "run", "ps", "start", "unpause", "stop", "rm", "exec", "cp",
+    ):
         (root / verb).write_text(script, encoding="utf-8")
     monkeypatch.chdir(root)
     monkeypatch.setenv("PODMAN_TEST_ROOT", str(root))
@@ -276,6 +320,11 @@ def test_real_provider_and_driver_process_roundtrip(tmp_path, monkeypatch):
         [stopped] = lifecycle.list_containers(config)
         assert stopped.state == "exited"
         assert fleet.start(config, "example") == ["example-1"]
+        state = json.loads((root / "state.json").read_text(encoding="utf-8"))
+        state["members"][MEMBER_ID]["State"]["Status"] = "paused"
+        (root / "state.json").write_text(json.dumps(state), encoding="utf-8")
+        assert fleet.start(config, "example") == ["example-1"]
+        assert lifecycle.list_containers(config)[0].state == "running"
         with pytest.raises(DriverError) as changed:
             driver.stop("example-1", instance_id="c" * 64)
         assert changed.value.code == "conflict"
@@ -284,5 +333,8 @@ def test_real_provider_and_driver_process_roundtrip(tmp_path, monkeypatch):
         assert state["members"] == {}
         assert len([call for call in state["calls"] if call[0] == "run"]) == 1
         assert next(call for call in state["calls"] if call[0] == "stop")[-1] == MEMBER_ID
+        assert [call for call in state["calls"] if call[0] == "unpause"] == [
+            ["unpause", MEMBER_ID],
+        ]
     finally:
         runtime_drivers.clear_bindings()

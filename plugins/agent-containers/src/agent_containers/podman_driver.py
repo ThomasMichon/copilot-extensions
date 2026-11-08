@@ -271,7 +271,8 @@ class PodmanDriver:
             force = request.get("force", False)
             if not isinstance(force, bool):
                 raise PodmanError("invalid_request", "force must be boolean")
-            args = ["rm" if verb == "remove" else verb]
+            command = "unpause" if verb == "start" and member["state"] == "paused" else verb
+            args = ["rm" if verb == "remove" else command]
             if verb == "remove" and force:
                 args.append("--force")
             self._checked([*args, target], timeout=300)

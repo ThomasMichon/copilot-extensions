@@ -43,8 +43,12 @@ elif verb == "container":
         result = json.dumps(selected)
     else:
         code = 125
-elif verb in ("stop", "start"):
-    members[args[-1]]["State"]["Status"] = "running" if verb == "start" else "exited"
+elif verb in ("stop", "start", "unpause"):
+    member = members[args[-1]]
+    if verb == "start" and member["State"]["Status"] == "paused":
+        code = 125
+    else:
+        member["State"]["Status"] = "exited" if verb == "stop" else "running"
 elif verb == "rm":
     del members[args[-1]]
 elif verb == "exec":

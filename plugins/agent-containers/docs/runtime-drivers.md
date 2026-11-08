@@ -137,9 +137,10 @@ Stopped members remain visible. Explicit removal still follows the provider's
 existing lease and retained-work gates.
 
 All per-member effects inspect fleet/driver ownership and select the full native
-container ID before exec, copy or lifecycle commands. A pinned request never
-reaches a same-name successor. Native diagnostics from failed control operations
-are not copied into protocol errors; those identify the operation and exit code
+container ID before exec, copy or lifecycle commands. `start` unpauses a paused
+member and starts a stopped member; a failed operation is not replayed.
+A pinned request never reaches a same-name successor. Native diagnostics from
+failed control operations are not copied into protocol errors; those identify the operation and exit code
 and direct the operator to the selected connection/source/authentication owner.
 The driver accepts request packets up to 1 MiB. Streaming environment inheritance
 uses variable names, not secret values in host arguments.
@@ -169,8 +170,8 @@ alone is not selection: ordinary driver resolution still prefers PATH over the
 bundled fallback.
 
 The lifecycle fixture covers provider provisioning, real native inventory,
-literal exec, copy-in and stopped/restarted state on Windows or POSIX. Its
-selected image must provide `/workspaces/qualification` and no baked-in SSH
+literal exec, copy-in, paused/resumed and stopped/restarted state on Windows or
+POSIX. Its selected image must provide `/workspaces/qualification` and no baked-in SSH
 host keys. The separate authenticated fixture is POSIX-only: it creates a fresh
 private SSH key/profile and runs a command through the driver's ProxyCommand.
 Cleanup targets only the successfully observed fixture incarnation. Unknown

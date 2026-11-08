@@ -147,6 +147,17 @@ def test_native_podman_provider_lifecycle(tmp_path, monkeypatch, bundled_podman)
             created, ["/bin/cat", "/tmp/native-fixture.txt"], instance_id=owned_id,
         )
         assert copied.exit_code == 0 and copied.stdout == "native-copy-fixture"
+        command = [executable]
+        if connection := options.get("connection"):
+            command += ["--connection", connection]
+        paused = run_caller_owned(
+            [*command, "pause", owned_id], timeout=30,
+            max_stdout_bytes=65536, max_stderr_bytes=65536,
+        )
+        assert paused.returncode == 0, "native fixture pause failed"
+        assert driver.state(created, instance_id=owned_id) == "paused"
+        driver.start(created, instance_id=owned_id)
+        assert driver.state(created, instance_id=owned_id) == "running"
         driver.stop(created, instance_id=owned_id)
         assert driver.state(created, instance_id=owned_id) == "exited"
         driver.start(created, instance_id=owned_id)
