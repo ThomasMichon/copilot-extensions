@@ -211,6 +211,24 @@ def test_non_podman_suffix_preserves_platform_glob_behavior(fake):
     assert findings == []
 
 
+def test_podman_directory_scan_failure_refuses_fallback(fake, monkeypatch):
+    original_iterdir = Path.iterdir
+
+    def unreadable(path):
+        if path == fake.drivers:
+            raise PermissionError("fixture directory unavailable")
+        return original_iterdir(path)
+
+    monkeypatch.setattr(Path, "iterdir", unreadable)
+    lookups = []
+    monkeypatch.setattr(external_driver.shutil, "which", lambda name: (
+        lookups.append(name) or "/tools/custom-podman"
+    ))
+    with pytest.raises(RuntimeError, match="cannot enumerate"):
+        find_driver("podman")
+    assert lookups == []
+
+
 # -- protocol and lifecycle ----------------------------------------------
 
 

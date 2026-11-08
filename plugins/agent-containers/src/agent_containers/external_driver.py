@@ -156,6 +156,7 @@ def find_driver(name: str) -> DriverSpec:
         if (
             Path(finding["path"]).stem == name
             or (name == "podman" and Path(finding["path"]).stem.casefold() == name)
+            or (name == "podman" and Path(finding["path"]) == drivers_dir())
         )
     )
     if name == "podman" and detail:
