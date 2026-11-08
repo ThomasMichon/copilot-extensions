@@ -42,6 +42,10 @@ from test_mux_questions import (
     as test_completion_requires_a_new_exact_answer_echo_not_old_history,
     test_completion_accepts_only_right_aligned_native_duration_annotations
     as test_completion_accepts_only_right_aligned_native_duration_annotations,
+    test_only_known_native_decorations_are_volatile
+    as test_only_known_native_decorations_are_volatile,
+    test_http_clock_ticks_preserve_the_same_one_use_inspected_screen
+    as test_http_clock_ticks_preserve_the_same_one_use_inspected_screen,
 )
 from test_mux_question_client import (
     test_backend_uses_selected_owner_and_exact_confirmed_native_pane

@@ -37,11 +37,16 @@ are not answer payloads. Normal punctuation inside a literal answer is retained.
 The existing local Worktrees owner resolves the native lock/process ancestry
 and exact pane. Bridge confirms mux session/pane/process identity and native
 incarnation, and recaptures the current viewport rather than stale scrollback.
-Every mux target includes both session and pane, since PSMux can reuse pane
-IDs across sessions. A bare pane ID is not a globally unique target.
+Every mux target includes session, immutable window ID and pane index, resolved
+only from session-scoped metadata matching the authoritative native pane ID and
+PID. PSMux can reuse pane IDs across sessions; a bare ID is not globally unique.
 Only TMux on POSIX and PSMux on Windows are supported. Each effect rechecks the
 same native pending request, form and live binding. Selecting Other may expand
 the native text box and scroll unrelated history; that is not a new request.
+Screen identity excludes only the recognized native waiting clock immediately
+before the form and the greeting card's two known blinking-eye frames. All
+other viewport text, including the complete question, choices and cursor,
+remains significant. These decorations cannot create a fresh admission.
 
 Inspection and current pane evidence are complementary. Represented history
 alone never grants answer authority. A missing or ambiguous authoritative
@@ -115,6 +120,10 @@ qualifies native, mux option and mux Other answers against the real built-in
 form, with same-conversation continuation and no abort/replacement prompt.
 On POSIX select `TMUX_TEST_BIN`; on Windows select `PSMUX_TEST_BIN`.
 Fixture transport proof does not substitute for installed owner resolution.
+PSMux capture must preserve interior blank columns. Version 3.4.0 includes the
+upstream blank-cell capture fix; the delayed native fixture qualifies that release.
+Older lossy captures can concatenate the question and its elapsed duration;
+that ambiguous completion remains `unverified`, never a prefix match or retry.
 
 See [agent-bridge](../README.md) and
 [native interactive answers](live-question-answers.md).
