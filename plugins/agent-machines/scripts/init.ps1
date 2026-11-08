@@ -1434,7 +1434,7 @@ if ($Action -eq 'cell-provision') {
             exit 1
         }
         . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
-        Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+        Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot -RuntimeRoot $InstallDir
         Write-CellDeployManifest `
             -PluginRoot $pluginRoot `
             -SourcePluginDir $OriginPayloadRoot `
@@ -2359,7 +2359,7 @@ if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
 
 if ($Action -in @('install', 'init', 'provision', 'cell-provision')) {
     . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
-    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot -RuntimeRoot $InstallDir
 }
 # -- Preflight checks --------------------------------------------------
 

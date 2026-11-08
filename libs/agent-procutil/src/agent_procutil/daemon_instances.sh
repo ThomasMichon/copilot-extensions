@@ -276,15 +276,26 @@ _di_write_cursor() {
     mv -fT -- "$pending" "$path"
 }
 
+daemon_instance_reconcile_contract() {
+    printf '%s\n' 'copilot-daemon-reconcile-v1'
+}
+
 reconcile_daemon_instances() (
-    local limit="${1:-128}" seconds="${2:-5}" root="${3:-}"
+    local limit="${1:-128}" seconds="${2:-5}" root="${3:-}" runtime_root="${4:-}" terminate="${5:-false}"
     local path id start now count=0 lockfd reason birth status
     local LC_ALL=C cursor visited='' collector_fd
+    local python='' target='' binding_state=unknown
     local -a after=() before=()
     local -A record
     read -r start _ </proc/uptime || return 1
     [[ "$limit" =~ ^[0-9]+$ && "$limit" -ge 1 && "$limit" -le 4096 ]] || return 1
     awk -v n="$seconds" 'BEGIN { exit !(n>0 && n<1e9) }' || return 1
+    [[ "$terminate" == false || "$terminate" == true ]] || return 1
+    if [[ -n "$runtime_root" && ( "$runtime_root" != /* ||
+        "$(readlink -m -- "$runtime_root")" != "$runtime_root" ) ]]; then
+        printf '%s\n' 'daemon reconciliation runtime scope unsafe' >&2
+        return 1
+    fi
     root="$(daemon_instance_root "$root")" || return 1
     if [[ "$root" != /* || -L "$root" || "$(readlink -m -- "$root")" != "$root" ]]; then
         printf '%s\n' 'daemon instance inventory path unsafe' >&2
@@ -345,20 +356,34 @@ reconcile_daemon_instances() (
         count=$((count+1)); id="$(basename -- "$path" .instance)"; reason=invalid-record; status=held
         visited="$id"
         if [[ "$id" =~ ^[a-f0-9]{32}$ ]] && _di_read "$path" record; then
+            [[ -z "$runtime_root" || "${record[runtime_root]:-}" == "$runtime_root" ]] || continue
             if [[ "${record[purpose]:-}" == production ]]; then
                 [[ "${record[lifecycle]:-resident}" == finite-worker ]] || continue
             fi
-            local python target remaining
-            if ! python="$(_di_python)" || ! target="$(_di_lifecycle_source)"; then
-                printf 'held\tlifecycle-binding-unavailable\t%s\n' "$id"
-                printf 'daemon instance held: %s lifecycle-binding-unavailable\n' "$id" >&2
+            local remaining
+            if [[ "$binding_state" == unknown ]]; then
+                binding_state=lifecycle-binding-unavailable
+                if python="$(_di_python)" && target="$(_di_lifecycle_source)"; then
+                    binding_state=lifecycle-contract-unavailable
+                    if [[ "$("$python" -I -S -B "$target" reconcile-contract)" == \
+                        'copilot-daemon-reconcile-v1 termination-policy runtime-scope' ]]; then
+                        binding_state=ready
+                    fi
+                fi
+            fi
+            if [[ "$binding_state" != ready ]]; then
+                printf 'held\t%s\t%s\n' "$binding_state" "$id"
+                printf 'daemon instance held: %s %s\n' "$id" "$binding_state" >&2
                 continue
             fi
             read -r now _ </proc/uptime || return 1
             remaining="$(awk -v a="$start" -v b="$now" -v limit="$seconds" \
                 'BEGIN { printf "%.6f", limit-(b-a) }')"
             awk -v n="$remaining" 'BEGIN { exit !(n>0) }' || break
-            "$python" -I -S -B "$target" cleanup "$path" "$remaining" || {
+            local -a options=()
+            [[ "$terminate" == true ]] || options+=(--no-terminate)
+            [[ -z "$runtime_root" ]] || options+=(--runtime-root "$runtime_root")
+            "$python" -I -S -B "$target" cleanup "$path" "$remaining" "${options[@]}" || {
                 printf 'daemon instance reconciliation unavailable: %s\n' "$id" >&2
             }
             continue

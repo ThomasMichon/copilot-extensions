@@ -62,6 +62,15 @@ foreground clients and protected connectivity are excluded, including children
 of a central service. Unprovable retirement is skipped and reported separately.
 Never sweep by interpreter name.
 
+The shared installer instance backstop is separate from central-service
+retirement. It reconciles only the addressed runtime root and never requests
+process termination. An expired instance that is still live remains held;
+another installation's record and artifacts are not cleanup candidates.
+Observed-exit artifacts retain their existing exact-ownership checks. Missing
+scope or a legacy helper without termination-policy/runtime-scope support defers
+this optional cleanup before effects, without falling back to a global sweep.
+Explicit lifecycle-owner cleanup and lease supervision remain separate.
+
 Runtime code, old daemon generations, stale installer transactions and owned
 launchers/registrations are replaceable; configuration, credentials, repositories,
 worktrees, sessions and databases are not. This is not factory reset. The

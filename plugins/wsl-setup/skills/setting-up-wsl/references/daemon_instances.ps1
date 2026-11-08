@@ -396,13 +396,22 @@ function Exit-DaemonInstance {
 }
 
 function Invoke-DaemonInstanceReconcile {
-    param([int]$Limit=128, [double]$MaxSeconds=5, [string]$RegistryRoot)
+    param(
+        [int]$Limit=128, [double]$MaxSeconds=5, [string]$RegistryRoot,
+        [bool]$Terminate=$false, [string]$RuntimeRoot
+    )
     if ($Limit -lt 1 -or $Limit -gt 4096 -or $MaxSeconds -le 0 -or
         [double]::IsNaN($MaxSeconds) -or [double]::IsInfinity($MaxSeconds)) {
         throw 'Invalid daemon reconciliation bounds.'
     }
+    $support = Invoke-DaemonInstanceRequest @{command='reconcile-contract'}
+    if ($null -eq $support -or $support.version -cne 1 -or
+        $support.termination_policy -cne $true -or $support.runtime_scope -cne $true) {
+        throw 'Daemon instance helper lacks scoped termination-policy support; reconciliation was not submitted.'
+    }
     $results = @(Invoke-DaemonInstanceRequest @{command='reconcile'; parameters=@{
         limit=$Limit; max_seconds=$MaxSeconds; registry_root=$RegistryRoot
+        terminate=$Terminate; runtime_root=$RuntimeRoot
     }})
     foreach ($row in $results) {
         if ($null -ne $row -and $row.status -eq 'held') {

@@ -1165,7 +1165,7 @@ if [[ "$ACTION" == "cell-provision" ]]; then
             exit 1
         fi
         . "$SCRIPT_DIR/installer-instance-reconcile.sh"
-        reconcile_installer_instances "$SCRIPT_DIR"
+        reconcile_installer_instances "$SCRIPT_DIR" "" "$INSTALL_DIR"
         _write_cell_manifest \
             "$PLUGIN_ROOT" "$ORIGIN_PAYLOAD_ROOT" "$PACKAGE_VERSION" \
             "$VERSIONS_ROOT/$SRC_VERSION" "$SRC_VERSION" "$CONTEXT" \
@@ -1874,7 +1874,7 @@ fi
 case "$ACTION" in
     install|init|provision|cell-provision)
         . "$SCRIPT_DIR/installer-instance-reconcile.sh"
-        reconcile_installer_instances "$SCRIPT_DIR"
+        reconcile_installer_instances "$SCRIPT_DIR" "" "$INSTALL_DIR"
         ;;
 esac
 _step 'agent-machines init'
