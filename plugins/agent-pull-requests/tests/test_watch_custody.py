@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pytest
 
+from agent_pull_requests import _installation_context as api, watch_journal
 from agent_pull_requests.watch_control import WatchControlClient, WatchControlRefused
 from agent_pull_requests.watch_journal import WatchJournal
 from agent_pull_requests.watch_private import require_private
@@ -90,6 +91,30 @@ def test_pending_or_corrupt_archive_never_permits_overwriting_pending_custody(ce
         with pytest.raises(FileExistsError, match="archival"):
             _begin(cell, guard, live=False)
         assert (installation.run_root / "watch-owner-transaction.json").read_bytes() == terminal
+
+
+def test_archive_revalidates_current_build_after_reading_existing_archive(cell, monkeypatch):
+    installation, _, target = cell
+    with installation.transaction(timeout=1, environment={}) as guard:
+        journal = _begin(cell, guard, live=False)
+        _select(installation, target)
+        journal.commit()
+        journal.finish()
+        path = journal.archive()
+        archived = path.read_bytes()
+        read = watch_journal._private_bytes
+
+        def changed(current):
+            raw = read(current)
+            if current == path:
+                snapshot = installation.plugin_root / "snapshots" / target.snapshot_id / "entry.py"
+                snapshot.write_bytes(b"changed during archive read")
+            return raw
+
+        monkeypatch.setattr(watch_journal, "_private_bytes", changed)
+        with pytest.raises(api.InstallationContextError):
+            journal.archive()
+        assert path.read_bytes() == archived
 
 
 @pytest.mark.parametrize("state", ["archived-terminal", "unarchived-terminal", "pending"])
