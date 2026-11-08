@@ -311,8 +311,10 @@ def _fake_proc(root: Path, entries: dict[str, bytes | None]) -> Path:
     return root
 
 
-def test_process_scan_matches_hyphenated_names(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    name = "unsealed-123-456-789-101"
+@pytest.mark.parametrize("name", ["unsealed-123-456-789-101", "unsealed-123-456-789-101-"])
+def test_process_scan_matches_hyphenated_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str,
+) -> None:
     proc = _fake_proc(tmp_path / "proc", {"1": f"PYTHONPYCACHEPREFIX=/c/{name}\0".encode()})
     monkeypatch.setattr(prune.sys, "platform", "linux")
 

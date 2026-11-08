@@ -284,7 +284,7 @@ def live_unsealed_names(proc_root: str = "/proc") -> tuple[str, set[str] | None]
                 continue
             except OSError:
                 return "unknown", None
-            names.update(m.decode("ascii").rstrip("-") for m in _UNSEALED_REF.findall(data))
+            names.update(m.decode("ascii") for m in _UNSEALED_REF.findall(data))
     return ("process-scan" if complete else "incomplete"), names
 
 
