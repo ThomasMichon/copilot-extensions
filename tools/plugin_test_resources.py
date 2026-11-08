@@ -22,7 +22,7 @@ def _validate_fallback_root(info: os.stat_result, uid: int) -> None:
         raise ValueError("default test scratch must be private and owned by the current user")
 
 
-def scratch_root(repo: Path) -> Path:
+def scratch_root(repo: Path, *, create: bool = True) -> Path:
     source = repo.resolve(strict=True)
     configured = os.environ.get("AGENT_SCRATCH_ROOT")
     owner = (
@@ -38,18 +38,26 @@ def scratch_root(repo: Path) -> Path:
     scratch = ordinary_cache_root(scratch)
     if scratch.is_relative_to(source):
         raise ValueError("test scratch must be outside the source checkout")
-    scratch.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if configured is None and os.name != "nt":
+    if create:
+        scratch.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if configured is None and os.name != "nt" and scratch.exists():
         _validate_fallback_root(scratch.stat(), os.getuid())
     return scratch
+
+
+def resource_path(repo: Path) -> Path:
+    """Name a checkout's retained-cache root without creating it."""
+    source = repo.resolve(strict=True)
+    scratch = scratch_root(repo, create=False)
+    identity = hashlib.sha256(os.path.normcase(str(source)).encode("utf-8")).hexdigest()[:20]
+    return ordinary_cache_root(scratch / f"ce-tests-{identity}")
 
 
 def resource_root(repo: Path) -> Path:
     """Keep retained environments separate for every canonical source checkout."""
     source = repo.resolve(strict=True)
-    scratch = scratch_root(repo)
-    identity = hashlib.sha256(os.path.normcase(str(source)).encode("utf-8")).hexdigest()[:20]
-    root = ordinary_cache_root(scratch / f"ce-tests-{identity}")
+    scratch_root(repo)
+    root = resource_path(repo)
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     record_owner(root, source, retention="retained source-bound test cache; no automatic sweep")
     return root

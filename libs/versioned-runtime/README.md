@@ -280,6 +280,23 @@ Only an absent record means no references; malformed, linked, oversized or
 unreadable evidence refuses deletion. References never expire by PID or age
 and do not provide a new mutation lock, recovery queue or force-release path.
 
+For a cohort that spans several bounded owners, hold the external lifecycle
+lock and `reference_transaction_custody(root)` through reconciliation. Use
+`begin_runtime_reference_transaction(root, owner)` to persist a deletion fence,
+then `commit_runtime_reference_transaction(root, owner, token, updates,
+expected=previous)` to atomically publish the owner's complete set. Updates
+may address that owner or its slash-delimited children; each value retains the
+64-generation bound. A pending fence is rejected by ordinary readers, including
+older reference-aware cleanup code, so it cannot authorize GC. If the process
+dies, the same lifecycle owner reacquires its locks and resumes the pending
+transaction. Another owner holding the same transaction custody may request
+`recover_foreign=True`: the runtime atomically replaces the abandoned fence with
+bounded conservative references to every extant ordinary slot before proceeding.
+The original owner can later reconcile those references using
+`reference_recovery_prefix(owner)`. An invalid inventory, target or failed
+commit leaves the fence in place. This does not qualify older cleanup code that
+never read runtime references.
+
 Canonical `gc`, `toss_incomplete`, and incomplete `slot` cleanup acquire
 construction, exclusive retention, then selector-publication ownership and
 recheck protection under those guards before deleting. Cleanup skips a busy
