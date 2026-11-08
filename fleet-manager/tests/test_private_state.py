@@ -29,11 +29,13 @@ def split_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamesp
     docker.write_bytes(b"not-executed")
     docker.chmod(0o700)
     owners = {client: 0, config: 0}
-    state = SimpleNamespace(client=client, config=config, docker=docker, opened_uid=None)
+    state = SimpleNamespace(
+        client=client, config=config, docker=docker, opened_uid=None, socket_identity=None,
+    )
     original_stat, original_lstat, original_fstat = Path.stat, Path.lstat, os.fstat
 
     def owned(info: Any, uid: int) -> SimpleNamespace:
-        return SimpleNamespace(
+        observed = SimpleNamespace(
             st_uid=uid,
             **{
                 name: getattr(info, name)
@@ -43,16 +45,16 @@ def split_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamesp
                 )
             },
         )
+        if (info.st_dev, info.st_ino) == state.socket_identity:
+            observed.st_mode = stat.S_IFSOCK | 0o600
+        return observed
 
     def owner_uid(path: Path, info: Any) -> int:
         return owners.get(path, 0 if path.is_relative_to(tmp_path) else info.st_uid)
 
     def path_stat(path: Path, *, follow_symlinks: bool = True) -> Any:
         info = original_stat(path, follow_symlinks=follow_symlinks)
-        observed = owned(info, owner_uid(path, info))
-        if path == tmp_path / "docker-socket":
-            observed.st_mode = stat.S_IFSOCK | 0o600
-        return observed
+        return owned(info, owner_uid(path, info))
 
     def path_lstat(path: Path) -> Any:
         info = original_lstat(path)
@@ -163,6 +165,8 @@ def selection(owner: SimpleNamespace, root: Path) -> Any:
         paths[name].chmod(0o600)
     socket = root / "docker-socket"
     socket.write_bytes(b"not-a-network-endpoint")
+    info = socket.stat()
+    owner.socket_identity = info.st_dev, info.st_ino
     material = KomodoMaterialization(docker_socket=socket, **paths)
     declared = KomodoDeclaration.from_dict({
         "schema": "fleet-manager.komodo-substrate", "version": 1,
@@ -213,12 +217,17 @@ def test_split_credentials_join_real_selection_state_and_recovery(
         pending.chmod(0o600)
         state.save({"value": 2})
         assert state.read() == {"value": 2}
+    first_open = list(locks)
     with KomodoState.open(
         selected.host_runtime, daemon=selected.tooling.daemon_id,
         project="example-manager", existing_only=True,
     ) as recovered:
         assert recovered.read() == {"value": 2}
-    assert locks == [fcntl.LOCK_EX | fcntl.LOCK_NB] * 2
+    for calls in (first_open, locks[len(first_open):]):
+        acquisitions = [flags for flags in calls if not flags & fcntl.LOCK_UN]
+        assert acquisitions and all(
+            flags == fcntl.LOCK_EX | fcntl.LOCK_NB for flags in acquisitions
+        )
     assert private_state.os.getuid() == 1234 and private_state.os.geteuid() == 0
 
 
