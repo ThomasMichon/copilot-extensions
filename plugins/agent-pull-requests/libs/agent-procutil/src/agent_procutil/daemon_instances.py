@@ -163,7 +163,7 @@ def spawn_instance(argv, *, instance: DaemonInstanceSpec, popen=None, **kwargs):
     environment.update(instance_environment(receipt))
     try:
         process = (popen or subprocess.Popen)(command, env=environment, **kwargs)
-    except OSError:
+    except (OSError, ValueError):
         cancel_instance_reservation(receipt, creation_refused=True)
         raise
     from ._daemon_instance_identity import created_process_identity
