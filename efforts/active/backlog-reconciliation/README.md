@@ -293,7 +293,7 @@ documentary coordination contracts without implementation or closure credit.
 Its follow-through discloses two repeated original acquisitions after exhausted
 scopes, withdraws unused source grants and retains metadata-only candidates as
 unfulfilled. The later dated census is 842 whole OPEN, 113 above fixed 729;
-all existing completion check states remain unchanged and the campaign Active.
+all existing completion check states remain unchanged and the campaign remains Active.
 
 The [fulfilled-request and bridge-identity checkpoint](<journal/2026/11.07 fulfilled-requests-and-bridge-identity.md>)
 records the campaign-wide standing completion-check approval, #11445's audited
@@ -3062,10 +3062,10 @@ sources, transferring owners or turning partial/planning gains into completion.
 The [worker-witness and safe Resume study](<journal/2026/11.08 worker-witness-and-safe-resume.md>)
 distinguishes complete prebody provenance qualification, static witness
 definitions and a verified public research comment from execution or native
-acceptance. Its follow-through records the actual 7/6 acquisitions for each of
-two repeated originals rather than resetting their exhausted scopes or claiming
-fresh coverage. Whole-source refusals remain intact; no campaign or technical
-completion checkbox changes.
+acceptance. Its follow-through records seven acquisitions against a six-object
+scope for each of two repeated originals rather than resetting their exhausted
+scopes or claiming fresh coverage. Whole-source refusals remain intact; no
+campaign or technical completion checkbox changes.
 
 The [serving-owner and attribution-event study](<journal/2026/11.07 serving-owner-and-attribution-events.md>)
 distinguishes guarded source inspection, attributed native witness results,
