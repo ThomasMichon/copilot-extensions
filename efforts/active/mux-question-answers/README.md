@@ -85,6 +85,8 @@ runtime remediation, elevated operation or destructive cleanup is authorized.
 - [x] Require an expiring one-use inspection token bound to the exact pane
   incarnation, question and current screen. Prefer an available native path.
   Recheck identity and form before every key effect; stop on detected races.
+  Exclude only the positively recognized native clock and greeting blink,
+  never question, choice, cursor, input or other viewport changes.
 - [x] Audit caller, answer, inspection and actual outcome in existing session
   observations. Consume admission before effects and never replay uncertain
   input. Verify a new matching answer echo and form disappearance, not merely
@@ -290,3 +292,36 @@ runtime remediation, elevated operation or destructive cleanup is authorized.
 - The earlier capture remains historical validation, not qualification of this
   new source combination. Repeat exact-source capture and independent
   verification before returning the PR to review readiness.
+
+### 2026-11-07 - Delayed native rendering controls
+
+- Delayed real Windows forms exposed a clock-only change between inspection
+  and submission, followed by a greeting-eye blink. Preserve all semantic
+  checks while excluding only those narrowly recognized native decorations
+  from both inspection identity and first-effect screen comparison.
+- Two inspections separated only by clock ticks retain the same one-use
+  admission identity. Question, option, cursor, unrelated text, unknown
+  status and changed native request/process controls remain refusing.
+- PSMux 3.3.5 also collapses interior blank cells, concatenating a completion
+  question and duration. Keep that ambiguous echo unverified. Qualify against
+  the released 3.4.0 fix in disposable namespaces, not by weakening exact
+  question matching or upgrading existing session servers.
+- The controlled portfolio now includes both additional decoration/admission
+  cases. Repeat current qualification after these source corrections.
+
+### 2026-11-07 - Bounded historical-checker cost correction
+
+- #11477 recurred during the rebased source's historical guard. Read-only
+  profiling measured 524 Git subprocesses taking 57 of 62 seconds.
+- Batch commit/path and metadata reads through the existing local-only Git
+  object owner. Preserve exact blob IDs/hashes, version/generation checks,
+  missing-object behavior and malformed-response refusal. Reject batch
+  delimiters before any object read.
+- The same profiled corpus now uses 42 subprocesses and completes in 10.4
+  seconds. Real Git controls verify three processes for the joined prefetch
+  and metadata flow, including spaced paths and missing objects.
+- Checker/rendering controls passed; the UTF-8 metadata fixture also passed
+  after selecting task-private temporary state and enabling long paths only
+  on its own Git invocations. No shared temporary directory or global
+  configuration was changed. Finish fresh canonical qualification before
+  treating this as a resolved release gate.

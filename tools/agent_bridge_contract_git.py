@@ -30,6 +30,39 @@ _LOCAL_GIT_TIMEOUT = 10
 _OBJECT_TYPES: dict[str, str | None] = {}
 _BLOB_HASHES: dict[str, str | None] = {}
 _SOURCE_BLOBS: dict[tuple[str, str], str | None] = {}
+_SOURCE_CONTENTS: dict[tuple[str, str], bytes | None] = {}
+_MANIFEST = "plugins/agent-bridge/plugin.json"
+
+
+def _batch(queries: list[str]) -> Iterable[tuple[str, str | None, str | None, bytes]]:
+    require_local_object_reads()
+    result = subprocess.run(
+        ["git", "-C", str(REPO), "cat-file", "--batch"],
+        input=("\n".join(queries) + "\n").encode("utf-8"),
+        capture_output=True, check=True, env=clean_git_environment(),
+        timeout=_LOCAL_GIT_TIMEOUT,
+        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+    )
+    stream = io.BytesIO(result.stdout)
+    for query in queries:
+        raw_header = stream.readline().rstrip(b"\n")
+        if raw_header == query.encode("utf-8") + b" missing":
+            yield query, None, None, b""
+            continue
+        header = raw_header.split()
+        if (
+            len(header) != 3
+            or re.fullmatch(rb"[0-9a-f]{40}", header[0]) is None
+            or header[1] not in (b"blob", b"tree", b"commit", b"tag")
+            or not header[2].isdigit()
+        ):
+            raise RuntimeError("Malformed local Git object batch header")
+        body = stream.read(int(header[2]))
+        if len(body) != int(header[2]) or stream.read(1) != b"\n":
+            raise RuntimeError("Truncated local Git object batch")
+        yield query, header[0].decode("ascii"), header[1].decode("ascii"), body
+    if stream.read(1):
+        raise RuntimeError("Unexpected trailing local Git object batch data")
 
 
 def prefetch_objects(objects: Iterable[str]) -> None:
@@ -39,38 +72,16 @@ def prefetch_objects(objects: Iterable[str]) -> None:
         return
     if any(not _GIT_OBJECT_RE.fullmatch(value) for value in requested):
         raise ValueError("Invalid object id in local evidence batch")
-    require_local_object_reads()
-    result = subprocess.run(
-        ["git", "-C", str(REPO), "cat-file", "--batch"],
-        input=("\n".join(requested) + "\n").encode("ascii"),
-        capture_output=True, check=True, env=clean_git_environment(),
-        timeout=_LOCAL_GIT_TIMEOUT,
-        creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
-    )
-    stream = io.BytesIO(result.stdout)
     types: dict[str, str | None] = {}
     hashes: dict[str, str | None] = {}
-    for expected in requested:
-        header = stream.readline().rstrip(b"\n").split()
-        if header == [expected.encode("ascii"), b"missing"]:
-            types[expected] = None
-            hashes[expected] = None
-            continue
-        if (
-            len(header) != 3 or header[0] != expected.encode("ascii")
-            or header[1] not in (b"blob", b"tree", b"commit", b"tag")
-            or not header[2].isdigit()
-        ):
-            raise RuntimeError("Malformed local Git object batch header")
-        body = stream.read(int(header[2]))
-        if len(body) != int(header[2]) or stream.read(1) != b"\n":
-            raise RuntimeError("Truncated local Git object batch")
-        kind = header[1].decode("ascii")
+    for expected, actual, kind, body in _batch(requested):
+        if actual is not None and actual != expected:
+            raise RuntimeError("Local Git object batch returned a different object")
         types[expected] = kind
         if kind == "blob":
             hashes[expected] = sha256_bytes(body)
-    if stream.read(1):
-        raise RuntimeError("Unexpected trailing local Git object batch data")
+        elif kind is None:
+            hashes[expected] = None
     _OBJECT_TYPES.update(types)
     _BLOB_HASHES.update(hashes)
 
@@ -80,37 +91,38 @@ def prefetch_sources(sources: Iterable[tuple[str, str, str]]) -> None:
     _OBJECT_TYPES.clear()
     _BLOB_HASHES.clear()
     _SOURCE_BLOBS.clear()
+    _SOURCE_CONTENTS.clear()
     grouped: dict[str, set[str]] = {}
     objects = set()
     for commit, path, blob in sources:
         if not _GIT_OBJECT_RE.fullmatch(commit) or not _GIT_OBJECT_RE.fullmatch(blob):
             raise ValueError("Invalid provenance id in local evidence batch")
+        if not isinstance(path, str) or not path or any(char in path for char in "\r\n\0"):
+            raise ValueError("Invalid provenance path in local evidence batch")
         grouped.setdefault(commit, set()).add(path)
         objects.update((commit, blob))
     prefetch_objects(objects)
+    queries = {}
     for commit, selected in sorted(grouped.items()):
-        paths = sorted(selected)
+        paths = sorted(selected | {_MANIFEST})
         _SOURCE_BLOBS.update(((commit, path), None) for path in paths)
+        _SOURCE_CONTENTS.update(
+            ((commit, path), None) for path in paths
+            if path == _MANIFEST or path.endswith("/protocol.py")
+        )
         if not ensure_commit_available(commit):
             continue
-        # Bound path batches for Windows command-line limits.
-        for offset in range(0, len(paths), 64):
-            result = subprocess.run(
-                ["git", "--literal-pathspecs", "-C", str(REPO), "ls-tree", "-r", "-z",
-                 commit, "--", *paths[offset:offset + 64]],
-                capture_output=True, check=True, env=clean_git_environment(),
-                timeout=_LOCAL_GIT_TIMEOUT,
-                creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
-            )
-            for row in result.stdout.split(b"\0"):
-                if not row:
-                    continue
-                metadata, path = row.split(b"\t", 1)
-                _mode, kind, blob = metadata.split()
-                name = path.decode("utf-8")
-                if kind == b"blob" and name in selected:
-                    _SOURCE_BLOBS[commit, name] = blob.decode("ascii")
-    prefetch_objects(blob for blob in _SOURCE_BLOBS.values() if blob is not None)
+        queries.update((f"{commit}:{path}", (commit, path)) for path in paths)
+    if queries:
+        for query, blob, kind, body in _batch(list(queries)):
+            key = queries[query]
+            if kind == "blob":
+                assert blob is not None
+                _SOURCE_BLOBS[key] = blob
+                _OBJECT_TYPES[blob] = kind
+                _BLOB_HASHES[blob] = sha256_bytes(body)
+                if key in _SOURCE_CONTENTS:
+                    _SOURCE_CONTENTS[key] = body
 
 
 @lru_cache(maxsize=1)
@@ -230,14 +242,22 @@ def blob_sha256(blob: str) -> str | None:
     return sha256_bytes(result.stdout)
 
 
-def plugin_version_at(commit: str) -> str | None:
+def _source_text(commit: str, path: str) -> str | None:
+    if (commit, path) in _SOURCE_CONTENTS:
+        body = _SOURCE_CONTENTS[commit, path]
+        return body.decode("utf-8") if body is not None else None
     if not ensure_commit_available(commit):
         return None
-    result = git("show", f"{commit}:plugins/agent-bridge/plugin.json")
-    if result.returncode != 0:
+    result = git("show", f"{commit}:{path}")
+    return result.stdout if result.returncode == 0 else None
+
+
+def plugin_version_at(commit: str) -> str | None:
+    text = _source_text(commit, _MANIFEST)
+    if text is None:
         return None
     try:
-        data = json.loads(result.stdout)
+        data = json.loads(text)
     except json.JSONDecodeError:
         return None
     version = data.get("version")
@@ -245,13 +265,11 @@ def plugin_version_at(commit: str) -> str | None:
 
 
 def integer_constant_at(commit: str, path: str, name: str) -> int | None:
-    if not ensure_commit_available(commit):
-        return None
-    result = git("show", f"{commit}:{path}")
-    if result.returncode != 0:
+    text = _source_text(commit, path)
+    if text is None:
         return None
     try:
-        tree = ast.parse(result.stdout, filename=f"{commit}:{path}")
+        tree = ast.parse(text, filename=f"{commit}:{path}")
     except SyntaxError:
         return None
     for node in tree.body:
