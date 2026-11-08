@@ -15,7 +15,8 @@ export async function load(url, context, nextLoad) {
       export async function joinSession(config) {
         const handlers = new Map(), subscribers = new Map(), prompts = [], logs = [], sends = [];
         const session = {
-          sessionId: null, config, handlers, prompts, logs, sends,
+          sessionId: process.env.FIXTURE_BOUND_CWD ? "fixture-bound-session" : null,
+          config, handlers, prompts, logs, sends,
           rpc: {tools:{getCurrentMetadata:async () => ({tools:null})}},
           on(name, fn) {
             const callbacks = subscribers.get(name) || new Set();

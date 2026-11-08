@@ -33,8 +33,16 @@ merely because an extension loaded. Root `session.context_cleared` and successfu
 root compaction also supply it. Native pressure deferral does not disable this
 path. `mode: off` suppresses automatic replay, while local receipt capture and
 explicit facts/reads remain available.
-Handoff generation, emergency drafting and consumption include current corpus
-and Goal references. With an active worktree effort binding, Goal is read fresh
+Config loading and live reload follow the resolved continuing worktree, not the
+extension launch directory. Queued replay rechecks its worktree after awaited
+discovery and discards stale-scope data. Failed sends rearm on later root activity
+without changing retained records.
+Handoff generation and consumption include current corpus and Goal references.
+Emergency drafting uses only cached, scope-local corpus/source pointers before
+storing the baton: current Goal and corpus freshness are explicitly unqualified,
+and later retained inputs may be absent from the cached page. It never performs
+optional Goal discovery on that last-chance pre-store path.
+With an active worktree effort binding, Goal is read fresh
 from the resolved effort home; legacy Guiding Intent is explicitly labelled.
 For external-state pairs, that home is the owning knowledge worktree, not its
 registered anchor checkout. Stale bindings retain their source pointer and

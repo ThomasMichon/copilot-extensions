@@ -164,6 +164,100 @@ test("failed persistence is visible and exact pending input survives a lifecycle
   assert.equal(observation.page(data.corpus.id).records[0].text, "Exact held instruction.");
 });
 
+test("replay discards a scope changed during configuration or Goal reads and rearms", async (t) => {
+  for (const boundary of ["configuration", "goal"]) {
+    const f = fixture(t), c = client(f.a);
+    let release, entered;
+    const waiting = new Promise((resolve) => { entered = resolve; });
+    const held = new Promise((resolve) => { release = resolve; });
+    let pause = true;
+    const wait = async () => { if (pause) { entered(); await held; } };
+    const observation = registerIntentObservation(c.session, c.state, {
+      createCorpus: (cwd) => new IntentCorpus(cwd, f.options),
+      allowAutomaticReplay: async () => {
+        if (boundary === "configuration") await wait();
+        return true;
+      },
+      readGoal: async (cwd) => {
+        if (boundary === "goal") await wait();
+        return { status: "goal", goal: cwd === f.a ? "Old Goal" : "Current Goal" };
+      },
+    });
+    t.after(() => observation.dispose());
+    c.session.emit("user.message", message("old", "Old scope input"));
+    await waiting;
+    c.state.cwd = f.b;
+    pause = false;
+    release();
+    await observation.settle();
+    assert.equal(c.sent.length, 0, boundary);
+    c.session.emit("user.message", message("current", "Current scope input"));
+    await observation.settle();
+    assert.equal(c.sent.length, 1, boundary);
+    assert.match(c.sent[0].prompt, /Current Goal/u);
+    assert.equal(c.sent[0].prompt.includes("Old scope input"), false);
+    const facts = observation.latest;
+    assert.equal(observation.page(facts.corpus.id).records[0].text, "Current scope input");
+  }
+});
+
+test("a rejected replay send retries on later root activity without recapturing history", async (t) => {
+  const f = fixture(t), c = client(f.a);
+  const send = c.session.send;
+  let reject = true;
+  c.session.send = async (options) => {
+    if (reject) throw new Error("disconnected");
+    await send(options);
+  };
+  const observation = registerIntentObservation(c.session, c.state, {
+    createCorpus: (cwd) => new IntentCorpus(cwd, f.options),
+  });
+  t.after(() => observation.dispose());
+  c.session.emit("user.message", message("one", "Retain this mission."));
+  await observation.settle();
+  assert.equal(c.sent.length, 0);
+  assert.equal(observation.latest, null);
+  assert.ok(c.warnings.length);
+  const snapshot = (await observation.facts()).corpus.id;
+  reject = false;
+  c.session.emit("tool.execution_start", { agentId: "child" });
+  await observation.settle();
+  assert.equal(c.sent.length, 0);
+  c.session.emit("tool.execution_start", {});
+  await observation.settle();
+  assert.equal(c.sent.length, 1);
+  assert.equal(observation.latest.corpus.id, snapshot);
+  assert.equal((await observation.facts()).corpus.count, 1);
+});
+
+test("emergency pointers avoid Goal discovery and explicitly disqualify cached freshness", async (t) => {
+  const f = fixture(t), c = client(f.a);
+  let reads = 0;
+  const observation = registerIntentObservation(c.session, c.state, {
+    createCorpus: (cwd) => new IntentCorpus(cwd, f.options),
+    allowAutomaticReplay: () => false,
+    readGoal: () => { reads++; return { status: "goal", path: "effort.md", goal: "Old Goal" }; },
+  });
+  t.after(() => observation.dispose());
+  c.session.emit("user.message", message("one", "Original constraint."));
+  await observation.settle();
+  const cached = await observation.facts();
+  c.session.emit("user.message", message("two", "Later constraint."));
+  await observation.settle();
+  const emergency = observation.emergencyFacts();
+  assert.equal(reads, 1);
+  assert.equal(emergency.goal.goal, null);
+  assert.equal(emergency.goal.path, "effort.md");
+  assert.equal(emergency.corpus.id, cached.corpus.id);
+  assert.match(emergency.instruction, /may omit later inputs/u);
+  assert.ok(emergency.corpusPath);
+  c.state.cwd = f.b;
+  const other = observation.emergencyFacts();
+  assert.equal(other.corpus, null);
+  assert.equal(other.goal.path, null);
+  assert.equal(reads, 1);
+});
+
 test("broken storage cannot prevent facts or manufacture a complete replay", async (t) => {
   const f = fixture(t), c = client(f.a);
   const observation = registerIntentObservation(c.session, c.state, {

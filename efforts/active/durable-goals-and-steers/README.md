@@ -208,3 +208,12 @@ root-goal string. Research may refine these choices within the Request.
 - Goal reads now stop at their declared file bound, and snapshot construction
   retains sorting metadata rather than all prompt bodies in memory. An
   unavailable known binding remains visible even without a resolvable home.
+- Third-round review identified stale-scope replay, optional emergency discovery,
+  launch-directory config binding, rejected-send rearming and doubled Goal
+  fragments. Corrected the class at each boundary: recheck scope after awaits,
+  use explicitly unqualified cached emergency pointers, rebind asynchronous
+  config loading/reloading without delaying SDK readiness, rearm failed sends
+  on root activity, and replace existing source fragments with `#goal`.
+  Added controlled-await and rejection regressions plus a production extension
+  fixture with different launch/bound modes, live edits and emergency discovery
+  counters. Review, release, installed qualification and closeout remain open.

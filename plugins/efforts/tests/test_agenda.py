@@ -47,7 +47,9 @@ def test_root_reads_current_goal_and_preserves_legacy_intent(home: Path) -> None
     effort = home / "effort.md"
     effort.write_text("# Work\n\n## Goal\n\n> Ship the requested behavior.\n\n## Plan\n\nNot the goal.")
     edit(home, "agenda.json", lambda b: b.update(source={"kind": "effort", "ref": "effort.md#plan"}))
-    assert "> Ship the requested behavior." in AGENDA.inspect(home).root
+    assert AGENDA.inspect(home).root == (
+        "> Ship the requested behavior.\n(Source: effort:effort.md#goal)"
+    )
     effort.write_text("# Work\n\n## Goal\n\nNew objective; preserve the hold.\n")
     assert "New objective; preserve the hold." in AGENDA.inspect(home).root
     effort.write_text("# Work\n\n## Guiding Intent\n\nLegacy objective.\n")

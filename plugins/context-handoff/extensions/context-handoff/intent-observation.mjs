@@ -7,6 +7,7 @@ export function registerIntentObservation(session, state, {
 } = {}) {
   const corpora = new Map();
   const pending = new Map();
+  const cached = new Map();
   const unsubscribers = [];
   let disposed = false;
   let delivery = Promise.resolve();
@@ -58,8 +59,10 @@ export function registerIntentObservation(session, state, {
     try {
       const snapshot = corpus(cwd).snapshot();
       const page = snapshot ? corpus(cwd).page(snapshot.id) : null;
-      return { status: pending.size ? "incomplete" : "available", goal, corpus: snapshot, page,
+      const data = { status: pending.size ? "incomplete" : "available", goal, corpus: snapshot, page,
         pendingInputs: pending.size, failures, directive: INTENT_RESEARCH_DIRECTIVE };
+      cached.set(cwd, data);
+      return data;
     } catch {
       failures++;
       warn();
@@ -74,8 +77,16 @@ export function registerIntentObservation(session, state, {
     const cwd = state.cwd || process.cwd();
     delivery = delivery.catch(() => {}).then(async () => {
       if (disposed) return;
+      const scopeChanged = () => {
+        if ((state.cwd || process.cwd()) === cwd) return false;
+        startupPending = true;
+        return true;
+      };
+      if (scopeChanged()) return;
       if (!await allowAutomaticReplay()) { startupPending = true; return; }
+      if (disposed || scopeChanged()) return;
       const data = await facts(cwd);
+      if (disposed || scopeChanged()) return;
       const unavailableReference = data.goal?.status === "unavailable" && data.goal?.ref;
       if (disposed || (!data.corpus?.count && !data.goal?.goal && !data.pendingInputs
           && data.status !== "unavailable" && !data.goal?.path && !unavailableReference)) return;
@@ -92,8 +103,9 @@ export function registerIntentObservation(session, state, {
       ].join("\n\n");
       await session.send({ prompt, source: "system", mode: "immediate",
         displayPrompt: "Canonical Goal and durable intent history" });
+      if (disposed || scopeChanged()) return;
       latest = { reason, ...data };
-    }).catch(() => { failures++; warn(); });
+    }).catch(() => { startupPending = true; failures++; warn(); });
     return delivery;
   }
   for (const [event, handler] of [
@@ -115,6 +127,19 @@ export function registerIntentObservation(session, state, {
   }
   const observation = {
     facts,
+    emergencyFacts(cwd = state.cwd || process.cwd()) {
+      const data = cached.get(cwd);
+      return {
+        status: "cached-unqualified",
+        goal: { status: "unqualified", goal: null,
+          ref: data?.goal?.ref ?? null, path: data?.goal?.path ?? null },
+        corpus: data?.corpus ?? null, page: data?.page ?? null,
+        corpusPath: corpora.get(cwd)?.home ?? null,
+        pendingInputs: pending.size, failures, directive: INTENT_RESEARCH_DIRECTIVE,
+        instruction: "Emergency cached pointers only; current Goal and corpus freshness are unqualified. " +
+          "Read the bound effort and retained corpus before action; cached pages may omit later inputs.",
+      };
+    },
     replay,
     page(snapshot, cursor) { return corpus(state.cwd || process.cwd()).page(snapshot, cursor); },
     get latest() { return latest; },

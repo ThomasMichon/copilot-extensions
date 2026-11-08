@@ -140,23 +140,32 @@ let handoffConfig = defaultConfig();
 // effect without restarting (see refreshHandoffConfig below). The watcher is
 // primed before the first load, so an edit racing that load is re-read later.
 let configReloader = null;
-const handoffConfigPromise = (async () => {
-  const startDir = process.cwd();
-  try {
-    const reloader = createConfigReloader({
-      paths: await contextHandoffConfigPathsAsync(startDir),
-      load: () => loadContextHandoffConfigAsync(startDir),
-    });
-    await reloader.prime();
-    configReloader = reloader;
-  } catch {
-    configReloader = null; // Live reload is best-effort; the initial load still runs.
-  }
-  const resolved = await loadContextHandoffConfigAsync(startDir);
-  handoffConfig = resolved;
-  return resolved;
-})();
-handoffConfigPromise.catch(() => {}); // loadContextHandoffConfigAsync never rejects; guard anyway.
+let configStartDir = null;
+let configGeneration = 0;
+let handoffConfigPromise;
+function bindHandoffConfig(startDir) {
+  configStartDir = startDir;
+  const generation = ++configGeneration;
+  configReloader = null;
+  handoffConfigPromise = (async () => {
+    let reloader = null;
+    try {
+      reloader = createConfigReloader({
+        paths: await contextHandoffConfigPathsAsync(startDir),
+        load: () => loadContextHandoffConfigAsync(startDir),
+      });
+      await reloader.prime();
+    } catch { /* Live reload is best-effort; the initial load still runs. */ }
+    const resolved = await loadContextHandoffConfigAsync(startDir);
+    if (generation === configGeneration) {
+      configReloader = reloader;
+      handoffConfig = resolved;
+    }
+    return resolved;
+  })();
+  handoffConfigPromise.catch(() => {});
+}
+bindHandoffConfig(process.cwd());
 
 // Design decision (revised from the original Phase 4 judgment call): `mode:
 // off` disables only automatic/unprompted behavior -- context-pressure
@@ -401,7 +410,7 @@ async function autoForceHandoff(sid, cwd) {
   let markdown;
   try {
     const { data } = collectHandoffData(sid);
-    data.intentContinuity = await intentObservation.facts();
+    data.intentContinuity = intentObservation.emergencyFacts(cwd);
     markdown = formatHandoffMarkdown(data, null);
   } catch (error) {
     session.log(
@@ -1473,6 +1482,7 @@ nativeObserver = createNativeContextObserver({
 state.sessionId = session.sessionId ?? state.sessionId ?? null;
 state.cwd = state.cwd || process.cwd();
 state.cwd = resolveIntentCwd(state.cwd, state.sessionId, runCli);
+if (configStartDir !== state.cwd) bindHandoffConfig(state.cwd);
 state.turnCount = 0;
 // handoffConfig may not have resolved yet at this exact point (it is
 // deliberately not awaited before/alongside joinSession() -- see the
@@ -1698,12 +1708,16 @@ const INVALID_CONFIG_PREFIX = /^Invalid context-handoff config; using defaults \
 // A valid edit replaces the live config; an invalid one is reported once and
 // the previous config stays in effect. Concurrent callers share one refresh.
 async function refreshHandoffConfig() {
+  if (configStartDir !== (state.cwd || process.cwd())) bindHandoffConfig(state.cwd || process.cwd());
   await handoffConfigPromise;
   if (!configReloader) return handoffConfig;
   if (!configRefreshInFlight) {
     configRefreshInFlight = (async () => {
+      const generation = configGeneration;
+      const reloader = configReloader;
       try {
-        const result = await configReloader.refresh();
+        const result = await reloader.refresh();
+        if (generation !== configGeneration) return;
         let liveWindowError = null;
         if (result.changed) {
           // The loader cannot know the live window; a mixed-unit edit may

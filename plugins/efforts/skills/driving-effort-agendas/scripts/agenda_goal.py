@@ -66,7 +66,7 @@ def root_goal(source: dict[str, Any], home: Path | None) -> str:
     if goal:
         if len(json.dumps(goal).encode("utf8")) > 12000:
             return f"{label} [Goal exceeds display budget; read canonical {path}#goal in bounded ranges]"
-        return f"{goal}\n(Source: {label}#goal)"
+        return f"{goal}\n(Source: {source['kind']}:{reference}#goal)"
     legacy = section(text, "Guiding Intent")
     if legacy:
         if len(json.dumps(legacy).encode("utf8")) > 12000:
