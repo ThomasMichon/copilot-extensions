@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import re
-import sqlite3
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
+    import sqlite3
+
     from .store import ChatStore
 
 from .store import ChatError, MAX_PAGE_BYTES, _identifier, _integer, _printable, _unicode, json_bytes
