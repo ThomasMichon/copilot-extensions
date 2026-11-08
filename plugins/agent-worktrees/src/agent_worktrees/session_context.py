@@ -340,14 +340,13 @@ def render_registry_context(
     pane_id: str | None = None,
     mux_session: str | None = None,
     plugin_related_anchors: list[str] | None = None,
-    session_id: str | None = None,
 ) -> str:
-    """Render the bounded registry context followed by any agenda guidance line.
+    """Render the bounded registry context.
 
-    ``session_id`` comes from the hook payload, never the process environment,
-    which in the resident belongs to whichever session spawned it.
+    Agenda guidance is appended by ``related_briefing.augment_session_message``,
+    which receives the hook payload's session id.
     """
-    context = _render_registry_core(
+    return _render_registry_core(
         config,
         record,
         cwd=cwd,
@@ -355,7 +354,6 @@ def render_registry_context(
         mux_session=mux_session,
         plugin_related_anchors=plugin_related_anchors,
     )
-    return with_agenda_guidance(context, config, record, session_id=session_id or None)
 
 
 def _render_registry_core(

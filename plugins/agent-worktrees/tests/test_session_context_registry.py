@@ -541,13 +541,21 @@ def test_agenda_policy_roots_honor_agent_home(monkeypatch, tmp_path: Path):
     assert all(Path(root).is_relative_to(sandbox) for root in roots)
 
 
-def test_registry_agenda_guidance_uses_payload_session_not_process_env(monkeypatch, tmp_path: Path):
+def test_session_message_agenda_guidance_uses_payload_session_not_process_env(
+    monkeypatch, tmp_path: Path,
+):
+    from agent_worktrees import related_briefing
+
     config, record = _agenda_setup(monkeypatch, tmp_path, "expected")
-    monkeypatch.setattr(session_context, "_render_registry_core", lambda *_a, **_k: "ctx")
+    monkeypatch.setattr(related_briefing, "write_related_briefings", lambda *_a, **_k: [])
     monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "foreign")
 
-    bound = session_context.render_registry_context(config, record, cwd=str(tmp_path), session_id="mine")
-    unbound = session_context.render_registry_context(config, record, cwd=str(tmp_path))
+    def augment(session_id):
+        return related_briefing.augment_session_message(
+            "ctx", config, record, cwd=str(tmp_path), session_id=session_id,
+        )
+
+    bound, unbound = augment("mine"), augment(None)
 
     assert "session-state/mine" in bound
     assert "foreign" not in bound + unbound

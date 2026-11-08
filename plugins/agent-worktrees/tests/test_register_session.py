@@ -206,6 +206,32 @@ def _write_managed_mux_mapping(
     )
 
 
+class TestRegisterSessionAgendaGuidance:
+    def test_emit_context_passes_payload_session_to_agenda_guidance(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch, capsys
+    ):
+        from agent_worktrees import related_briefing, session_context
+
+        _save_record(tmp_tracking_dir, "wt-agenda", "/tmp/src/wt-agenda")
+        monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "foreign")
+        monkeypatch.setattr(cfg, "load_config", lambda **_k: object())
+        monkeypatch.setattr(session_context, "_render_registry_core", lambda *_a, **_k: "ctx")
+        monkeypatch.setattr(session_context, "publish_agenda_policy", lambda *_a: None)
+        monkeypatch.setattr(
+            session_context, "render_agenda_guidance",
+            lambda _config, _record, *, session_id=None: f"Agenda: session={session_id}",
+        )
+        monkeypatch.setattr(related_briefing, "write_related_briefings", lambda *_a, **_k: [])
+
+        assert m.cmd_register_session(_args(
+            worktree_id="wt-agenda", session_id="mine", emit_context=True,
+        )) == 0
+
+        context = json.loads(capsys.readouterr().out)["additionalContext"]
+        assert "Agenda: session=mine" in context
+        assert "foreign" not in context
+
+
 class TestRegisterSessionStdin:
     def test_session_start_associates_candidate_without_moving_head(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
