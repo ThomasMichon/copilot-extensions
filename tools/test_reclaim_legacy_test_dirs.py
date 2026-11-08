@@ -1,18 +1,29 @@
-"""Legacy per-checkout test-directory reclamation stays fail-closed."""
+"""Guided legacy test-directory reclamation stays explicit and fail-closed."""
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import pytest
 
 from tools import reclaim_legacy_test_dirs as reclaim
 
+_REAL_IN_USE = reclaim.in_use
+
 
 def _git(cwd, *args):
-    subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True,
+                   env=reclaim.git_environment())
+
+
+@pytest.fixture(autouse=True)
+def _no_live_users(monkeypatch):
+    """Liveness is a platform provider; tests that exercise it override this."""
+    monkeypatch.setattr(reclaim, "in_use", lambda _path, _accepted=frozenset(): (False, ""))
 
 
 @pytest.fixture
@@ -27,62 +38,199 @@ def repo(tmp_path):
     return root
 
 
-def _legacy(root, name=".test-venvs", *, age_hours=48.0):
-    tree = root / name / "linux" / "plugin"
-    tree.mkdir(parents=True)
-    payload = tree / "python"
-    payload.write_bytes(b"x" * 1024)
-    stamp = time.time() - age_hours * 3600
-    for path in (payload, tree, tree.parent, root / name):
+def _age(target, hours=48.0):
+    stamp = time.time() - hours * 3600
+    for path in sorted(target.rglob("*"), reverse=True):
         os.utime(path, (stamp, stamp))
+    os.utime(target, (stamp, stamp))
+
+
+def _legacy(root, name=".test-venvs", *, age_hours=48.0, evidence=False):
+    env = root / name / "linux" / "plugin"
+    env.mkdir(parents=True)
+    (env / "pyvenv.cfg").write_text("home = x\n", encoding="utf-8")
+    (env / "python").write_bytes(b"x" * 1024)
+    if evidence:
+        probe = root / name / "capture-probes"
+        probe.mkdir()
+        (probe / "report.json").write_text("{}", encoding="utf-8")
+    _age(root / name, age_hours)
     return root / name
 
 
-def _run(root, *args, capsys):
-    code = reclaim.main(["--repo", str(root), "--json", *args])
-    import json
-    return code, json.loads(capsys.readouterr().out)
+def _run(*args, capsys):
+    code = reclaim.main(["--json", *map(str, args)])
+    out = capsys.readouterr().out
+    return code, (json.loads(out) if out.strip() else None)
 
 
-def test_dry_run_reports_without_deleting(repo, capsys):
-    target = _legacy(repo)
-    code, report = _run(repo, capsys=capsys)
+def _plan(repo, tmp_path, target, *extra, capsys):
+    plan = tmp_path / "plan.json"
+    code, _report = _run("--repo", repo, "--select", target, *extra, "--plan-out", plan,
+                         capsys=capsys)
+    return code, plan
+
+
+def test_inventory_classifies_without_deleting(repo, capsys):
+    venvs = _legacy(repo, evidence=True)
+    runs = repo / ".test-runs"
+    runs.mkdir()
+    (runs / "log.txt").write_text("x", encoding="utf-8")
+    _age(runs)
+    code, report = _run("--repo", repo, capsys=capsys)
     assert code == 0
-    [candidate] = report["candidates"]
-    assert candidate["status"] == "eligible" and candidate["bytes"] == 1024
-    assert target.is_dir()
+    by_path = {c["path"]: c for c in report["candidates"]}
+    assert by_path[str(venvs)]["status"] == "needs-decision"
+    assert by_path[str(venvs)]["unclassified_sample"] == ["capture-probes/report.json"]
+    assert by_path[str(runs)]["status"] == "needs-decision"
+    assert venvs.is_dir() and runs.is_dir()
 
 
-def test_apply_removes_eligible_tree(repo, capsys):
-    target = _legacy(repo, ".test-runs")
-    code, report = _run(repo, "--apply", capsys=capsys)
+def test_environment_only_tree_is_ready_and_reclaimed_from_plan(repo, tmp_path, capsys):
+    target = _legacy(repo)
+    code, plan = _plan(repo, tmp_path, target, capsys=capsys)
+    assert code == 0 and target.is_dir()
+    code, report = _run("--apply-plan", plan, capsys=capsys)
     assert code == 0
     assert report["candidates"][0]["status"] == "reclaimed"
     assert not os.path.lexists(target)
-    assert not list(repo.glob(".test-runs.reclaiming-*"))
+    assert not list(repo.glob(".test-venvs.reclaiming-*"))
 
 
-def test_recent_tree_is_refused(repo, capsys):
-    target = _legacy(repo, age_hours=1)
-    _code, report = _run(repo, "--apply", capsys=capsys)
-    assert report["candidates"][0]["reason"] == "recently modified"
+def test_unclassified_content_requires_target_specific_discard(repo, tmp_path, capsys):
+    target = _legacy(repo, evidence=True)
+    code, plan = _plan(repo, tmp_path, target, capsys=capsys)
+    assert code == 2 and not plan.exists()
+    code, plan = _plan(repo, tmp_path, target, "--discard", target, capsys=capsys)
+    assert code == 0
+    assert json.loads(plan.read_text(encoding="utf-8"))["targets"][0]["discard_unclassified"]
+    code, report = _run("--apply-plan", plan, capsys=capsys)
+    assert code == 0 and report["candidates"][0]["status"] == "reclaimed"
+
+
+def test_discard_decision_cannot_be_dropped_from_plan(repo, tmp_path, capsys):
+    target = _legacy(repo, evidence=True)
+    code, plan = _plan(repo, tmp_path, target, "--discard", target, capsys=capsys)
+    assert code == 0
+    data = json.loads(plan.read_text(encoding="utf-8"))
+    data["targets"][0]["discard_unclassified"] = False
+    plan.write_text(json.dumps(data), encoding="utf-8")
+    code, report = _run("--apply-plan", plan, capsys=capsys)
+    assert code == 1
+    assert report["candidates"][0]["reason"] == "unclassified content without a discard decision"
+    assert (target / "capture-probes" / "report.json").is_file()
+
+
+def test_new_content_after_review_refuses(repo, tmp_path, capsys):
+    target = _legacy(repo)
+    code, plan = _plan(repo, tmp_path, target, capsys=capsys)
+    assert code == 0
+    (target / "new-evidence.json").write_text("{}", encoding="utf-8")
+    _age(target)
+    code, report = _run("--apply-plan", plan, capsys=capsys)
+    assert code == 1
+    assert report["candidates"][0]["reason"] == "changed since the plan was reviewed"
+    assert (target / "new-evidence.json").is_file()
+
+
+def test_only_selected_checkout_is_deleted(repo, tmp_path, capsys):
+    sibling = tmp_path / "sibling"
+    _git(repo, "worktree", "add", "-q", str(sibling))
+    mine, theirs = _legacy(repo), _legacy(sibling)
+    code, report = _run("--repo", repo, "--checkout", sibling, capsys=capsys)
+    assert [c["path"] for c in report["candidates"]] == [str(theirs)]
+    code, plan = _plan(repo, tmp_path, mine, capsys=capsys)
+    code, _report = _run("--apply-plan", plan, capsys=capsys)
+    assert code == 0 and not mine.exists() and theirs.is_dir()
+
+
+def test_unregistered_checkout_selector_is_an_error(repo, tmp_path, capsys):
+    code, _report = _run("--repo", repo, "--checkout", tmp_path, capsys=capsys)
+    assert code == 2
+
+
+def test_change_after_review_refuses_at_mutation(repo, tmp_path, capsys):
+    target = _legacy(repo)
+    code, plan = _plan(repo, tmp_path, target, capsys=capsys)
+    (target / "linux" / "plugin" / "python").write_bytes(b"y" * 2048)
+    _age(target)
+    code, report = _run("--apply-plan", plan, capsys=capsys)
+    assert code == 1
+    assert report["candidates"][0]["reason"] == "changed since the plan was reviewed"
     assert target.is_dir()
+
+
+def test_replaced_directory_refuses_at_mutation(repo, tmp_path, capsys):
+    target = _legacy(repo)
+    code, plan = _plan(repo, tmp_path, target, capsys=capsys)
+    os.rename(target, repo / "moved")
+    os.rename(repo / "moved", tmp_path / "moved")
+    _legacy(repo)
+    code, report = _run("--apply-plan", plan, capsys=capsys)
+    assert report["candidates"][0]["reason"] == "changed since the plan was reviewed"
+    assert target.is_dir()
+
+
+def test_write_between_rename_and_removal_restores_tree(repo, tmp_path, capsys, monkeypatch):
+    target = _legacy(repo)
+    code, plan = _plan(repo, tmp_path, target, capsys=capsys)
+    real = reclaim.survey
+
+    def racing_survey(path):
+        if ".reclaiming-" in path.name:
+            (path / "linux" / "late.txt").write_text("x", encoding="utf-8")
+        return real(path)
+
+    monkeypatch.setattr(reclaim, "survey", racing_survey)
+    code, report = _run("--apply-plan", plan, capsys=capsys)
+    assert report["candidates"][0]["reason"] == "changed since the plan was reviewed"
+    assert (target / "linux" / "late.txt").is_file()
+    assert not list(repo.glob(".test-venvs.reclaiming-*"))
+
+
+def test_live_user_detected_after_rename_restores_tree(repo, tmp_path, capsys, monkeypatch):
+    target = _legacy(repo)
+    code, plan = _plan(repo, tmp_path, target, capsys=capsys)
+    monkeypatch.setattr(reclaim, "in_use", lambda path, _accepted=frozenset(): (True, "in use by a live process") if ".reclaiming-" in path.name else (False, ""))
+    code, report = _run("--apply-plan", plan, capsys=capsys)
+    assert report["candidates"][0]["reason"] == "in use by a live process"
+    assert target.is_dir()
+
+
+def test_recent_tree_is_refused_at_plan_and_apply(repo, tmp_path, capsys):
+    target = _legacy(repo)
+    code, plan = _plan(repo, tmp_path, target, capsys=capsys)
+    _age(target, hours=1)
+    code, report = _run("--apply-plan", plan, capsys=capsys)
+    assert report["candidates"][0]["reason"] == "recently modified"
+    code, _plan_path = _plan(repo, tmp_path, target, capsys=capsys)
+    assert code == 2 and target.is_dir()
 
 
 def test_tracked_content_is_refused(repo, capsys):
     target = _legacy(repo)
     _git(repo, "add", "-f", ".test-venvs/linux/plugin/python")
-    _code, report = _run(repo, "--apply", capsys=capsys)
+    _code, report = _run("--repo", repo, capsys=capsys)
+    assert report["candidates"][0]["reason"] == "contains tracked files"
+    assert target.is_dir()
+
+
+def test_inherited_git_selectors_cannot_hide_tracked_files(repo, tmp_path, capsys, monkeypatch):
+    target = _legacy(repo)
+    _git(repo, "add", "-f", ".test-venvs/linux/plugin/python")
+    empty_index = tmp_path / "empty-index"
+    monkeypatch.setenv("GIT_INDEX_FILE", str(empty_index))
+    monkeypatch.setenv("GIT_DIR", str(tmp_path / "elsewhere"))
+    _code, report = _run("--repo", repo, capsys=capsys)
     assert report["candidates"][0]["reason"] == "contains tracked files"
     assert target.is_dir()
 
 
 def test_unignored_directory_is_refused(repo, capsys):
     (repo / ".gitignore").write_text("", encoding="utf-8")
-    target = _legacy(repo)
-    _code, report = _run(repo, "--apply", capsys=capsys)
+    _legacy(repo)
+    _code, report = _run("--repo", repo, capsys=capsys)
     assert report["candidates"][0]["reason"] == "not ignored by Git"
-    assert target.is_dir()
 
 
 def test_inner_link_is_refused_and_never_followed(repo, tmp_path, capsys, native_file_symlink):
@@ -91,9 +239,7 @@ def test_inner_link_is_refused_and_never_followed(repo, tmp_path, capsys, native
     (outside / "keep.txt").write_text("keep", encoding="utf-8")
     target = _legacy(repo)
     native_file_symlink(target / "escape", outside, target_is_directory=True)
-    stamp = time.time() - 48 * 3600
-    os.utime(target, (stamp, stamp))
-    _code, report = _run(repo, "--apply", capsys=capsys)
+    _code, report = _run("--repo", repo, capsys=capsys)
     assert report["candidates"][0]["reason"] == "contains a link or reparse point"
     assert (outside / "keep.txt").is_file() and target.is_dir()
 
@@ -102,43 +248,176 @@ def test_root_link_is_refused(repo, tmp_path, capsys, native_file_symlink):
     outside = tmp_path / "outside"
     outside.mkdir()
     native_file_symlink(repo / ".test-venvs", outside, target_is_directory=True)
-    _code, report = _run(repo, "--apply", capsys=capsys)
+    _code, report = _run("--repo", repo, capsys=capsys)
     assert report["candidates"][0]["reason"] == "not a plain directory"
     assert outside.is_dir()
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="Windows rename probe")
-def test_open_handle_blocks_reclaim_on_windows(repo, capsys):
+def test_plan_paths_must_stay_registered_legacy_directories(repo, tmp_path, capsys):
     target = _legacy(repo)
+    code, plan = _plan(repo, tmp_path, target, capsys=capsys)
+    data = json.loads(plan.read_text(encoding="utf-8"))
+    victim = repo / "src"
+    victim.mkdir()
+    data["targets"][0]["path"] = str(victim)
+    plan.write_text(json.dumps(data), encoding="utf-8")
+    code, report = _run("--apply-plan", plan, capsys=capsys)
+    assert report["candidates"][0]["reason"] == "not a legacy directory of a registered worktree"
+    assert victim.is_dir()
+
+
+def test_partial_removal_is_reported_and_remainder_restored(repo, tmp_path, capsys, monkeypatch):
+    target = _legacy(repo)
+    code, plan = _plan(repo, tmp_path, target, capsys=capsys)
+
+    def failing_remove(path, errors):
+        os.remove(path / "linux" / "plugin" / "python")
+        errors.append("simulated failure")
+
+    monkeypatch.setattr(reclaim, "_remove", failing_remove)
+    code, report = _run("--apply-plan", plan, capsys=capsys)
+    [result] = report["candidates"]
+    assert code == 1 and result["status"] == "partial"
+    assert "removed entries are gone" in result["reason"]
+    assert (target / "linux" / "plugin" / "pyvenv.cfg").is_file()
+    assert not (target / "linux" / "plugin" / "python").exists()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows exclusive rename")
+def test_open_handle_blocks_reclaim_on_windows(repo, tmp_path, capsys):
+    target = _legacy(repo)
+    code, plan = _plan(repo, tmp_path, target, capsys=capsys)
     with open(target / "linux" / "plugin" / "python", "rb"):
-        _code, report = _run(repo, "--apply", capsys=capsys)
+        _code, report = _run("--apply-plan", plan, capsys=capsys)
     assert report["candidates"][0]["reason"] == "in use by a live process"
     assert target.is_dir()
 
 
-def test_live_process_blocks_reclaim_on_posix(repo, capsys, monkeypatch):
-    if os.name == "nt":
-        pytest.skip("POSIX liveness scan")
+def test_unverifiable_liveness_refuses(repo, capsys, monkeypatch):
     target = _legacy(repo)
-    monkeypatch.setattr(reclaim, "_linux_in_use", lambda _path: True)
-    _code, report = _run(repo, "--apply", capsys=capsys)
-    assert report["candidates"][0]["reason"] == "in use by a live process"
-    assert target.is_dir()
-
-
-def test_unverifiable_liveness_refuses_on_posix(repo, capsys, monkeypatch):
-    if os.name == "nt":
-        pytest.skip("POSIX liveness scan")
-    target = _legacy(repo)
-    monkeypatch.setattr(reclaim, "_linux_in_use", lambda _path: None)
-    _code, report = _run(repo, "--apply", capsys=capsys)
+    monkeypatch.setattr(reclaim, "in_use",
+                        lambda _path, _accepted=frozenset(): (None, "process use cannot be verified"))
+    _code, report = _run("--repo", repo, capsys=capsys)
     assert report["candidates"][0]["reason"] == "process use cannot be verified"
     assert target.is_dir()
 
 
-def test_sibling_worktrees_are_discovered(repo, tmp_path, capsys):
-    sibling = tmp_path / "sibling"
-    _git(repo, "worktree", "add", "-q", str(sibling))
-    target = _legacy(sibling)
-    _code, report = _run(repo, capsys=capsys)
-    assert [c["path"] for c in report["candidates"]] == [str(target)]
+def test_unsupported_platform_cannot_verify_liveness(monkeypatch, tmp_path):
+    class _NoProc:
+        def is_dir(self):
+            return False
+
+    monkeypatch.setattr(reclaim, "Path", lambda *args: _NoProc())
+    assert reclaim._linux_scan(tmp_path) is None
+
+
+class _FakeProc:
+    """Minimal ``/proc/<pid>`` stand-in for exercising inspection failures."""
+
+    def __init__(self, name, uid, fd_error=None, comm="worker"):
+        self.name, self._uid, self._fd_error, self.comm = name, uid, fd_error, comm
+
+    def stat(self):
+        return type("S", (), {"st_uid": self._uid})()
+
+    def __truediv__(self, part):
+        return _FakeLink(self, part)
+
+
+class _FakeLink:
+    def __init__(self, proc, part):
+        self.proc, self.part = proc, part
+
+    def iterdir(self):
+        if self.proc._fd_error:
+            raise self.proc._fd_error
+        return iter([])
+
+    def read_text(self, **_kwargs):
+        return self.proc.comm + "\n"
+
+    def __fspath__(self):
+        return f"/proc/{self.proc.name}/{self.part}"
+
+
+def _fake_linux(monkeypatch, procs, readlink=lambda _link: "/elsewhere"):
+    monkeypatch.setattr(reclaim.os, "getuid", lambda: 7, raising=False)
+    monkeypatch.setattr(reclaim, "Path", _patched_path(procs))
+    monkeypatch.setattr(reclaim.os, "readlink", readlink)
+    monkeypatch.setattr(reclaim, "_WINDOWS", False)
+    monkeypatch.setattr(reclaim, "in_use", _REAL_IN_USE)
+
+
+@pytest.mark.parametrize("error,expected", [
+    (PermissionError("denied"), (False, {"sshd"})),
+    (FileNotFoundError("gone"), (False, set())),
+])
+def test_linux_fd_inspection_failure_is_not_absence(monkeypatch, tmp_path, error, expected):
+    _fake_linux(monkeypatch, [_FakeProc("10", 7, fd_error=error, comm="sshd"), _FakeProc("11", 8)])
+    assert reclaim._linux_scan(tmp_path) == expected
+
+
+def test_linux_readlink_failure_is_not_absence(monkeypatch, tmp_path):
+    def readlink(_link):
+        raise PermissionError("denied")
+
+    _fake_linux(monkeypatch, [_FakeProc("10", 7, comm="systemd")], readlink)
+    assert reclaim._linux_scan(tmp_path) == (False, {"systemd"})
+    use, why = reclaim.in_use(tmp_path)
+    assert use is None and why.endswith("cannot inspect: systemd")
+
+
+def test_accepted_uninspectable_process_is_explicit(monkeypatch, tmp_path):
+    _fake_linux(monkeypatch, [_FakeProc("10", 7, fd_error=PermissionError("x"), comm="sshd"),
+                              _FakeProc("12", 7, fd_error=PermissionError("x"), comm="python3")])
+    assert reclaim.in_use(tmp_path, frozenset({"sshd"}))[0] is None
+    assert reclaim.in_use(tmp_path, frozenset({"sshd", "python3"})) == (False, "")
+
+
+def test_linux_scan_detects_cwd_inside_tree(monkeypatch, tmp_path):
+    inside = os.path.join(os.path.realpath(tmp_path), "child")
+    _fake_linux(monkeypatch, [_FakeProc("10", 7)],
+                lambda link: inside if str(os.fspath(link)).endswith("cwd") else "/x")
+    assert reclaim._linux_scan(tmp_path) == (True, set())
+    assert reclaim.in_use(tmp_path) == (True, "in use by a live process")
+
+
+def test_accepted_names_are_recorded_in_plan(repo, tmp_path, capsys):
+    target = _legacy(repo)
+    code, plan = _plan(repo, tmp_path, target, "--accept-uninspectable", "sshd", capsys=capsys)
+    assert code == 0
+    assert json.loads(plan.read_text(encoding="utf-8"))["targets"][0]["accepted_uninspectable"] == ["sshd"]
+
+
+@pytest.mark.skipif(not os.path.isdir("/proc/self/fd"), reason="Linux /proc scan")
+def test_real_proc_scan_detects_child_cwd(tmp_path):
+    tree = tmp_path / ".test-venvs"
+    tree.mkdir()
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"], cwd=tree)
+    try:
+        deadline = time.time() + 10
+        while reclaim._linux_scan(tree)[0] is not True and time.time() < deadline:
+            time.sleep(0.1)
+        assert reclaim._linux_scan(tree)[0] is True
+    finally:
+        child.kill()
+        child.wait()
+    assert reclaim._linux_scan(tree)[0] is False
+
+
+def _patched_path(procs):
+    real = Path
+
+    class _ProcRoot:
+        def is_dir(self):
+            return True
+
+        def iterdir(self):
+            return iter(procs)
+
+    def factory(*args):
+        if args == ("/proc",):
+            return _ProcRoot()
+        return real(*args)
+
+    return factory

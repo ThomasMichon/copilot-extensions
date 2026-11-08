@@ -16,7 +16,7 @@ from uuid import uuid4
 
 import pytest
 
-from tools import typecheck
+from tools import plugin_test_resources, typecheck
 from tools import typecheck_source_views as views
 from installer_dependency_policy import DependencyPolicyError
 
@@ -29,7 +29,7 @@ def fixed_checker_stage(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture(autouse=True)
 def _isolated_scratch(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep temporary checkouts' environments out of the shared scratch root."""
-    real = typecheck.resource_path
+    real = plugin_test_resources.resource_path
     original = os.environ.get("AGENT_SCRATCH_ROOT")
     monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(tmp_path_factory.mktemp("scratch")))
 
@@ -43,7 +43,7 @@ def _isolated_scratch(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pyt
                 scoped.setenv("AGENT_SCRATCH_ROOT", original)
             return real(root)
 
-    monkeypatch.setattr(typecheck, "resource_path", resource_path)
+    monkeypatch.setattr(plugin_test_resources, "resource_path", resource_path)
 
 
 def _harness_emitted_fixture(root: Path) -> tuple[str, ...]:
@@ -533,6 +533,7 @@ def test_real_source_and_frozen_candidate_frontdoors_enforce_version_matrix(
     root.mkdir()
     closure = [
         "tools/typecheck.py", "tools/_admission_protocol.py", "tools/cache_directory_paths.py",
+        "tools/plugin_test_resources.py",
         "tools/typecheck_source_views.py", "tools/typecheck_catalog_views.py",
         "tools/native_test_paths.py", "tools/typecheck-requirements.txt",
         *(
@@ -1447,6 +1448,8 @@ def test_preparation_installs_the_same_lock_bytes_that_keyed_the_cache(
     requirements.write_bytes(initial)
     path, digest = typecheck.environment_path(tmp_path, project())
     assert (path / ".typecheck-prepared").read_text(encoding="utf-8").strip() == digest
+    owner = plugin_test_resources.resource_path(tmp_path) / "scratch-owner.json"
+    assert json.loads(owner.read_text(encoding="utf-8"))["source_checkout"] == str(tmp_path.resolve())
 
 
 def test_failed_cache_repair_cannot_preserve_preparation_marker(

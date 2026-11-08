@@ -8338,11 +8338,30 @@ retained scratch root. Pytest's cache and interpreter bytecode caches also
 stay in the disposable sandbox. Environment leases, source fingerprints and unreaped-tree
 retention remain unchanged. `--list` does not allocate or validate scratch.
 Old checkout-root `.test-venvs` and `.test-runs` directories are not migrated;
-the runner no longer writes them. Reclaim them explicitly with
-`python tools/reclaim_legacy_test_dirs.py` (a dry run across every registered
-worktree of this clone), then `--apply` after reviewing the list. It deletes
-only Git-ignored, untracked, link-free trees older than `--min-age-hours`
-(default 24) that no process is using, and reports every refusal.
+the runner no longer writes them. Reclaiming them is guided, never a sweep:
+
+1. `python tools/reclaim_legacy_test_dirs.py [--checkout <worktree>]` inventories
+   registered worktrees of this clone without changing anything. Each tree is
+   `ready` (only virtual environments), `needs-decision` (other files such as
+   captured evidence, with a sample listed) or `refused` with its reason.
+2. Review the set, then record it:
+   `--select <dir> [--discard <dir>] --plan-out plan.json`. A `needs-decision`
+   tree needs a matching `--discard`, the owner's decision to drop its
+   unclassified files. The plan binds each tree's identity and
+   metadata fingerprint.
+3. `--apply-plan plan.json` re-verifies each target, renames it aside,
+   re-verifies again and only then deletes it. Any change since review, a live
+   or unverifiable process user, or an inspection error restores the tree and
+   reports the refusal; partial outcomes are reported per target.
+
+Only Git-ignored, untracked, link-free trees older than `--min-age-hours`
+(default 24) qualify. On Linux, a process of yours that cannot be inspected
+(for example a non-dumpable `sshd`) refuses a target unless you name it with
+`--accept-uninspectable NAME` while planning; the plan records that choice.
+Stop test and capture writers for the selected set before applying a plan.
+These checks detect known users when they run; they do not prove exclusive use
+or protect against concurrent or adversarial mutation. Windows rename detects
+sharing violations, not every possible open handle.
 `tools/typecheck.py` keeps its prepared environments under the same
 `ce-tests-<canonical-checkout-key>/typecheck/<platform>/` retained cache.
 Changing scratch storage starts a separate cache; keep the same setting between
