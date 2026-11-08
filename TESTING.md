@@ -188,6 +188,8 @@ inclusive; do not sum them. Select `prepared_json_engine_retains_shell_semantics
 for JSON value parity and the older-engine command fallback without enabling
 profiling. Neither these diagnostics nor their finite timings
 establish installed or whole-roster throughput.
+The stage profile, baseline comparison and prepared cold-process tests emit
+their reports with ordinary pytest capture enabled; no `-s` or `-rP` is needed.
 
 `python-selection-native.yml` supplies real Python 3.9 and supported Python
 side by side on a disposable hosted Windows runner. Its `TEST_PYTHON39` input
