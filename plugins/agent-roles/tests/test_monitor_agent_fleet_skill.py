@@ -80,6 +80,33 @@ def test_fabric_reader_suppresses_worktrees_provisioning() -> None:
     assert "refusal or missing runtime as unavailable evidence" in text
 
 
+def test_fabric_reader_inventories_per_project_without_false_zeroes() -> None:
+    text = " ".join(_read(SKILL / "references" / "fabric-readers.md").split())
+    skill = " ".join(_read(SKILL / "SKILL.md").split())
+    for requirement in (
+        "<worktrees-argv> --project <project> fleet --json",
+        "covers **only the selected project**",
+        "enumerate projects on each target host, never only on the observer",
+        "agent-worktrees --project <name> list --json --passive",
+        "never starts, recovers, waits for or wakes it, nor renews its scan demand",
+        "Do not fall back to a plain or `--cache-only` `list --json`",
+        "repos list --strict --json",
+        "require `inventory_authority == \"complete\"`",
+        "a host-level coverage gap",
+        "derived `state == \"active\"`",
+        "Do not use lifecycle `status == \"active\"`",
+        "`live_rest`, `fact_provenance` and `observed_at`",
+        "unobserved, not empty or offline",
+        "never as zero active work",
+        "Do not sweep with `list-sessions`",
+        "Bound the command on the remote side",
+    ):
+        assert requirement in text, requirement
+    assert "list-sessions --all-projects --json" not in text
+    assert "execution procedure" not in text
+    assert "never a session-history sweep" in skill
+
+
 def test_watchdog_checks_never_block_and_classify_waits() -> None:
     skill = " ".join(_read(SKILL / "SKILL.md").split())
     checks = " ".join(_read(SKILL / "references" / "watchdog-checks.md").split())

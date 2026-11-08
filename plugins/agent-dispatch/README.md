@@ -364,6 +364,13 @@ the first `agent-dispatch` invocation self-provisions the runtime. Repos that us
 agent-worktrees may also machine-gate the runtime and reconcile it automatically,
 but that is composition, not a requirement. To install/manage it directly:
 
+With UV, Windows prepares the declared local workspace dependencies in the
+root package transaction, matching the POSIX path. Per-package reinstall and
+refresh flags, governed dependency policy and before/after build-artifact
+scrubbing remain intact. Standalone prerequisite installs remain only for the
+non-UV fallback. Supervisor enablement also leaves an already-enabled native
+task unchanged; a disabled task still requires a successful enable operation.
+
 ```bash
 # via the marketplace (once published):
 copilot plugin install agent-dispatch@copilot-extensions

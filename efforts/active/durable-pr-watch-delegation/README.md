@@ -382,8 +382,8 @@ _Operator-required outcome; agent-recommended slices and validation._
   existing owners, then bind one explicitly selected authenticated host route.
   Injected factories and observation credentials do not satisfy these exits;
   default watch-only and native read-only hosting stay unchanged.
-  Review the [provider-first writer expansion](comment-producer-enrollment.md#provider-first-protected-writer-expansion)
-  before changing credential/provider contracts; its implementation and
+  The [provider-first writer expansion](comment-producer-enrollment.md#provider-first-protected-writer-expansion)
+  cleared review in #11410 before credential/provider changes; implementation and
   mixed-version/rotation/unknown-effect controls remain open.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
@@ -1090,6 +1090,20 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-07 - Separate protected credential support before native host adoption
+
+- #11410 actually merged as `15704f93b3d8aac8b9feb9be22775a1f2e7b173b`
+  after exact-head Copilot approval with no findings and latest CI
+  `42425153368` passed. Managed completion retained its backup and reconciled
+  only the merged source commits.
+- Re-read the affected canonical Plan and Validation. Contract review is the
+  only completed exit here. Continue the separate typed credential delivery
+  through the existing Gateway/controller/worker owners, then the native
+  pinned transport and explicit host consumer. Observe-only contracts remain
+  unchanged; a synthetic verifier is not actual native permission evidence.
+- Both parents and #11128 stay open. No credential enrollment, host activation,
+  production review, deployment or resource release follows from this merge.
 
 ### 2026-11-07 - Resolve actual producer source and profile before composition
 

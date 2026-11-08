@@ -110,6 +110,9 @@ class WorktreesFeed:
     def stream(self, payload: dict, disconnected):
         try:
             project, _selection = request_selection(payload)
+            if payload.get("passive") is True:
+                # A subscription is producer demand; passive reads are point reads.
+                raise ProjectionError("passive reads cannot subscribe to the feed")
         except ProjectionError as exc:
             yield {"type": "error", **self._owner._failure("invalid-request", str(exc))}
             return

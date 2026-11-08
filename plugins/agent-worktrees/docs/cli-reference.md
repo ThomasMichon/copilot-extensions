@@ -127,6 +127,60 @@ reports provider-open PRs and original worktree claim paths. Start with
 `--fleet --list-cells --json` to inspect configuration without probing.
 See [one-shot scope, exact command inputs and partial-result semantics](pr-sweep.md).
 
+## Fleet worktree inventory
+
+`[--project <project>] fleet [--json] [--timeout N] [--tracking-status S]
+[--all]` reads one project's worktrees on every Copilot-enabled, SSH-ready
+machine × environment in `machines.yaml`. It starts exactly one
+`list --json --passive` per target: the current environment runs this runtime
+locally, and each remote one runs
+`agent-worktrees --project <project> list --json --passive` over
+`ssh -o BatchMode=yes`, so a host needs the owner command but no `<project>`
+binstub.
+
+`--json` prints `{"version": 1, "hosts": [{"machine", "env", "reachable",
+"worktrees", "projection"?, "availability"?, "error"?}]}`. Each worktree row is
+the host's own `list --json` record:
+
+- **Live work** is the derived `state == "active"`. Lifecycle
+  `status == "active"`, a nonempty `live_session_ids`, and `--glance` are not
+  liveness signals: they can include idle rows and dead or retained sessions.
+- Keep each row's `live_rest`, `fact_provenance`, and `observed_at` so a busy,
+  live-idle, or awaiting-operator worktree stays distinguishable.
+
+Coverage is explicit, never inferred:
+
+- **Selected project only.** `fleet` covers the current or `--project`
+  project, not every repository registered on a host. For broader discovery,
+  read each target host's registry with `repos list --strict --json` on that
+  host, require `inventory_authority: "complete"`, and run one read per
+  registered project. An error or a reply without that field, as from an older
+  runtime without `--strict`, leaves the host's projects unknown.
+- **Gaps mean unknown.** A target that is unreachable, times out, lacks the
+  owner command, exits nonzero, or prints unparseable output becomes
+  `reachable: false` with an `error` and `worktrees: []`. Report it as a
+  coverage gap, never as zero worktrees. One failed target never drops
+  another target's rows.
+- **Registration is not checked per host.** Confirm that an empty list comes
+  from a host that registers the project before counting it as empty.
+- **Passive read.** `list --passive` makes one bounded attempt to read the
+  host's status-monitor and never starts, recovers, waits for or wakes it, and
+  records no list or producer demand, so repeated sweeps cannot trigger scans
+  or hold off idle retirement. If the monitor does not answer, has not
+  published the project, or predates the demand-free read and rejects it, the
+  host returns its saved roster and the row carries `availability`
+  (`status: "advisory"`) and
+  `projection.observed_at`: saved rows that may be stale. A host with no saved
+  roster, or an older runtime that rejects `--passive` as an unrecognized
+  argument, becomes a `reachable: false` gap. A saved roster never proves a
+  delegate's caller gone or terminal: a caller missing from it is `unknown`,
+  and the delegate is not finalizable (`host-roster-advisory`). Every child
+  also runs with stdin closed and `AGENT_WORKTREES_NO_SELFPROVISION=1`, so a
+  host without a usable runtime reports a gap instead of provisioning one.
+- **Local deadline only.** `--timeout` bounds the SSH connect and the local
+  client. Some SSH servers keep the remote command running after the client
+  disconnects, so prefer this bounded reader to ad hoc remote scripts.
+
 ## Native machine-record repair
 
 `doctor --repair-machine-record <exact-id> --from-machine <old>
@@ -563,7 +617,7 @@ continue to work unchanged.
 | `hygiene` | Detect (and with `--fix`, remove) stale **global-Python editable installs** left by a manual `pip install -e .` against a worktree checkout (a real, empirically-hit hazard: #2726) -- a `.pth` file permanently pinned to one worktree that silently shadows whichever worktree an `import`/console-script invocation actually intends, even after that worktree is deleted. Machine-wide; no project context needed. `--json` emits the report |
 | `status` | Show worktree git status; **write mode** (`--summary "<one-liner>"` / `--title "<headline>"` / `--follow-up` / `--resolved` / `--paused` / `--unpaused`) annotates THIS worktree's Picker disposition -- `--paused`/`--unpaused` is purely informational (never affects `finalize`'s obligation gate or any other gate, unlike `--follow-up`); **history mode** (`--history` `[--limit N]` `[--json]`) prints this worktree's durable disposition trajectory (summary/title over time). A `postToolUse` hook nudges you to refresh it as work drifts (`AGENT_WORKTREES_NUDGE=off` to silence) |
 | `recent-messages` | Show a worktree's latest session's last N message-bearing turns (`--worktree <id>` `--limit N`, JSON) -- the read-side companion to the disposition summary; includes per-turn `tool_names` plus an ending-state signal that distinguishes a cut-off assistant turn from a clean unanswered offer. Backs the picker's **Messages** viewer |
-| `list-sessions` | List Copilot sessions with interface/origin metadata, append-only activation intervals, resolved head revision, numbered handoffs, and any bound profile-assignment metadata (JSON); `--worktree <id>` scopes to one worktree and `--all-projects` enumerates every adopted project |
+| `list-sessions` | List Copilot sessions with interface/origin metadata, append-only activation intervals, resolved head revision, numbered handoffs, and any bound profile-assignment metadata (JSON); `--worktree <id>` scopes to one worktree and `--all-projects` enumerates every adopted project. It scans session history, so an unscoped call can take over a minute on a host with a large history; use `fleet` or `list --json` for worktree inventory |
 | `session-recovery` | Read one exact session's reciprocal projection and emit validated, machine-readable recovery state without changing bindings. Version-aware output includes schema version, history completeness, relation overflow (`omitted_relations` is `null` for v2 overflow), and tombstone-overflow diagnostics. `--stdin` accepts a sessionStart payload; `--emit-context` renders the bounded pointer used when startup cannot establish an authoritative worktree binding |
 | `session-lineage` | Read one exact session projection and validate every retained worktree relation against authoritative records. Reports restored evidence, missing records, unsupported or invalid projections, schema/history completeness, relation overflow, full-key v1 or opaque-digest v2 tombstones, and tombstone overflow without enumerating the live session-state root |
 | `head-session` | Project-agnostic replay of a worktree's monotonic head-transition ledger, including pending handoffs (JSON; fail-open when untracked) |
@@ -572,9 +626,9 @@ continue to work unchanged.
 | `worktree-observations` | Passively read one selected resident-roster observation or hold `--follow` updates, with explicit partial history and no host startup; [source contract and limits](worktree-observations.md) |
 | `worktree-observation-history` | Read one bounded, generation-qualified retained observation page without consuming a live cursor; [source contract and limits](worktree-observations.md) |
 | `worktree-lineage` | Project-agnostic, bounded graph of one authoritative worktree's sessions, transitions, handoffs, controllers, normalized reciprocal presentation, projection health, and explicit terminal/fork/cycle/missing-session findings (JSON) |
-| `fleet` | Aggregate `list --json` across every reachable machine × environment -- one SSH/local process per target, never per-worktree. `--json` returns host rows (`machine` / `env` / `reachable` / `worktrees`) and annotates delegate edges with `caller_state`, `delegate_finalizable`, and reverse `delegates` lists. |
+| `fleet` | Aggregate one project's `list --json` across every reachable machine × environment -- one SSH/local process per target, never per-worktree. `--json` returns host rows (`machine` / `env` / `reachable` / `worktrees`) and annotates delegate edges with `caller_state`, `delegate_finalizable`, and reverse `delegates` lists. Covers the selected project only; see [Fleet worktree inventory](#fleet-worktree-inventory) for liveness and coverage rules. |
 | `reconcile` | Force-refresh PR state for every tracked worktree (including `finalized`) out of band, so `list` stays a pure file read |
-| `delegates` | Focused cross-machine delegate/caller query built on the fleet snapshot. Dry-run by default: reports every `caller_worktree` delegate plus whether its host is `resolved`, `gone`, `unreachable`, or `ambiguous`, and whether the delegate became finalizable because the host is `finalized` / `complete(d)` / gone. `--execute` finalizes every currently eligible delegate through the owning host. |
+| `delegates` | Focused cross-machine delegate/caller query built on the fleet snapshot. Dry-run by default: reports every `caller_worktree` delegate plus whether its host is `resolved`, `gone`, `unreachable`, `ambiguous`, or `unknown`, and whether the delegate became finalizable because the host is `finalized` / `complete(d)` / gone. Only a host's current roster can prove that; a saved, stale, or unlabeled one leaves the delegate blocked (`host-roster-advisory`). `--execute` finalizes every currently eligible delegate through the owning host. |
 | `conclude-session` / `link-succession` | Project-agnostic write primitives for explicit session conclusion and exact-token handoff succession links (JSON) |
 | `resolve-handoff-successor` | Sanctioned repair for a terminal (`kind` managed, status finalized/complete/completed) worktree whose real handoff successor session ran to completion but was never `register-session`'d (a crash/race in that step), leaving `pending_handoffs`/`resolved_head_session` permanently wedged. `--token` names the still-`pending` handoff and `--successor` the NOT-yet-tracked session id; refuses unless the successor is a real, non-live, non-detached local session (`sessions.validate_session_id`) whose recorded cwd matches the worktree's `worktree_path` and whose transcript's first turn is itself a handoff-seed prompt with real turns beyond it (the same class-G evidence bar `repairing-worktrees` documents). On success it retroactively registers the successor, links the handoff, and immediately concludes it so the worktree lands back in the terminal shape gc already expects -- the sanctioned alternative to hand-editing tracking YAML |
 | `conclude-disposable` | Project-agnostic, exact-id terminal conclusion for an explicitly disposable worker, regardless of CLI/ACP tracking metadata. Requires `--policy disposable-cli` (historical wire spelling) and `--owner`; preserves live sessions, all dirty work (including generated local overlays), local commits, follow-ups, claims, pairs, and open PRs. A clean branch with zero commits ahead of upstream may remain behind without being rewritten, then the command marks the record managed/final without changing its effective interface. `--remove` immediately runs the conservative managed-GC verdict for only that exact id, with fresh lifecycle/liveness checks; an already-removed id is idempotent success. |
@@ -1170,6 +1224,18 @@ merely because a read is slow. Authentication, malformed replies, invalid
 requests and unsupported contracts remain explicit failures.
 The internal bounded/advisory reader and explicitly selected saved-preview
 bootstrap retain their separate contracts; saved rows are never labeled current.
+`list --json --passive` selects that bounded reader for unattended and
+cross-host reads such as `fleet`: one resident attempt that never starts,
+recovers, waits for or wakes the resident and records no list or producer
+demand (the request carries `passive: true`, which the resident honors by
+neither renewing scan demand nor waking its producer for an unpublished
+project); otherwise the saved roster labeled `availability.status: "advisory"`
+with its `projection.observed_at`, or a JSON error (exit 1) when none is saved.
+A resident that predates the marker rejects it as an invalid request; the
+passive read then also returns the labeled saved roster, never a demand read. It
+cannot be combined with `--follow`, `--glance` or `--refresh`, and the feed
+refuses a passive subscription. Runtimes that
+predate it reject `--passive` as an unrecognized argument (exit 2).
 `--stream --follow` holds the engine-owned snapshot/update feed. See the
 [engine/Picker contract](engine-picker-contract.md) for barriers, order,
 selection, recovery and cutover rules.
@@ -1194,13 +1260,20 @@ record's head, liveness, occupancy, or resume target.
 When a row carries `caller_worktree`, `list --json` also adds a normalized
 `caller_state` object so consumers do not re-derive the host relationship: the
 host worktree id plus the best-known `state` (`resolved`, `gone`,
-`unreachable`, or `ambiguous`) and, when resolved, the host's machine/platform,
+`unreachable`, `ambiguous`, `unresolved`, or -- in cross-host reads --
+`unknown`) and, when resolved, the host's machine/platform,
 path, and tracking status. Every such delegate row also carries
 `delegate_finalizable` + `delegate_finalizable_reason`, encoding the manual
 inheritance rule now made programmatic: a delegate becomes finalizable once its
 host is `finalized`, `complete(d)`, or gone. The reverse edge is surfaced on
 explicit legacy/detail host rows as `delegates` (the delegate worktree ids plus
 their own finalizable/not-finalizable verdicts); current rows omit that graph.
+`fleet` and `delegates` accept a host's roster as proof that a caller is gone
+or terminal only when it is a current publication (`projection.quality:
+"current"` with no `availability` label). A saved, stale, or unlabeled roster
+(for example from an older runtime) leaves a missing caller `unknown` and never
+authorizes finalization (`delegate_finalizable: false`, reason
+`host-roster-advisory`).
 
 When a worktree record carries profile-assignment history, the ordinary
 `list --json` row includes `current_profile_assignment`: the bound assignment

@@ -661,8 +661,6 @@ def _run_slot_startup(
                 routing.Endpoint.from_dict(current_raw) if isinstance(current_raw, dict)
                 else None
             )
-            if handle[0] != "absent" and current is None:
-                return "MCP data handle has no attributable serving owner"
             if current_raw is not None and (
                 current is None or not current.pid or not current.process_start_time
                 or current.client_host not in {"127.0.0.1", "::1"}
@@ -671,6 +669,8 @@ def _run_slot_startup(
             ):
                 return "MCP current native route ownership is unavailable or foreign"
             owner = source_data_owner(fixed)
+            if handle[0] != "absent" and current is None and owner is not None:
+                return "MCP data handle has no attributable serving owner"
             if owner is not None and (
                 current is None or owner != current.pid
                 or process_start_time(owner) != current.process_start_time
