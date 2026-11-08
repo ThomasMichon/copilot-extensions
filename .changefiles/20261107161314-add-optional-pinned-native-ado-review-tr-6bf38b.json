@@ -1,0 +1,13 @@
+{
+  "comment": "Add optional pinned native ADO review transport with mandatory current-owner policy and finite requests",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}
