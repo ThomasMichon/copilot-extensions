@@ -395,6 +395,9 @@ _Operator-required outcome; agent-recommended slices and validation._
   cleared review in #11410 before credential/provider changes. The finite
   delivery leaf above does not close native rotation/unknown-effect or
   normal-host qualification.
+  The [current-authority and request-local material design](comment-producer-enrollment.md#current-authority-and-request-local-material)
+  separates actual source/native/custodian verification and binds one factory
+  per execution before strict host configuration expands.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -1119,6 +1122,23 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-07 - Refine current authority and request-local writer design
+
+- Trace the actual Fleet verifier, raw Azure relay source, standalone host,
+  workspace executor and pinned native factory. The raw relay's action/host
+  policy is not Fleet's mandatory material verifier, and local process
+  withdrawal is not native admission. Document source-grant, native effective
+  permission and current custodian checks as distinct prerequisites.
+- Choose lazy, per-execution factory resolution at the existing workspace
+  boundary. Reuse one actual material generation across action contexts and
+  feedback; leave the legacy embedding separate. Storage-only recovery must
+  not acquire credentials, and unknown actions retain read-only reconciliation
+  without resend. Strict host configuration remains unchanged.
+- This is review-first design, not an implemented verifier or host route.
+  Documentation consistency and whitespace checks pass; implementation,
+  contained lifetime controls, native source adoption and both parent effort
+  acceptance gates remain open.
 
 ### 2026-11-07 - Deliver finite pinned native requests without host enrollment
 
