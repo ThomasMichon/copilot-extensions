@@ -115,7 +115,9 @@ def observe(*, timeout: float = 5) -> dict[str, int]:
             name, clients, reported_pid = _query(port, key, deadline)
             if reported_pid != pid or not (base == name or base.endswith("__" + name)):
                 raise MuxObservationUnavailable("Native mux reply disagrees with its registration")
-            result[base] = clients
+            if name in result:
+                raise MuxObservationUnavailable("Native mux session name is ambiguous")
+            result[name] = clients
         if (
             windows_mux_processes.servers() != servers
             or _registrations(root, servers, deadline) != registrations

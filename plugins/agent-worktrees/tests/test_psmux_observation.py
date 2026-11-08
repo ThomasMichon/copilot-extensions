@@ -90,6 +90,25 @@ def test_wrong_or_renamed_server_cannot_establish_absence(registered, monkeypatc
         reader.observe()
 
 
+def test_namespaced_registration_preserves_live_session_name(registered, monkeypatch):
+    for extension in ("pid", "port", "key"):
+        (registered / f"wt-other.{extension}").rename(registered / f"example__wt-fixture.{extension}")
+    monkeypatch.setattr(reader, "_query", lambda *a: ("wt-fixture", 1, 101))
+    monkeypatch.setattr(sessions.platform, "system", lambda: "Windows")
+    assert reader.observe() == {"wt-fixture": 1}
+    assert sessions.mux_status_many(["fixture"], strict=True)["fixture"].exists
+
+
+def test_same_session_name_in_multiple_namespaces_remains_unknown(registered, monkeypatch):
+    monkeypatch.setattr(native, "servers", lambda: {101: "123", 202: "456"})
+    (registered / "example__wt-other.pid").write_text("202:456")
+    (registered / "example__wt-other.port").write_text("12346")
+    (registered / "example__wt-other.key").write_text("b" * 16)
+    monkeypatch.setattr(reader, "_query", lambda port, *a: ("wt-other", 1, 101 if port == 12345 else 202))
+    with pytest.raises(MuxObservationUnavailable, match="ambiguous"):
+        reader.observe()
+
+
 def test_orphan_and_new_server_cannot_be_omitted(registered, monkeypatch):
     for snapshots in ([{101: "123", 202: "456"}], [{101: "123"}, {101: "123", 202: "456"}]):
         values = iter(snapshots)

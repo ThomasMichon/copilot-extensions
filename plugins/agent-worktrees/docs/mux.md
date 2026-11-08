@@ -157,8 +157,9 @@ The reader has a five-second total budget, bounded registration/reply sizes
 and process counts. It never writes registrations, starts a server, repairs
 an orphan, attaches a client, paints status or sends pane input. An unreadable
 process, unsupported command-line mode, missing live-server registration,
-PID reuse, rename, authentication failure, incomplete reply or changing
-inventory remains unknown. `PSMUX_DATA_DIR` must be absolute when set; live
+PID reuse, rename, duplicate names across namespaces, authentication failure,
+incomplete reply or changing inventory remains unknown.
+`PSMUX_DATA_DIR` must be absolute when set; live
 servers whose registrations are outside that selected directory also prevent
 a complete result. This conservative action-time support does not re-enable
 periodic discovery or change cleanup authority. A silent failed PSMux CLI
