@@ -252,6 +252,10 @@ implementation authority, resource custody or the fixed checkpoint.
 
 Operator clarification, 2026-11-07, summary:
 
+Public-capture boundary: the source conversation is non-public and is retained
+separately rather than reproduced here. The following is an explicitly labeled
+summary, not a verbatim transcript or a grant of additional authority.
+
 Distinguish fulfilled requests from duplicate tracking. A genuinely completed
 third-party request should receive an acknowledged `COMPLETED` closure with
 delivery links, rather than remain open solely because its original author is
