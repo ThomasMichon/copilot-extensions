@@ -1,9 +1,9 @@
-# Terminal intent and workspace admission
+# Terminal intent, workspace admission and compact recovery
 
 This internal source embedding implements the first part of the reviewed
 [terminal-retention sequence](../../../efforts/active/durable-pr-watch-delegation/terminal-retention.md).
-It adds no service, discovery operation, automatic adoption or physical
-compactor. The existing [conversation journal](conversation-journal.md),
+It adds no service, discovery operation or automatic adoption. The existing
+[conversation journal](conversation-journal.md),
 [review owner](review-owner-store.md) and
 [workspace](workspace-integration.md) retain their baseline behavior by default.
 
@@ -114,8 +114,63 @@ recording `drained`. Timeout or lost custody preserves `pending`. A prior drain
 record is not a permanent guarantee against later acquisition or permission
 to compact; subsequent physical stages must rejoin/fence their actual owner.
 
-This source does **not** remove stored bodies, cache pointers/objects, server
-buffers or generation/cursor bindings, and it does not compact intents into
-recovery-only records. Protected minimal readback, scoped physical retirement,
-consumer negotiation and installed/restart/rollback qualification remain
-separate gates. No delete, secure erase, zero-fill or TRIM operation is added.
+## Compact original operations and protected readback
+
+A separate explicit `ReplayStore(..., terminal_retention=True,
+terminal_recovery=True)` reader can select the internal recovery extension.
+`TerminalRecoveryStore(owner).adopt(lifecycle_checkpoint=..., expires_at=...,
+checkpoint=...)` requires existing terminal-intent adoption and the actual
+lifecycle owner's exclusion of incompatible readers. It adds
+`terminal_recovery_version: 1` and the
+`agent-pull-requests.terminal-recovery/v1` section to the **same** replay
+envelope. A terminal-capable reader without this additional selection refuses
+the expanded envelope unchanged. This is not a serving capability or rollback.
+
+The actual workspace owner calls `operations.retention.compact_recovery(scope,
+cursor, policies, expires_at=..., checkpoint=..., deadline=...,
+lifecycle_checkpoint=...)`. It rejoins admitted work even after a persisted
+`drained` result, then holds the existing workspace exclusion and replay
+transaction while replacing that terminal epoch's original review operations.
+An active or delayed sender must finish first. Reopen or expired/lost custody
+refuses; an uncertain replacement requires readback of that same epoch.
+
+`policies` binds every captured operation ID to its **original** recovery
+`owner`, finite `deadline_at` and `escalation_ref`, supplied by the existing
+execution/lifecycle owner. These values cannot be invented by a collector or
+changed on retry. Expiry preserves unknown identities and requires escalation;
+it never confirms, cancels or deletes an effect.
+
+The compact record retains original scope, operation/intent/action/attempt IDs,
+candidate, generation/source hashes, native receipts, selection input/stage,
+prepared comment/write GUIDs and necessary content hashes. Unattempted actions
+become `retired`; unknown and confirmed remain distinct. No body, source
+manifest or executable intent survives in the compact record. Body-free
+feedback captures keep their original binding without claiming handled progress
+or original-version proof. Existing frozen delivery payloads are untouched.
+
+At most 1024 compact operations use the existing bounded review reservation
+alongside active operations, including reserved receipt growth. A short
+original intent can require slightly more compact metadata: the transaction
+must fund that from unused review capacity, never another budget or eviction.
+Full capacity refuses the complete replacement. Native readback cannot grow
+beyond its original reserved receipt allowance.
+
+`reconcile_terminal(TerminalRecoveryStore(owner), scope, operation_id,
+context_factory=..., checkpoint=..., expires_at=..., budget_seconds=...)`
+uses the original protected ADO owner's pinned credential transport. It
+freshly verifies principal/repository/PR and can confirm only an unknown
+create-thread comment with one exact original native action marker, actor and
+content digest. The body hash uses the workspace's canonical JSON digest;
+the separately retained prepared `body_id` keeps its original UTF-8 SHA-256.
+Current text, vote, actor or comment GUID alone cannot confirm an old effect.
+Replies, edits, votes, unsupported receivers and incomplete/unattributable
+reads remain unknown under the original recovery deadline. There is no
+perform/send path, no new attempt and no feedback advance. No replay-file
+lock is held over native IO; the receipt is checked again against the same
+original unknown attempt when it commits.
+
+This leaf removes selected bodies from the owner file only after actual drain.
+It does **not** retire cache pointers/objects, server buffers or
+generation/cursor bindings, strip a frozen pending event, or qualify installed
+consumers. Those remaining physical-retirement and T3 gates stay open. No
+ordinary file deletion, secure erase, zero-fill or TRIM operation is added.

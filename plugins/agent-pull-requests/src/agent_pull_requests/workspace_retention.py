@@ -182,3 +182,31 @@ class WorkspaceRetention:
             return owner._review_transaction(
                 drained, expires_at=expires_at, checkpoint=checkpoint,
             )
+
+    def compact_recovery(
+        self, scope: dict, cursor: Cursor, policies: dict, *, expires_at: int,
+        checkpoint: Callable[[], None], deadline: float, lifecycle_checkpoint: Callable[[], None],
+    ) -> dict:
+        """Rejoin actual admitted work; a prior persisted drain is not exclusion."""
+        from .terminal_recovery import TerminalRecoveryStore, compact
+
+        scope, policies = _scope(scope), copy.deepcopy(policies)
+        owner = self.workspace.store
+        TerminalRecoveryStore(owner)
+        self.drain(
+            scope, cursor, expires_at=expires_at, checkpoint=checkpoint,
+            deadline=deadline, lifecycle_checkpoint=lifecycle_checkpoint,
+        )
+        with self._condition:
+            if self._active.get(_digest(scope), 0):
+                raise TerminalAdmissionClosed("terminal workspace drain must be rejoined")
+
+            def retire(document: dict) -> dict:
+                lifecycle_checkpoint()
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("terminal workspace drain incomplete")
+                result = compact(document, scope, cursor, policies)
+                lifecycle_checkpoint()
+                return result
+
+            return owner._review_transaction(retire, expires_at=expires_at, checkpoint=checkpoint)
