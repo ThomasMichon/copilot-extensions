@@ -6,7 +6,6 @@ import asyncio
 from contextlib import redirect_stdout
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -24,36 +23,11 @@ pytestmark = pytest.mark.parametrize("environment", [True], indirect=True)
 
 @pytest.fixture
 def tracked(environment: tuple, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple:
-    from agent_worktrees import config as cfg, pr_ops, providers, tracking
+    owner_tests = Path(__file__).resolve().parents[3] / "plugins" / "agent-worktrees" / "tests"
+    monkeypatch.syspath_prepend(str(owner_tests))
+    from _tracked_publication_fixtures import tracked_state
 
-    scope = environment[1]["scope"]
-    target = {
-        "provider": scope["provider"], "api_base": scope["endpoint"],
-        "repo": "project-name/repository-name", "number": scope["number"],
-    }
-    home = tmp_path / "tracked"
-    home.mkdir()
-    monkeypatch.setattr(cfg, "tracking_dir", lambda *a, **k: home)
-    config = SimpleNamespace(default_repo=SimpleNamespace(pr=SimpleNamespace(
-        provider=target["provider"], api_base=target["api_base"],
-    )))
-    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
-    monkeypatch.setattr(cfg, "_ACTIVE_PROJECT", "selected-project")
-    record = tracking.WorktreeRecord(
-        worktree_id="selected-worktree", branch="worktree/example", worktree_path=str(tmp_path),
-        repo=target["repo"], machine="example", platform="linux", started_at="", last_resumed_at="",
-        resume_count=0, title=None, status="active", completed_at=None,
-        prs=[tracking.PRRecord(state="open", number=scope["number"], provider=scope["provider"])],
-    )
-    tracking.save_record(record, home / "selected-worktree.yaml")
-
-    def forbidden(*args: object, **kwargs: object) -> None:
-        pytest.fail("selected consumer entered legacy reconcile/provider/credential path")
-
-    monkeypatch.setattr(pr_ops, "_reconcile_active_pr", forbidden)
-    monkeypatch.setattr(providers, "get_provider", forbidden)
-    monkeypatch.setattr(providers, "account_token_for_slug", forbidden)
-    return target, config, home
+    return tracked_state(environment[1]["scope"], tmp_path, monkeypatch)
 
 
 def call(
@@ -187,7 +161,8 @@ def test_mismatch_and_unsupported_composition_refuse_without_fallback_or_effects
     environment: tuple, prepared_workspace: tuple, selection_workspace: tuple, tracked: tuple,
     monkeypatch: pytest.MonkeyPatch, changed: str,
 ) -> None:
-    from agent_worktrees import config as cfg, tracking
+    from agent_worktrees import config as cfg
+    from _tracked_publication_fixtures import change_association
 
     store, _, _, attachment, backend, _ = environment
     gateway, _, native, _, _, _ = prepared_workspace
@@ -196,20 +171,7 @@ def test_mismatch_and_unsupported_composition_refuse_without_fallback_or_effects
     body, event = draft["actions"][0]["body"], "APPROVED"
     request = {"number": 42, "intent": draft, "source_attachment": attachment, "budget_seconds": 60}
     if changed in ("number", "repo", "provider"):
-        path = home / "selected-worktree.yaml"
-        record = tracking.load_record(path)
-        if changed == "number":
-            record.prs.append(tracking.PRRecord(
-                state="open", number=43, branch="pr/another", provider=target["provider"],
-                opened_at="2026-10-31T00:00:00Z",
-            ))
-        elif changed == "repo":
-            record.prs[0].repo = "another/repository"
-        else:
-            record.prs[0].provider = "github"
-        tracking.save_record(record, path)
-        if changed == "number":
-            assert tracking.load_record(path).active_pr().number == 43
+        change_association(home, changed, provider=target["provider"])
     elif changed == "endpoint":
         config.default_repo.pr.api_base = "https://dev.azure.com/another"
         monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
