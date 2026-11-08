@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-worktrees"
-version = "1.25.21-dev1"
+version = "1.25.22-dev1"
 description = "Worktree isolation system for concurrent Copilot CLI sessions"
 readme = "README.md"
 license = "MIT"
@@ -125,7 +125,9 @@ agent-worktrees = "agent_worktrees.current_roster_entry:console_entry"
 
 [project.optional-dependencies]
 fleet-ssh = ["fleet-manager[service-gateway,ssh-client]"]
+fleet-review = ["fleet-manager[auth]"]
 dev = [
+    "fleet-manager[auth]",
     "pytest>=9.1.1",
     "pytest-xdist>=3.8,<4",
     "psutil>=6",

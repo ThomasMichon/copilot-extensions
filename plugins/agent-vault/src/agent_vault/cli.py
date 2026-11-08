@@ -785,6 +785,12 @@ def cmd_start(args):
     return 1
 
 
+def cmd_source_start(args):
+    from .source_start import command
+
+    return command(args)
+
+
 def cmd_stop(args):
     resp = send_command({"action": "stop"})
     if resp and resp.get("ok"):
@@ -1703,6 +1709,9 @@ def _main(argv: list[str] | None = None):
 
     p = sub.add_parser("start", help="Start the vault service")
     p.set_defaults(func=cmd_start)
+
+    p = sub.add_parser("__source-start", help=argparse.SUPPRESS, allow_abbrev=False)
+    p.set_defaults(func=cmd_source_start)
 
     p = sub.add_parser("stop", help="Stop the vault service")
     p.set_defaults(func=cmd_stop)

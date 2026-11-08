@@ -282,7 +282,7 @@ def test_real_python_post_fallback_preserves_accounting_and_binding(tmp_path):
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("event_case", [
     "mutation", "late-watch", "oversized-mutation", "oversized-late-watch",
-    "batch-shell", "batch-malformed", "batch-empty", "batch-too-many", "batch-call-cwd",
+    "batch-unknown", "batch-malformed", "batch-empty", "batch-too-many", "batch-call-cwd",
 ])
 def test_registered_post_hook_reuses_original_prepared_membership(tmp_path, monkeypatch, shell, event_case):
     from agent_procutil import no_window_kwargs
@@ -303,8 +303,8 @@ def test_registered_post_hook_reuses_original_prepared_membership(tmp_path, monk
     }
     if event_case.startswith("batch-"):
         calls = [{"name": "edit", "args": {"path": "one"}}]
-        if event_case == "batch-shell":
-            calls.append({"name": "powershell", "args": {"command": "git status"}})
+        if event_case == "batch-unknown":
+            calls.append({"name": "unknown", "args": {"command": "git status"}})
         elif event_case == "batch-malformed":
             calls.append(None)
         elif event_case == "batch-empty":
@@ -527,13 +527,14 @@ def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config, request):
         )
     env.pop("AGENT_WORKTREES_NUDGE", None)
     try:
-        yield dict(
+        fixture = dict(
             env=env, harness=harness, payload=payload, facts=fact_path,
             row=row, record_heads=record_heads, runtime=runtime, session=session, registry=registry,
             home=tmp_path, tracking_path=path,
             sidecar=counter_home / "nudge-state" / "worktree.json",
             context=context, selected=selected, payload_root=payload_root,
         )
+        yield fixture
     finally:
         runtime.shutdown()
 
@@ -546,7 +547,8 @@ def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config, request):
 @pytest.mark.parametrize("prepared_read_event", ["cell"], indirect=True)
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("case", [
-    "read", "native", "batch", "shell", "shell-read", "no-reply", "missing-discovery",
+    "read", "native", "batch", "shell", "shell-read", "mixed-targets", "mixed-write",
+    "no-reply", "missing-discovery",
     "old-provider", "wrong-generation", "closed", "foreign-marketplace",
     "foreign-receipt", "foreign-root", "legacy-discovery", "missing-row",
     "changed-receipt", "changed-payload", "unadmitted", "old-membership",
@@ -672,12 +674,17 @@ def test_registered_prepared_cell_post_tool_uses_selected_original_owners(
             fixture["env"]["EXPECTED_PYTHON_LOOKUPS"] = "1"
         if case == "native":
             payload.update(toolName="multi_edit", toolArgs={"edits": [{"path": target}]})
-        elif case == "batch":
+        elif case in {"batch", "mixed-targets", "mixed-write"}:
             payload.pop("toolName")
             payload["toolCalls"] = [
                 {"name": "view", "args": {"path": "read-only"}},
                 {"name": "edit", "args": json.dumps({"path": target})},
             ]
+            if case.startswith("mixed-"):
+                payload["toolCalls"].append({
+                    "name": "powershell",
+                    "args": '{"command":"git pull --ff-only"}' if case == "mixed-write" else {"command": "git status"},
+                })
         elif case in {"shell", "shell-read"}:
             payload.update(
                 toolName="powershell",
@@ -711,6 +718,7 @@ def test_registered_prepared_cell_post_tool_uses_selected_original_owners(
             expected_kind = {
                 "native": "nativeToolMutation", "batch": "nativeToolBatchMutation",
                 "shell": "shellToolMutation", "shell-read": "shellToolMutation",
+                "mixed-targets": "mixedToolBatchMutation", "mixed-write": "mixedToolBatchMutation",
             }.get(case, "readHookDemand")
             assert notices[0]["kind"] == expected_kind
             if expected_kind == "readHookDemand":
@@ -720,7 +728,7 @@ def test_registered_prepared_cell_post_tool_uses_selected_original_owners(
                     key: value for key, value in payload.items() if key != "toolResult"
                 }
             assert server.has_recent_hook_demand() is (case != "no-reply")
-        assert invalidated == ([target] if case in {"native", "batch"} else ["all"] if case == "shell" else [])
+        assert invalidated == ([target] if case in {"native", "batch", "mixed-targets"} else ["all"] if case in {"shell", "mixed-write"} else [])
         assert synchronous == [], "prepared events must never request synchronous policy or advice"
         no_counter = case.startswith("foreign-") or case in {
             "legacy-discovery", "missing-discovery", "missing-row", "changed-receipt",
@@ -737,6 +745,159 @@ def test_registered_prepared_cell_post_tool_uses_selected_original_owners(
             stalled.server_close()
             stalled_thread.join(timeout=2)
             assert not stalled_thread.is_alive()
+        server.close()
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows sender deadline arithmetic")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("allocation_ms", [60, 110])
+def test_post_tool_send_debits_allocation_and_connect_from_one_budget(tmp_path, shell, allocation_ms):
+    from agent_procutil import no_window_kwargs
+
+    executable = shutil.which(shell)
+    if not executable:
+        if os.environ.get("AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP") == "1":
+            pytest.fail(f"Required native membership shell {shell} is unavailable")
+        pytest.skip(f"{shell} is unavailable")
+    source = (PLUGIN / "scripts" / "hook-facts.ps1").read_text(encoding="utf-8")
+    start = source.index("function Send-PostToolReadDemand")
+    end = source.index("function Get-PostToolRuntimeRoot", start)
+    sender = source[start:end]
+    for original, replacement in (
+        ("$clock = [Diagnostics.Stopwatch]::StartNew()", "$clock = $script:clock"),
+        (
+            "$client = [Net.Sockets.TcpClient]::new([Net.Sockets.AddressFamily]::InterNetwork)",
+            "$client = $script:client",
+        ),
+    ):
+        assert sender.count(original) == 1
+        sender = sender.replace(original, replacement)
+    source = source[:start] + sender + source[end:]
+    script = tmp_path / "sender-budget.ps1"
+    script.write_text(source + r"""
+$ErrorActionPreference = 'Stop'
+$script:clock = [pscustomobject]@{ ElapsedMilliseconds = [int]$env:ALLOCATION_MS }
+$script:connectWaits = [Collections.Generic.List[int]]::new()
+$script:writeWaits = [Collections.Generic.List[int]]::new()
+$script:wire = $null; $script:disposed = 0
+$script:connectTask = [pscustomobject]@{}
+$script:connectTask | Add-Member ScriptMethod Wait {
+    param($remaining)
+    $script:connectWaits.Add($remaining)
+    $script:clock.ElapsedMilliseconds = 75
+    return $true
+}
+$script:writeTask = [pscustomobject]@{}
+$script:writeTask | Add-Member ScriptMethod Wait {
+    param($remaining)
+    $script:writeWaits.Add($remaining)
+    return $true
+}
+$script:stream = [pscustomobject]@{}
+$script:stream | Add-Member ScriptMethod WriteAsync {
+    param($bytes, $offset, $count)
+    $script:wire = [Text.Encoding]::UTF8.GetString($bytes, $offset, $count)
+    return $script:writeTask
+}
+$script:client = [pscustomobject]@{}
+$script:client | Add-Member ScriptMethod ConnectAsync {
+    param($address, $port)
+    return $script:connectTask
+}
+$script:client | Add-Member ScriptMethod GetStream { return $script:stream }
+$script:client | Add-Member ScriptMethod Dispose { $script:disposed++ }
+Send-PostToolReadDemand -Discovery @{
+    hook_capabilities = @('read-hook-demand-v1'); hook_transport = 'tcp'
+    hook_generation = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    hook_endpoint = '127.0.0.1:12345'; hook_token = 'example'
+}
+ConvertTo-Json -Compress -InputObject @{
+    connect = @($script:connectWaits); write = @($script:writeWaits)
+    wire = $script:wire; disposed = $script:disposed
+}
+""", encoding="utf-8")
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-File", str(script)],
+        text=True, capture_output=True, timeout=10,
+        env={**os.environ, "ALLOCATION_MS": str(allocation_ms)}, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    value = json.loads(result.stdout)
+    assert value["disposed"] == 1
+    if allocation_ms == 60:
+        assert value["connect"] == [40]
+        assert value["write"] == [25]
+        assert json.loads(value["wire"])["kind"] == "readHookDemand"
+    else:
+        assert value["connect"] == value["write"] == []
+        assert value["wire"] is None
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("network")
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows prepared consumer cold-process tail")
+@pytest.mark.parametrize("prepared_read_event", ["cell"], indirect=True)
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("sample_group", range(4))
+def test_registered_prepared_cell_post_tool_cold_process_tail(
+    prepared_read_event, shell, sample_group,
+):
+    from agent_procutil import no_window_kwargs
+    from agent_worktrees.hook_ipc import HookIpcServer
+
+    executable = shutil.which(shell)
+    if not executable:
+        if os.environ.get("AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP") == "1":
+            pytest.fail(f"Required native membership shell {shell} is unavailable")
+        pytest.skip(f"{shell} is unavailable")
+    fixture = prepared_read_event
+    fixture["env"]["AGENT_WORKTREES_NUDGE_CALLS"] = "1000"
+    notices, samples = [], []
+    received = threading.Event()
+
+    class Server(HookIpcServer):
+        def _on_read_demand(self, request):
+            super()._on_read_demand(request)
+            notices.append(request)
+            received.set()
+
+    server = Server(
+        lambda *args: pytest.fail("prepared reads must not request synchronous policy or advice"),
+        read_demand_admitted=lambda: True,
+    )
+    server.start()
+    try:
+        path = fixture["registry"] / "status-monitor.lock"
+        path.write_text(json.dumps({**json.loads(path.read_text()), **server.rendezvous()}), encoding="utf-8")
+        for index in range(3):
+            received.clear()
+            started = time.perf_counter()
+            result = subprocess.run(
+                [executable, "-NoProfile", "-NonInteractive", "-File", str(fixture["harness"])],
+                input=json.dumps(fixture["payload"]), text=True, capture_output=True, timeout=10,
+                env=fixture["env"], **no_window_kwargs(),
+            )
+            elapsed = time.perf_counter() - started
+            assert result.returncode == 0, result.stderr
+            assert result.stdout == ""
+            assert result.stderr.startswith("entry_seconds="), result.stderr
+            samples.append({
+                "process_seconds": elapsed,
+                "entry_seconds": float(result.stderr.removeprefix("entry_seconds=")),
+            })
+            assert received.wait(2), "selected original IPC owner received no notification"
+            assert len(notices) == index + 1
+            assert notices[-1]["kind"] == "readHookDemand"
+            assert "payload" not in notices[-1]
+            assert server.has_recent_hook_demand()
+            assert json.loads(fixture["sidecar"].read_text())["count"] == index + 1
+        print(f"{shell}/cell/cold-tail-{sample_group}: {json.dumps(samples)}")
+    finally:
         server.close()
 
 
@@ -862,6 +1023,9 @@ def test_registered_read_demand_is_send_only(prepared_read_event, shell, case):
     "shell-evaluation", "shell-module-write", "shell-module-read", "shell-quoted-evaluation",
     "shell-read-select-string", "shell-read-select-object", "shell-read-expansion",
     "shell-read-assignment",
+    "mixed-targets", "mixed-reads", "mixed-write", "mixed-unknown-args",
+    "mixed-old-provider", "mixed-wrong-generation", "mixed-closed",
+    "mixed-missing-discovery", "mixed-oversized", "mixed-no-reply",
 ])
 def test_registered_native_mutation_is_send_only(prepared_read_event, shell, case):
     from types import SimpleNamespace
@@ -874,15 +1038,16 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
     if not executable:
         pytest.skip(f"{shell} is unavailable")
     fixture = prepared_read_event
-    batch = case.startswith("batch-")
+    mixed = case.startswith("mixed-")
+    batch = mixed or case.startswith("batch-")
     shell_event = case.startswith("shell-")
-    case = case.removeprefix("batch-") if batch else case.removeprefix("shell-")
+    case = case.removeprefix("mixed-") if mixed else case.removeprefix("batch-") if batch else case.removeprefix("shell-")
     paths = [str(fixture["home"] / name) for name in ("one", "two")]
     policy = main._ResidentHookPolicy(main._load_hook_client_module())
     invalidated = []
     cache = SimpleNamespace(
         invalidate=lambda path: invalidated.append(path),
-        invalidate_all=lambda: invalidated.append("all") if shell_event else pytest.fail("known paths must retain target scope"),
+        invalidate_all=lambda: invalidated.append("all") if shell_event or mixed else pytest.fail("known paths must retain target scope"),
     )
     received, release = threading.Event(), threading.Event()
     notices = []
@@ -925,7 +1090,9 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
         path = fixture["registry"] / "status-monitor.lock"
         discovery = {**json.loads(path.read_text()), **server.rendezvous()}
         if case == "old-provider":
-            if shell_event:
+            if mixed:
+                discovery["hook_capabilities"].remove("mixed-hook-batch-mutation-v1")
+            elif shell_event:
                 discovery["hook_capabilities"].remove("shell-hook-mutation-v1")
             elif batch:
                 discovery["hook_capabilities"].remove("native-hook-batch-mutation-v1")
@@ -965,6 +1132,13 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
                 payload["toolCalls"] = payload["toolCalls"][:1]
             elif case == "shell-metadata":
                 payload["toolName"] = "powershell"
+            if mixed:
+                payload["toolCalls"].append({
+                    "name": "powershell",
+                    "args": {"command": ["unknown"]} if case == "unknown-args" else
+                        '{"command":"git -c core.quotepath=false pull --ff-only"}' if case == "write" else
+                        {"command": "git --no-pager status --short"},
+                })
         elif case == "structured":
             payload["workingDirectory"] = payload["cwd"]
             payload["toolArgs"] = {}
@@ -1065,13 +1239,13 @@ def test_registered_native_mutation_is_send_only(prepared_read_event, shell, cas
             }
             assert notices[0]["payload"] == expected
             assert notices[0]["kind"] == (
-                "shellToolMutation" if shell_event else "nativeToolBatchMutation" if batch else "nativeToolMutation"
+                "mixedToolBatchMutation" if mixed else "shellToolMutation" if shell_event else "nativeToolBatchMutation" if batch else "nativeToolMutation"
             )
         assert callback_errors == []
         writes = case in {"write", "json-args", "raw-args", "fallback-args", "unknown-args", "pull", "assignment", "control-block", "conditional", "bash-assignment", "typed-assignment", "pipeline-block", "invoke-block", "sed-cluster", "git-output", "dot-write", "dot-assignment", "evaluation", "module-write"}
-        assert invalidated == (["all"] if shell_event and writes else paths if case in {"structured", "patch", "shell-metadata"} else [])
+        assert invalidated == (["all"] if (shell_event or mixed) and writes else paths if case in {"structured", "patch", "shell-metadata", "targets"} else [])
         assert server.has_recent_hook_demand() is (writes or case in {
-            "structured", "patch", "reads", "read", "literal-assignment", "read-sed",
+            "structured", "patch", "targets", "reads", "read", "literal-assignment", "read-sed",
             "quoted-parentheses", "shell-metadata",
             "literal-scriptblock",
             "read-bracket-path", "read-type-call",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+from contextlib import contextmanager
 from dataclasses import replace
 import json
 import time
@@ -247,6 +248,39 @@ def test_actual_target_guard_is_independent_of_head_common_iteration(feedback_en
     if after_effect:
         retry = run(value)
         assert retry["entered_writes"] == 0 and retry["feedback"]["status"] == "unavailable"
+
+
+@pytest.mark.parametrize("target", ["changed", "missing"])
+def test_fresher_dispatch_snapshot_rechecks_captured_target(
+    feedback_environment: tuple, target: str,
+) -> None:
+    value = feedback_environment
+    backend = value[4]
+    original_context = backend.context
+
+    @contextmanager
+    def context():
+        with original_context() as selected:
+            original_perform = selected.perform
+
+            def perform(operation, action):
+                if target == "changed":
+                    backend.pr["lastMergeTargetCommit"]["commitId"] = "e" * 40
+                else:
+                    backend.pr.pop("lastMergeTargetCommit")
+                fresh = selected.read_state()
+                selected.review_check(operation, action, fresh, context=selected)
+                return original_perform(operation, action)
+
+            selected.perform = perform
+            yield selected
+
+    backend.context = context
+    result = run(value)
+    assert result["status"] == "candidate_changed"
+    assert result["actions"][0]["state"] == "unknown"
+    assert result["actions"][0]["attempt_id"] and writes(backend) == []
+    assert result["feedback"]["status"] != "handled"
 
 
 def test_changed_interest_cannot_replace_original_capture(feedback_environment: tuple) -> None:

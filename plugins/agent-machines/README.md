@@ -93,6 +93,12 @@ so an inherited finite guardian is not unlocked by the caller's exit trap.
   Machine-specific harness-to-knowledge values remain suggestions; no native
   apply, binding change or cloud enrollment occurs.
   See [the exchange contract](docs/portable-preferences.md).
+- **Selected local carrier replicas.** `preferences carrier publish|receive`
+  reuse that exchange with explicit account-labelled replica configuration
+  and approved participants. A bounded dedicated-namespace census blocks
+  unexpected entries; offline receipt preserves accepted data and local
+  overrides. No provider API, synchronization or peer-delivery proof is implied.
+  See [the replica contract](docs/portable-preferences.md#selected-onedrive-local-replica).
 - **Explicit Copilot scalar-floor adoption.** `preferences copilot` previews
   accepted `model`/`effortLevel` data in the qualified native scope; a separate
   confirmed apply uses the existing settings merge. Native defaults, live

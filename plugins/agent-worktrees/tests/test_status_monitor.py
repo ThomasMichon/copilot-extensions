@@ -1515,6 +1515,55 @@ def test_native_batch_reuses_original_normalization_and_bounded_targets(tmp_path
     assert invalidated == expected
 
 
+@pytest.mark.parametrize("case", ["targets", "reads", "shell-write", "unknown", "overflow"])
+def test_mixed_batch_reuses_original_normalization_and_classifiers(tmp_path, case):
+    calls = [
+        {"name": "view", "args": {"path": "read-only"}},
+        {"name": "powershell", "args": '{"command":"git --no-pager status --short"}'},
+        {"name": "multi_edit", "args": {"edits": [{"path": "one"}, {"path": "two"}]}},
+        {"name": "apply_patch", "args": "*** Update File: two\n*** Move to: three\n"},
+    ]
+    expected = [str(tmp_path / name) for name in ("one", "two", "three")]
+    if case == "reads":
+        calls = calls[:2]
+        expected = []
+    elif case in {"shell-write", "unknown"}:
+        calls[1]["args"] = {"command": "git pull --ff-only"} if case == "shell-write" else {"command": []}
+        expected = ["all"]
+    elif case == "overflow":
+        calls[2]["args"] = {"files": [{"path": f"file-{i}"} for i in range(128)]}
+        expected = ["all"]
+    invalidated = []
+    cache = types.SimpleNamespace(
+        invalidate=lambda path: invalidated.append(path),
+        invalidate_all=lambda: invalidated.append("all"),
+    )
+    assert m._resident_hook_decision(
+        "mixedToolBatchMutation", {
+            "cwd": str(tmp_path / "other"), "workingDirectory": str(tmp_path),
+            "toolName": "unknown-outer-metadata", "toolCalls": calls,
+        }, policy=m._ResidentHookPolicy(m._load_hook_client_module()), segment_cache=cache,
+    ) == {}
+    assert invalidated == expected
+
+
+@pytest.mark.parametrize("tail", [
+    None, {"name": "unknown"}, {"name": ["powershell"]},
+    {"name": "powershell", "cwd": "other"},
+])
+def test_mixed_batch_validates_entire_event_before_classification(monkeypatch, tail):
+    from agent_worktrees.hook_ipc import HookUnavailable
+
+    policy = m._ResidentHookPolicy(m._load_hook_client_module())
+    monkeypatch.setattr(policy, "mutation_targets", lambda *_a: pytest.fail("partial batch classification"))
+    with pytest.raises(HookUnavailable):
+        m._resident_hook_decision(
+            "mixedToolBatchMutation", {"toolCalls": [
+                {"name": "powershell", "args": {"command": "git commit -m test"}}, tail,
+            ]}, policy=policy, segment_cache=object(),
+        )
+
+
 @pytest.mark.parametrize("tool", ["edit", "powershell"])
 def test_legacy_post_batch_metadata_preserves_outer_mutation_and_advice(tmp_path, monkeypatch, tool):
     policy = m._ResidentHookPolicy(m._load_hook_client_module())
@@ -5350,6 +5399,7 @@ def test_status_monitor_backs_off_at_iteration_boundary_without_mutating(
     "legacy-batch-shell", "legacy-batch-native", "legacy-batch-read",
     "shellToolMutation", "shell-unadmitted", "shell-read",
     "shell-bash-quoted-brace",
+    "mixedToolBatchMutation", "mixed-unadmitted", "mixed-reads", "mixed-invalid",
 ])
 def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, monkeypatch, kind):
     """Wiring-level regression: a real ``handoffWake`` request, dialed through
@@ -5375,7 +5425,7 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
             return object()  # any non-None stub satisfies ready()'s check
 
         def _managed_session_admitted(self, payload):
-            return kind not in {"native-unadmitted", "batch-unadmitted", "shell-unadmitted"}
+            return kind not in {"native-unadmitted", "batch-unadmitted", "shell-unadmitted", "mixed-unadmitted"}
 
     lock = tmp_path / "status-monitor.lock"
     monkeypatch.setattr(m, "_monitor_lock_path", lambda: lock)
@@ -5459,6 +5509,14 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
                         "name": "view" if kind == "batch-reads" else "edit",
                         "args": {"path": "one"},
                     }]}
+                mixed = kind in {"mixedToolBatchMutation", "mixed-unadmitted", "mixed-reads", "mixed-invalid"}
+                if mixed:
+                    payload = {"cwd": str(tmp_path), "toolCalls": [
+                        {"name": "view", "args": {"path": "one"}},
+                        {"name": "powershell", "args": '{"command":"git status"}' if kind == "mixed-reads" else '{"command":"git pull --ff-only"}'},
+                    ]}
+                    if kind == "mixed-invalid":
+                        payload["toolCalls"].append({"name": "unknown"})
                 legacy = kind.startswith("legacy-batch-")
                 shell = kind in {"shellToolMutation", "shell-unadmitted", "shell-read", "shell-bash-quoted-brace"}
                 if shell:
@@ -5481,7 +5539,7 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
                     payload = {"cwd": str(tmp_path)}
                 request = {
                     "version": 1, "token": self.token,
-                    "kind": "worktreeChanged" if kind == "worktreeChanged" else "postToolUse" if legacy else "shellToolMutation" if shell else "nativeToolBatchMutation" if batch else "nativeToolMutation",
+                    "kind": "worktreeChanged" if kind == "worktreeChanged" else "postToolUse" if legacy else "mixedToolBatchMutation" if mixed else "shellToolMutation" if shell else "nativeToolBatchMutation" if batch else "nativeToolMutation",
                     "hook_generation": self.generation, "deadline": time.time() + 1,
                     "payload": payload,
                 }
@@ -5494,7 +5552,7 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
                         dial_results.append(conn.recv(1) == b"")
                 assert self.handler_settled.wait(1), "request handler did not settle"
                 assert self.has_recent_hook_demand() is (
-                    kind not in {"native-unadmitted", "batch-unadmitted", "shell-unadmitted"}
+                    kind not in {"native-unadmitted", "batch-unadmitted", "shell-unadmitted", "mixed-unadmitted", "mixed-invalid"}
                 )
             wake_at_reply.append((before, wake_event.is_set()))
 
@@ -5509,6 +5567,7 @@ def test_handoff_wake_kind_actually_wakes_the_running_monitor_sweep(tmp_path, mo
     assert wake_at_reply == [(False, kind not in {
         "native-unadmitted", "batch-unadmitted", "batch-reads", "legacy-batch-read",
         "shell-unadmitted", "shell-read",
+        "mixed-unadmitted", "mixed-reads", "mixed-invalid",
     })], (
         "a real handoffWake request through the actual HookIpcServer must "
         "set the real wake_event the sweep loop waits on, not just satisfy "

@@ -759,7 +759,7 @@ def test_source_only_cache_invalidates_the_previous_tooling_selection():
 
 @pytest.mark.parametrize("name,extra", [
     ("agent-index", "auth"), ("agent-pull-requests", "service-gateway"),
-    ("agent-dispatch", "service-gateway"), ("agent-ssh", ""),
+    ("agent-dispatch", "service-gateway"), ("agent-ssh", ""), ("agent-worktrees", "auth"),
 ])
 def test_preparation_selects_same_checkout_fleet_dependency(tmp_path, monkeypatch, name, extra):
     import plugin_test_environment as preparation
@@ -807,9 +807,9 @@ def test_preparation_selects_same_checkout_fleet_dependency(tmp_path, monkeypatc
     install = calls[-1]
     if name == "agent-dispatch":
         assert str(tmp_path / "plugins" / "agent-pull-requests") + "[fleet]" in install
-    assert install[-len(runner.RUNNER_DEPENDENCIES) - 2:] == [
-        "-e", str(fleet) + (f"[{extra}]" if extra else ""), *runner.RUNNER_DEPENDENCIES,
-    ]
+    fleet_spec = str(fleet) + (f"[{extra}]" if extra else "")
+    assert ["-e", fleet_spec] in [install[index:index + 2] for index in range(len(install) - 1)]
+    assert all(requirement in install for requirement in runner.RUNNER_DEPENDENCIES)
     assert not any("http" in argument for argument in install)
     assert retained == [(
         tmp_path / "libs" / "versioned-runtime",
