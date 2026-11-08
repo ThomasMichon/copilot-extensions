@@ -440,11 +440,13 @@ _Operator-required outcome; agent-recommended slices and validation._
   before changing strict owner or serving schemas. Reuse retained intent and
   receipt identity; add only bounded acquired evidence under the same owner
   (#11538; storage/acquisition/read implementation remains open).
-- [ ] Deliver its explicitly adopted source storage/acquisition/read leaves,
+- [x] Deliver its finite explicitly adopted data-owner/library transaction and
+  scoped retained-read leaves (#11542; final affected packet: 100 source cases).
+  Preserve original confirmation, unknown outcomes and B3/B4 proof.
+- [ ] Complete actual workspace load/sync enrollment and negotiated serving
+  for that persisted acquisition mapping,
   preserving original confirmation, unknown outcomes and B3/B4 proof; keep
   all-publisher, provider and installed acceptance separate.
-  The finite data-owner/library transaction and scoped retained read are
-  separate from actual workspace load/sync enrollment and negotiated serving.
 - [x] Review the [tracked comment/review consumer refinement](tracked-comment-consumers.md)
   before changing legacy commands (#11525).
 - [x] Qualify one explicit tracked comment/review source binding
@@ -1000,6 +1002,12 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
+- [x] Qualify finite mapping data/library controls: original prepared/native
+  joins, restart, later writes, unknown/partial/divergent evidence, copied
+  targets, explicit/capacity-refused adoption, old strict readers, receipt
+  invalidation, uncertain replacement, cache-before-journal failure and
+  normalization/digest reuse (#11542; final 100 affected source cases).
+  Actual load/sync and negotiated serving remain separate.
 - [ ] Qualify the [persisted acquisition mapping controls](comment-observation-correlation.md#provider-first-delivery-and-validation):
   same-owner native joins, real-file restart/contention, monotone evidence,
   capacity and uncertain replacement, no duplicate IO or false feedback,
