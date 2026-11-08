@@ -196,6 +196,19 @@ def test_agenda_nudge_throttled_when_expected_and_lane_missing(tmp_path):
     assert "agendas.default: expected" in outs[2]
 
 
+def test_agenda_nudge_reads_policy_published_under_agent_home(tmp_path):
+    agent_home, cwd = _make_home(tmp_path)
+    real_home = tmp_path / "real-home"
+    real_home.mkdir()
+    _publish_policy(agent_home, "expected")
+    env = {**_AGENDA_ENV, "AGENT_HOME": str(agent_home)}
+
+    outs = [nudge.decide(_payload(cwd), env=env, home=real_home, now=1000.0 + i) for i in range(3)]
+
+    assert _has_agenda(outs[2])
+    assert not (real_home / ".agent-worktrees").exists()
+
+
 def test_agenda_nudge_silent_when_worktree_lane_exists(tmp_path):
     home, cwd = _make_home(tmp_path)
     wt = tmp_path / "wt"

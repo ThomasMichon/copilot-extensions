@@ -473,7 +473,8 @@ def decide(
 
     Pure/injectable for tests: reads+writes the per-worktree sidecar under
     ``<home>/.agent-worktrees/nudge-state/`` and reads the worktree tracking yaml
-    (per-project) at ``<home>/.<project>/worktrees/<id>.yaml``. The agenda
+    (per-project) at ``<home>/.<project>/worktrees/<id>.yaml``, where ``<home>``
+    is ``AGENT_HOME`` when set. The agenda
     policy comes only from the owner-published ``<id>.agenda-policy.json``.
     """
     env = env if env is not None else os.environ
@@ -488,9 +489,13 @@ def decide(
         return None
 
     cwd = str(payload.get("cwd") or "") or os.getcwd()
-    aw = home / ".agent-worktrees"
+    # The runtime tree (policy records, counters, tracking) lives under
+    # AGENT_HOME when set, matching the publisher; session-state stays on home.
+    agent_home = str(env.get("AGENT_HOME") or "").strip()
+    state_home = Path(agent_home) if agent_home else home
+    aw = state_home / ".agent-worktrees"
     found = (
-        (tracking_lookup or _find_tracking_yaml)(cwd, home)
+        (tracking_lookup or _find_tracking_yaml)(cwd, state_home)
         if tracking_record is _UNSET else tracking_record
     )
     if not found:
