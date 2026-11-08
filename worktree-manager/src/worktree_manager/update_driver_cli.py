@@ -34,7 +34,7 @@ _TELEMETRY_KEYS = (
     "COPILOT_EXTENSIONS_UPDATE_RUN_ID", "COPILOT_EXTENSIONS_UPDATE_EVENTS",
     "COPILOT_EXTENSIONS_UPDATE_OWNER",
 )
-_RUNNER_CONTEXT_KEYS = (*_CONTEXT_KEYS, _UNATTENDED, *_TELEMETRY_KEYS)
+_RUNNER_CONTEXT_KEYS = (*_CONTEXT_KEYS, _UNATTENDED)
 
 
 def _current_authority(driver, **kwargs):
@@ -531,7 +531,12 @@ def cmd_update_request(rest: list[str]) -> int:
         argv, env = driver.runtime_command("worktree_manager", ["update", *arguments])
         request = driver.enqueue(
             spec, runner=driver.TrustedRunner(
-                argv, str(cwd), env=tuple(env.items()), context_keys=_RUNNER_CONTEXT_KEYS,
+                argv, str(cwd), env=tuple(env.items()),
+                context_keys=(
+                    (*_RUNNER_CONTEXT_KEYS, *_TELEMETRY_KEYS)
+                    if "--unattended" in arguments or _automatic_arguments(arguments)
+                    else _RUNNER_CONTEXT_KEYS
+                ),
             ),
         )
         print(f"Update request {request.id}; log: {request.log_path}", file=sys.stderr)

@@ -74,6 +74,20 @@ def test_unattended_authentication_hint_is_manager_arguments_not_engine_context(
     assert "CE_UPDATE_UNATTENDED" in seen["runner"].context_keys
 
 
+@pytest.mark.parametrize("arguments,cleared", [
+    ([], False), (["--unattended"], True), (["--automatic-trigger", "manager"], True),
+])
+def test_initial_telemetry_context_is_cleared_only_for_unattended_requests(
+    queued, monkeypatch, arguments, cleared,
+):
+    seen, _ = queued
+    monkeypatch.setenv("COPILOT_EXTENSIONS_UPDATE_RUN_ID", "unrelated-caller")
+    assert driver.cmd_update_request([*arguments, "--detach"]) == 0
+    assert not (set(dict(seen["spec"].context)) & set(driver._TELEMETRY_KEYS))
+    selected = set(seen["runner"].context_keys) & set(driver._TELEMETRY_KEYS)
+    assert selected == (set(driver._TELEMETRY_KEYS) if cleared else set())
+
+
 def test_unattended_execution_sanitizes_the_current_executor_and_restores_it(monkeypatch, tmp_path):
     for key in ("GH_TOKEN", "GITHUB_TOKEN", "AGENT_WORKTREES_AHP_AUTH_TOKEN",
                 "GIT_SSH_COMMAND", "GIT_DIR", "GIT_CONFIG_COUNT", "SSH_ASKPASS"):
