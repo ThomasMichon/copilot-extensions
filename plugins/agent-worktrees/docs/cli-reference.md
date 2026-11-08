@@ -1091,6 +1091,11 @@ base disposition (`direct` | `pr-human-merge` | `pr-agent-merge` |
 `pr-self-merge`); use live `pr-status` for the acting identity's effective
 profile when `pr.roles` or live merge authority can change which verbs apply.
 
+An optional [tracked comment/review Python embedding](../../agent-pull-requests/docs/tracked-publication.md)
+can bind these same parsers/handlers to an already selected workspace owner.
+It adds no CLI flags or automatic host enrollment; ordinary `pr-comment` and
+`pr-review` syntax, output and provider semantics remain unchanged.
+
 After a recorded PR squash-merges, `pr-complete` verifies its original head
 against reachable upstream commits and replays only later local commits.
 Candidate discovery ignores unchanged diff context, so independent edits near

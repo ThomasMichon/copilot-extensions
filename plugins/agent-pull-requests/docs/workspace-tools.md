@@ -104,6 +104,8 @@ The public contract is `agent-pull-requests.workspace-tools/v1`. Discovery repor
 the actual supplied client's supported operations and source-read descriptor.
 Unsupported/missing bindings do not choose an ambient backend or command.
 All original CLI/watch interfaces and defaults remain unchanged.
+The optional [tracked comment/review source embedding](tracked-publication.md)
+composes those existing owners without enrolling ordinary Worktrees commands.
 Overlapping service tool calls share negotiation through the existing client's
 `ensure_capabilities()`; explicit rediscovery remains separate and can withdraw
 cached support. This orders metadata, not caller authority or effect admission.
