@@ -261,3 +261,20 @@ runtime remediation, elevated operation or destructive cleanup is authorized.
   its authoritative mux session, not just its pane ID.
 - These are source corrections, not installed success claims. Repeat affected
   validation, review, promotion, authorized updates and both installed proofs.
+
+### 2026-11-07 - Installed corrections source qualified
+
+- The corrections passed 43 focused cases, all three real private native
+  roundtrips and nine actor-free cases, plus lint, install and documentation
+  guards. The canonical collector now includes the new duration regression.
+- Source-pinned run 42439721383 passed all 317 current cases and independent
+  no-write verification. Its first historical guard hit the existing
+  30-second test deadline; one unchanged failed-job retry passed every
+  historical guard and canonical export. #11477 retains that deadline failure;
+  no timeout, test or historical fixture was changed or waived.
+- The native publication owner materialized all 157 verified current outputs.
+  Independent local contract validation passed two contracts and 1,068
+  retained fixtures. The changes preserve exact native binding, admission,
+  field/value completion and no-replay semantics.
+- Return #11467 to normal review and required CI, then continue ordinary
+  promotion, coordinated authorized updates and both installed proofs.
