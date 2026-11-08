@@ -171,9 +171,11 @@ def create_worktree(
 def resolve_worktree(
     worktree_id: str, *, project: str | None = None,
     timeout: float | None = None, task_id: str | None = None,
+    allow_terminal: bool = False,
 ) -> dict[str, str | None]:
     """Resolve a tracked worktree id to its current path. ``task_id``
-    additionally rejects a reassigned worktree (see :mod:`agent_dispatch.worktree_attribution`)."""
+    additionally rejects a reassigned worktree (see :mod:`agent_dispatch.worktree_attribution`).
+    ``allow_terminal`` admits a terminal row for identity checks only, never reuse."""
     exe_prefix = _agent_worktrees_launch_prefix()
     if exe_prefix is None:
         raise EmbodyUnavailable("agent-worktrees CLI not found on PATH")
@@ -204,7 +206,7 @@ def resolve_worktree(
             env=agent_worktrees_environment())
         if row is None:
             raise
-    if row.get("status") in _TERMINAL_WORKTREE_STATUSES:
+    if not allow_terminal and row.get("status") in _TERMINAL_WORKTREE_STATUSES:
         raise WorktreeNotFound(f"worktree is terminal and cannot be reused: {worktree_id}")
     if task_id and (owner := worktree_attribution.foreign_task_id(row, task_id)):
         raise WorktreeNotFound(f"worktree now owned by {owner!r}, not {task_id!r}")
@@ -384,10 +386,17 @@ def conclude_dispatch_attempt(
         raise DisposableConclusionError("agent-worktrees CLI not found on this host")
     if not project or not worktree_path:
         raise DisposableConclusionError("allocation provenance unavailable; workspace preserved")
+    # A deferred removal leaves the record primed (terminal); retries must still
+    # reach the idempotent conclusion after re-proving the same identity. A
+    # missing or unreadable row never proves identity, so it preserves.
     try:
-        actual = resolve_worktree(worktree, project=project, timeout=timeout)
+        actual = resolve_worktree(
+            worktree, project=project, timeout=timeout, allow_terminal=True,
+        )
     except EmbodyUnavailable as exc:
-        raise DisposableConclusionError("allocation owner unavailable; workspace preserved") from exc
+        raise DisposableConclusionError(
+            "allocation owner unavailable; workspace preserved"
+        ) from exc
     if actual.get("project") != project or actual.get("path") != worktree_path:
         raise DisposableConclusionError("allocation identity changed; workspace preserved")
     result = subprocess.run(  # noqa: S603 -- fixed argv, launcher resolved locally
