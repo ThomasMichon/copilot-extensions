@@ -18,6 +18,7 @@ import subprocess
 import sys
 import threading
 import time
+import types
 from unittest.mock import MagicMock
 
 import pytest
@@ -1174,6 +1175,98 @@ def test_launch_session_host_surfaces_crash_tail(tmp_path, monkeypatch):
     assert "exited early (code=7)" in message
     assert "simulated session host startup crash" in message
     assert "diagnosable detail line" in message
+
+
+def test_launch_session_host_fallback_scratch_is_labeled_and_removed_on_crash(
+    tmp_path, monkeypatch,
+):
+    """Without ``state_dir`` the fallback lives in labeled scratch and a
+    failed launch leaves no ``agbridge-host-*`` directory behind."""
+    crash_script = tmp_path / "crash.py"
+    crash_script.write_text("import sys\nsys.exit(3)\n")
+    scratch_root = tmp_path / "scratch"
+    scratch_root.mkdir()
+    monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(scratch_root))
+    seen: list[str] = []
+    real_popen = subprocess.Popen
+
+    def _fake_popen(argv, **kwargs):
+        seen.extend(
+            entry.name for entry in scratch_root.iterdir()
+            if (entry / "scratch-owner.json").is_file()
+        )
+        if "--support-json" in argv:
+            return real_popen(argv, **kwargs)
+        return real_popen([sys.executable, str(crash_script)], **kwargs)
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", _fake_popen)
+
+    with pytest.raises(RuntimeError, match="exited early"):
+        launcher.launch_session_host(["irrelevant-child-argv"], ready_timeout=5.0)
+    assert seen and all(name.startswith("agbridge-host-") for name in seen)
+    assert list(scratch_root.iterdir()) == []
+
+
+def test_launch_session_host_fallback_scratch_removed_when_creation_refused(
+    tmp_path, monkeypatch,
+):
+    scratch_root = tmp_path / "scratch"
+    scratch_root.mkdir()
+    monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(scratch_root))
+    real_popen = subprocess.Popen
+    refused = []
+
+    def refusing_popen(argv, **kwargs):
+        if "--support-json" in argv:
+            return real_popen(argv, **kwargs)
+        refused.extend(scratch_root.iterdir())
+        return real_popen(argv, **{**kwargs, "cwd": str(tmp_path / "missing")})
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", refusing_popen)
+    with pytest.raises(FileNotFoundError):
+        launcher.launch_session_host(["irrelevant-child-argv"], ready_timeout=5.0)
+    assert len(refused) == 1
+    assert not refused[0].exists()
+    assert list(scratch_root.iterdir()) == []
+
+
+def test_launch_session_host_fallback_scratch_kept_when_interrupted_after_spawn(
+    tmp_path, monkeypatch,
+):
+    """An interruption while a spawned host may still be running keeps the
+    labeled fallback directory, since that host may still use its records."""
+    hang_script = tmp_path / "hang.py"
+    hang_script.write_text("import time\ntime.sleep(30)\n")
+    scratch_root = tmp_path / "scratch"
+    scratch_root.mkdir()
+    monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(scratch_root))
+    real_popen = subprocess.Popen
+    spawned: dict[str, subprocess.Popen] = {}
+
+    def _fake_popen(argv, **kwargs):
+        if "--support-json" in argv:
+            return real_popen(argv, **kwargs)
+        spawned["proc"] = real_popen([sys.executable, str(hang_script)], **kwargs)
+        return spawned["proc"]
+
+    def _interrupt(_seconds):
+        if "proc" in spawned:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(
+        launcher._core, "time", types.SimpleNamespace(time=time.time, sleep=_interrupt),
+    )
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            launcher.launch_session_host(["irrelevant-child-argv"], ready_timeout=30.0)
+        kept = [entry for entry in scratch_root.iterdir() if entry.name.startswith("agbridge-host-")]
+        assert len(kept) == 1 and (kept[0] / "scratch-owner.json").is_file()
+    finally:
+        proc = spawned.get("proc")
+        if proc is not None:
+            proc.kill()
+            proc.wait(timeout=10)
 
 
 def test_launch_session_host_timeout_kills_hung_process(tmp_path, monkeypatch):

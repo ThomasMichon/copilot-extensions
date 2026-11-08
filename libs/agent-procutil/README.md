@@ -1611,6 +1611,31 @@ CPU enforcement, consumer role aggregation and process-tree reclamation are
 not provided by this API. Run its focused and native tests with the library's
 `dev` and `metrics` extras under the adopting repository's bounded test runner.
 
+## Labeled scratch directories
+
+`agent_procutil.scratch.labeled_scratch(prefix, purpose, *, owner_refs=None,
+retention=None, cleanup=True)` creates a timestamped
+`<prefix><UTC stamp>-<random>` directory under the OS temp directory (or
+`AGENT_SCRATCH_ROOT`, or an explicit `root=`), writes a `scratch-owner.json`
+breadcrumb (schema, purpose, retention reason, creation time, PID and owner
+references such as the Copilot session, bound worktree and launch IDs taken
+from the environment) and removes the directory on exit. Removal is best
+effort and never follows symlinks or junctions: a link is unlinked, not
+traversed, and each directory is pinned before it is entered (descriptor-
+relative traversal on POSIX, a no-share-delete handle on Windows) so a
+directory swapped for a link mid-cleanup is never followed. Incomplete
+cleanup keeps the breadcrumb, so retained scratch stays labeled.
+`create_labeled_scratch` / `remove_scratch` serve callers whose
+scratch outlives one `with` block. Removal rejects raw paths ending in a
+separator, `.` or `..` before inspection, since those suffixes can force
+directory-link traversal even during a no-follow lookup.
+
+`python -m agent_procutil.scratch report [--root DIR] [--json]` is a
+read-only inventory of a temp root: entries grouped by name prefix with
+counts, bytes, oldest/newest age and how many carry a breadcrumb (only a
+regular-file breadcrumb is read). It has no
+deletion capability; stale content is left for the operator to review.
+
 ## Vendoring
 
 **In dev**, most consumers' `pyproject.toml` reference this library through

@@ -262,11 +262,63 @@ def launch_session_host(
     own stdout/stderr to ``os.devnull`` once ready
     (``_detach_stdio_from_frontend``), so output after that point is never
     coupled to this frontend process's lifetime.
+
+    Without ``state_dir`` the host's records live in a labeled scratch
+    directory (``scratch-owner.json`` breadcrumb). A launch that fails before
+    spawning, or whose host is confirmed to have exited, removes that
+    directory; any other outcome keeps it because a live host or a later
+    authority read may still need it.
     """
-    sd = (
-        Path(os.path.abspath(state_dir))
-        if state_dir else Path(tempfile.mkdtemp(prefix="agbridge-host-"))
-    )
+    # Frontend-only helper; the compact host archive does not carry it.
+    from agent_procutil.scratch import create_labeled_scratch, remove_scratch
+
+    if state_dir:
+        sd, fallback = Path(os.path.abspath(state_dir)), None
+    else:
+        sd = fallback = create_labeled_scratch(
+            "agbridge-host", "agent Session Host state and authority record",
+            owner_refs={"session_id": session_id} if session_id else None,
+            retention="retained while its host authority may be read; removed on failed launch",
+        )
+    phase = {"spawn_attempted": False, "creation_refused": False, "exited": False}
+    try:
+        return _launch_in(
+            sd, child_argv, cwd=cwd, env=env, ready_timeout=ready_timeout, nonce=nonce,
+            session_id=session_id, host_version=host_version,
+            unexpected_reap_seconds=unexpected_reap_seconds,
+            active_reap_seconds=active_reap_seconds, acquisition_launch=acquisition_launch,
+            host_entrypoint=host_entrypoint, policy_context=policy_context,
+            lifetime_policy=lifetime_policy, phase=phase,
+        )
+    except BaseException:
+        # Only a proven pre-spawn failure or a confirmed host exit releases the
+        # records; any other post-spawn outcome may leave a live host behind.
+        # Custody owners always keep their evidence.
+        if fallback is not None and acquisition_launch is None and (
+            not phase["spawn_attempted"] or phase["creation_refused"] or phase["exited"]
+        ):
+            remove_scratch(fallback)
+        raise
+
+
+def _launch_in(
+    sd: Path,
+    child_argv: list[str],
+    *,
+    cwd: str | None,
+    env: dict[str, str] | None,
+    ready_timeout: float,
+    nonce: str,
+    session_id: str,
+    host_version: str,
+    unexpected_reap_seconds: float,
+    active_reap_seconds: float,
+    acquisition_launch: LaunchOwner | None,
+    host_entrypoint: str,
+    policy_context: str | None,
+    lifetime_policy: str,
+    phase: dict[str, bool],
+) -> HostHandle:
     from agent_procutil._daemon_instance_store import _root
 
     _root(sd, create=True)
@@ -353,11 +405,22 @@ def launch_session_host(
         child_env[_STARTUP_ENV] = startup.context
 
     spawn_options = host_spawn_kwargs()
+
+    def create_host(*args, **kwargs):
+        phase["spawn_attempted"] = True
+        try:
+            return subprocess.Popen(*args, **kwargs)
+        except OSError:
+            # Only the actual creation seam can prove no Host was started.
+            phase["creation_refused"] = True
+            raise
+
     try:
         if acquisition_launch is not None:
             acquisition_launch.begin_host()
         proc = spawn_instance(
             host_argv,
+            popen=create_host,
             instance=DaemonInstanceSpec(
                 "agent-bridge-session-host", sd, Path(__file__).resolve(),
             ),
@@ -387,6 +450,7 @@ def launch_session_host(
     deadline = time.time() + ready_timeout
     while True:
         if proc.poll() is not None:
+            phase["exited"] = True
             if startup is not None:
                 startup.close()
             # The process has exited, but the OS pipe may still hold bytes

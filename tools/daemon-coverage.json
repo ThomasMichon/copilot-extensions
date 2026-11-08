@@ -195,7 +195,7 @@
       "r:services/ssh/container/Dockerfile::<script>::CMD": 1,
       "t:clean-room/gateway-role-tunnels/fixture_service.py::_supervise::spawn_daemon": 1,
       "b:service_process_cli.py::_launch_bridge_daemon::spawn_daemon": 1,
-      "cd:session_host/launcher.py::launch_session_host::spawn_instance": 1,
+      "cd:session_host/launcher.py::_launch_in::spawn_instance": 1,
       "cd:session_host/launcher.py::run_host::serve_forever": 1,
       "cd:session_host/host.py::SessionHost.serve::start_server": 1,
       "cd:session_host/host.py::SessionHost.serve::create_server": 1,

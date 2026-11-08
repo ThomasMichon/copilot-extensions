@@ -710,10 +710,17 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
                         if requirements:
                             raise _AdditionalBuildRequirements
                         uv_output = workspace / ("build-" + str(index))
+                        # UV leaves a per-source-path setuptools lock in its temp
+                        # directory; keep it inside this disposable workspace.
+                        build_temp = workspace / ("temp-" + str(index))
+                        build_temp.mkdir(exist_ok=True)
                         run(
                             [str(uv), "build", "--wheel", "--no-build-isolation", "--no-sources",
                              "--offline", "--python", str(python), "--out-dir", str(uv_output), str(compact)],
-                            environment=environment, cwd=compact,
+                            environment={**{key: value for key, value in environment.items()
+                                            if key.upper() not in ("TMP", "TEMP", "TMPDIR")},
+                                         **dict.fromkeys(("TMP", "TEMP", "TMPDIR"), str(build_temp))},
+                            cwd=compact,
                         )
                         wheels = tuple(uv_output.glob("*.whl"))
                         if len(wheels) != 1:
