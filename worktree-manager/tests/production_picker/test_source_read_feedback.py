@@ -544,6 +544,29 @@ def test_successful_provider_fetch_preserves_stale_feedback_until_fresh(monkeypa
             assert screen.worktrees_view.notice_lines() == []
 
 
+@pytest.mark.parametrize("stale_index", [0, 1])
+def test_advisory_feed_keeps_stale_feedback_without_claiming_authoritative_rows(stale_index):
+    _screen, loader, source = screen_and_loader(provider=True)
+    rows = [{"id": f"row-{i}", "_projection": {"quality": "advisory"}} for i in range(2)]
+    rows[stale_index]["_availability"] = {"status": "stale", "reason": "cached advisory rows"}
+    loader._feed_commit(source, 0, rows)
+    status = loader.read_status_for_source(source.source_id)
+    assert str(status["error"]) == "cached advisory rows"
+    assert status["failure_kind"] == "content"
+    assert source.source_id not in loader.authoritative_source_ids()
+    assert loader.state_for_source(source.source_id) == "loading"
+
+
+@pytest.mark.parametrize("metadata", [{"raw": ["invalid"]}, {"raw": {"_availability": "invalid"}}])
+def test_roster_publication_retains_invalid_availability_as_a_read_failure(metadata):
+    _screen, loader, source = screen_and_loader(provider=True)
+    with loader._lock:
+        loader._publish_source_records(source, [{"id": "one", **metadata}])
+    status = loader.read_status_for_source(source.source_id)
+    assert "metadata is invalid" in str(status["error"])
+    assert status["failure_kind"] == "content"
+
+
 @pytest.mark.parametrize("other_action", [None, "Existing action"])
 def test_retry_key_repaints_loading_before_the_background_reload_finishes(monkeypatch, other_action):
     monkeypatch.setattr(PickerScreen, "_tick", lambda self: None)
