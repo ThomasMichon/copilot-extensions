@@ -189,6 +189,16 @@ real credentials to conceal the gap. A future acquisition-owner expansion
 must preserve authoritative response metadata and actual account/material
 custody through a reviewed supported boundary before enabling this writer.
 
+The current relay's `CredentialSource.resolve` interface returns framed text,
+and `HttpSourceRegistry` adds only routing references and scope selection.
+Neither exposes a metadata-preserving acquisition record. The raw MSAL result
+exists inside Azure CLI's credential implementation before
+`Profile.get_raw_token` transforms it; an internal method or test inspection
+hook is not a supported relay acquisition boundary. Preserve this dependency
+as unavailable until the acquisition owner supplies that supported contract.
+Independent journal, read and consumer work may continue; none enables the
+protected writer or closes this prerequisite.
+
 Use the native provider's read-only permission evaluation for effective
 principal permission, with the same pinned material and finite IO owner.
 For ADO, the documented

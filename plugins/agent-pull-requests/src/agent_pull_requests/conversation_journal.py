@@ -226,6 +226,11 @@ class ConversationJournal:
                 return {"status": "conflict", "cursor": _cursor(record)}
             if _meaning(current) == _meaning(record["current"]):
                 record["current"] = current
+                record["events"] = [
+                    row for row in record["events"]
+                    if row["sequence"] == record["sequence"]
+                    or row["observed_at"] > value.observed_to - RETENTION_SECONDS
+                ]
                 return {"status": "unchanged", "cursor": _cursor(record)}
             if old.author is not None and value.author != old.author:
                 raise ValueError("original conversation author cannot change or disappear")

@@ -448,11 +448,11 @@ _Operator-required outcome; agent-recommended slices and validation._
   actual-boundary source controls),
   preserving original confirmation, unknown outcomes and B3/B4 proof; keep
   all-publisher, provider and installed acceptance separate.
-- [ ] Select retained mappings through the existing standalone foreground
+- [x] Select retained mappings through the existing standalone foreground
   host's trusted per-route configuration and fresh-only storage adoption.
   Preserve default-off hosting, read-only native scope and retained inspection
   after optional preparation-provider withdrawal; this is source hosting,
-  not protected publication or production enrollment.
+  not protected publication or production enrollment (#11561).
 - [x] Review the [tracked comment/review consumer refinement](tracked-comment-consumers.md)
   before changing legacy commands (#11525).
 - [x] Qualify one explicit tracked comment/review source binding
@@ -1020,11 +1020,12 @@ or silently expanding a bounded source claim.
   strict old/new/rollback peers, additive discovery and unchanged default
   hosting (#11542/#11556; final 56 consumer controls). Normal installed
   enrollment and live provider acceptance remain with P3-P5, not this source leaf.
-- [ ] Qualify that standalone mapping selection through strict passive parsing,
+- [x] Qualify that standalone mapping selection through strict passive parsing,
   fresh-only adoption, unsupported existing volumes, route isolation and the
   real foreground/Gateway/native-exporter boundary with a synthetic prior
   receipt. Separate retained current-content evidence from native-send,
-  original-version, feedback/handled and installed/provider acceptance.
+  original-version, feedback/handled and installed/provider acceptance
+  (#11561; final 105 standalone controls).
 - [x] Qualify the explicit tracked comment/review consumer through its actual
   resolution and workspace CLI/tool/client boundary: exact scoped selection,
   final preview and separate submission, original-key restart/lost-result
@@ -1248,6 +1249,45 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-08 - Expire journal metadata during quiet observations
+
+- The existing P1/P2 lane now removes the aged metadata suffix on admitted
+  unchanged observations while retaining the last cursor anchor. Expiry does
+  not allocate events, acknowledge a cursor or promote feedback. Terminal
+  summaries and other replay-owner state retain their existing custody.
+- The focused journal, workspace-projection and CLI/HTTP integration packet
+  passes 53 cases under the bounded local runner. Both disposable-container
+  attempts failed during the pinned `uv` download with HTTP 504, before
+  collection, and verified cleanup; this is not container qualification.
+  Fatal lint, documentation consistency and install-contract gates pass.
+- Acquisition-owner inspection confirms that the current relay returns text,
+  not authoritative acquisition metadata. Keep protected review unavailable;
+  internal Azure CLI credential methods are not a supported relay boundary.
+  The existing enrollment contract retains that dependency without probing
+  credentials or enabling another source.
+- Source review/merge remains pending. Coordinated body/cache/outbox
+  retention, all-publisher/provider/installed qualification, full
+  CLI/Dispatch and shadow/presentation outcomes remain open. No activation,
+  deployment or existing resource release is implied.
+
+### 2026-11-08 - Select acquired mappings in the existing standalone host
+
+- #11561 merged as `139f39067c6b18159366550b807f8ed0f85524eb`.
+  The current-head Comment verdict was assessed under the owner-authored
+  review policy, with actionable findings fixed and explained findings
+  resolved. Required current-head checks passed; no further approval
+  round was required after that accepted condition.
+- Final standalone qualification passes 105 cases; strict service analysis
+  passes all 14 files on Linux and Windows targets. The actual foreground
+  fixture qualifies a present preparer before later withdrawal and restart,
+  using a synthetic original receipt seeded before its writer starts.
+- Re-read the parent Plan/Validation and close only the two finite host
+  leaves above. The next protected-host prerequisite is still actual
+  supported acquisition-source grant/audience and current-custodian
+  verification, not observation credentials or injected callbacks.
+  All-publisher, provider/installed, full retention/CLI/Dispatch and
+  shadow/pane acceptance remain open. No live host was activated or updated.
 
 ### 2026-11-08 - Clear the finite installed-owner prerequisite with exact-release native evidence
 
