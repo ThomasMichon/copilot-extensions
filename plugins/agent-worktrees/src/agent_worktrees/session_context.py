@@ -270,7 +270,9 @@ def _agenda_policy_roots() -> list[Any]:
     from pathlib import Path
 
     roots: list[Any] = []
-    for factory in (cfg.install_dir, lambda: Path.home() / ".agent-worktrees"):
+    # legacy_install_dir honors AGENT_HOME, so a sandboxed session never writes
+    # into the real home's runtime tree.
+    for factory in (cfg.install_dir, cfg.legacy_install_dir):
         try:
             root = Path(os.path.abspath(factory()))
         except Exception:

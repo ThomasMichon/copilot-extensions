@@ -211,7 +211,8 @@ resume), which already runs in the selected runtime, publishes the effective
 value to `<runtime>/nudge-state/<worktree>.agenda-policy.json` as
 `{"version":1,"policy":"off"|"expected","written_at":<epoch>}`, written
 atomically and explicitly even when `off`. The record is written under both the
-selected runtime root and the per-user `~/.agent-worktrees` root. The resident
+selected runtime root and the per-user `~/.agent-worktrees` root (relocated
+under `AGENT_HOME` when set, so sandboxes never write to the real home). The resident
 monitor, the standard-library fallback hook and the prepared Windows PowerShell
 read path each read only this small record and the local lane evidence, with
 their own `<worktree>.agenda.json` window independent of the disposition

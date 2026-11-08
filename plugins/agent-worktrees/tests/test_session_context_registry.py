@@ -528,3 +528,14 @@ def test_agenda_policy_publication_rejects_unsafe_worktree_ids(monkeypatch, tmp_
 
     assert not (tmp_path / "runtime").exists()
     assert not (tmp_path / "legacy").exists()
+
+
+def test_agenda_policy_roots_honor_agent_home(monkeypatch, tmp_path: Path):
+    sandbox = tmp_path / "sandbox"
+    monkeypatch.setenv("AGENT_HOME", str(sandbox))
+    monkeypatch.setenv("HOME", str(tmp_path / "real-home"))
+
+    roots = session_context._agenda_policy_roots()
+
+    assert roots
+    assert all(Path(root).is_relative_to(sandbox) for root in roots)
