@@ -414,7 +414,6 @@ def test_shared_runtime_environment_replaces_every_foreign_route(tmp_path, names
     root = tmp_path / root_name
     context = str(tmp_path / "context.json") if namespaced else ""
     identity = "fixture-market/agent-vault" if namespaced else ""
-    suffix = _peer_launch._vault_service_suffix(str(root)) if namespaced else ""
     env = {**os.environ, **dict.fromkeys(keys, "foreign")}
     if os.name == "nt":
         shell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
@@ -451,6 +450,7 @@ def test_shared_runtime_environment_replaces_every_foreign_route(tmp_path, names
     actual = json.loads(result.stdout)
     assert actual["AGENT_VAULT_HOME"] == str(root)
     if namespaced:
+        suffix = actual["AGENT_VAULT_PIPE"].removeprefix(r"\\.\pipe\agent-vault-")
         expected = {
             "AGENT_VAULT_VALIDATED_CONTEXT": context, "COPILOT_EXTENSIONS_CONTEXT": context,
             "AGENT_VAULT_INSTALLATION_ID": identity, "AGENT_VAULT_RUN_DIR": str(root / "run"),
@@ -463,12 +463,13 @@ def test_shared_runtime_environment_replaces_every_foreign_route(tmp_path, names
             "AGENT_VAULT_TASK_NAME": f"AgentVault-{suffix}",
         }
         assert {key: actual[key] for key in expected} == expected
-        rebound = _peer_launch.peer_environment({
-            "pluginId": "agent-vault", "pluginRoot": str(root),
-            "marketplaceId": "fixture-market", "installReceipt": context,
-            "payloadRoot": str(PLUGIN),
-        }, env)
-        assert {key: rebound[key] for key in keys} == actual
+        if os.name == "nt" or sys.platform.startswith("linux"):
+            rebound = _peer_launch.peer_environment({
+                "pluginId": "agent-vault", "pluginRoot": str(root),
+                "marketplaceId": "fixture-market", "installReceipt": context,
+                "payloadRoot": str(PLUGIN),
+            }, env)
+            assert {key: rebound[key] for key in keys} == actual
     else:
         assert not actual["AGENT_VAULT_VALIDATED_CONTEXT"]
         assert all(actual[key] is None for key in keys[2:])

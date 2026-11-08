@@ -212,6 +212,8 @@ def _vault_service_suffix(root: str) -> str:
             raise ValueError("Vault native installation suffix is unavailable")
         normalized = mapped.value
     else:
+        if not sys.platform.startswith("linux"):
+            raise ValueError("Vault peer invocation supports native Windows and Linux only")
         if not (shutil.which("sha256sum") or shutil.which("shasum")):
             raise ValueError("Vault peer requires the native owner's SHA-256 suffix support")
         normalized = root.replace("\\", "/").translate(

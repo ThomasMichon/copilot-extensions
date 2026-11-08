@@ -1,5 +1,5 @@
 {
-  "comment": "Support explicitly selected same-cell Vault peer invocation with native owner environment and retained runtime identity.",
+  "comment": "Support explicitly selected Windows/Linux same-cell Vault peer invocation with native owner environment and retained runtime identity.",
   "changes": [
     {
       "plugin": "agent-bridge",

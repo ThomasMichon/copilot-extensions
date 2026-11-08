@@ -449,6 +449,10 @@ def test_pinned_peer_retains_runtime_across_selection_changes(tmp_path, monkeypa
     _assert_peer_refused(pinned)
 
 
+@pytest.mark.skipif(
+    os.name != "nt" and not sys.platform.startswith("linux"),
+    reason="Vault peer target supports native Windows and Linux",
+)
 def test_vault_peer_retains_native_owner_and_build_without_ambient_fallback(tmp_path, monkeypatch):
     from agent_dispatch import peer_launch
 

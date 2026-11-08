@@ -179,7 +179,11 @@ Vault is also an opt-in same-cell peer target. Its environment uses the native
 Vault owner's installation identity, home/run/cache/endpoint geometry and
 service suffix, not the caller's database, cached context or endpoint overrides.
 Native invariant casing is retained on Windows, including Unicode paths.
-POSIX peer invocation requires `sha256sum` or `shasum`, matching the native
+This opt-in Vault target supports native Windows and Linux; other native
+platforms refuse before owner execution rather than assuming equivalent
+suffix or service semantics. Ordinary peer targets and Vault entrypoints keep
+their existing platform behavior.
+Linux peer invocation requires `sha256sum` or `shasum`, matching the native
 owner's SHA-256 route; it refuses before execution rather than inventing the
 legacy checksum fallback's service identity. Ordinary Vault launchers retain
 their existing fallback unchanged.
