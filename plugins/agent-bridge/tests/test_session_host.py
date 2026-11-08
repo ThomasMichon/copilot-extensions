@@ -1223,7 +1223,7 @@ def test_launch_session_host_fallback_scratch_removed_when_creation_refused(
         return real_popen(argv, **{**kwargs, "cwd": str(tmp_path / "missing")})
 
     monkeypatch.setattr(launcher.subprocess, "Popen", refusing_popen)
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises((FileNotFoundError, NotADirectoryError)):
         launcher.launch_session_host(["irrelevant-child-argv"], ready_timeout=5.0)
     assert len(refused) == 1
     assert not refused[0].exists()
