@@ -48,8 +48,13 @@ def test_native_gate_installs_and_validates_the_same_frozen_candidate_before_pub
     assert native["env"]["MAIN_BEFORE"] == "${{ needs.gate.outputs.main_before }}"
     assert native["env"]["CANDIDATE_SHA"] == "${{ needs.compose-candidate.outputs.candidate_sha }}"
     assert native["env"]["CANDIDATE_TREE"] == "${{ needs.compose-candidate.outputs.tree }}"
-    assert native["env"]["ACCEPTANCE_ROOT"] == r"${{ runner.temp }}\candidate\it"
+    assert "runner." not in json.dumps(native["env"])
+    directory = _step(native, "Set the native acceptance directory")
+    assert directory["shell"] == "pwsh"
+    assert r'"ACCEPTANCE_ROOT=$env:RUNNER_TEMP\candidate\it"' in directory["run"]
+    assert "Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append" in directory["run"]
     imported = _step(native, "Import the frozen candidate without recomposition")
+    assert native["steps"].index(directory) < native["steps"].index(imported)
     assert "--directory \"$RUNNER_TEMP/frozen-candidate\"" in imported["run"]
     for argument in (
         '--dev-sha "$DEV_SHA"', '--main-before "$MAIN_BEFORE"',

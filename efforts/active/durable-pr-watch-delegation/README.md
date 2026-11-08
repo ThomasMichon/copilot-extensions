@@ -1162,6 +1162,25 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-11-08 - Merge the qualified fresh-validation source improvement
+
+- #11472 merged at `57952d35f1d98800bf8b4980d29a3d7007dbd741`
+  after final-head Copilot approval `5816236964` with no open issues and
+  required CI `42440720357` passed. The two changed canonical unit-source
+  admissions and two runtime-admission generated SDK copies are synchronized;
+  the unit inventory, coverage targets and budget are unchanged.
+- The integrated original normal-payload lifecycle passes locally within its
+  original limits, alongside the focused driver, native entry, guarded-journal
+  and real TCP controls recorded below. This closes the source correction
+  slice, not #11231's installed acceptance or any broader parent outcome.
+- #11153's separate Bridge migration prerequisite has also merged. Next,
+  confirm both fixes in a promoted release before the already-authorized
+  same-machine unified update and isolated installed-owner qualification.
+  Preserve the prior partial-update evidence, existing sessions and pending
+  state; no force, live delegation activation, fleet effect or retained-resource
+  release is implied. #6007 and its installed/service/provider/resource rows
+  remain open.
+
 - [2026-11-07 - Preparation-only producer sequencing](journal/2026/11.07%20preparation-only.md)
 
 ### 2026-11-07 - Deliver native effective review-permission evaluation

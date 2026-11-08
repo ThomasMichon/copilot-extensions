@@ -469,13 +469,16 @@ jobs:
       MAIN_BEFORE: ${{ needs.gate.outputs.main_before }}
       CANDIDATE_SHA: ${{ needs.compose-candidate.outputs.candidate_sha }}
       CANDIDATE_TREE: ${{ needs.compose-candidate.outputs.tree }}
-      ACCEPTANCE_ROOT: '${{ runner.temp }}\candidate\it'
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.gate.outputs.sha }}
           fetch-depth: '0'
           persist-credentials: false
+      - name: Set the native acceptance directory
+        shell: pwsh
+        run: |
+          "ACCEPTANCE_ROOT=$env:RUNNER_TEMP\candidate\it" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
