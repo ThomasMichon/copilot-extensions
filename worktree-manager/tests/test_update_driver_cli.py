@@ -612,6 +612,7 @@ def test_project_controller_routes_borrowed_request_before_manager_source(
         state="running",
         spec=SimpleNamespace(
             backend="manager", context=(), killswitch_path=None, cwd=str(tmp_path),
+            argv=("--project", "example", "--force"),
         ),
     )
     calls = []
