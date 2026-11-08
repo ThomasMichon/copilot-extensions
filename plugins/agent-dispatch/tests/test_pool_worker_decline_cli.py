@@ -386,9 +386,7 @@ def test_unsettled_claim_for_another_reservation_refuses_before_decision(governe
     assert g.q.task_relationship(g.task_id)["state"] == "bound"
 
 
-@pytest.mark.parametrize("governed", [False], indirect=True)
-def test_rerun_after_replacement_placement_recovers_exact_original_binding(governed_cli, monkeypatch, capsys):
-    g, args, order, requests, _ = governed_cli
+def _replace_after_settled_decline(g, args, monkeypatch):
     monkeypatch.setattr(worker, "DISPOSITION_WAIT_SECONDS", 0)
     with pytest.raises(DispatchError, match="not yet confirmed"):
         args.func(args)
@@ -407,7 +405,13 @@ def test_rerun_after_replacement_placement_recovers_exact_original_binding(gover
     )
     assert admitted and replacement.key != g.binding["reservation_key"]
     assert g.q.pool_worker_decline(g.task_id) is None
-    placed = g.q.get(g.task_id)
+    return g.q.get(g.task_id)
+
+
+@pytest.mark.parametrize("governed", [False], indirect=True)
+def test_rerun_after_replacement_placement_recovers_exact_original_binding(governed_cli, monkeypatch, capsys):
+    g, args, order, requests, _ = governed_cli
+    placed = _replace_after_settled_decline(g, args, monkeypatch)
     requests.clear()
     for _ in range(2):
         assert args.func(args) == 0
@@ -440,3 +444,30 @@ def test_recovery_refuses_another_incarnation_or_unsettled_decline(governed_cli)
     for change in ({"native_id": "other"}, {"generation": g.binding["generation"] + 1},
                    {"worker_id": "host-a/other"}):
         assert app.get(url, headers=headers("data"), params={**body, **change}).status_code == 404
+
+
+@pytest.mark.parametrize("versions", ["missing", None, [], [True], [2]])
+@pytest.mark.parametrize("governed", [False], indirect=True)
+def test_rolled_back_coordinator_refuses_recovery_before_settlement(governed_cli, monkeypatch, versions):
+    g, args, order, requests, app = governed_cli
+    placed = _replace_after_settled_decline(g, args, monkeypatch)
+
+    def rewrite(request, response):
+        if request.url.path == "/health":
+            value = response.json()
+            if versions == "missing":
+                value["pool_placement"].pop("worker_decline_binding_recovery_versions")
+            else:
+                value["pool_placement"]["worker_decline_binding_recovery_versions"] = versions
+            return httpx.Response(200, json=value)
+        return response
+
+    monkeypatch.setattr(cli, "_client", lambda *a, **k: controls.connected(
+        app, requests, control=False, rewrite=rewrite,
+    ))
+    requests.clear()
+    with pytest.raises(DispatchUpgradeRequired, match="binding recovery"):
+        args.func(args)
+    assert not order and g.q.get(g.task_id) == placed
+    assert not any(r.url.path.endswith(("/recovery", "/settlement")) for r in requests)
+    assert all(r.method == "GET" for r in requests)
