@@ -1,5 +1,5 @@
 {
-  "comment": "Reduce prepared PowerShell entry overhead while preserving path guards and legacy accounting",
+  "comment": "Reduce prepared PowerShell entry overhead and preserve dictionary nudge metadata, path guards and legacy accounting",
   "changes": [
     {
       "plugin": "agent-worktrees",

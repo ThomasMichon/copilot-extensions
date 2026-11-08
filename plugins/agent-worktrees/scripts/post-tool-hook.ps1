@@ -60,7 +60,7 @@ function Invoke-ResidentPostTool {
         if ($null -ne $value) { $forwarded[$key] = $value }
     }
     if ($payload -is [Collections.IDictionary]) {
-        if (-not $payload.Contains('_agentWorktrees')) { $payload['_agentWorktrees'] = @{ environment = $forwarded } }
+        if (-not $payload.ContainsKey('_agentWorktrees')) { $payload['_agentWorktrees'] = @{ environment = $forwarded } }
     } elseif ($null -eq $payload.PSObject.Properties['_agentWorktrees']) {
         $payload | Add-Member -NotePropertyName '_agentWorktrees' -NotePropertyValue @{ environment = $forwarded }
     }

@@ -353,6 +353,11 @@ def test_registered_post_hook_reuses_original_prepared_membership(tmp_path, monk
         (registry / "status-monitor.lock").write_text(json.dumps(server.rendezvous()), encoding="utf-8")
         env = environment(tmp_path, anchor)
         env["COPILOT_PLUGIN_ROOT"] = str(scripts.parent)
+        forwarded = {
+            "AGENT_WORKTREES_NUDGE": " OFF ", "AGENT_WORKTREES_AGENDA_NUDGE": " OFF ",
+            "AGENT_WORKTREES_NUDGE_CALLS": "7", "AGENT_WORKTREES_NUDGE_MINUTES": "33",
+        }
+        env.update(forwarded)
         for _ in range(2):
             result = subprocess.run(
                 [executable, "-NoProfile", "-NonInteractive", "-File", str(harness)],
@@ -367,7 +372,8 @@ def test_registered_post_hook_reuses_original_prepared_membership(tmp_path, monk
                     assert (session / "local-guidance-watch.json").read_text() == "{}"
             else:
                 assert json.loads(result.stdout) == {"additionalContext": "prepared resident"}
-        expected = [] if event_case in {"mutation", "late-watch"} else [("postToolUse", payload)] * 2
+        expected_payload = {**payload, "_agentWorktrees": {"environment": forwarded}}
+        expected = [] if event_case in {"mutation", "late-watch"} else [("postToolUse", expected_payload)] * 2
         assert seen == expected
     finally:
         server.close()
