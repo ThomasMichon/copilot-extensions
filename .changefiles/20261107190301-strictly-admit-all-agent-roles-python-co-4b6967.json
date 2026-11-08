@@ -1,0 +1,9 @@
+{
+  "comment": "Strictly admit all Agent Roles Python contract tests with an explicit JSON fixture boundary",
+  "changes": [
+    {
+      "plugin": "agent-roles",
+      "type": "patch"
+    }
+  ]
+}
