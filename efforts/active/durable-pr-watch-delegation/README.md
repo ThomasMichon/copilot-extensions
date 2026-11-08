@@ -387,6 +387,11 @@ _Operator-required outcome; agent-recommended slices and validation._
   final candidate/ownership/captured-target guards and durable unknown outcomes.
   This source prerequisite does not supply the actual credential verifier,
   normal-host route or installed/live-provider qualification.
+- [x] Deliver the finite optional request-local workspace factory (#11452)
+  after reviewed authority/lifetime design (#11450). Resolve once across
+  actions and feedback without credential acquisition for preparation or
+  storage-only recovery. Native verifier/source and host enrollment remain
+  separate; legacy per-context embedding is retained.
 - [ ] Deliver the actual protected write-owner prerequisite through its
   existing owners, then bind one explicitly selected authenticated host route.
   Injected factories and observation credentials do not satisfy these exits;
@@ -397,8 +402,8 @@ _Operator-required outcome; agent-recommended slices and validation._
   normal-host qualification.
   The [current-authority and request-local material design](comment-producer-enrollment.md#current-authority-and-request-local-material)
   cleared review in #11450. It separates actual source/native/custodian
-  verification and binds one factory
-  per execution before strict host configuration expands.
+  verification and binds one factory per execution before strict host
+  configuration expands.
 - [ ] Complete P3 HTTP-backed author/reviewer CLI and Dispatch consumer
   integration, preserving exact legacy semantics and source/resource custody.
 - [ ] Complete P4 ADO, GitHub and Gitea driver-specific acceptance.
@@ -947,6 +952,14 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
+- [x] Qualify the finite request-local workspace factory (#11452): 151 coupled
+  lifetime/workspace/selection/owned-edit/attention cases pass with verified
+  cleanup. Multiple action and feedback contexts share one resolution;
+  preparation and storage-only recovery acquire none. Concurrent requests,
+  failure, rotation/withdrawal and unknown reconciliation retain their
+  separate execution/no-resend semantics. This is not actual native grant
+  verification, normal-host or installed/provider qualification.
+
 - [x] Qualify optional selected-edit CLI/native/Fleet/Gateway source consumers:
   actual shared preparation and native receipts, prepared and genuine legacy
   edits, lost previews, cache-independent original-key recovery, confirmed
@@ -1147,6 +1160,10 @@ callback an implicit credential store.
 
 ### 2026-11-07 - Qualify the finite request-local workspace factory source
 
+- #11452 actually merged as `6813f6e026a876b73304e8be06d954c35a9a69f6`
+  after current-head Copilot approval `5815992311` with no open issues and
+  latest required CI `42435506760` / `128594078737` passed. Managed completion
+  retained its source backup; #11128 stays open.
 - Implement the reviewed optional in-process resolver at `WorkspaceOperations`.
   It resolves lazily once per submission execution, retaining the selected
   factory across action and feedback contexts. Failed resolution, material
@@ -1165,6 +1182,10 @@ callback an implicit credential store.
   verification, normal-host enrollment, installed/provider acceptance or
   representative native latency. Broader typing remains pending under #9807.
   Both parent Plan/Validation gates remain open.
+- Re-read both complete parent Plans/Validation after merge and close only
+  this finite lifetime leaf. Continue the actual native permission/source
+  verifier under the existing credential/provider owners before strict
+  normal-host enrollment; no host activation or deployment occurred.
 
 ### 2026-11-07 - Deliver finite pinned native requests without host enrollment
 
