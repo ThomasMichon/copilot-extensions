@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse the same-engine JSON serializer for PS7 managed-admission queries while preserving PS5 and older-engine fallback semantics.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
