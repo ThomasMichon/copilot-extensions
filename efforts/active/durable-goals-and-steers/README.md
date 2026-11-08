@@ -229,3 +229,15 @@ root-goal string. Research may refine these choices within the Request.
   before reading scope/config. Production regression variants cover file,
   dispatch-task and delivery-checkpoint consumption as the first late-identity
   command. The affected production fixture packet passes both tests.
+- The following review summary identified a real agenda text-bound mismatch.
+  Projection now measures the entire root string, including its source label,
+  against the receiver's existing 4 KiB UTF-8 bound; overflow keeps a canonical
+  reference rather than enlarging the wire contract. Actual receiver encode
+  regressions cover Goal and legacy Guiding Intent at the exact bound and one
+  byte over while preserving accepted historical records. Four focused tests
+  and touched Python lint pass.
+- Native SDK qualification of the source observer passed exact receipt,
+  two actual handler-origin context-cleared events, full system-origin replay,
+  fresh synthetic Goal reads and disconnect/resume replay. Display labels and
+  transformed content are distinguished by the native host. This qualifies
+  event delivery, not semantic reading by the model or installed adoption.

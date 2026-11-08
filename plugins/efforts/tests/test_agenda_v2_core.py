@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import importlib
+import importlib.util
 import json
 from pathlib import Path
 import subprocess
@@ -75,6 +76,38 @@ def test_managed_root_tracks_external_canonical_goal_without_ledger_rewrite(tmp_
     assert accepted["snapshot"]["root"] == f"effort:{effort}"
     exporter = importlib.import_module("agenda_export")
     assert exporter._delivery_matches(accepted, after, accepted["source"], exporter._Budget())
+
+@pytest.mark.parametrize("heading", ["Goal", "Guiding Intent"])
+def test_goal_projection_respects_actual_receiver_text_bound(tmp_path: Path, heading: str) -> None:
+    contract_path = (
+        SKILL.parents[2] / "agent-worktrees" / "src" / "agent_worktrees" / "agenda_contract.py"
+    )
+    spec = importlib.util.spec_from_file_location("goal_receiver_contract", contract_path)
+    assert spec and spec.loader
+    receiver = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(receiver)
+    effort = tmp_path / "canonical.md"
+    home = tmp_path / "lane"
+    home.mkdir()
+    effort.write_text(f"# Work\n\n## {heading}\n\nShort objective.\n")
+    source = board()
+    source["source"] = {"kind": "effort", "ref": str(effort)}
+    STORE.mutate(home, v2({"operation": "init", "worktree": "fixture-lane", "board": source,
+        "baseline_context": context("input"), "resource_caps": CAPS}, 0, "init"))
+    accepted = STORE.delivery_record(home)[1]
+    suffix = STORE.read(home)["snapshot"]["root"].removeprefix("Short objective.")
+    # The receiver bounds the entire UTF-8 string, including its source label.
+    exact = "é" * 1800 + "x" * (4096 - len(suffix.encode()) - 3600)
+    effort.write_text(f"# Work\n\n## {heading}\n\n{exact}\n")
+    projected = STORE.read(home)
+    assert len(projected["snapshot"]["root"].encode()) == 4096
+    receiver.encode(projected["snapshot"])
+    effort.write_text(f"# Work\n\n## {heading}\n\n{exact}x\n")
+    fallback = STORE.read(home)
+    assert "exceeds display budget" in fallback["snapshot"]["root"]
+    assert str(effort) in fallback["snapshot"]["root"]
+    receiver.encode(fallback["snapshot"])
+    assert STORE.delivery_record(home)[1] == accepted
 
 
 def current(home: Path) -> tuple[str, str, str]:
