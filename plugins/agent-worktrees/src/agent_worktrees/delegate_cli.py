@@ -14,11 +14,13 @@ from __future__ import annotations
 
 import argparse
 import base64
+import copy
 import json
 import math
 import shlex
 import subprocess
 import sys
+import time
 from collections import defaultdict
 from collections.abc import Collection
 from typing import Any
@@ -262,7 +264,7 @@ def _finite_seconds(value: Any) -> bool:
     )
 
 
-def host_roster_is_current(host: dict[str, Any]) -> bool:
+def host_roster_is_current(host: dict[str, Any], *, now: float | None = None) -> bool:
     """True only for a reachable fleet host row read from a current publication.
 
     A saved (``availability.status: "advisory"``) or stale-labeled roster, or
@@ -270,7 +272,10 @@ def host_roster_is_current(host: dict[str, Any]) -> bool:
     cached listing), may omit or misstate a caller that exists now. A passive
     read is also current only while the resident proves it republished the
     roster within its freshness bound (``projection.freshness``): an older
-    runtime that cannot prove this stays non-authoritative."""
+    runtime that cannot prove this stays non-authoritative. That age was
+    measured when the host answered, so the local time elapsed since its probe
+    started (``now`` minus the row's probe stamp) counts against the bound too;
+    a row without that stamp is not provably current."""
     projection = host.get("projection")
     if not (
         host.get("reachable") is True
@@ -280,17 +285,23 @@ def host_roster_is_current(host: dict[str, Any]) -> bool:
     ):
         return False
     freshness = projection.get("freshness")
-    if not isinstance(freshness, dict):
+    started = host.get(list_views_cli.PROBE_STARTED_KEY)
+    if not isinstance(freshness, dict) or type(started) not in (int, float):
         return False
+    elapsed = (time.monotonic() if now is None else now) - started
     age, bound = freshness.get("refreshed_age_s"), freshness.get("bound_s")
-    return _finite_seconds(age) and _finite_seconds(bound) and age <= bound
+    return all(_finite_seconds(value) for value in (age, bound, elapsed)) and age + elapsed <= bound
 
 
-def annotate_fleet_hosts(hosts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def annotate_fleet_hosts(
+    hosts: list[dict[str, Any]], *, now: float | None = None,
+) -> list[dict[str, Any]]:
     """Annotate the delegate graph across fleet host rows, in place.
 
-    Only hosts whose roster is current are authoritative: elsewhere a missing
-    caller is ``unknown`` and a resolved caller cannot authorize finalization."""
+    Only hosts whose roster is current at ``now`` (default: the monotonic
+    clock) are authoritative: elsewhere a missing caller is ``unknown`` and a
+    resolved caller cannot authorize finalization."""
+    now = time.monotonic() if now is None else now
     reachable_hosts: dict[tuple[str, str], bool] = {}
     authoritative_hosts: set[tuple[str, str]] = set()
     advisory_rows: set[int] = set()
@@ -298,7 +309,7 @@ def annotate_fleet_hosts(hosts: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for host in hosts:
         key = (str(host.get("machine") or ""), str(host.get("env") or ""))
         reachable_hosts[key] = bool(host.get("reachable"))
-        current = host_roster_is_current(host)
+        current = host_roster_is_current(host, now=now)
         if current:
             authoritative_hosts.add(key)
         copies = [dict(row) for row in host.get("worktrees") or [] if isinstance(row, dict)]
@@ -346,6 +357,22 @@ def _fleet_snapshot(
             worktree for worktree in row["worktrees"] if isinstance(worktree.get("id"), str)
         ]
     return rows
+
+
+def _target_key(row: dict[str, Any]) -> tuple[Any, ...]:
+    return (row.get("id"), execution_machine_from_fields(row), row.get("platform"))
+
+
+def _still_finalizable(hosts: list[dict[str, Any]], target: dict[str, Any]) -> bool:
+    """Re-derive ``target``'s verdict from the snapshot at this instant, just
+    before finalizing it: a caller roster that authorized it at annotation may
+    have outlived its freshness bound since."""
+    key = _target_key(target)
+    return any(
+        _target_key(row) == key and row.get("delegate_finalizable") is True
+        for host in annotate_fleet_hosts(copy.deepcopy(hosts))
+        for row in host.get("worktrees") or []
+    )
 
 
 def _delegate_candidates(hosts: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -510,6 +537,15 @@ def run_delegates(argv: list[str]) -> int:
                 timeout=args.timeout,
                 host_index=host_index,
             )
+            if _still_finalizable(hosts, row)
+            else {
+                "worktree_id": row.get("id"),
+                "machine": execution_machine_from_fields(row) or "",
+                "platform": str(row.get("platform") or ""),
+                "ok": False,
+                "reason": _ROSTER_ADVISORY_REASON,
+                "error": "caller roster is no longer provably current; not finalized",
+            }
             for row in eligible
         ]
         payload["executed"] = executed
@@ -517,7 +553,9 @@ def run_delegates(argv: list[str]) -> int:
         payload["changed"] = [row for row in executed if row.get("ok")]
 
     if args.json:
-        print(json.dumps(payload, default=str))
+        print(json.dumps(
+            {**payload, "hosts": list_views_cli.public_host_rows(hosts)}, default=str,
+        ))
         return 0
 
     print(

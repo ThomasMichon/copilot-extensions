@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import sys
+import time
 from contextlib import redirect_stdout
 from types import SimpleNamespace
 
@@ -311,12 +312,14 @@ def test_build_list_json_payload_adds_delegate_annotations(monkeypatch):
 
 def test_run_fleet_json_annotates_delegate_graph(monkeypatch):
     current = {"quality": "current", "observed_at": 1.0, "freshness": _FRESH}
+    probed = {list_views_cli.PROBE_STARTED_KEY: time.monotonic()}
     hosts = [
         {
             "machine": "atlas-core",
             "env": "wsl",
             "reachable": True,
             "projection": current,
+            **probed,
             "worktrees": [_row(
                 "atlas-core-wsl-20260101-host",
                 machine="atlas-core",
@@ -329,6 +332,7 @@ def test_run_fleet_json_annotates_delegate_graph(monkeypatch):
             "env": "linux",
             "reachable": True,
             "projection": current,
+            **probed,
             "worktrees": [_row(
                 "ember-linux-20260101-delegate",
                 machine="ember",
@@ -381,11 +385,12 @@ _FLEET_CONFIG = SimpleNamespace(
 )
 
 
-def _fleet_hosts(caller_host: dict, caller_rows: list[dict]) -> list[dict]:
+def _fleet_hosts(caller_host: dict, caller_rows: list[dict], *, probed: float | None = None) -> list[dict]:
+    stamp = {list_views_cli.PROBE_STARTED_KEY: time.monotonic() if probed is None else probed}
     return [
         {"machine": "atlas-core", "env": "wsl", "reachable": True,
-         "worktrees": caller_rows, **caller_host},
-        {"machine": "ember", "env": "linux", "reachable": True, "projection": _CURRENT,
+         "worktrees": caller_rows, **stamp, **caller_host},
+        {"machine": "ember", "env": "linux", "reachable": True, "projection": _CURRENT, **stamp,
          "worktrees": [_row(
              _DELEGATE_ID, machine="ember", platform="linux", status="active",
              caller_worktree=_CALLER_ID,
@@ -411,9 +416,11 @@ def _fleet_hosts(caller_host: dict, caller_rows: list[dict]) -> list[dict]:
      "unknown", False, "host-roster-advisory"),
     ({"projection": {**_CURRENT, "freshness": {"refreshed_age_s": -1.0, "bound_s": 90.0}}},
      "unknown", False, "host-roster-advisory"),
+    ({"projection": _CURRENT, list_views_cli.PROBE_STARTED_KEY: None},
+     "unknown", False, "host-roster-advisory"),
 ], ids=[
     "current", "saved", "stale", "unlabeled", "unproven-freshness", "overdue",
-    "never-refreshed", "bool-age", "nan-age", "negative-age",
+    "never-refreshed", "bool-age", "nan-age", "negative-age", "no-probe-clock",
 ])
 def test_run_fleet_infers_gone_caller_only_from_current_roster(
     monkeypatch, caller_host, state, finalizable, reason,
@@ -516,6 +523,88 @@ def test_run_delegates_probes_passively_so_a_proven_current_roster_authorizes(mo
     assert payload["eligible"][0]["delegate_finalizable_reason"] == "host-gone"
 
 
+def _stub_fleet(monkeypatch) -> None:
+    monkeypatch.setattr(delegate_cli.cfg, "project_name", lambda: "agent-worktrees")
+    monkeypatch.setattr(delegate_cli.cfg, "load_config", lambda: _FLEET_CONFIG)
+    monkeypatch.setattr(
+        delegate_cli.list_views_cli, "_fleet_targets",
+        lambda config: [
+            ("atlas-core", "wsl", "atlas-core-wsl", "bash", True),
+            ("ember", "linux", "ember", "bash", False),
+        ],
+    )
+
+
+def _run_delegates_json(argv: list[str]) -> dict:
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        assert delegate_cli.run_delegates(argv) == 0
+    return json.loads(buf.getvalue())
+
+
+@pytest.mark.parametrize("later_probe_s,state,finalizable", [
+    (0.0, "gone", True),
+    (120.0, "unknown", False),
+], ids=["prompt", "slow-later-host"])
+def test_slow_later_probe_expires_an_earlier_fresh_caller_roster(
+    monkeypatch, later_probe_s, state, finalizable,
+):
+    """A resident's ``refreshed_age_s`` is frozen when it answers; local time
+    spent probing later hosts still counts against the caller roster's bound."""
+    clock = [1000.0]
+    timer = SimpleNamespace(monotonic=lambda: clock[0])
+    monkeypatch.setattr(list_views_cli, "time", timer)
+    monkeypatch.setattr(delegate_cli, "time", timer)
+    delegate_host = {"projection": _CURRENT, "worktrees": [_row(
+        _DELEGATE_ID, machine="ember", platform="linux", status="active",
+        caller_worktree=_CALLER_ID,
+    )]}
+
+    def _run(cmd, **_kwargs):
+        reply = {"worktrees": [], "projection": _CURRENT}
+        if cmd[0] == "ssh":
+            clock[0] += later_probe_s
+            reply = delegate_host
+        return SimpleNamespace(returncode=0, stdout=json.dumps(reply), stderr="")
+
+    monkeypatch.setattr(list_views_cli.subprocess, "run", _run)
+    _stub_fleet(monkeypatch)
+    payload = _run_delegates_json(["--json"])
+    (row,) = payload["eligible"] + payload["blocked"]
+
+    assert row["caller_state"]["state"] == state
+    assert row["delegate_finalizable"] is finalizable
+    assert all(list_views_cli.PROBE_STARTED_KEY not in host for host in payload["hosts"])
+
+
+def test_execute_rechecks_caller_roster_freshness_before_each_finalize(monkeypatch):
+    """A caller roster that authorized two delegates can outlive its bound
+    while the first is finalized; the second is then left alone."""
+    clock = [1000.0]
+    monkeypatch.setattr(delegate_cli, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    second = "ember-linux-20260101-000002-abcd"
+    hosts = _fleet_hosts({"projection": _CURRENT}, [], probed=1000.0)
+    hosts[1]["worktrees"].append(_row(
+        second, machine="ember", platform="linux", status="active", caller_worktree=_CALLER_ID,
+    ))
+    _stub_fleet(monkeypatch)
+    monkeypatch.setattr(delegate_cli.list_views_cli, "_probe_host", lambda *a, **k: hosts.pop(0))
+    finalized: list[str] = []
+
+    def _finalize(target, **_kwargs):
+        finalized.append(target["id"])
+        clock[0] += 120.0
+        return {"worktree_id": target["id"], "ok": True}
+
+    monkeypatch.setattr(delegate_cli, "_finalize_target", _finalize)
+    payload = _run_delegates_json(["--json", "--execute"])
+
+    assert [row["id"] for row in payload["eligible"]] == [_DELEGATE_ID, second]
+    assert finalized == [_DELEGATE_ID]
+    assert [row["worktree_id"] for row in payload["errors"]] == [second]
+    assert payload["errors"][0]["reason"] == "host-roster-advisory"
+
+
 def test_cmd_list_stream_emits_classified_rows_progressively(monkeypatch):
     args = SimpleNamespace(
         mux_details=False,
@@ -577,7 +666,16 @@ def test_run_delegates_execute_finalizes_only_eligible(monkeypatch):
     monkeypatch.setattr(
         delegate_cli,
         "_fleet_snapshot",
-        lambda **kwargs: [{"machine": "ember", "env": "linux", "reachable": True, "worktrees": [eligible, blocked]}],
+        lambda **kwargs: [
+            {"machine": "atlas-core", "env": "wsl", "reachable": True, "projection": _CURRENT,
+             list_views_cli.PROBE_STARTED_KEY: time.monotonic(), "worktrees": [
+                 _row("atlas-core-wsl-20260101-host", machine="atlas-core", platform="wsl",
+                      status="finalized"),
+                 _row("atlas-core-wsl-20260101-live", machine="atlas-core", platform="wsl",
+                      status="active"),
+             ]},
+            {"machine": "ember", "env": "linux", "reachable": True, "worktrees": [eligible, blocked]},
+        ],
     )
     monkeypatch.setattr(delegate_cli.cfg, "project_name", lambda: "agent-worktrees")
     monkeypatch.setattr(delegate_cli.cfg, "load_config", lambda: SimpleNamespace())
