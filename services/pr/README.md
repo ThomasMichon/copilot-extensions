@@ -295,6 +295,9 @@ service checkout, PR author nor remote labels can supply that identity.
 Profiles use only the selected source's repository defaults and explicit
 `profile_home` personal/config defaults; ambient instruction directories,
 `XDG_CONFIG_HOME`, `APPDATA` and the service account's home are not substituted.
+Passive command validation checks structure, not executable availability:
+a missing optional preparation executable is handled by discovery, without
+preventing ordinary watches or retained inspection from starting.
 
 After passive config loading, the host discovers
 `agent-worktrees.comment-origin-capabilities` version 1 once for that selected
@@ -312,7 +315,10 @@ the watch service. It never migrates an existing volume or repairs interrupted
 provisioning. Serve validates retained storage; it does not adopt it.
 New allocation resolves native origin and the canonical profile before the
 replay transaction, then the existing selection owner allocates identities and
-retains pure composition. Fresh comments and replies are supported, not
+retains pure composition. The budget-aware native preparer receives the
+enclosing allocation deadline; its subprocess timeout uses the remaining caller
+budget, capped by the host limit. Legacy checkpoint-only callbacks retain their
+existing call shape. Fresh comments and replies are supported, not
 automatic owned edits. No write context is installed: `submit` stays unavailable.
 
 The original allocation key recovers its exact retained preview before touching

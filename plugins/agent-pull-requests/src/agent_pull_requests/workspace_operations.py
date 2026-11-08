@@ -81,6 +81,7 @@ class WorkspaceOperations:
                  feedback_owner: Callable[[dict], FeedbackInputs] | None = None,
                  prepared_reviews: bool = False,
                  selection_preparer: Callable[..., Callable[..., dict]] | None = None,
+                 selection_preparer_deadline: bool = False,
                  selection_owned_edits: bool = False,
                  write_context_factory: Callable[..., Callable] | None = None) -> None:
         writers = (write_context, write_context_factory)
@@ -98,6 +99,8 @@ class WorkspaceOperations:
             or type(conversations) is not bool
             or type(prepared_reviews) is not bool
             or type(selection_owned_edits) is not bool
+            or type(selection_preparer_deadline) is not bool
+            or selection_preparer_deadline and selection_preparer is None
             or selection_owned_edits and selection_preparer is None
             or selection_preparer is not None and (
                 not callable(selection_preparer) or iscoroutinefunction(selection_preparer)
@@ -129,6 +132,7 @@ class WorkspaceOperations:
         self.feedback_owner = feedback_owner
         self.prepared_reviews = prepared_reviews
         self.selection_preparer = selection_preparer
+        self.selection_preparer_deadline = selection_preparer_deadline
         self.selection_owned_edits = selection_owned_edits
         self._materializations = OrderedDict()
         self._generation_positions: OrderedDict[str, dict | None] = OrderedDict()
@@ -284,7 +288,7 @@ class WorkspaceOperations:
         if operation == "allocate":
             result = allocate_selection(
                 self, payload, scope, cache, expires_at=expires_at, checkpoint=check,
-                validate_intent=selection_validator,
+                validate_intent=selection_validator, deadline=deadline,
             )
             check()
             return {"protocol": PROTOCOL, "scope": scope, "result": result}

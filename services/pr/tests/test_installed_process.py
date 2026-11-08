@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 import json
 import os
@@ -99,18 +100,31 @@ else:
 """
 
 
-@pytest.mark.parametrize("workspace_enabled,preparation_enabled", [
-    (False, False), (True, False), (True, True),
+@pytest.mark.parametrize("workspace_enabled,preparation_enabled,missing_preparer", [
+    (False, False, False), (True, False, False), (True, True, False), (True, True, True),
 ])
 def test_installed_host_process_register_observe_reconnect_restart_and_ack(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
-    workspace_enabled: bool, preparation_enabled: bool,
+    workspace_enabled: bool, preparation_enabled: bool, missing_preparer: bool,
 ) -> None:
     # The existing Fleet fixture owns issuer, policy and TLS; do not add a fake Gateway.
     root = Path(__file__).resolve().parents[3]
     monkeypatch.syspath_prepend(str(root / "fleet-manager" / "tests"))
     fixtures = import_module("gateway_service_transport_fixtures")
     eventually, running = fixtures.eventually, fixtures.running
+    from agent_pull_requests.workspace_tools import WorkspaceTools
+
+    workspace_errors: list[Exception] = []
+    invoke: Callable[..., Awaitable[Any]] = WorkspaceTools.invoke
+
+    async def diagnostic_invoke(self: Any, *args: Any, **kwargs: Any) -> Any:
+        try:
+            return await invoke(self, *args, **kwargs)
+        except Exception as error:
+            workspace_errors.append(error)
+            raise
+
+    monkeypatch.setattr(WorkspaceTools, "invoke", diagnostic_invoke)
 
     async def scenario() -> None:
         path = tmp_path / "host.json"
@@ -342,13 +356,26 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                     arguments = ["workspace", operation]
                     if operation != "capabilities":
                         arguments += ["--request", str(request)]
-                    code = await asyncio.to_thread(
-                        workspace_cli.main, arguments,
-                        host=cast(Any, WorkspaceTools)(client),
-                    )
-                    output = capsys.readouterr()
-                    assert code == 0, output.err
-                    return cast(dict[str, Any], json.loads(output.out))
+                    for _ in range(100):
+                        errors_before = len(workspace_errors)
+                        code = await asyncio.to_thread(
+                            workspace_cli.main, arguments,
+                            host=cast(Any, WorkspaceTools)(client),
+                        )
+                        output = capsys.readouterr()
+                        if code == 0:
+                            return cast(dict[str, Any], json.loads(output.out))
+                        if (
+                            operation in {"capabilities", "events", "inspect", "materialize"}
+                            and len(workspace_errors) > errors_before
+                            and getattr(workspace_errors[-1], "http_status", None) == 503
+                        ):
+                            # The observer holds a nonblocking store lock briefly.
+                            # Retry only effect-free reads, never load/sync/allocation.
+                            await asyncio.sleep(0.05)
+                            continue
+                        raise AssertionError((output.out, output.err, workspace_errors))
+                    raise AssertionError(f"{operation} remained unavailable")
 
                 original = {
                     "request_id": "original", "issued_at": time.time(),
@@ -472,11 +499,21 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
             if preparation_enabled:
                 native_state = json.loads(preparation_state.read_text())
                 preparation_state.write_text(json.dumps({**native_state, "supported": False}))
+                if missing_preparer:
+                    config["workspaces"]["bindings"][0]["preparation"]["command"][0] = str(
+                        tmp_path / "withdrawn-preparation-executable"
+                    )
+                    path.write_text(json.dumps(config))
+            prior_channel = rig.state.channels.get("service-a")
             successor = await launch()
             try:
                 await eventually(lambda: ready(status), timeout=10)
                 # A stale predecessor snapshot can pass briefly; require actual attachment too.
-                await eventually(lambda: "service-a" in rig.state.channels, timeout=10)
+                await eventually(
+                    lambda: "service-a" in rig.state.channels
+                    and rig.state.channels["service-a"] is not prior_channel,
+                    timeout=10,
+                )
                 assert await send("pending") == pending
                 if workspace_enabled:
                     if preparation_enabled:

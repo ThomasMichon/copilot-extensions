@@ -97,6 +97,7 @@ class WorkspaceConfig:
                 max_work_seconds=seconds, conversations=True,
                 prepared_reviews=(principal, target) in preparations,
                 selection_preparer=preparations.get((principal, target)),
+                selection_preparer_deadline=preparations.get((principal, target)) is not None,
             )
             for principal, target, reader in self.readers
         }

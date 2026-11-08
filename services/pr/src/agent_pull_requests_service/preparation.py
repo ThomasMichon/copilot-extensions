@@ -21,7 +21,7 @@ else:
     from ._attribution.attribution_profile import ProfileError, load_profile
     from ._attribution.comment_preparation import _source, prepare
 
-_command_prefix: Callable[[tuple[str, ...]], tuple[str, ...]] = command_prefix
+_command_prefix: Callable[..., tuple[str, ...]] = command_prefix
 _run_native: Callable[[list[str], Callable[[], float], int], Any] = NativeReadHandler._run
 
 
@@ -35,7 +35,7 @@ class PreparationConfig:
     allow_anonymous: bool
 
     def __post_init__(self) -> None:
-        _command_prefix(self.command)
+        _command_prefix(self.command, require_available=False)
         if self.visibility not in ("public", "internal") or type(self.allow_anonymous) is not bool:
             raise ValueError("explicit preparation privacy required")
 
@@ -75,8 +75,12 @@ class NativePreparation:
     scope: Mapping[str, object]
     seconds: int
 
-    def remaining(self, checkpoint: Callable[[], None]) -> Callable[[], float]:
-        deadline = time.monotonic() + self.seconds
+    def remaining(
+        self, checkpoint: Callable[[], None], deadline: float | None = None,
+    ) -> Callable[[], float]:
+        deadline = min(time.monotonic() + self.seconds, deadline) if deadline is not None else (
+            time.monotonic() + self.seconds
+        )
 
         def remaining() -> float:
             checkpoint()
@@ -89,8 +93,9 @@ class NativePreparation:
 
     def __call__(
         self, generation: dict[str, Any], *, checkpoint: Callable[[], None],
+        deadline: float | None = None,
     ) -> Callable[..., Any]:
-        remaining = self.remaining(checkpoint)
+        remaining = self.remaining(checkpoint, deadline)
         remaining()
         selected_scope = copy.deepcopy(generation.get("scope"))
         if not isinstance(selected_scope, dict) or {

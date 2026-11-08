@@ -14,6 +14,7 @@ import pytest
 from single_instance_lease import SingleInstance
 
 from agent_pull_requests.review_workspace import _digest, build_generation
+from agent_pull_requests.owner_read import OwnerReadBudgetExceeded, OwnerReadUnavailable
 from agent_pull_requests.workspace_operations import WorkspaceUnavailable
 from agent_pull_requests_service.config import HostConfig, load_config
 from agent_pull_requests_service.preparation import NativePreparation
@@ -42,7 +43,7 @@ def prepared_host(configuration: Configuration, tmp_path: Path) -> tuple[HostCon
     control.write_text(json.dumps({"supported": True, "origin": True}))
     script = tmp_path / "native.py"
     script.write_text("""
-import json, pathlib, sys
+import json, pathlib, sys, time
 control = pathlib.Path(sys.argv[1])
 state = json.loads(control.read_text())
 args = sys.argv[2:]
@@ -60,6 +61,7 @@ else:
     assert args[2:] == state['expected']
     if not state['origin']:
         raise SystemExit(1)
+    time.sleep(state.get('origin_delay', 0))
     result = state.get('source', {
         'protocol': 'agent-worktrees.comment-origin/v1', 'privacy': 'public',
         'origin': {'codename': 'selected-producer'}, 'effects': 'none'})
@@ -242,6 +244,25 @@ def test_resolved_reply_composer_does_no_io_and_preserves_allocated_identity(
     assert all(prepared["identity"][name] == value for name, value in identity.items())
     with pytest.raises(ValueError, match="action binding"):
         compose("edit_owned_comment", "Changed note.", scope=generation["scope"], **identity)
+
+
+def test_slow_native_origin_uses_remaining_allocation_budget_not_host_limit(
+    prepared_host: tuple[HostConfig, Path, Path],
+) -> None:
+    config, control, _ = prepared_host
+    config.provision()
+    operations = _operations(config)
+    generation, request = _request()
+    operations.cache.publish(generation, expected_current=None)
+    state = json.loads(control.read_text())
+    control.write_text(json.dumps({**state, "origin_delay": 5}))
+    request["budget_seconds"] = 0.25
+    before = config.store().path.read_bytes()
+    started = time.monotonic()
+    with pytest.raises((OwnerReadUnavailable, OwnerReadBudgetExceeded)):
+        _execute(operations, "allocate", request)
+    assert time.monotonic() - started < 3
+    assert config.store().path.read_bytes() == before
 
 
 def test_fresh_preparation_provision_never_adopts_an_existing_or_competing_volume(
