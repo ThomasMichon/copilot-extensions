@@ -30,7 +30,7 @@ def test_source_reader_runs_without_a_runtime_venv(tmp_path: Path) -> None:
     root.mkdir()
     (root / "action-controls.json").write_text("{}")
     base = getattr(sys, "_base_executable", sys.executable)
-    command = [base, "-I", "-B", str(PLUGIN / "scripts" / "action_controls.py"),
+    command = [base, "-I", "-S", "-B", str(PLUGIN / "scripts" / "action_controls.py"),
                "--root", str(root), "--action", ACTIONS[0]]
     result = subprocess.run(command, capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stderr
