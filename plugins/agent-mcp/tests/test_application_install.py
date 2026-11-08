@@ -80,7 +80,8 @@ def test_darwin_data_owner_identifies_actual_listener(tmp_path, monkeypatch):
 def test_source_socket_link_retains_missing_target_and_refuses_foreign_types(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target_kind: str,
 ) -> None:
-    home = tmp_path.resolve()
+    home = tmp_path.resolve() / ("long-native-socket-" + "x" * 110)
+    home.mkdir()
     monkeypatch.chdir(home)
     monkeypatch.setattr(serve, "_HAS_AF_UNIX", True)
     fixed = home / "serve.sock"
@@ -105,7 +106,7 @@ def test_source_socket_link_retains_missing_target_and_refuses_foreign_types(
             )
             assert os.readlink(fixed) == target.name
             if target_kind == "missing":
-                assert cutover.source_data_owner(fixed) is None
+                assert cutover.source_data_owner(Path(fixed.name)) is None
                 assert not target.exists()
         else:
             with pytest.raises(cutover.ControlError, match="foreign socket target"):
