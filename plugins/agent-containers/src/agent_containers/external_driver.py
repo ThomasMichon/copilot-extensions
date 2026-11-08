@@ -28,6 +28,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
+from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +52,7 @@ from .runtime_drivers import (
 log = logging.getLogger("agent-containers")
 
 PROTOCOL_VERSION = 1
+BUNDLED_DRIVERS = {"podman": "agent_containers.podman_driver"}
 MANIFEST_SCHEMA_VERSION = 1
 PATH_PREFIX = "agent-containers-driver-"
 DRIVERS_DIR_ENV = "AGENT_CONTAINERS_DRIVERS_DIR"
@@ -129,7 +131,7 @@ def scan_drivers() -> tuple[dict[str, DriverSpec], list[dict[str, str]]]:
     try:
         entries = sorted(
             path for path in root.iterdir()
-            if path.suffix == ".json"
+            if fnmatch(path.name, "*.json")
             or (path.stem.casefold() == "podman" and path.suffix.casefold() == ".json")
         ) if root.is_dir() else []
     except OSError as exc:
@@ -161,8 +163,8 @@ def find_driver(name: str) -> DriverSpec:
     on_path = shutil.which(PATH_PREFIX + name)
     if on_path:
         return DriverSpec(name, (on_path,), "PATH")
-    if name == "podman":
-        return DriverSpec(name, (sys.executable, "-m", "agent_containers.podman_driver"),
+    if name in BUNDLED_DRIVERS:
+        return DriverSpec(name, (sys.executable, "-m", BUNDLED_DRIVERS[name]),
                           "bundled")
     raise RuntimeError(
         f"runtime driver '{name}' is not registered: add "

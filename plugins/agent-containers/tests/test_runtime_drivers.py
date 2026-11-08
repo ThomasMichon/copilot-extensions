@@ -191,7 +191,7 @@ def test_podman_bundled_fallback_preserves_explicit_drivers(fake, monkeypatch):
     assert find_driver("podman").source == "PATH"
     (fake.drivers / "podman.json").write_text(json.dumps({
         "schema_version": 1, "name": "podman", "command": [sys.executable, "custom.py"],
-    }))
+    }), encoding="utf-8")
     assert find_driver("podman").command == (sys.executable, "custom.py")
 
 
@@ -201,6 +201,14 @@ def test_invalid_explicit_podman_does_not_fall_back(fake, monkeypatch, filename)
     monkeypatch.setattr(external_driver.shutil, "which", lambda _: "/tools/custom-podman")
     with pytest.raises(RuntimeError, match="unreadable manifest"):
         find_driver("podman")
+
+
+def test_non_podman_suffix_preserves_platform_glob_behavior(fake):
+    original = fake.drivers / "example-driver.json"
+    original.rename(fake.drivers / "example-driver.JSON")
+    specs, findings = scan_drivers()
+    assert ("example-driver" in specs) == (os.name == "nt")
+    assert findings == []
 
 
 # -- protocol and lifecycle ----------------------------------------------
