@@ -265,6 +265,10 @@ file before loading policy layers. Multiple unnamed repositories refuse;
 global defaults and active-project identity cannot choose this producer.
 The selected repository's policy must actually resolve; another repository's
 default policy cannot authorize the producer when its own anchor is unavailable.
+Concrete unreadable or malformed inputs reported by the existing configuration
+loader refuse this optional path instead of restoring default attribution.
+Ordinary absent layers retain their meanings; diagnostics are not a claim of
+complete acquisition coverage or reusable configuration evidence.
 The exact-root resolver above owns registration and privacy checks. It never
 falls back to an enclosing worktree or the service's CWD. Missing, ambiguous,
 withdrawn or unauthorized source data refuses without allocating or modifying

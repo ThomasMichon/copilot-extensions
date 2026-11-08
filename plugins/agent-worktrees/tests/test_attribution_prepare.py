@@ -622,3 +622,55 @@ def test_unresolved_selected_project_cannot_borrow_another_privacy_policy(
     )) == 1
     result = json.loads(capfd.readouterr().out)
     assert "error" in result and "bolted-circuit" not in str(result)
+
+
+@pytest.mark.parametrize("failure", ["unreadable", "invalid"])
+def test_selected_privacy_read_failure_cannot_restore_default_attribution(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    capfd: pytest.CaptureFixture[str], failure: str,
+) -> None:
+    import builtins
+
+    root = tmp_path / "source"
+    policy = root / ".copilot-extensions" / "agent-worktrees"
+    policy.mkdir(parents=True)
+    policy_path = policy / "config.yaml"
+    policy_path.write_text('{"pr":{"source_attribution":false}}', encoding="utf-8")
+    state = tmp_path / "project"
+    (state / "worktrees").mkdir(parents=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    (state / "worktrees/selected.yaml").write_text(json.dumps({
+        "worktree_id": "selected", "branch": "worktree/selected", "repo": "producer",
+        "machine": "fixture-machine", "platform": "linux", "worktree_path": str(root),
+        "codename": "bolted-circuit", "codename_source": "built-in", "sessions": [],
+    }), encoding="utf-8")
+    config_path = state / "config.yaml"
+    config_path.write_text(json.dumps({
+        "repo_name": "producer", "machine": "fixture-machine", "platform": "linux",
+        "repos": {"producer": {"anchor": str(root)}},
+    }), encoding="utf-8")
+    monkeypatch.setenv("AGENT_HOME", str(home))
+    monkeypatch.setattr(cli.cfg, "_ACTIVE_PROJECT", None)
+    monkeypatch.setattr(cli.cfg, "global_config_path", lambda: home / "absent-global.yaml")
+    monkeypatch.setattr(cli.cfg, "project_dir", lambda name=None: state)
+    monkeypatch.chdir(tmp_path)
+    args = _comment_args(
+        "--comment-origin", "--source-root", str(root), "--config", str(config_path), "--json",
+    )
+    assert cli.cmd_attribution_prepare(args) == 0
+    assert json.loads(capfd.readouterr().out)["privacy"] == "anonymous"
+    if failure == "invalid":
+        policy_path.write_text("[", encoding="utf-8")
+    else:
+        original_open = builtins.open
+
+        def unavailable(file, *args, **kwargs):
+            if file == policy_path:
+                raise PermissionError("selected policy unavailable")
+            return original_open(file, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "open", unavailable)
+    assert cli.cmd_attribution_prepare(args) == 1
+    result = json.loads(capfd.readouterr().out)
+    assert "error" in result and "bolted-circuit" not in str(result)

@@ -178,7 +178,13 @@ def cmd_attribution_prepare(args: argparse.Namespace) -> int:
                 project = next(iter(repositories))
             if not isinstance(project, str) or not project.strip():
                 raise ValueError("explicit comment origin requires a configured project name")
-            config = cfg.load_config(config_path, project=project)
+            with cfg.config_acquisition.capture_config_observations() as observations:
+                config = cfg.load_config(config_path, project=project)
+            if any(
+                finding.reason in {"unreadable-source", "invalid-shape", "invalid-yaml", "invalid-entry"}
+                for observation in observations for finding in observation.findings
+            ):
+                raise ValueError("explicit comment origin configuration policy is unavailable")
             result = resolve_comment_origin(
                 source_root, config, visibility=visibility or "public",
             )
