@@ -4,6 +4,7 @@ export function registerIntentObservation(session, state, {
   createCorpus = (cwd) => new IntentCorpus(cwd),
   readGoal = async () => ({ status: "unbound", goal: null }),
   allowAutomaticReplay = async () => true,
+  resolveCwd = (cwd) => cwd,
 } = {}) {
   const corpora = new Map();
   const pending = new Map();
@@ -14,6 +15,19 @@ export function registerIntentObservation(session, state, {
   let latest = null;
   let failures = 0;
   let startupPending = true;
+  let scopedSessionId = session.sessionId || state.sessionId || null;
+  function resolveScope() {
+    const sid = session.sessionId || state.sessionId;
+    if (!sid || sid === scopedSessionId) return;
+    const previousCwd = state.cwd || process.cwd();
+    const cwd = resolveCwd(previousCwd, sid);
+    state.cwd = cwd;
+    state.sessionId ||= sid;
+    scopedSessionId = sid;
+    for (const item of pending.values()) {
+      if (!item.input.sessionId && item.cwd === previousCwd) item.cwd = cwd;
+    }
+  }
   function corpus(cwd) {
     if (!corpora.has(cwd)) corpora.set(cwd, createCorpus(cwd));
     return corpora.get(cwd);
@@ -25,6 +39,7 @@ export function registerIntentObservation(session, state, {
     } catch { /* a disconnected log sink must not discard pending capture */ }
   }
   function retry() {
+    resolveScope();
     for (const [key, item] of pending) {
       if (item.blocked) continue;
       const { cwd, input } = item;
@@ -38,6 +53,7 @@ export function registerIntentObservation(session, state, {
   }
   function capture(event) {
     if (disposed) return;
+    resolveScope();
     const input = classifyIntent(event, session.sessionId || state.sessionId);
     if (!input) return;
     const cwd = state.cwd || process.cwd();
@@ -51,10 +67,15 @@ export function registerIntentObservation(session, state, {
     retry();
     if (startupPending) void replay("startup-or-reconnect");
   }
-  async function facts(cwd = state.cwd || process.cwd()) {
+  async function facts(cwd) {
     retry();
+    cwd ||= state.cwd || process.cwd();
     let goal;
-    try { goal = await readGoal(cwd); }
+    try {
+      goal = session.sessionId || state.sessionId
+        ? await readGoal(cwd)
+        : { status: "unqualified", goal: null, reason: "session identity is not yet available" };
+    }
     catch { goal = { status: "unavailable", goal: null }; }
     try {
       const snapshot = corpus(cwd).snapshot();
@@ -73,6 +94,8 @@ export function registerIntentObservation(session, state, {
   }
   function replay(reason) {
     if (disposed) return delivery;
+    resolveScope();
+    if (!session.sessionId && !state.sessionId) { startupPending = true; return delivery; }
     startupPending = false;
     const cwd = state.cwd || process.cwd();
     delivery = delivery.catch(() => {}).then(async () => {
@@ -127,6 +150,7 @@ export function registerIntentObservation(session, state, {
   }
   const observation = {
     facts,
+    resolveScope,
     emergencyFacts(cwd = state.cwd || process.cwd()) {
       const data = cached.get(cwd);
       return {
@@ -141,7 +165,10 @@ export function registerIntentObservation(session, state, {
       };
     },
     replay,
-    page(snapshot, cursor) { return corpus(state.cwd || process.cwd()).page(snapshot, cursor); },
+    page(snapshot, cursor) {
+      resolveScope();
+      return corpus(state.cwd || process.cwd()).page(snapshot, cursor);
+    },
     get latest() { return latest; },
     get pendingInputs() { return pending.size; },
     async settle() { await delivery; },

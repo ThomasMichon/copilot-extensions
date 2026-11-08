@@ -480,6 +480,7 @@ test("pending input acquires only its missing session identity at a later lifecy
   const observation = registerIntentObservation(c.session, c.state, {
     createCorpus: (cwd) => new IntentCorpus(cwd, f.options),
   });
+
   t.after(() => observation.dispose());
   c.session.emit("user.message", message("early", "Keep this early instruction exactly."));
   await observation.settle();
@@ -492,6 +493,38 @@ test("pending input acquires only its missing session identity at a later lifecy
   assert.equal(saved.sessionId, "late-identity");
   assert.equal(saved.text, "Keep this early instruction exactly.");
   assert.equal(saved.eventId, "early");
+});
+
+test("delayed identity binds provisional inputs and Goal reads once to the continuing worktree", async (t) => {
+  const f = fixture(t), c = client(f.a);
+  c.session.sessionId = c.state.sessionId = null;
+  let resolutions = 0;
+  const observation = registerIntentObservation(c.session, c.state, {
+    createCorpus: (cwd) => new IntentCorpus(cwd, f.options),
+    allowAutomaticReplay: () => false,
+    resolveCwd: (cwd, sid) => {
+      resolutions++;
+      assert.equal(cwd, f.a);
+      assert.equal(sid, "continuing-session");
+      return f.b;
+    },
+    readGoal: (cwd) => ({ status: "goal", goal: cwd === f.b ? "Bound Goal" : "Launch Goal" }),
+  });
+  t.after(() => observation.dispose());
+  c.session.emit("user.message", message("early", "Keep the early instruction."));
+  await observation.settle();
+  assert.equal(observation.pendingInputs, 1);
+  c.state.sessionId = "continuing-session";
+  c.session.emit("tool.execution_complete", {});
+  const facts = await observation.facts();
+  assert.equal(c.state.cwd, f.b);
+  assert.equal(facts.goal.goal, "Bound Goal");
+  assert.equal(observation.pendingInputs, 0);
+  const saved = observation.page(facts.corpus.id).records[0];
+  assert.equal(saved.text, "Keep the early instruction.");
+  assert.equal(saved.sessionId, "continuing-session");
+  assert.equal(new IntentCorpus(f.a, f.options).snapshot(), null);
+  assert.equal(resolutions, 1);
 });
 
 test("CLI paging and consume facts retain the session-bound scope from an unrelated shell directory", (t) => {

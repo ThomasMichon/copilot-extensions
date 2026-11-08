@@ -14,6 +14,10 @@ the checkout and session folder. Scope uses the canonical Git worktree root
 and metadata incarnation; standalone use keys the canonical working directory.
 A single optional, non-provisioning binding lookup after extension join keeps
 bare resumes on their continuing worktree instead of the shell's home directory.
+When session identity arrives late, the next receipt/read/lifecycle boundary
+performs that lookup once and moves only still-provisional pending inputs into
+the resolved scope. Automatic replay and Goal discovery wait for identity;
+known captured inputs are never rebound.
 Records retain exact prompt text, source, session/event identity and timestamps.
 Ordering uses event time, then receipt time/order and a stable identity tie-break;
 concurrent sessions with indistinguishable timestamps have no claimed causal

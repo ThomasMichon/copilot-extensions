@@ -15,6 +15,15 @@ const waitFor = async (predicate) => {
   }
 };
 await emit("user.message", { content: "Keep the bound mission.", source: "user" }, { id: "one" });
+if (process.env.FIXTURE_DELAYED_ID) {
+  assert.equal(session.sends.length, 0);
+  assert.equal(globalThis.intentGoalReads, undefined);
+  const generate = session.config.tools.find((tool) => tool.name === "generate_handoff_prompt");
+  const generated = await generate.handler({}, { sessionId: "fixture-bound-session" });
+  assert.match(generated.textResultForLlm, /Bound Goal/u);
+  assert.match(generated.textResultForLlm, /Keep the bound mission/u);
+  assert.ok(generated.textResultForLlm.includes(process.env.FIXTURE_BOUND_CWD.replaceAll("\\", "\\\\")));
+}
 await emit("session.context_cleared");
 // Bound mode off must win over launch mode auto, including the initial-load race.
 const status = session.config.tools.find((tool) => tool.name === "handoff_pressure");

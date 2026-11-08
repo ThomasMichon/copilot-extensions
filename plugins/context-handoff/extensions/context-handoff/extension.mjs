@@ -257,6 +257,8 @@ function ensureState(invocation) {
   if (!state.cwd) {
     state.cwd = process.cwd();
   }
+  intentObservation?.resolveScope();
+  if (configStartDir !== state.cwd) bindHandoffConfig(state.cwd);
 }
 
 // --- Shared Logic ---
@@ -1500,6 +1502,7 @@ handoffConfigPromise.then((resolved) => {
 const promptReceiptObservation = registerNativePromptReceiptObservation(session, state);
 intentObservation = registerIntentObservation(session, state, {
   readGoal: (cwd) => readCanonicalGoal(cwd, runCli),
+  resolveCwd: (cwd, sid) => resolveIntentCwd(cwd, sid, runCli),
   allowAutomaticReplay: async () => (await refreshHandoffConfig()).mode !== "off",
 });
 session.on("session.shutdown", () => {

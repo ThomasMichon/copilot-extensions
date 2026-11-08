@@ -217,3 +217,10 @@ root-goal string. Research may refine these choices within the Request.
   Added controlled-await and rejection regressions plus a production extension
   fixture with different launch/bound modes, live edits and emergency discovery
   counters. Review, release, installed qualification and closeout remain open.
+- A subsequent current-head review's summary identified delayed identity during
+  bare resume despite no inline findings. Corrected it before merge: defer
+  unqualified replay/Goal discovery, resolve the continuing worktree once when
+  identity arrives, and rehome only provisional pending inputs. The production
+  fixture covers early null identity followed by tool-invocation identity, bound
+  Goal/config, retained exact input and emergency storage. Changed packet:
+  32 passed, one platform skip.
