@@ -14,12 +14,53 @@ unlock a vault, start a daemon, fetch a credential, or install anything.
 The global file is selected by `AGENT_VAULT_CONFIG`, otherwise
 `%APPDATA%/agent-vault/config.json` on Windows or
 `${XDG_CONFIG_HOME:-~/.config}/agent-vault/config.json` elsewhere.
+The Windows installer resolves an explicit relative selector against its original
+filesystem invocation directory before activation or staging changes cwd. The
+absolute selection is retained for task-only actions and staged child invocations;
+an invalid present file never becomes a missing-file/default-policy result.
 `_discover_repo_config` walks the calling directory's parents for the first
 `.agent-vault.json`. Registered extension configuration is collected separately
 by `extensions.py`; it is not a knowledge-binding or repository-identity engine.
 Missing files contribute nothing. Strict readers refuse malformed-present JSON,
 non-object documents and invalid known fields rather than using defaults.
 Non-strict legacy reads tolerate malformed configuration as empty.
+
+## Windows scheduling is separate from activation
+
+The **global native settings file** (selected above) accepts
+`"windows_scheduled_task": "preserve"`, `"enabled"` or `"absent"`. This is
+machine deployment policy, not a portable `.agent-vault.json` preference.
+
+`preserve` is the new default: install/update/first-use never create a missing
+task and do not rewrite existing/custom registrations. `enabled` explicitly
+provisions the logon task through the existing installer. `absent` removes
+only a validated task owned by this installation; foreign/ambiguous tasks and
+removal failures refuse rather than purge. The selection persists across updates.
+Task-query permission/CIM failures or an unavailable ScheduledTasks module also
+refuse retirement rather than report absence. Default `preserve` still works
+without that module.
+
+Run `scripts\install.ps1 schedule` after changing the setting to reconcile task
+policy alone. With `absent`, no daemon is stopped or started, no runtime/state
+is deleted, and nothing else is enabled.
+Task-only absence reads retained configuration without requiring an interpreter,
+even when the incoming payload's version has not been built. Task-only opt-in
+resolves the selected installed runtime instead of assuming the incoming slot.
+It retains the original project selection across payload staging for both runtime
+activation and the service configuration snapshot; a repository-only activation
+opt-in remains effective. Task ownership validates the actual PowerShell script
+operand, including supported conhost wrapping, never a later forwarded path.
+Normal install/update still prepare
+the native launcher and ensure the selected service generation independently
+of task registration. Without a task, `agent-vault start` retains the existing
+on-demand user-mode startup path.
+
+An existing disabled task keeps its independent startup hold: it is not
+re-enabled or bypassed by installer startup, and `absent` refuses to retire it until that intent is
+deliberately cleared. Runtime `enabled`, maintenance inhibition and `-NoService`
+remain independent; do not use client-only `-NoService` to select task absence.
+No administrative account, Task Scheduler registration or substitute supervisor
+is required by the default scheduling policy.
 
 ## Runtime activation
 
@@ -125,12 +166,66 @@ database custody, activation precedence or strict owner/configuration refusals.
 The source is not an activation snapshot: a newly launched resident rechecks
 current opt-in before service admission, including revocation after its caller's
 check. Read-only ping and explicit stop/export controls retain their own gates.
-Activation accepts the selected completed runtime's interpreter and uses
-ambient Python discovery only for a cold payload. This does not bypass the
+Activation accepts the selected completed runtime's interpreter and discovers
+an existing Python 3.10+ reader only for a cold payload. Windows uses the
+canonical native helper's read-only discovery, including later PATH candidates,
+non-Store launcher entries/selectors and standard installation roots. Its
+ordinary installer caller still requires 3.11; activation does not raise the
+Vault reader floor or execute an installer to select Python. POSIX qualifies
+the existing `python3`/`python` PATH candidates. Unsupported-only or absent
+Python is an explicit prerequisite refusal, never inactive readiness.
+Discovery stops at a supported PATH candidate without querying unused launchers.
+Its child processes disable Python install manager's `automatic_install`
+through `PYTHON_MANAGER_AUTOMATIC_INSTALL=false`; the parent policy is unchanged.
+Windows reader execution uses the same headless captured-process helper;
+discovery and reads neither install Python nor mutate PATH. Explicit runtime
+Python remains authoritative without rediscovery. This does not bypass the
 canonical installation-context owner's independent bootstrap prerequisites;
 its current Windows front door still requires Python on PATH before resolving
 an installation. The POSIX payload control qualifies the full no-global-Python
 path; Windows separately qualifies the activation reader with owned Python.
+
+### Activation performance
+
+The legacy session bootstrap reads activation once on every eligible session
+start, before checking current runtime metadata; inactive scope therefore still
+needs the read. Killswitch and cell-context exits precede it. On Windows with a
+supported PATH candidate this adds one qualification subprocess to the existing
+configuration-reader subprocess. Launcher/root discovery runs only if PATH
+qualification fails. The read itself does no network, installation, repository
+history or full-tree work; optional configuration-owner composition retains its
+existing bounded peer read. An ordinary runtime dispatcher supplies its selected
+completed interpreter, avoiding discovery. Explicit install participation also
+performs an activation read. Each call covers one selected Vault installation
+and configuration context, not a fleet or enabled-plugin roster scan.
+
+Selection evidence is reused within that call for the reader, not cached across
+sessions: executable availability and opt-in/configuration may change. Runtime
+metadata, process count and a watchdog do not establish latency acceptance.
+The plugin's 30-second hook timeout is unchanged; it is not a claim that the
+composed hook meets the performance pattern's two-second target.
+
+The explicitly selected `vault-activation` integration portfolio runs
+`test_native_bootstrap_performance_samples`. It observes two real native entry
+invocations for each absent-runtime and current-metadata fixture, including
+shell startup and cleanup. Its driver is a non-installing stub; current metadata
+is not an actual installed/healthy runtime. Reports retain individual monotonic
+samples, nearest-rank summaries and errors; two samples cannot qualify tails.
+Child CPU/spawn totals, live installed latency, first-OS-boot cache conditions,
+visible/model-ready and whole-enabled-hook-stack boundaries remain unavailable,
+not zero or passing. Instrumentation stays outside production callbacks.
+The initial local Windows/Python 3.14 samples were 9.078/5.271s for absent runtime
+and 4.620/3.654s for current metadata. These do not meet a two-second composed-hook
+target. Local source SHA and before-change delta were not captured; this is
+fixture observation, not installed performance or a regression comparison.
+The broader latency target remains with the performance-telemetry objective
+[#7935](https://github.com/ThomasMichon/copilot-extensions/issues/7935).
+
+Reproduce in an isolated test lane with:
+
+```text
+python tools/run-plugin-tests.py agent-vault --allow-explicit-tiers --test-file tests/test_bootstrap_driver.py -k native_bootstrap_performance_samples --plugin-timeout 180 --timeout 120 --test-timeout 60
+```
 
 Removing opt-in or setting `enabled: false` withdraws this scope's automatic
 participation; it does not stop a shared service, delete data, uninstall

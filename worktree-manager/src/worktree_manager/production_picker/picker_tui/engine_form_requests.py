@@ -15,7 +15,7 @@ from worktree_manager.form_requests import (
 )
 from worktree_manager.form_draft_storage import write_record
 from .engine_dialogs import TaskMenuScreen
-from .registered_scopes import read_scope
+from .registered_scopes import action_scopes, read_scope
 
 
 class RetainedResponsesMenu(TaskMenuScreen):
@@ -48,7 +48,7 @@ def current_request_action(contract):
     return matches[0]
 
 
-def run_retained_request(path, record, *, receipt=False):
+def run_retained_request(path, record, *, receipt=False, runtime=None, scopes=None):
     from . import pivots, tasks
 
     reg, action = resolve_request(record, current_request_registrations())
@@ -57,7 +57,8 @@ def run_retained_request(path, record, *, receipt=False):
     ctx = {**record["context"], "prepared_request": record["prepared_request"]}
     template = action.form["request"]["receipt"] if receipt else action.run
     argv = pivots.format_form_template(template, ctx, record["values"])
-    ok, output = tasks.RegisteredPivotRuntime(reg).run_resolved(argv, preserve_output=True)
+    runtime = runtime if runtime is not None else tasks.RegisteredPivotRuntime(reg)
+    ok, output = runtime.run_resolved(argv, preserve_output=True, scopes=scopes)
     try:
         observe_request(
             path, operation="receipt" if receipt else "submit", ok=ok, output=output,
@@ -75,19 +76,20 @@ class PivotFormRequestActionsMixin:
         self, reg, action, ctx, title, values, *, draft_binding=None,
         draft_path=None, draft_cleanup=None,
     ):
-        from . import pivots, tasks
+        from . import pivots
         from .steering import SubmitErrorScreen, _steer_drafts_dir
 
         contract = request_contract(reg, action)
         ctx, values = deepcopy(ctx), deepcopy(values)
         ctx["request_id"] = uuid.uuid4().hex
+        runtime = self._pivot_runtime(reg)
 
         def work():
             try:
                 current_reg, current_action = current_request_action(contract)
                 spec = current_action.form["request"]
                 argv = pivots.format_form_template(spec["prepare"], ctx, values)
-                ok, output = tasks.RegisteredPivotRuntime(current_reg).run_json_resolved(argv)
+                ok, output = runtime.run_json_resolved(argv, scopes=action_scopes(ctx))
                 if not ok:
                     return False, output, None
                 record = prepared_record(

@@ -1,0 +1,9 @@
+{
+  "comment": "Add agenda outline expansion, effort-remainder derivation, session backfill and offline preview helpers",
+  "changes": [
+    {
+      "plugin": "efforts",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "comment": "Ship a declared non-routing Manager application-input provider with group-aware canonical resources and preserve version-one asset declarations.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}

@@ -21,12 +21,24 @@ Scope
   Observation period: <time range or "from now">
 
 Mode: read-only sweep | recurring observation | steering | dormant correction
+  Enforced goals: <G1-G4 for a finite sweep | G1-G5 for a recorded recurring
+    assignment; see SKILL.md "Enforced goals">
   Cadence and wake source: <existing scheduler/event; required for recurring>
+  Confidence cadence: <tight cadence used until confident, e.g. 15 minutes;
+    recurring only>
+  Healthy sweeps to relax: <consecutive healthy sweeps before leaving the
+    confidence cadence, default 2; a sweep is healthy only when every target
+    was read and classified with no waste disposition. A coverage gap or
+    unknown target earns no healthy-sweep credit (unreadable state is never
+    healthy) unless the charter explicitly excludes that venue; the
+    unknown-state limit governs reporting, not health. Any waste finding
+    returns to the confidence cadence>
   Active and parked cadences: <e.g. 30 minutes active, 2 hours parked>
   Early-check triggers: <question at half its revisit time, two observations
     without delta, validation over budget, unanswered change request past its
     limit, recorded deadline passed>
-  End condition: <finite stop criterion or explicit indefinite service + owner>
+  End condition: <finite stop criterion or explicit indefinite service + owner;
+    an open-ended assignment is never self-declared done>
 
 Steering scope (only if explicitly granted; else "none")
   Recipients: <owners/selectors allowed to receive steers>
@@ -34,6 +46,14 @@ Steering scope (only if explicitly granted; else "none")
   Excluded purposes: <e.g. scope change, merge, deploy, stop/start, approvals>
   Validity: <expiry, revision or revocation condition>
   Limits: <one outstanding steer per target+issue; other caps>
+
+Answer scope (only if explicitly granted; else "none")
+  Recipients: <owners/selectors whose parked questions may be answered>
+  Permitted question classes: <routine decisions within the worker's own
+    delegated authority, e.g. ordering, retry/validation depth, continue>
+  Excluded: <permission/approval prompts, destructive, access/spend,
+    objective change, deployment, raising caps or review-round limits>
+  Validity: <expiry, revision or revocation condition>
 
 Dormant correction scope (only if explicitly granted; else "none")
   Record kinds: <effort plan, workspace title/summary, agenda cursor,
@@ -58,12 +78,25 @@ Watchdog thresholds (see references/watchdog-checks.md)
     revisit time or a second steer goes unheeded>
   Unknown-state limit: <consecutive unknown observations before one report>
 
+Self-improvement (see references/self-improvement.md)
+  Weak-point catalogue: <consuming repository's own filled-in catalogue,
+    created from assets/WEAK-POINTS.md; unknown until one exists>
+  Adapter and readers: <consuming repository's adapter skill / reader table>
+  Source-change and publication authority: <none | scope, destination and
+    rolling-change policy for folding learnings>
+  Upstream route: <owner of this generic skill; anonymized issue or change>
+
 Holds and later narrowing: <references, newest first>
 Acceptance: <what a completed sweep or a healthy service period must show>
 ```
 
 ## Acceptance checks
 
+- The report shows evidence for every applicable enforced goal (G1-G4, plus
+  G5 under a recorded recurring assignment); a missing goal marks the sweep
+  incomplete, and an open-ended assignment was never self-declared done.
+- Every waste finding and steer maps to a weak-point pattern or "no new
+  pattern", and monitor difficulties were captured as proposed improvements.
 - Every target resolves through an existing owner, or is a recorded gap.
 - A recurring cycle with a re-resolved roster records its manifest source,
   readiness results and machines added, retired or kept as gaps.
@@ -71,6 +104,8 @@ Acceptance: <what a completed sweep or a healthy service period must show>
   marked with confidence.
 - **Messages sent** is `none` in read-only mode, and each steer in steering mode
   has a persisted pending record before send and a recorded result after.
+- Every parked question was reported or classified; each answer was within
+  the answer scope, persisted before sending and rechecked as still pending.
 - Each dormant correction had a liveness recheck and revision re-read
   immediately before the write and an owner readback after; live-idle, newly
   active and unknown targets were left unchanged.

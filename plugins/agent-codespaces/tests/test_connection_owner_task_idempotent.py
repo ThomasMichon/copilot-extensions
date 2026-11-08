@@ -60,8 +60,7 @@ def _sh_function_definition(name: str) -> str:
 def test_connection_owner_service_skips_reregister_when_action_unchanged() -> None:
     body = _sync_connection_owner_service_body()
 
-    assert "$task = Get-OwnerScheduledTask" in body
-    assert "$existingTask = $task" in body
+    assert "Get-ScheduledTask -TaskName $OwnerTaskName -ErrorAction SilentlyContinue" in body
     assert "$existingAction.Execute -eq $action.Execute" in body
     assert "already correct" in body
     # The unconditional-write call must now be reached only on the genuine-
@@ -85,10 +84,10 @@ def test_connection_owner_service_query_failure_preserves_existing_task() -> Non
     assert "$result = @{ Known = $false; Enabled = $false; Interval = 15.0 }" in config
     assert "$result.Known = $true" in config
     assert "if (-not $co.Known)" in sync
-    assert "throw 'Connection Owner config query failed; selected Owner readiness not confirmed'" in sync
+    assert "leaving any existing scheduled task unchanged" in sync
     assert sync.index("if (-not $co.Known)") < sync.index("if (-not $co.Enabled)")
     assert "Unregister-ConnectionOwnerService" not in sync
-    assert "Connection Owner disabled -- not starting an owner" in sync
+    assert "existing task left unchanged" in sync
 
 
 @pytest.mark.parametrize("registration", ("current", "refused", "missing-stub"))
@@ -115,18 +114,6 @@ $InstallDir = '{tmp_path}'
 $LinkPython = '{python}'
 $OwnerTaskName = 'isolated-owner'
 function Get-ConnectionOwnerConfig {{ return @{{ Known=$true; Enabled=$true; Interval=15 }} }}
-function Get-WindowsScheduledTaskPolicy {{ return 'enabled' }}
-function Get-OwnerScheduledTask {{
-    if ('{registration}' -eq 'current') {{
-        $exe=(Get-Command pwsh).Source
-        $stub=Join-Path $LocalBin 'agent-codespaces.ps1'
-        return [pscustomobject]@{{ Actions=@([pscustomobject]@{{
-            Execute='conhost.exe'
-            Arguments="--headless `"$exe`" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$stub`" owner"
-        }}) }}
-    }}
-}}
-function Assert-OwnerScheduledTaskOwned {{ param($Task) }}
 function Write-ServiceOk {{ param($Message) }}
 function Write-ServiceChanged {{ param($Message) }}
 function Write-ServiceWarn {{ param($Message) }}

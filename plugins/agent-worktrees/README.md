@@ -11,6 +11,10 @@ sibling plugin to use local worktree isolation. Those sibling plugins compose
 gracefully when installed (extra picker pivots, cross-machine delegation,
 CodeSpace/container resolvers), but their absence only disables those features.
 
+For exclusive cross-machine resources, the [lease reference](skills/worktree/references/leases.md)
+documents ordinary acquisition and optional `--released-only` acquisition,
+which refuses expired-but-unreleased holders. Existing callers remain unchanged.
+
 Open and Resume preserve the worktree's existing repository and paired plugin
 setup; they do not submit software updates or implicitly fast-forward a branch.
 Use `sync --paired --worktree-id <id> --json` (or Picker **Sync**) to safely advance both
@@ -205,6 +209,25 @@ for its bounded scope and remaining takeover/foundation limitations.
 `--no-manager` selects the standalone updater but still queues it.
 `--supervised-debug` uses the same exclusive authority under foreground
 supervision, never a second installation writer.
+
+`update --inventory --json` advertises
+`project_controller_delegation` version 1 only when the running engine and
+its driver belong to the selected installed slot and support a full project
+controller's custody-bound engine fallback.
+Its isolated runtime phase excludes Manager recovery and local integration.
+Its `project_integration` capability reports whether delegated local integration
+preserves the project controller's Manager ownership while still reconciling
+project commands and applicable terminal profiles. It rechecks the captured
+registration and root before profile dispatch and at completion; it does not
+serialize registration writers. It does not certify Manager readiness; the
+controller remains responsible for that state.
+`targeted_payload_install` is true only when the selected engine also carries
+the durable activation-preservation owner. A delegated `--phase payloads
+--plugin <name>` can then acquire that one selected payload, including a
+missing installation, without permanently changing the user's activation.
+The caller still owns source admission, child settlement and verification.
+This is not evidence that other installed or running update writers are
+capable or quiescent, and it does not select an authority.
 
 Runtime installers may execute from a delivered or prepared payload directory.
 The collected plan preserves the resolved invoking repository separately in

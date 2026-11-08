@@ -46,6 +46,7 @@ from .command_transport import (
 from .configuration_context import run_list
 from .pivots import RegisteredPivot, format_template, parse_list_payload as parse_list_payload
 from .pivot_requests import PivotRequestsMixin
+from .registered_scopes import action_scopes
 
 #: Hard cap on how long a pivot's ``list``/action command may run.
 LIST_TIMEOUT = 20.0
@@ -143,10 +144,9 @@ def resolve_form_fields(
     return resolved
 
 
-#: Overall watchdog for a one-shot (non-``subscribe``) streaming ``list``: a
-#: stalled producer is killed after this many seconds, but rows already received
-#: are kept. A ``subscribe`` (held/live) stream has no overall deadline.
+#: Silence/initial-commit budget; finite streams also retain a process deadline.
 STREAM_TIMEOUT = 30.0
+STREAM_PROCESS_TIMEOUT = 3600.0
 
 _CREATE_NO_WINDOW = no_window_flags()
 
@@ -498,29 +498,18 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
         done = False
         saw_envelope = False
         err_frame = ""
-        raw_lines: list[str] = []
         id_field = self.pivot.id_field
 
-        # No overall deadline for a held ``subscribe`` stream (it runs until the
-        # picker exits); a one-shot stream is watchdogged so a stalled producer
-        # can't wedge the loader thread.
-        timed_out = threading.Event()
-        first_read_lock = threading.Lock()
-        initial_read_complete = False
-        def expired():
-            with first_read_lock:
-                if self.pivot.subscribe and initial_read_complete:
-                    return
-                timed_out.set()
-            _kill_proc_tree(proc)
-        timer = threading.Timer(STREAM_TIMEOUT, expired)
-        timer.daemon = True
-        timer.start()
+        from .stream_deadline import StreamDeadline
+
+        deadline = StreamDeadline(
+            subscribe=self.pivot.subscribe, timeout=STREAM_TIMEOUT,
+            process_timeout=STREAM_PROCESS_TIMEOUT, retire=lambda: _kill_proc_tree(proc),
+        )
 
         def publish() -> None:
-            nonlocal initial_read_complete
-            with first_read_lock:
-                if timed_out.is_set():
+            with deadline.lock:
+                if deadline.timed_out.is_set():
                     return
                 with self._lock:
                     generation = getattr(self._request_context, "generation", None)
@@ -528,16 +517,14 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
                         return
                     self._cache[machine] = ("ready", [by_id[i] for i in order], "")
                     self._summaries[machine] = dict(summary)
-                initial_read_complete = True
-                if self.pivot.subscribe:
-                    timer.cancel()
+                deadline.commit()
+                deadline.progress()
             self._release_startup(machine)
 
         try:
             for raw in proc.stdout:  # type: ignore[union-attr]
                 if self._closed.is_set():
                     break
-                raw_lines.append(raw)
                 obj = _parse_ndjson_line(raw)
                 if obj is None:
                     continue
@@ -600,8 +587,7 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
             if not err_frame:
                 err_frame = str(exc)[:200]
         finally:
-            if timer is not None:
-                timer.cancel()
+            deadline.close()
             try:
                 _, stderr = proc.communicate(timeout=5)
             except Exception:
@@ -612,17 +598,29 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
                     stderr = ""
             self._untrack(proc)
 
-        if timed_out.is_set():
+        if deadline.timed_out.is_set():
             self._subscribe_live[machine] = False
             self._finish(machine, (
                 "error", [by_id[i] for i in order],
-                f"{self.pivot.label}: no completed initial read within {STREAM_TIMEOUT:g}s; press r to retry",
+                f"{self.pivot.label}: " + (
+                    f"process budget of {STREAM_PROCESS_TIMEOUT:g}s exceeded"
+                    if deadline.process_timed_out.is_set() else
+                    f"no progress within {STREAM_TIMEOUT:g}s"
+                    if deadline.initial_read_complete else
+                    f"no completed initial read within {STREAM_TIMEOUT:g}s"
+                ) + "; press r to retry",
             ), summary)
             return
         if err_frame:
             self._handle_subscribe_drop(
                 machine, ctx, ("error", [], err_frame[:200]), {}, had_rows=ready
             )
+            return
+        if saw_envelope and not self.pivot.subscribe and (not done or proc.returncode):
+            self._finish(machine, (
+                "error", [by_id[i] for i in order],
+                f"{self.pivot.label}: incomplete stream (exit {proc.returncode}); press r to retry",
+            ), summary)
             return
         if ready or done:
             # Fully or partially resolved (empty roster included) -- keep rows.
@@ -710,10 +708,11 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
         """Run one action's argv template against ``ctx``. Returns
         ``(ok, message)`` -- never raises, so the caller can surface the result
         in the status line."""
-        return self.run_resolved(format_template(action.run, ctx))
+        return self.run_resolved(format_template(action.run, ctx), scopes=action_scopes(ctx))
 
     def run_resolved(
         self, argv: Sequence[str], *, preserve_output: bool = False,
+        scopes: Sequence[str] | None = None,
     ) -> tuple[bool, str]:
         """Run an **already-substituted** argv (A5 form path + the shared sync
         run path). Resolves ``argv[0]`` on ``PATH`` and executes, returning
@@ -722,9 +721,12 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
         ``{field.<name>}`` + entry tokens in one safe pass via
         :func:`format_form_template`, or a plain template via
         :func:`format_template`). ``preserve_output`` retains full receipts on
-        both success and failure for full-content contributed command results."""
+        both success and failure for full-content contributed command results.
+        Captured ``scopes`` are rechecked immediately before command invocation;
+        omitted scopes preserve independent read and retained-request recovery."""
         proc, error = self._invoke_resolved(
-            argv, timeout=ACTION_TIMEOUT, **({"preserve_output": True} if preserve_output else {}),
+            argv, timeout=ACTION_TIMEOUT, scopes=scopes,
+            **({"preserve_output": True} if preserve_output else {}),
         )
         if proc is None:
             return False, error
@@ -736,10 +738,12 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
 
     def run_json_resolved(
         self, argv: Sequence[str], *, timeout: float | None = None,
+        scopes: Sequence[str] | None = None,
     ) -> tuple[bool, str]:
         """Run a declared JSON command without mixing successful stdout and stderr."""
         proc, error = self._invoke_resolved(
             argv, timeout=ACTION_TIMEOUT if timeout is None else timeout, preserve_output=True,
+            scopes=scopes,
         )
         if proc is None:
             return False, error
@@ -752,6 +756,7 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
 
     def _invoke_resolved(
         self, argv: Sequence[str], *, timeout: float, preserve_output: bool = False,
+        scopes: Sequence[str] | None = None,
     ) -> tuple[subprocess.CompletedProcess[str] | None, str]:
         argv = list(argv)
         if picker_review.active():
@@ -760,9 +765,13 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
             return None, "empty action command"
         try:
             argv = _resolve_command(argv)
+            environment = _child_process_env()
+            environment["PYTHONIOENCODING"] = "utf-8"
+            if scopes is not None and not self.actions_ready(scopes):
+                return None, "Source read is not current; refresh and reopen this action."
             proc = subprocess.run(
-                argv, capture_output=True, text=True, timeout=timeout,
-                check=False, env=_child_process_env(), creationflags=no_window_flags(),
+                argv, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
+                check=False, env=environment, creationflags=no_window_flags(),
             )
         except FileNotFoundError:
             return None, f"{argv[0]} not found on PATH"
@@ -809,6 +818,9 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
             return (False, "empty action command")
         try:
             argv = _resolve_command(argv)
+            scopes = action_scopes(ctx)
+            if scopes is not None and not self.actions_ready(scopes):
+                return False, "Source read is not current; refresh and reopen this action."
             proc = self._spawn_stream(argv)
         except FileNotFoundError:
             return (False, f"{argv[0]} not found on PATH")

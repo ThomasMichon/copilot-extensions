@@ -171,11 +171,53 @@ def qualify(path: Path, url: str) -> Source:
 
 
 @dataclass(frozen=True)
+class SSHKeySelection:
+    argv: tuple[str, ...]
+    configuration_root: str
+    entry: str
+    directory: str
+    fingerprint: str
+
+
+def _ssh_key(value: object) -> SSHKeySelection | None:
+    if value is None:
+        return None
+    item = _fields(value, {"argv", "configuration_root", "entry", "directory", "fingerprint"})
+    argv = item["argv"]
+    if (
+        not isinstance(argv, list) or not 1 <= len(argv) <= 16
+        or any(not isinstance(arg, str) or not arg or len(arg) > 2048
+               or any(ord(c) < 32 for c in arg) for arg in argv)
+        or not Path(argv[0]).expanduser().is_absolute()
+        or Path(argv[0]).suffix.lower() in {".ps1", ".cmd", ".bat"}
+    ):
+        raise SetupError("Selected Vault requires a fully launchable absolute argv, not a bare shell script.")
+    for name in ("configuration_root", "directory"):
+        reference = item[name]
+        if (
+            not isinstance(reference, str) or not reference or len(reference) > 2048
+            or any(ord(c) < 32 for c in reference)
+            or not Path(reference).expanduser().is_absolute()
+            or ".." in Path(reference).parts
+        ):
+            raise SetupError("Selected Vault requires normalized absolute configuration and key references.")
+    if (
+        not isinstance(item["entry"], str) or not 0 < len(item["entry"]) <= 512
+        or any(ord(c) < 32 for c in item["entry"])
+        or not isinstance(item["fingerprint"], str)
+        or re.fullmatch(r"SHA256:[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]", item["fingerprint"]) is None
+    ):
+        raise SetupError("Selected Vault requires a bounded entry and canonical public-key fingerprint.")
+    return SSHKeySelection(tuple(argv), **{name: item[name] for name in item if name != "argv"})
+
+
+@dataclass(frozen=True)
 class ContinuityContext:
     name: str
     provider: str
     source: str
     ssh_setup: str | None = None
+    ssh_key: SSHKeySelection | None = None
 
 
 @dataclass(frozen=True)
@@ -198,18 +240,19 @@ def inspect(path: Path, url: str) -> Setup:
     declaration = _tracked(source.path, DECLARATION)
     value = _json(declaration)
     version = value.get("version")
-    if type(version) is not int or version not in (1, 2, 3):
+    if type(version) is not int or version not in (1, 2, 3, 4):
         raise SetupError("Unsupported repository setup version.")
-    _fields(value, {"version", "entrypoints"} | ({"contexts"} if version in (2, 3) else set()))
+    _fields(value, {"version", "entrypoints"} | ({"contexts"} if version >= 2 else set()))
     contexts = []
-    if version in (2, 3):
+    if version >= 2:
         declarations = value["contexts"]
         if not isinstance(declarations, dict) or not 1 <= len(declarations) <= 32:
             raise SetupError("Repository contexts must be a bounded named collection.")
         for name, item in sorted(declarations.items()):
             if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", name):
                 raise SetupError("Repository context name is invalid.")
-            item = _fields(item, {"provider", "source"} | ({"ssh_setup"} if version == 3 else set()))
+            item = _fields(item, {"provider", "source"} | ({"ssh_setup"} if version >= 3 else set())
+                           | ({"ssh_key"} if version == 4 else set()))
             if item["provider"] != "local-projection-v1":
                 raise SetupError("Unsupported continuity provider.")
             reference = item["source"]
@@ -224,7 +267,10 @@ def inspect(path: Path, url: str) -> Setup:
                 or not Path(ssh_setup).expanduser().is_absolute()
             ):
                 raise SetupError("SSH setup requires an absolute or home-relative reference.")
-            contexts.append(ContinuityContext(name, item["provider"], reference, ssh_setup))
+            ssh_key = _ssh_key(item.get("ssh_key"))
+            if ssh_key is not None and ssh_setup is None:
+                raise SetupError("Selected Vault SSH key requires an explicit SSH setup request.")
+            contexts.append(ContinuityContext(name, item["provider"], reference, ssh_setup, ssh_key))
     entries = value["entrypoints"]
     if not isinstance(entries, dict) or not entries or set(entries) - {"windows", "posix"}:
         raise SetupError("Setup entrypoints must name supported platforms only.")
@@ -322,6 +368,9 @@ def _call(setup: Setup, mode: str) -> Outcome:
         environment[ENGINE_CONTEXT] = json.dumps({
             "schema": "copilot-extensions.repository-setup-engine", "version": 1,
             "argv": [environment[ENGINE_PYTHON], "-I", "-m", "agent_worktrees"],
+            "capabilities": {
+                "new_admission": _json(Path(__file__).with_name("new-admission-v1.json")),
+            },
         })
         completed = subprocess.run(
             argv, cwd=setup.source.path, env=environment,

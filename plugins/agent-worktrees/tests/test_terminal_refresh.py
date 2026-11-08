@@ -331,7 +331,7 @@ def test_cell_refresh_transports_validated_roots_without_changing_global_home(
     (registry / "projects.yaml").write_text("projects:\n  demo: {}\n  peer: {}\n",
                                             encoding="utf-8")
     (registry / "repos.yaml").write_text(json.dumps({"repos": {
-        name: {"class": "worktree", "remote": f"https://github.com/example/{name}.git"}
+        name: {"class": "worktree", "agent": True, "remote": f"https://github.com/example/{name}.git"}
         for name in ("demo", "peer")
     }}), encoding="utf-8")
     roots = {name: project_state.ensure_project_state(name) for name in ("demo", "peer")}

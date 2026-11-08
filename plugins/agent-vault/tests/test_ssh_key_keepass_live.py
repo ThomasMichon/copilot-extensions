@@ -107,8 +107,16 @@ def test_real_local_installation_fresh_reuse_recovery_and_locked_refusal(tmp_pat
             "--initialize", "--confirm-initialization", "--json",
         )
         require(created.returncode == 0, "Disposable identity initialization failed")
-        public = json.loads(created.stdout)["public_key"]
+        metadata = json.loads(created.stdout)
+        public = metadata["public_key"]
         database_before = hashlib.sha256(Path(fixture.database).read_bytes()).digest()
+        fingerprint = metadata["fingerprint"]
+        different = fingerprint[:-1] + ("E" if fingerprint[-1] == "A" else "A")
+        refused = fixture.run(*command, "--expected-fingerprint", different)
+        require(refused.returncode == 1, "Mismatched inspected identity was installed")
+        require(json.loads(refused.stdout).get("error") == "key_mismatch", "Identity mismatch was hidden")
+        require(not destination.exists(), "Public identity mismatch created local key state")
+        command = (*command, "--expected-fingerprint", fingerprint)
         installed = fixture.run(*command)
         require(installed.returncode == 0, "Disposable native key installation failed")
         result = json.loads(installed.stdout)

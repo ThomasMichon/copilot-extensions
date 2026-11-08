@@ -17,7 +17,9 @@ either a **live directory** or a compressed **archive**, transparently:
   :func:`materialize` -- archive-aware reads. Selection metadata
   (``workspace.yaml``/``origin.json``) is kept **uncompressed** beside each
   archive as a *sidecar*, so listing/selecting never hydrates a tarball; only
-  content consumers pay a decompress.
+  content consumers pay a decompress. Transcript consumers use
+  :func:`open_events_stream` / :func:`open_member_stream`, which read lazily
+  so multi-gigabyte ``events.jsonl`` members are never held whole in memory.
 - :func:`archive_session` / :func:`restore_session` -- the write path used by
   the on-device and hub compaction flows.
 
@@ -46,7 +48,7 @@ from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, BinaryIO, TextIO
 
 from agent_logger.session_codecs import (
     ArchiveMemberDigest,
@@ -736,13 +738,43 @@ def remove_archive(ref: SessionRef) -> None:
         (ref.store / _sidecar_name(ref.id, member)).unlink(missing_ok=True)
 
 
-def open_events_lines(ref: SessionRef) -> io.StringIO | None:
-    """Return ``events.jsonl`` as an in-memory text buffer, or ``None``.
+@contextmanager
+def open_member_stream(ref: SessionRef, member: str) -> Iterator[BinaryIO | None]:
+    """Yield a lazily-read binary stream over ``member``, or ``None`` if absent.
 
-    A convenience for line-oriented consumers that avoids materializing the
-    whole session directory when only the event stream is needed.
+    Unlike :func:`read_member`, the member is never materialized whole: live
+    files are read from disk and archive members are decompressed on demand,
+    so transcript-sized members stay bounded in memory.
     """
-    raw = read_member(ref, EVENTS_MEMBER)
-    if raw is None:
-        return None
-    return io.StringIO(raw.decode("utf-8", errors="replace"))
+    if ref.kind == "live":
+        path: Path | None = ref.path / member
+    else:
+        path = ref._sidecar(member)
+    if path is not None and path.is_file():
+        with open(path, "rb") as fh:
+            yield fh
+    elif ref.kind == "live":
+        yield None
+    else:
+        with _codec_for_archive(ref.path).open_member(ref.path, member) as fh:
+            yield fh
+
+
+@contextmanager
+def open_events_stream(ref: SessionRef) -> Iterator[TextIO | None]:
+    """Yield ``events.jsonl`` as lazily-decoded UTF-8 text, or ``None``.
+
+    Decoding is incremental (``errors="replace"``, lines split on ``\\n``
+    only), matching a whole-file decode while keeping memory bounded for
+    multi-gigabyte transcripts. Iterate the yielded stream line by line.
+    """
+    with open_member_stream(ref, EVENTS_MEMBER) as raw:
+        if raw is None:
+            yield None
+        else:
+            text = io.TextIOWrapper(raw, encoding="utf-8", errors="replace", newline="\n")
+            try:
+                yield text
+            finally:
+                # The owning context closes ``raw``; don't let the wrapper do it twice.
+                text.detach()

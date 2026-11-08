@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve standalone and repository-shaped frozen inputs in native owner qualification without recursive copying or losing contained-test admission.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

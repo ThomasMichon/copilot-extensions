@@ -127,8 +127,11 @@ def test_cli_refuses_public_age_override_before_governed_source_preparation(
 
 
 def test_cli_prepares_only_the_selected_core_projects(tmp_path, monkeypatch, capsys):
-    seen = []
-    monkeypatch.setattr(local, "compose", lambda *args, **kwargs: {"projects": {}})
+    seen, composed = [], []
+    monkeypatch.setattr(
+        local, "compose",
+        lambda *args, **kwargs: (composed.append(kwargs["projects"]) or {"projects": {}}),
+    )
     monkeypatch.setattr(
         local, "build_projects",
         lambda output, record, **kwargs: seen.append((output, kwargs["projects"])),
@@ -142,11 +145,16 @@ def test_cli_prepares_only_the_selected_core_projects(tmp_path, monkeypatch, cap
     assert seen == [
         (tmp_path / "prepared", ("standalone:worktree-manager", "agent-worktrees")),
     ]
+    assert composed == [seen[0][1]]
     with pytest.raises(SystemExit) as refused:
         local.main([*arguments, "--suite"])
     assert refused.value.code == 2
     assert len(seen) == 1
     assert "not allowed with argument" in capsys.readouterr().err
+    assert local.main(arguments[:6] + ["--suite"]) == 0
+    assert composed[-1] is None and seen[-1][1] is None
+    assert local.main(arguments[:6]) == 0
+    assert composed[-1] == seen[-1][1] == ("standalone:worktree-manager",)
 
 
 @pytest.fixture
@@ -361,7 +369,10 @@ def test_local_source_can_retain_explicit_existing_provenance_without_a_remote(r
 
 
 @pytest.mark.parametrize("deep", [False, True])
-def test_suite_build_preserves_roster_versions_and_uses_one_toolchain(tmp_path, monkeypatch, deep):
+@pytest.mark.parametrize("remaining", [None, 60, 240])
+def test_suite_build_preserves_roster_versions_and_uses_one_toolchain(
+    tmp_path, monkeypatch, deep, remaining,
+):
     import build_python_artifacts
     import build_toolchain_lock
     import promotion_python_artifacts
@@ -401,7 +412,15 @@ def test_suite_build_preserves_roster_versions_and_uses_one_toolchain(tmp_path, 
             "copilot-extensions-worktree-manager" if component == "worktree-manager"
             else "agent-index-engine" if component == "index-engine" else component
         )
-        (payload / "pyproject.toml").write_text(f'[project]\nname="{name}"\nversion="{version}"\n')
+        (payload / "pyproject.toml").write_text(
+            '[build-system]\nrequires=["setuptools>=68"]\n'
+            'build-backend="setuptools.build_meta"\n'
+            f'[project]\nname="{name}"\nversion="{version}"\n',
+        )
+        if component == "worktree-manager":
+            (payload / "setup.py").write_bytes(
+                (Path(__file__).resolve().parents[1] / "worktree-manager/setup.py").read_bytes(),
+            )
         if ":" not in key:
             (payload / "plugin.json").write_text(json.dumps({"name": component, "version": version}))
     monkeypatch.setattr(promotion_python_artifacts, "candidate_projects", lambda root: projects)
@@ -415,11 +434,14 @@ def test_suite_build_preserves_roster_versions_and_uses_one_toolchain(tmp_path, 
         __file__=build_python_artifacts.__file__, uer=build_python_artifacts.uer,
         resolve_vendored_libs=lambda root: [],
     )
-    monkeypatch.setattr(promote_release, "_load_module", lambda *a: builder)
+    wheel_calls = []
+    builder.build_wheel = lambda *args, **kwargs: wheel_calls.append(kwargs)
+    monkeypatch.setattr(local, "_load_module", lambda *a: builder)
     admitted_toolchain = toolchain
 
     def build(component, *, out_dir, toolchain, builder=builder):
         assert toolchain is admitted_toolchain
+        builder.build_wheel(component, out_dir, toolchain=toolchain)
         if os.name == "nt":
             assert builder.REPO != source
             assert builder.REPO.parent == Path(local.native_retained_path(resolutions[0][0])).parent
@@ -455,8 +477,24 @@ def test_suite_build_preserves_roster_versions_and_uses_one_toolchain(tmp_path, 
         "schema": local.SCHEMA, "version": 1, "kind": "source",
         "source_commit": "a" * 40, "source_tree": "b" * 40, "projects": {},
     }
-    local.build_projects(output, record)
+    uv = tmp_path / "uv.exe"
+    deadline = time.monotonic() + (remaining or 240)
+    options = {"uv": uv, "deadline": deadline} if remaining is not None else {}
+    local.build_projects(output, record, **options)
     assert builds == list(projects) and len(resolutions) == 1
+    assert resolutions[0][1] == {
+        "python": sys.executable, "source_policy": "governed", "min_age_days": None, **options,
+    }
+    for call in wheel_calls:
+        assert call["toolchain"] is admitted_toolchain
+        if remaining is not None:
+            assert call["uv"] == str(uv)
+            assert time.monotonic() < call["deadline"] <= deadline
+            assert call["deadline"] <= time.monotonic() + 180
+            if remaining == 60:
+                assert call["deadline"] == deadline
+        else:
+            assert set(call) == {"toolchain"}
     if os.name == "nt":
         assert len(set(build_roots)) == 1
         assert not build_roots[0].exists()
@@ -466,6 +504,74 @@ def test_suite_build_preserves_roster_versions_and_uses_one_toolchain(tmp_path, 
         version = payload_package_version(payload, component)
         assert read_source_identity(payload, version, plugin=component).document() == project["source"]
         assert project["artifact"]["version"] == version
+
+
+def test_suite_build_expired_deadline_refuses_before_source_writes(tmp_path, monkeypatch):
+    import build_toolchain_lock
+
+    monkeypatch.setattr(
+        build_toolchain_lock, "resolve_toolchain_lock",
+        lambda *args, **kwargs: pytest.fail("expired caller reached toolchain preparation"),
+    )
+    output = tmp_path / "not-created"
+    with pytest.raises(local.preparation.SourcePreparationError, match="deadline exceeded"):
+        local.build_projects(
+            output, {"projects": {}}, uv=tmp_path / "uv.exe",
+            deadline=time.monotonic() - 1,
+        )
+    assert not output.exists()
+
+
+def test_local_builder_load_keeps_controller_and_module_state_independent(tmp_path, monkeypatch):
+    import builtins
+    import build_python_artifacts
+
+    original_import = builtins.__import__
+
+    def without_controller(name, *args, **kwargs):
+        if name == "promote_release":
+            pytest.fail("local artifact building imported the release controller")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", without_controller)
+    original_root = build_python_artifacts.REPO
+    builder = local._load_module(
+        Path(build_python_artifacts.__file__), "_local_install_artifact_builder",
+    )
+    builder.REPO = tmp_path
+    assert build_python_artifacts.REPO == original_root
+    assert builder.resolve_vendored_libs is not build_python_artifacts.resolve_vendored_libs
+
+
+def test_manager_provider_rejects_foreign_native_target_before_profile(tmp_path, monkeypatch):
+    import build_toolchain_lock
+    import installer_packaging_seed
+    import install_source
+    import local_install_profile
+    import prepare_manager_application
+
+    uv = tmp_path / "uv"
+    uv.write_bytes(b"fixture, never executed")
+    monkeypatch.setattr(install_source, "select", lambda *a: SimpleNamespace(
+        identity=SimpleNamespace(document=lambda: {}),
+    ))
+    monkeypatch.setattr(build_toolchain_lock, "_query_marker_environment", lambda *a, **k: {})
+    monkeypatch.setattr(
+        installer_packaging_seed, "_target",
+        lambda python, *a: {"base_prefix": str(python)},
+    )
+    monkeypatch.setattr(
+        local_install_profile, "prepare_registry_lock",
+        lambda *a, **k: pytest.fail("foreign tooling target prepared a profile"),
+    )
+    output = tmp_path / "output"
+    with pytest.raises(ValueError, match="selected native target"):
+        prepare_manager_application.main([
+            "--install-source", str(tmp_path), "--output", str(output),
+            "--identity", "{}", "--python", str(tmp_path / "foreign-python"),
+            "--uv", str(uv), "--deadline", str(time.monotonic() + 10),
+        ])
+    assert not output.exists()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows compact build workspace")
@@ -490,7 +596,7 @@ def test_suite_refuses_changed_compact_or_retained_source(tmp_path, monkeypatch,
         __file__=build_python_artifacts.__file__, uer=build_python_artifacts.uer,
         resolve_vendored_libs=lambda root: [],
     )
-    monkeypatch.setattr(promote_release, "_load_module", lambda *a: builder)
+    monkeypatch.setattr(local, "_load_module", lambda *a: builder)
     builds = []
 
     def build(component, *, out_dir, toolchain):
@@ -808,6 +914,110 @@ def test_native_registry_lock_refuses_invalid_extras_before_output(tmp_path, mon
     assert not output.exists()
 
 
+@pytest.mark.parametrize(("selected", "association"), [
+    (False, "missing"), (False, "present"), (True, "present"),
+    (True, "missing"), (True, "different"), (True, "missing-ssh"), (True, "different-ssh"),
+])
+def test_native_engine_profile_projects_declared_fleet_ssh_sdk(
+    tmp_path, monkeypatch, selected, association,
+):
+    from contextlib import contextmanager
+    import local_install_profile as native
+    from packaging.markers import Marker, default_environment
+    from packaging.requirements import Requirement
+    from packaging.utils import canonicalize_name
+    from application_sources import application_sources
+
+    root = Path(__file__).resolve().parent.parent
+    payload = root / "plugins/agent-worktrees"
+    wheels = {}
+    for directory in (payload, root / "fleet-manager", root / "plugins/agent-ssh"):
+        metadata = tomllib.loads((directory / "pyproject.toml").read_text())
+        project = metadata["project"]
+        requirements = list(project.get("dependencies", []))
+        extras = project.get("optional-dependencies", {})
+        for extra, values in extras.items():
+            for value in values:
+                requirement = Requirement(value)
+                marker = f'extra == "{extra}"'
+                if requirement.marker:
+                    marker = f"({requirement.marker}) and {marker}"
+                requirement.marker = Marker(marker)
+                requirements.append(str(requirement))
+        wheels[canonicalize_name(project["name"])] = {
+            "version": project["version"], "provides_extras": list(extras),
+            "requires_dist": requirements,
+            "application_sources": application_sources(metadata),
+        }
+    if association == "missing":
+        del wheels["fleet-manager"]
+    else:
+        wheels["fleet-manager"]["source_project"] = (
+            "standalone:fleet-manager"
+            if association in {"present", "missing-ssh", "different-ssh"} else "unrelated"
+        )
+    if association == "missing-ssh":
+        del wheels["agent-ssh"]
+    else:
+        wheels["agent-ssh"]["source_project"] = (
+            "unrelated" if association == "different-ssh" else "agent-ssh"
+        )
+    monkeypatch.setattr(native, "first_party", lambda *a, **kw: (
+        SimpleNamespace(payload=payload), wheels,
+    ))
+    monkeypatch.setattr(native, "_query_marker_environment", lambda *a, **kw: default_environment())
+    compiled = []
+
+    @contextmanager
+    def compiler(uv, arguments, **kwargs):
+        compiled.extend(Path(arguments[0]).read_text().splitlines())
+        raise RuntimeError("native compiler boundary")
+        yield
+
+    monkeypatch.setattr(native.dependencies, "retain_uv_compile", compiler)
+    refused = selected and association != "present"
+    expected_error = native.ProfileError if refused else RuntimeError
+    expected_message = "selected associated application" if refused else "native compiler boundary"
+    with pytest.raises(expected_error, match=expected_message):
+        native.main([
+            "--install-source", str(tmp_path / "input"), "--output", str(tmp_path / "profile"),
+            "--uv", "unused", "--component", "agent-worktrees",
+            *(["--extra", "fleet-ssh"] if selected else []),
+        ])
+    if refused:
+        assert compiled == []
+        assert not (tmp_path / "profile").exists()
+        return
+    names = {canonicalize_name(Requirement(value).name) for value in compiled if value}
+    assert ("aiohttp" in names) is selected
+    assert ("jwcrypto" in names) is selected
+    assert not names & {"fleet-manager", "agent-ssh"}
+
+
+@pytest.mark.parametrize("embedded_profile_source", [False, True], indirect=True)
+def test_native_application_dependency_binds_actual_associated_wheel_owner(
+    embedded_profile_source,
+):
+    import local_install_profile as native
+
+    _, wheels = native.first_party(
+        embedded_profile_source, deadline=time.monotonic() + 30,
+    )
+    name = "copilot-extensions-worktree-manager"
+    wheels["consumer"] = {
+        "version": "1", "provides_extras": [], "requires_dist": [name],
+        "application_sources": {name: "standalone:worktree-manager"},
+    }
+    assert native.registry_roots(
+        wheels, "consumer==1", {}, deadline=time.monotonic() + 5,
+    ) == []
+    wheels["consumer"]["application_sources"][name] = "unrelated"
+    with pytest.raises(native.ProfileError, match="selected associated application"):
+        native.registry_roots(
+            wheels, "consumer==1", {}, deadline=time.monotonic() + 5,
+        )
+
+
 @pytest.mark.parametrize("fault", [None, "missing", "version"])
 @pytest.mark.parametrize("component", [
     "worktree-manager", "agent-worktrees", "index-service", "index-engine",
@@ -947,8 +1157,15 @@ def test_native_profile_preserves_duplicate_selected_feed_evidence(monkeypatch):
 
 @pytest.fixture
 def native_source(tmp_path, request):
+    return prepare_native_source(tmp_path, request)
+
+
+def prepare_native_source(tmp_path, request):
+    return complete_native_source(tmp_path, prepare_native_source_inputs(tmp_path, request))
+
+
+def prepare_native_source_inputs(tmp_path, request):
     import local_install_profile as native
-    from packaging.markers import default_environment
     from wheel_input_fixture import wheel_bytes
 
     original = tmp_path / "original"
@@ -985,11 +1202,38 @@ def native_source(tmp_path, request):
         '[tool.uv.sources]\nagent-procutil={path="' +
         ("../libs/agent-procutil" if sibling else "libs/agent-procutil") + '"}\n',
     )
+    callback = {}
+    if isinstance(options, dict) and options.get("callback"):
+        code = (
+            "VALUE = 1\n"
+            "import json,pathlib,shutil,sys\n"
+            "def prepare_snapshot(data):\n"
+            "    slot=pathlib.Path(sys.prefix).parent\n"
+            "    source=pathlib.Path(data['frozen_plugin'])\n"
+            "    shutil.copytree(source,slot/'callback-payload')\n"
+            "    (slot/'callback-source.json').write_text(json.dumps(str(source)))\n"
+            "def snapshot_health():\n"
+            "    slot=pathlib.Path(sys.prefix).parent\n"
+            "    source=pathlib.Path(json.loads((slot/'callback-source.json').read_text()))\n"
+            "    assert source.is_dir(), 'source owner ended before health'\n"
+            "    assert (slot/'callback-payload'/'pyproject.toml').read_bytes() == "
+            "(source/'pyproject.toml').read_bytes()\n"
+        )
+        (package / "__init__.py").write_text(code, encoding="utf-8")
+        callback["demo_app/__init__.py"] = code.encode("utf-8")
     if not (isinstance(options, dict) and options.get("standalone", False)):
         (payload / "plugin.json").write_text('{"name":"demo-app","version":"1.0.0"}\n')
     scripts = payload / "scripts"
-    if not standalone:
+    if not standalone or isinstance(options, dict) and options.get("source_install"):
         scripts.mkdir()
+    if isinstance(options, dict) and options.get("source_install"):
+        (payload / "source-install.json").write_text(json.dumps({
+            "schema": "copilot-extensions.native-source-install", "version": 1,
+            "windows": {"script": "scripts/install.ps1", "argument": "-InstallSource"},
+            "posix": {"script": "scripts/install.sh", "argument": "--install-source"},
+        }))
+        (scripts / "install.ps1").write_text("# source entry fixture\n")
+        (scripts / "install.sh").write_text("# source entry fixture\n")
     root = Path(__file__).resolve().parents[1]
     native.source_inputs.engine.freeze_inputs(
         root / "libs" / "agent-procutil", (original if sibling else payload) / "libs",
@@ -1021,7 +1265,7 @@ def native_source(tmp_path, request):
     archive = tmp_path / "demo_app-1.0.0-py3-none-any.whl"
     archive.write_bytes(wheel_bytes(
         name="demo_app", prefix="demo_app-1.0.0.dist-info/",
-        extra={"demo_app/__init__.py": content.encode()},
+        extra={"demo_app/__init__.py": content.encode(), **callback},
         metadata=(
             "Metadata-Version: 2.4\nName: demo-app\nVersion: 1.0.0\n" +
             ("Requires-Dist: counter>=1\n" if dependency else "") + "\n"
@@ -1041,9 +1285,18 @@ def native_source(tmp_path, request):
         ))
         archives[counter.name] = counter
         expected[counter.name] = "sha256:" + hashlib.sha256(counter.read_bytes()).hexdigest()
+    return SimpleNamespace(
+        native=native, selected=selected, archives=archives, expected=expected, options=options,
+    )
+
+
+def complete_native_source(tmp_path, inputs):
+    from packaging.markers import default_environment
+
+    native, selected = inputs.native, inputs.selected
     deadline = time.monotonic() + 120
     with native.retain_wheel_inputs(
-        archives, expected,
+        inputs.archives, inputs.expected,
         max_wheels=2, max_archive_bytes=1 << 20, max_total_bytes=2 << 20,
         max_snapshot_bytes=2 << 20, deadline=deadline,
     ) as retained:
@@ -1055,7 +1308,7 @@ def native_source(tmp_path, request):
         output = tmp_path / "prepared"
         output.mkdir()
         uv = None
-        if options:
+        if inputs.options:
             uv = shutil.which("uv")
             if uv is None:
                 pytest.skip("a real uv executable is required")
@@ -1162,6 +1415,16 @@ def test_copied_application_qualifies_after_the_prepared_source_is_removed(nativ
     )
     if os.name == "nt":
         environment.update(HOMEDRIVE=home.drive, HOMEPATH=str(home)[len(home.drive):])
+        # A copied launcher keeps fixture cleanup independent of mapped UV
+        # interpreter links held by other test environments.
+        subprocess.run(
+            [sys.executable, "-I", "-m", "venv", "--without-pip", "--copies", str(slot / ".venv")],
+            env=environment, capture_output=True, text=True, timeout=60, check=True,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        for executable in (slot / ".venv/Scripts").glob("python*.exe"):
+            assert executable.stat().st_nlink == 1
+            executable.chmod(executable.stat().st_mode | 0o200)
     command = (
         [shutil.which("powershell.exe"), "-NoProfile", "-NonInteractive",
          "-File", str(slot / "install.ps1")]
@@ -1178,6 +1441,18 @@ def test_copied_application_qualifies_after_the_prepared_source_is_removed(nativ
     assert (root / "current-version").read_text().strip() == slot.name
     assert not (slot / "payload").exists()
     assert not (slot / "source").exists()
+    cleanup_deadline = time.monotonic() + 60
+    while not source.engine.runtime._rmtree_deferrable(root, label="disposable application fixture"):
+        if time.monotonic() >= cleanup_deadline:
+            image = slot / ".venv" / "Scripts" / "python.exe"
+            facts = image.stat() if image.exists() else None
+            pytest.fail(
+                f"disposable application cleanup remained blocked: "
+                f"attributes={getattr(facts, 'st_file_attributes', None)}, "
+                f"links={getattr(facts, 'st_nlink', None)}; "
+                f"native output: {result.stdout}{result.stderr}"
+            )
+        time.sleep(0.25)
 
 
 @pytest.mark.parametrize("native_source", [{"sibling": True}], indirect=True)

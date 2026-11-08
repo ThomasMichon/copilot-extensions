@@ -1,0 +1,13 @@
+{
+  "comment": "Expose provider-owned required application readiness and confirmed repair with bounded progressive Configuration reads",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

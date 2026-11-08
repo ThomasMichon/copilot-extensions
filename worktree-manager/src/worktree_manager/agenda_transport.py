@@ -22,7 +22,10 @@ from .companion_client import cancellable_read_runner
 from .engine_process import EngineCleanupError, cleanup_phase
 from .engine_environment import _engine_environment
 from .engine_posix_process import _OWNER, read_completion_receipt, output_pipe, close_descriptor, close_stream
-from .agenda_contract import AgendaUnavailable, CONTRACT_VERSIONS, MAX_FRAME_BYTES, _TRANSIENT_ERRORS, bounded_json
+from .agenda_contract import (
+    AgendaUnavailable, CONTRACT_VERSIONS, GRAPH_CAPABILITY, GRAPH_VERSIONS, MAX_FRAME_BYTES,
+    _TRANSIENT_ERRORS, bounded_json,
+)
 
 STARTUP_TIMEOUT = 5.0
 IDLE_TIMEOUT = 5.0
@@ -33,6 +36,7 @@ try:
     from agent_worktrees.worktrees_client import read_health
     health = read_health()
     versions = (1,)
+    graphs = ()
     if (isinstance(health,dict) and isinstance(health.get("worktrees"),dict)
         and health["worktrees"].get("status") == "ready"
         and isinstance(health.get("capabilities"),list)
@@ -48,7 +52,10 @@ try:
             if getattr(agenda_contract,"CAPABILITY",None) != "worktree-agendas-v1":
                 raise ValueError("selected CLI has no supported agenda contract declaration")
             versions = (1,)
+        graphs = getattr(agenda_contract,"GRAPH_VERSIONS",None) or ()
     result = {"ok": True, "health": health, "cli_contract_versions": list(versions)}
+    if graphs:
+        result["cli_graph_versions"] = list(graphs)
     raw = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
     if len(raw.encode("utf-8")) > 35 * 1024:
         raise ValueError("resident health exceeds its response bound")
@@ -119,7 +126,9 @@ def health_argv(base: list[str]) -> list[str]:
 def require_capability(
     base: list[str], *, cancelled: Event, cwd: str,
     on_supported: Callable[[], None] | None = None,
+    on_graph: Callable[[int | None], None] | None = None,
 ) -> int:
+    """Select the agenda contract; report the optional display-graph version via on_graph."""
     argv = health_argv(base)
     try:
         result = cancellable_read_runner(cancelled, cwd=cwd)(argv, STARTUP_TIMEOUT)
@@ -155,6 +164,7 @@ def require_capability(
         )
     if value.get("ok") is not True or set(value) not in (
         {"ok", "health"}, {"ok", "health", "cli_contract_versions"},
+        {"ok", "health", "cli_contract_versions", "cli_graph_versions"},
     ):
         raise AgendaUnavailable("resident health probe returned invalid fields", code="malformed")
     versions = value.get("cli_contract_versions", [1])
@@ -164,6 +174,13 @@ def require_capability(
         or len(set(versions)) != len(versions)
     ):
         raise AgendaUnavailable("selected CLI supplied invalid agenda contracts", code="malformed")
+    graphs = value.get("cli_graph_versions", [])
+    if (
+        not isinstance(graphs, list)
+        or any(type(graph) is not int or graph < 1 for graph in graphs)
+        or len(set(graphs)) != len(graphs)
+    ):
+        raise AgendaUnavailable("selected CLI supplied invalid agenda graph versions", code="malformed")
     health = value.get("health")
     if (
         not isinstance(health, dict) or not isinstance(health.get("capabilities"), list)
@@ -200,21 +217,32 @@ def require_capability(
             f"resident agenda authority is {status}; no resident was started",
             retry=status in _TRANSIENT_ERRORS, code=status,
         )
+    if on_graph is not None:
+        supported = [graph for graph in GRAPH_VERSIONS if graph in graphs]
+        on_graph(
+            max(supported) if supported and version == 2
+            and GRAPH_CAPABILITY in health["capabilities"] else None
+        )
     return version
 
 
 def feed_argv(
     project: str, worktree: str, session: str, *, engine_command: list[str] | None = None,
-    contract_version: int = 1,
+    contract_version: int = 1, graph: int | None = None,
 ) -> list[str]:
     base = _resolved_engine() if engine_command is None else engine_command
     validate_agenda_entry(base)
     if type(contract_version) is not int or contract_version not in CONTRACT_VERSIONS:
         raise AgendaUnavailable("unsupported agenda contract selection", code="unsupported")
+    if graph is not None and (
+        type(graph) is not int or graph not in GRAPH_VERSIONS or contract_version != 2
+    ):
+        raise AgendaUnavailable("unsupported agenda graph selection", code="unsupported")
     return [
         *base, "agenda-feed", "--project", project, "--worktree", worktree,
         "--session", session, "--json",
         *(["--contract-version", "2"] if contract_version == 2 else []),
+        *(["--agenda-graph", str(graph)] if graph is not None else []),
     ]
 
 
@@ -292,12 +320,18 @@ def frames(
         return
     base = _resolved_engine()
     validate_agenda_entry(base)
-    version = require_capability(base, cancelled=cancelled, cwd=cwd, on_supported=on_supported)
+    graph: list[int | None] = [None]
+    version = require_capability(
+        base, cancelled=cancelled, cwd=cwd, on_supported=on_supported,
+        on_graph=lambda selected: graph.__setitem__(0, selected),
+    )
     if cancelled.is_set():
         return
     if on_contract is not None:
         on_contract(version)
-    argv = feed_argv(project, worktree, session, engine_command=base, contract_version=version)
+    argv = feed_argv(
+        project, worktree, session, engine_command=base, contract_version=version, graph=graph[0],
+    )
     yield from command_frames(
         argv, cancelled=cancelled, cwd=cwd,
         startup_timeout=STARTUP_TIMEOUT, idle_timeout=IDLE_TIMEOUT,

@@ -1,0 +1,9 @@
+{
+  "comment": "Show recorded PR associations and owner-backed point reads in Companion",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

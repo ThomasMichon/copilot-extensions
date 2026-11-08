@@ -32,9 +32,13 @@ def _bash() -> str:
 
 def _slot(
     root: Path, version: str, *, exit_code: int = 0, tail: str = "", malformed: bool = False,
+    application: bool = False,
 ) -> bytes:
     slot = root / "versions" / version
-    (slot / "bin").mkdir(parents=True)
+    environment = slot / ".venv" if application else slot
+    (environment / "bin").mkdir(parents=True)
+    if application:
+        (slot / "application.json").write_text("{}", encoding="utf-8")
     (slot / ".runtime-bootstrap").mkdir()
     (slot / ".runtime-bootstrap" / "runtime_launcher.py").write_text("# fixture\n", encoding="utf-8")
     (slot / ".install-complete.json").write_text("{}", encoding="utf-8")
@@ -46,7 +50,7 @@ def _slot(
     }).decode("utf-8").split("\0")[:-1]
     if malformed:
         fields[0] = "malformed"
-    python = slot / "bin" / "python"
+    python = environment / "bin" / "python"
     python.write_text(
         "#!/usr/bin/env bash\nset -euo pipefail\n"
         'trap \'printf "%s" "$?" > "${0%/versions/*}/provider-status"\' EXIT\n'
@@ -85,14 +89,26 @@ def _run(
         return result
 
 
-def test_finite_phase_streams_exact_reply_and_returns_provider_status(tmp_path: Path) -> None:
+@pytest.mark.parametrize("application", [False, True], ids=["legacy", "application"])
+def test_finite_phase_streams_exact_reply_and_returns_provider_status(tmp_path: Path, application) -> None:
     root = tmp_path / "runtime"
-    expected = _slot(root, "A")
+    expected = _slot(root, "A", application=application)
     (root / "current-version").write_text("A\n", encoding="utf-8", newline="\n")
     result = _run('. "$1"; aw_native_seed_phase "$2" --phase prepare --output-format nul', [root])
     assert result.returncode == 0, result.stderr
     assert result.stdout.encode("utf-8") == expected
     assert not result.stderr
+
+
+def test_incomplete_application_cannot_select_a_leftover_flat_interpreter(tmp_path):
+    root = tmp_path / "runtime"
+    _slot(root, "A")
+    (root / "versions" / "A" / "application.json").write_text("{}", encoding="utf-8")
+    (root / "current-version").write_text("A\n", encoding="utf-8", newline="\n")
+    result = _run('. "$1"; aw_native_seed_phase "$2" --phase prepare --output-format nul', [root])
+    assert result.returncode == 3
+    assert not result.stdout
+    assert not (root / "observed").exists()
 
 
 def test_control_lookup_ignores_exported_functions_and_preserves_backend_path(tmp_path: Path) -> None:
@@ -112,7 +128,7 @@ declare -F env >/dev/null
 
 def _contract_slot(
     root: Path, version: str, *, supported=True, discovery_tail="", discovery_exit=0,
-    contract_version=1,
+    contract_version=1, admission=False,
 ) -> None:
     _slot(root, version)
     python = root / "versions" / version / "bin" / "python"
@@ -124,6 +140,7 @@ def _contract_slot(
         "nul_reply_schema": "agent-worktrees.native-seed-reply.v1",
         "setup_process_start_time_sources": ["provider"],
         "backend_execution_modes": ["posix-exec-env-v1"] if supported else ["posix-exec-v1"],
+        **({"setup_admission_modes": ["posix-live-owner-v1"]} if admission else {}),
     })
     python.write_text(
         "#!/usr/bin/env bash\nset -euo pipefail\n"
@@ -161,6 +178,90 @@ if _aw_native_setup_prepare "$2" --phase prepare --output-format nul; then exit 
     assert result.returncode == 0, result.stderr
     assert (root / "described").read_text().splitlines() == ["A"]
     assert not (root / "effects").exists()
+
+
+@pytest.mark.parametrize("admission", [False, True])
+def test_setup_admission_requires_explicit_provider_support_before_effects(tmp_path, admission):
+    root = tmp_path / "runtime"
+    _contract_slot(root, "A", admission=admission)
+    (root / "current-version").write_text("A", encoding="utf-8")
+    result = _run(r'''
+set -euo pipefail
+. "$1"
+. "${1%/*}/native-seed-setup.sh"
+LAUNCH_SEED_PREPARATION=admission
+LAUNCH_SEED_NATIVE_ROOT="$2"
+status=0
+_aw_native_setup_require_contract || status=$?
+[[ "$status" == "$3" ]]
+''', [root, "0" if admission else "4"])
+    assert result.returncode == 0, result.stderr
+    assert not result.stdout and not result.stderr
+    assert (root / "described").read_text().splitlines() == ["A"]
+    assert not (root / "effects").exists()
+
+
+@pytest.mark.parametrize("headed", [False, True])
+def test_no_seed_backend_forwards_admission_and_preserved_intent_to_exec(tmp_path, headed):
+    result = _run(r'''
+set -euo pipefail
+. "$1"
+. "${1%/*}/native-seed-setup.sh"
+LAUNCH_SEED_PREPARATION=admission
+LAUNCH_SEED_ID=""
+LAUNCH_SEED_NATIVE_ROOT="$2"
+LAUNCH_SEED_RECORD=record
+LAUNCH_ATTEMPT_ID=attempt
+LAUNCH_RESOLUTION_ID=resolution
+LAUNCH_PARENT_ID=parent
+LAUNCH_SEED_PRESERVE_ID=preserved
+LAUNCH_NATIVE_RESUME_SESSION=original
+_aw_native_setup_require_contract() { AW_NATIVE_SEED_RUNTIME=(_fixture_exec); }
+aw_native_seed_supports_posix_headed() { return "$FIXTURE_SUPPORT"; }
+_fixture_options() {
+    local admission=0 preserved=0 resume=0 previous=""
+    for argument; do
+        [[ "$argument" != --seed-id ]] || return 91
+        [[ "$argument" != --admission-only ]] || admission=1
+        [[ "$previous|$argument" != "--preserve-seed-id|preserved" ]] || preserved=1
+        [[ "$previous|$argument" != "--native-resume-session|original" ]] || resume=1
+        previous="$argument"
+    done
+    [[ "$admission$preserved$resume" == 111 ]]
+}
+_aw_native_setup_prepare() {
+    _fixture_options "$@" || return 92
+    AW_NATIVE_SEED_ATTEMPT=attempt
+    AW_NATIVE_SEED_RESOLUTION=resolution
+    AW_NATIVE_SEED_OPERATION=operation
+    AW_NATIVE_SEED_PARENT=parent
+    AW_NATIVE_SEED_ENV=('AGENT_WORKTREES_LAUNCH_EXECUTION=fixture')
+    AW_NATIVE_SEED_ARGV=(custom-backend)
+}
+_fixture_exec() {
+    _fixture_options "$@" || return 93
+    while [[ "$1" != --completion-file ]]; do shift; done
+    printf '0\n' > "$2"
+    return 17
+}
+_aw_native_seed_control() {
+    case "$1" in
+        mktemp) builtin command -p mktemp "$LAUNCH_SEED_NATIVE_ROOT/.native-seed-exec.XXXXXXXX" ;;
+        env)
+            shift
+            while [[ "$1" == -u ]]; do shift 2; done
+            "$@" ;;
+        *) builtin command -p "$@" ;;
+    esac
+}
+aw_native_seed_return() { [[ " $* " == *" --exit-code 17 "* ]]; }
+code=0
+aw_native_setup_backend custom-backend || code=$?
+[[ "$code" == 17 ]]
+'''.replace("set -euo pipefail", f"set -euo pipefail\nFIXTURE_SUPPORT={0 if headed else 4}"), [tmp_path])
+    assert result.returncode == 0, result.stderr
+    assert not result.stdout and not result.stderr
+    assert not list(tmp_path.glob(".native-seed-exec.*"))
 
 
 def test_setup_discovery_cannot_cache_another_slots_descriptor_during_aba(tmp_path: Path) -> None:
@@ -270,8 +371,9 @@ _aw_native_seed_supports_contract "$2" return
 
 
 @pytest.mark.parametrize("backend_code", [0, 7])
+@pytest.mark.parametrize("headed", [False, True])
 def test_uncertain_observer_warns_without_a_second_mutation_or_changed_exit(
-    tmp_path: Path, backend_code: int,
+    tmp_path: Path, backend_code: int, headed: bool,
 ) -> None:
     result = _run(r'''
 set -euo pipefail
@@ -284,6 +386,7 @@ LAUNCH_ATTEMPT_ID=attempt
 LAUNCH_RESOLUTION_ID=resolution
 LAUNCH_PARENT_ID=parent
 _aw_native_setup_require_contract() { AW_NATIVE_SEED_RUNTIME=(_fixture_exec); }
+aw_native_seed_supports_posix_headed() { return "$FIXTURE_SUPPORT"; }
 _aw_native_setup_prepare() {
     AW_NATIVE_SEED_ATTEMPT=attempt
     AW_NATIVE_SEED_RESOLUTION=resolution
@@ -293,6 +396,11 @@ _aw_native_setup_prepare() {
     AW_NATIVE_SEED_ARGV=(backend)
 }
 _fixture_exec() {
+    local argument selected=0
+    for argument; do
+        [[ "$argument" != headed-live-owner-v1 ]] || selected=1
+    done
+    [[ "$selected" == "$FIXTURE_HEADED" ]] || return 92
     while [[ "$1" != --completion-file ]]; do shift; done
     printf '3\n' > "$2"
     return "$FIXTURE_CODE"
@@ -313,7 +421,9 @@ aw_native_seed_phase() { printf 'UNEXPECTED MUTATION\n'; return 3; }
 code=0
 aw_native_setup_backend backend || code=$?
 [[ "$code" == "$FIXTURE_CODE" ]]
-'''.replace("set -euo pipefail", f"set -euo pipefail\nFIXTURE_CODE={backend_code}"), [tmp_path])
+'''.replace("set -euo pipefail",
+            f"set -euo pipefail\nFIXTURE_CODE={backend_code}\n"
+            f"FIXTURE_SUPPORT={0 if headed else 4}\nFIXTURE_HEADED={int(headed)}"), [tmp_path])
     assert result.returncode == 0, result.stderr
     assert not result.stdout
     assert result.stderr == "Native backend exec is unconfirmed; inspect the retained handoff.\n"

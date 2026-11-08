@@ -109,6 +109,128 @@ atomic persistence may finish while the owner is withdrawn; the later denial is
 not rollback or proof of absent state. Re-read that same operation under a valid
 owner instead of inventing a replacement identity or blindly repeating effects.
 
+## Optional prepared-intent storage extension
+
+The existing lifecycle owner may explicitly call
+`adopt_prepared_reviews(lifecycle_checkpoint=..., expires_at=..., checkpoint=...)`.
+This orthogonal data extension adds `review_intent_version: 2` to the current
+owner envelope; it does not require adopting conversation, attention or capture
+features merely to store a prepared review. Those existing layout versions and
+capacity declarations retain their meanings and preserve the extension.
+Old strict envelope readers refuse the extra field before rewriting anything.
+The lifecycle checkpoint must actually exclude or transition those readers,
+as with the existing adoption API. A submit request never adopts it.
+
+An explicitly adopted owner accepts review-intent/v2. Each comment/reply/owned
+edit retains its existing body plus `preparation` with exactly `identity` and
+`body_id`, selected from the actual
+[shared preparation result](../../ai-attribution/docs/comment-preparation.md).
+The identity retains its public comment/write GUIDs and original source
+projection. The hash and canonical trailing marker must agree with the exact
+body, including the producer's single-outer-marker and conservative literal
+boundaries. Quoted and closed code examples remain authored content; duplicate
+outer markers and unfinished fences/comments refuse before admission.
+No second body or profile history is stored. Bodyless votes carry no
+preparation and do not create filler comments.
+
+One selected operation has at most one prepared action per logical comment;
+different replies need different comment/write identities. A write GUID cannot
+be reused by another retained action/operation. These are owner-local data
+consistency checks, not a distributed uniqueness service, evidence of who
+prepared the content or authority to post it. The actual producer still owns
+profile/audience/source policy and preparation before final approval. Original
+operation fingerprints bind the entire selected body and metadata through
+restart and unknown/confirmed receipts; changed retry bytes or identities refuse.
+All added bytes count toward the existing review/receipt reservation.
+
+Legacy v1 intents and their unresolved receipts remain unchanged and do not
+acquire preparation evidence from body markers. The default intent parser and
+protected executor still select v1. A separate
+[explicit native execution selection](protected-review-executor.md#prepared-native-intent-and-original-receipt-projection)
+can use v2 and read original receipt correlation; the data extension alone
+activates neither. A separately selected
+[workspace receiver](workspace-integration.md#optional-prepared-review-receiver)
+can expose the adopted contract; data adoption alone advertises no capability
+or installed/provider qualification. Rollback cannot remove
+the extension or downgrade a file with unresolved v2 records.
+
+## Optional pre-approval selection retention
+
+`ReviewSelectionStore(existing_store)` uses the same file, operation lock,
+transaction and review capacity. Its explicit `adopt(lifecycle_checkpoint=...,
+expires_at=..., checkpoint=...)` requires prepared-review adoption and adds
+`review_selection_version: 1`. Old strict envelope and operation readers
+refuse this extension; the existing lifecycle owner must exclude them before
+adoption. No request adopts or downgrades it.
+
+The trusted source owner may call `retain(original, prepared, expires_at=...,
+checkpoint=...)` with a v1 original selection and the actual composed v2
+intent. Non-body selection, source/revision, action order and native targets
+must agree. The owner retains only the original selection's digest and a
+`prepared` stage alongside the single final intent/body and funded eventual
+receipt reservation. It stores no original draft or profile archive.
+`recover(original, ...)` reads that exact retained operation without composing
+again. Changed input refuses; a same-key race or repeated retain returns the
+first committed final bytes, not a later origin/profile's candidate. Existing
+nonblocking lock contention refuses; reconcile the same key after it clears.
+An uncertain commit must be reconciled by that same original key.
+
+This is a **data-only prerequisite**, not preparation provenance.
+`retain` still accepts the caller's already-prepared intent. The optional
+[workspace receiver](workspace-integration.md#optional-pre-approval-selection-receiver)
+composes the allocation API below under the
+[reviewed pre-approval contract](../../../efforts/active/durable-pr-watch-delegation/comment-intent-binding.md#durable-pre-approval-selection-and-allocation).
+
+The optional source-only `allocate(original, compose=..., expires_at=...,
+checkpoint=...)` creates fresh version-4 comment/write GUIDs for **new comments
+and replies**. Resolve actual policy, effective profile and source through their
+existing owners before calling it; `compose` must be a bound synchronous,
+bounded pure preparer, not a resolver or native/network IO callback. Under the
+same owner lock, allocation first reconciles the original key, then composes
+the exact final v2 bytes, validates the selected identities and commits before
+returning a preview. Restart, contention and lost results use `recover` or the
+same `allocate` key: neither invokes composition or allocates another identity
+when the original record already exists. Current-owner checks remain mandatory;
+recovery does not grant current policy permission.
+An optional trusted pure `validate_intent` callback may enforce the executing
+transport's complete preview/submission limits before retention commits.
+Failure leaves no new selection; it does not reserve a failed preview or
+authorize another body under an already committed key.
+
+Bodyless votes allocate no GUIDs and create no filler comment. Without the
+optional `generation` and `source_attachment` arguments, automatic owned edits
+still refuse. When a trusted embedding supplies its actual protected source,
+allocation reuses the executor's complete selection and native-author/baseline
+checks. Under the same transaction, confirmed original receipts for the exact
+scope/native target must bind one logical GUID and the exact baseline body.
+The actual composer receives that retained preparation and a fresh write GUID.
+Potentially matching unknown effects, conflicting logical identities and
+unmatched prepared histories refuse without committing another selection.
+
+A genuinely legacy target gets its first GUID only during its explicitly
+selected ordinary edit with that protected source binding. An unbound outer
+marker refuses; copied metadata or caller-supplied previous preparation is not
+native evidence. Quoted examples remain content. No unselected targets are
+edited or backfilled. Original-key recovery returns the committed selection
+without requiring its old generation to remain cached or composing again.
+
+The explicit caller-ID prepared path remains unchanged. This API adds no
+storage format, public request syntax, capability advertisement, callback
+loader, policy owner, publisher rollout or installed adoption. The current
+workspace receiver retains `owned_edits: false` as its baseline. Its separately
+selected [edit extension](workspace-integration.md#optional-selected-edits)
+can supply the actual protected source after additive capability negotiation;
+ordinary/default receivers still refuse automatic edits.
+
+A retained selection is not execution-admitted. Existing execution inspection,
+attempt, receipt/projection and feedback-capture paths refuse it. Only
+`admit_review()` with that exact final intent changes its stage to `admitted`;
+the operation, GUIDs, body, creation time and reservation remain unchanged.
+That transition is still owner-only data admission, not evidence of approval
+or permission to send. Pending records cannot contain attempts or receipts.
+Legacy operations and unknown fences remain unchanged, and preparation itself
+does not ACK, emit Dispatch, advance feedback or perform native IO.
+
 ## Explicit remaining boundary
 
 This is **not a backend executor**. It does not perform actual write-credential/

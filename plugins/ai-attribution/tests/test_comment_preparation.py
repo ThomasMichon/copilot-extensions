@@ -56,6 +56,20 @@ def test_actual_profile_and_one_compact_distinct_marker_are_repeatable() -> None
     assert prepare(first["body"], profile=settings) == first
 
 
+def test_optional_producer_refuses_a_source_owner_without_resolution_support(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import ModuleType
+
+    from comment_producer import CommentProducer
+
+    monkeypatch.setitem(
+        sys.modules, "agent_worktrees.attribution_prepare_cli",
+        ModuleType("agent_worktrees.attribution_prepare_cli"),
+    )
+    producer = CommentProducer(Path.cwd(), None, {}, CONTEXT)  # type: ignore[arg-type]
+    with pytest.raises(profile.ProfileError, match="source owner unavailable"):
+        producer({"scope": {}}, checkpoint=lambda: None)
+
+
 def test_intentional_edit_keeps_comment_id_and_replaces_only_the_owned_marker() -> None:
     first = prepare()
     edited = prepare(first["body"].replace("Review text.", "Updated review."), write_id=EDIT, previous=first)

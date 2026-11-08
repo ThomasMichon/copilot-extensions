@@ -139,5 +139,9 @@ def materialize(
                 "observed_at": observed_at if session_ctx is not None else None,
             },
         }
+        if wid not in mux_map and getattr(record, "mux_live", None) is not None:
+            row["mux_last_known"] = {
+                "present": record.mux_live, "observed_at": record.mux_live_at,
+            }
         rows.append(row)
     return rows

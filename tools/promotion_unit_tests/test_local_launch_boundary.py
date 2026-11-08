@@ -21,7 +21,7 @@ def boundary(monkeypatch, tmp_path):
     package.__path__ = [str(source)]
     monkeypatch.setitem(sys.modules, package_name, package)
     installer = ModuleType(f"{package_name}.installer")
-    installer.install_dir = lambda: tmp_path
+    installer.scripts_dir = lambda: tmp_path / "scripts"
     monkeypatch.setitem(sys.modules, installer.__name__, installer)
 
     def load(name, path):
@@ -32,6 +32,11 @@ def boundary(monkeypatch, tmp_path):
         spec.loader.exec_module(module)
         return module
 
+    core = ROOT / "libs/copilot-driver-core/src/agent_remote_driver"
+    core_package = ModuleType("agent_remote_driver")
+    core_package.__path__ = [str(core)]
+    monkeypatch.setitem(sys.modules, core_package.__name__, core_package)
+    load("agent_remote_driver.native_arguments", core / "native_arguments.py")
     load(f"{package_name}.native_arguments", source / "native_arguments.py")
     producer = load(f"{package_name}.process_launcher", source / "process_launcher.py")
     consumer = load(

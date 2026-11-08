@@ -1,0 +1,9 @@
+{
+  "comment": "Passive current-roster reads carry a demand-free marker, so a running status-monitor neither renews scan demand nor wakes its producer for them; a resident that predates the marker rejects it and the passive read returns the labeled advisory saved roster",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -113,6 +113,49 @@ def test_passive_supervisor_never_reconciles_before_original_singleton_admission
     assert calls == []
 
 
+@pytest.mark.parametrize("incumbent_base", ["runtime", "caller"])
+def test_supervisor_admission_uses_coordinator_database_directory(tmp_path, monkeypatch, incumbent_base):
+    from contextlib import ExitStack
+    from agent_dispatch import config, source_start, supervise_cli, supervisor_source
+    from zdd.diagnostics import process_start_time
+
+    runtime = tmp_path / "runtime"
+    caller = tmp_path / "caller"
+    runtime.mkdir()
+    caller.mkdir()
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(runtime))
+    monkeypatch.setenv("AGENT_DISPATCH_DB", str(Path("data") / "tasks.db"))
+    cfg = config.load_config()
+    monkeypatch.chdir(runtime if incumbent_base == "runtime" else caller)
+    identity = source_start.config_identity(cfg)
+    monkeypatch.chdir(caller)
+    birth = process_start_time(os.getpid())
+    assert birth
+
+    class Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def health(self):
+            return {
+                "status": "ok", "runtime_config_identity": identity,
+                "slot": {"pid": os.getpid(), "process_start_time": birth},
+            }
+
+    monkeypatch.setattr(source_start, "require_selected_source", lambda: runtime)
+    monkeypatch.setattr(supervise_cli, "_client", lambda *_args, **_kwargs: Client())
+    with ExitStack() as clients:
+        admission = supervisor_source.configure_admission(SimpleNamespace(), None, object(), clients)
+        if incumbent_base == "runtime":
+            admission.probe()
+        else:
+            with pytest.raises(RuntimeError, match="data access"):
+                admission.probe()
+
+
 def test_passive_supervisor_reads_cohort_without_queue_or_unit_mutation(monkeypatch, tmp_path):
     from agent_dispatch import source_start, supervisor_source
     from agent_dispatch.pool_source_snapshot import DeclarationRead

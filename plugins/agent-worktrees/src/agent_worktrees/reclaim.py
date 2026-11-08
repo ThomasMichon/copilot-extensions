@@ -706,7 +706,7 @@ def ensure_session_copilot_reaped(
     }
 
 
-def _mux_reachability(worktree_ids) -> dict[str, bool]:
+def _mux_reachability(worktree_ids) -> dict[str, bool | None]:
     """Map each worktree id -> whether its ``wt-<id>`` mux session is reachable
     by the mux control socket (``has-session``/``list-sessions``) -- i.e. a live
     session **Stop** (``kill-session``) can act on.
@@ -715,10 +715,8 @@ def _mux_reachability(worktree_ids) -> dict[str, bool]:
     folds every session into one ``list-sessions``), so an ``--all`` / multi-
     worktree scan pays O(1) mux queries, not O(N). A **detached** psmux server
     (Windows: no attached client) is alive but invisible to every control-socket
-    verb, so it reads ``False`` here -- deliberately, since Stop cannot reach it
-    (dotfiles #1447). Degrades to all-``False`` on any error (treat an
-    unverifiable mux as unreachable, so its bound Copilot stays reclaimable
-    rather than stranded).
+    verb, so it reads ``False`` only after a confirmed negative observation.
+    Errors and missing results remain ``None`` and never authorize reclaim.
     """
     ids = sorted({w for w in worktree_ids if w})
     if not ids:
@@ -726,8 +724,8 @@ def _mux_reachability(worktree_ids) -> dict[str, bool]:
     try:
         status = sessions.mux_status_many(ids)
     except Exception:
-        return {w: False for w in ids}
-    return {w: bool(status.get(w) and status[w].exists) for w in ids}
+        return {w: None for w in ids}
+    return {w: status[w].exists if status.get(w) is not None else None for w in ids}
 
 
 def filter_stop_unreachable(
@@ -762,7 +760,7 @@ def filter_stop_unreachable(
             kept.append(f)
             continue
         wt = f.get("worktree_id")
-        if not wt or reach.get(wt, False):
+        if not wt or reach.get(wt) is not False:
             continue  # healthy, Stop-able mux (or unverifiable) -> preserve
         kept.append(f)  # detached / control-socket-unreachable mux -> reclaimable
     return kept
@@ -802,7 +800,7 @@ def teardown_detached_mux(
         if t.get("homing") != "mux":
             continue
         wt = t.get("worktree_id")
-        if not wt or reach.get(wt, False):
+        if not wt or reach.get(wt) is not False:
             continue
         for server in mux_ancestors_of(t["pid"], table):
             if server in done:

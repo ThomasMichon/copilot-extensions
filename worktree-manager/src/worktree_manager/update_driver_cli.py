@@ -27,6 +27,13 @@ _CONTEXT_KEYS = (
 )
 
 
+def _current_authority(driver, **kwargs):
+    inspect = getattr(driver, "current_authority", None)
+    if not callable(inspect):
+        raise driver.StateError("selected update driver lacks authority support")
+    return inspect(**kwargs)
+
+
 def handoff_environment(args: list[str]) -> dict[str, str]:
     if args and (
         (args[0] == "update" and "--auth-report" not in args)
@@ -152,9 +159,15 @@ def source_identity() -> dict[str, object]:
     }
 
 
-def request_context() -> dict[str, str]:
-    context = {key: os.environ[key] for key in _CONTEXT_KEYS if key in os.environ}
-    if f"{__package__}.engine_client" in sys.modules:
+def request_context(*, capture_engine: bool = True) -> dict[str, str]:
+    excluded = set() if capture_engine else {
+        "WORKTREE_MANAGER_ENGINE_ARGV", "WORKTREE_MANAGER_ENGINE_CMD",
+    }
+    context = {
+        key: os.environ[key] for key in _CONTEXT_KEYS
+        if key in os.environ and key not in excluded
+    }
+    if capture_engine and f"{__package__}.engine_client" in sys.modules:
         from .engine_client import ENGINE_ARGV_ENV, inherited_engine_command
 
         accepted = inherited_engine_command()
@@ -269,28 +282,36 @@ def self_install_request(operation: Callable[[], int]) -> int:
     from .self_install import _runtime_installer, default_root, running_payload_dir
     from .runtime_identity import running_application_slot
 
-    with _runtime_installer()._installation_custody() as custody:
-        if custody is not None:
-            return operation()
-        argv, environment = driver.runtime_command("worktree_manager", ["self-install", "--apply"])
-        workspace = running_application_slot() or running_payload_dir()
-        root = str(default_root().expanduser().resolve())
-        context = {**request_context(), "WORKTREE_MANAGER_ROOT": root}
-        request = driver.enqueue(
-            driver.RequestSpec(
-                "manager-self-install", ("--apply",), project=root,
-                cwd=str(workspace), source=_source_key(), context=tuple(context.items()),
-            ),
-            runner=driver.TrustedRunner(
-                argv, str(workspace), env=tuple(environment.items()), context_keys=_CONTEXT_KEYS,
-            ),
-        )
-        driver.drain()
-        result = driver.wait(request.id, output=sys.stdout)
-        if result.state != "completed" or result.exit_code is None:
-            _report(result, as_json=False)
-            return 1
-        return result.exit_code
+    try:
+        with _runtime_installer()._installation_custody() as custody:
+            if custody is not None:
+                return operation()
+            argv, environment = driver.runtime_command("worktree_manager", ["self-install", "--apply"])
+            workspace = running_application_slot() or running_payload_dir()
+            root = str(default_root().expanduser().resolve())
+            context = {**request_context(), "WORKTREE_MANAGER_ROOT": root}
+            selected = _current_authority(
+                driver, context=context.get("COPILOT_EXTENSIONS_CONTEXT", ""), cwd=str(workspace),
+            )
+            request = driver.enqueue(
+                driver.RequestSpec(
+                    "manager-self-install", ("--apply",), project=root,
+                    cwd=str(workspace), source=_source_key(), context=tuple(context.items()),
+                    authority="standalone" if selected.configured and selected.mode == "standalone" else "",
+                ),
+                runner=driver.TrustedRunner(
+                    argv, str(workspace), env=tuple(environment.items()), context_keys=_CONTEXT_KEYS,
+                ),
+            )
+            driver.drain()
+            result = driver.wait(request.id, output=sys.stdout)
+            if result.state != "completed" or result.exit_code is None:
+                _report(result, as_json=False)
+                return 1
+            return result.exit_code
+    except (driver.DriverError, driver.ParticipantError, OSError, ValueError) as error:
+        print(f"Update driver: {error}", file=sys.stderr)
+        return 1
 
 
 def cmd_update_request(rest: list[str]) -> int:
@@ -353,7 +374,29 @@ def cmd_update_request(rest: list[str]) -> int:
                     _update_context_directory(os.environ)
                     from .project_update_controller import handoff
 
-                    controlled = handoff(forwarded)
+                    selected = _current_authority(
+                        driver,
+                        root=custody.root,
+                        context=dict(request.spec.context).get("COPILOT_EXTENSIONS_CONTEXT", ""),
+                        cwd=request.spec.cwd,
+                    )
+                    requested = getattr(request.spec, "authority", "standalone")
+                    if selected.configured and (
+                        selected.mode != requested
+                        or (requested == "project" and selected.project != request.spec.project)
+                    ):
+                        raise driver.StateError("update authority changed before execution")
+                    if requested == "project" and not selected.configured:
+                        raise driver.StateError("selected project update authority is unavailable")
+                    if selected.configured and selected.mode == "standalone":
+                        if "--no-project-controller" not in forwarded:
+                            forwarded = [*forwarded, "--no-project-controller"]
+                    delegated = requested == "project" and not any(
+                        flag in {"--phase", "--target", "--repair-engine", "--no-project-controller"}
+                        or flag.startswith(("--phase=", "--target=", "--repair-engine="))
+                        for flag in getattr(request.spec, "argv", ())
+                    )
+                    controlled = handoff(forwarded, authority=selected, delegated=delegated)
                     if controlled is not None:
                         return controlled
                     if request.spec.backend == "manager" and request.spec.source != _source_key():
@@ -369,8 +412,17 @@ def cmd_update_request(rest: list[str]) -> int:
             for name in ("detach", "wait", "supervised_debug", "json")
             if getattr(options, name)
         ]
-        with _request_environment(request_context()):
-            controlled = handoff(forwarded, observer=observer)
+        context = request_context()
+        source_anchor = request_source_anchor()
+        selected = _current_authority(
+            driver,
+            context=context.get("COPILOT_EXTENSIONS_CONTEXT", ""), cwd=source_anchor,
+        )
+        if selected.configured and selected.mode == "standalone":
+            if "--no-project-controller" not in forwarded:
+                forwarded = [*forwarded, "--no-project-controller"]
+        with _request_environment(context):
+            controlled = handoff(forwarded, observer=observer, authority=selected)
         if controlled is not None:
             return controlled
         if options.target is not None and options.target != "worktree-manager":
@@ -384,16 +436,14 @@ def cmd_update_request(rest: list[str]) -> int:
                 for name in ("detach", "wait", "supervised_debug", "json")
                 if getattr(options, name)
             ]
-            with _request_environment(request_context()):
+            with _request_environment(context):
                 return engine_client.run_engine_passthrough(
                     project, ["update", "--no-manager", *arguments, *observer],
                     **({"headless": True} if options.detach else {}),
                 )
         project, _args = extract_project(forwarded)
-        context = request_context()
         _update_context_directory(context)
         cwd = Path.cwd().resolve()
-        source_anchor = request_source_anchor()
         hold_override = os.environ.get("BOOTSTRAP_KILLSWITCH_STATE_FILE", "")
         hold_path = os.path.abspath(os.path.expanduser(hold_override)) if hold_override else ""
         arguments = list(forwarded)
@@ -408,6 +458,7 @@ def cmd_update_request(rest: list[str]) -> int:
             cwd=source_anchor, source=_source_key(), context=tuple(context.items()),
             repair=not options.auto,
             killswitch_path=hold_path,
+            authority="standalone" if selected.configured and selected.mode == "standalone" else "",
         )
         argv, env = driver.runtime_command("worktree_manager", ["update", *arguments])
         request = driver.enqueue(

@@ -23,6 +23,13 @@ def _context() -> tuple[tuple[str, str], ...]:
     return tuple((key, os.environ[key]) for key in _CONTEXT_KEYS if key in os.environ)
 
 
+def _current_authority(driver, **kwargs):
+    inspect = getattr(driver, "current_authority", None)
+    if not callable(inspect):
+        raise driver.StateError("selected update driver lacks authority support")
+    return inspect(**kwargs)
+
+
 def _invocation_cwd() -> Path:
     from . import __main__ as core
 
@@ -193,7 +200,9 @@ def cmd_update_request(args: argparse.Namespace) -> int:
         if custody is not None:
             with custody:
                 request = driver.status(custody.request_id, root=custody.root)
-                if request.state != "running" or request.spec.backend not in {"manager", "engine"}:
+                if request.state != "running" or request.spec.backend not in {
+                    "manager", "engine", "source-recovery",
+                }:
                     raise driver.StateError("engine does not participate in this update request")
                 with _execution_context(request.spec.context):
                     if (
@@ -202,27 +211,63 @@ def cmd_update_request(args: argparse.Namespace) -> int:
                     ):
                         raise driver.StateError("engine installation changed after submission")
                     custody.assert_owned()
-                    previous = getattr(args, "_controller_request", None)
+                    selected = _current_authority(
+                        driver,
+                        root=custody.root,
+                        context=dict(request.spec.context).get("COPILOT_EXTENSIONS_CONTEXT", ""),
+                        cwd=request.spec.cwd,
+                    )
+                    missing = object()
+                    previous = getattr(args, "_controller_request", missing)
+                    previous_authority = getattr(args, "_controller_authority", missing)
                     args._controller_request = request.spec
+                    args._controller_authority = selected
                     try:
                         return update_cli.cmd_update(args)
                     finally:
-                        if previous is None:
+                        if previous is missing:
                             del args._controller_request
                         else:
                             args._controller_request = previous
+                        if previous_authority is missing:
+                            del args._controller_authority
+                        else:
+                            args._controller_authority = previous_authority
         from .project_update_controller import probe_for_submission
 
         cwd = _invocation_cwd()
-        selection = True if controller else probe_for_submission(args, cwd=cwd)
-        controller = selection is True
+        selected = _current_authority(
+            driver,
+            context=os.environ.get("COPILOT_EXTENSIONS_CONTEXT", ""), cwd=str(cwd),
+        )
         project = cfg.active_project()
+        request_authority = ""
+        if selected.configured and selected.mode == "standalone":
+            args = argparse.Namespace(**vars(args))
+            args.no_project_controller = True
+            controller = False
+            request_authority = "standalone"
+        elif selected.configured:
+            if (
+                getattr(args, "no_project_controller", False) or getattr(args, "phase", None)
+                or getattr(args, "target", None) is not None
+            ):
+                raise driver.StateError("standalone or partial update is disabled by project authority")
+            project = selected.project
+            if probe_for_submission(args, cwd=cwd, project=project) is not True:
+                raise driver.StateError("selected project update controller is unavailable")
+            controller = True
+            request_authority = "project"
+        else:
+            selection = True if controller else probe_for_submission(args, cwd=cwd)
+            controller = selection is True
         flags = _flags(args)
         bypass = ["--no-manager"] if getattr(args, "no_manager", False) else []
         spec = driver.RequestSpec(
             backend="engine", argv=tuple([*bypass, *flags]), project=project or "", cwd=str(cwd),
             source=str(cfg.install_dir().resolve()), context=_request_context(controller=controller, cwd=cwd),
             repair=not getattr(args, "auto", False),
+            authority=request_authority,
         )
         project_args = ["--project", project] if project else []
         argv, environment = driver.runtime_command(

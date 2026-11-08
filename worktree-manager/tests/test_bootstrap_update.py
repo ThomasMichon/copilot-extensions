@@ -19,6 +19,10 @@ SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "bootstrap_update.py"
 sys.path.insert(0, str(SCRIPT.parent))
 
 
+def _legacy_authority(**_kwargs):
+    return core.authority.UpdateAuthority()
+
+
 @pytest.fixture(autouse=True)
 def retained_inputs(tmp_path, monkeypatch):
     import bootstrap_inputs
@@ -86,6 +90,7 @@ def test_bootstrap_update_journals_scope_and_waits_for_the_whole_result(
 
     driver = SimpleNamespace(
         RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
+        current_authority=_legacy_authority,
         enqueue=enqueue, drain=drain, wait=wait, default_root=lambda: tmp_path,
     )
     args = SimpleNamespace(
@@ -109,6 +114,47 @@ def test_bootstrap_update_journals_scope_and_waits_for_the_whole_result(
     assert not capsys.readouterr().out
 
 
+@pytest.mark.parametrize("mode", ["standalone", "project"])
+def test_bootstrap_repair_obeys_configured_authority(tmp_path, monkeypatch, mode):
+    import bootstrap_inputs
+
+    tmp_path = tmp_path.resolve()
+    payload, queue = tmp_path / "source", tmp_path / "driver"
+    payload.mkdir()
+    core.change_authority(
+        mode, project="example" if mode == "project" else "", root=queue, timeout=5,
+        verify_capabilities=lambda _deadline: True,
+    )
+    monkeypatch.setattr(update_driver_cli, "_source_key", lambda: "configured-source")
+    monkeypatch.setattr(update_driver_cli, "request_context", lambda: {})
+    captured = []
+    driver = SimpleNamespace(
+        RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
+        DriverError=core.DriverError, StateError=core.StateError, InterruptedError=core.InterruptedError,
+        default_root=lambda: queue,
+        current_authority=lambda **kwargs: core.current_authority(root=queue, **kwargs),
+        enqueue=lambda spec, **kwargs: core.enqueue(spec, root=queue, **kwargs),
+        drain=lambda: core.drain(root=queue, executor=lambda transaction: captured.append(transaction.request) or 0),
+        wait=lambda request_id, **kwargs: core.wait(request_id, root=queue, **kwargs),
+    )
+    args = SimpleNamespace(
+        payload=payload, root=tmp_path / "manager",
+        command=["update", "--supervised-debug", "--repair-engine", str(payload), "--project", "sample"],
+        repair_update=True, install_source=None,
+    )
+    if mode == "project":
+        monkeypatch.setattr(bootstrap_inputs, "retain", lambda *_a, **_kw: pytest.fail("unselected bootstrap ran"))
+        assert runpy.run_path(str(SCRIPT))["execute"](args, driver, source_digest="a" * 64) == 1
+        assert not core.status(root=queue)
+    else:
+        assert runpy.run_path(str(SCRIPT))["execute"](args, driver, source_digest="a" * 64) == 0
+        assert len(captured) == 1
+        request = captured[0]
+        assert request.spec.authority == "standalone"
+        assert "--no-project-controller" in request.spec.argv
+        assert "--no-project-controller" in request.runner.argv
+
+
 @pytest.mark.parametrize("state", ["interrupted", "blocked"])
 def test_bootstrap_update_does_not_report_unfinished_work_as_success(tmp_path, monkeypatch, state):
     execute = runpy.run_path(str(SCRIPT))["execute"]
@@ -116,6 +162,7 @@ def test_bootstrap_update_does_not_report_unfinished_work_as_success(tmp_path, m
     monkeypatch.setattr(update_driver_cli, "request_context", lambda: {})
     driver = SimpleNamespace(
         RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
+        current_authority=_legacy_authority,
         default_root=lambda: tmp_path,
         enqueue=lambda *a, **k: SimpleNamespace(id="fixture", log_path=tmp_path / "log"),
         drain=lambda: None,
@@ -162,6 +209,7 @@ def test_default_update_observes_a_retained_worker_instead_of_running_installers
 
     driver = SimpleNamespace(
         RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
+        current_authority=_legacy_authority,
         default_root=lambda: tmp_path,
         enqueue=lambda *a, **k: request, ensure_worker=worker, wait=wait,
         drain=lambda: pytest.fail("ordinary observer ran installation"),
@@ -173,6 +221,102 @@ def test_default_update_observes_a_retained_worker_instead_of_running_installers
     )
     assert execute(args, driver, source_digest="a" * 64) == (0 if detach else 23)
     assert seen == (["worker"] if detach else ["worker", "wait"])
+
+
+@pytest.mark.parametrize("phase,already_completed,as_json", [
+    ("launch", False, False), ("launch", False, True),
+    ("launch", True, False), ("launch", True, True), ("wait", False, False),
+])
+def test_worker_start_failure_retains_the_admitted_request(
+    tmp_path, monkeypatch, capsys, as_json, phase, already_completed,
+):
+    import agent_procutil
+    import bootstrap_update
+    import runtime_install
+
+    queue = tmp_path / "queue"
+    monkeypatch.setattr(update_driver_cli, "_source_key", lambda: "configured-source")
+    monkeypatch.setattr(update_driver_cli, "request_context", lambda: {})
+    monkeypatch.setattr(update_driver_cli, "request_source_anchor", lambda: str(tmp_path))
+    monkeypatch.setattr(runtime_install.engine, "_package_roots", lambda payload: (tmp_path,))
+    monkeypatch.setattr(runtime_install.engine, "_package_name", lambda path: "agent-procutil")
+    launches = []
+
+    def refuse_spawn(*args, **kwargs):
+        launches.append(args)
+        raise agent_procutil.DaemonSpawnError("fixture caller Job forbids breakaway")
+
+    monkeypatch.setattr(agent_procutil, "spawn_daemon", refuse_spawn)
+
+    def enqueue(spec, **kwargs):
+        request = core.enqueue(spec, root=queue, **kwargs)
+        if already_completed:
+            core.drain(root=queue, executor=lambda _transaction: 23)
+            return core.status(request.id, root=queue)
+        return request
+
+    def worker(command, **kwargs):
+        if phase == "wait":
+            launches.append(("acknowledged-worker",))
+            return "acknowledged-worker"
+        return core.ensure_worker(command, root=queue, **kwargs)
+
+    def wait(identifier, **kwargs):
+        assert phase == "wait" and kwargs["worker"] == "acknowledged-worker"
+        raise core.SpawnError("fixture acknowledged worker exited before claim")
+
+    driver = SimpleNamespace(
+        RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
+        current_authority=_legacy_authority, StateError=core.StateError,
+        default_root=lambda: queue,
+        enqueue=enqueue,
+        ensure_worker=worker,
+        drain=lambda: pytest.fail("worker refusal became foreground execution"),
+        wait=wait,
+    )
+    args = SimpleNamespace(
+        payload=tmp_path, root=tmp_path / "manager",
+        command=["update", *(["--detach"] if phase == "launch" else []),
+                 *(["--json"] if as_json else [])],
+        repair_update=False, install_source=None,
+    )
+    message = "DaemonSpawnError" if phase == "launch" else "exited before claim"
+    with pytest.raises(core.SpawnError, match=message):
+        bootstrap_update.execute(args, driver, source_digest="a" * 64)
+
+    request, = core.status(root=queue)
+    expected_state, expected_exit = ("completed", 23) if already_completed else ("pending", None)
+    assert request.state == expected_state and request.exit_code == expected_exit
+    if already_completed:
+        assert request.started_at is not None and request.finished_at is not None
+    else:
+        assert request.started_at is None and request.finished_at is None
+        if phase == "launch":
+            assert "DaemonSpawnError" in request.error
+    assert len(launches) == 1
+    output = capsys.readouterr()
+    if as_json:
+        receipt = json.loads(output.out)
+        assert receipt["request_id"] == request.id
+        assert receipt["log_path"] == str(request.log_path)
+        assert receipt["state"] == expected_state and receipt["exit_code"] == expected_exit
+        assert message in receipt["error"]
+    else:
+        assert output.out == ""
+    assert f"Update request {request.id}; log: {request.log_path}" in output.err
+
+
+def test_foreground_json_refuses_before_bootstrap_admission(tmp_path, capsys):
+    import bootstrap_update
+
+    args = SimpleNamespace(
+        payload=tmp_path, root=tmp_path, command=["update", "--wait", "--json"],
+        repair_update=False, install_source=None,
+    )
+    with pytest.raises(SystemExit) as failure:
+        bootstrap_update.execute(args, SimpleNamespace(), source_digest="a" * 64)
+    assert failure.value.code == 2
+    assert capsys.readouterr().out == ""
 
 
 def test_prepared_old_source_is_data_not_the_bootstrap_controller(tmp_path, monkeypatch):
@@ -199,6 +343,7 @@ def test_prepared_old_source_is_data_not_the_bootstrap_controller(tmp_path, monk
     monkeypatch.setattr(update_driver_cli, "request_context", lambda: {})
     driver = SimpleNamespace(
         RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
+        current_authority=_legacy_authority,
         enqueue=enqueue, default_root=lambda: tmp_path, drain=lambda: None,
         wait=lambda *a, **k: SimpleNamespace(state="completed", exit_code=23),
     )
@@ -230,6 +375,7 @@ def test_bootstrap_retains_effective_budget_only_for_suite_execution(
     captured = []
     driver = SimpleNamespace(
         RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
+        current_authority=_legacy_authority,
         enqueue=lambda spec, **kwargs: captured.append((spec, kwargs["runner"]))
         or SimpleNamespace(id="fixture", log_path=tmp_path / "log"),
         default_root=lambda: tmp_path, drain=lambda: None,
@@ -277,6 +423,7 @@ def test_observer_modes_share_the_actual_pending_installation_recipe(
 
     driver = SimpleNamespace(
         RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
+        current_authority=_legacy_authority,
         default_root=lambda: queue,
         enqueue=lambda spec, **kwargs: core.enqueue(spec, root=queue, **kwargs),
         ensure_worker=worker, wait=wait, drain=lambda: events.append("drain"),
@@ -410,6 +557,7 @@ def test_bootstrap_source_identity_is_captured_before_retention(tmp_path, monkey
     monkeypatch.setattr(bootstrap_inputs, "retain", retain)
     driver = SimpleNamespace(
         RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
+        current_authority=_legacy_authority,
         enqueue=enqueue, default_root=lambda: tmp_path, drain=lambda: None,
         wait=lambda *a, **k: SimpleNamespace(state="completed", exit_code=23),
     )

@@ -20,6 +20,17 @@ def _args(**values):
     return argparse.Namespace(**{**fields, **values})
 
 
+@pytest.fixture(autouse=True)
+def _prepared_fixture_import_graph(monkeypatch):
+    import json
+    import sys
+    from pathlib import Path
+
+    monkeypatch.setenv("UPDATE_DRIVER_TEST_IMPORT_PATH", json.dumps([
+        str(Path(path).resolve()) for path in sys.path if path
+    ]))
+
+
 def _run_runtime_owned(monkeypatch, argv, environment, *, timeout=20):
 
     with monkeypatch.context() as selected:
@@ -41,6 +52,8 @@ def _write_fixture_project(scope):
 
 
 def _enqueue_fixture_update(monkeypatch, scope, **values):
+    import json
+    import os
     from pathlib import Path
     import update_driver
     from agent_worktrees import __main__ as engine, project_update_controller
@@ -51,7 +64,12 @@ def _enqueue_fixture_update(monkeypatch, scope, **values):
     def command(module, args=()):
         argv, environment = original(module, args)
         if module == "agent_worktrees":
-            argv = (argv[0], str(fixture.resolve()), "execute", *args)
+            if os.environ.get("UPDATE_DRIVER_TEST_RUNTIME_MODE", "source") == "prepared":
+                prepared = json.loads(Path(os.environ["UPDATE_DRIVER_TEST_PREPARED_RUNTIME"]).read_text(encoding="utf-8"))
+                prefix, environment = prepared["engine"]["script"]
+            else:
+                prefix = [argv[0], str(fixture.resolve())]
+            argv = (*prefix, "execute", *args)
         return argv, environment
 
     with monkeypatch.context() as selected:
@@ -68,6 +86,7 @@ def _enqueue_fixture_update(monkeypatch, scope, **values):
 def queued(monkeypatch, tmp_path):
     import update_driver
     from agent_worktrees import project_update_controller
+    from update_driver.authority import UpdateAuthority
 
     seen = {}
     request = SimpleNamespace(
@@ -88,6 +107,7 @@ def queued(monkeypatch, tmp_path):
         pytest.fail("ordinary caller entered the update executor")
 
     monkeypatch.setattr(update_driver, "borrowed_custody", lambda: None)
+    monkeypatch.setattr(update_driver, "current_authority", lambda **_kwargs: UpdateAuthority())
     monkeypatch.setattr(update_driver, "enqueue", enqueue)
     monkeypatch.setattr(update_driver, "runtime_command", lambda module, args=(): (
         (str(tmp_path / "python.exe"), "-m", module, *args), {},
@@ -103,6 +123,34 @@ def queued(monkeypatch, tmp_path):
     return seen, request
 
 
+def test_fresh_source_recovery_uses_existing_custody_without_requeue(tmp_path, monkeypatch):
+    import update_driver
+
+    calls = []
+
+    class Custody:
+        request_id = "source-request"
+        root = tmp_path
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def assert_owned(self):
+            calls.append("owned")
+
+    monkeypatch.setattr(update_driver, "borrowed_custody", Custody)
+    monkeypatch.setattr(update_driver, "status", lambda *args, **kw: SimpleNamespace(
+        state="running", spec=SimpleNamespace(backend="source-recovery", context=()),
+    ))
+    monkeypatch.setattr(update_driver, "enqueue", lambda *args, **kw: pytest.fail("no second request"))
+    monkeypatch.setattr(update_cli, "cmd_update", lambda args: calls.append("native-suite") or 17)
+    assert boundary.cmd_update_request(_args(no_manager=True)) == 17
+    assert calls == ["owned", "native-suite"]
+
+
 def test_ordinary_update_queues_before_manager_discovery(queued):
     seen, request = queued
     assert boundary.cmd_update_request(_args(force=True)) == 4
@@ -110,6 +158,75 @@ def test_ordinary_update_queues_before_manager_discovery(queued):
     assert seen["spec"].project == "example"
     assert seen["runner"].argv[-4:] == ("--project", "example", "update", "--force")
     assert seen["wait"] == request.id
+
+
+def test_downlevel_driver_refuses_cleanly_without_queueing(queued, monkeypatch, capsys):
+    import update_driver
+
+    seen, _request = queued
+    monkeypatch.delattr(update_driver, "current_authority")
+    assert boundary.cmd_update_request(_args()) == 1
+    assert "spec" not in seen
+    assert "lacks authority support" in capsys.readouterr().err
+
+
+def test_explicit_standalone_authority_bypasses_the_controller_through_manager(
+    queued, monkeypatch,
+):
+    import update_driver
+    from agent_worktrees import project_update_controller
+    from update_driver.authority import selection
+
+    seen, _request = queued
+    monkeypatch.setattr(update_driver, "current_authority", lambda **_kwargs: selection("standalone"))
+    monkeypatch.setattr(
+        project_update_controller, "probe_for_submission",
+        lambda *_args, **_kwargs: pytest.fail("standalone mode probed a project controller"),
+    )
+    monkeypatch.setenv("AGENT_WORKTREES_INTERNAL_PROJECT_CONTROLLER", "1")
+    assert boundary.cmd_update_request(_args()) == 4
+    assert seen["spec"].authority == "standalone"
+    assert "--no-project-controller" in seen["spec"].argv
+    assert "--no-project-controller" in seen["runner"].argv
+
+
+def test_project_authority_routes_to_the_selected_project(queued, monkeypatch):
+    import update_driver
+    from agent_worktrees import project_update_controller
+    from update_driver.authority import selection
+
+    seen, _request = queued
+    probes = []
+    monkeypatch.setattr(
+        update_driver, "current_authority", lambda **_kwargs: selection("project", "harness"),
+    )
+    monkeypatch.setattr(boundary.cfg, "active_project", lambda: "different")
+    monkeypatch.setattr(boundary, "_request_context", lambda **_kwargs: ())
+    monkeypatch.setattr(
+        project_update_controller, "probe_for_submission",
+        lambda _args, **kwargs: probes.append(kwargs) or True,
+    )
+    assert boundary.cmd_update_request(_args()) == 4
+    assert probes[0]["project"] == "harness"
+    assert seen["spec"].project == "harness"
+    assert seen["spec"].authority == "project"
+    assert seen["runner"].argv[-3:] == ("--project", "harness", "update")
+
+
+@pytest.mark.parametrize("options", [{}, {"no_project_controller": True}, {"target": "agent-bridge"},
+                                      {"phase": "runtimes"}])
+def test_project_authority_never_queues_a_standalone_fallback(queued, monkeypatch, options):
+    import update_driver
+    from agent_worktrees import project_update_controller
+    from update_driver.authority import selection
+
+    seen, _request = queued
+    monkeypatch.setattr(
+        update_driver, "current_authority", lambda **_kwargs: selection("project", "example"),
+    )
+    monkeypatch.setattr(project_update_controller, "probe_for_submission", lambda *_a, **_kw: False)
+    assert boundary.cmd_update_request(_args(**options)) == 1
+    assert "spec" not in seen
 
 
 @pytest.mark.parametrize("route", ["shortcut", "no-manager", "direct"])
@@ -458,16 +575,35 @@ def test_queued_update_keeps_original_context_after_project_chdir(queued, tmp_pa
 
 
 @pytest.mark.parametrize("with_manager", [False, True])
-# Two independently bounded workers plus fixture setup and cleanup.
-@pytest.mark.timeout(100)
+# Two independently bounded 20-second workers plus fixture setup and cleanup.
+@pytest.mark.timeout(60)
 def test_actual_queued_engine_keeps_each_scope_and_original_invocation(tmp_path, monkeypatch, with_manager):
     import json
     import importlib.util
     import os
     import subprocess
+    import shutil
+    import time
     from contextlib import nullcontext
     from pathlib import Path
     import update_driver
+
+    mode = os.environ.get("UPDATE_DRIVER_TEST_RUNTIME_MODE", "source")
+    assert mode in {"source", "prepared"}
+    prepared = (
+        json.loads(Path(os.environ["UPDATE_DRIVER_TEST_PREPARED_RUNTIME"]).read_text(encoding="utf-8"))
+        if mode == "prepared" else None
+    )
+    print(f"Routing runtime mode: {mode}; cold-first-touch proof not exercised")
+    phases = tmp_path / "fixture-phases.jsonl"
+    monkeypatch.setenv("UPDATE_DRIVER_TEST_PHASE_LOG", str(phases))
+
+    def worker_phase(phase):
+        with phases.open("a", encoding="utf-8") as logfile:
+            logfile.write(json.dumps({
+                "time": time.monotonic(), "role": "worker-owner",
+                "phase": phase, "pid": os.getpid(),
+            }) + "\n")
 
     home = tmp_path / "home"
     home.mkdir()
@@ -507,21 +643,56 @@ def test_actual_queued_engine_keeps_each_scope_and_original_invocation(tmp_path,
                 ) == 0
             monkeypatch.setenv("AGENT_HOME", str(tmp_path / "first"))
             worker, environment = update_driver.runtime_command("update_driver", ["worker"])
+            if prepared is not None:
+                from agent_procutil import python_cache_args
+
+                worker, environment = prepared["engine"]["worker"]
+                queue_root = home / ".copilot-extensions" / "update-driver"
+                cache = python_cache_args(queue_root, runtime=prepared["engine"]["slot"])
+                target_cache = Path(cache[1].split("=", 1)[1])
+                if not target_cache.exists():
+                    worker_phase("owned-bytecode-copy-start")
+                    shutil.copytree(
+                        Path(prepared["engine"]["cache"][1].split("=", 1)[1]), target_cache,
+                    )
+                    worker_phase("owned-bytecode-copy-completed")
+            worker_phase("starting")
             try:
                 result = _run_runtime_owned(monkeypatch, worker, environment, timeout=40)
             except subprocess.TimeoutExpired as error:
+                worker_phase("timeout")
                 logs = home / ".copilot-extensions" / "update-driver"
-                pytest.fail(f"worker timeout: {[p.read_text() for p in logs.glob('*.log')]}: {error}")
+                pytest.fail(
+                    f"worker timeout: {[p.read_text() for p in logs.glob('*.log')]}; "
+                    f"phases: {phases.read_text(encoding='utf-8')}: {error}"
+                )
+            worker_phase("completed")
+            print("Fixture phases:\n" + phases.read_text(encoding="utf-8"))
             assert result.returncode == 0, result.stderr
             rows = update_driver.status(root=home / ".copilot-extensions" / "update-driver")
             assert rows and all(row.state == "completed" and row.exit_code == 0 for row in rows), [
                 (row.state, row.exit_code, row.error, row.log_path.read_text()) for row in rows
             ]
+            assert all(
+                row.spec.cwd == os.path.normcase(os.path.normpath(
+                    str(Path(dict(row.spec.context)["AGENT_HOME"]) / "invocation")
+                ))
+                for row in rows
+            )
     if windows is not None:
         assert windows.surfaced == {}, windows.surfaced
         assert windows.focus_changes == {}, windows.focus_changes
+    entries = [
+        json.loads(line) for line in phases.read_text(encoding="utf-8").splitlines()
+        if json.loads(line)["phase"] == "manager-entry-cwd"
+    ]
+    assert [entry["cwd"] for entry in entries] == (
+        [str(tmp_path / "first" / "anchor")] * 2 if with_manager else []
+    )
     for name in scopes:
         scope = tmp_path / name
+        # Native update re-entry uses captured settings context; project routing
+        # still selects the anchor. Manager entry is observed separately above.
         assert json.loads((scope / "result.json").read_text()) == {
             "anchor": str(scope / "anchor"),
             "invocation": str(scope / "invocation"),

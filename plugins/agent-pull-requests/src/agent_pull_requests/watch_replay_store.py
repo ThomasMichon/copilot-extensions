@@ -162,6 +162,19 @@ class ReplayStore:
     def _validate_owner(self, document: dict) -> None:
         version = document.get("version")
         names = {"schema", "version", "namespace", "service", "replay", "reviews", "capacities"}
+        prepared = "review_intent_version" in document
+        selections = "review_selection_version" in document
+        if selections:
+            names.add("review_selection_version")
+            if (
+                type(document["review_selection_version"]) is not int
+                or document["review_selection_version"] != 1 or not prepared
+            ):
+                raise ReplayStoreInvalid("unsupported pre-approval selection storage contract")
+        if prepared:
+            names.add("review_intent_version")
+            if type(document["review_intent_version"]) is not int or document["review_intent_version"] != 2:
+                raise ReplayStoreInvalid("unsupported prepared review storage contract")
         if version in (3, 4, 5, 6):
             names.add("conversations")
         if version in (4, 5, 6):
@@ -201,6 +214,8 @@ class ReplayStore:
             raise ReplayStoreInvalid("replay state exceeds its reserved capacity")
         review_intent.validate_operations(
             document["reviews"], receipt_bytes=capacities["receipt_bytes"], review_bytes=capacities["review_bytes"],
+            versions=(1, 2) if prepared else (1,),
+            selections=selections,
         )
         if version in (3, 4, 5, 6):
             from .conversation_journal import ConversationJournal
@@ -296,6 +311,24 @@ class ReplayStore:
             self.check_current(expires_at, checkpoint)
             return copy.deepcopy(result)
 
+    def adopt_prepared_reviews(
+        self, *, lifecycle_checkpoint: Callable[[], None], expires_at: int,
+        checkpoint: Callable[[], None] | None = None,
+    ) -> dict:
+        """Explicit orthogonal extension; the existing owner excludes old strict readers."""
+        if not callable(lifecycle_checkpoint):
+            raise ValueError("actual reader lifecycle checkpoint required")
+
+        def adopt(document: dict) -> dict:
+            lifecycle_checkpoint()
+            status = "already_adopted" if "review_intent_version" in document else "adopted"
+            document["review_intent_version"] = 2
+            self._validate_owner(document)
+            lifecycle_checkpoint()
+            return {"status": status, "review_intent_versions": [1, 2]}
+
+        return self._review_transaction(adopt, expires_at=expires_at, checkpoint=checkpoint)
+
     @staticmethod
     def _review_operation(document, operation_id, scope):
         review_intent.text(operation_id, 128)
@@ -303,28 +336,29 @@ class ReplayStore:
         operation = next((row for row in document["reviews"] if row["intent"]["operation_id"] == operation_id), None)
         if operation is None or operation["intent"]["scope"] != scope:
             raise ValueError("review operation missing or outside selected scope")
+        if operation.get("selection", {}).get("stage") == "prepared":
+            raise ValueError("pre-approval selection is not execution-admitted")
         return operation
 
     def admit_review(self, selected: dict, *, expires_at: int, checkpoint=None) -> dict:
         """Owner-only data admission; never authorizes or invokes backend effects."""
-        selected = review_intent.intent(selected)
+        selected = review_intent.intent(selected, versions=(1, 2))
         digest = _digest(selected)
 
         def admit(document):
+            if selected["version"] == 2 and document.get("review_intent_version") != 2:
+                raise ReplayStoreInvalid("prepared review requires explicit storage adoption")
             previous = next((row for row in document["reviews"]
                              if row["intent"]["operation_id"] == selected["operation_id"]), None)
             if previous is not None:
                 if previous["intent_id"] != digest or previous["intent"] != selected:
                     raise ValueError("review operation ID already has a different immutable intent")
+                if previous.get("selection", {}).get("stage") == "prepared":
+                    previous["selection"]["stage"] = "admitted"
+                    return {"status": "admitted", "operation": previous}
                 return {"status": "existing", "operation": previous}
-            operation = {
-                "intent": copy.deepcopy(selected), "intent_id": digest, "created_at": self.clock(),
-                "actions": [{"id": action["id"], "state": "unattempted", "attempt_id": None, "receipt": None}
-                            for action in selected["actions"]],
-            }
-            operation["reserved_bytes"] = (
-                len(review_intent.encoded(operation))
-                + len(selected["actions"]) * (document["capacities"]["receipt_bytes"] + 512) + 1024
+            operation = review_intent.new_operation(
+                selected, created_at=self.clock(), receipt_bytes=document["capacities"]["receipt_bytes"],
             )
             document["reviews"].append(operation)
             return {"status": "admitted", "operation": operation}
@@ -335,6 +369,52 @@ class ReplayStore:
         return self._review_transaction(
             lambda document: self._review_operation(document, operation_id, scope),
             expires_at=expires_at, checkpoint=checkpoint, persist=False,
+        )
+
+    def review_intent_versions(
+        self, *, expires_at: int, checkpoint: Callable[[], None] | None = None,
+    ) -> tuple[int, ...]:
+        """Read the actual adopted contract without provisioning or granting write authority."""
+        return self._review_transaction(
+            lambda document: (1, 2) if document.get("review_intent_version") == 2 else (1,),
+            expires_at=expires_at, checkpoint=checkpoint, persist=False,
+        )
+
+    def prepared_review_receipt(
+        self, operation_id: str, scope: dict, action_id: str, *,
+        expires_at: int, checkpoint: Callable[[], None] | None = None,
+    ) -> dict:
+        """Read original intent/receipt correlation, never tag discovery or fresh native proof."""
+        review_intent.text(action_id, 128)
+
+        def project(document: dict) -> dict:
+            if document.get("review_intent_version") != 2:
+                raise ReplayStoreInvalid("prepared receipt requires explicit storage adoption")
+            operation = self._review_operation(document, operation_id, scope)
+            selected = next(
+                (action for action in operation["intent"]["actions"] if action["id"] == action_id), None,
+            )
+            if selected is None:
+                raise ValueError("selected review action missing")
+            result = {
+                "protocol": "agent-pull-requests.prepared-comment-receipt/v1",
+                "operation_id": operation_id, "action_id": action_id,
+                "scope": copy.deepcopy(operation["intent"]["scope"]),
+                "intent_id": operation["intent_id"], "effects": "none",
+            }
+            if operation["intent"]["version"] != 2 or "preparation" not in selected:
+                return {**result, "status": "unavailable", "reason": "original_preparation_missing"}
+            state = next(action for action in operation["actions"] if action["id"] == action_id)
+            return {
+                **result, "status": "retained",
+                "identity": copy.deepcopy(selected["preparation"]["identity"]),
+                "body_id": selected["preparation"]["body_id"],
+                "action_state": state["state"], "receipt": copy.deepcopy(state["receipt"]),
+                "basis": "original_intent_and_retained_receipt", "fresh_native_read": False,
+            }
+
+        return self._review_transaction(
+            project, expires_at=expires_at, checkpoint=checkpoint, persist=False,
         )
 
     def begin_review_action(self, operation_id, scope, action_id, *, expires_at: int, checkpoint=None) -> dict:

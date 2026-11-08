@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -147,6 +148,130 @@ def test_acquire_defaults_have_no_disposition(remote: Path, capsys):
     # inspect confirms the settled disposition is durable on the ref.
     seen = _run(capsys, "inspect", "codespace", "cs-2", "--origin", str(remote))
     assert ob.from_context(seen["context"]) == ob.AT_REST
+
+
+def test_released_only_cli_refuses_expiry_but_accepts_release(remote, capsys, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    monkeypatch.setattr(lease_cli.GitLeaseStore, "_utc_now", lambda self: now)
+    acquired = _run(
+        capsys, "acquire", "codespace", "sequential",
+        "--holder", "first/project/work", "--origin", str(remote),
+        "--ttl", "60", "--released-only",
+    )
+    now += timedelta(hours=1)
+    assert run_lease([
+        "borrow", "codespace", "sequential", "--holder", "next/project/work",
+        "--origin", str(remote), "--released-only",
+    ]) == 3
+    capsys.readouterr()
+    unchanged = _run(capsys, "inspect", "codespace", "sequential", "--origin", str(remote))
+    assert unchanged["token"] == acquired["token"]
+    assert unchanged["live"] is False
+    assert unchanged["state"] == "leased"
+    # The existing default retains its explicit stale-takeover semantics.
+    taken = _run(
+        capsys, "acquire", "codespace", "sequential",
+        "--holder", "first/project/work", "--origin", str(remote),
+    )
+    assert taken["event"] == "takeover"
+    _run(
+        capsys, "release", "codespace", "sequential",
+        "--token", taken["token"], "--origin", str(remote),
+    )
+    reused = _run(
+        capsys, "borrow", "codespace", "sequential",
+        "--holder", "next/project/work", "--origin", str(remote), "--released-only",
+    )
+    assert reused["event"] == "acquire"
+    assert reused["holder"] == "next/project/work"
+
+
+def test_return_proof_cli_uses_real_separate_receiver(remote, capsys):
+    from agent_procutil import no_window_kwargs
+
+    acquired = _run(
+        capsys, "acquire", "codespace", "return-proof",
+        "--holder", "first/project/work", "--origin", str(remote),
+    )
+    invocation = [
+        sys.executable, "-c",
+        "import sys; from agent_worktrees.lease_cli import run_lease; "
+        "raise SystemExit(run_lease(sys.argv[1:]))",
+    ]
+    returned = subprocess.run(
+        [*invocation, "release", "codespace", "return-proof", "--token", acquired["token"],
+         "--retain-return-proof", "--origin", str(remote)],
+        capture_output=True, text=True, timeout=30, **no_window_kwargs(),
+    )
+    assert returned.returncode == 0, returned.stderr
+    result = json.loads(returned.stdout)
+    assert result["schema_version"] == 2
+    assert result["returned_generations"] == [{
+        "lease_id": acquired["lease_id"], "holder": acquired["holder"],
+        "released_at": result["renewed_at"],
+    }]
+    reused = _run(
+        capsys, "borrow", "codespace", "return-proof",
+        "--holder", "next/project/work", "--origin", str(remote), "--released-only",
+    )
+    assert reused["returned_generations"] == result["returned_generations"]
+    assert reused["holder"] == "next/project/work"
+
+
+def test_return_proof_legacy_codec_refuses_without_overwrite(remote, capsys, monkeypatch):
+    from agent_worktrees import lease_store
+    from agent_worktrees.lease_protocol import ProtocolError
+
+    acquired = _run(
+        capsys, "acquire", "codespace", "rollback",
+        "--holder", "first/project/work", "--origin", str(remote),
+    )
+    assert acquired["schema_version"] == 1
+    assert "returned_generations" not in acquired
+    released = _run(
+        capsys, "release", "codespace", "rollback", "--token", acquired["token"],
+        "--retain-return-proof", "--origin", str(remote),
+    )
+    parse = lease_store.parse_record
+
+    def legacy_codec(message, expected=None):
+        if json.loads(message.split("\n", 1)[1])["schema_version"] != 1:
+            raise ProtocolError("unsupported lease schema_version")
+        return parse(message, expected)
+
+    with monkeypatch.context() as legacy:
+        legacy.setattr(lease_store, "parse_record", legacy_codec)
+        assert run_lease([
+            "acquire", "codespace", "rollback", "--holder", "next/project/work",
+            "--origin", str(remote),
+        ]) == 2
+        assert "unsupported lease schema_version" in capsys.readouterr().err
+    unchanged = _run(capsys, "inspect", "codespace", "rollback", "--origin", str(remote))
+    assert unchanged == released
+    baseline = _run(
+        capsys, "acquire", "codespace", "legacy-baseline",
+        "--holder", "first/project/work", "--origin", str(remote),
+    )
+    ordinary = _run(
+        capsys, "release", "codespace", "legacy-baseline", "--token", baseline["token"],
+        "--origin", str(remote),
+    )
+    assert ordinary["schema_version"] == 1
+    assert "returned_generations" not in ordinary
+
+
+def test_return_proof_cli_typo_is_rejected_before_store_access(monkeypatch, capsys):
+    monkeypatch.setattr(
+        lease_cli, "GitLeaseStore", lambda *args: pytest.fail("invalid syntax reached the store"),
+    )
+    with pytest.raises(SystemExit) as error:
+        run_lease([
+            "release", "codespace", "typo", "--token", "a" * 40, "--retain-return-proofs",
+        ])
+    assert error.value.code == 2
+    assert "unrecognized arguments" in capsys.readouterr().err
 
 
 def test_renew_advances_disposition_to_at_rest(remote: Path, capsys):

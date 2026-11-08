@@ -24,6 +24,215 @@ from agent_worktrees.lease_store import GitLeaseStore, LeaseConflict, LeaseLost
 from conftest import _published_seed_environment
 
 
+@pytest.mark.parametrize("released", [False, True])
+def test_released_only_acquisition_never_takes_over_expired_hold(monkeypatch, released):
+    from dataclasses import replace
+
+    client = store(LeaseSettings(origin="https://example.invalid/state.git"))
+    monkeypatch.setattr(client, "inspect", lambda *args: None)
+    transitions = []
+
+    def transition(item, expected, record):
+        transitions.append((expected, record.event))
+        return "a" * 40
+
+    monkeypatch.setattr(client, "_transition", transition)
+    previous = client.acquire("codespace", "reusable", "first", ttl_seconds=60)
+    if released:
+        previous = replace(
+            previous, live=False,
+            record=replace(previous.record, state="released", event="release"),
+        )
+    else:
+        previous = replace(previous, live=False)
+    monkeypatch.setattr(client, "inspect", lambda *args: previous)
+    transitions.clear()
+
+    if released:
+        acquired = client.acquire("codespace", "reusable", "next", released_only=True)
+        assert acquired.record.holder == "next"
+        assert transitions == [(previous.oid, "acquire")]
+    else:
+        with pytest.raises(LeaseConflict) as error:
+            client.acquire("codespace", "reusable", "next", released_only=True)
+        assert error.value.snapshot is previous
+        assert transitions == []
+        acquired = client.acquire("codespace", "reusable", "next")
+        assert acquired.record.event == "takeover"
+
+
+def test_released_only_rechecks_holder_after_cas_race(monkeypatch):
+    from dataclasses import replace
+    from agent_worktrees.lease_store import _CASConflict
+
+    client = store(LeaseSettings(origin="https://example.invalid/state.git"))
+    monkeypatch.setattr(client, "inspect", lambda *args: None)
+    monkeypatch.setattr(client, "_transition", lambda *args: "a" * 40)
+    previous = client.acquire("codespace", "reusable", "racer")
+    expired = replace(previous, live=False)
+    observations = iter([None, expired])
+    monkeypatch.setattr(client, "inspect", lambda *args: next(observations))
+    transitions = []
+
+    def lose_race(*args):
+        transitions.append(args)
+        raise _CASConflict()
+
+    monkeypatch.setattr(client, "_transition", lose_race)
+    with pytest.raises(LeaseConflict) as error:
+        client.acquire("codespace", "reusable", "next", released_only=True, retries=1)
+    assert error.value.snapshot is expired
+    assert len(transitions) == 1
+
+
+def test_return_proof_survives_successor_and_compaction_gc(settings, remote):
+    moment = BASE
+    client = store(settings)
+    client._now = lambda: moment
+    first = client.acquire("codespace", "returned", "first/project/work")
+    moment += timedelta(seconds=1)
+    renewed = client.renew("codespace", "returned", first.oid)
+    assert renewed.record.lease_id == first.record.lease_id
+    moment += timedelta(seconds=1)
+    returned = client.release("codespace", "returned", renewed.oid, retain_return_proof=True)
+    original_proof = [{
+        "lease_id": first.record.lease_id, "holder": first.record.holder,
+        "released_at": returned.record.renewed_at,
+    }]
+    assert returned.to_dict()["returned_generations"] == original_proof
+    moment += timedelta(seconds=1)
+    successor = client.acquire("codespace", "returned", "next/project/work", released_only=True)
+    assert successor.to_dict()["returned_generations"] == original_proof
+    moment += timedelta(seconds=1)
+    transferred = client.transfer("codespace", "returned", successor.oid, "third/project/work")
+    moment += timedelta(seconds=1)
+    transferred = client.renew("codespace", "returned", transferred.oid)
+    moment += timedelta(seconds=1)
+    final = client.release("codespace", "returned", transferred.oid)
+    proofs = final.to_dict()["returned_generations"]
+    assert proofs == original_proof + [{
+        "lease_id": transferred.record.lease_id, "holder": transferred.record.holder,
+        "released_at": final.record.renewed_at,
+    }]
+    assert successor.record.lease_id not in {item["lease_id"] for item in proofs}
+    with pytest.raises(LeaseLost):
+        client.release("codespace", "returned", renewed.oid, retain_return_proof=True)
+    assert client.inspect("codespace", "returned").oid == final.oid
+    moment += timedelta(days=31)
+    assert len(client.squash_stale(retention_days=30, kind="codespace")) == 1
+    git(f"--git-dir={remote}", "reflog", "expire", "--expire=now", "--all")
+    git(f"--git-dir={remote}", "gc", "--prune=now")
+    assert git(f"--git-dir={remote}", "cat-file", "-e", returned.oid, check=False).returncode != 0
+    compacted = client.inspect("codespace", "returned")
+    assert compacted.to_dict()["returned_generations"] == proofs
+    assert compacted.record.lease_id == final.record.lease_id
+
+
+def test_return_proof_evicts_only_the_oldest_generation(monkeypatch):
+    from dataclasses import replace
+    from agent_worktrees.lease_protocol import ReturnedGeneration, parse_record
+
+    client = store(LeaseSettings(origin="https://example.invalid/state.git"))
+    monkeypatch.setattr(client, "inspect", lambda *args: None)
+    monkeypatch.setattr(client, "_transition", lambda *args: "a" * 40)
+    held = client.acquire("codespace", "bounded", "current/project/work")
+    earlier = tuple(ReturnedGeneration(
+        f"{number:032x}", "earlier/project/work", format_timestamp(BASE - timedelta(seconds=1)),
+    ) for number in range(16))
+    held = replace(held, record=replace(held.record, schema_version=2, returned_generations=earlier))
+    monkeypatch.setattr(client, "inspect", lambda *args: held)
+    returned = client.release("codespace", "bounded", held.oid)
+    assert returned.record.returned_generations[:-1] == earlier[1:]
+    assert returned.record.returned_generations[-1].lease_id == held.record.lease_id
+    assert parse_record(serialize_record(returned.record)) == returned.record
+
+
+@pytest.mark.parametrize("corruption", ["drop", "downgrade"])
+def test_return_proof_cannot_be_removed_by_later_writes(settings, corruption):
+    from dataclasses import replace
+
+    client = store(settings)
+    first = client.acquire("codespace", "preserved", "first/project/work")
+    client.release("codespace", "preserved", first.oid, retain_return_proof=True)
+    successor = client.acquire("codespace", "preserved", "next/project/work")
+    corrupt = replace(
+        successor.record, event="renew", returned_generations=(),
+        schema_version=1 if corruption == "downgrade" else 2,
+    )
+    client._transition(resource("codespace", "preserved"), successor.oid, corrupt)
+    with pytest.raises(ProtocolError, match="retained return evidence"):
+        client.inspect("codespace", "preserved")
+
+
+def test_lost_release_cas_cannot_publish_return_proof(settings, monkeypatch):
+    client = store(settings)
+    first = client.acquire("codespace", "racing-return", "first/project/work")
+    transition = client._transition
+    rival = store(settings)
+    renewed = None
+
+    def race(item, expected, record):
+        nonlocal renewed
+        renewed = rival.renew("codespace", "racing-return", first.oid)
+        return transition(item, expected, record)
+
+    monkeypatch.setattr(client, "_transition", race)
+    with pytest.raises(LeaseLost, match="compare-and-swap"):
+        client.release("codespace", "racing-return", first.oid, retain_return_proof=True)
+    seen = rival.inspect("codespace", "racing-return")
+    assert seen.oid == renewed.oid
+    assert seen.record.state == "leased"
+    assert seen.record.returned_generations == ()
+    assert seen.record.schema_version == 1
+
+
+def test_return_proof_survives_unknown_release_after_successor_wins(settings, monkeypatch):
+    client = store(settings)
+    first = client.acquire("codespace", "unknown-return", "first/project/work")
+    original_git = client._git
+    rival = store(settings)
+    successor = None
+
+    def publish_then_reacquire(args, **kwargs):
+        nonlocal successor
+        result = original_git(args, **kwargs)
+        if "push" in args and result.returncode == 0:
+            successor = rival.acquire(
+                "codespace", "unknown-return", "next/project/work", released_only=True,
+            )
+        return result
+
+    monkeypatch.setattr(client, "_git", publish_then_reacquire)
+    with pytest.raises(LeaseLost, match="compare-and-swap"):
+        client.release("codespace", "unknown-return", first.oid, retain_return_proof=True)
+    seen = rival.inspect("codespace", "unknown-return")
+    assert seen.oid == successor.oid
+    assert seen.record.state == "leased"
+    assert seen.record.holder == "next/project/work"
+    assert [item.lease_id for item in seen.record.returned_generations] == [first.record.lease_id]
+
+
+def test_stale_takeover_retains_only_actual_return_proof(monkeypatch):
+    from dataclasses import replace
+    from agent_worktrees.lease_protocol import ReturnedGeneration
+
+    client = store(LeaseSettings(origin="https://example.invalid/state.git"))
+    monkeypatch.setattr(client, "inspect", lambda *args: None)
+    monkeypatch.setattr(client, "_transition", lambda *args: "a" * 40)
+    held = client.acquire("codespace", "stale-proof", "first/project/work")
+    earlier = (ReturnedGeneration(
+        "b" * 32, "earlier/project/work", format_timestamp(BASE - timedelta(seconds=1)),
+    ),)
+    held = replace(
+        held, live=False, record=replace(held.record, schema_version=2, returned_generations=earlier),
+    )
+    monkeypatch.setattr(client, "inspect", lambda *args: held)
+    taken = client.acquire("codespace", "stale-proof", "next/project/work")
+    assert taken.record.event == "takeover"
+    assert taken.record.returned_generations == earlier
+    assert held.record.lease_id not in {item.lease_id for item in taken.record.returned_generations}
+
+
 def git(
     *args: str,
     cwd: Path | None = None,

@@ -281,32 +281,53 @@ raise SystemExit(repository.run(repository.parse([
 
 
 @pytest.mark.skipif(os.name != "nt", reason="native windowless Manager boundary")
-@pytest.mark.parametrize("operation", ["repository", "prerequisite"])
+@pytest.mark.parametrize("operation", [
+    "repository", "prerequisite", "powershell-prerequisite",
+    "diagnostic-git", "diagnostic-census", "diagnostic-pid",
+])
 def test_native_windowless_manager_does_not_surface_engine(tmp_path: Path, operation: str) -> None:
     pythonw = Path(getattr(sys, "_base_executable", sys.executable)).with_name("pythonw.exe")
     assert pythonw.is_file()
     engine = tmp_path / "engine.py"
     engine.write_text("raise SystemExit(7)\n", encoding="utf-8")
+    if operation == "diagnostic-git":
+        subprocess.run(
+            ["git", "init", str(tmp_path / "repo")], capture_output=True, text=True,
+            check=True, **no_window_kwargs(),
+        )
     paths = tmp_path / "paths.json"
     paths.write_text(json.dumps(sys.path), encoding="utf-8")
     result = tmp_path / "result.json"
     driver = tmp_path / "manager.py"
     driver.write_text("""
-import ctypes,json,pathlib,subprocess,sys
+import ctypes,json,pathlib,shutil,subprocess,sys
 sys.path[:0] = json.loads(pathlib.Path(sys.argv[1]).read_text())
-from worktree_manager import engine_client, prereqs, repository_bootstrap as repository
+from worktree_manager import engine_client, harness_state, mux_daemon_cutover, prereqs, repository_bootstrap as repository
 python = str(pathlib.Path(sys.executable).with_name('python.exe'))
 engine_client.set_engine_command([python, sys.argv[2]])
 assert ctypes.windll.kernel32.GetConsoleCP() == 0
 original = subprocess.run
 def run(argv, **kwargs):
     assert kwargs.get('creationflags', 0) & subprocess.CREATE_NO_WINDOW
+    if sys.argv[4].startswith('diagnostic-') and argv[0] == 'powershell':
+        # Exercise the real console child without scanning foreign processes.
+        argv = [*argv[:4], "Write-Output ''"]
     return original(argv, **kwargs)
 engine_client.subprocess.run = run
 statuses = []
 for _ in range(2):
     if sys.argv[4] == 'prerequisite':
         statuses.append(prereqs._probe_version(python))
+    elif sys.argv[4] == 'powershell-prerequisite':
+        shell = shutil.which('pwsh')
+        assert shell, 'native PowerShell probe requires pwsh'
+        statuses.append(prereqs._probe_version(shell))
+    elif sys.argv[4] == 'diagnostic-git':
+        statuses.append(harness_state._is_real_git_checkout(pathlib.Path(sys.argv[2]).parent / 'repo'))
+    elif sys.argv[4] == 'diagnostic-census':
+        statuses.append(sorted(mux_daemon_cutover._iter_mux_daemon_pids()))
+    elif sys.argv[4] == 'diagnostic-pid':
+        statuses.append(mux_daemon_cutover._pid_matches_root(123, root=pathlib.Path(sys.argv[2]).parent))
     else:
         statuses.append(repository.run(repository.parse([
             '--apply', '--repository', 'https://example.invalid/team/sample.git'
@@ -324,6 +345,15 @@ pathlib.Path(sys.argv[3]).write_text(json.dumps({'statuses': statuses}))
         )
     assert process.returncode == 0, process.stdout + process.stderr
     assert result.is_file(), process.stdout + process.stderr
-    expected = ".".join(str(part) for part in sys.version_info[:3]) if operation == "prerequisite" else 7
-    assert json.loads(result.read_text()) == {"statuses": [expected, expected]}
+    observed = json.loads(result.read_text())
+    if operation == "powershell-prerequisite":
+        statuses = observed["statuses"]
+        assert len(statuses) == 2 and statuses[0] == statuses[1]
+        assert statuses[0] and int(statuses[0].split(".")[0]) >= 7
+    elif operation.startswith("diagnostic-"):
+        expected = {"diagnostic-git": True, "diagnostic-census": [], "diagnostic-pid": False}[operation]
+        assert observed == {"statuses": [expected, expected]}
+    else:
+        expected = ".".join(str(part) for part in sys.version_info[:3]) if operation == "prerequisite" else 7
+        assert observed == {"statuses": [expected, expected]}
     assert windows.surfaced == {} and windows.focus_changes == {}

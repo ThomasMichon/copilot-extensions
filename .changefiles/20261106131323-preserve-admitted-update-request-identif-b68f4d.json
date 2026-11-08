@@ -1,0 +1,13 @@
+{
+  "comment": "Preserve admitted update request identifiers and logs when worker startup fails, without replay or foreground fallback.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

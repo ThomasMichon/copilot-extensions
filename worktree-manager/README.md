@@ -21,6 +21,15 @@ plugins. It is the one piece that must work *before* the plugins do.
 
 ## Picker notices and diagnostics
 
+Mux uncertainty is separate from process liveness: `MUX(?)` means last-known
+mux hosting cannot be confirmed, and `HOST(?)` means a live process's hosting
+is unknown. Neither is a zero-client detached session or proof of a safe cold
+launch. Passive PSMux CLI discovery, attachment refresh and status validation
+are unavailable rather than executing commands that can perform startup cleanup.
+Existing mappings and counts are preserved, not revalidated. See
+[preservation-first recovery](../plugins/agent-worktrees/docs/mux.md#preserve-first-when-discovery-is-unavailable)
+for the scope, older-consumer limitation and separately authorized recovery.
+
 The Picker reserves two fixed notice rows for Knowledge setup and cached-source
 refresh status. Updates to these notices do not insert entries into the worktree
 list or move its selection. Claim-coverage warnings appear as a compact warning
@@ -28,6 +37,26 @@ icon; impacted worktrees offer **Doctor** in Actions for read-only diagnostics
 and full claim inspection. Inspection does not repair or release resources.
 Re-homed resources without a worktree row retain the compact `o: Doctor`
 footer shortcut to their existing inspection screen.
+
+## Worktree list controls
+
+The default list keeps **Active** separate and combines dormant and completed
+work in **Recent**, ordered by USED. The always-visible controls row exposes
+`s` **Sort** (used/title/state), `g` **Group** (Active/Recent, detailed status,
+or none), `f` **Status** (all/live/unfinished/completed), and `/` **Search**.
+Unowned and controller-owned workspaces retain their separate safety sections.
+
+Search still preserves live rows. An explicit nonlive status filter may hide
+them and visibly says **live hidden**. Escape clears search, then a status
+filter, before collapsing selection or asking to quit. Grouping and sorting
+remain selected. Live reordering preserves source-qualified focus, range
+anchor and multiselection; filtering never changes an action's target identity.
+
+USED and its default sort share the latest real worktree message timestamp
+when the selected engine supplies the optional versioned message fact.
+Older engines retain resume/completion/start fallback. See the
+[engine contract](../plugins/agent-worktrees/docs/engine-picker-contract.md#message-activity-and-native-mutation-wakes)
+for message, timezone and compatibility semantics.
 
 ## Staged launch prompts
 
@@ -426,6 +455,19 @@ retained file, not unique calls or lifetime totals. Missing, partial, stale and
 unsupported evidence remain visible. Reported completion is not agent retirement.
 Refresh reloads the graph; leaving the app cancels its owned reads.
 
+Graph also lists the worktree's recorded PR associations, but only when the
+selected engine declares `companion-pr-observations-v1` on its status bundle;
+otherwise it shows claim-only text and PR state stays unknown. A recorded
+lifecycle is association bookkeeping, not current openness. Selecting one
+association runs exactly one finite `pr-watch snapshot <repo> <number> --json`
+through that same engine (no host or token overrides); **Re-read PR** repeats
+it. The result shows open, closed without merge, merged, or unknown, with its
+last-observed time and source. A reply must match the selected provider,
+repository, number and endpoint and the version-1 snapshot schema, or it is
+shown as unavailable. Review, check and mergeability fields are diagnostics
+only and never grant consent or merge authority. Refresh or exit invalidates
+in-flight reads. Bounds: 24 associations and a 256 KiB reply.
+
 The optional attention strip shows the selected head CLI's **last-reported**
 busy, idle or awaiting-operator state and transition timestamp. Continuity
 remains unknown: this is not proof of a currently pending question or of no
@@ -573,9 +615,21 @@ continues in the same invocation when they are available. Failed provisioning
 or unresolved prerequisites stop before the core installer; a PATH-changing
 install that still leaves a gap requests a shell restart. Re-running is
 idempotent and can heal a partial install. Required Python must return a
-successful, supported version from the exact discovered executable; a found
-but unusable or unqualified Python remains a prerequisite gap. Detection does
-not reorder candidates, substitute a private runtime or repair public PATH.
+successful, supported version from the exact discovered executable. Detection
+continues through the existing `python3`/`python` aliases and their PATH entries
+when an earlier Python is unusable or too old, without executing WindowsApps
+Store aliases. If none qualifies, the first candidate remains the diagnostic
+path and Python remains a prerequisite gap. Fallback lookup stays within each
+PATH directory, tries remaining Windows PATHEXT matches, and retains the
+current-directory meaning of empty entries.
+Detection does not change PATH,
+acquire Python, search private runtimes or add launcher/install-root discovery.
+Windows also requires a working PowerShell 7 (`pwsh`) host for the native core
+installer. A missing, older or unqualified host stops setup before core or
+repository work. As with Git, setup reports a manual system-package command;
+it does not run WinGet or request elevation for this prerequisite. Install the
+reported package, open a fresh terminal, and retry. POSIX setup does not require
+PowerShell.
 The core install is never
 reimplemented — the Worktree Manager locates and calls agent-worktrees' own
 `install.{ps1,sh}`. Core detection uses the same read-only, installation-context-
@@ -750,6 +804,15 @@ Request status, recovery and authentication inspection instead use the current
 CLI outside installation submission. Read-only queries never authorize implicit
 fence repair; explicit recovery does not enqueue a new job that would hold its
 own recovery lock. Structured results remain on stdout, separate from diagnostics.
+If worker startup fails after bootstrap admission, detached JSON mode returns the
+admitted request ID, log path and admission snapshot with the caller error.
+The caller still fails; a pending receipt is not a running worker or completed
+installation. Inspect that same request before any further submission. The
+receipt does not authorize replay, foreground fallback or a different launch
+boundary.
+Foreground waits preserve the admitted identity on stderr when a worker exits
+between acknowledgment and claiming the request. Foreground `--json` remains
+unsupported and is rejected before admission; this receipt does not enable it.
 POSIX dispatch also waits when it owns a completion scope but deliberately
 forwards no witness. An unowned non-update
 launch retains process replacement. Source-only entries resolve their current
@@ -791,6 +854,13 @@ that authorization does not certify cleanup or permit displacing a live owner.
 
 ### Local promoted installation inputs
 
+For recovery independent of an installed Manager or dispatcher, the current
+Windows bootstrap also exposes passive-marker-guarded
+`--describe-recovery-source` discovery and `--recover-source <request.json>`.
+See [Fresh bootstrap source recovery](../docs/fresh-source-recovery.md) for
+the exact preview/install request, immutable selection, native new/legacy
+compatibility and partial-outcome contract.
+
 The standalone bootstrap and `scripts/runtime_install.py` advertise the
 read-only `--describe-source-inputs` descriptor. Its `install-source` capability
 accepts `--install-source <absolute-snapshot>` before application arguments;
@@ -827,6 +897,16 @@ remain associated build inputs, and the sdist carries the inputs needed to
 rebuild without the original checkout. This does not qualify cold construction,
 serving, cutover or rollout.
 
+Installed wheels expose the non-routing
+`runtime_source_prepare.prepare_application_inputs` API for completing an
+already-admitted first-party snapshot through the canonical native profile
+pipeline. Its declared multi-root toolkit is independent of the original
+checkout. Callers explicitly supply their prepared tooling interpreter,
+absolute native Python/UV, source identity and remaining deadline; no host
+dependency bootstrap, runtime selection or activation is implicit. This is
+provider reachability, not adoption by default/configured-source update.
+See the [installation contract](../docs/install-contract.md#local-wheel-applications).
+
 A complete snapshot additionally carries its prepared native profile and exact
 wheel closure. The adapter retains and inspects those bytes through the existing
 constructor and real installed-health gate. It does not resolve dependencies,
@@ -860,6 +940,38 @@ Mux routes and target readiness use the constructed slot's immutable generation,
 including repair/source qualifiers. Health preserves the semantic package
 `version` and separately reports `runtime_generation` from its own interpreter
 prefix, never from the mutable selected marker.
+`python -m worktree_manager.mux_serving_observation --root <manager-root>`
+emits the version-1 `worktree-manager.mux-serving-observation` result. It
+reads the existing authenticated route and native process identity without
+starting a daemon or creating a control credential. It reports `ready` with
+the actual serving generation, `inactive` only when no route or ownership
+markers exist, and otherwise `unknown`. Health binds the routed PID and birth
+identity; older health replies are admitted only when the authenticated
+rendezvous independently matches the route. An unresolved cutover breadcrumb
+is never reported as a ready or inactive owner. `--lock-paths` describes this
+runtime's cutover, routing and spawn lock paths without acquiring them.
+`--unfenced-absence` ignores those lock files but reports only
+`unfenced-absence`, not verified inactivity. It also recognizes a cleared
+shutdown route when intact, unsaturated publication history confirms every
+recorded owner's original process has exited. This does not account for
+unrecorded owners or settle child execution. A coordinating caller must hold
+all three corresponding native locks and recheck before relying on it.
+
+The selected, complete physical Manager runtime also provides
+`python -m worktree_manager.mux_serving_reconcile --root <manager-root>`.
+It leaves an inactive Manager stopped, or uses the existing cutover owner to
+replace a verified incumbent with the selected generation. It checks selection,
+credentials and native ownership around publication, and never terminates a
+candidate whose publication is uncertain. A failed, unpublished candidate is
+retired only through an identity-bound OS process owner with confirmed exit;
+if that owner is unavailable, the candidate remains and the result is unknown.
+Its version-1 result reports
+`ready`, `inactive` or `unknown`; an uncertain effect must not be replayed
+through another command. The timeout bounds individual waits, not the whole
+transaction; each bounded health request and its release share one completion
+budget. Neither observation nor reconciliation alone authorizes selector
+settlement or rollback; a coordinating caller must hold the appropriate
+native ownership and recheck the result.
 Normal mux-daemon startup uses the
 [external Python bytecode cache](../libs/agent-procutil/README.md#managed-python-bytecode-cache)
 under Manager's durable root. Explicitly read-only retention/bootstrap controls
@@ -2078,6 +2190,22 @@ that subtree's legacy `.install-complete` proves only assembly. It does not
 authorize runtime selection. Frozen source provenance and isolated installed
 health precede canonical completion, and candidate custody is retained through
 selection and update-triggered mux cutover.
+
+Installed plugin discovery uses the canonical runtime layout resolver for both
+historical direct-slot environments and prepared applications with a slot-local
+`.venv`. Root attribution and complete-slot selection still apply; a same-named
+command on `PATH` is not an engine selection. Engine bytecode caches remain
+outside the selected slot in either layout. Picker monitor reuse compares the
+selected interpreter's environment prefix with the monitor's recorded prefix,
+so a healthy nested environment does not cause another launch attempt.
+
+Wheel applications retain operational scripts under the installed package's
+`_runtime_assets/`, without requiring a source `payload/`. Self-install and
+bootstrap activation bind the running application to its physical installation
+and package location, accepting equivalent native Windows path spellings while
+still refusing a foreign root or package. Launcher consumers obtain resources
+from the selected Manager itself; the filesystem spelling is not an ownership
+or readiness exemption.
 
 Package versions and runtime generations are distinct: a repair adds the
 canonical `+repair.<identity>` qualifier (or `.repair.<identity>` after a local

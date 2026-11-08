@@ -920,6 +920,11 @@ receipts. They are not a backend executor or serving authorization.
 The [protected review executor](docs/protected-review-executor.md) orchestrates
 selected actions over those same records and the actual existing owner's pinned
 write transport. Source support is not installed backend authority or adoption.
+Its optional prepared-intent source selection retains original comment/write
+identity through that same native owner; receipt correlation is not fresh
+readback, feedback handling or automatic CLI/HTTP adoption. An explicitly
+selected [workspace receiver](docs/workspace-integration.md#optional-prepared-review-receiver)
+can expose that source path through the existing client and Gateway.
 
 The [explicit generation cache](docs/generation-cache.md) stores retained
 immutable views with CAS publication; it starts no provider read or service

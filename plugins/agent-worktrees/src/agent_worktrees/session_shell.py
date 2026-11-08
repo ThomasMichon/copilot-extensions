@@ -61,6 +61,8 @@ def prepare(
     if record.yaml_path != record_path:
         raise ValueError("Session shell record identity changed")
     names = {
+        "launch-command.ps1": ("launch-command.ps1",),
+        "launch-command.sh": ("launch-command.sh",),
         "pane-wrapper.ps1": ("pane-wrapper.ps1", "pane-launch.ps1"),
         "pane-wrapper.sh": ("pane-wrapper.sh",),
         "default-setup.ps1": (
@@ -83,7 +85,7 @@ def prepare(
     ).splitlines():
         from . import installer
 
-        helper = installer.install_dir() / "scripts" / "native-seed-boundary.ps1"
+        helper = installer.scripts_dir() / "native-seed-boundary.ps1"
         if not helper.is_file():
             helper = Path(__file__).resolve().parents[2] / "scripts" / helper.name
         _plain(helper)

@@ -72,6 +72,11 @@ def test_sweep_interval_default(monkeypatch):
     assert load_config().sweep_interval == DEFAULT_SWEEP_INTERVAL
 
 
+def test_coordinator_start_lock_follows_the_captured_routing_root(tmp_path):
+    assert config_mod.coordinator_start_lock_path() == tmp_path / "routing" / "serve-start.lock"
+    assert config_mod.coordinator_start_lock_path(tmp_path / "other") == tmp_path / "other" / "serve-start.lock"
+
+
 def test_sweep_interval_from_env(monkeypatch):
     monkeypatch.setenv("AGENT_DISPATCH_SWEEP_INTERVAL", "5")
     assert load_config().sweep_interval == 5.0

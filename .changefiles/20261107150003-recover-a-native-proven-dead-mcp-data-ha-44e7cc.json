@@ -1,0 +1,9 @@
+{
+  "comment": "Recover a native-proven dead MCP data handle without an incumbent route while preserving live-owner and publication-race checks",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

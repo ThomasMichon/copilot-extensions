@@ -202,6 +202,56 @@ def test_application_callbacks_preserve_optional_serving(
         assert (bridges / "example.json").read_text(encoding="utf-8") == original_config
 
 
+def test_application_setup_observes_an_explicit_precurrent_incumbent(tmp_path, monkeypatch):
+    from zdd import routing
+
+    module, root, slot, generation, bridges = _installed_callback(
+        tmp_path, monkeypatch, "source-nested",
+    )
+    bridges.mkdir(parents=True)
+    (bridges / "example.json").write_text(json.dumps({
+        "server": {"type": "stdio", "command": ["fixture-upstream"]},
+    }), encoding="utf-8")
+    fixed = tmp_path / "configured-sockets" / "explicit.sock"
+    fixed.parent.mkdir()
+    monkeypatch.setenv("AGENT_MCP_SERVE_SOCKET", str(fixed))
+    owner = routing.Endpoint(
+        bind="127.0.0.1", port=23456, pid=1111, version="incumbent",
+        generation=1, process_start_time="101",
+    )
+    observations = []
+
+    def active(home, **kwargs):
+        observations.append(home)
+        return owner if home == fixed.parent else None
+
+    monkeypatch.setattr(routing, "read_active_endpoint", active)
+    assert module.source_setup()["wanted"] is True
+    assert observations == [fixed.parent]
+    starts = []
+    monkeypatch.setattr(module, "_run_slot_startup", lambda *args, **kwargs: starts.append(args) or {"ok": True})
+    (root / "current-version").write_text(generation, encoding="utf-8")
+    assert module.source_start()["ok"]
+    assert starts == [((generation, slot, root), generation)]
+
+
+def test_application_setup_retains_separate_legacy_intent_without_adoption(tmp_path, monkeypatch):
+    module, _root, _slot, _generation, bridges = _installed_callback(
+        tmp_path, monkeypatch, "source-nested",
+    )
+    bridges.mkdir(parents=True)
+    (bridges / "example.json").write_text(json.dumps({
+        "server": {"type": "stdio", "command": ["fixture-upstream"]},
+    }), encoding="utf-8")
+    monkeypatch.delenv("AGENT_MCP_SERVE_SOCKET", raising=False)
+    legacy = bridges.parent / "serve.sock.endpoint"
+    original = b"opaque legacy state must not be rewritten"
+    legacy.write_bytes(original)
+    assert module.source_setup()["wanted"] is True
+    assert module.source_fixed_socket() == bridges.parent / "current" / "serve.sock"
+    assert legacy.read_bytes() == original
+
+
 def test_application_start_refuses_a_different_selected_slot(
     tmp_path, monkeypatch, capsys,
 ):
@@ -251,7 +301,7 @@ def test_application_setup_refuses_before_writing_an_unowned_slot(
     assert not list(slot.glob("*.tmp"))
 
 
-@pytest.mark.parametrize("mismatch", [None, "generic", "pid", "version", "ready", "birth"])
+@pytest.mark.parametrize("mismatch", [None, "generic", "pid", "version", "ready", "birth", "installation"])
 def test_source_startup_health_pins_only_the_incoming_owner(
     tmp_path, monkeypatch, mismatch,
 ):
@@ -263,7 +313,7 @@ def test_source_startup_health_pins_only_the_incoming_owner(
     )
     (root / "current-version").write_text(generation, encoding="utf-8")
     data_home = tmp_path / "data"
-    fixed = tmp_path / "sockets" / "serve.sock"
+    fixed = tmp_path / "sockets" / "current" / "serve.sock"
     monkeypatch.setenv("AGENT_MCP_HOME", str(data_home))
     monkeypatch.setenv("AGENT_MCP_SERVE_SOCKET", str(fixed))
     monkeypatch.setattr(serve, "_HAS_AF_UNIX", False)
@@ -295,11 +345,14 @@ def test_source_startup_health_pins_only_the_incoming_owner(
         reply = {
             "ok": True, "pong": True, "ready": True, "pid": candidate.pid,
             "version": generation, "data_socket": str(seen["context"].new_socket_path),
+            "runtime_root": str(root),
         }
         if mismatch == "generic":
             reply = {"ok": True, "pong": True}
         elif mismatch in {"pid", "version", "ready"}:
             reply[mismatch] = {"pid": 9876, "version": "outgoing-version", "ready": False}[mismatch]
+        elif mismatch == "installation":
+            reply["runtime_root"] = str(tmp_path / "other-installation")
         if mismatch:
             candidate.returncode = 0
         return reply
@@ -343,8 +396,8 @@ def _published_incumbent(tmp_path, monkeypatch, *, incumbent=True, same_generati
         "server": {"type": "stdio", "command": ["fixture-upstream"]},
         "auth": {"kind": "none"},
     }), encoding="utf-8")
-    home = tmp_path / "sockets"
-    home.mkdir()
+    home = tmp_path / "sockets" / "current"
+    home.mkdir(parents=True)
     fixed = home / "serve.sock"
     monkeypatch.setenv("AGENT_MCP_SERVE_SOCKET", str(fixed))
     monkeypatch.setattr(serve, "_HAS_AF_UNIX", False)
@@ -435,6 +488,7 @@ def _published_incumbent(tmp_path, monkeypatch, *, incumbent=True, same_generati
             return {
                 "ok": True, "pong": True, "ready": True, "pid": 1111,
                 "version": old_version, "data_socket": str(fixed),
+                "runtime_root": str(root),
             }
         actor = next(actor for actor in actors if actor.port == port)
         assert token == actor.context.new_control_token
@@ -446,6 +500,7 @@ def _published_incumbent(tmp_path, monkeypatch, *, incumbent=True, same_generati
         return {
             "ok": True, "pong": True, "ready": True, "pid": actor.pid,
             "version": generation, "data_socket": str(actor.context.new_socket_path),
+            "runtime_root": str(root),
         }
 
     monkeypatch.setattr(module, "spawn_passive_daemon", spawn)
@@ -454,6 +509,57 @@ def _published_incumbent(tmp_path, monkeypatch, *, incumbent=True, same_generati
         module=module, root=root, slot=slot, generation=generation, home=home, fixed=fixed,
         actors=actors, requests=requests, births=births, control=control,
     )
+
+
+@pytest.mark.parametrize("identity", ["other", "missing", "invalid"])
+def test_same_generation_foreign_installation_is_not_reused_or_replaced(
+    tmp_path, monkeypatch, identity,
+):
+    from zdd import routing
+
+    fixture = _published_incumbent(tmp_path, monkeypatch, same_generation=True)
+    before_route = routing.read_table(fixture.home, strict=True)
+    before_handle = fixture.module.source_handle_state(fixture.fixed)
+
+    def control(*args, **kwargs):
+        reply = fixture.control(*args, **kwargs)
+        if identity == "other":
+            reply["runtime_root"] = str(tmp_path / "other-installation")
+        elif identity == "invalid":
+            reply["runtime_root"] = []
+        else:
+            reply.pop("runtime_root", None)
+        return reply
+
+    monkeypatch.setattr(fixture.module, "control_request", control)
+    with pytest.raises((fixture.module.ControlError, routing.ActivePublicationRefused),
+                       match="installation"):
+        fixture.module._run_slot_startup(
+            (fixture.generation, fixture.slot, fixture.root), fixture.generation,
+            health_timeout=1,
+        )
+    assert not fixture.actors
+    assert routing.read_table(fixture.home, strict=True) == before_route
+    assert fixture.module.source_handle_state(fixture.fixed) == before_handle
+
+
+def test_installed_startup_publishes_only_the_exact_requested_handle(tmp_path, monkeypatch):
+    from zdd import routing
+
+    fixture = _published_incumbent(tmp_path, monkeypatch, incumbent=False)
+    requested = tmp_path / "requested" / "exact.sock"
+    requested.parent.mkdir()
+    result = fixture.module._run_slot_startup(
+        (fixture.generation, fixture.slot, fixture.root), fixture.generation,
+        health_timeout=1, fixed_socket=requested,
+    )
+    assert result["ok"]
+    assert serve._read_endpoint(requested) == serve._read_endpoint(result["data_socket"])
+    assert routing.read_active_endpoint(requested.parent, verify_listener=False).pid == result["pid"]
+    assert not serve._endpoint_path(fixture.fixed).exists()
+    assert routing.read_table(fixture.home, strict=True) is None
+    assert fixture.actors[0].context.fixed_socket == requested
+    assert fixture.actors[0].context.config_home == tmp_path / "data"
 
 
 def test_source_start_missing_route_preserves_the_live_generation_handle(tmp_path, monkeypatch):
@@ -475,6 +581,74 @@ def test_source_start_missing_route_preserves_the_live_generation_handle(tmp_pat
     assert incumbent_endpoint.read_bytes() == old_target
     assert fixture.module.source_handle_state(fixture.fixed) == old_fixed
     assert routing.read_table(fixture.home, strict=True) is None
+
+
+@pytest.mark.parametrize("retained_route", [False, True])
+def test_source_start_replaces_dead_handle_without_incumbent_route(
+    tmp_path, monkeypatch, retained_route,
+):
+    from zdd import routing
+
+    fixture = _published_incumbent(tmp_path, monkeypatch)
+    table = routing.read_table(fixture.home, strict=True)
+    previous = table.pop("active")
+    if retained_route:
+        table["previous"] = previous
+        (fixture.home / "active.json").write_text(json.dumps(table), encoding="utf-8")
+    else:
+        (fixture.home / "active.json").unlink()
+    owner = fixture.module.source_data_owner
+    monkeypatch.setattr(
+        fixture.module, "source_data_owner",
+        lambda path: None if serve._read_endpoint(path)["port"] == 12001 else owner(path),
+    )
+
+    result = fixture.module.source_start()
+
+    assert result["ok"]
+    assert routing.read_active_endpoint(fixture.home, verify_listener=False).pid == result["pid"]
+    assert serve._read_endpoint(fixture.fixed) == serve._read_endpoint(result["data_socket"])
+    assert fixture.actors[0].context.config_home == tmp_path / "data"
+    assert (12002, "shutdown") not in fixture.requests
+
+
+def test_source_start_dead_handle_refuses_unavailable_native_inspection(tmp_path, monkeypatch):
+    fixture = _published_incumbent(tmp_path, monkeypatch)
+    (fixture.home / "active.json").unlink()
+    original = fixture.module.source_handle_state(fixture.fixed)
+
+    def unavailable(path):
+        raise fixture.module.ControlError("Native TCP listener inspection failed")
+
+    monkeypatch.setattr(fixture.module, "source_data_owner", unavailable)
+    with pytest.raises(fixture.module.ControlError, match="listener inspection"):
+        fixture.module.source_start()
+    assert not fixture.actors
+    assert fixture.module.source_handle_state(fixture.fixed) == original
+
+
+def test_source_start_dead_handle_preserves_listener_appearing_before_publication(
+    tmp_path, monkeypatch,
+):
+    from zdd import routing
+
+    fixture = _published_incumbent(tmp_path, monkeypatch)
+    (fixture.home / "active.json").unlink()
+    original = fixture.module.source_handle_state(fixture.fixed)
+    started = [False]
+
+    def control(*args, **kwargs):
+        reply = fixture.control(*args, **kwargs)
+        started[0] = True
+        return reply
+
+    monkeypatch.setattr(fixture.module, "control_request", control)
+    monkeypatch.setattr(fixture.module, "source_data_owner", lambda path: 3333 if started[0] else None)
+    with pytest.raises(routing.ActivePublicationRefused, match="serving owner"):
+        fixture.module.source_start()
+    assert fixture.module.source_handle_state(fixture.fixed) == original
+    assert fixture.actors[0].returncode == 0 and fixture.actors[0].waited
+    assert (12002, "shutdown") not in fixture.requests
 
 
 @pytest.mark.parametrize("occupied_kind", ["socket", "endpoint"])
@@ -666,8 +840,8 @@ def test_source_start_does_not_reuse_partial_same_generation_proof(tmp_path, mon
         fixture.births.pop(1111)
     else:
         monkeypatch.setattr(fixture.module, "source_data_owner", lambda path: 3333)
-    if defect in {"birth", "foreign-data"}:
-        with pytest.raises(routing.ActivePublicationRefused):
+    if defect in {"birth", "foreign-data", "missing-token"}:
+        with pytest.raises((routing.ActivePublicationRefused, fixture.module.ControlError)):
             fixture.module.source_start()
         assert not fixture.actors, "unqualified incumbent ownership must refuse before spawn"
         assert fixture.module.source_handle_state(fixture.fixed) == original_handle
@@ -693,7 +867,7 @@ def test_source_start_does_not_reuse_an_owner_after_selection_changes(tmp_path, 
     assert not fixture.actors
 
 
-@pytest.mark.parametrize("mismatch", [None, "ready", "pid", "version", "birth", "route", "data"])
+@pytest.mark.parametrize("mismatch", [None, "ready", "pid", "version", "birth", "route", "data", "installation"])
 def test_outgoing_self_retirement_requires_the_selected_ready_data_owner(
     tmp_path, monkeypatch, mismatch,
 ):
@@ -702,8 +876,8 @@ def test_outgoing_self_retirement_requires_the_selected_ready_data_owner(
     installation = tmp_path / "installation"
     installation.mkdir()
     (installation / "current-version").write_text("incoming", encoding="utf-8-sig")
-    home = tmp_path / "sockets"
-    home.mkdir()
+    home = tmp_path / "sockets" / "current"
+    home.mkdir(parents=True)
     fixed = home / "serve.sock"
     incoming = home / "serve-g2.sock"
     server = serve.Server(fixed, enable_lease=False, version="outgoing")
@@ -737,9 +911,12 @@ def test_outgoing_self_retirement_requires_the_selected_ready_data_owner(
         reply = {
             "ok": True, "pong": True, "ready": True, "pid": endpoint.pid,
             "version": "incoming", "data_socket": str(incoming),
+            "runtime_root": str(installation),
         }
         if mismatch in {"ready", "pid", "version"}:
             reply[mismatch] = {"ready": False, "pid": 9876, "version": "outgoing"}[mismatch]
+        if mismatch == "installation":
+            reply["runtime_root"] = str(tmp_path / "other-installation")
         if mismatch == "route":
             table["active"] = {**endpoint.to_dict(), "pid": 9876}
         return reply
@@ -854,8 +1031,8 @@ async def test_startup_transaction_keeps_passive_admission_independent(
     root = tmp_path / "installation"
     root.mkdir()
     (root / "current-version").write_text("incoming", encoding="utf-8")
-    fixed = tmp_path / "sockets" / "serve.sock"
-    fixed.parent.mkdir()
+    fixed = tmp_path / "sockets" / "current" / "serve.sock"
+    fixed.parent.mkdir(parents=True)
     server = serve.Server(fixed, version="incoming", passive=passive)
     server._runtime_root = root
     server._stop.set()
@@ -879,7 +1056,7 @@ async def test_ordinary_startup_releases_transaction_before_resident_wait(tmp_pa
     root = tmp_path / "installation"
     root.mkdir()
     (root / "current-version").write_text("incoming", encoding="utf-8")
-    fixed = tmp_path / "sockets" / "serve.sock"
+    fixed = tmp_path / "sockets" / "current" / "serve.sock"
     server = serve.Server(fixed, version="incoming")
     server._runtime_root = root
     with daemon_test_lifecycle(
@@ -915,7 +1092,7 @@ async def test_selection_change_during_bind_refuses_route_and_settles_listeners(
     root.mkdir()
     selector = root / "current-version"
     selector.write_text("outgoing", encoding="utf-8")
-    fixed = tmp_path / "sockets" / "serve.sock"
+    fixed = tmp_path / "sockets" / "current" / "serve.sock"
     server = serve.Server(fixed, version="outgoing")
     server._runtime_root = root
     server._stop.set()

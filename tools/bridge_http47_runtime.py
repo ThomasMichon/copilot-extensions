@@ -9,6 +9,8 @@ import json
 import os
 from pathlib import Path
 import sys
+import tempfile
+import threading
 from types import CodeType, FunctionType, ModuleType
 from importlib.machinery import ModuleSpec, PathFinder
 
@@ -67,6 +69,12 @@ def relative_source(filename: str, proof: dict) -> str | None:
     return _source_locator(proof)(filename)
 
 
+def _interpreter_log(directory: Path) -> Path:
+    fd, name = tempfile.mkstemp(prefix=f"{os.getpid()}-", suffix=".jsonl", dir=directory)
+    os.close(fd)
+    return Path(name)
+
+
 def entry_role(filename: str) -> str | None:
     name = filename.replace("\\", "/")
     return next((role for suffix, role in ROLES.items() if name.endswith(suffix)), None)
@@ -85,7 +93,25 @@ def installation_source(filename: str) -> str | None:
     return None
 
 
-def launch_role(argv: list) -> str | None:
+def launch_role(argv: list | str) -> str | None:
+    if isinstance(argv, str):
+        import ctypes
+        from ctypes import wintypes
+
+        shell = ctypes.WinDLL("shell32", use_last_error=True)
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        shell.CommandLineToArgvW.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(ctypes.c_int)]
+        shell.CommandLineToArgvW.restype = ctypes.POINTER(wintypes.LPWSTR)
+        kernel.LocalFree.argtypes = [wintypes.HLOCAL]
+        kernel.LocalFree.restype = wintypes.HLOCAL
+        count = ctypes.c_int()
+        parsed = shell.CommandLineToArgvW(argv, ctypes.byref(count))
+        if not parsed:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            argv = [parsed[index] for index in range(count.value)]
+        finally:
+            kernel.LocalFree(parsed)
     values = [os.fsdecode(value) for value in argv]
     if "-m" in values and values[values.index("-m") + 1] == "agent_bridge.session_host":
         return "host"
@@ -185,12 +211,13 @@ def install(*, observer: bool = False) -> None:
     sys.meta_path.insert(0, Origins)
     directory = path.parent / "interpreters"
     directory.mkdir(exist_ok=True)
-    log = directory / f"{os.getpid()}.jsonl"
-    if log.exists():
-        raise ValueError("HTTP-47 interpreter identity was reused")
+    log = _interpreter_log(directory)
+    # The audit hook owns this stream for the interpreter's lifetime.
+    stream = log.open("a", encoding="utf-8")
+    record_lock = threading.Lock()
 
     def record(event: dict) -> None:
-        with log.open("a", encoding="utf-8") as stream:
+        with record_lock:
             stream.write(json.dumps(event, sort_keys=True) + "\n")
             stream.flush()
             os.fsync(stream.fileno())
@@ -275,6 +302,7 @@ def verify_interpreters(
     directory: Path, proof: dict, *,
     expected_roles: frozenset[str] = frozenset({"worker", "host", "peer"}),
     required_sources: frozenset[str] = frozenset(),
+    expected_observers: int = 1,
 ) -> dict:
     """Require a bound entrypoint for every actual contributing child launch."""
     logs = []
@@ -288,7 +316,11 @@ def verify_interpreters(
             raise ValueError("HTTP-47 interpreter rejected unproven source")
         logs.append(events)
     observers = [events for events in logs if events[0]["observer"]]
-    if len(observers) != 1 or not any(e["kind"] == "observer-entry" for e in observers[0]):
+    if (
+        type(expected_observers) is not int or expected_observers < 1
+        or len(observers) != expected_observers
+        or any(not any(e["kind"] == "observer-entry" for e in events) for events in observers)
+    ):
         raise ValueError("HTTP-47 observer entrypoint is unproven")
     launched = Counter()
     started = Counter()

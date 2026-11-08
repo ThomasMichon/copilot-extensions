@@ -145,6 +145,9 @@ def test_junit_retains_skips_failures_and_exact_case_identities(tmp_path):
     (1, '<testsuite><testcase name="real"><failure/></testcase></testsuite>', "failed"),
     (0, '<testsuite><testcase name="real"/></testsuite>', "qualified"),
     (-1, "", "failed"),
+    (5, "<testsuite/>", "incomplete"),
+    (5, "", "failed"),
+    (5, '<testsuite><testcase name="real"><failure/></testcase></testsuite>', "failed"),
 ])
 def test_execution_preserves_actual_collection_failure_and_skip_outcomes(
     tmp_path, monkeypatch, code, junit, outcome,
@@ -170,7 +173,16 @@ def test_execution_preserves_actual_collection_failure_and_skip_outcomes(
     monkeypatch.setattr(worker, "Transport", lambda *args: SimpleNamespace(
         git=lambda *args: SimpleNamespace(stdout="b" * 40),
     ))
-    actual = worker.execute(root, request(), output)
+    value = request()
+    if code == 5:
+        test = root / "tools/test_sample.py"
+        test.parent.mkdir()
+        test.write_text("test fixture", encoding="utf-8")
+        value["selection"] = {
+            "kind": "tools", "files": ["tools/test_sample.py"], "k": "",
+            "full": False, "explicit_tiers": False,
+        }
+    actual = worker.execute(root, value, output)
     assert actual["outcome"] == outcome
     assert json.loads((output / "result.json").read_text("utf-8"))["outcome"] == outcome
     assert (output / "phase-2.stdout.log").read_text("utf-8") == (
@@ -178,6 +190,8 @@ def test_execution_preserves_actual_collection_failure_and_skip_outcomes(
     )
     if code == -1:
         assert actual["failure_kind"] == "timeout"
+    if code == 5 and outcome == "incomplete":
+        assert actual["incomplete_reason"] == "empty-selection"
 
 
 def result():
@@ -404,6 +418,50 @@ def test_same_request_operations_exclude_duplicate_resume_but_other_requests_rem
                 pytest.fail("the same request cannot have two mutation owners")
         with client_module.request_lock(other):
             assert (directory / "state.json").is_file()
+
+
+def test_tool_entry_uses_candidate_environment_schema_not_controller_schema(tmp_path, monkeypatch):
+    root = tmp_path / "candidate"
+    tools = root / "tools"
+    tools.mkdir(parents=True)
+    (tools / "test_sample.py").write_text("def test_sample(): pass\n", encoding="utf-8")
+    environment_source = Path(worker.__file__).with_name("plugin_test_environment.py").read_text("utf-8")
+    (tools / "plugin_test_environment.py").write_text(
+        environment_source
+        + '\n_ROOT_ENV["QUALIFICATION_FUTURE_ROOT"] = "future-root"\n'
+        + "ROOT_ENV_NAMES = tuple(_ROOT_ENV)\n",
+        encoding="utf-8",
+    )
+    value = request()
+    value["selection"] = {
+        "kind": "tools", "files": ["tools/test_sample.py"], "k": "",
+        "full": False, "explicit_tiers": False,
+    }
+    payload = event()
+    payload["inputs"]["request"] = contract.canonical(value)
+    event_path = tmp_path / "event.json"
+    event_path.write_text(contract.canonical(payload), encoding="utf-8")
+    for name, content in {
+        "GITHUB_EVENT_PATH": str(event_path), "GITHUB_ACTOR": "owner",
+        "GITHUB_TRIGGERING_ACTOR": "owner", "GITHUB_REF": "refs/heads/main",
+        "GITHUB_REF_PROTECTED": "true",
+    }.items():
+        monkeypatch.setenv(name, content)
+    monkeypatch.setattr(sys, "path", sys.path.copy())
+    monkeypatch.delitem(sys.modules, "plugin_test_environment")
+    monkeypatch.setattr(sys, "argv", [
+        str(worker.__file__), "tools", "--candidate", str(root), "--output", str(tmp_path / "out"),
+    ])
+
+    def candidate_tests(candidate, selected, output):
+        from plugin_test_environment import isolated_environment
+        sandbox = tmp_path / "sandbox"
+        environment = isolated_environment(os.environ, sandbox)
+        assert Path(environment["QUALIFICATION_FUTURE_ROOT"]).is_relative_to(sandbox)
+        assert candidate == root and selected == value["selection"]
+        return 0
+    monkeypatch.setattr(worker, "tool_tests", candidate_tests)
+    assert worker.main() == 0
 
 
 @pytest.mark.portfolio_tier("T2")

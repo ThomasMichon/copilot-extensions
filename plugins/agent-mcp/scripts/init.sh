@@ -275,6 +275,11 @@ VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
 VENV_PYTHON="$VENV_DIR/bin/python"
 # === end install-contract:v3 versioned-venv ===
 
+# Nested environments are admitted by the canonical runtime-construction owner.
+VENV_DIR="$VENV_DIR/.venv"
+VENV_PYTHON="$VENV_DIR/bin/python"
+LINK_DIR="$VENV_DIR"
+
 # --- self-provisioning (runtime-self-provisioning pattern) -------------------
 # Vendor a standalone uv when absent (pristine box has neither uv nor pip/venv).
 _ensure_uv() {
@@ -689,7 +694,7 @@ _versioned_slot_clean() {
         "$(_payload_hash)" "$(basename "$LINK_DIR")" "" \
         "$SCRIPT_DIR/uninstall-profile.json" agent-mcp || return 1
     SRC_VERSION="$_RUNTIME_CONSTRUCTION_VERSION"
-    VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
+    VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION/.venv"
     VENV_PYTHON="$VENV_DIR/bin/python"
     LINK_DIR="$VENV_DIR"
     _assert_source_runtime
@@ -855,89 +860,17 @@ if [[ "$VERSIONED_RUNTIME" -eq 1 ]]; then
 fi
 # === end install-contract:v3 versioned-venv activate ===
 
-# agent-mcp-specific (Phase 2, agent-mcp-graceful-cutover): before the hard
-# reap below, give a live `serve` daemon on a stale (non-current) version a
-# graceful zero-downtime handoff instead of just killing it. --require-live
-# makes this call safe to run unconditionally on every activation: it never
-# starts a resident daemon where none was running (serve is optional,
-# on-demand warmth, not a registered service), and no-ops if the live daemon
-# is already on this exact version. Only a genuinely live, differently-
-# versioned daemon actually cuts over here; the reap step right after this
-# still runs unchanged as the safety net for anything cutover didn't handle
-# (a pre-feature daemon with no control channel, a failed cutover, or a
-# leaked/orphaned bridge tree that was never a `serve` daemon at all).
-# Best-effort: never fails the install. Opt out with AGENT_MCP_NO_CUTOVER.
-# The CLI's own defaults (60s health / 300s drain) are tuned for a human
-# operator explicitly watching a manual `agent-mcp cutover`; an unattended
-# activation pass must not silently block for up to ~6 minutes on a lightly-
-# used bridge, so this uses much shorter install-appropriate defaults
-# (still overridable, e.g. for a host with slow-starting upstream MCP
-# servers) via AGENT_MCP_CUTOVER_HEALTH_TIMEOUT / AGENT_MCP_CUTOVER_DRAIN_TIMEOUT.
-if [[ "$VERSIONED_RUNTIME" -eq 1 && "${_RUNTIME_CONSTRUCTION_MODE:-}" != fresh && -z "${AGENT_MCP_NO_CUTOVER:-}" ]]; then
-    _cutover_health_timeout="${AGENT_MCP_CUTOVER_HEALTH_TIMEOUT:-15}"
-    _cutover_drain_timeout="${AGENT_MCP_CUTOVER_DRAIN_TIMEOUT:-30}"
-    _cutover_json="$("$VENV_PYTHON" -I -X utf8 -m agent_mcp cutover \
-        --require-live --force --json \
-        --health-timeout "$_cutover_health_timeout" \
-        --drain-timeout "$_cutover_drain_timeout" 2>/dev/null || true)"
-    if [[ -n "$_cutover_json" ]]; then
-        _cutover_parsed="$("$VENV_PYTHON" -I -X utf8 -c 'import sys,json
-try:
-    d = json.loads(sys.argv[1])
-except Exception:
-    d = {}
-print(d.get("skipped") or "")
-print("1" if d.get("ok") else "0")' "$_cutover_json" 2>/dev/null || printf '\n0\n')"
-        _cutover_skipped="$(printf '%s\n' "$_cutover_parsed" | sed -n '1p')"
-        _cutover_ok="$(printf '%s\n' "$_cutover_parsed" | sed -n '2p')"
-        if [[ -n "$_cutover_skipped" ]]; then
-            _skip "Cutover skipped: $_cutover_skipped"
-        elif [[ "$_cutover_ok" == "1" ]]; then
-            _ok "Cut over the live serve daemon to the new version (routing flipped; old drained + retired)"
-        else
-            _step "Cutover attempted -- not fully successful (see reap step below)"
-        fi
-    fi
-fi
-
-_settle_runtime_owners() {
-    [[ "$VERSIONED_RUNTIME" -eq 1 && "${_RUNTIME_CONSTRUCTION_MODE:-}" == fresh ]] || return 0
-    local arguments=("$SCRIPT_DIR/reap_versions.py" --root "$INSTALL_DIR" --link-name '.venv' --fresh --reset-control)
-    [[ -z "${AGENT_MCP_NO_VERSION_REAP:-}" ]] || arguments+=(--check-only)
-    if ! "$VENV_PYTHON" -I "${arguments[@]}"; then
-        _fail 'Fresh MCP replacement could not settle its old runtime owners and control state'
+# Incoming readiness is required; incumbent extinction is not. Never invoke
+# reset-control or forced drain as incoming admission.
+_publish_incoming_mcp() {
+    [[ "$VERSIONED_RUNTIME" -eq 1 ]] || return 0
+    "$VENV_PYTHON" -I "$SCRIPT_DIR/publish_incoming.py" --root "$INSTALL_DIR" || {
+        _fail 'Incoming MCP generation failed readiness/publication; live custody retained'
         return 1
-    fi
-    _ok 'Old MCP runtime owners and control state settled'
+    }
+    _ok 'Incoming MCP selection qualified; serving activation follows policy'
 }
-_settle_runtime_owners || exit 1
-
-# agent-mcp-specific (NOT part of the byte-identical activate block above): reap
-# processes still running from a now-stale (non-current) slot -- leaked/orphaned
-# bridge trees or a warmth daemon from the prior version -- so an upgrade never
-# leaves "two runtime versions resident". Best-effort; opt out with
-# AGENT_MCP_NO_VERSION_REAP. Runs via the new slot's own python, so it is
-# attributed to the current version and never reaps itself.
-if [[ "$VERSIONED_RUNTIME" -eq 1 && "${_RUNTIME_CONSTRUCTION_MODE:-}" != fresh && -z "${AGENT_MCP_NO_VERSION_REAP:-}" ]]; then
-    _reap_script="$SCRIPT_DIR/reap_versions.py"
-    if ! _reaped="$("$VENV_PYTHON" -I "$_reap_script" --root "$INSTALL_DIR" --link-name '.venv')"; then
-        _step 'Version-reap incomplete: old MCP runtime retirement was not confirmed'
-    elif [[ -n "$_reaped" ]]; then
-        _n="$(printf '%s\n' "$_reaped" | grep -c . || true)"
-        _ok "Reaped $_n stale-version process(es)"
-    fi
-    # Collect the now-idle stale version *directories* the reap above freed. The
-    # process-reap alone leaves the dirs on disk (the primitive's gc deliberately
-    # protects any slot a live process runs from), so without this step stale
-    # slots accumulate unbounded across upgrades. --protect-pids keeps the current
-    # version + any slot a live process still runs from; --min-age-days is a
-    # recency floor so a *concurrent* peer install's freshly-built (not-yet-live)
-    # slot is never reaped mid-build. Best-effort; runs via the new slot's python.
-    _gc_json="$("$VENV_PYTHON" "$SCRIPT_DIR/versioned_runtime.py" --root "$INSTALL_DIR" \
-        --link-name '.venv' --json gc --protect-pids --min-age-days 0.05 2>/dev/null || true)"
-    _gc_n="$("$VENV_PYTHON" -c 'import sys,json; a=sys.argv[1] if len(sys.argv)>1 else ""; print(len(json.loads(a).get("removed",[])) if a.strip()[:1]=="{" else 0)' "$_gc_json" 2>/dev/null || echo 0)"
-    [[ "${_gc_n:-0}" -gt 0 ]] && _ok "Collected $_gc_n stale version dir(s)"
-fi
+_publish_incoming_mcp || exit 1
 
 # -- 4. Binstub --------------------------------------------------------
 deploy_binstub
@@ -1037,5 +970,6 @@ case ":$PATH:" in
     *) _step "Add $LOCAL_BIN to your PATH (e.g. in ~/.bashrc): export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
 esac
 
+_skip 'Predecessor retirement and slot collection deferred; incoming publication is complete'
 echo '  Try: agent-mcp version'
 exit 0

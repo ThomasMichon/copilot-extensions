@@ -1,0 +1,9 @@
+{
+  "comment": "Negotiate optional protected owned-edit selection through existing workspace CLI native and Fleet clients while preserving baseline allocation",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

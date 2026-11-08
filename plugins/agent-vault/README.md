@@ -56,7 +56,12 @@ Missing/older driver support refuses without an inline installer.
 The POSIX hook retains its existing metadata-Python prerequisite and no-Python
 no-op. Activation reads use the payload's bundled configuration SDK and the
 selected completed runtime interpreter when available, retaining ambient
-Python discovery for cold payloads. The canonical installation-context
+Python discovery for cold payloads. Cold activation qualifies an existing
+Python 3.10+ reader rather than accepting the first unsupported PATH winner;
+Windows reuses read-only canonical native discovery and headless capture.
+This neither raises Vault's floor to the installer's 3.11 tooling floor nor
+installs Python, changes PATH or invokes an installer to select the reader.
+The canonical installation-context
 bootstrap keeps its independent platform prerequisites (currently Python
 on PATH on Windows). No Vault runtime or backend is installed for this read. Cold
 bootstrap requires the qualified Windows or Linux native driver, not stock
@@ -289,6 +294,9 @@ enrollment or automatic mesh setup; attachment import/export remains unchanged.
 selected owner-private local directory. It never initializes a missing record,
 overwrites a different key or repairs existing permissions. Both commands support
 `--require-running` to prohibit service activation and first-touch provisioning.
+Selected setup consumers can require `ssh-key-install-pin-v1` from the owning
+invocation contract and pass `--expected-fingerprint` to refuse a changed public
+identity before local key publication; existing unpinned callers are unchanged.
 
 ## Shared owner-key setup
 
@@ -466,7 +474,7 @@ diagnostics or plaintext artifacts.
 - The daemon keeps KeePass master passwords in memory **per database**. `VAULT_PASSWORD_TTL` controls the password TTL (default `3600` seconds). `agent-vault lock` drops the cached password immediately.
 - Credential reads fail fast by default when locked: they return an actionable error instead of hanging on a hidden prompt. Use `agent-vault unlock`, `agent-vault unlock --terminal`, or `agent-vault get --prompt ...` when you want an interactive prompt.
 - Unlock-source extensions run before prompts, so a configured provider can satisfy locked reads without UI.
-- The CLI cold-starts the daemon when needed. The installer also deploys platform supervision: a Windows Scheduled Task named `AgentVault`, or a Linux/WSL systemd user unit named `agent-vault.service` when systemd is available.
+- The CLI cold-starts the daemon when needed. Windows scheduling is opt-in via the native [`windows_scheduled_task` policy](docs/configuration.md#windows-scheduling-is-separate-from-activation); clean installs leave tasks absent and existing registrations are preserved by default. Linux/WSL installs retain the systemd user unit named `agent-vault.service` when systemd is available.
 - Windows updates start the incoming generation independently; the old build preferably settles work and retires itself. A bounded, ownership-checked central retirement handles stuck predecessors, but live credential children retain writer exclusion. Compatible private auth handoff preserves unexpired unlocked state without resetting its lifetime. See [runtime replacement](docs/runtime-replacement.md) for the contract, readiness distinction and remaining POSIX/systemd migration.
 - There is **no** `agent-vault doctor` subcommand today. Use `agent-vault ping`, `agent-vault which`, `agent-vault cache-status`, and the installer `status` action for troubleshooting.
 

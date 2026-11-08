@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "label": "Application Readiness",
+  "placement": "config",
+  "scope": "global",
+  "stream": true,
+  "list": ["agent-machines", "installation-configuration", "--project", "{repo}"],
+  "summary": "Required applications: {status}",
+  "entry": {"id": "id", "title": "title", "subtitle": "state", "badges": ["classification"]},
+  "columns": [
+    {"key": "title", "header": "REQUIRED CLOSURE", "width": 36, "priority": 1},
+    {"key": "state", "header": "READINESS", "width": 22, "priority": 1},
+    {"key": "classification", "header": "REQUIREMENT", "width": 14, "priority": 2}
+  ],
+  "empty_hint": "The owner observed an empty required-module closure; this is not authentication or first-task admission.",
+  "actions": [
+    {"key": "details", "label": "Inspect owner readiness and limitations", "kind": "card", "title_from": "card.title", "body_from": "card.body"}
+  ],
+  "view_actions": [
+    {
+      "key": "repair-required",
+      "label": "Run declared repair for the displayed required closure",
+      "kind": "command",
+      "when": {"repairable": "true"},
+      "confirm": true,
+      "progress": true,
+      "run": ["agent-machines", "installation-configuration", "--project", "{project}", "--apply", "--progress", "--expected-plan-digest", "{plan_digest}"]
+    }
+  ]
+}

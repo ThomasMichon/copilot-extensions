@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve nested prepared application interpreters through the canonical runtime layout without dropping legacy engine discovery.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

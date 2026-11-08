@@ -7,7 +7,7 @@ from collections import OrderedDict
 from collections.abc import Callable
 import copy
 import hashlib
-from inspect import getattr_static
+from inspect import getattr_static, iscoroutinefunction
 import json
 import math
 import threading
@@ -22,11 +22,42 @@ from .owner_read import OwnerReadBudgetExceeded, OwnerReadHandler, REQUEST_SCHEM
 from .review_executor import execute_review
 from .review_feedback import FeedbackInputs
 from .review_intent import identifier
+from .workspace_selection import (
+    allocate_selection, needs_owned_edits, owned_edit_contract, selection_contract,
+    supports_owned_edits, supports_selection,
+)
 from .review_workspace import MAX_GENERATION_BYTES, _generation, _scope, compare_generations
 
 PROTOCOL = "agent-pull-requests.workspace/v1"
 CHUNK_BYTES = 8192
-OPERATIONS = ("capabilities", "load", "sync", "lookup", "chunk", "inspect", "submit", "events")
+OPERATIONS = ("capabilities", "load", "sync", "lookup", "chunk", "inspect", "submit", "events", "receipt",
+              "allocate")
+
+
+def prepared_review_contract() -> dict[str, object]:
+    return {
+        "protocol": "agent-pull-requests.prepared-review/v1",
+        "intent_versions": [2],
+        "receipt_protocol": "agent-pull-requests.prepared-comment-receipt/v1",
+    }
+
+
+def supports_prepared_review(value: object) -> bool:
+    expected = prepared_review_contract()
+    return (
+        isinstance(value, dict) and set(value) == set(expected)
+        and value["protocol"] == expected["protocol"]
+        and value["receipt_protocol"] == expected["receipt_protocol"]
+        and type(value["intent_versions"]) is list and len(value["intent_versions"]) == 1
+        and type(value["intent_versions"][0]) is int and value["intent_versions"] == [2]
+    )
+
+
+def needs_prepared_review(operation: str, payload: object) -> bool:
+    return operation == "receipt" or (
+        operation == "submit" and isinstance(payload, dict) and isinstance(payload.get("intent"), dict)
+        and payload["intent"].get("version") == 2
+    )
 
 
 class WorkspaceUnavailable(RuntimeError):
@@ -47,7 +78,10 @@ class WorkspaceOperations:
     def __init__(self, store, cache, *, scope, read_owner, binding_ref,
                  write_context=None, checkpoint, max_work_seconds, conversations=False,
                  attention_owner: Callable[[dict], AttentionInputs] | None = None,
-                 feedback_owner: Callable[[dict], FeedbackInputs] | None = None) -> None:
+                 feedback_owner: Callable[[dict], FeedbackInputs] | None = None,
+                 prepared_reviews: bool = False,
+                 selection_preparer: Callable[..., Callable[..., dict]] | None = None,
+                 selection_owned_edits: bool = False) -> None:
         if (
             not isinstance(cache, GenerationCache)
             or not isinstance(read_owner, (OwnerReadHandler, NativeReadHandler))
@@ -56,6 +90,13 @@ class WorkspaceOperations:
             or type(max_work_seconds) not in (int, float)
             or not math.isfinite(max_work_seconds) or max_work_seconds <= 0
             or type(conversations) is not bool
+            or type(prepared_reviews) is not bool
+            or type(selection_owned_edits) is not bool
+            or selection_owned_edits and selection_preparer is None
+            or selection_preparer is not None and (
+                not callable(selection_preparer) or iscoroutinefunction(selection_preparer)
+                or not prepared_reviews or write_context is None
+            )
             or attention_owner is not None and (not callable(attention_owner) or not conversations)
             or feedback_owner is not None and (
                 not callable(feedback_owner) or not conversations or write_context is None
@@ -79,6 +120,9 @@ class WorkspaceOperations:
         self.conversations = conversations
         self.attention_owner = attention_owner
         self.feedback_owner = feedback_owner
+        self.prepared_reviews = prepared_reviews
+        self.selection_preparer = selection_preparer
+        self.selection_owned_edits = selection_owned_edits
         self._materializations = OrderedDict()
         self._generation_positions: OrderedDict[str, dict | None] = OrderedDict()
         self._materialization_lock = threading.Lock()
@@ -89,7 +133,8 @@ class WorkspaceOperations:
         with self.cache._transaction() as lock:
             self.cache._check(lock)
 
-    def execute(self, operation, payload, *, expires_at, checkpoint):
+    def execute(self, operation, payload, *, expires_at, checkpoint,
+                selection_validator: Callable[[dict], None] | None = None):
         if operation not in OPERATIONS or not isinstance(payload, dict):
             raise ValueError("unsupported workspace operation")
         fields = {
@@ -99,7 +144,9 @@ class WorkspaceOperations:
             "lookup": ({"number"}, {"generation_id"}),
             "chunk": ({"number", "generation_id", "offset"}, set()),
             "inspect": ({"number", "operation_id"}, set()),
+            "receipt": ({"number", "operation_id", "action_id"}, set()),
             "submit": ({"number", "intent", "source_attachment", "budget_seconds"}, set()),
+            "allocate": ({"number", "intent", "source_attachment", "budget_seconds"}, set()),
             "events": ({"number", "after", "limit"}, set()),
         }
         required, optional = fields[operation]
@@ -130,12 +177,22 @@ class WorkspaceOperations:
                 conversation_contract = ConversationStore(self.store).capabilities(
                     expires_at=expires_at, checkpoint=check,
                 )
+            prepared = self.prepared_reviews is True and self.store.review_intent_versions(
+                expires_at=expires_at, checkpoint=check,
+            ) == (1, 2)
+            from .review_selection_store import ReviewSelectionStore
+            selection = (
+                prepared and self.selection_preparer is not None and self.write_context is not None
+                and ReviewSelectionStore(self.store).supported(expires_at=expires_at, checkpoint=check)
+            )
             return {
                 "protocol": PROTOCOL,
                 "operations": [
                     name for name in OPERATIONS
                     if (name != "submit" or self.write_context is not None)
                     and (name != "events" or self.conversations)
+                    and (name != "receipt" or prepared)
+                    and (name != "allocate" or selection)
                 ],
                 "generation_versions": [1], "owner_store_versions": [2],
                 **({"conversation_contract": conversation_contract} if self.conversations else {}),
@@ -144,6 +201,10 @@ class WorkspaceOperations:
                 "refresh": "full_sections", "source": "existing_client_local_owner",
                 **({"read_acquisition": self.read_owner.profile}
                    if isinstance(self.read_owner, NativeReadHandler) else {}),
+                **({"prepared_review_contract": prepared_review_contract()} if prepared else {}),
+                **({"selection_contract": selection_contract()} if selection else {}),
+                **({"owned_edit_selection_contract": owned_edit_contract()}
+                   if selection and self.selection_owned_edits is True else {}),
                 "provision_or_adopt": False,
             }
         number = payload["number"]
@@ -175,6 +236,13 @@ class WorkspaceOperations:
             max_bytes=self.cache.max_bytes, max_generations=self.cache.max_generations,
             service_identity=self.store.service_identity, checkpoint=check,
         )
+        if operation == "allocate":
+            result = allocate_selection(
+                self, payload, scope, cache, expires_at=expires_at, checkpoint=check,
+                validate_intent=selection_validator,
+            )
+            check()
+            return {"protocol": PROTOCOL, "scope": scope, "result": result}
         if operation in ("load", "sync"):
             previous = None
             if operation == "sync":
@@ -234,12 +302,22 @@ class WorkspaceOperations:
                 result.update(offset=offset, data=base64.b64encode(data[offset:offset + CHUNK_BYTES]).decode("ascii"))
         elif operation == "inspect":
             result = self.store.inspect_review(payload["operation_id"], scope, expires_at=expires_at, checkpoint=check)
+        elif operation == "receipt":
+            if self.prepared_reviews is not True:
+                raise WorkspaceUnavailable("prepared review receiver unavailable")
+            result = self.store.prepared_review_receipt(
+                payload["operation_id"], scope, payload["action_id"],
+                expires_at=expires_at, checkpoint=check,
+            )
         else:
             if self.write_context is None:
                 raise WorkspaceUnavailable("existing protected write context unavailable")
             intent = payload["intent"]
             if not isinstance(intent, dict) or intent.get("scope") != scope:
                 raise ValueError("selected review differs from authorized workspace scope")
+            prepared = intent.get("version") == 2
+            if prepared and self.prepared_reviews is not True:
+                raise WorkspaceUnavailable("prepared review receiver unavailable")
             generation = cache.lookup(scope, generation_id=intent.get("generation_id"))["generation"]
             if generation is None:
                 raise WorkspaceUnavailable("reviewed generation unavailable")
@@ -269,6 +347,7 @@ class WorkspaceOperations:
                 feedback_position=feedback_position,
                 feedback_current=feedback_current,
                 enclosing_deadline=deadline,
+                prepared_intent=prepared,
             )
         check()
         return {"protocol": PROTOCOL, "scope": scope, "result": copy.deepcopy(result)}
@@ -339,20 +418,59 @@ class NativeWorkspaceClient:
 
     def __init__(self, operations, *, checkpoint, expires_at):
         self.operations, self.checkpoint, self.expires_at = operations, checkpoint, expires_at
+        self._prepared_contract: object = None
+        self._selection_contract: object = None
+        self._owned_edit_contract: object = None
+        self._prepared_lock = threading.Lock()
+        self._discovery_epoch = 0
 
     def preparation_contract(self):
         return {"schema": "agent-pull-requests.client-preparation",
                 "version": 2 if _native_source_supported(self) else 1, "io": "worker"}
 
     def exchange(self, operation, payload, *, checkpoint=None):
+        epoch: int | None = None
+
         def current():
             self.checkpoint()
             if checkpoint is not None:
                 checkpoint()
-        return self.operations.execute(
+        if operation == "capabilities":
+            with self._prepared_lock:
+                self._discovery_epoch += 1
+                epoch = self._discovery_epoch
+                self._prepared_contract = None
+                self._selection_contract = None
+                self._owned_edit_contract = None
+        if operation == "allocate":
+            current()
+            with self._prepared_lock:
+                supported = supports_selection(self._selection_contract)
+            if not supported:
+                raise WorkspaceUnavailable("pre-approval selection capability required")
+            if needs_owned_edits(operation, payload):
+                with self._prepared_lock:
+                    supported = supports_owned_edits(self._owned_edit_contract)
+                if not supported:
+                    raise WorkspaceUnavailable("owned-edit selection capability required")
+        if needs_prepared_review(operation, payload):
+            current()
+            with self._prepared_lock:
+                supported = supports_prepared_review(self._prepared_contract)
+            if not supported:
+                raise WorkspaceUnavailable("prepared review capability required")
+        result = self.operations.execute(
             operation, payload, expires_at=self.expires_at(),
             checkpoint=current if checkpoint is not None else self.checkpoint,
         )
+        if operation == "capabilities":
+            with self._prepared_lock:
+                if epoch != self._discovery_epoch:
+                    raise WorkspaceUnavailable("workspace discovery superseded")
+                self._prepared_contract = copy.deepcopy(result.get("prepared_review_contract"))
+                self._selection_contract = copy.deepcopy(result.get("selection_contract"))
+                self._owned_edit_contract = copy.deepcopy(result.get("owned_edit_selection_contract"))
+        return result
 
     def materialize(self, number, generation_id, *, checkpoint=None):
         if checkpoint is not None:

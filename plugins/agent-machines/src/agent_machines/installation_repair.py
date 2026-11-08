@@ -9,7 +9,7 @@ import platform as host_platform
 import re
 import shutil
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -344,6 +344,7 @@ def repair(
     expected_plan_digest: str | None = None, home: Path | None = None,
     readiness_timeout: float = 15, installer_timeout: float = 300,
     confirm_restart: str | None = None,
+    on_observation: Callable[[list[dict[str, object]]], None] | None = None,
 ) -> dict[str, object]:
     """Serialize apply and explicit restart confirmation against durable obligations."""
     journal = RestartJournal(home if home is not None else Path.home())
@@ -368,6 +369,7 @@ def repair(
                     expected_plan_digest=expected_plan_digest, home=home,
                     readiness_timeout=readiness_timeout, installer_timeout=installer_timeout,
                     journal=journal,
+                    on_observation=on_observation,
                 )
         journal.load()
         return _repair(
@@ -376,6 +378,7 @@ def repair(
             expected_plan_digest=expected_plan_digest, home=home,
             readiness_timeout=readiness_timeout, installer_timeout=installer_timeout,
             journal=journal,
+            on_observation=on_observation,
         )
     except OSError as error:
         raise RepairAdmissionError("installation repair state cannot be accessed or persisted") from error
@@ -386,6 +389,7 @@ def _repair(
     required: bool,
     expected_plan_digest: str | None, home: Path | None,
     readiness_timeout: float, installer_timeout: float, journal: RestartJournal,
+    on_observation: Callable[[list[dict[str, object]]], None] | None = None,
 ) -> dict[str, object]:
     """Reconstruct host admission and invoke only the explicit selected closure."""
     if (
@@ -415,6 +419,8 @@ def _repair(
         )
         for module in selected
     }
+    if on_observation is not None:
+        on_observation([outcome.evidence() for outcome in outcomes.values()])
     interrupted = False
     for module in selected:
         owner = owners.get(module.owner.owner_id)
@@ -423,6 +429,8 @@ def _repair(
             if owner else Observation("unknown", "owner-not-admitted")
         )
         outcomes[module.qualified_id].before = observation
+        if on_observation is not None:
+            on_observation([outcomes[module.qualified_id].evidence()])
         if observation.reason == "readiness-interrupted":
             interrupted = True
             break
@@ -484,6 +492,8 @@ def _repair(
                 journal.require(module.qualified_id, module.restart.value, plan_digest)
                 outcome.restart_required = True
             outcome.attempted = True
+            if on_observation is not None:
+                on_observation([outcome.evidence()])
             result = _invoke(
                 module, fresh_owner, platform, readonly=False, timeout=installer_timeout,
             )
@@ -494,6 +504,8 @@ def _repair(
         outcome.installer = {"status": result.status, "exitCode": result.exit_code}
         after = _observe(module, fresh_owner, platform, readiness_timeout)
         outcome.after = after
+        if on_observation is not None:
+            on_observation([outcome.evidence()])
         if after.reason == "readiness-interrupted":
             interrupted = True
             continue
@@ -530,6 +542,7 @@ def _repair(
     )
     return {
         "schema": "copilot-extensions.installation-repair", "version": 1,
+        "projectRoot": str(project_root.resolve()), "requiredSelection": required,
         "platform": platform.value, "apply": apply, "planDigest": plan_digest,
         "interrupted": interrupted,
         "restarts": journal.evidence(),

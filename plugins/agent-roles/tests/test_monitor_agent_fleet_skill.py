@@ -80,6 +80,33 @@ def test_fabric_reader_suppresses_worktrees_provisioning() -> None:
     assert "refusal or missing runtime as unavailable evidence" in text
 
 
+def test_fabric_reader_inventories_per_project_without_false_zeroes() -> None:
+    text = " ".join(_read(SKILL / "references" / "fabric-readers.md").split())
+    skill = " ".join(_read(SKILL / "SKILL.md").split())
+    for requirement in (
+        "<worktrees-argv> --project <project> fleet --json",
+        "covers **only the selected project**",
+        "enumerate projects on each target host, never only on the observer",
+        "agent-worktrees --project <name> list --json --passive",
+        "never starts, recovers, waits for or wakes it, nor renews its scan demand",
+        "Do not fall back to a plain or `--cache-only` `list --json`",
+        "repos list --strict --json",
+        "require `inventory_authority == \"complete\"`",
+        "a host-level coverage gap",
+        "derived `state == \"active\"`",
+        "Do not use lifecycle `status == \"active\"`",
+        "`live_rest`, `fact_provenance` and `observed_at`",
+        "unobserved, not empty or offline",
+        "never as zero active work",
+        "Do not sweep with `list-sessions`",
+        "Bound the command on the remote side",
+    ):
+        assert requirement in text, requirement
+    assert "list-sessions --all-projects --json" not in text
+    assert "execution procedure" not in text
+    assert "never a session-history sweep" in skill
+
+
 def test_watchdog_checks_never_block_and_classify_waits() -> None:
     skill = " ".join(_read(SKILL / "SKILL.md").split())
     checks = " ".join(_read(SKILL / "references" / "watchdog-checks.md").split())
@@ -190,6 +217,38 @@ def test_dormant_correction_edits_records_only_under_its_own_grant() -> None:
     } <= dormant
 
 
+def test_parked_questions_are_answered_only_under_answer_scope() -> None:
+    skill = " ".join(_read(SKILL / "SKILL.md").split())
+    text = " ".join(_read(SKILL / "references" / "pending-input.md").split())
+    charter = " ".join(_read(SKILL / "assets" / "CHARTER.md").split())
+    steering = " ".join(_read(SKILL / "references" / "steering.md").split())
+    readers = " ".join(_read(
+        SKILL / "references" / "fabric-readers.md"
+    ).split())
+    assert "(references/pending-input.md)" in skill
+    assert "only with recorded source-change and publication authority" in skill
+    for requirement in (
+        "**turn state alone does not rule out pending input**",
+        "a read-only or steering grant does not authorize answers",
+        "If persistence fails, do not answer",
+        "exact request identifier",
+        "never by blind re-answer",
+        "**Never inject keystrokes, drive a terminal or impersonate the "
+        "operator**",
+        "Treat as operator-only",
+    ):
+        assert requirement in text, requirement
+    assert text.index("1. **Recheck.**") < text.index("2. **Persist first.**")
+    assert "Answer scope (only if explicitly granted; else \"none\")" in charter
+    assert "[parked questions](pending-input.md)" in steering
+    assert "Answer the target's permission prompts" in steering
+    assert "documented no-ensure switch" in readers
+    scenarios = json.loads(_read(SKILL / "assets" / "scenarios.json"))
+    assert {"parked-routine-question", "parked-operator-only-question"} <= {
+        case["id"] for case in scenarios["cases"]
+    }
+
+
 def test_recurring_watch_re_resolves_roster_each_cycle() -> None:
     skill = " ".join(_read(SKILL / "SKILL.md").split())
     charter = " ".join(_read(SKILL / "assets" / "CHARTER.md").split())
@@ -215,3 +274,66 @@ def test_recurring_watch_re_resolves_roster_each_cycle() -> None:
     assert "recurring-roster-refresh" in {
         case["id"] for case in scenarios["cases"]
     }
+
+
+def test_enforced_goals_require_evidence_and_scope_g5_to_recurring() -> None:
+    skill = " ".join(_read(SKILL / "SKILL.md").split())
+    charter = " ".join(_read(SKILL / "assets" / "CHARTER.md").split())
+    for requirement in (
+        "## Enforced goals",
+        "**A sweep report that lacks evidence for an applicable goal is "
+        "incomplete**",
+        "reported against G1-G4 only",
+        "**G5 applies only to a recorded recurring assignment**",
+        "**a fleet that stays on-charter without a monitor**",
+        "**never self-declare an open-ended assignment done**",
+        "never widen the charter's mode, steering, answer or source-change "
+        "authority",
+    ):
+        assert requirement in skill, requirement
+    for goal in ("| G1 |", "| G2 |", "| G3 |", "| G4 |", "| G5 |"):
+        assert goal in skill, goal
+    assert skill.index("## Enforced goals") < skill.index(
+        "## 1. Establish the charter"
+    )
+    for requirement in (
+        "Confidence cadence:",
+        "Healthy sweeps to relax:",
+        "Any waste finding returns to the confidence cadence",
+        "A coverage gap or unknown target earns no healthy-sweep credit",
+        "a missing goal marks the sweep incomplete",
+    ):
+        assert requirement in charter, requirement
+    scenarios = json.loads(_read(SKILL / "assets" / "scenarios.json"))
+    assert {
+        "finite-request-goal-evidence", "recurring-confidence-cadence",
+    } <= {case["id"] for case in scenarios["cases"]}
+
+
+def test_self_improvement_loop_routes_learnings_by_owner() -> None:
+    skill = " ".join(_read(SKILL / "SKILL.md").split())
+    loop = " ".join(_read(SKILL / "references" / "self-improvement.md").split())
+    template = _read(SKILL / "assets" / "WEAK-POINTS.md")
+    assert "(references/self-improvement.md)" in skill
+    assert "(assets/WEAK-POINTS.md)" in skill
+    for requirement in (
+        "## Improve the fleet, not just the agent (G3)",
+        "## Improve this monitor (G4)",
+        "**Capture in the ledger first.**",
+        "Never stop a sweep to edit guidance or open a change",
+        "**Fold at sweep end.**",
+        "**Ride one rolling change.**",
+        "as a batched, anonymized change",
+        "needs recorded source-change and publication authority",
+        "A reader that starts, resumes or repairs a service is never the fix",
+    ):
+        assert requirement in loop, requirement
+    assert "**The consuming repository owns its filled-in catalogue**" in (
+        template
+    )
+    for section in (
+        "## Agent guidance weak points",
+        "## Monitor blind spots",
+        "## Reader discovery log",
+    ):
+        assert section in template, section

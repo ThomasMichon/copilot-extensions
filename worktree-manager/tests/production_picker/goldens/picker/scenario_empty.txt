@@ -1,8 +1,9 @@
 <<TOPBAR>>
   WORKTREES                                                                                           ⚙ Configuration
 ───────────────────────────────────────────────────────── ▲ ──────────────────────────────────────────────────────────
- Machine  Ctrl ◀▶                                                                      ● 0 active · 0 recent · 0 done
+ Machine  Ctrl ◀▶                                                             ● 0 active · 0 unfinished · 0 completed
     All     anomalous-potato Win ✓
+  f Status: all  g Group: Active/Recent  s Sort: used  / Search
 
    + New worktree…     creates on anomalous-potato Win  (this host)
 
@@ -13,8 +14,7 @@
     (none)
   ── Recent ──────────────────────────────────────────────────────────────────────────────────────────────────────────
     (none)
-  ── Completed ───────────────────────────────────────────────────────────────────────────────────────────────────────
-    (none)
+
 
 
 

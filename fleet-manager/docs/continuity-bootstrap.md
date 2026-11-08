@@ -266,6 +266,25 @@ root, so a request changed during bootstrap cannot redirect configuration writes
 Direct standalone callers may omit the pin as before; the repository consumer
 never downgrades to that unpinned operation.
 
+The additive `continuity-ssh-key-reference-v1` capability accepts read-only
+`--key-references-only`. It retains scope, policy, path/writer, host-state and
+Source checks but does not read the identity or public-key files. Its
+version-two description adds their exact absolute references as
+`key_files.identity_file` and `key_files.public_key_file`. This allows an
+explicit credential owner to validate a first-touch destination before
+materialization; combining it with `--apply` refuses before any preparation.
+Other inputs still require their ordinary checks. Normal callers retain the
+version-one description and actual key reads.
+
+The additive `continuity-ssh-key-pin-v1` capability accepts
+`--expected-key-fingerprint SHA256:<digest>` for actual key inspection,
+including apply. Malformed or mismatching public fingerprints refuse before
+configuration preparation; a reference-only inspection cannot claim this pin.
+The selected repository consumer carries both this pin and the original
+request digest after owning Vault installation and through construction.
+Fleet does not contact Vault, read its database, start its service or substitute
+a credential source. Default standalone callers may omit this new pin as before.
+
 The owner-private, bounded16KiB request has exactly these fields:
 
 ```json

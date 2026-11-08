@@ -9,7 +9,7 @@ loosely-coupled resource plugins can shell into it:
 
     agent-worktrees lease acquire <kind> <key> --holder <ref> [--ttl N]
     agent-worktrees lease renew   <kind> <key> --token <oid> [--ttl N]
-    agent-worktrees lease release <kind> <key> --token <oid>
+    agent-worktrees lease release <kind> <key> --token <oid> [--retain-return-proof]
     agent-worktrees lease inspect <kind> <key> [--pretty]
     agent-worktrees lease list [--kind <kind>] [--pretty]
 
@@ -89,6 +89,7 @@ def _run(args: argparse.Namespace) -> int:
             ttl_seconds=args.ttl,
             context=context,
             retries=args.retries,
+            released_only=args.released_only,
         )
         _print(snapshot, pretty=args.pretty)
         return 0
@@ -111,7 +112,9 @@ def _run(args: argparse.Namespace) -> int:
         _print(snapshot, pretty=args.pretty)
         return 0
     if command == "release":
-        _print(store.release(args.kind, args.resource, args.token), pretty=args.pretty)
+        _print(store.release(
+            args.kind, args.resource, args.token, retain_return_proof=args.retain_return_proof,
+        ), pretty=args.pretty)
         return 0
     if command in {"inspect", "status"}:
         _print(store.inspect(args.kind, args.resource), pretty=args.pretty)
@@ -160,6 +163,10 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument("--ttl", type=int, help="lease TTL in seconds")
         command.add_argument("--retries", type=int, help="bounded acquisition CAS retries")
         command.add_argument(
+            "--released-only", action="store_true",
+            help="acquire only absent or explicitly released leases; never take over expired holders",
+        )
+        command.add_argument(
             "--context", action="append", default=[], metavar="KEY=VALUE",
             help="bounded non-sensitive diagnostic context",
         )
@@ -177,6 +184,10 @@ def _parser() -> argparse.ArgumentParser:
     )
     release = resource_command("release", "append a release tombstone")
     release.add_argument("--token", required=True, help="current commit OID fencing token")
+    release.add_argument(
+        "--retain-return-proof", action="store_true",
+        help="retain bounded generation-qualified return evidence on this resource",
+    )
     resource_command("inspect", "inspect one lease")
     resource_command("status", "inspect one lease")
     listing = subs.add_parser("list", help="list leases in the namespace")

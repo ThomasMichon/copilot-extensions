@@ -235,8 +235,12 @@ def read_current(request: dict, *, recover: bool = True, wait: bool = False) -> 
     recovery_pending = False
     try:
         return _resident(request)
-    except ProjectionError:
-        raise
+    except ProjectionError as exc:
+        # A resident that predates the demand-free marker rejects it; a passive
+        # read then degrades to the labeled saved roster, never to a demand read.
+        if request.get("passive") is not True:
+            raise
+        unavailable = f"resident rejected the passive read: {exc}"
     except _ResidentUnready as exc:
         unavailable = str(exc)
         recovery_pending = True
@@ -303,6 +307,9 @@ def emit_current(args) -> int:
         return output._json_error("current-roster reads cannot include profile history")
     if getattr(args, "refresh", False) and not getattr(args, "worktree_id", None):
         return output._json_error("--refresh requires --worktree-id")
+    passive = bool(getattr(args, "passive", False))
+    if passive and any(getattr(args, flag, False) for flag in ("follow", "glance", "refresh")):
+        return output._json_error("--passive cannot be combined with --follow, --glance or --refresh")
     request = {
         "contract_version": CONTRACT_VERSION,
         "project": cfg.project_name(),
@@ -318,12 +325,15 @@ def emit_current(args) -> int:
         else cfg.detect_platform(),
         "include_missing": bool(getattr(args, "all", False)),
     }
+    if passive:
+        request["passive"] = True
     key = list_cache.cache_key(
         args, project=request["project"], tracking_status=args.tracking_status
     )
-    list_cache.note_demand(
-        key, args, project=request["project"], tracking_status=args.tracking_status
-    )
+    if not passive:
+        list_cache.note_demand(
+            key, args, project=request["project"], tracking_status=args.tracking_status
+        )
     if getattr(args, "follow", False):
         from .worktrees_feed_client import FeedFailure, relay
 
@@ -354,7 +364,9 @@ def emit_current(args) -> int:
             }), flush=True)
             return 1
     try:
-        result = read_current(request, wait=True)
+        # A passive read makes one bounded resident attempt and otherwise
+        # returns the labeled saved roster; it never starts or awaits a resident.
+        result = read_current(request, recover=False) if passive else read_current(request, wait=True)
     except (OSError, ValueError, RecursionError, ProjectionError, ProjectionUnavailable) as exc:
         return output._json_error(str(exc))
     if getattr(args, "stream", False):

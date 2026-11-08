@@ -52,7 +52,6 @@ on:
           - registration-inspection
           - worktrees-runtime-only
           - codespaces-installer
-          - codespaces-state-retirement
           - fleet-client-generations
         default: context
       source_sha:
@@ -249,32 +248,6 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 12
     steps: *coverage-selection-steps
-  codespaces-state-retirement-windows:
-    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'codespaces-state-retirement'
-    name: CodeSpaces isolated native state retirement (Windows)
-    runs-on: windows-latest
-    timeout-minutes: 10
-    env:
-      UV_PYTHON: "3.12"
-      PYTEST_ADDOPTS: "-vv --durations=10"
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: astral-sh/setup-uv@v9.0.0
-        with:
-          version: "0.12.6"
-      - name: Prove both native layouts without ambient consumers
-        run: >-
-          python tools/run-plugin-tests.py agent-codespaces
-          --test-file tests/native_uninstall/test_state_preservation.py
-          -k "test_native_success_removes_runtime_and_preserves_all_state and pwsh and agent-codespaces"
-          --allow-explicit-tiers
-
   codespaces-installer-linux:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'codespaces-installer'
     name: CodeSpaces canonical and materialized installers (Linux)
@@ -390,6 +363,17 @@ jobs:
           name: vault-configuration-critical-${{ runner.os }}-${{ github.sha }}
           path: vault-configuration-critical-junit
           if-no-files-found: warn
+      - name: Measure isolated Vault bootstrap cold and current metadata
+        run: >-
+          python tools/run-plugin-tests.py agent-vault --allow-explicit-tiers
+          --test-file tests/test_bootstrap_driver.py
+          -k native_bootstrap_performance_samples
+          --plugin-timeout 180 --timeout 120 --test-timeout 60
+      - name: Qualify Vault public pin before native key publication
+        run: >-
+          python tools/run-plugin-tests.py agent-vault --allow-explicit-tiers
+          --test-file tests/test_ssh_key_install.py
+          --plugin-timeout 180 --timeout 120 --test-timeout 60
       - name: Qualify inactive first touch and configured consumers
         run: >-
           python tools/run-plugin-tests.py agent-vault --max-files-per-sub-suite 2

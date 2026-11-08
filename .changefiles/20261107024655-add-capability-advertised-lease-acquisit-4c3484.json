@@ -1,0 +1,9 @@
+{
+  "comment": "Advertise optional lease acquisition that requires explicit release instead of stale takeover",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

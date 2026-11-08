@@ -111,6 +111,93 @@ def test_manager_creation_uses_the_home_scoped_boundary():
     assert "$plan.work_dir" in creation
 
 
+def _core_helpers():
+    source = SOURCE.read_text("utf-8")
+    helpers = []
+    for name in ("Invoke-AwMuxCoreProcess", "Resolve-AwMuxCore", "Invoke-AwMuxCoreCreation"):
+        start = source.index("function " + name + " {")
+        helpers.append(source[start:source.index("\n}\n", start) + 3])
+    return "\n".join(helpers)
+
+
+@pytest.mark.skipif(not PWSH, reason="PowerShell is required")
+@pytest.mark.parametrize("outcome", ["created", "joined", "rejected", "unknown", "lost"])
+def test_core_creation_uses_literal_process_contract_without_legacy_retry(tmp_path, outcome):
+    provider = tmp_path / "finite provider.py"
+    captured = tmp_path / "request.json"
+    provider.write_text(
+        "import json,sys\nfrom pathlib import Path\n"
+        f"Path({str(captured)!r}).write_text(sys.stdin.read(),encoding='utf-8')\n"
+        f"outcome={outcome!r}\n"
+        "if outcome=='lost': raise SystemExit(17)\n"
+        # Both captured streams must drain concurrently, without deadlock.
+        "sys.stderr.write('x'*131072)\n"
+        "print(json.dumps({'contract':'copilot-driver.mux-creation',"
+        "'version':1,'status':outcome}))\n"
+        "raise SystemExit(0 if outcome in ('created','joined') else 3)\n",
+        encoding="utf-8",
+    )
+    _, creation = _creation_source()
+    script = tmp_path / "core.ps1"
+    script.write_text(
+        "$ErrorActionPreference='Stop'\n"
+        "$script:AwPsmuxBin='psmux.exe'\n"
+        "$muxCore=@{python=$args[0];entrypoint=$args[1]}\n"
+        "$plan=@{work_dir=$args[2]}\n$sessName='wt-fixture'\n"
+        "$envFlags=@('-e','FIXTURE=two words')\n"
+        "$paneCmd=@('child','','quote \"inside\"',\"literal`nline\",'tail\\')\n"
+        "$joinedDuringCreate=$false\n$muxPublished=$false\n"
+        "function Enter-AwMuxCreation {throw 'Legacy creation after core selection'}\n"
+        "function Stop-AwOwnedPsmuxSession {throw 'Cleanup after core dispatch'}\n"
+        + _core_helpers() + "\n"
+        "$failed=$false\ntry {\n" + creation + "\n}catch{$failed=$true}\n"
+        "ConvertTo-Json -Compress @{code=$LASTEXITCODE;published=$muxPublished;"
+        "joined=$joinedDuringCreate;failed=$failed}\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [PWSH, "-NoProfile", "-File", str(script),
+         sys.executable, str(provider), str(tmp_path)],
+        capture_output=True, text=True, timeout=20,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    observed = json.loads(result.stdout)
+    assert observed["failed"] is (outcome == "lost")
+    assert observed["published"] is (outcome != "rejected")
+    assert observed["joined"] is (outcome == "joined")
+    if outcome != "lost":
+        assert observed["code"] == (0 if outcome in ("created", "joined") else 3)
+    request = json.loads(captured.read_text("utf-8"))
+    assert request == {
+        "version": 1, "binary": "psmux.exe", "session": "wt-fixture",
+        "argv": ["new-session", "-d", "-s", "wt-fixture", "-c", str(tmp_path),
+                 "-e", "FIXTURE=two words", "child", "", 'quote "inside"',
+                 "literal\nline", "tail\\"],
+    }
+
+
+@pytest.mark.skipif(not PWSH, reason="PowerShell is required")
+@pytest.mark.parametrize("declaration", ["missing", "unsupported"])
+def test_old_provider_is_selected_before_creation(tmp_path, declaration):
+    script = tmp_path / "select.ps1"
+    script.write_text(
+        "$ErrorActionPreference='Stop'\n" + _core_helpers() + "\n"
+        "function Invoke-AwMuxCoreProcess {\n"
+        + ("return @{code=1;output=''}\n" if declaration == "missing" else
+           "return @{code=0;output='{\"contract\":\"copilot-driver.mux-creation\","
+           "\"version\":2,\"operations\":[]}'}\n")
+        + "}\nif($null -ne (Resolve-AwMuxCore)){throw 'Guessed provider support'}\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [PWSH, "-NoProfile", "-File", str(script)],
+        capture_output=True, text=True, timeout=15,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 @pytest.mark.skipif(not PWSH, reason="PowerShell is required")
 def test_published_creation_failure_preserves_handoffs_and_does_not_retry(tmp_path):
     source = SOURCE.read_text("utf-8")

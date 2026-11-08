@@ -1,0 +1,9 @@
+{
+  "comment": "Require qualified PowerShell 7 before Windows core setup",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

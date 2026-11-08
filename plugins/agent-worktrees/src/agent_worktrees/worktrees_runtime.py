@@ -34,6 +34,7 @@ _FIELDS = frozenset(
         "platform_filter",
         "include_missing",
         "bootstrap",
+        "passive",
     }
 )
 
@@ -56,8 +57,9 @@ def request_selection(payload: dict) -> tuple[str, dict]:
     if type(include_missing) is not bool:
         raise ProjectionError("invalid include_missing")
     selection["include_missing"] = include_missing
-    if "bootstrap" in payload and type(payload["bootstrap"]) is not bool:
-        raise ProjectionError("invalid bootstrap")
+    for flag in ("bootstrap", "passive"):
+        if flag in payload and type(payload[flag]) is not bool:
+            raise ProjectionError(f"invalid {flag}")
     Selection(**selection)
     if selection["worktree_id"] is not None and selection["codename"] is not None:
         raise ProjectionError("current-roster selectors are mutually exclusive")
@@ -217,6 +219,7 @@ class WorktreesRuntime:
                     observations.CAPABILITY, "picker-bootstrap-v1",
                     "worktree-agendas-v1",
                     "worktree-agendas-v2",
+                    "worktree-agendas-graph-v1",
                 ],
                 "worktrees": {
                     "contract_version": CONTRACT_VERSION,
@@ -356,6 +359,9 @@ class WorktreesRuntime:
             project, selection = request_selection(payload)
         except ProjectionError as exc:
             return self._failure("invalid-request", str(exc))
+        # A passive read neither renews producer demand nor wakes the producer,
+        # so unattended sweeps cannot start scans or hold off idle retirement.
+        demand = payload.get("passive") is not True
         if self._read_elected is not None and not self._read_elected():
             self.close_admission("superseded")
         with self._lock:
@@ -363,14 +369,16 @@ class WorktreesRuntime:
                 return self._failure(
                     self._reason, self._error or "current-roster admission closed"
                 )
-            self._record_demand_locked(project)
+            if demand:
+                self._record_demand_locked(project)
             publication_error = self._publication_errors.get(project)
         try:
             result = self.store.read(
                 project, **selection, contract_version=payload["contract_version"],
             )
         except ProjectionUnavailable as exc:
-            self.register_project_demand(project, unready=True)
+            if demand:
+                self.register_project_demand(project, unready=True)
             return self._failure(
                 "unavailable" if publication_error else "unready", publication_error or str(exc),
             )

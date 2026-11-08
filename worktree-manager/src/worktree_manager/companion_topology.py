@@ -7,6 +7,7 @@ from itertools import islice
 from rich.text import Text
 from rich.tree import Tree
 
+from . import companion_pr_state
 from .companion_observations import observation_error as validate_observation
 
 MAX_ROWS = 24
@@ -220,7 +221,7 @@ def _subagents(parent, subagents):
 
 
 def topology_view(
-    worktree, bundle, session_observation=None, observation_error=None,
+    worktree, bundle, session_observation=None, observation_error=None, pr_state=None,
 ) -> Tree:
     """Render explicit snapshots only, with independent provenance and bounded fanout."""
     worktree = worktree if isinstance(worktree, dict) else {}
@@ -233,5 +234,7 @@ def topology_view(
     _disposition(root, disposition, marker)
     claims, marker = _fact(bundle, "claims", worktree_id)
     _claims(root, claims, marker, identity)
+    if pr_state is not None:
+        companion_pr_state.render(root, **pr_state)
     _observations(root, session_observation, observation_error)
     return root

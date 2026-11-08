@@ -5,19 +5,25 @@ import vm from "node:vm";
 import * as path from "node:path";
 import * as delivery from "../extensions/agent-bridge/delivery.mjs";
 import * as retained from "../extensions/agent-bridge/retained-delivery.mjs";
+import * as questions from "../extensions/agent-bridge/questions.mjs";
 import { isRemoteDriverSource } from "../extensions/agent-bridge/remote-driver.mjs";
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 const source = readFileSync(new URL("../extensions/agent-bridge/extension.mjs", import.meta.url), "utf8");
 
-async function load(selected, version = 50, { exact = false, nativeId = "native-a", driver = false } = {}) {
-  const calls = [], sends = [], logs = [], timers = [], handlers = [], driverSends = [];
+async function load(selected, version = 50, {
+  exact = false, nativeId = "native-a", driver = false, headed = false, headedRefused = false,
+} = {}) {
+  const calls = [], sends = [], logs = [], timers = [], handlers = [], driverSends = [], headedSends = [];
+  const shutdowns = new Map();
+  let closed = 0;
   let consumer;
   const session = {
     sessionId: "native-a", on: (handler) => handlers.push(handler),
     log: async (message) => logs.push(message),
     send: async (options) => { sends.push(options); return "sdk-message-a"; },
     getEvents: async () => [],
+    close() { assert.fail("Closing the Bridge client must not close native"); },
     rpc: { metadata: { snapshot: async () => ({
       sessionId: nativeId, workingDirectory: process.cwd(),
     }) } },
@@ -54,12 +60,14 @@ async function load(selected, version = 50, { exact = false, nativeId = "native-
   const context = vm.createContext({
     process: {
       env: { SESSION_ID: "native-a", AGENT_BRIDGE_RETAINED_INBOX: selected,
+        ...(headed ? { COPILOT_DRIVER_HEADED_CLIENT: "synthetic-selected-core" } : {}),
         ...(driver ? {
           AGENT_BRIDGE_REMOTE_DRIVER_ROOT: process.cwd(), AGENT_BRIDGE_NATIVE_SESSION_ID: "native-a",
           AGENT_BRIDGE_DRIVER_OWNER: "synthetic-launch",
         } : {}) },
       cwd: () => process.cwd(),
-      stderr: { write: (line) => logs.push(line) }, once: () => {},
+      ppid: 101,
+      stderr: { write: (line) => logs.push(line) }, once: (name, callback) => shutdowns.set(name, callback),
     },
     fetch: () => { throw new Error("real network forbidden"); },
     setInterval: (fn, ms) => { timers.push({ fn, ms }); return { unref() {} }; },
@@ -77,8 +85,24 @@ async function load(selected, version = 50, { exact = false, nativeId = "native-
     "@github/copilot-sdk/extension": { joinSession: async () => session },
     "./delivery.mjs": delivery,
     "./retained-delivery.mjs": retained,
+    "./questions.mjs": questions,
     "./remote-driver.mjs": {
       isRemoteDriverSource,
+      createHeadedDriverSession: async (native, options) => {
+        assert.equal(headed, true);
+        assert.equal(options.declaration, "synthetic-selected-core");
+        assert.equal(options.nativePid, 101);
+        assert.equal(options.cwd, process.cwd());
+        if (driver) {
+          assert.equal(options.pluginRoot, process.cwd());
+          assert.equal(options.expectedSessionId, "native-a");
+        }
+        if (headedRefused) throw new Error("selected headed client unavailable");
+        return {
+          ...native, send: async (value) => { headedSends.push(value); return "headed-message"; },
+          close: () => { closed++; },
+        };
+      },
       createRemoteDriverSession: (native, options) => {
         assert.equal(driver, true);
         assert.equal(options.expectedSessionId, "native-a");
@@ -119,7 +143,7 @@ async function load(selected, version = 50, { exact = false, nativeId = "native-
   assert.ok(poll);
   poll.fn();
   await settle();
-  return { calls, sends, logs, handlers, poll, driverSends };
+  return { calls, sends, logs, handlers, poll, driverSends, headedSends, shutdowns, closed: () => closed };
 }
 
 test("actual extension default still uses legacy inbox, ACK and controls", async () => {
@@ -168,5 +192,28 @@ test("launch-selected driver cannot fall through to legacy native delivery or co
   const old = await load("0", 49, { driver: true });
   assert.equal(old.sends.length, 0);
   assert.equal(old.driverSends.length, 0);
+  assert.equal(old.calls.some((call) => /\/messages|\/controls|\/enroll/.test(call.route)), false);
+});
+
+test("the actual extension selects launch-bound common delivery ahead of both legacy paths", async () => {
+  for (const driver of [false, true]) {
+    const f = await load("0", 50, { headed: true, driver });
+    assert.equal(f.sends.length, 0);
+    assert.equal(f.driverSends.length, 0);
+    assert.equal(f.headedSends.length, 1);
+    assert.match(f.headedSends[0].prompt, /retained-handoff="handoff-a"/);
+    assert.equal(f.headedSends[0].mode, "immediate");
+    assert.equal(f.calls.some((call) => /\/messages|\/controls/.test(call.route)), false);
+    f.shutdowns.get("SIGTERM")();
+    assert.equal(f.closed(), 1);
+  }
+});
+
+test("an unavailable selected headed client never falls through to the SDK or old driver", async () => {
+  await assert.rejects(load("0", 50, { headed: true, headedRefused: true }), /selected headed client unavailable/);
+  const old = await load("0", 49, { headed: true });
+  assert.equal(old.sends.length, 0);
+  assert.equal(old.driverSends.length, 0);
+  assert.equal(old.headedSends.length, 0);
   assert.equal(old.calls.some((call) => /\/messages|\/controls|\/enroll/.test(call.route)), false);
 });

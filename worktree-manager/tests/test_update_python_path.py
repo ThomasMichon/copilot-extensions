@@ -264,6 +264,7 @@ def test_bootstrap_observer_owns_publication_only_after_successful_wait(
 
     driver = SimpleNamespace(
         RequestSpec=core.RequestSpec, TrustedRunner=core.TrustedRunner,
+        current_authority=lambda **_kwargs: core.authority.UpdateAuthority(),
         default_root=lambda: tmp_path, enqueue=lambda *a, **k: request,
         ensure_worker=lambda *a, **k: None, wait=wait,
     )

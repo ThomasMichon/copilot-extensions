@@ -261,6 +261,29 @@ def test_read_only_controls_preserve_defaults_without_creating_state(
     assert not list(policy.home.iterdir())
 
 
+def test_controller_uses_runtime_resources_without_loading_native_owner(
+    policy: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scripts = policy.home / "resources"
+    scripts.mkdir()
+    for name in ("bootstrap-killswitch-guard.sh", "bootstrap-killswitch-guard.ps1"):
+        (scripts / name).write_text("inert unit fixture\n", encoding="utf-8")
+    calls = []
+
+    def resources():
+        calls.append("runtime resources")
+        return scripts
+
+    monkeypatch.setitem(sys.modules, "worktree_manager.self_install", SimpleNamespace(
+        _runtime_scripts=resources,
+        running_payload_dir=lambda: pytest.fail("legacy payload selected"),
+    ))
+    monkeypatch.setattr(bootstrap_policy.shutil, "which", lambda name: "inert-shell")
+    command = bootstrap_policy._guard_command()
+    assert Path(command[-1]).parent == scripts and Path(command[-1]).is_file()
+    assert calls == ["runtime resources"]
+
+
 def test_direct_manager_recheck_keeps_its_invocation_directory(
     policy: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, manager_policy_boundary: None,
 ) -> None:
@@ -376,3 +399,76 @@ def test_cell_control_never_reads_or_edits_global_switch(
     row = bootstrap_policy.configuration_row()
     assert row["enabled"] == "not applicable" and not row["bootstrap_control"]
     assert not list(policy.home.iterdir())
+
+
+def test_suite_authority_classifies_reconciliation_and_independent_backends() -> None:
+    source = ROOT / "libs" / "update-driver" / "src" / "update_driver" / "authority.py"
+    tree = ast.parse(source.read_bytes(), filename=str(source))
+    selected = [
+        node for node in tree.body
+        if isinstance(node, ast.ImportFrom) and node.module == "__future__"
+        or isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "_SUITE_BACKENDS"
+            for target in node.targets
+        )
+        or isinstance(node, ast.FunctionDef) and node.name == "suite_request"
+    ]
+    assert len(selected) == 3
+    namespace = {}
+    exec(compile(ast.Module(body=selected, type_ignores=[]), str(source), "exec"), namespace)
+    classify = namespace["suite_request"]
+    assert classify(SimpleNamespace(
+        backend="engine-launch-update", argv=("automatic", "--no-update", "--with-reconcile"),
+    ))
+    assert not classify(SimpleNamespace(
+        backend="engine-launch-update", argv=("automatic", "--no-update"),
+    ))
+    assert classify(SimpleNamespace(backend="manager-self-install", argv=()))
+    assert classify(SimpleNamespace(backend="engine-dev-release", argv=()))
+    assert not classify(SimpleNamespace(backend="other-product", argv=()))
+
+
+def test_manager_authority_routes_only_to_selected_owner() -> None:
+    source = ROOT / "worktree-manager" / "src" / "worktree_manager" / "project_update_controller.py"
+    tree = ast.parse(source.read_bytes(), filename=str(source))
+    selected = [
+        node for node in tree.body
+        if isinstance(node, ast.ImportFrom) and node.module == "__future__"
+        or isinstance(node, ast.FunctionDef) and node.name == "handoff"
+    ]
+    assert len(selected) == 2
+    calls = []
+    engine = SimpleNamespace(
+        EngineError=RuntimeError,
+        get_value=lambda project, key: calls.append((project, key)) or "tools/update.py",
+        run_engine_passthrough=lambda project, args, **kwargs: calls.append((project, args)) or 7,
+    )
+    namespace = {
+        "engine_client": engine,
+        "extract_project": lambda _arguments: ("other", ["--force"]),
+    }
+    exec(compile(ast.Module(body=selected, type_ignores=[]), str(source), "exec"), namespace)
+    handoff = namespace["handoff"]
+    project = SimpleNamespace(configured=True, mode="project", project="example")
+    assert handoff(["--project", "other", "--force"], authority=project) == 7
+    assert calls == [("example", "update-controller"), ("example", ["update", "--force"])]
+    with pytest.raises(ValueError, match="disabled"):
+        handoff(["--no-project-controller"], authority=project)
+    assert handoff(["--no-project-controller"], authority=project, delegated=True) is None
+    for flags in (["--target", "agent-bridge"], ["--target=agent-bridge"]):
+        with pytest.raises(ValueError, match="disabled"):
+            handoff(flags, authority=project)
+        assert handoff(flags, authority=project, delegated=True) is None
+    assert len(calls) == 2
+    engine.get_value = lambda *_args: ""
+    with pytest.raises(ValueError, match="unavailable"):
+        handoff([], authority=project)
+    standalone = SimpleNamespace(configured=True, mode="standalone")
+    assert handoff([], authority=standalone) is None
+
+
+def test_downlevel_manager_driver_capability_is_refused() -> None:
+    from worktree_manager import update_driver_cli
+
+    with pytest.raises(RuntimeError, match="lacks authority support"):
+        update_driver_cli._current_authority(SimpleNamespace(StateError=RuntimeError))

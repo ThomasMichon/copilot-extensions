@@ -186,6 +186,30 @@
       "mode": "dormant-correction",
       "facts": "A dormant worktree's pending handoff baton tells its successor to resume a PR that later merged under another owner. The handoff owner offers only its ordinary save path, and the grant includes batons and effort plans.",
       "expected": "Do not save a replacement baton: an ordinary save is scoped to the caller and can add claims, abandon handoffs or leave old tokens resolving to the stale baton. Report the baton correction as advisory with records changed: none, and correct the effort plan the resumer also reads through its owner."
+    },
+    {
+      "id": "parked-routine-question",
+      "mode": "steering-authorized",
+      "facts": "A worker's turn state reads running, but its pending-input field shows a form asked two hours ago: continue to the next planned slice or wait. The charter has an answer scope covering routine continuation questions for this worker, and the transport has a documented answer operation.",
+      "expected": "Recheck the same request is still pending and no later hold applies, persist the intended answer first, then answer 'continue' through the documented operation with the exact request identifier. Record delivery separately from progress and record the missing default as a guidance finding."
+    },
+    {
+      "id": "parked-operator-only-question",
+      "mode": "read-only",
+      "facts": "A worker is parked on a question asking whether it may raise its own review-round limit. No answer operation exists for its session type.",
+      "expected": "Do not answer, inject keystrokes or drive its terminal. Report once to the operator with the evidence, a recommended answer and its default, and record the missing answer path as a coverage gap."
+    },
+    {
+      "id": "finite-request-goal-evidence",
+      "mode": "read-only",
+      "facts": "The operator asks once whether the agents are on track; no recurring assignment or schedule is recorded. One venue's roster read fails, and one live head has looped on the same failing command for an hour.",
+      "expected": "One read-only sweep reported against G1-G4: a coverage line naming the failed venue's literal error, a disposition per head with a recommended steer for the loop, the loop mapped to a weak-point pattern or 'no new pattern', and the failed reader recorded as a monitor improvement. G5 does not apply; create no schedule and send no message."
+    },
+    {
+      "id": "recurring-confidence-cadence",
+      "mode": "read-only",
+      "facts": "A recorded recurring assignment uses a 15-minute confidence cadence and two healthy sweeps to relax. The last sweep was healthy; this sweep finds one head waiting on a question it could have defaulted.",
+      "expected": "Classify the wait as waste, reset the healthy-sweep count and stay on the confidence cadence. Report evidence for G1-G5 and keep the assignment running until its recorded end condition; never declare it done."
     }
   ]
 }

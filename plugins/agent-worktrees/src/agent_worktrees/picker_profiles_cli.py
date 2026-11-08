@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 from agent_procutil import no_window_kwargs
@@ -13,6 +14,8 @@ from agent_procutil import no_window_kwargs
 from . import config as cfg
 from . import installer as inst
 from . import output, validate as val
+
+CONTROLLER_PROFILE_REFRESH_CAPABILITY = "controller-profile-refresh/v1"
 
 
 def _core():
@@ -182,16 +185,20 @@ def cmd_validate(args: argparse.Namespace) -> int:
     return 1 if failures else 0
 
 
-def _refresh_terminal_profiles(project: str | None = None, *, machine: str | None = None) -> bool:
+def _refresh_terminal_profiles(
+    project: str | None = None, *, machine: str | None = None,
+    manager=None, verify: Callable[[], None] | None = None,
+) -> bool:
     """Invoke the Manager's narrow owner surface, without staging an installer."""
     from .manager_launch_cli import _discover_control_plane_provider_manifests
     from .control_plane_providers import _machine_control_plane_providers_dir
     from .update_events import bounded
 
     try:
-        manager = _discover_control_plane_provider_manifests(
-            directory=_machine_control_plane_providers_dir(),
-        ).get("worktree-manager")
+        if manager is None:
+            manager = _discover_control_plane_provider_manifests(
+                directory=_machine_control_plane_providers_dir(),
+            ).get("worktree-manager")
         if manager is None:
             output.warn("Could not refresh Windows Terminal profiles: Worktree Manager is unavailable")
             return False
@@ -224,6 +231,8 @@ def _refresh_terminal_profiles(project: str | None = None, *, machine: str | Non
                 "projectRoots": {name: str(cfg.project_dir(name)) for name in sorted(names)},
             })
             arguments.append("--input-roots-stdin")
+        if verify is not None:
+            verify()
         result = subprocess.run(
             arguments,
             **input_kwargs,
