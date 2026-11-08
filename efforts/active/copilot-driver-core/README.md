@@ -2610,3 +2610,13 @@ install-contract gate pass. Both application cases remain explicitly selected,
 outside required unit-only CI. The native installed flow is the real consumer
 and clean first-touch tier; no productive desktop or external venue is used,
 and those broader adoption/lifetime obligations remain in the parent plan.
+
+Review identifies a release-layout omission in the fixture copy: an already
+materialized checkout has local `libs` references that the escaping-reference
+materializer cannot recreate. Preserve that existing directory in the same
+copy helper. A focused regression constructs that layout, copies it, invokes
+the real materializer/resolver and reads the resolved module bytes; it passes
+in 0.72 seconds (77.19 including runner preparation/cleanup). The development
+checkout has no pre-existing local `libs`, so this addition leaves its already
+qualified construction/native path unchanged. Refresh final-head review and
+CI rather than treating the earlier High finding as advisory.

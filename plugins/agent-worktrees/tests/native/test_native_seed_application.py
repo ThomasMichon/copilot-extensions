@@ -34,6 +34,46 @@ def _literal(value):
     return "'" + str(value).replace("'", "''") + "'"
 
 
+def _copy_application_inputs(source, destination):
+    for entry in source.iterdir():
+        if entry.is_file():
+            shutil.copyfile(entry, destination / entry.name)
+        elif entry.name in {"src", "scripts", "libs"}:
+            shutil.copytree(
+                entry, destination / entry.name,
+                ignore=shutil.ignore_patterns(
+                    ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "build", "*.egg-info",
+                ),
+            )
+
+
+def test_application_inputs_preserve_materialized_local_dependencies(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(ROOT / "tools"))
+    import build_python_artifacts as builder
+    import materialize_main as materializer
+
+    original, copied = tmp_path / "materialized", tmp_path / "copied"
+    module = original / "libs" / "widget" / "src" / "widget" / "__init__.py"
+    module.parent.mkdir(parents=True)
+    module.write_text("VALUE = 'fixture'\n", encoding="utf-8")
+    (original / "libs" / "widget" / "pyproject.toml").write_text(
+        '[project]\nname = "demo-widget"\nversion = "0.1.0"\n', encoding="utf-8",
+    )
+    (original / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\nversion = "0.1.0"\n'
+        '[tool.uv.sources]\ndemo-widget = { path = "libs/widget" }\n',
+        encoding="utf-8",
+    )
+    copied.mkdir()
+    _copy_application_inputs(original, copied)
+    materializer.materialize_uv_editable_ref_into(
+        source_consumer_dir=original, dest_consumer_dir=copied, canonical_root=tmp_path,
+    )
+    dependencies = dict(builder.resolve_vendored_libs(copied))
+    assert dependencies["widget"] == (copied / "libs" / "widget").resolve()
+    assert (dependencies["widget"] / "src" / "widget" / "__init__.py").read_bytes() == module.read_bytes()
+
+
 @pytest.mark.timeout(300)
 def test_fresh_application_admits_its_current_native_runtime(tmp_path, monkeypatch):
     _qualify_native_application(tmp_path, monkeypatch)
@@ -71,16 +111,7 @@ def _qualify_native_application(tmp_path, monkeypatch, *, broker=False):
     source, artifacts = inputs / "plugins" / "agent-worktrees", inputs / "wheels"
     source.mkdir(parents=True)
     artifacts.mkdir()
-    for entry in SOURCE.iterdir():
-        if entry.is_file():
-            shutil.copyfile(entry, source / entry.name)
-        elif entry.name in {"src", "scripts"}:
-            shutil.copytree(
-                entry, source / entry.name,
-                ignore=shutil.ignore_patterns(
-                    ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "build", "*.egg-info",
-                ),
-            )
+    _copy_application_inputs(SOURCE, source)
     materializer.materialize_uv_editable_ref_into(
         source_consumer_dir=SOURCE, dest_consumer_dir=source, canonical_root=ROOT,
     )

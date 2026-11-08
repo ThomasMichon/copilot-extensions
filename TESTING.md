@@ -2497,6 +2497,8 @@ current-runtime native admission. Disposable build inputs retain application
 Python source, operational scripts, top-level build metadata and dependency
 sources, not unrelated plugin surfaces or non-shipped test trees. Runtime
 assets and notices remain in the real wheel.
+Existing local `libs` are preserved on materialized release checkouts; a focused
+copy/materializer/resolver regression covers that layout without building wheels.
 It also builds the real installed CLI's launch
 command and invokes the packaged finite native provider after removing source
 inputs. Both scripts must belong to the installed nested environment, and the
