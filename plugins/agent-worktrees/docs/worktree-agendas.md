@@ -217,8 +217,10 @@ read path each read only this small record and the local lane evidence, with
 their own `<worktree>.agenda.json` window independent of the disposition
 counter. They do not load configuration, run git, start Python or make a
 synchronous call. A missing, malformed or unknown-version record means no
-reminder, so a changed preference reaches a running session at its next start
-or resume.
+reminder. `agent-worktrees status` write mode (for example `status --activity`,
+which the disposition nudge already asks agents to run) republishes the record
+too, so a changed preference reaches a running session at its next disposition
+write, start or resume.
 
 The policy is guidance, not automation or a lock. Agent-worktrees never adopts,
 creates or edits an agenda; the agent decides whether to adopt, owns its edits,

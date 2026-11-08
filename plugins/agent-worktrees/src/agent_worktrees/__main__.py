@@ -2501,6 +2501,15 @@ def _cmd_status_write(
     # flagged in review: `create` acquires them allocation-lock-then-record-
     # lock via `create_new_record`'s own `save_record`).
     peek = tracking.load_record(yaml_path)
+    # Republish the effective agenda policy for the post-tool reminder hooks,
+    # so a running session picks up an `agendas.default` change on its next
+    # disposition write rather than only at session start/resume.
+    try:
+        from . import session_context as _session_context
+
+        _session_context.publish_agenda_policy(config, peek)
+    except Exception:
+        pass
     if not peek.codename:
         try:
             codename_tracking.ensure_codename(

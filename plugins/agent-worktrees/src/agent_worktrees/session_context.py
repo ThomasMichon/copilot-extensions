@@ -253,7 +253,7 @@ def render_agenda_guidance(
             "- Adopt one via the `driving-effort-agendas` skill (its `scripts/`): "
             "`agenda_outline.py from-effort <effort README.md>`, or "
             f"`agenda_backfill.py preview {session_folder}` to rebuild from this "
-            "session, or author an outline; then `agenda_outline.py preview` and "
+            "session, or author an outline; then `agenda_outline.py preview <outline>` and "
             "`agenda_outline.py adopt <outline> --state-home .effort-agenda/<lane>/`."
         )
     lines.append(

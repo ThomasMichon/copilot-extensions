@@ -433,7 +433,8 @@ to the bound-session guidance and publishes the effective value for that
 worktree's post-tool hooks. The hooks re-check on the same call/minute cadence
 as the disposition nudge (`AGENT_WORKTREES_NUDGE_CALLS` /
 `AGENT_WORKTREES_NUDGE_MINUTES`) without resolving configuration themselves, so
-a changed setting reaches a running session at its next start or resume. The
+a changed setting reaches a running session at its next start, resume or
+`agent-worktrees status` disposition write. The
 reminder is emitted only while no agenda lane is detected, and
 `AGENT_WORKTREES_AGENDA_NUDGE=off` silences it. See
 [Worktree agendas](worktree-agendas.md#default-on-policy).

@@ -36,6 +36,24 @@ def test_maintenance_refusal_preserves_status_and_normal_output(
     assert status_env.read_bytes() == before
 
 
+def test_status_write_republishes_agenda_policy(status_env, monkeypatch):
+    from agent_worktrees import session_context, tracking_write
+
+    published = []
+    monkeypatch.setattr(
+        session_context,
+        "publish_agenda_policy",
+        lambda config, record: published.append(record.worktree_id),
+    )
+    def held(*args, **kwargs):
+        raise tracking_write.ResidentRecoveryHeld("active maintenance")
+    monkeypatch.setattr(tracking_write, "dispatch", held)
+    main._cmd_status_write(
+        argparse.Namespace(worktree_id=None, json=False), summary=None, activity="focus",
+    )
+    assert published == ["wt-status"]
+
+
 @pytest.fixture
 def status_env(tmp_path, tmp_tracking_dir, monkeypatch):
     record = tracking.WorktreeRecord(

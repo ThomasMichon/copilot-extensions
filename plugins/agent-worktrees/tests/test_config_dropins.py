@@ -722,3 +722,10 @@ def test_agendas_dropin_validation():
     assert dropins._validate_config({"agendas": {"default": False}}) is None
     error = dropins._validate_config({"agendas": {"default": "sometimes"}})
     assert error == "agendas.default must be one of off, expected (got 'sometimes')"
+    nested = dropins._validate_config(
+        {"repos": {"sample": {"agendas": {"default": "sometimes"}}}}
+    )
+    assert nested == "repos.sample.agendas.default must be one of off, expected (got 'sometimes')"
+    assert dropins._validate_config(
+        {"repos": {"sample": {"agendas": {"default": "expected"}}}}
+    ) is None

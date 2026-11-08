@@ -318,6 +318,12 @@ def _validate_repo_fragment(repo: object, *, location: str) -> str | None:
         error = _validate_codename(repo["codename"], location=f"{location}.codename")
         if error:
             return error
+    if "agendas" in repo:
+        from .config import agenda_policy_error
+
+        error = agenda_policy_error(repo["agendas"])
+        if error:
+            return f"{location}.{error}"
     return None
 
 
