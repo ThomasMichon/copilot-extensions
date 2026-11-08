@@ -339,6 +339,30 @@ def render_registry_context(
     mux_session: str | None = None,
     plugin_related_anchors: list[str] | None = None,
 ) -> str:
+    """Render the bounded registry context followed by any agenda guidance line."""
+    context = _render_registry_core(
+        config,
+        record,
+        cwd=cwd,
+        pane_id=pane_id,
+        mux_session=mux_session,
+        plugin_related_anchors=plugin_related_anchors,
+    )
+    return with_agenda_guidance(
+        context, config, record,
+        session_id=os.environ.get("COPILOT_AGENT_SESSION_ID") or None,
+    )
+
+
+def _render_registry_core(
+    config: Any,
+    record: Any,
+    *,
+    cwd: str,
+    pane_id: str | None = None,
+    mux_session: str | None = None,
+    plugin_related_anchors: list[str] | None = None,
+) -> str:
     """Render current checkout, state pairing, PR conduct, and bounded related topology."""
 
     resolved_state = state_root.resolve_state_root(config, cwd=cwd)

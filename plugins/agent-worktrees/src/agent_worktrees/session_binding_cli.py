@@ -563,8 +563,6 @@ def cmd_register_session(args: argparse.Namespace) -> int:
                 message = f"[agent-worktrees] This Copilot session is bound.\n{registry_context}"
                 message = related_briefing.augment_session_message(
                     message, context_config, record, cwd=target_cwd, session_id=session_id)
-                message = session_context_mod.with_agenda_guidance(
-                    message, context_config, record, session_id=session_id)
             except Exception:
                 message = ""
         if not message and recovered_mux:
