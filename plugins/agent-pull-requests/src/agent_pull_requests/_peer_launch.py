@@ -193,7 +193,7 @@ def legacy_peer_environment(inherited: dict[str, str]) -> dict[str, str]:
 
 
 def _vault_service_suffix(root: str) -> str:
-    if os.name == "nt":
+    if sys.platform == "win32":
         import ctypes
         from ctypes import wintypes
 

@@ -116,11 +116,10 @@ def test_agent_dispatch_retains_authority_and_separate_shared_control() -> None:
     assert "AGENT_DISPATCH_SHARED_CONTROL_TOKEN" not in other
 
 
-@pytest.mark.skipif(
-    peer_launch.os.name != "nt" and not peer_launch.sys.platform.startswith("linux"),
-    reason="Vault peer target supports native Windows and Linux",
-)
-def test_vault_rebinds_native_owner_without_caller_credential_selection(tmp_path) -> None:
+def test_vault_rebinds_native_owner_without_caller_credential_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(peer_launch, "_vault_service_suffix", lambda _root: "f" * 12)
     root = tmp_path / "Vault Owner"
     context = {
         **_context("agent-vault"), "pluginRoot": str(root),
@@ -159,7 +158,9 @@ def test_vault_rebinds_native_owner_without_caller_credential_selection(tmp_path
     assert not root.exists()
 
 
-def test_vault_suffix_refuses_unsupported_posix_checksum_without_a_fallback(monkeypatch) -> None:
+def test_vault_suffix_refuses_unsupported_posix_checksum_without_a_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(peer_launch.os, "name", "posix")
     monkeypatch.setattr(peer_launch.sys, "platform", "linux")
     monkeypatch.setattr(peer_launch.shutil, "which", lambda _name: None)
@@ -167,7 +168,9 @@ def test_vault_suffix_refuses_unsupported_posix_checksum_without_a_fallback(monk
         peer_launch._vault_service_suffix("/example/Vault")
 
 
-def test_vault_peer_refuses_unqualified_native_platform_without_owner_fallback(monkeypatch) -> None:
+def test_vault_peer_refuses_unqualified_native_platform_without_owner_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(peer_launch.os, "name", "posix")
     monkeypatch.setattr(peer_launch.sys, "platform", "darwin")
     monkeypatch.setattr(peer_launch.shutil, "which", lambda _name: pytest.fail("unqualified owner lookup"))
