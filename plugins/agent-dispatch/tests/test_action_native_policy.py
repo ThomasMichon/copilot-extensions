@@ -25,6 +25,18 @@ def _policy(root: Path, action: str, inhibited: bool) -> None:
     (root / "action-controls.json").write_text(json.dumps({action: {"disabled": inhibited}}))
 
 
+def test_source_reader_runs_without_a_runtime_venv(tmp_path: Path) -> None:
+    root = tmp_path / "install"
+    root.mkdir()
+    (root / "action-controls.json").write_text("{}")
+    base = getattr(sys, "_base_executable", sys.executable)
+    command = [base, "-I", "-S", "-B", str(PLUGIN / "scripts" / "action_controls.py"),
+               "--root", str(root), "--action", ACTIONS[0]]
+    result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["ok"]
+
+
 @pytest.mark.parametrize("action", ACTIONS)
 def test_native_policy_is_read_only_and_each_invocation_rechecks(
     tmp_path: Path, action: str,
