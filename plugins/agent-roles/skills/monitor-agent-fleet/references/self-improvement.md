@@ -41,6 +41,11 @@ Learning the fleet's readers is part of the role.
   session's command catalog, an operator correction) and fix the consumer's
   reader table with a discovery-log row, so the next monitor skips that guess.
   A reader that starts, resumes or repairs a service is never the fix.
+- **Exact credential references.** A health probe or reader that needs a
+  credential names the exact credential reference (the precise store entry or
+  identity, never a description of it) in the consumer's reader table. A probe
+  that authenticated with the wrong credential is a reader correction, not a
+  venue failure.
 - **Monitor blind spots.** Unreachable venues, unread session types, flaky or
   expensive readers, misleading liveness signals and missing answer paths go
   in the catalogue's "Monitor blind spots" section with their effect and a
@@ -55,8 +60,9 @@ Improvement work is part of the sweep, not a separate project. Keep it cheap:
 
 1. **Capture in the ledger first.** During a sweep, write each learning as one
    line in the private supervisory record, tagged (for example `skill:`) with
-   its kind: reader fix, blind spot or weak-point pattern. Never stop a sweep
-   to edit guidance or open a change.
+   its kind: reader fix, blind spot or weak-point pattern, and recorded against
+   the [thread register](thread-register.md)'s self-improvement thread. Never
+   stop a sweep to edit guidance or open a change.
 2. **Fold at sweep end.** Apply the tagged lines as small edits: reader fixes
    to the consumer's reader table and discovery log; drift patterns and blind
    spots to its weak-point catalogue; a changed default, override or goal to

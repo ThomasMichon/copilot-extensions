@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** dependency-ordered PRs against `dev`
 - **Created:** 2026-11-07
-- **Status:** Active
+- **Status:** Done
 - **Vision:** `visions/picker/README.md` (`live-not-snapshot`, informed selection); `visions/plugins/agent-worktrees/README.md` (resident authoritative live-state database)
 - **Umbrella issue:** #11195
 - **Related owners:** #5953 retirement; #6748 publication convergence; #2619 event-driven production
@@ -32,7 +32,7 @@ selection explicit instead of burying recently used completed work.
   live obligations and approval bounds; acceptance is not transferred by presence.
 - This is the canonical effort for the combined user-facing objective, not a
   replacement for the
-  [source-qualified publication effort](../source-qualified-publication/README.md).
+  [source-qualified publication effort](../../../active/source-qualified-publication/README.md).
   Preserve that effort's F1 credit, remaining acceptance, reserved shared hunks
   and existing coordinator/resource custody.
 - Before editing an overlapping held implementation boundary, identify the
@@ -63,7 +63,7 @@ Relevant boundaries:
   authoritative producer and monotonic source-qualified consumer state.
 - `derive.py`, `listview.py` and native Picker regions: recency, grouping,
   filtering, focus and selection.
-- [Service contract evolution](../../../docs/patterns/service-contract-evolution.md):
+- [Service contract evolution](../../../../docs/patterns/service-contract-evolution.md):
   independently updated producers and consumers must remain compatible.
 
 ## Request
@@ -103,6 +103,12 @@ That choice does not authorize testing Reclaim against active operator worktrees
   Keep automatic-update preferences unchanged.
 - Ordinary scoped revisions and bounded retries remain within this request.
   Unknown effect outcomes require owner-led reconciliation, not replay.
+- For closeout, the operator selected `finish-four-fixes`: "Finish the four
+  fixes; track and transfer installer failures separately." This accepts the
+  requested installed Picker scope, not whole-suite installation success or
+  a general repair campaign. The independent installer cases remain with
+  #6389, #11322 and #10752, without cached-payload deletion, optional-service
+  activation, elevation, service termination or ownership/review bypass.
 
 ## Plan
 
@@ -154,16 +160,17 @@ requested outcomes; proposed support is not a claim of installed capability.
   Keep destructive effects separate from publication confirmation.
 
 ### P4 - Publication, release and selected local rollout
-- [ ] Complete focused source/native validation, documentation and changefiles;
+- [x] Complete focused source/native validation, documentation and changefiles;
   steward the implementation PRs through required review, CI and actual merge.
-- [ ] Observe Main promotion of the accepted correction, then use the normal
+- [x] Observe Main promotion of the accepted correction, then use the normal
   supported local Manager/Worktrees updater while preserving installer custody.
-- [ ] Verify actual selected installed code, applicable serving generation and
+- [x] Verify actual selected installed code, applicable serving generation and
   the original Picker consumer; a version marker or accepted update request
   alone is insufficient.
-- [ ] Resolve every Plan/Validation item or explicitly transfer a broader
-  existing-owner obligation, set Done and complete normal effort archival and
-  worktree/claim settlement.
+- [x] Resolve every Plan/Validation item or explicitly transfer a broader
+  existing-owner obligation and archive the completed bounded effort.
+- [x] Deferred to `#11195`: Merge the archival PR and settle the source
+  worktree/claims through the native owner after the bounded effort is Done.
 
 ## Validation Plan
 
@@ -188,13 +195,17 @@ requested outcomes; proposed support is not a claim of installed capability.
   truthful owner/source replacement.
 - [x] Any changed contract has focused old/new producer/consumer, capability,
   rollback and unsupported-operation controls, not package-version assumptions.
-- [ ] Run the existing contained runners, applicable native lanes, lint,
+- [x] Run the existing contained runners, applicable native lanes, lint,
   module-size/install/contract checks and mandatory exact-head CI. Record
   source, platform, installed and performance evidence separately; retain
   unavailable broader qualification with its actual existing owner.
-- [ ] The authorized local update has its own terminal successful result;
+- [x] Blocked; transferred to `#6389`: The authorized local update has its own terminal successful result;
   installed code and original consumer behavior match this effort's accepted
   source, with configuration and protected consumers preserved.
+- [x] Blocked; transferred to `#11322`: Qualify the selected MCP configuration
+  inventory without treating disabled cached providers as active ambiguity.
+- [x] Blocked; transferred to `#10752`: Honor owner-declared inactive runtime
+  readiness without optional activation or a false version-postcheck failure.
 
 ## Proposal
 
@@ -267,6 +278,80 @@ mistaken for a content-only repaint. Existing source-qualified keys preserve
 focus, selection, range anchors and action targets.
 
 ## Journal
+
+### 2026-11-07 - Bounded closeout and explicit installer follow-ups
+- The operator chose `finish-four-fixes`, retaining the original Picker scope
+  instead of expanding it into unrelated installer repairs. Source, release,
+  selected installed code, authenticated resident generation and fresh native
+  Picker/control acceptance are complete for that scope.
+- Both normal serialized updater requests have terminal nonzero outcomes;
+  neither is reported successful. Bridge serving-generation convergence
+  remains with #6389, disabled-provider MCP readiness with #11322, and the
+  inactive-runtime postcheck with #10752 and its existing implementation owner.
+  These are explicit tracked follow-ups, not discarded observations or new
+  grants to change configuration, retire services or supersede another PR.
+- The effort is Done and archived for its bounded outcome. #11195 retains
+  this driver's archival review/merge and native worktree/claim settlement
+  until those operations actually complete. The original retirement,
+  publication and event-production programs remain open under their owners.
+
+### 2026-11-07 - Selected native Picker accepted; suite convergence still blocked
+- The accepted correction reached Main through the successful producing run
+  `42355192023` and merged promotion #11284. The subsequent normal local
+  update selected Worktrees `1.25.3-dev1` and Manager `0.7.2-dev1`.
+  All 25 changed installed Python files matched their selected authentic
+  payload bytes; authenticated resident health reported the same Worktrees
+  runtime generation as the selected completed installation.
+- A fresh installed native Picker loaded actual local owner rows. Its Active
+  and unified Recent groups, message-based USED, truthful degraded mux labels
+  and Sort/Group/Status controls were visible. Native key events changed
+  sort from used to title, grouping to status, and filtering to live.
+  No live worktree was reclaimed and no persistent preference was changed.
+- An initial capture inherited a retained old engine invocation and failed
+  its strict row admission. Selecting the ordinary current marker in that
+  one validation process loaded the real rows successfully. No global
+  environment, pinned source, old client or package code was rewritten;
+  retained clients and passive extension loading still require fresh launches.
+- Both serialized suite update requests ended with nonzero status. Bridge
+  still served an older healthy generation after its cutover attempt; MCP
+  readiness rejected disabled cached provider copies; and the updater
+  rejected the owner's intentionally inactive Vault result. The MCP source
+  defect is tracked in #11322. The inactive-runtime fix remains with #10752
+  and #10757; at the recorded check, required CI was red despite approving reviews.
+- Installed Picker acceptance is not whole-suite installation success.
+  P4, the successful-update validation and final archival remain open.
+  Existing installer/session-handover owners retain their broader scope;
+  no further update, payload deletion, service restart or gate bypass was used.
+
+### 2026-11-07 - Release held by the existing native Resume repair
+- The merged-source CI passed. Promotion run `42350208582` then passed its
+  source gate, candidate freeze, artifact build and source-unit jobs, but
+  failed the required Windows Resume pane-startup lane; Main qualification
+  and landing were skipped.
+- The failure is the distinct native-executable signature tracked by
+  #10945/#10946: the fixture passes `owner.ps1` as its runtime Python, and
+  native process creation reports an invalid application before all four
+  pane acknowledgments. It is not this effort's retired admission or
+  recency regression, and it is not an accepted flake.
+- The existing `jointed-diode` repair claim is retained and was notified of
+  the current run and producer/fixture boundary. No competing repair,
+  pipeline retry, gate bypass or installed rollout was performed. This
+  effort still owns release follow-through and selected installed acceptance
+  after that required gate is genuinely green.
+
+### 2026-11-07 - Implementation merged; release and installed acceptance next
+- #11257 squash-merged after exact-head review with no open severity findings,
+  all resolved threads and passing required checks. The documented
+  owner-authored clean-Comment flow and repository-authorized review-vote
+  exception were used; no failed CI or blocking finding was bypassed.
+- The accepted squash is `18d2f7a794e9cf3652c349a48fbcafa50e7a3d8f`.
+  Authored runtime inputs match the reviewed head; unrelated upstream changes
+  are retained. Managed pull-forward followed verified squash-history
+  reconciliation, with recovery references preserved.
+- The source/native/contract slice is complete. The next slice is Main
+  promotion, the explicitly selected normal local update, and actual
+  installed-generation/Picker acceptance. #11195 and this effort remain open;
+  source merge is not release, rollout or final completion.
 
 ### 2026-11-07 - Unchanged-roster hot path and immediate native repaint
 - The subsequent exact-head review resolved the admission findings and raised
