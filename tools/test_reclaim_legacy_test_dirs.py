@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import stat
 import subprocess
 import sys
 import time
@@ -124,6 +125,67 @@ def test_environment_only_tree_is_ready_and_reclaimed_from_plan(repo, tmp_path, 
     assert report["candidates"][0]["status"] == "reclaimed"
     assert not os.path.lexists(target)
     assert not list(repo.glob(".test-venvs.reclaiming-*"))
+
+
+@pytest.mark.parametrize("field,value", [
+    ("identity", None),
+    ("discard_unclassified", "false"),
+    ("accepted_uninspectable", "worker"),
+])
+def test_invalid_later_plan_target_refuses_before_any_deletion(repo, tmp_path, capsys, field, value):
+    first = _legacy(repo)
+    second = _legacy(repo, ".test-runs")
+    code, plan = _plan(repo, tmp_path, first, "--select", second, capsys=capsys)
+    assert code == 0
+    data = json.loads(plan.read_text(encoding="utf-8"))
+    data["targets"][1][field] = value
+    plan.write_text(json.dumps(data), encoding="utf-8")
+    code, report = _run("--apply-plan", plan, "--confirm-writers-stopped", capsys=capsys)
+    assert code == 2 and report is None
+    assert first.is_dir() and second.is_dir()
+
+
+def test_permission_retry_does_not_change_shared_hardlink_permissions(tmp_path, monkeypatch):
+    outside = tmp_path / "shared-file"
+    outside.write_bytes(b"shared bytes")
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    linked = tree / "linked-file"
+    try:
+        os.link(outside, linked)
+    except OSError:
+        pytest.skip("filesystem does not support hard links")
+    before = outside.stat().st_mode
+
+    def rmtree(_path, **callbacks):
+        retry = callbacks.get("onexc") or callbacks["onerror"]
+        retry(os.unlink, str(linked), PermissionError("read-only"))
+
+    monkeypatch.setattr(reclaim.shutil, "rmtree", rmtree)
+    errors = []
+    reclaim._remove(tree, errors)
+    assert errors and "shared entry" in errors[0]
+    assert outside.stat().st_mode == before
+    assert outside.read_bytes() == b"shared bytes"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+def test_permission_retry_preserves_other_permission_bits(tmp_path, monkeypatch):
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    target = tree / "file"
+    target.write_bytes(b"x")
+    target.chmod(0o440)
+
+    def rmtree(_path, **callbacks):
+        retry = callbacks.get("onexc") or callbacks["onerror"]
+        retry(lambda _target: None, str(target), PermissionError("read-only"))
+
+    monkeypatch.setattr(reclaim.shutil, "rmtree", rmtree)
+    errors = []
+    reclaim._remove(tree, errors)
+    assert not errors
+    assert stat.S_IMODE(target.stat().st_mode) == 0o640
 
 
 @pytest.mark.parametrize("relative", ["reports/session.json", "Lib/reports/session.json", "capture.json"])

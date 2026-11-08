@@ -45,6 +45,8 @@ use afterwards or make this safe against concurrent or adversarial mutation.
 A removal that fails part-way is reported as ``partial``: entries already
 deleted are not recoverable. The remainder is moved back to its original name
 when possible, otherwise left at the reported ``.reclaiming-*`` path.
+The whole plan's field types are validated before the first deletion; filesystem
+eligibility is still rechecked separately for each target.
 
 Run:
   python tools/reclaim_legacy_test_dirs.py [--checkout DIR ...] [--json]
@@ -342,7 +344,17 @@ def evaluate(checkout: Path, path: Path, *, min_age: float, now: float,
 def _remove(path: Path, errors: list[str]) -> None:
     def retry(func: Any, target: str, _exc: object) -> None:
         try:
-            os.chmod(target, stat.S_IWRITE)
+            info = os.lstat(target)
+            if (
+                _is_link(info, Path(target))
+                or not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode))
+                or (stat.S_ISREG(info.st_mode) and info.st_nlink > 1)
+            ):
+                raise OSError("permission retry refused for an unsafe or shared entry")
+            mode = stat.S_IMODE(info.st_mode) | stat.S_IWUSR
+            if stat.S_ISDIR(info.st_mode):
+                mode |= stat.S_IRUSR | stat.S_IXUSR
+            os.chmod(target, mode)
             func(target)
         except OSError as exc:
             errors.append(f"{target}: {exc.strerror or exc}")
@@ -464,8 +476,30 @@ def write_plan(candidates: list[Candidate], select: list[Path], discard: list[Pa
 
 def apply_plan(plan_path: Path, *, min_age: float, now: float) -> list[Candidate]:
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
-    if plan.get("version") != PLAN_VERSION or not isinstance(plan.get("targets"), list):
+    if not isinstance(plan, dict) or plan.get("version") != PLAN_VERSION:
         raise ValueError("unsupported plan file")
+    if not isinstance(plan.get("repo"), str) or not plan["repo"]:
+        raise ValueError("plan must name its repository")
+    if not isinstance(plan.get("targets"), list):
+        raise ValueError("plan must contain a target list")
+    for entry in plan["targets"]:
+        if not isinstance(entry, dict):
+            raise ValueError("invalid plan target")
+        if any(not isinstance(entry.get(key), str) or not entry[key]
+               for key in ("checkout", "path", "fingerprint")):
+            raise ValueError("plan target must name its checkout, path and fingerprint")
+        identity = entry.get("identity")
+        if not isinstance(identity, list) or len(identity) != 2 or any(
+            type(value) is not int for value in identity
+        ):
+            raise ValueError("invalid plan target identity")
+        if type(entry.get("discard_unclassified", False)) is not bool:
+            raise ValueError("invalid plan discard decision")
+        accepted = entry.get("accepted_uninspectable", [])
+        if not isinstance(accepted, list) or any(
+            not isinstance(name, str) or not name for name in accepted
+        ):
+            raise ValueError("invalid plan inspection exceptions")
     registered = {_key(c) for c in registered_worktrees(Path(plan["repo"]))}
     results = []
     for planned in plan["targets"]:
