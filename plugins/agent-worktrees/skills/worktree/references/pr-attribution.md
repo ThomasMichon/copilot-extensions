@@ -235,6 +235,48 @@ not a PR-ownership marker or a posted comment:
 <agent-worktrees catalog argv[0]> attribution-prepare --comment-origin --visibility internal --json
 ```
 
+For an independently hosted producer, discover the actual selected native
+installation's support without resolving a project, configuration or source:
+
+```text
+<agent-worktrees catalog argv[0]> attribution-prepare --comment-origin --capabilities
+```
+
+The JSON response declares schema
+`agent-worktrees.comment-origin-capabilities`, version `1`,
+`origin_protocol: agent-worktrees.comment-origin/v1`,
+`capabilities: ["explicit_source_root"]` and `effects: none`. Discovery cannot
+combine with source/config/visibility or PR-body selections. It performs no
+source/profile resolution, allocation, credential acquisition or forge access.
+Select this support independently of package versions; an old parser rejecting
+discovery or a rolled-back provider makes only this optional path unavailable.
+Do not substitute another executable or infer support from a newer payload.
+
+After that selection, the existing operation can resolve an explicit producer
+outside any managed CWD:
+
+```text
+<agent-worktrees catalog argv[0]> attribution-prepare --comment-origin --source-root /path/to/producer --config /path/to/project/config.yaml --json
+```
+
+Both references must be absolute; the configuration file must exist.
+Select `repo_name`, or the sole configured repository, from that explicit
+file before loading policy layers. Multiple unnamed repositories refuse;
+global defaults and active-project identity cannot choose this producer.
+The selected repository's policy must actually resolve; another repository's
+default policy cannot authorize the producer when its own anchor is unavailable.
+Concrete unreadable or malformed inputs reported by the existing configuration
+loader refuse this optional path instead of restoring default attribution.
+Ordinary absent layers retain their meanings; diagnostics are not a claim of
+complete acquisition coverage or reusable configuration evidence.
+The exact-root resolver above owns registration and privacy checks. It never
+falls back to an enclosing worktree or the service's CWD. Missing, ambiguous,
+withdrawn or unauthorized source data refuses without allocating or modifying
+the tracked record. Resolve this bounded native read before a consumer's replay
+transaction; no external command belongs under its lock. This provider support
+does not package an attribution composer, configure a host or enable submission.
+Existing invocations without `--source-root` retain their CWD-based behavior.
+
 Default destination visibility is `public`, even when the source repository
 permits raw PR metadata. Example output:
 

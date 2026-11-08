@@ -188,6 +188,9 @@ reads remain offline, keep the same candidate order and one-hop branch policy,
 and use the same bounded batch/presence/ordered-read fallback. An empty committed
 mapping still permits the existing disk fallback. Reporting adds no Git probes,
 parses, source rescans or hashes.
+Every committed-policy Git read selects the explicit anchor through the existing
+repository-isolation helper. Inherited repository/configuration selectors cannot
+redirect those reads to another checkout's policy.
 
 Reports separate the operational `value` from ordered, metadata-only
 `observations` and sanitized `findings`:
