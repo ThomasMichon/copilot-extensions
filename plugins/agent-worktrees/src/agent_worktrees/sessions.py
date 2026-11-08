@@ -1407,12 +1407,9 @@ def _list_mux_sessions(*, strict: bool = False) -> dict[str, int] | None:
     from .mux_list_result import is_empty_tmux_listing, parse_session_counts
 
     if platform.system() == "Windows":
-        from agent_remote_driver.mux_observation import list_psmux
+        from .psmux_observation import list_session_counts
 
-        observed = list_psmux()
-        if observed is None or any(o.status not in {"present", "absent"} for o in observed.values()):
-            return None
-        return {name: o.clients for name, o in observed.items() if o.status == "present"}
+        return list_session_counts()
     cmd = ["tmux", "list-sessions", "-F", "#{session_name}:#{session_attached}"]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=5, **no_window_kwargs())
@@ -2164,11 +2161,9 @@ def mux_active_pane_named(
 
     mux_bin = _mux_bin(mux)
     if _is_psmux(mux_bin):
-        from agent_remote_driver.mux_observation import observe_psmux
+        from .psmux_observation import active_pane
 
-        observed = observe_psmux(session_name)
-        active = [p.pane_id for p in observed.panes if p.active and not p.dead]
-        return active[0] if observed.status == "present" and len(active) == 1 else None
+        return active_pane(session_name)
     target = _mux_named_session_target(session_name, mux_bin)
     if not _is_psmux(mux_bin):
         # display-message takes a pane target, not a session-only target.

@@ -30,3 +30,20 @@ def display_status(worktree_ids: list[str]) -> dict:
                 clients=observed.clients if observed.status == "present" else 0,
             )
     return result
+
+
+def list_session_counts() -> dict[str, int] | None:
+    from agent_remote_driver.mux_observation import list_psmux
+
+    observed = list_psmux()
+    if observed is None or any(o.status not in {"present", "absent"} for o in observed.values()):
+        return None
+    return {name: o.clients for name, o in observed.items() if o.status == "present"}
+
+
+def active_pane(session_name: str) -> str | None:
+    from agent_remote_driver.mux_observation import observe_psmux
+
+    observed = observe_psmux(session_name)
+    active = [p.pane_id for p in observed.panes if p.active and not p.dead]
+    return active[0] if observed.status == "present" and len(active) == 1 else None
