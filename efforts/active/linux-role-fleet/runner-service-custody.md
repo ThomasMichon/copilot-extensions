@@ -174,14 +174,13 @@ changed-module size, final-diff blob size and install-contract checks passed.
 This remains a receiver expansion, not completion of the canonical-owner or
 provider admission plan items.
 
-The receiver PR's review found that historical custody depended on each
-inspecting client's clock-skew setting. The follow-up records the actual
-acceptance margin and freezes that policy for the complete custody-headed
-history, including predecessor transfer/takeover validation. It does not relax
-ordinary task admission. The latest pull-forward also retains the newly landed
-released-only acquisition and version-2 return-evidence checks.
+The custody record retains the actual acceptance margin, making validation of
+the complete custody-headed history independent of inspecting clients'
+clock-skew settings, including predecessor transfer/takeover validation.
+Ordinary task admission still uses its existing policy. Released-only
+acquisition and version-2 return-evidence checks remain enforced.
 
-Follow-up qualification covers all 126 selected cases on the revised source,
+Current qualification covers all 126 selected cases on the revised source,
 using native Windows and the isolated runner's unchanged 30-second item and
 300-second group limits. All 17 released-only/return-proof task cases passed,
 including four independent real-Git phases for generation stability, successor/
