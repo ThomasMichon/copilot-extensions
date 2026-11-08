@@ -2383,8 +2383,8 @@ function Register-UserModeTask {
             Write-Warn "Could not update $Kind task '$Name': $($_.Exception.Message)"
             return $false
         }
-        if (-not (Test-IndexStartAllowed -Name $Name)) { return $true }
     }
+    if (-not (Test-IndexStartAllowed -Name $Name)) { return $true }
     # Create a missing task (may be refused without admin on locked-down boxes).
     try {
         Register-ScheduledTask -TaskPath '\' -TaskName $Name -Action $Spec.Action -Trigger $Spec.Trigger -Settings $Spec.Settings -Principal $Spec.Principal -ErrorAction Stop | Out-Null
@@ -2407,7 +2407,9 @@ function Invoke-ScopedElevation {
     if ($env:AGENT_INDEX_INSTALLATION_CONFIG) {
         $childArgs += @('-InstallationConfig', $env:AGENT_INDEX_INSTALLATION_CONFIG)
     }
-    $quotedArgs = ($childArgs | ForEach-Object { '"' + ([string]$_).Replace('"', '\"') + '"' }) -join ' '
+    $quotedArgs = ($childArgs | ForEach-Object {
+        '"' + [regex]::Replace([regex]::Replace($_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"'
+    }) -join ' '
     try {
         Write-Host '  ...    Requesting elevation for the task-scheduling step ONLY (UAC)...'
         $p = Start-Process pwsh -Verb RunAs -ArgumentList $quotedArgs -PassThru -Wait -ErrorAction Stop

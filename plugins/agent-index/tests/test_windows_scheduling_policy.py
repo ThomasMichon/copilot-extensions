@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 from xml.sax.saxutils import escape
 
 import pytest
@@ -44,11 +45,12 @@ def task(root: Path, name="agent-index", *, enabled=True, arguments=None, comman
     )
 
 
-def run_policy(tmp_path, host, *, tasks=None, policy=None, body="", action=None, failure=""):
+def run_policy(tmp_path, host, *, tasks=None, policy=None, body="", action=None, failure="", root_name="install"):
     shell = shutil.which(host)
     if not shell:
         pytest.skip(f"{host} unavailable")
-    root = tmp_path / "install"
+    root = tmp_path / root_name
+    root_literal = str(root).replace("'", "''")
     root.mkdir(exist_ok=True)
     (root / "service.ps1").write_text("throw 'must not execute launcher'")
     (root / "engine").mkdir(exist_ok=True)
@@ -68,7 +70,7 @@ def run_policy(tmp_path, host, *, tasks=None, policy=None, body="", action=None,
     script = f"""
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version 2
-$InstallDir='{root}'; $EngineHome=Join-Path $InstallDir 'engine'
+$InstallDir='{root_literal}'; $EngineHome=Join-Path $InstallDir 'engine'
 $TaskName='agent-index'; $EngineTaskName='agent-index-engine'
 $Launcher=Join-Path $InstallDir 'service.ps1'; $EngineLauncher=Join-Path $EngineHome 'engine.ps1'
 $NoService=$false; $DryRun=$false; $AllowTaskElevation=$false; $SrcVersion='fixture'
@@ -374,3 +376,154 @@ Invoke-ServiceCutover
     result = run_policy(tmp_path, host, body=body, policy={"windows_scheduled_task": "absent"})
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout.splitlines()[-1]) == {"removed": [], "events": ["incoming-service"]}
+
+
+@HOSTS
+@pytest.mark.parametrize("name,hold", [
+    ("agent-index", "start_service"), ("agent-index-engine", "start_engine"),
+])
+def test_missing_task_refresh_honors_hold_changed_after_caller_admission(tmp_path, host, name, hold):
+    body = "\n".join(function(value) for value in (
+        "Register-UserModeTask", "Test-TaskCurrent", "Test-AccessDenied",
+    )) + f"""
+if (-not (Test-IndexStartAllowed -Name '{name}')) {{ throw 'caller was not admitted' }}
+$configPath=Join-Path $InstallDir 'installation.json'
+$document=Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+$document.installation.local.{hold}=$false
+$document | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $configPath
+function Register-ScheduledTask {{ throw 'forbidden creation after refreshed hold' }}
+function Set-ScheduledTask {{ throw 'forbidden task update' }}
+$spec=@{{ Action='action';Trigger='trigger';Settings='settings';Principal='principal' }}
+if (-not (Register-UserModeTask -Name '{name}' -Spec $spec)) {{ throw 'failed registration' }}
+if (Test-IndexStartAllowed -Name '{name}') {{ throw 'hold was not refreshed' }}
+"""
+    result = run_policy(tmp_path, host, body=body, policy={
+        "windows_scheduled_task": "enabled", "start_service": True, "start_engine": True,
+    })
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout.splitlines()[-1]) == {"removed": [], "events": []}
+
+
+@HOSTS
+@pytest.mark.parametrize("root_selector", ["C:\\Index\\", "C:\\Index & Search\\\\"])
+def test_elevated_handoff_captures_exact_native_argv_without_elevation(tmp_path, host, root_selector):
+    capture = tmp_path / "capture.py"
+    output = tmp_path / "argv.json"
+    capture.write_text(
+        "import json, pathlib, sys\n"
+        f"pathlib.Path({str(output)!r}).write_text(json.dumps(sys.argv[1:]))\n",
+        encoding="utf-8",
+    )
+    python = os.fsdecode(sys._base_executable).replace("'", "''")
+    config_selector = "C:\\Policy O'Brien\\installation.json"
+    body = function("Invoke-ScopedElevation") + f"""
+$InstallDir='{root_selector}'
+$env:AGENT_INDEX_INSTALLATION_CONFIG='{config_selector.replace("'", "''")}'
+function Start-Process {{
+ param($FilePath,$Verb,$ArgumentList,[switch]$PassThru,[switch]$Wait,$ErrorAction)
+ if ($FilePath -ne 'pwsh' -or $Verb -ne 'RunAs') {{ throw 'foreign handoff' }}
+ $start=New-Object Diagnostics.ProcessStartInfo
+ $start.FileName='{python}'
+ $start.Arguments='-I -B "{capture}" '+$ArgumentList
+ $start.UseShellExecute=$false;$start.CreateNoWindow=$true
+ $start.RedirectStandardOutput=$true;$start.RedirectStandardError=$true
+ $process=[Diagnostics.Process]::Start($start)
+ $stdout=$process.StandardOutput.ReadToEndAsync()
+ $stderr=$process.StandardError.ReadToEndAsync()
+ if (-not $process.WaitForExit(10000)) {{ $process.Kill();throw 'capture timed out' }}
+ if ($process.ExitCode -ne 0) {{ throw ($stdout.Result+$stderr.Result) }}
+ [pscustomobject]@{{ExitCode=$process.ExitCode}}
+ $process.Dispose()
+}}
+if (-not (Invoke-ScopedElevation -ElevAction 'register-tasks')) {{ throw 'handoff failed' }}
+"""
+    result = run_policy(tmp_path, host, body=body)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(output.read_text()) == [
+        "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(tmp_path / "harness.ps1"),
+        "register-tasks", "-AllowTaskElevation", "-InstallDir", root_selector,
+        "-InstallationConfig", config_selector,
+    ]
+    assert json.loads(result.stdout.splitlines()[-1]) == {"removed": [], "events": []}
+
+
+@HOSTS
+@pytest.mark.parametrize("root_name", ["Index & Search", "Index's Search"])
+@pytest.mark.parametrize("phase", ["create", "reuse", "retire"])
+def test_quoted_literal_paths_are_owned_for_creation_reuse_and_retirement(tmp_path, host, root_name, phase):
+    root = tmp_path / root_name
+    if phase == "retire":
+        result = run_policy(
+            tmp_path, host, root_name=root_name, action="task-retire",
+            policy={"windows_scheduled_task": "absent"}, tasks={"agent-index": task(root)},
+        )
+    else:
+        template = task(root).replace("'", "''")
+        body = "\n".join(function(value) for value in (
+            "New-TaskSpec", "Register-UserModeTask", "Test-TaskCurrent", "Test-AccessDenied",
+        )) + f"""
+function New-ScheduledTaskAction {{
+ param($Execute,$Argument)
+ [pscustomobject]@{{Execute=$Execute;Arguments=$Argument}}
+}}
+function New-ScheduledTaskTrigger {{
+ param([switch]$AtLogOn)
+ [pscustomobject]@{{CimClass=[pscustomobject]@{{CimClassName='MSFT_TaskLogonTrigger'}}}}
+}}
+function New-ScheduledTaskSettingsSet {{
+ param([switch]$AllowStartIfOnBatteries,[switch]$DontStopIfGoingOnBatteries,
+       [switch]$StartWhenAvailable,$ExecutionTimeLimit,$RestartCount,$RestartInterval)
+ [pscustomobject]@{{ExecutionTimeLimit=$ExecutionTimeLimit;StartWhenAvailable=$true}}
+}}
+function New-ScheduledTaskPrincipal {{
+ param($UserId,$LogonType,$RunLevel)
+ [pscustomobject]@{{LogonType=$LogonType;RunLevel=$RunLevel}}
+}}
+function Register-ScheduledTask {{
+ param($TaskPath,$TaskName,$Action,$Trigger,$Settings,$Principal,$ErrorAction)
+ if ($TaskPath -ne '\\') {{ throw 'foreign task folder' }}
+ $xml=[xml]'{template}'
+ $xml.Task.Principals.Principal.UserId=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+ $xml.Task.Actions.Exec.Command=$Action.Execute
+ $xml.Task.Actions.Exec.Arguments=$Action.Arguments
+ $manager=New-Object Xml.XmlNamespaceManager($xml.NameTable)
+ $manager.AddNamespace('t','http://schemas.microsoft.com/windows/2004/02/mit/task')
+ Assert-IndexTaskOwned -Name $TaskName -Observed @{{Xml=$xml;Namespace=$manager}}
+ $script:events += "create:$TaskName"
+}}
+function Get-ScheduledTask {{
+ param($TaskName,$TaskPath,$ErrorAction)
+ $spec=New-TaskSpec -LauncherPath $Launcher
+ $xml=[xml]$script:tasks[$TaskName]
+ [pscustomobject]@{{
+  State='Ready';Triggers=@($spec.Trigger);Settings=$spec.Settings;Principal=$spec.Principal
+  Actions=@([pscustomobject]@{{Execute=$xml.Task.Actions.Exec.Command;Arguments=$xml.Task.Actions.Exec.Arguments}})
+ }}
+}}
+function Set-ScheduledTask {{ throw 'current task must not be rewritten' }}
+if (-not (Register-UserModeTask -Name $TaskName -Spec (New-TaskSpec -LauncherPath $Launcher))) {{
+ throw 'failed registration'
+}}
+"""
+        result = run_policy(
+            tmp_path, host, root_name=root_name, body=body,
+            tasks={"agent-index": task(root)} if phase == "reuse" else {},
+        )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout.splitlines()[-1]) == {
+        "removed": ["agent-index"] if phase == "retire" else [],
+        "events": ["create:agent-index"] if phase == "create" else [],
+    }
+
+
+@HOSTS
+@pytest.mark.parametrize("root_name", ["Index&Literal", "Index'Literal"])
+def test_shell_special_characters_require_a_quoted_file_operand(tmp_path, host, root_name):
+    root = tmp_path / root_name
+    result = run_policy(
+        tmp_path, host, root_name=root_name, action="task-retire",
+        policy={"windows_scheduled_task": "absent"},
+        tasks={"agent-index": task(root, arguments=f'--headless powershell.exe -File {root / "service.ps1"}')},
+    )
+    assert result.returncode != 0
+    assert json.loads(result.stdout.splitlines()[-1]) == {"removed": [], "events": []}

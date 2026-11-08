@@ -92,9 +92,10 @@ function Assert-IndexTaskOwned {
         @($exec[0].SelectNodes('t:Arguments', $ns)).Count -ne 1) { throw "Incomplete Index task action: $Name" }
     # Parse the shell's actual -File operand; a matching path in forwarded
     # arguments to a foreign script never proves ownership.
-    $tokens = @([regex]::Matches($arguments.InnerText, '"[^"]*"|[^\s"]+') | ForEach-Object { $_.Value.Trim('"') })
+    $rawTokens = @([regex]::Matches($arguments.InnerText, '"[^"]*"|[^\s"]+') | ForEach-Object { $_.Value })
+    $tokens = @($rawTokens | ForEach-Object { $_.Trim('"') })
     $residual = [regex]::Replace($arguments.InnerText, '"[^"]*"|[^\s"]+', '')
-    if ($residual.Trim() -or ($tokens -join ' ') -match '[`;&|<>]' -or $arguments.InnerText.Contains("'")) {
+    if ($residual.Trim()) {
         throw "Unsupported Index task shell syntax: $Name"
     }
     $image = $command.InnerText
@@ -103,6 +104,7 @@ function Assert-IndexTaskOwned {
         if ($tokens.Count -lt 3 -or $tokens[0] -cne '--headless') { throw "Unsupported Index task wrapper: $Name" }
         $image = $tokens[1]
         $tokens = @($tokens | Select-Object -Skip 2)
+        $rawTokens = @($rawTokens | Select-Object -Skip 2)
     }
     $shells = @('powershell', 'powershell.exe', 'pwsh', 'pwsh.exe',
         (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'),
@@ -124,6 +126,11 @@ function Assert-IndexTaskOwned {
             '^(?i)-File$' {
                 if ($i + 2 -ne $tokens.Count) { throw "Ambiguous Index script operand: $Name" }
                 $operand = $tokens[$i + 1]
+                $literal = $rawTokens[$i + 1]
+                if ($operand -match "[``;&|<>']" -and
+                    -not ($literal.StartsWith('"') -and $literal.EndsWith('"'))) {
+                    throw "Unsupported Index task shell syntax: $Name"
+                }
                 $i = $tokens.Count
                 continue
             }
