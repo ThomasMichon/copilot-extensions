@@ -290,6 +290,12 @@ _Operator-required outcome; agent-recommended slices and validation._
   [existing-owner conversation metadata journal](../../../plugins/agent-pull-requests/docs/conversation-journal.md)
   and opt-in event reader merged in #10401; full body acquisition, coordinated terminal
   retention, notifications and normal host adoption remain separate.
+  Quiet-observation metadata expiry merged in #11574; it preserves the cursor
+  anchor and does not compact body-bearing caches, outboxes or effect receipts.
+  The [coordinated terminal-retention refinement](terminal-retention.md)
+  defines the proposed same-owner fence, notification, recovery-only payload
+  and scoped cache/materialization sequence; realization and qualification
+  remain open.
   Existing normalized ADO load/sync acquisition feeds the explicitly enabled
   journal after confirmed cache publication (#10405); native observation and
   standalone-host adoption remain distinct prerequisites.
@@ -1266,7 +1272,12 @@ callback an implicit credential store.
   internal Azure CLI credential methods are not a supported relay boundary.
   The existing enrollment contract retains that dependency without probing
   credentials or enabling another source.
-- Source review/merge remains pending. Coordinated body/cache/outbox
+- Source #11574 merged as `2eeb74efebd9446b53b97d8c5cae331b04133bb2`
+after current-head Copilot approval `5817530673` with no open findings and
+latest CI `42471468624` / source checks `42471468097` passed. Managed
+completion preserved the verified attribution-only bookkeeping commit and
+its pre-complete backup; the source worktree remains owned.
+Coordinated body/cache/outbox
   retention, all-publisher/provider/installed qualification, full
   CLI/Dispatch and shadow/presentation outcomes remain open. No activation,
   deployment or existing resource release is implied.
