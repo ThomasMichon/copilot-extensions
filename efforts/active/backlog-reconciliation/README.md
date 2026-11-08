@@ -294,6 +294,9 @@ Its follow-through discloses two repeated original acquisitions after exhausted
 scopes, withdraws unused source grants and retains metadata-only candidates as
 unfulfilled. The later dated census is 842 whole OPEN, 113 above fixed 729;
 all existing completion check states remain unchanged and the campaign remains Active.
+The next follow-through retains #11545's positive macOS lifecycle/recovery gap
+and 28 recovered prior whole-source refusals. Successful refusal-job metadata
+and a documentation-only candidate are not positive native acceptance.
 
 The [fulfilled-request and bridge-identity checkpoint](<journal/2026/11.07 fulfilled-requests-and-bridge-identity.md>)
 records the campaign-wide standing completion-check approval, #11445's audited
@@ -3067,6 +3070,10 @@ six-object scope for #11210 and #11211, including one repeated original
 acquisition per issue. It does not reset those exhausted scopes or claim fresh
 coverage. Whole-source refusals remain intact; no campaign or technical
 completion checkbox changes.
+The same journal retains #11545's exhausted study scope and distinguishes
+complete job metadata from positive macOS lifecycle/recovery qualification.
+Its 28 recovered actual refusal records renew no acquisition allowance and
+supply no closure credit.
 
 The [serving-owner and attribution-event study](<journal/2026/11.07 serving-owner-and-attribution-events.md>)
 distinguishes guarded source inspection, attributed native witness results,
