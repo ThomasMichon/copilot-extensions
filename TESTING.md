@@ -7727,6 +7727,12 @@ producer isolation on Linux. The incomplete-association control reaches the
 actual original admission CLI and its caller-watch helper, then verifies the
 one-time prepared-view upgrade. It remains under the same item/child bounds;
 missing native prerequisites are failures in the selected hosted lane.
+The selected-owner post-tool controls instrument only the copied sender to
+report allocation, connection and write progress, elapsed budget and accepted
+receiver connections when a notification is missing. Both shells, the 100 ms
+sender budget and all delivery assertions remain unchanged. Instrumentation
+can perturb timing; these diagnostics do not replace the separate uninstrumented
+cold-process controls or establish a production latency result.
 
 The `plugin-activation` target runs the shared activation transaction suite.
 Its `tests/test_preservation_processes.py` packet interrupts real transaction
