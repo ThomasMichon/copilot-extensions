@@ -52,6 +52,18 @@ function Invoke-ResidentPostTool {
         ($payload -isnot [pscustomobject] -and $payload -isnot [Collections.IDictionary])) {
         $payload = @{}
     }
+    # Forward this session's nudge switches; the resident's environment is not ours.
+    $forwarded = @{}
+    foreach ($key in @('AGENT_WORKTREES_NUDGE', 'AGENT_WORKTREES_AGENDA_NUDGE',
+            'AGENT_WORKTREES_NUDGE_CALLS', 'AGENT_WORKTREES_NUDGE_MINUTES')) {
+        $value = [Environment]::GetEnvironmentVariable($key)
+        if ($null -ne $value) { $forwarded[$key] = $value }
+    }
+    if ($payload -is [Collections.IDictionary]) {
+        if (-not $payload.Contains('_agentWorktrees')) { $payload['_agentWorktrees'] = @{ environment = $forwarded } }
+    } elseif ($null -eq $payload.PSObject.Properties['_agentWorktrees']) {
+        $payload | Add-Member -NotePropertyName '_agentWorktrees' -NotePropertyValue @{ environment = $forwarded }
+    }
     $request = @{
         version = 1
         token = $Endpoint.hook_token
