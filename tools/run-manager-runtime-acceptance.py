@@ -27,6 +27,7 @@ from _admission_protocol import acquire
 from plugin_test_containment import (
     Limits,
     TestSandbox,
+    UnreapedProcessError,
     isolated_environment,
     no_window_kwargs,
     run_contained,
@@ -153,6 +154,7 @@ def _installed_tty_acceptance(root: Path, output: Path, identity: dict) -> int:
                 "--exercise", str(sandbox), "--identity", json.dumps(identity),
                 "--work-deadline", str(budget.execution_deadline),
             ]
+            unreaped = None
             try:
                 # This new contract shares one bounded owner across source
                 # preparation, both genuine constructors and interactive use.
@@ -167,10 +169,17 @@ def _installed_tty_acceptance(root: Path, output: Path, identity: dict) -> int:
                     )
                     if result:
                         raise RuntimeError(f"Native installed-tty {phase} exited {result}")
+            except UnreapedProcessError as error:
+                unreaped = error
+                raise
             finally:
                 diagnostics = sandbox / "diagnostics"
                 if diagnostics.is_dir():
-                    shutil.copytree(diagnostics, root / "diagnostics")
+                    try:
+                        shutil.copytree(diagnostics, root / "diagnostics")
+                    except OSError:
+                        if unreaped is None:
+                            raise
             native = json.loads((sandbox / "native-result.json").read_text(encoding="utf-8"))
             evidence.update(native)
         if host_state() != before_host:
@@ -179,6 +188,15 @@ def _installed_tty_acceptance(root: Path, output: Path, identity: dict) -> int:
         if time.monotonic() > budget.deadline:
             raise TimeoutError("Installed TTY whole-run deadline exceeded during cleanup")
         evidence["complete"] = True
+    except UnreapedProcessError as error:
+        evidence["errors"].append(f"{type(error).__name__}: {error}")
+        evidence["cleanup"] = {"complete": False, "owned_processes_reaped": False,
+                               "host_state_unchanged": False}
+        evidence["elapsed_seconds"] = time.monotonic() - started
+        try:
+            output.write_text(json.dumps(evidence, indent=2), encoding="utf-8")
+        finally:
+            raise error
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
         evidence["errors"].append(f"{type(error).__name__}: {error}")
     evidence["elapsed_seconds"] = time.monotonic() - started

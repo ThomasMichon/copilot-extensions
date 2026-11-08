@@ -294,3 +294,23 @@ inventory; unsupported execution must not be reported as a successful gate.
 - Phase 2's implemented consumer contract is proved. Phase 3, final frozen
   candidate execution, independently governed Main activation and any authorized
   operator installation remain open. This effort is not Done.
+
+### 2026-11-07 - Blocking cleanup and Git-context review findings fixed
+
+- Source review identified two High-severity fixture defects: an unreaped
+  process-tree error could be converted into ordinary failure before an outer
+  sandbox removed the retained tree, and inherited Git context could redirect
+  private fixture operations into the caller's repository or index.
+- The acceptance runner now writes bounded failure evidence and re-raises the
+  original unreaped-process exception. Diagnostic or report-write failures cannot
+  mask it, and the falsifying-control path preserves the same exception.
+- Candidate inspection and private harness operations use the existing
+  repository-identity environment scrubber, preserving fixture HOME while
+  removing inherited Git repository and configuration selectors.
+- The coordinator independently passed all three focused regressions through
+  the canonical isolated runner: nested-owner retention, original exception
+  identity despite report failures, and real private Git/index isolation.
+  Scoped lint and whitespace checks passed.
+- These fixes still require current-head native qualification and a passing
+  source review before merge. Main activation and actual frozen-candidate
+  publication remain separate obligations.

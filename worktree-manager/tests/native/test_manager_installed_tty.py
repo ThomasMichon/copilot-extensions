@@ -91,6 +91,22 @@ def _command_failure(label, code, stdout, stderr):
     )
 
 
+def _git_environment(environment=None):
+    source = str(REPO / "plugins" / "agent-worktrees" / "src")
+    inserted = source not in sys.path
+    if inserted:
+        sys.path.insert(0, source)
+    try:
+        from agent_worktrees.git_repository_environment import repository_identity_env
+
+        env = repository_identity_env(environment)
+        env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+        return env
+    finally:
+        if inserted:
+            sys.path.remove(source)
+
+
 def _slot_census(root, diagnostics):
     """Observe only the private candidate slot; the real seal remains untouched."""
     deadline = min(time.monotonic() + 10, _WORK_DEADLINE or float("inf"))
@@ -471,7 +487,7 @@ def _environment(root):
 
     if os.name != "nt" or not shutil.which("pwsh") or not shutil.which("uv"):
         raise RuntimeError("Native Windows, PowerShell 7 and configured uv are required")
-    env = isolated_environment(os.environ, root, allow_explicit_tiers=True)
+    env = isolated_environment(_git_environment(), root, allow_explicit_tiers=True)
     home = root / "h"
     home.mkdir(exist_ok=True)
     env.update({
@@ -482,7 +498,6 @@ def _environment(root):
         "AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR": str(root / "p"),
         "WORKTREE_NO_UPDATE": "1", "AGENT_WORKTREES_STATUS_MONITOR": "0",
         "AGENT_WORKTREES_NO_SELFPROVISION": "1", "UV_PYTHON_DOWNLOADS": "never",
-        "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
     })
     for key in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "WT_SESSION", "TMUX",
                 "TMUX_PANE", "CE_TERMINAL_LAUNCH", "CE_TERMINAL_CAPABILITY_QUERY",
@@ -559,6 +574,29 @@ def _harness_registration(engine_python, project, marketplace_root):
     ]
 
 
+def _negative_control(manager_python, launch):
+    from plugin_test_containment import UnreapedProcessError
+
+    hidden = manager_python.with_suffix(".negative-control")
+    manager_python.rename(hidden)
+    unreaped = None
+    try:
+        try:
+            launch()
+        except UnreapedProcessError as error:
+            unreaped = error
+            raise
+        except (RuntimeError, TimeoutError, AssertionError):
+            return True
+        return False
+    finally:
+        try:
+            hidden.rename(manager_python)
+        finally:
+            if unreaped is not None:
+                raise unreaped
+
+
 def exercise(root, identity):
     env = _environment(root)
     diagnostics = root / "diagnostics"
@@ -603,17 +641,10 @@ def exercise(root, identity):
         witnesses.append(_witness(
             shell, stub, env, project, diagnostics, manager_python, engine_python,
         ))
-    hidden = manager_python.with_suffix(".negative-control")
-    rejected = False
-    manager_python.rename(hidden)
-    try:
-        try:
-            _witness("cmd", bin_dir / "tty-harness.cmd", env, project, diagnostics,
-                     manager_python, engine_python, control=True)
-        except (RuntimeError, TimeoutError, AssertionError):
-            rejected = True
-    finally:
-        hidden.rename(manager_python)
+    rejected = _negative_control(manager_python, lambda: _witness(
+        "cmd", bin_dir / "tty-harness.cmd", env, project, diagnostics,
+        manager_python, engine_python, control=True,
+    ))
     if not rejected:
         raise RuntimeError("Install-success/launch-failure negative control was not rejected")
     if before_host != _host_state():
@@ -772,7 +803,8 @@ def test_actual_installed_project_binstubs_reach_input_ready_windows_tty(record_
     def git(argument):
         return subprocess.run(
             ["git", "-C", str(REPO), "rev-parse", argument], check=True,
-            capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+            capture_output=True, text=True, timeout=15, env=_git_environment(),
+            **no_window_kwargs(),
         ).stdout.strip()
 
     commit = git("HEAD")
@@ -913,6 +945,123 @@ def test_native_cmd_project_binstub_handles_space_path(tmp_path):
     assert b"NATIVE PROJECT COMMAND REACHED" in console.output
 
 
+def test_unreaped_error_preserves_enclosing_sandboxes_and_original_exception(tmp_path, monkeypatch):
+    import runpy
+    from types import SimpleNamespace
+
+    import pytest
+    from plugin_test_containment import TestSandbox as Sandbox
+    from plugin_test_containment import UnreapedProcessError
+
+    for mode in ("ordinary", "diagnostic-copy-fails", "receipt-write-fails"):
+        namespace = runpy.run_path(str(REPO / "tools" / "run-manager-runtime-acceptance.py"))
+        accept = namespace["_installed_tty_acceptance"]
+        owner = accept.__globals__
+        monkeypatch.setitem(owner, "sys", SimpleNamespace(platform="win32", executable=sys.executable))
+        monkeypatch.setitem(owner, "runpy", SimpleNamespace(
+            run_path=lambda _path: {"_host_state": dict},
+        ))
+        monkeypatch.setitem(owner, "isolated_environment", lambda *_args, **_kwargs: {})
+        job = object()
+        original = UnreapedProcessError("controlled unconfirmed cleanup", job=job)
+        observed = {}
+
+        def unsettled(_arguments, _observed=observed, _error=original, **options):
+            sandbox = options["sandbox"]
+            _observed["inner"] = sandbox
+            (sandbox / "pending-owner.txt").write_text("no process launched; test-owned state")
+            (sandbox / "diagnostics").mkdir()
+            (sandbox / "diagnostics" / "failure.txt").write_text("controlled diagnostic")
+            raise _error
+
+        monkeypatch.setitem(owner, "run_contained", unsettled)
+        if mode == "diagnostic-copy-fails":
+            def failed_copy(*_args):
+                raise OSError("controlled diagnostic copy failure")
+            monkeypatch.setitem(owner, "shutil", SimpleNamespace(copytree=failed_copy))
+        outer = Sandbox(prefix="unreaped-unit-", dir=tmp_path)
+        try:
+            with pytest.raises(UnreapedProcessError) as caught, outer as raw:
+                root = Path(raw) / "it"
+                report = root / "installed-tty-result.json"
+                output = report
+                if mode == "receipt-write-fails":
+                    class FailedReceipt:
+                        parent = root
+
+                        def write_text(self, *_args, **_kwargs):
+                            raise OSError("controlled receipt write failure")
+                    output = FailedReceipt()
+                identity, _ = _receipt_fixture()
+                accept(root, output, identity)
+            assert caught.value is original and caught.value.job is job
+            assert outer.retained and Path(outer.name).is_dir()
+            assert (observed["inner"] / "pending-owner.txt").is_file()
+            if mode != "receipt-write-fails":
+                evidence = json.loads(report.read_text(encoding="utf-8"))
+                assert evidence["complete"] is False
+                assert evidence["cleanup"]["owned_processes_reaped"] is False
+        finally:
+            # No process was launched: retire only these synthetic retained files.
+            outer._rmtree(outer.name)
+
+
+def test_negative_control_does_not_accept_unreaped_error(tmp_path):
+    import pytest
+    from plugin_test_containment import UnreapedProcessError
+
+    interpreter = tmp_path / "python.exe"
+    interpreter.write_bytes(b"unit fixture")
+    original = UnreapedProcessError("controlled unsettled terminal", job=object())
+
+    def unsettled():
+        raise original
+
+    with pytest.raises(UnreapedProcessError) as caught:
+        _negative_control(interpreter, unsettled)
+    assert caught.value is original
+    assert interpreter.read_bytes() == b"unit fixture"
+    assert not interpreter.with_suffix(".negative-control").exists()
+
+
+def test_inherited_git_context_cannot_redirect_private_repository(tmp_path, monkeypatch):
+    from agent_procutil import no_window_kwargs
+
+    clean = _git_environment()
+    clean.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+    caller, target = tmp_path / "caller", tmp_path / "target"
+    for path in (caller, target):
+        path.mkdir()
+        subprocess.run(["git", "-C", str(path), "init", "-q"], env=clean,
+                       check=True, timeout=10, **no_window_kwargs())
+    foreign_index = caller / "foreign-index"
+    foreign_index.write_bytes(b"untouched caller index")
+    foreign_config = caller / "foreign-config"
+    foreign_config.write_text("[core]\nworktree = " + caller.as_posix() + "\n", encoding="utf-8")
+    (target / "probe.txt").write_text("private fixture")
+    for key, value in {
+        "GIT_DIR": str(caller / ".git"), "GIT_WORK_TREE": str(caller),
+        "GIT_INDEX_FILE": str(foreign_index), "GIT_CONFIG": str(foreign_config),
+        "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.worktree",
+        "GIT_CONFIG_VALUE_0": str(caller),
+        "GIT_CONFIG_PARAMETERS": "'core.worktree=" + caller.as_posix() + "'",
+        "GIT_OBJECT_DIRECTORY": str(caller / ".git" / "objects"),
+        "GIT_NAMESPACE": "wrong-candidate", "GIT_CONFIG_GLOBAL": str(foreign_config),
+        "GIT_CONFIG_SYSTEM": str(foreign_config),
+    }.items():
+        monkeypatch.setenv(key, value)
+    for env in (_git_environment(), _environment(tmp_path / "environment")):
+        result = subprocess.run(
+            ["git", "-C", str(target), "rev-parse", "--show-toplevel"], env=env,
+            check=True, capture_output=True, text=True, timeout=10, **no_window_kwargs(),
+        )
+        assert Path(result.stdout.strip()).resolve() == target.resolve()
+        subprocess.run(["git", "-C", str(target), "add", "probe.txt"], env=env,
+                       check=True, timeout=10, **no_window_kwargs())
+    assert (target / ".git" / "index").is_file()
+    assert foreign_index.read_bytes() == b"untouched caller index"
+
+
 if "pytest" in sys.modules:
     import pytest
 
@@ -924,6 +1073,9 @@ if "pytest" in sys.modules:
     test_native_cmd_project_binstub_handles_space_path = pytest.mark.skipif(
         os.name != "nt", reason="Native Windows CMD/ConPTY invocation",
     )(test_native_cmd_project_binstub_handles_space_path)
+    test_inherited_git_context_cannot_redirect_private_repository = pytest.mark.skipif(
+        os.name != "nt", reason="Native Windows fixture environment",
+    )(test_inherited_git_context_cannot_redirect_private_repository)
 
 
 if __name__ == "__main__":
