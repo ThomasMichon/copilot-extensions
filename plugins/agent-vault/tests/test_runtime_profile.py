@@ -108,7 +108,7 @@ def test_profile_file_cannot_redirect_writes(profile, tmp_path):
     assert target.read_text() == "retained"
 
 
-def test_bootstrap_currentness_requires_matching_profile_and_actual_slot(profile, tmp_path):
+def test_bootstrap_currentness_requires_matching_profile_and_actual_slot(profile, payload, tmp_path):
     profile.persist_profile(tmp_path, "ssh")
     slot = tmp_path / "versions" / "1.2.3+ssh"
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -117,16 +117,82 @@ def test_bootstrap_currentness_requires_matching_profile_and_actual_slot(profile
     (tmp_path / "current-version").write_text(slot.name)
     manifest = {"source": {"version": "1.2.3"}, "runtime_profile": "ssh", "runtime_version": slot.name}
     (tmp_path / "deploy-manifest.json").write_text(json.dumps(manifest))
-    assert profile.current(tmp_path, "1.2.3")
-    assert not profile.current(tmp_path, "1.2.4")
+    assert profile.current(tmp_path, "1.2.3", payload)
+    assert not profile.current(tmp_path, "1.2.4", payload)
     profile.persist_profile(tmp_path, "base")
-    assert not profile.current(tmp_path, "1.2.3")
+    assert not profile.current(tmp_path, "1.2.3", payload)
     profile.persist_profile(tmp_path, "ssh")
     (tmp_path / "current-version").write_text("1.2.3")
-    assert not profile.current(tmp_path, "1.2.3")
+    assert not profile.current(tmp_path, "1.2.3", payload)
     (tmp_path / "current-version").write_text(slot.name)
     python.unlink()
-    assert not profile.current(tmp_path, "1.2.3")
+    assert not profile.current(tmp_path, "1.2.3", payload)
+
+
+@pytest.mark.parametrize("desired", [None, "base", "ssh"])
+def test_bootstrap_currentness_binds_incoming_source_and_full_receipt(
+    profile, payload, tmp_path, monkeypatch, desired,
+):
+    import runtime_source_target as target
+    import versioned_runtime_source as source
+
+    monkeypatch.delenv(source.SOURCE_PIN_ENV, raising=False)
+    root = tmp_path / "runtime"
+    root.mkdir()
+    if desired:
+        profile.persist_profile(root, desired)
+
+    def prepare(commit):
+        digest = source.assembly_hash(payload)
+        identity = source.SourceIdentity(
+            "agent-vault", "1.2.3", commit * 40, "b" * 40, digest,
+            source.runtime_version("1.2.3", commit * 40, digest),
+        )
+        (payload / source.SOURCE_FILE).write_text(json.dumps(identity.document()))
+        return identity
+
+    incumbent = prepare("a")
+    selected = target.selected(root, payload)
+    slot = root / "versions" / selected["runtime_version"]
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"interpreter metadata fixture")
+    marker = root / "current-version"
+    marker.write_text(slot.name)
+    manifest = {
+        "source": {"version": "1.2.3"}, "runtime_profile": desired or "base",
+        "runtime_version": slot.name, "runtime_source": incumbent.document(),
+    }
+    deployment = root / "deploy-manifest.json"
+    deployment.write_text(json.dumps(manifest))
+    assert profile.current(root, "1.2.3", payload)
+    monkeypatch.setenv(source.SOURCE_PIN_ENV, "{}")
+    with pytest.raises(ValueError, match="transaction selection"):
+        profile.current(root, "1.2.3", payload)
+    monkeypatch.delenv(source.SOURCE_PIN_ENV)
+    manifest["runtime_source"]["source_tree"] = "c" * 40
+    deployment.write_text(json.dumps(manifest))
+    assert not profile.current(root, "1.2.3", payload)
+    manifest["runtime_source"] = incumbent.document()
+    deployment.write_text(json.dumps(manifest))
+    incoming = prepare("d")
+    assert not profile.current(root, "1.2.3", payload)
+    manifest["runtime_source"] = incoming.document()
+    deployment.write_text(json.dumps(manifest))
+    assert not profile.current(root, "1.2.3", payload)
+
+
+def test_legacy_currentness_preserves_unselected_base(profile, payload, tmp_path):
+    root = tmp_path / "runtime"
+    python = root / "versions" / "1.2.3" / (
+        "Scripts/python.exe" if os.name == "nt" else "bin/python"
+    )
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"interpreter metadata fixture")
+    (root / "current-version").write_text("1.2.3")
+    (root / "deploy-manifest.json").write_text(json.dumps({"source": {"version": "1.2.3"}}))
+    assert profile.current(root, "1.2.3", payload)
+    assert not (root / profile.PROFILE_FILE).exists()
 
 
 def test_native_driver_retains_profile_through_request_handoff(profile, monkeypatch, tmp_path):

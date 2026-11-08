@@ -272,15 +272,21 @@ def test_source_profile_stamp_survives_publisher_and_validates_retained_helpers(
     snapshot = Path((root / "payload-dir").read_text().strip())
     assert (root / "stamped-version").read_text().strip() == identity.runtime_version
     assert not (root / "current-version").exists()
-    shutil.rmtree(payload)
-    shutil.rmtree(payload.parents[1] / "libs")
-    env.pop("AGENT_VAULT_INSTALL_PROFILE", None)
-    installer = snapshot / "scripts" / "install.ps1"
     _run(_no_service_provision_command(home, installer, pwsh), env, home)
     selected = (
         source.runtime_version(version + "+ssh", identity.source_commit, digest)
         if profile == "ssh" else identity.runtime_version
     )
+    slot = root / "versions" / selected
+    completed = {str(p.relative_to(slot)): (p.read_bytes(), p.stat().st_mtime_ns)
+                 for p in slot.rglob("*") if p.is_file()}
+    shutil.rmtree(payload)
+    shutil.rmtree(payload.parents[1] / "libs")
+    env.pop("AGENT_VAULT_INSTALL_PROFILE", None)
+    installer = snapshot / "scripts" / "install.ps1"
+    _run(_no_service_provision_command(home, installer, pwsh), env, home)
+    assert {str(p.relative_to(slot)): (p.read_bytes(), p.stat().st_mtime_ns)
+            for p in slot.rglob("*") if p.is_file()} == completed
     assert (root / "current-version").read_text().strip() == selected
     manifest = json.loads((root / "deploy-manifest.json").read_text())
     assert manifest["source"]["version"] == version and manifest["runtime_version"] == selected
@@ -289,7 +295,6 @@ def test_source_profile_stamp_survives_publisher_and_validates_retained_helpers(
     receipt = json.loads((root / "versions" / selected / "runtime-profile.json").read_text())
     assert receipt["runtimeSource"] == identity.document()
     assert (root / "stamped-version").read_text().strip() == identity.runtime_version
-    slot = root / "versions" / selected
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     if profile == "ssh":
         result = _run([python, "-I", "-B", "-c", CONSUMER, home], env, home)
@@ -312,13 +317,26 @@ def test_source_profile_stamp_survives_publisher_and_validates_retained_helpers(
 def _exercise_native_profile(payload, home, env, pwsh):
     root = home / ".agent-vault"
     installer = payload / "scripts" / "install.ps1"
+    sentinel = payload / "tests" / "assembly-sentinel.py"
+    sentinel.parent.mkdir(exist_ok=True)
+    sentinel.write_text("STAMP_INPUT_SENTINEL = True\n")
     env["AGENT_VAULT_INSTALL_PROFILE"] = "base"
-    installed = _run(_no_service_provision_command(home, installer, pwsh), env, home)
+    _run(_no_service_provision_command(home, installer, pwsh, action="stamp"), env, home)
+    snapshot = Path((root / "payload-dir").read_text().strip())
+    assert not (snapshot / "tests").exists()
+    installed = _run(
+        _no_service_provision_command(home, snapshot / "scripts" / "install.ps1", pwsh), env, home,
+    )
     assert "PATH: Added " in installed.stdout
     base = (root / "current-version").read_text().strip()
     base_slot = root / "versions" / base
     before = {str(p.relative_to(base_slot)): (p.read_bytes(), p.stat().st_mtime_ns)
               for p in base_slot.rglob("*") if p.is_file()}
+    _run(_no_service_provision_command(home, installer, pwsh, action="update"), env, home)
+    assert (root / "current-version").read_text().strip() == base
+    assert {str(p.relative_to(base_slot)): (p.read_bytes(), p.stat().st_mtime_ns)
+            for p in base_slot.rglob("*") if p.is_file()} == before
+    assert not list(root.glob(".profile-inputs-*"))
     python_member = "Scripts/python.exe" if os.name == "nt" else "bin/python"
     _run([base_slot / python_member, "-I", "-c",
           "import importlib.util; assert importlib.util.find_spec('cryptography') is None"], env, home)

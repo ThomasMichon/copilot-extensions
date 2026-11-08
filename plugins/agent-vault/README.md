@@ -108,7 +108,9 @@ bash plugins/agent-vault/scripts/install.sh install --profile ssh
 ```
 
 The same selection works with `stamp`, `provision` and `update`. Stamping records
-the desired profile without acquiring dependencies; first use constructs it.
+the desired profile without acquiring dependencies. With no active runtime,
+first use constructs it; an existing runtime remains active after stamping.
+Use `provision` or `update` to apply a changed profile before using its capabilities.
 The installation-owned `runtime-profile.json` preserves selection across ordinary
 updates. With no explicit or recorded selection, existing base setup is unchanged.
 Use `base` explicitly to select a new base runtime without the optional crypto

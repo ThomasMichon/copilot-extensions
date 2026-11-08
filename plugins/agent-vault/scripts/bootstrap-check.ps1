@@ -62,7 +62,26 @@ try {
         } catch [IO.FileNotFoundException] {
         } catch [IO.DirectoryNotFoundException] {
         }
-        $expectedRuntime = if ($deployment.runtime_version) { $deployment.runtime_version } else { $current }
+        $sourcePresent = $false
+        try {
+            [void][IO.File]::GetAttributes((Join-Path $PluginDir 'runtime-source.json'))
+            $sourcePresent = $true
+        } catch [IO.FileNotFoundException] {
+        } catch [IO.DirectoryNotFoundException] {
+        }
+        $sourceSelected = $sourcePresent -or (Test-Path Env:COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN)
+        $expectedRuntime = $current
+        if ($profilePresent -or $sourceSelected) {
+            . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+            $profilePython = Resolve-NativeBootstrapPython -MinimumMinor 11
+            if (-not $profilePython) { throw 'Vault source/profile inspection requires a bootstrap Python interpreter.' }
+            [void](Invoke-Hidden -FilePath $profilePython -ArgList @(
+                '-I', '-B', (Join-Path $PSScriptRoot 'runtime_profile.py'),
+                '--root', $InstallDir, 'current', '--package-version', $current
+            ))
+            if ($LASTEXITCODE -eq 0) { Exit-SessionStart }
+            if ($LASTEXITCODE -ne 1) { throw 'Vault source/profile metadata could not be read.' }
+        }
         $provisioned = Test-Path -LiteralPath (Join-Path $InstallDir '.venv')
         $marker = Join-Path $InstallDir 'current-version'
         if (-not $provisioned -and (Test-Path -LiteralPath $marker)) {
@@ -72,20 +91,11 @@ try {
                 (Test-Path -LiteralPath (Join-Path $InstallDir "versions/$selected/bin/python"))
             )) { $provisioned = $true }
         }
-        if ($provisioned -and $deployed -ceq $current) {
-            if ($profilePresent) {
-                . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
-                $profilePython = Resolve-NativeBootstrapPython -MinimumMinor 10
-                if (-not $profilePython) { throw 'Vault profile inspection requires a bootstrap Python interpreter.' }
-                [void](Invoke-Hidden -FilePath $profilePython -ArgList @(
-                    '-I', '-B', (Join-Path $PSScriptRoot 'runtime_profile.py'),
-                    '--root', $InstallDir, 'current', '--package-version', $current
-                ))
-                if ($LASTEXITCODE -eq 0) { Exit-SessionStart }
-                if ($LASTEXITCODE -ne 1) { throw 'Vault dependency-profile metadata could not be read.' }
-            } elseif (-not $deployment.runtime_profile -or $deployment.runtime_profile -ceq 'base') {
-                Exit-SessionStart
-            }
+        if (-not $profilePresent -and -not $sourceSelected -and $provisioned -and
+            $deployed -ceq $current -and (-not $deployment.runtime_profile -or
+            $deployment.runtime_profile -ceq 'base') -and -not $deployment.runtime_source -and
+            (-not $deployment.runtime_version -or $deployment.runtime_version -ceq $current)) {
+            Exit-SessionStart
         }
         $installerAction = 'provision'
     }

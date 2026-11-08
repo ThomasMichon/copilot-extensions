@@ -62,6 +62,12 @@ binds profile, original source, package version and canonical completion hash.
 Evidence is created only before completion and verified without rewriting on reuse.
 Native start/status resolve the active interpreter read-only, not desired policy.
 Common PATH/pruning finalization also runs after retained profile construction.
+Bootstrap currentness binds the marker and full original source receipt to the
+incoming payload's exact generation, including unselected prepared-source base.
+Windows ordinary stamp and direct profile construction share the same
+materialized input assembly; prepared-source profiles use the canonical source
+snapshot. Fingerprinting and construction read that same retained assembly,
+without publishing redirects merely to prepare inputs.
 
 ## Configuration model
 

@@ -141,8 +141,9 @@ preserved selection on update and actual installed-runtime key prepare/install.
 A prepared-source stamp/provision control removes its publisher, preserves the
 original source receipt separately from the profiled slot and refuses corrupted
 retained helpers without rewriting the completed runtime.
-It also checks PATH/pruning finalization and unselected legacy-base source
-compatibility. Worktrees' explicitly selected
+It also checks ordinary Windows stamp/provision followed by same-version update
+from the original payload, completed-slot immutability, PATH/pruning finalization
+and unselected legacy-base source compatibility. Worktrees' explicitly selected
 `tests/native/test_vault_profile_update.py` passes a collected prepared-source
 step through the real native updater, verifies the profiled completion receipt
 and checks that the next collected plan reports current.

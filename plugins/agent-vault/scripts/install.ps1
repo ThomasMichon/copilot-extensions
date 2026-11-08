@@ -647,7 +647,7 @@ function Get-PayloadHash {
     if ($script:RuntimeProfile) {
         $py = Get-BootstrapPython
         $result = Invoke-Hidden -FilePath $py -ArgList @(
-            '-I', '-B', (Join-Path $ScriptDir 'runtime_profile.py'),
+            '-I', '-B', (Get-RuntimeProfileHelper),
             '--root', $InstallDir, 'fingerprint'
         )
         if ($LASTEXITCODE -ne 0 -or $result.Trim() -cnotmatch '^[0-9a-f]{64}$') {
@@ -684,7 +684,7 @@ function Invoke-VersionedSlotClean {
         if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
         Invoke-Expression $helpers
     }
-    if ($script:RuntimeProfile) { $vr = Join-Path $ScriptDir 'runtime_profile.py' }
+    if ($script:RuntimeProfile) { $vr = Get-RuntimeProfileHelper }
     $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
         -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
         -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
@@ -900,6 +900,43 @@ function Materialize-SnapshotInstallerEngine {
         $ps1Text = $ps1Text.Replace('. (Join-Path $PSScriptRoot ''..\..\..\libs\installer-engine\installer-engine.ps1'')', '. (Join-Path $PSScriptRoot ''installer-engine.ps1'')')
         [System.IO.File]::WriteAllText($installPs1, $ps1Text, $utf8NoBom)
     }
+}
+
+function Copy-VaultSnapshotInputs {
+    param([Parameter(Mandatory)][string]$Destination)
+    [void][IO.Directory]::CreateDirectory($Destination)
+    $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+    Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $Destination $_.Name) -Recurse -Force
+    }
+    Materialize-SnapshotLibs -SnapshotDir $Destination
+    Materialize-SnapshotInstallerEngine -SnapshotDir $Destination
+}
+
+function Get-RuntimeProfileHelper {
+    if ($script:RuntimeProfileHelper) { return $script:RuntimeProfileHelper }
+    if ($script:SourceRuntimeIdentity) {
+        $snapshot = Publish-SourceSnapshot
+    } else {
+        $snapshot = Join-Path $InstallDir ('.profile-inputs-' + [Guid]::NewGuid().ToString('N'))
+        $directory = [IO.Directory]::CreateDirectory($snapshot)
+        $script:RuntimeProfileInputs = @{ Path = $directory.FullName; Created = $directory.CreationTimeUtc }
+        Copy-VaultSnapshotInputs -Destination $snapshot
+    }
+    $script:RuntimeProfileHelper = Join-Path $snapshot 'scripts\runtime_profile.py'
+    return $script:RuntimeProfileHelper
+}
+
+function Remove-RuntimeProfileInputs {
+    if (-not $script:RuntimeProfileInputs) { return }
+    $path = $script:RuntimeProfileInputs.Path
+    $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+    if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+        $item.CreationTimeUtc -ne $script:RuntimeProfileInputs.Created) {
+        throw 'Vault profile input custody changed; preserving construction inputs'
+    }
+    Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction Stop
+    $script:RuntimeProfileInputs = $null
 }
 
 function Test-RuntimeHealthy {
@@ -1368,13 +1405,7 @@ function Invoke-Stamp {
     }
     $snapTmp = "$snapDir.tmp-$PID"
     if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
-    New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
-    $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
-    Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
-        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
-    }
-    Materialize-SnapshotLibs -SnapshotDir $snapTmp
-    Materialize-SnapshotInstallerEngine -SnapshotDir $snapTmp
+    Copy-VaultSnapshotInputs -Destination $snapTmp
     Write-Binstubs -SnapshotSourcePath $snapTmp
     if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
     Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
@@ -1736,6 +1767,9 @@ $PackageVersion = $SrcVersion
 $SourceRuntimeIdentity = $null
 $RuntimeProfile = ''
 $RuntimeProfilePython = ''
+$RuntimeProfileHelper = ''
+$RuntimeProfileInputs = $null
+$installFailure = $null
 $profilePresent = $false
 if ($Action -in @('install', 'update', 'provision', 'stamp')) {
     $profilePresent = Test-VaultRuntimeProfilePresent
@@ -1799,11 +1833,18 @@ try {
         'provision' { Invoke-Install }
         'schedule'  { Register-AgentVaultTask }
     }
+} catch {
+    $installFailure = $_
+    throw
 } finally {
     try {
         if (Test-Path -LiteralPath 'Function:\Stop-RuntimeConstruction') {
             Stop-RuntimeConstruction
         }
+        Remove-RuntimeProfileInputs
+    } catch {
+        if (-not $installFailure) { throw }
+        Write-Warn "Vault construction inputs retained after settlement/cleanup refusal: $($_.Exception.Message)"
     } finally {
         Exit-InstallLock
     }

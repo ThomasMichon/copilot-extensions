@@ -46,8 +46,10 @@ runtime unchanged.
 
 The deploy manifest's `source.version` remains the package version.
 `runtime_profile` and `runtime_version` identify the selected dependency slot.
-Bootstrap compares desired and deployed profiles as well as package version,
-so a healthy SSH runtime is not repeatedly rebuilt as base.
+Bootstrap compares desired and deployed profiles, the exact incoming runtime
+generation, its full source receipt and the active marker, not package version
+alone. A newer prepared source at the same package version is not skipped,
+and a healthy SSH runtime is not repeatedly rebuilt as base.
 Start/status use the active runtime even when a later desired update failed.
 Prepared-source updates bind the selected target through the existing
 `COPILOT_EXTENSIONS_RUNTIME_SOURCE_TARGET` contract and verify immutable slot

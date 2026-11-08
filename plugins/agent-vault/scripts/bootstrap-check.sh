@@ -65,6 +65,7 @@ if not isinstance(version, str) or not version:
 print(version)
 print(data.get("runtime_version") or version)
 print(data.get("runtime_profile", "base"))
+print("source" if data.get("runtime_source") is not None else "ordinary")
 ' "$Manifest")"; then
     printf '[agent-vault] Runtime publication refused: deployed runtime metadata could not be read.\n' >&2
     exit 3
@@ -72,7 +73,9 @@ print(data.get("runtime_profile", "base"))
   deployed="${deployment%%$'\n'*}"
   deployment="${deployment#*$'\n'}"
   expected_runtime="${deployment%%$'\n'*}"
-  deployed_profile="${deployment#*$'\n'}"
+  deployment="${deployment#*$'\n'}"
+  deployed_profile="${deployment%%$'\n'*}"
+  deployed_source="${deployment#*$'\n'}"
   if ! current="$(grep -m1 -E '^[[:space:]]*version[[:space:]]*=' "$PluginDir/pyproject.toml" |
       sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')"; then
     printf '[agent-vault] Runtime publication refused: owning payload version is unavailable.\n' >&2
@@ -81,27 +84,32 @@ print(data.get("runtime_profile", "base"))
   [[ -n "$deployed" && -n "$current" ]] || {
     printf '[agent-vault] Runtime publication refused: runtime or payload version is unavailable.\n' >&2; exit 3;
   }
+  special_selection=0
+  if [[ -e "$InstallDir/runtime-profile.json" || -L "$InstallDir/runtime-profile.json" ||
+      -e "$PluginDir/runtime-source.json" || -L "$PluginDir/runtime-source.json" ||
+      -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN+x}" ]]; then
+    special_selection=1
+    profile_code=0
+    "$py" -I -B "$ScriptDir/runtime_profile.py" --root "$InstallDir" \
+        current --package-version "$current" || profile_code=$?
+    if [[ "$profile_code" == 0 ]]; then exit 0; fi
+    if [[ "$profile_code" != 1 ]]; then
+      printf '[agent-vault] Runtime publication refused: source/profile metadata could not be read.\n' >&2
+      exit 3
+    fi
+  fi
   provisioned=0
   [[ ! -e "$InstallDir/.venv" ]] || provisioned=1
   if [[ "$provisioned" == 0 && -f "$InstallDir/current-version" ]]; then
     selected="$(tr -d '[:space:]' <"$InstallDir/current-version")"
-    if [[ -n "$selected" && "$selected" == "$expected_runtime" ]] &&
+    if [[ -n "$selected" && "$selected" == "$current" ]] &&
         { [[ -x "$InstallDir/versions/$selected/bin/python" ]] ||
           [[ -f "$InstallDir/versions/$selected/Scripts/python.exe" ]]; }; then provisioned=1; fi
   fi
-  if [[ "$provisioned" == 1 && "$deployed" == "$current" ]]; then
-    if [[ -e "$InstallDir/runtime-profile.json" || -L "$InstallDir/runtime-profile.json" ]]; then
-      profile_code=0
-      "$py" -I -B "$ScriptDir/runtime_profile.py" --root "$InstallDir" \
-          current --package-version "$current" || profile_code=$?
-      if [[ "$profile_code" == 0 ]]; then exit 0; fi
-      if [[ "$profile_code" != 1 ]]; then
-        printf '[agent-vault] Runtime publication refused: dependency-profile metadata could not be read.\n' >&2
-        exit 3
-      fi
-    elif [[ "$deployed_profile" == "base" ]]; then
-      exit 0
-    fi
+  if [[ "$special_selection" == 0 && "$provisioned" == 1 && "$deployed" == "$current" &&
+      "$expected_runtime" == "$current" && "$deployed_profile" == "base" &&
+      "$deployed_source" == "ordinary" ]]; then
+    exit 0
   fi
   installer_action=provision
 fi

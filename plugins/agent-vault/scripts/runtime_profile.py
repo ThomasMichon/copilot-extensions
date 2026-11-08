@@ -54,14 +54,14 @@ def selected_profile(root: Path, requested: str | None = None) -> str:
 
 
 def selection(root: Path, payload: Path, requested: str | None = None) -> dict:
-    import installer_engine as engine
+    import tomllib
     import versioned_runtime_source as source
 
     profile = selected_profile(root, requested)
-    project = engine.tomllib.loads((payload / "pyproject.toml").read_text(encoding="utf-8"))
-    version = project["project"]["version"]
+    project = tomllib.loads((payload / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    version = project["version"]
     if (
-        project["project"]["name"] != "agent-vault" or not isinstance(version, str)
+        project["name"] != "agent-vault" or not isinstance(version, str)
         or not re.fullmatch(r"[0-9][A-Za-z0-9._+-]*", version) or version.endswith(".")
     ):
         raise ValueError("Dependency selection requires the owning Vault payload")
@@ -154,33 +154,10 @@ def construction_session(root: Path, payload: Path, version: str, expected_hash:
     return 1
 
 
-def current(root: Path, package_version: str) -> bool:
-    desired = selected_profile(root)
-    if not (root / "deploy-manifest.json").is_file() or not (
-        root / "current-version"
-    ).is_file():
-        return False
-    manifest = json.loads(
-        (root / "deploy-manifest.json").read_text(encoding="utf-8"),
-        object_pairs_hook=_unique_object,
-    )
-    selected = (root / "current-version").read_text(encoding="utf-8").strip()
-    if not isinstance(manifest, dict) or not isinstance(manifest.get("source"), dict):
-        raise ValueError("Vault deployment metadata must name its source")
-    version = manifest.get("runtime_version")
-    profile_version = package_version + ("." if "+" in package_version else "+") + desired
-    if (
-        manifest.get("source", {}).get("version") != package_version
-        or manifest.get("runtime_profile", "base") != desired
-        or not isinstance(version, str) or selected != version
-        or not re.fullmatch(r"[0-9][A-Za-z0-9._+-]*", version)
-        or not (version == profile_version or version.startswith(profile_version + ".source."))
-    ):
-        return False
-    python = root / "versions" / version / (
-        "Scripts/python.exe" if os.name == "nt" else "bin/python"
-    )
-    return python.is_file()
+def current(root: Path, package_version: str, payload: Path | None = None) -> bool:
+    from runtime_source_target import current as target_current
+
+    return target_current(root, payload or SCRIPTS.parent, package_version)
 
 
 def main(argv=None) -> int:

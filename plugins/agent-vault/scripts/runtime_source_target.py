@@ -41,6 +41,37 @@ def document(root: Path, selection: dict) -> dict:
     }
 
 
+def current(root: Path, payload: Path, package_version: str) -> bool:
+    from runtime_profile import _unique_object
+    import versioned_runtime_source as source
+
+    expected = selected(root, payload)
+    pin = os.environ.get(source.SOURCE_PIN_ENV)
+    if pin is not None and json.dumps(expected["source_identity"] or {}, sort_keys=True) != pin:
+        raise ValueError("Source identity differs from the update transaction selection")
+    manifest_path = root / "deploy-manifest.json"
+    marker = root / "current-version"
+    if expected["package_version"] != package_version or not manifest_path.is_file() or not marker.is_file():
+        return False
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"), object_pairs_hook=_unique_object)
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("source"), dict):
+        raise ValueError("Vault deployment metadata must name its source")
+    fields = expected["source_identity"]
+    version = expected["runtime_version"]
+    if (
+        manifest["source"].get("version") != package_version
+        or manifest.get("runtime_profile", "base") != expected["profile"]
+        or manifest.get("runtime_version", package_version) != version
+        or marker.read_text(encoding="utf-8").strip() != version
+        or manifest.get("runtime_source") != (fields["runtime_source"] if fields else None)
+    ):
+        return False
+    python = root / "versions" / version / (
+        "Scripts/python.exe" if os.name == "nt" else "bin/python"
+    )
+    return python.is_file()
+
+
 def check_target(root: Path, selection: dict) -> None:
     if TARGET_ENV not in os.environ:
         return
