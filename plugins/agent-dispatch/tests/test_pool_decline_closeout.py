@@ -771,6 +771,22 @@ def test_readiness_refusal_blocks_before_any_dispatch_mutation(governed):
     assert snapshot(g.q, g.task_id) == before
 
 
+@pytest.mark.parametrize("required", [False, True])
+def test_governed_decline_refuses_a_pinned_workspace_before_any_mutation(governed, required):
+    g = governed
+    with g.q._connect() as conn:
+        if required:
+            conn.execute("UPDATE tasks SET requires='[\"worktree:tree\"]' WHERE id=?", (g.task_id,))
+        else:
+            conn.execute("UPDATE tasks SET target_worktree='tree' WHERE id=?", (g.task_id,))
+    before = snapshot(g.q, g.task_id)
+    with pytest.raises(TaskError, match="pinned to a worktree"):
+        g.q.close_pool_decline(g.task_id, **g.binding)
+    assert snapshot(g.q, g.task_id) == before
+    assert g.q.task_relationship(g.task_id)["state"] == "bound"
+    assert not any("observe-ready" in argv for argv in g.calls)
+
+
 def test_lost_settlement_reply_retains_claim_then_converges_without_second_requeue(governed):
     g = governed
     g.owner.lose_reply = "close"

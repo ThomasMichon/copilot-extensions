@@ -12,6 +12,7 @@ import weakref
 
 from .queue_pool_decline import PoolDeclineCloseout, _QueueOwner, current_pool_decline
 from .queue_records import SpawnState, Status, TaskError
+from .task_obligations import _worktree_requirement
 
 
 def _state(owner: _QueueOwner, conn: sqlite3.Connection, task_id: str, binding: dict) -> dict:
@@ -39,10 +40,17 @@ def _state(owner: _QueueOwner, conn: sqlite3.Connection, task_id: str, binding: 
     require_pool_start(
         conn, task, binding["worker_id"], binding["native_id"], binding["generation"], declining=True,
     )
+    row_task = dict(conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone())
+    relationship = _relationship(conn, task_id, dict(row))
+    if relationship is not None and (
+        row_task["target_worktree"] is not None or _worktree_requirement(row_task["requires"])
+    ):
+        # A requeue would keep the pin, so the retained claim could never settle.
+        raise TaskError("worker decline cannot settle a task claim pinned to a worktree; custody retained")
     return {
-        "task": dict(conn.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()),
+        "task": row_task,
         "reservation": dict(row), "assignment": dict(assignment), "decline": asdict(decline),
-        "relationship": _relationship(conn, task_id, dict(row)),
+        "relationship": relationship,
     }
 
 
