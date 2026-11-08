@@ -1,0 +1,9 @@
+{
+  "comment": "Report unavailable selected SSH databases before service or key effects",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}
