@@ -36,6 +36,7 @@ class TrackedPublication:
             or type(request) is not dict
         ):
             raise ValueError("actual tracked publication owner and mapping required")
+        target = {**target, "api_base": target["api_base"].rstrip("/")}
         scope = _scope(native_scope)
         if (
             target["provider"] != scope["provider"] or target["api_base"] != scope["endpoint"]
@@ -133,6 +134,8 @@ class TrackedPublication:
         self, *, worktree_id: str, target: dict | None,
         command: str, body: str, event: str,
     ) -> dict:
+        if target is not None:
+            target = {**target, "api_base": target["api_base"].rstrip("/")}
         if worktree_id != self.worktree_id or (
             self.phase != "recover" and target != self.target
         ) or (self.phase == "recover" and target is not None):

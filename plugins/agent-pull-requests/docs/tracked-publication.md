@@ -30,6 +30,8 @@ native provider/endpoint/project/repository/principal/PR scope. A repository
 name is not a native GUID; an account label or matching number is not an
 authenticated principal. The adapter checks this mapping, and the actual
 workspace receiver retains its own scope, storage, policy and writer checks.
+Endpoint comparison uses the native scope's trailing-slash normalization;
+equivalent configured forms do not retarget an operation.
 Do not derive trusted mapping or credentials from the selected request.
 
 The host supplies the binding explicitly to the existing

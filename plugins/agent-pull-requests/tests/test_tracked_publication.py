@@ -296,3 +296,28 @@ def test_submission_requires_the_original_committed_preview_not_only_valid_prepa
     assert code == 1 and "error" in refused
     assert store.path.read_bytes() == before and backend.calls == []
     asyncio.run(gateway.drain(timeout=2))
+
+
+@pytest.mark.parametrize("transport", ["native", "gateway"])
+def test_trailing_slash_endpoint_forms_keep_the_same_native_target(
+    environment: tuple, prepared_workspace: tuple, selection_workspace: tuple, tracked: tuple,
+    transport: str,
+) -> None:
+    _, _, _, attachment, backend, _ = environment
+    gateway, client, native, _, _, _ = prepared_workspace
+    draft, _ = selection_workspace
+    draft["actions"] = draft["actions"][:1]
+    target, config, _ = tracked
+    target["api_base"] += "/"
+    config.default_repo.pr.api_base = target["api_base"]
+    host = WorkspaceTools(native if transport == "native" else client)
+    request = {"number": 42, "intent": draft, "source_attachment": attachment, "budget_seconds": 60}
+    code, preview = call(host, target, draft["scope"], request, "preview", "pr-comment", draft["actions"][0]["body"], "")
+    assert code == 0 and backend.calls == [], preview
+    chosen = preview["publication"]["response"]["result"]["intent"]
+    target["api_base"] = target["api_base"].rstrip("/")
+    request["intent"] = chosen
+    code, submitted = call(host, target, draft["scope"], request, "submit", "pr-comment", chosen["actions"][0]["body"], "")
+    assert code == 0 and submitted["publication"]["response"]["result"]["status"] == "complete", submitted
+    assert len([row for row in backend.calls if row[0] == "POST"]) == 1
+    asyncio.run(gateway.drain(timeout=2))
