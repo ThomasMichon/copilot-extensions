@@ -167,6 +167,11 @@ validation evidence, including honest reasons for unavailable native lanes.
 
 ### 2026-11-07 - Delivery source qualified before publication
 
+- Integrated the newer mux improvements and preserved their upstream evidence.
+  Exact public checkpoint `28529938b1` passed capture and independent no-write
+  replay, each with all 337 required cases. Receipt production code is unchanged
+  from the earlier approved source. The contract checker passed with two
+  contracts and 1,073 fixtures; fresh review and CI still gate merge.
 - Genuine HTTP-52 capture and a separate no-write replay each passed all 334
   required cases against source checkpoint `4e247f0760`.
   The contract checker passed with two contracts and 1,073 fixtures.
