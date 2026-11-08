@@ -138,6 +138,8 @@ def _publish_helpers(
         "bash", "bash.exe", "pwsh", "pwsh.exe", "powershell.exe", "powershell",
     ):
         raise InstallationRefused("Helper publisher requires an exact native shell")
+    if os.name == "nt" and frontend["shell"] == "ps1" and executable.name.lower() in ("pwsh", "pwsh.exe"):
+        content = Path(engine._native_retained_path(content))
     identity = _installed_identity(slot)
     source = json.loads(identity["build_info"]["deployment_source"])
     pin = {key: source[key] for key in ("runtime_version", "runtime_source") if key in source}
@@ -183,7 +185,14 @@ def _publish_helpers(
         # Windows st_dev differs across Python versions; callbacks use the
         # plan owner's interpreter without weakening its file identity check.
         if frontend["shell"] == "ps1":
-            argv = [str(executable), "-NoProfile", "-NonInteractive", "-File", str(entry),
+            entry_name = str(entry)
+            if os.name == "nt" and executable.name.lower() in ("pwsh", "pwsh.exe"):
+                if entry_name[:8].lower() == "\\\\?\\unc\\":
+                    entry_name = "\\\\?\\UNC\\" + entry_name[8:]
+                entry_name = runtime._normalize_windows_extended_path(entry_name)
+                if not Path(entry_name).is_absolute():
+                    raise InstallationRefused("PowerShell helper source is not an ordinary absolute path")
+            argv = [str(executable), "-NoProfile", "-NonInteractive", "-File", entry_name,
                     "publish-runtime-helpers", "-InstallDir", str(governance.root),
                     "-BootstrapPython", sys._base_executable,
                     "-RuntimePublicationPlan", str(plan_path), "-RuntimePublicationDigest", digest]
@@ -845,7 +854,14 @@ def main(argv: list[str] | None = None) -> int:
         plan = helper_publication_plan(path, arguments.publication_digest)
         if Path(plan["root"]).resolve() != arguments.root.resolve():
             raise InstallationRefused("Helper publication runtime root differs from its invocation")
-        if Path(plan["content"]).resolve() != arguments.plugin.resolve():
+        try:
+            same_content = os.path.samefile(
+                engine._native_retained_path(plan["content"]),
+                engine._native_retained_path(arguments.plugin),
+            )
+        except OSError as error:
+            raise InstallationRefused("Helper publication content root is unavailable") from error
+        if not same_content:
             raise InstallationRefused("Helper publication content root differs from its invocation")
         if arguments.inspect_helper_publication:
             print(json.dumps(plan))
