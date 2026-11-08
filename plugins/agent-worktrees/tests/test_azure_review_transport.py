@@ -20,6 +20,22 @@ from agent_worktrees.providers.azure_owned_review import protected_review_contex
 from test_pr_observation_credential_transports import certificate
 
 
+PROJECT = "11111111-1111-4111-8111-111111111111"
+REPOSITORY = "22222222-2222-4222-8222-222222222222"
+NAMESPACE = "33333333-3333-4333-8333-333333333333"
+
+
+def namespaces():
+    return {"count": 1, "value": [{
+        "name": "Git Repositories", "namespaceId": NAMESPACE, "separatorValue": "/",
+        "structureValue": 1, "useTokenTranslator": True, "readPermission": 2,
+        "actions": [
+            {"name": name, "bit": bit, "namespaceId": NAMESPACE}
+            for name, bit in (("GenericRead", 2), ("PullRequestContribute", 8))
+        ],
+    }]}
+
+
 @pytest.fixture
 def backend(tmp_path):
     observed = []
@@ -33,6 +49,10 @@ def backend(tmp_path):
             observed.append((self.command, self.path, self.headers.get("Authorization"), None))
             if "connectionData?" in self.path:
                 body = {"authorizedUser": {"id": "principal"}}
+            elif "/_apis/securitynamespaces?" in self.path:
+                body = copy.deepcopy(control.get("namespaces", namespaces()))
+            elif "/_apis/permissions/" in self.path:
+                body = copy.deepcopy(control.get("permissions", {"count": 2, "value": [True, True]}))
             elif "/iterations?" in self.path:
                 body = {"value": [{"id": 1, "sourceRefCommit": {"commitId": control.get("head", "a" * 40)},
                                    "commonRefCommit": {"commitId": "b" * 40}}]}
@@ -41,10 +61,15 @@ def backend(tmp_path):
             elif any(route in self.path for route in ("/statuses?", "/policy/evaluations?")):
                 body = {"value": []}
             else:
-                body = {"pullRequestId": 42, "repository": {"id": "repository", "project": {"id": "project"}},
+                body = {"pullRequestId": 42, "repository": {"id": REPOSITORY, "project": {"id": PROJECT}},
+                        "targetRefName": control.get("target", "refs/heads/main"),
                         "lastMergeSourceCommit": {"commitId": control.get("head", "a" * 40)}}
             if callable(control.get("on_read")):
                 control["on_read"]()
+            if callable(control.get("on_permission_read")) and "/_apis/permissions/" in self.path:
+                control["permission_reads"] = control.get("permission_reads", 0) + 1
+                if control["permission_reads"] == 2:
+                    control["on_permission_read"]()
             if control.get("identity"):
                 body = {"authorizedUser": {"id": control["identity"]}}
             self.respond(body)
@@ -103,8 +128,8 @@ def backend(tmp_path):
 
 def selected(backend, *, authentication="bearer", actions=("comment", "reply", "edit_owned_comment", "verdict")):
     base, ca, _, _ = backend
-    review = ReviewScope(base, "project/repository", authentication, "project", "repository", 42, "principal", actions)
-    scope = {"provider": "azure-devops", "endpoint": base, "project_id": "project", "repository_id": "repository",
+    review = ReviewScope(base, f"{PROJECT}/{REPOSITORY}", authentication, PROJECT, REPOSITORY, 42, "principal", actions)
+    scope = {"provider": "azure-devops", "endpoint": base, "project_id": PROJECT, "repository_id": REPOSITORY,
              "number": 42, "principal_id": "principal"}
     material = CredentialMaterial("synthetic-secret", time.time() + 60, "source", "account",
                                   "audience", ("review",), review=review)
@@ -153,6 +178,10 @@ def test_real_transport_keeps_private_generation_through_reads_and_all_actions(b
         assert scheme == ("Bear" + "er" if authentication == "bearer" else "Bas" + "ic")
         assert value == expected
     assert [row[0] for row in observed if row[0] != "GET"] == ["POST", "POST", "PATCH", "PUT"]
+    permission_reads = [row for row in observed if "/_apis/permissions/" in row[1]]
+    assert len(permission_reads) == 16
+    assert all(f"/_apis/permissions/{NAMESPACE}/{bit}?" in row[1]
+               for row, bit in zip(permission_reads, [2, 8] * 8))
 
 
 @pytest.mark.parametrize("wrong", ["observe", "endpoint", "repository", "principal", "pr", "action", "expired",
@@ -267,6 +296,35 @@ def test_actual_action_policy_reads_share_the_pinned_transport(backend):
     assert all(row[2].split(" ", 1)[1] == material.token for row in backend[2])
 
 
+@pytest.mark.parametrize("when", ["preflight", "dispatch"])
+def test_effective_branch_denial_refuses_without_write_or_reacquisition(backend, when):
+    scope, _, kwargs, acquired, policies, _ = selected(backend)
+    if when == "preflight":
+        backend[3]["permissions"] = {"count": 2, "value": [True, False]}
+    else:
+        backend[3]["on_permission_read"] = lambda: backend[3].update(
+            permissions={"count": 2, "value": [True, False]},
+        )
+    factory = native.ado_review_context_factory(scope, **kwargs)
+    with protected_review_context(factory, scope, lambda: 5) as context:
+        with pytest.raises(PermissionError):
+            context.perform({"intent": {"scope": scope, "operation_id": "op"}, "intent_id": "intent"},
+                            {"id": "c", "kind": "comment", "body": "selected"})
+    assert len(acquired) == 1 and len(policies) == int(when == "dispatch")
+    assert all(row[0] == "GET" for row in backend[2])
+
+
+def test_incomplete_native_permissions_are_unavailable_not_policy_success(backend):
+    scope, _, kwargs, acquired, policies, _ = selected(backend)
+    backend[3]["permissions"] = {"count": 1, "value": [True]}
+    factory = native.ado_review_context_factory(scope, **kwargs)
+    with protected_review_context(factory, scope, lambda: 5) as context:
+        with pytest.raises(ReviewContextUnavailable):
+            context.perform({"intent": {"scope": scope, "operation_id": "op"}, "intent_id": "intent"},
+                            {"id": "c", "kind": "comment", "body": "selected"})
+    assert len(acquired) == 1 and not policies and all(row[0] == "GET" for row in backend[2])
+
+
 def test_expired_pinned_generation_is_not_reacquired(backend, monkeypatch):
     from types import SimpleNamespace
 
@@ -337,7 +395,7 @@ def native_execution(backend, tmp_path, monkeypatch):
                            "review-evidence.example.json").read_text())
     evidence["scope"] = copy.deepcopy(scope)
     pr = evidence["sections"]["pull_request"]["data"]
-    pr["repository"] = {"id": "repository", "project": {"id": "project"}}
+    pr["repository"] = {"id": REPOSITORY, "project": {"id": PROJECT}}
     iteration = evidence["sections"]["iterations"]["data"][0]
     iteration["id"] = 1
     evidence["sections"]["changes"]["revision"]["iteration"] = 1
@@ -401,6 +459,30 @@ def test_real_executor_retains_lost_native_effect_across_reopen_without_resend(b
     assert result["status"] == "unknown" and result["entered_writes"] == 0
     assert result["actions"][0]["attempt_id"] == attempt
     assert sum(row[0] == "POST" for row in backend[2]) == 1 and len(acquired) == 1
+
+
+@pytest.mark.parametrize("after_fence", [False, True])
+def test_executor_native_permission_denial_preserves_attempt_boundary(backend, native_execution, after_fence):
+    from agent_pull_requests.review_executor import execute_review
+
+    store, intent, generation, attachment, kwargs, acquired, expiry = native_execution
+    if after_fence:
+        backend[3]["on_permission_read"] = lambda: backend[3].update(
+            permissions={"count": 2, "value": [True, False]},
+        )
+    else:
+        backend[3]["permissions"] = {"count": 2, "value": [True, False]}
+    factory = native.ado_review_context_factory(intent["scope"], **kwargs)
+    with pytest.raises(PermissionError):
+        execute_review(
+            store, intent, generation, attachment, context_factory=factory,
+            checkpoint=lambda: None, expires_at=expiry, budget_seconds=10,
+        )
+    retained = store.inspect_review(intent["operation_id"], intent["scope"], expires_at=expiry)
+    action = retained["actions"][0]
+    assert action["state"] == ("unknown" if after_fence else "unattempted")
+    assert bool(action["attempt_id"]) is after_fence
+    assert all(row[0] == "GET" for row in backend[2]) and len(acquired) == 1
 
 
 @pytest.mark.parametrize("drift", ["head", "owned_content"])
