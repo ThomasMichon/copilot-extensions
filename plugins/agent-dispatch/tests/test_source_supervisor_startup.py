@@ -4,6 +4,19 @@ import argparse
 from pathlib import Path
 
 import pytest
+from agent_dispatch.source_start import prepare_scheduled_launchers as prepare_owner_launchers
+
+
+@pytest.fixture(autouse=True)
+def isolated_windows_scheduling(monkeypatch):
+    from agent_dispatch import installation_policy, source_start
+
+    monkeypatch.setattr(installation_policy, "windows_policy", lambda *_, **__: {
+        "windows_scheduled_task": "preserve", "start_coordinator": True,
+        "start_supervisor": True,
+    })
+    # Most tests isolate readiness planning; launcher publication has its own test.
+    monkeypatch.setattr(source_start, "prepare_scheduled_launchers", lambda *_, **__: None)
 
 
 def _sources(monkeypatch, *, declarations=(), complete=True):
@@ -47,13 +60,18 @@ def test_foreign_supervisor_preflight_preserves_coordinator(monkeypatch, tmp_pat
 
 
 def test_classic_child_profile_preflight_cannot_silently_disable_work(monkeypatch, tmp_path):
+    from agent_dispatch import source_start
+
     _sources(monkeypatch)
     profiles = tmp_path / "supervisors"
     profiles.mkdir()
     (profiles / "fixture.env").write_text("AGENT_DISPATCH_SUPERVISE_LABELS=fixture\n", encoding="utf-8")
-    command = _command(monkeypatch, tmp_path)
-    with pytest.raises(RuntimeError, match="classic supervisor"):
-        command()
+    plan = source_start.supervisor_plan(tmp_path)
+    assert isinstance(plan, source_start.ClassicStartupPlan)
+    assert len(plan.profiles) == 1
+    assert plan.profiles[0][0] == profiles / "fixture.env"
+    assert plan.profiles[0][1][:2] == ["supervise", "--all-repos"]
+    assert "--label" in plan.profiles[0][1]
 
 
 @pytest.mark.parametrize("legacy", [False, True])
@@ -151,3 +169,85 @@ def test_missing_optional_supervisor_configuration_is_absent(monkeypatch, tmp_pa
 
     _sources(monkeypatch)
     assert source_start.supervisor_plan(tmp_path) is None
+
+
+@pytest.mark.parametrize("coordinator,supervisor", [(False, False), (True, False), (False, True), (True, True)])
+def test_scheduling_absence_does_not_disable_independent_source_readiness(
+    monkeypatch, tmp_path, coordinator, supervisor,
+):
+    from agent_dispatch import coordinator_cli, installation_policy, source_start
+
+    calls = []
+    monkeypatch.setattr(source_start, "require_selected_source", lambda: tmp_path)
+    monkeypatch.setattr(installation_policy, "windows_policy", lambda *_, **__: {
+        "windows_scheduled_task": "absent", "start_coordinator": coordinator,
+        "start_supervisor": supervisor,
+    })
+    monkeypatch.setattr(source_start, "supervisor_plan", lambda _: "captured")
+    monkeypatch.setattr(coordinator_cli, "_cmd_cutover", lambda *_, **__: calls.append("coordinator") or 0)
+    monkeypatch.setattr(source_start, "ensure_supervisor", lambda *_, **__: calls.append("supervisor"))
+    assert source_start.command(argparse.Namespace(json=True)) == 0
+    assert calls == (["coordinator"] if coordinator else []) + (["supervisor"] if supervisor else [])
+
+
+def test_explicit_native_scheduling_prepares_only_missing_owner_launchers(monkeypatch, tmp_path):
+    from agent_dispatch import source_start
+
+    monkeypatch.setattr(source_start, "require_selected_source", lambda: tmp_path)
+    custom = tmp_path / "serve-service.ps1"
+    custom.write_text("# existing custom launcher\n")
+    prepare_owner_launchers(tmp_path)
+    prepare_owner_launchers(tmp_path)
+    assert custom.read_text() == "# existing custom launcher\n"
+    supervisor = (tmp_path / "supervise-service.ps1").read_text()
+    assert "__source-start" in supervisor
+    assert "current-version" in supervisor
+    assert "last-known-good" not in supervisor
+    assert "Start-ScheduledTask" not in supervisor
+    assert "Register-ScheduledTask" not in supervisor
+
+
+def test_native_classic_startup_retains_independent_disabled_profile_intent(monkeypatch, tmp_path):
+    from agent_dispatch import coordinator_cli, installation_policy, source_start, supervisor_lane_status
+
+    _sources(monkeypatch)
+    (tmp_path / "supervisor.env").write_text("AGENT_DISPATCH_SUPERVISE_LABELS=primary\n")
+    profiles = tmp_path / "supervisors"
+    profiles.mkdir()
+    (profiles / "child.env").write_text(
+        "AGENT_DISPATCH_SUPERVISE_LABELS=child\nAGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=--no-reactive\n",
+    )
+    calls = []
+    monkeypatch.setattr(source_start, "require_selected_source", lambda: tmp_path)
+    monkeypatch.setattr(installation_policy, "windows_policy", lambda *_, **options: {
+        "windows_scheduled_task": "preserve", "start_coordinator": True,
+        "start_supervisor": (
+            options.get("observe_supervisor") is False
+            or options.get("supervisor_profile") == "child"
+        ),
+    })
+    monkeypatch.setattr(coordinator_cli, "_cmd_cutover", lambda *_, **__: calls.append("coordinator") or 0)
+    monkeypatch.setattr(supervisor_lane_status, "ensure", lambda root, profile, arguments, **options: (
+        calls.append((profile.name, arguments, options["generation"]))
+    ))
+    assert source_start.command(argparse.Namespace(json=True)) == 0
+    assert calls[0] == "coordinator"
+    assert len(calls) == 2
+    assert calls[1][0] == "child.env"
+    assert "--no-reactive" in calls[1][1]
+    assert calls[1][1][0] == "supervise"
+    assert calls[1][1][1] != "serve"
+    assert len(calls[1][2]) == 64
+
+
+def test_native_classic_extra_flags_cannot_bypass_the_environment_label_gate(monkeypatch, tmp_path):
+    from agent_dispatch import source_start
+
+    _sources(monkeypatch)
+    (tmp_path / "supervisor.env").write_text(
+        "AGENT_DISPATCH_SUPERVISE_LABELS= , , \n"
+        "AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=--label extra-only\n",
+    )
+    plan = source_start.supervisor_plan(tmp_path)
+    assert isinstance(plan, source_start.ClassicStartupPlan)
+    assert plan.profiles == ()

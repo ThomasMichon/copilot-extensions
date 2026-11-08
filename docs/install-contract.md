@@ -5186,6 +5186,30 @@ both the index URI and captured credential identity are identical, preserving
 every reference. Different supplemental indexes or credential identities
 remain refusals.
 
+#### Native configuration-selector handoff
+
+The canonical `libs/installer-engine/installer_driver.py` carries
+`AGENT_DISPATCH_INSTALLATION_CONFIG`, `AGENT_INDEX_INSTALLATION_CONFIG` and
+`AGENT_INDEX_CONFIG_ROOT` through the existing request context and trusted runner.
+Relative selectors resolve against the original filesystem working directory
+before staging; absent selectors remain absent. Empty or unsupported
+selector-looking fields fail rather than silently selecting defaults.
+
+An explicit installation-policy file must be bounded, ordinary and bound to the
+selected plugin's exact installation root. Index's configuration-directory
+selector remains a directory location, not an installation-root alias; an absent
+directory can remain an explicit future location. Other plugins' admitted
+selectors are transported without rebinding them to the current plugin.
+Authenticated native re-entry must retain the admitted selectors as well as the
+existing source, argument, project and incarnation bindings. Changed, missing or
+foreign active selectors refuse before native installation effects.
+
+Selector-aware installers retain their pre-driver refusal with an older provider
+that cannot transport these fields. Updated providers preserve transport; they
+do not teach an older native consumer a new policy schema or prove service
+readiness, first-provision behavior, non-admin operation or live lifetime.
+No scheduler, broker or account enrollment is part of this transport boundary.
+
 The completed snapshot contains a copyable, locked UV application with its
 associated wheels and slot-local install entries. `install --stage` creates
 only the nested `.venv`; it does not run setup, publish globals, select a

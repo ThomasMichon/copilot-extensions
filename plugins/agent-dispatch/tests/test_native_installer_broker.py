@@ -262,6 +262,7 @@ function Test-CoordinatorHealthy { return $false }
 function Install-CoordinatorTask { $script:Events.Add('coordinator') }
 function Remove-CoordinatorFirewallRule {}
 function Install-SupervisorTask { $script:Events.Add('supervisor') }
+function Test-DispatchStartIntent { param($Kind,$Name) return $true }
 function Confirm-CoordinatorRunning { $script:Events.Add('confirm') }
 """ + entry + "\n$script:Events | ConvertTo-Json -Compress")
     assert json.loads(output) == [

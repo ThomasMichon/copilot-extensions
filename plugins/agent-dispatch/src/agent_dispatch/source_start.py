@@ -10,8 +10,10 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import sys
 import time
+import uuid
 
 from . import __version__
 from .install_paths import install_dir
@@ -454,10 +456,16 @@ class SupervisorStartupPlan:
     scope: str
 
 
+@dataclass(frozen=True)
+class ClassicStartupPlan:
+    root: Path
+    profiles: tuple[tuple[Path, list[str], str], ...]
+
+
 _UNPLANNED = object()
 
 
-def supervisor_plan(root: Path) -> SupervisorStartupPlan | None:
+def supervisor_plan(root: Path, *, profiles_only=False) -> SupervisorStartupPlan | ClassicStartupPlan | None:
     """Capture supervisor intent without starting a service or publishing a route."""
     from . import __main__ as cli
     from . import remote_dispatch
@@ -487,10 +495,44 @@ def supervisor_plan(root: Path) -> SupervisorStartupPlan | None:
         for path in sorted(profiles.iterdir()):
             if path.suffix == ".env":
                 profile = _parse_env_file(path, strict=True)
-                if profile.get("AGENT_DISPATCH_SUPERVISE_LABELS", "").strip():
+                if (profile.get("AGENT_DISPATCH_SUPERVISE_LABELS", "").strip()
+                        or profile.get("AGENT_DISPATCH_SUPERVISE_MODE", "").strip().lower() == "serve"):
                     legacy = True
-    if mode not in ("", "serve") or (legacy and mode != "serve"):
-        raise RuntimeError("classic supervisor requires its existing owner-led migration")
+    if mode not in ("", "legacy", "serve"):
+        raise RuntimeError("supervisor mode is unsupported")
+    if profiles_only or (legacy and mode != "serve"):
+        from .supervisor_lane_status import profile_arguments
+
+        paths = [] if profiles_only else [primary]
+        if profiles.is_dir():
+            paths += sorted(path for path in profiles.iterdir() if path.suffix == ".env")
+        selected = []
+        for path in paths:
+            try:
+                content = path.read_bytes()
+            except FileNotFoundError:
+                continue
+            values = _parse_env_file(path, strict=True)
+            explicit_master = values.get("AGENT_DISPATCH_SUPERVISE_MODE", "").strip().lower() == "serve"
+            if not explicit_master and not any(re.split(
+                r"[\s,]+", values.get("AGENT_DISPATCH_SUPERVISE_LABELS", "").strip(),
+            )):
+                continue
+            if path != primary and re.fullmatch(r"[A-Za-z0-9_-]+", path.stem) is None:
+                raise ValueError("classic supervisor profile name is unsupported")
+            arguments = profile_arguments(values)
+            parsed = cli.build_parser().parse_args(arguments)
+            if not explicit_master and not parsed.label:
+                continue
+            if (getattr(parsed, "once", False) or getattr(parsed, "no_single_instance", False)
+                    or not math.isfinite(parsed.interval) or parsed.interval <= 0):
+                raise ValueError("classic readiness requires a resident lane with a finite positive interval")
+            if path.read_bytes() != content:
+                raise RuntimeError("classic supervisor profile changed during preflight")
+            selected.append((path, arguments, hashlib.sha256(content).hexdigest()))
+        return ClassicStartupPlan(root, tuple(selected))
+    if mode == "legacy":
+        return None
     if not declarations.declarations and mode != "serve":
         return None
     argv = ["supervise", "serve"]
@@ -526,8 +568,24 @@ def ensure_supervisor(root: Path, *, plan=_UNPLANNED) -> dict:
         plan = supervisor_plan(root)
     if plan is None:
         return {"status": "unconfigured"}
+    if isinstance(plan, ClassicStartupPlan):
+        from .installation_policy import windows_policy
+        from .supervisor_lane_status import ensure
+
+        if not plan.root.samefile(root):
+            raise ValueError("classic startup plan belongs to another installation")
+        count = 0
+        for profile, arguments, generation in plan.profiles:
+            name = None if profile == root / "supervisor.env" else profile.stem
+            if windows_policy(root, supervisor_profile=name)["start_supervisor"]:
+                ensure(root, profile, arguments, generation=generation)
+                count += 1
+        return {"status": "ready" if count else "disabled", "profiles": count}
     if not isinstance(plan, SupervisorStartupPlan) or not plan.root.samefile(root):
         raise ValueError("supervisor startup plan belongs to another installation")
+    from .installation_policy import windows_policy
+    if not windows_policy(root)["start_supervisor"]:
+        return {"status": "disabled"}
     args, machine, env, scope = plan.args, plan.machine, plan.env, plan.scope
     lock = lock_path_for(run_dir(), scope)
     argv = ["supervise", "serve", "--interval", str(args.interval), "--env", env]
@@ -578,23 +636,91 @@ def ensure_supervisor(root: Path, *, plan=_UNPLANNED) -> dict:
         time.sleep(0.1)
 
 
+def prepare_scheduled_launchers(root: Path, *, create=True) -> None:
+    """Explicit Source scheduling activates the existing application owner."""
+    if not _path_name(require_selected_source()).samefile(root):
+        raise RuntimeError("scheduled activation belongs to another installation")
+    body = """# agent-dispatch Source scheduled activation v1
+$ErrorActionPreference = 'Stop'
+$root = $PSScriptRoot
+$version = [IO.File]::ReadAllText((Join-Path $root 'current-version')).Trim()
+if ($version -notmatch '^[A-Za-z0-9_+.-]+$' -or $version -in @('.', '..')) {
+    throw 'Selected Dispatch runtime is unavailable'
+}
+$slot = Join-Path (Join-Path $root 'versions') $version
+$python = Join-Path $slot '.venv\\Scripts\\python.exe'
+if (-not [IO.File]::Exists($python)) { $python = Join-Path $slot 'Scripts\\python.exe' }
+if (-not [IO.File]::Exists($python)) { throw 'Selected Dispatch runtime is unavailable' }
+$env:AGENT_DISPATCH_INSTALL_DIR = $root
+& $python -I -B -c "import sys; from pathlib import Path; from agent_dispatch.action_controls import action_decision; from agent_dispatch.installation_policy import windows_policy; d=action_decision('automatic-runtime-reconcile', automatic=True); p=windows_policy(Path(sys.argv[1]), observe_supervisor=False); raise SystemExit(3 if d.inhibited or d.error or not p['@INTENT@'] else 0)" $root
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& $python -I -B -m agent_dispatch @COMMAND@
+exit $LASTEXITCODE
+"""
+    for name in ("serve-service.ps1", "supervise-service.ps1"):
+        path = root / name
+        command = "_ensure-coordinator" if name == "serve-service.ps1" else "__source-start"
+        intent = "start_coordinator" if name == "serve-service.ps1" else "start_supervisor"
+        rendered = body.replace("@COMMAND@", command).replace("@INTENT@", intent)
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            if create:
+                with path.open("x", encoding="utf-8", newline="\n") as stream:
+                    stream.write(rendered)
+        else:
+            if not path.is_file() or path.is_symlink() or getattr(info, "st_file_attributes", 0) & 0x400:
+                if create:
+                    raise RuntimeError("scheduled activation launcher is not an ordinary file")
+                continue
+            existing = path.read_text(encoding="utf-8-sig")
+            first = existing.splitlines()[0] if existing else ""
+            owned = (
+                first == "# agent-dispatch Source scheduled activation v1"
+                or first == "# agent-dispatch-supervisor-launch-v1"
+                or first.startswith("# agent-dispatch coordinator launcher (generated by install.ps1)")
+            )
+            if owned and existing != rendered:
+                pending = path.with_name(path.name + "." + uuid.uuid4().hex + ".pending")
+                created = False
+                try:
+                    with pending.open("x", encoding="utf-8", newline="\n") as stream:
+                        created = True
+                        stream.write(rendered)
+                    os.replace(pending, path)
+                finally:
+                    if created:
+                        pending.unlink(missing_ok=True)
+
+
 def command(args: argparse.Namespace) -> int:
     from .coordinator_cli import _cmd_cutover
     from .install_paths import capture_service_environment
+    from .installation_policy import windows_policy
 
     root = _path_name(require_selected_source())
+    policy = windows_policy(root, observe_supervisor=False)
+    prepare_scheduled_launchers(root, create=policy["windows_scheduled_task"] == "enabled")
+    if policy["windows_scheduled_task"] in {"enabled", "absent"}:
+        policy = windows_policy(root, reconcile=True, observe_supervisor=False)
     captured = capture_service_environment(root)
     previous = dict(os.environ)
     try:
         os.environ.update(captured)
-        plan = supervisor_plan(root)
-        result = _cmd_cutover(
-            argparse.Namespace(json=True, health_timeout=60.0, drain_timeout=60.0, force=False, recover=False),
-            source_replacement=True, source_environment=captured,
-        )
+        plan = None
+        if policy["start_supervisor"]:
+            primary_enabled = windows_policy(root)["start_supervisor"]
+            plan = supervisor_plan(root) if primary_enabled else supervisor_plan(root, profiles_only=True)
+        result = 0
+        if policy["start_coordinator"]:
+            result = _cmd_cutover(
+                argparse.Namespace(json=True, health_timeout=60.0, drain_timeout=60.0, force=False, recover=False),
+                source_replacement=True, source_environment=captured,
+            )
         if result != 0:
             return result
-        ensure_supervisor(root, plan=plan)
+        if policy["start_supervisor"]:
+            ensure_supervisor(root, plan=plan)
         return 0
     finally:
         os.environ.clear()
