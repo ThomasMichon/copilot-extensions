@@ -559,7 +559,6 @@ def cmd_register_session(args: argparse.Namespace) -> int:
                     pane_id=pane_id,
                     mux_session=(recovered_mux.get("session_name") if recovered_mux else None),
                     plugin_related_anchors=getattr(args, "plugin_related_anchors", None),
-                    session_id=session_id,
                 )
                 message = f"[agent-worktrees] This Copilot session is bound.\n{registry_context}"
                 message = related_briefing.augment_session_message(
