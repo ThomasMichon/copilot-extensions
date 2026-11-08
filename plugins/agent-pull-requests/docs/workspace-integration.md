@@ -71,6 +71,7 @@ back to ordinary watches or another provider.
 | `chunk` | `number`, exact `generation_id`, `offset` |
 | `inspect` | `number`, original `operation_id` |
 | `receipt` (optional prepared contract) | `number`, original `operation_id`, `action_id` |
+| `observe-comment` (optional observation contract) | `number`, original `operation_id`, `action_id`, retained `generation_id` |
 | `submit` | `number`, immutable `intent`, separate `source_attachment`, `budget_seconds` |
 | `allocate` (optional selection contract) | `number`, original v1 `intent`, `source_attachment`, `budget_seconds` |
 
@@ -185,6 +186,42 @@ operations remain usable. The existing capability exchange is reused, not a
 second transport or per-comment forge query. Older clients may ignore the
 additive metadata and keep using v1; older receivers do not acquire new fields
 or operations from a package-version assumption.
+
+### Optional acquired comment observation
+
+A current receiver with `prepared_reviews=True` and already adopted v2 intent
+storage additionally advertises `observe-comment` and this exact
+`comment_observation_contract`:
+
+```json
+{
+  "protocol": "agent-pull-requests.comment-observation/v1",
+  "result_protocol": "agent-pull-requests.prepared-comment-observation/v1",
+  "generation_versions": [1],
+  "effects": "none",
+  "original_version_proof": false
+}
+```
+
+The request selects `number`, original `operation_id`/`action_id` and an exact
+retained `generation_id`. The receiver delegates to the existing-owner
+[body-free library projection](review-owner-store.md#acquired-comment-observation).
+It acquires no native evidence and does not require a protected writer.
+The result preserves the original state/receipt and the selected generation's
+actual observation interval; current content correlation is neither original
+version proof nor feedback/handled progress.
+
+Native/Fleet clients and CLI/tools select the operation only after the actual
+receiver advertises both the prepared and observation contracts. Missing,
+malformed or prior support refuses locally before sending this strict request.
+The receiver rechecks its selected prepared mode and actual adopted storage
+when invoked; cached capabilities cannot bypass withdrawal. The authenticated
+Gateway keeps its existing binding, checkpoint and drain owners, including for
+this hyphenated operation. Remote responses must match the selected original
+operation/action, scope and generation and preserve the no-effects/no-proof
+boundary. Old clients ignore the additive capability and keep their prior
+operations; rollback refuses this read without rewriting state, discovering
+a replacement by tags or falling back to another owner.
 
 ## Optional pre-approval selection receiver
 

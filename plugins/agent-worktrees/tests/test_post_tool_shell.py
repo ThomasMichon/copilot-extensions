@@ -1065,7 +1065,7 @@ ConvertTo-Json -Compress -InputObject @{
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("sample_group", range(4))
 def test_registered_prepared_cell_post_tool_cold_process_tail(
-    prepared_read_event, shell, sample_group,
+    prepared_read_event, shell, sample_group, capsys,
 ):
     from agent_procutil import no_window_kwargs
     from agent_worktrees.hook_ipc import HookIpcServer
@@ -1116,7 +1116,8 @@ def test_registered_prepared_cell_post_tool_cold_process_tail(
             assert "payload" not in notices[-1]
             assert server.has_recent_hook_demand()
             assert json.loads(fixture["sidecar"].read_text())["count"] == index + 1
-        print(f"{shell}/cell/cold-tail-{sample_group}: {json.dumps(samples)}")
+        with capsys.disabled():
+            print(f"{shell}/cell/cold-tail-{sample_group}: {json.dumps(samples)}")
     finally:
         server.close()
 
@@ -1132,7 +1133,7 @@ def test_registered_prepared_cell_post_tool_cold_process_tail(
 @pytest.mark.parametrize("prepared_read_event", ["cell"], indirect=True)
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("sample_group", range(2))
-def test_prepared_post_entry_baseline_comparison(prepared_read_event, shell, sample_group):
+def test_prepared_post_entry_baseline_comparison(prepared_read_event, shell, sample_group, capsys):
     from agent_procutil import no_window_kwargs
     from agent_worktrees.hook_ipc import HookIpcServer
 
@@ -1217,10 +1218,11 @@ def test_prepared_post_entry_baseline_comparison(prepared_read_event, shell, sam
                 "variant": variant, "process_seconds": elapsed,
                 "entry_seconds": float(result.stderr.removeprefix("entry_seconds=")),
             })
-        print(json.dumps({
-            "shell": shell, "sample_group": sample_group,
-            "baseline_revision": revision, "fixed_fixture_aba": samples,
-        }))
+        with capsys.disabled():
+            print(json.dumps({
+                "shell": shell, "sample_group": sample_group,
+                "baseline_revision": revision, "fixed_fixture_aba": samples,
+            }))
     finally:
         server.close()
 
@@ -1326,7 +1328,7 @@ if ($script:preparedJsonFallbackCalls -ne $script:expectedFallbackCalls) {
 @pytest.mark.parametrize("prepared_read_event", ["cell"], indirect=True)
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("mode", ["startup", "registered", "stages"])
-def test_prepared_post_entry_stage_profile(prepared_read_event, shell, mode):
+def test_prepared_post_entry_stage_profile(prepared_read_event, shell, mode, capsys):
     from agent_procutil import no_window_kwargs
     from agent_worktrees.hook_ipc import HookIpcServer
 
@@ -1500,12 +1502,13 @@ try {
             for name, stage in stages.items():
                 if not name.startswith("load-"):
                     assert len(stage["samples_ms"]) == stage["count"]
-        print(json.dumps({
-            "shell": shell, "mode": mode, "process_seconds": elapsed,
-            "entry_seconds": float(fields["entry_seconds"]),
-            "cpu_seconds": float(fields["profile_cpu_seconds"]),
-            "diagnostic_inclusive_stages": stages,
-        }))
+        with capsys.disabled():
+            print(json.dumps({
+                "shell": shell, "mode": mode, "process_seconds": elapsed,
+                "entry_seconds": float(fields["entry_seconds"]),
+                "cpu_seconds": float(fields["profile_cpu_seconds"]),
+                "diagnostic_inclusive_stages": stages,
+            }))
     finally:
         server.close()
 

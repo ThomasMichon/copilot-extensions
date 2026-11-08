@@ -3,8 +3,10 @@
 Back to the [canonical effort](README.md),
 [comment-identity contract](comment-identity.md) and
 [original intent binding](comment-intent-binding.md).
-This is an **agent-recommended, review-first C3 source refinement**, not
-implemented support, protected writer enrollment or installed qualification.
+This is the **reviewed C3 source refinement**, not protected writer enrollment
+or installed qualification. The existing-owner
+[runtime reference](../../../plugins/agent-pull-requests/docs/review-owner-store.md#acquired-comment-observation)
+owns the delivered finite library and optional-consumer behavior.
 
 ## Separate the remaining evidence
 
