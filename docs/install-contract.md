@@ -5163,6 +5163,10 @@ its flat or nested interpreter without following a selector or resolving a UV
 project at the asset directory.
 Resource-packaging hooks on ordinary source installations use the existing
 isolated source-build fallback rather than the static-project wheel cache.
+On Windows, the shared standalone build helper uses normalized extended-length
+paths for build, wheel staging and installation copies, including UNC roots.
+Archive member names remain relative; metadata-only setup still works before
+an optional wheel command is installed. No machine long-path setting is changed.
 An explicitly prepared application installs its first-party wheels offline
 without running those first-party backends. Neither path upgrades, stops or
 removes unrelated service installations.
