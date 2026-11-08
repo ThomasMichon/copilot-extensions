@@ -220,24 +220,14 @@ def _capture_native_source() -> dict:
 
 
 # Mirrors nudge_status.NUDGE_ENV_KEYS (asserted equal in tests).
-_POST_TOOL_ENV_KEYS = (
-    "AGENT_WORKTREES_NUDGE",
-    "AGENT_WORKTREES_AGENDA_NUDGE",
-    "AGENT_WORKTREES_NUDGE_CALLS",
-    "AGENT_WORKTREES_NUDGE_MINUTES",
-)
+_POST_TOOL_ENV_KEYS = ("AGENT_WORKTREES_NUDGE", "AGENT_WORKTREES_AGENDA_NUDGE",
+                       "AGENT_WORKTREES_NUDGE_CALLS", "AGENT_WORKTREES_NUDGE_MINUTES")
 
 
 def _enrich_post_tool_payload(payload: dict) -> dict:
     """Forward this session's nudge switches; the resident's env is not ours."""
-    return {
-        **payload,
-        "_agentWorktrees": {
-            "environment": {
-                key: os.environ[key] for key in _POST_TOOL_ENV_KEYS if key in os.environ
-            },
-        },
-    }
+    env = {key: os.environ[key] for key in _POST_TOOL_ENV_KEYS if key in os.environ}
+    return {**payload, "_agentWorktrees": {"environment": env}}
 
 
 def _enrich_session_end_payload(payload: dict) -> dict:
