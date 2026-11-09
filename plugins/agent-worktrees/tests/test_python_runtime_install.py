@@ -195,8 +195,14 @@ def native_runtime_source(tmp_path_factory: pytest.TempPathFactory) -> Iterator[
     repository = Path(__file__).resolve().parents[3]
     plugin = repository / "plugins" / "agent-worktrees"
     owned = tmp_path_factory.mktemp("native-runtime-source")
+    yield from _frozen_native_runtime_source(plugin, owned)
+
+
+def _frozen_native_runtime_source(plugin: Path, owned: Path) -> Iterator[tuple[Path, str]]:
+    repository = Path(__file__).resolve().parents[3]
+    root = owned / "repository"
     with pytest.MonkeyPatch.context() as patch:
-        patch.syspath_prepend(str(plugin / "scripts"))
+        patch.syspath_prepend(str(repository / "plugins" / "agent-worktrees" / "scripts"))
         spec = importlib.util.spec_from_file_location(
             "backend_fixture_engine", repository / "libs/installer-engine/installer_engine.py",
         )
@@ -204,8 +210,7 @@ def native_runtime_source(tmp_path_factory: pytest.TempPathFactory) -> Iterator[
         engine = importlib.util.module_from_spec(spec)
         patch.setitem(sys.modules, spec.name, engine)
         spec.loader.exec_module(engine)
-        frozen = engine.freeze_inputs(plugin, owned / "repository")
-    root = owned / "repository"
+        frozen = engine.freeze_inputs(plugin, root / "source")
     marketplace = root / ".github" / "plugin" / "marketplace.json"
     marketplace.parent.mkdir(parents=True)
     marketplace.write_text(json.dumps({
@@ -245,6 +250,36 @@ def native_runtime_source(tmp_path_factory: pytest.TempPathFactory) -> Iterator[
     assert engine.runtime.fingerprint_source(engine._source_files(frozen.packages)) == frozen.payload_hash
     assert run("rev-parse", "HEAD") == head
     assert run("status", "--porcelain", "--untracked-files=no") == ""
+
+
+@pytest.mark.parametrize("vendored", [False, True])
+def test_native_runtime_source_keeps_repository_metadata_outside_frozen_packages(
+    tmp_path, vendored,
+):
+    plugin = tmp_path / "source" / "plugins" / "fixture"
+    dependency = (
+        plugin / "_vendor" / "dependency" if vendored
+        else tmp_path / "source" / "libs" / "dependency"
+    )
+    plugin.mkdir(parents=True)
+    dependency.mkdir(parents=True)
+    dependency_path = "_vendor/dependency" if vendored else "../../libs/dependency"
+    (plugin / "pyproject.toml").write_text(
+        '[project]\nname = "fixture"\nversion = "1.0.0"\n'
+        '[tool.uv.sources]\n'
+        f'dependency = {{ path = "{dependency_path}" }}\n',
+        encoding="utf-8",
+    )
+    (dependency / "pyproject.toml").write_text(
+        '[project]\nname = "dependency"\nversion = "1.0.0"\n', encoding="utf-8",
+    )
+    owned = tmp_path / "fixture"
+    owned.mkdir()
+    with contextmanager(_frozen_native_runtime_source)(plugin, owned) as (frozen_plugin, head):
+        assert (frozen_plugin / "pyproject.toml").read_bytes() == (
+            plugin / "pyproject.toml"
+        ).read_bytes()
+        assert head
 
 
 def _slot(driver, root, version):

@@ -385,3 +385,31 @@ inventory; unsupported execution must not be reported as a successful gate.
   attestation because no Sigstore verifier could initialize. The existing
   watchdog report #11691 retains that failure; no attestation policy was
   weakened and no release retry is claimed as a fix.
+
+### 2026-11-09 - Native monitor fixture blocked workflow-only Main adoption
+
+- PR #11693 merged as `14b9295cbccab2c708566fb7b6f1647d1a37bb96`
+  after current-head Copilot approval and all required checks passed.
+  The source workspace pulled forward and this effort was reread.
+  The actual Main gate and frozen-candidate completion items remain open.
+- Rebased Main PR #11478 passed Actions parsing, but its existing
+  native monitor lane failed on both Linux and Windows in run 42636151633.
+  The failure precedes installation: adding marketplace metadata changed
+  the frozen fixture's payload fingerprint.
+- Main's release source vendors dependencies beneath the plugin, so the
+  common frozen package root can equal the fixture repository root.
+  Dev's sibling-library layout had hidden that collision. The fixture now
+  retains source beneath a dedicated child of the repository, keeping Git
+  and marketplace metadata outside both dependency layouts.
+- The source correction retains real Git provenance and pre/post payload
+  fingerprint equality. Focused cases exercise both layouts. It must land
+  through Dev and normal release before the workflow-only Main PR can use it;
+  no non-workflow source is inserted directly into Main.
+- Both focused real-Git layout regressions passed through canonical test
+  containment. Scoped Ruff, whitespace and all 13 installation-contract
+  checks passed. The existing actual Windows installer case is still under
+  validation; no native pass is claimed by those two regression cases.
+- Two local invocations used the generic 300-second group limit and timed
+  out during construction, with owned cleanup completed. The native lane
+  already declares 900-second test, group and plugin bounds. Validation
+  now uses that existing profile, not a changed timeout or production policy.
