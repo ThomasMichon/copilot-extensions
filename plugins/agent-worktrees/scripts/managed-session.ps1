@@ -364,8 +364,12 @@ function Test-PreparedManagedWorktreesSession {
 }
 
 function Test-ManagedWorktreesSession {
-    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Raw)
-    if (Test-PreparedManagedWorktreesSession -Raw $Raw) { return $true }
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Raw, [ref]$Prepared)
+    if ($null -ne $Prepared) { $Prepared.Value = $false }
+    if (Test-PreparedManagedWorktreesSession -Raw $Raw) {
+        if ($null -ne $Prepared) { $Prepared.Value = $true }
+        return $true
+    }
     $helper = Join-Path $PSScriptRoot 'managed_session.py'
     if (-not [IO.File]::Exists($helper)) { return $false }
     $process = $null

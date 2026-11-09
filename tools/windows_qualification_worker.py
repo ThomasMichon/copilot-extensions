@@ -210,6 +210,7 @@ def execute(root: Path, value: dict, output: Path) -> dict:
                 max_stdout_bytes=8 * 1024 * 1024, max_stderr_bytes=2 * 1024 * 1024,
                 env={
                     **os.environ,
+                    "PYTHONIOENCODING": "utf-8",
                     "PYTHONPATH": os.pathsep.join((
                         str(root / "libs/agent-procutil/src"), str(root / "tools"),
                     )),
