@@ -640,6 +640,11 @@ def activate_after_update(
         selected_predecessor = replacement.active(smr._aw_runtime_home())
         lock_live = bool(locks.read_lock(smr._monitor_lock_path()))
         monitor_was_live = bool(monitor_was_live or lock_live)
+        if retired_predecessor is not None:
+            lock_live, monitor_was_live = activation_liveness(
+                monitor_was_live, retired_predecessor, asynchronous=True,
+                guard=cutover_guard, handles=spawned_handles, predecessor=retirement_predecessor,
+            )
         routed_live = replacement.active(smr._aw_runtime_home(), fallback=True) is not None or retirement_predecessor is not None
     else:
         lock_live, monitor_was_live = activation_liveness(

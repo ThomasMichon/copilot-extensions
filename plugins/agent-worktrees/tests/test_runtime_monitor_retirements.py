@@ -274,6 +274,79 @@ def test_qualified_predecessor_exit_does_not_veto_unchanged_route_selection(reta
     assert routing.read_table(directory)["active"]["pid"] == 202
 
 
+def test_recovery_keeps_one_fence_until_every_pending_archive_has_an_inventory(retained, monkeypatch):
+    from agent_worktrees import runtime_monitor_replacement as replacement
+
+    root, runtime, _identities, _alive = retained
+    replacement.retain(root, runtime=runtime, predecessor={"pid": 101, "start": "1001"})
+    directory = root / "status-monitor-observations"
+    completed = next(directory.glob("*.json"))
+    content = json.loads(completed.read_text())
+    later = next(
+        {"pid": 101, "start": str(start)}
+        for start in range(1002, 100000)
+        if replacement._digest({
+            **replacement._content(content),
+            "predecessor": {"pid": 101, "process_start_time": str(start)},
+        }) > completed.stem
+    )
+    (root / "versions" / "newly-retained").mkdir()
+    runtime.mark_complete(root, "newly-retained", payload_hash="new")
+    inventory = runtime.list_versions
+    def interrupted(requested):
+        raise OSError("fixture stopped before inventory")
+    monkeypatch.setattr(runtime, "list_versions", interrupted)
+    with pytest.raises(OSError, match="before inventory"):
+        replacement.retain(root, runtime=runtime, predecessor=later)
+    monkeypatch.setattr(runtime, "list_versions", inventory)
+    assert completed.name < next(directory.glob("*.pending")).name
+    commit = runtime._leases.commit_runtime_reference_transaction
+    collections = []
+    def collect_after_commit(*args, **kwargs):
+        commit(*args, **kwargs)
+        collections.append(runtime.gc(root, min_age_days=0))
+    monkeypatch.setattr(runtime._leases, "commit_runtime_reference_transaction", collect_after_commit)
+    assert replacement.recover(root, runtime=runtime)
+    assert collections and all("newly-retained" not in removed for removed in collections)
+    assert (root / "versions" / "newly-retained").is_dir()
+    assert "newly-retained" in {
+        slot for slots in runtime._leases.read_runtime_references(root).values() for slot in slots
+    }
+
+
+@pytest.mark.parametrize("release", [False, True])
+def test_archive_cleanup_retries_after_reference_release_gc_and_failed_unlink(
+    retained, monkeypatch, release,
+):
+    from agent_worktrees import runtime_monitor_replacement as replacement
+
+    root, runtime, _identities, alive = retained
+    claim = runtime.claim_dev(root, "original-owner", previous_version="current") if release else None
+    replacement.retain(
+        root, runtime=runtime, predecessor={"pid": 101, "start": "1001"}, release_claim=claim,
+    )
+    if release:
+        replacement.settle_release(root, claim, committed=True)
+    archive = next((root / "status-monitor-observations").glob("*.json"))
+    unlink = Path.unlink
+    def interrupted(path, *args, **kwargs):
+        if path == archive:
+            raise OSError("fixture archive deletion interrupted")
+        return unlink(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "unlink", interrupted)
+    alive.clear()
+    with pytest.raises(OSError, match="deletion interrupted"):
+        replacement.reconcile(root, runtime=runtime)
+    assert not runtime._leases.read_runtime_references(root)
+    assert "legacy" in runtime.gc(root, min_age_days=0)
+    monkeypatch.setattr(Path, "unlink", unlink)
+    assert not replacement.reconcile(root, runtime=runtime)
+    assert not archive.exists()
+    assert not runtime._leases.read_runtime_references(root)
+    if release:
+        assert runtime.read_dev_claim(root, strict=True) is None
+
+
 @pytest.mark.parametrize("failure", ["archive", "references"])
 def test_changed_observation_recovers_archive_failure_and_more_than_64_retained_slots(
     retained, monkeypatch, failure,

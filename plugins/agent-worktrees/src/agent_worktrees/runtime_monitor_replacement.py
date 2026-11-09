@@ -101,8 +101,11 @@ def _archives(directory: Path) -> list[tuple[Path, dict]]:
         required = {"version", "table", "breadcrumb", "lock", "predecessor", "slots"}
         if record["version"] == 2:
             required |= {"release_claim", "release_state"}
+        if "cleanup_complete" in record:
+            required.add("cleanup_complete")
         if (
             set(record) != required
+            or type(record.get("cleanup_complete", False)) is not bool
             or any(record[key] is not None and not isinstance(record[key], dict)
                    for key in ("table", "lock", "predecessor"))
             or record["breadcrumb"] is not None and not isinstance(record["breadcrumb"], str)
@@ -122,6 +125,24 @@ def _archives(directory: Path) -> list[tuple[Path, dict]]:
     return records
 
 
+def _reference_updates(record: dict, digest: str, references: dict, *, retain: bool) -> tuple[dict, dict]:
+    groups = _groups(record, digest)
+    expected = {}
+    for owner, slots in groups.items():
+        previous = references.get(owner, [])
+        if previous and previous != slots:
+            raise ValueError("Monitor observation code custody changed")
+        expected[owner] = previous
+    return {owner: slots if retain else [] for owner, slots in groups.items()}, expected
+
+
+def _inventory(root: Path, path: Path, record: dict, helper) -> dict:
+    if path.suffix == ".pending" and not record["slots"] and not record.get("cleanup_complete"):
+        record = {**record, "slots": sorted(helper.list_versions(root))}
+        routing_persistence.write(path, record)
+    return record
+
+
 def _references(
     root: Path, record: dict, digest: str, helper, *, retain: bool,
     inventory_path: Path | None = None,
@@ -132,17 +153,9 @@ def _references(
         else:
             transaction = helper._leases.begin_runtime_reference_transaction(root, _REFERENCE_PREFIX)
             references = transaction["owners"]
-            if inventory_path is not None and not record["slots"]:
-                record = {**record, "slots": sorted(helper.list_versions(root))}
-                routing_persistence.write(inventory_path, record)
-        groups = _groups(record, digest)
-        expected = {}
-        for owner, slots in groups.items():
-            previous = references.get(owner, [])
-            if previous and previous != slots:
-                raise ValueError("Monitor observation code custody changed")
-            expected[owner] = previous
-        desired = {owner: slots if retain else [] for owner, slots in groups.items()}
+            if inventory_path is not None:
+                record = _inventory(root, inventory_path, record, helper)
+        desired, expected = _reference_updates(record, digest, references, retain=retain)
         if record["version"] == 1:
             for owner, slots in desired.items():
                 helper._leases.replace_runtime_references(root, owner, slots, expected=expected[owner])
@@ -155,23 +168,45 @@ def _references(
 
 def _recover_archives(root: Path, directory: Path, helper) -> bool:
     records = dict(_archives(directory))
+    selected = {}
     for path, record in records.items():
         target = path.with_suffix(".json")
         if path.suffix == ".pending" and target in records:
             if record["slots"] != records[target]["slots"]:
                 raise ValueError("Monitor observation inventory changed")
             continue
-        record = _references(
-            root, record, path.stem, helper, retain=True,
-            inventory_path=path if path.suffix == ".pending" else None,
-        )
+        selected[path] = record
+    if any(record["version"] == 2 for record in selected.values()):
+        with helper._leases.reference_transaction_custody(root):
+            transaction = helper._leases.begin_runtime_reference_transaction(root, _REFERENCE_PREFIX)
+            desired, expected = {}, {}
+            for path, record in selected.items():
+                if record["version"] != 2:
+                    continue
+                record = selected[path] = _inventory(root, path, record, helper)
+                updates, previous = _reference_updates(
+                    record, path.stem, transaction["owners"],
+                    retain=not record.get("cleanup_complete", False),
+                )
+                desired.update(updates)
+                expected.update(previous)
+            helper._leases.commit_runtime_reference_transaction(
+                root, _REFERENCE_PREFIX, transaction["token"], desired, expected=expected,
+            )
+    for path, record in selected.items():
+        if record["version"] == 1:
+            _references(root, record, path.stem, helper, retain=not record.get("cleanup_complete", False))
+        target = path.with_suffix(".json")
+        if record.get("cleanup_complete"):
+            path.unlink()
+            continue
         if path.suffix == ".pending":
             routing_persistence.write(target, record)
             path.unlink()
     for path in records:
         if path.suffix == ".pending" and path.with_suffix(".json") in records:
             path.unlink()
-    return bool(records)
+    return any(not record.get("cleanup_complete") for record in selected.values())
 
 
 def recover(root: Path, *, runtime=None) -> bool:
@@ -216,6 +251,7 @@ def retain(
     if directory.is_symlink():
         raise ValueError("Monitor observation directory must not be linked")
     with tracking._RecordLock(directory / "inventory", require_sidecar=True):
+        _recover_archives(root, directory, helper)
         with routing.routing_lock(route_root, deadline=time.monotonic() + 5.0):
             table = routing.read_table(route_root, strict=True)
             routing._validate_endpoint_rows(table)
@@ -438,6 +474,8 @@ def reconcile(root: Path, *, runtime=None, cleanup: bool = True) -> bool:
             if cleanup and exited:
                 if claim is not None and record["release_state"] == "retiring":
                     retirements.release_exited_claim(root, claim, helper)
+                record = {**record, "cleanup_complete": True}
+                routing_persistence.write(path, record)
                 _references(root, record, digest, helper, retain=False)
                 path.unlink()
             elif cleanup:

@@ -424,6 +424,20 @@ migration already works.
   passes 376 tests with verified bounded-owner cleanup; the same five native
   cases remain unqualified. Review, required CI, release, normal full-update
   performance and session-preserving acceptance remain open.
+- Current-head review confirmed those seven prior findings resolved, then
+  identified multi-archive recovery clearing a shared fence too early and
+  cleanup retry re-retaining already-collected slots. New failure-first
+  controls cover GC between archive commits and deletion failure after
+  reference release, with and without a dev claim. Recovery now publishes
+  combined references under one fence, and terminal cleanup intent precedes
+  their removal. CI also exposed stale generated ZDD admission copies and
+  three exact cold-start controls: regenerated the copies and restored the
+  explicit retired-predecessor native-exit checks. The combined affected and
+  legacy-custody selection passes 487 tests, with the same five native cases
+  still unqualified and bounded cleanup verified. The admitted source
+  fingerprint is refreshed without changing nodes, source inventory or budget.
+  Renewed current-head review and CI remain required; no installed or
+  whole-effort acceptance is claimed.
 - Added a failure-first case to the existing installer-custody controls:
   outgoing native-identity observation is unavailable, but the healthy incoming
   runtime must publish with retirement pending and both slots preserved.

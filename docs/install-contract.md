@@ -5883,7 +5883,11 @@ transaction, preceded by a durable write-ahead mapping. Interrupted final
 archives and reference commits therefore remain recoverable even after the
 observations change. The write-ahead record precedes the deletion fence, and
 the fence precedes slot inventory capture; a crash before the inventory is
-persisted resumes conservatively under that same fence. The installer restores
+persisted resumes conservatively under that same fence. Recovery captures every
+pending inventory and atomically publishes their combined references before
+clearing the shared fence. Terminal cleanup intent is durable before reference
+release, so a failed archive deletion never re-retains slots that GC has since
+removed. The installer restores
 archived references before ordinary retirement reservation regardless of whether
 outgoing identity is now readable. Resident reconciliation also restores
 prepared dev-claim references without granting their release. A qualified
