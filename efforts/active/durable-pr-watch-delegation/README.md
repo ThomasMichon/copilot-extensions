@@ -325,10 +325,14 @@ they merged in #11712. This is not retained-host enrollment or rollout.
 The [selected native thread-resolution contract](native-thread-resolution.md),
 reviewed in #11714, defines an optional ADO-first, single-thread status change through the existing
 owner. Its [source implementation and isolated controls](journal/2026/11.09%20Selected%20native%20resolution%20implementation.md)
-pass; independent implementation review/merge remains open.
+pass and merged in #11728 after independent review and required CI.
 Read routes stay read-only; installed/account/HTTP and three-provider
 qualification remain open. It advances #7051 without replacing its lifecycle
 owner or claiming an atomic candidate/thread write.
+Its [selected reopening refinement](native-thread-resolution.md#selected-native-reopening-proposal)
+is a review-first proposal only. The new optional action would compose the same
+owner for an exact resolved-to-active transition; current close-only commands,
+legacy status choices and advertised support remain unchanged.
 
 - [x] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence)
   (merged in #10380; implementation, provider and adoption gates remain).
@@ -1081,14 +1085,21 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
-- [ ] Qualify the finite [selected native thread-resolution contract](native-thread-resolution.md#expansion-and-qualification)
+- [ ] Qualify the [selected native reopening refinement](native-thread-resolution.md#reopening-source-controls-after-review)
+  only after independent contract review: exact resolved-to-active transition,
+  native action authority, same candidate/thread, status-only write, original
+  consumed-operation outcomes, strict peers and unchanged close-only behavior.
+  No runtime reopening support or installed/provider/HTTP parity is claimed.
+
+- [x] Qualify the finite [selected native thread-resolution contract](native-thread-resolution.md#expansion-and-qualification) (#11728)
   after reviewed intent: exact ADO target/principal/candidate/thread, status-only
   mutation, consumed-key recovery, unknown outcomes and old/new runtime
   composition. Source controls do not establish atomic CAS, other-provider
   support, installed/HTTP adoption or the full lifecycle acceptance in #7051.
   All five linked source controls now pass (336 Worktrees and 150 dedicated
-  frontend cases, five existing platform skips); independent implementation
-  review, required CI and merge remain open.
+  frontend cases, five existing platform skips); independent current-head
+  approval, resolved findings and all actual required CI preceded merge.
+  The actor-free packet passes 4,699. This credits only the finite source leaf.
 
 - [x] Qualify finite explicit standalone report hosting (#11712): 168 full
   standalone and 68 isolated affected plugin cases cover actual foreground

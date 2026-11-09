@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 import httpx
+import pytest
 
 from agent_index.sources import get_connector
 from agent_index.sources.azure_devops import AzureDevOpsConnector
@@ -429,3 +430,150 @@ def test_ado_registry_aliases(monkeypatch) -> None:
 
     assert isinstance(get_connector("ado:acme/widgets"), AzureDevOpsConnector)
     assert isinstance(get_connector("azure-devops:acme/widgets"), AzureDevOpsConnector)
+
+
+@pytest.mark.parametrize("changed_ids", [[], [2, 201]])
+def test_ado_incremental_filters_metadata_before_hydrating_bodies(
+    changed_ids: list[int],
+) -> None:
+    wiql = "SELECT [System.Id] FROM WorkItemLinks WHERE Arbitrary Operator Predicate"
+    ids = list(range(1, 202))
+    metadata_batches: list[list[int]] = []
+    body_ids: list[int] = []
+    comment_ids: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/_apis/wit/wiql"):
+            assert json.loads(request.content)["query"] == wiql
+            return _json_response(200, {"workItems": [{"id": number} for number in ids]})
+        if path.endswith("/_apis/wit/wiql/saved-query"):
+            return _json_response(200, {"workItems": [{"id": 2}, {"id": 201}]})
+        if path.endswith("/workitemsbatch"):
+            payload = json.loads(request.content)
+            batch = payload["ids"]
+            if "fields" in payload:
+                assert payload == {
+                    "ids": batch,
+                    "fields": ["System.Id", "System.ChangedDate"],
+                    "errorPolicy": "fail",
+                }
+                metadata_batches.append(batch)
+                return _json_response(200, {"value": [
+                    {"id": number, "fields": {
+                        "System.ChangedDate": (
+                            "2026-01-03T00:00:00Z" if number in changed_ids
+                            else "2026-01-01T00:00:00Z"
+                        ),
+                    }}
+                    for number in reversed(batch)
+                ]})
+            assert payload == {"ids": batch, "$expand": "all"}
+            body_ids.extend(batch)
+            return _json_response(200, {"value": [
+                _work_item_payload(number, changed="2026-01-03T00:00:00Z")
+                for number in batch
+            ]})
+        if path.endswith("/comments"):
+            number = int(path.split("/")[-2])
+            assert number in changed_ids
+            comment_ids.append(number)
+            return _json_response(200, {"comments": [{"text": "Updated comment"}]})
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    connector = AzureDevOpsConnector(
+        "ado:acme/widgets", token="pat-token", min_interval_s=0,
+        transport=httpx.MockTransport(handler),
+        work_item_queries=[
+            {"wiql": wiql}, {"saved_query_id": "saved-query"},
+        ],
+        pull_request_queries=[],
+    )
+
+    entries = connector.discover_changed("2026-01-03T00:01:00Z")
+
+    assert metadata_batches == [ids[:200], ids[200:]]
+    assert body_ids == changed_ids
+    assert comment_ids == changed_ids
+    assert [entry.path for entry in entries] == [
+        f"workitems/{number}.md" for number in changed_ids
+    ]
+    assert all("Updated comment" in entry.content for entry in entries)
+
+
+@pytest.mark.parametrize("fault", ["missing", "duplicate", "unexpected", "invalid-date"])
+def test_ado_incremental_refuses_incomplete_metadata_before_body_fetch(fault: str) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/wiql"):
+            return _json_response(200, {"workItems": [{"id": 1}, {"id": 2}]})
+        if request.url.path.endswith("/workitemsbatch"):
+            payload = json.loads(request.content)
+            assert payload.get("fields") == ["System.Id", "System.ChangedDate"]
+            items = [
+                {"id": 1, "fields": {"System.ChangedDate": "2026-01-03T00:00:00Z"}},
+                {"id": 2, "fields": {"System.ChangedDate": "2026-01-03T00:00:00Z"}},
+            ]
+            if fault == "missing":
+                items.pop()
+            elif fault == "duplicate":
+                items[1] = items[0]
+            elif fault == "unexpected":
+                items[1]["id"] = 3
+            else:
+                items[1]["fields"]["System.ChangedDate"] = "not-a-timestamp"
+            return _json_response(200, {"value": items})
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    connector = AzureDevOpsConnector(
+        "ado:acme/widgets", token="pat-token", min_interval_s=0,
+        transport=httpx.MockTransport(handler),
+        work_item_queries=[{"wiql": "SELECT [System.Id] FROM WorkItems"}],
+        pull_request_queries=[],
+    )
+
+    with pytest.raises(ValueError, match="work-item metadata"):
+        connector.discover_changed("2026-01-03T00:01:00Z")
+
+
+@pytest.mark.parametrize("cancel_after_metadata", [False, True])
+def test_ado_incremental_checks_cancellation_and_body_timestamp(
+    cancel_after_metadata: bool,
+) -> None:
+    metadata_done = False
+    body_requests = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal metadata_done, body_requests
+        if request.url.path.endswith("/wiql"):
+            return _json_response(200, {"workItems": [{"id": 1}]})
+        if request.url.path.endswith("/workitemsbatch"):
+            payload = json.loads(request.content)
+            if "fields" in payload:
+                metadata_done = True
+                return _json_response(200, {"value": [
+                    {"id": 1, "fields": {"System.ChangedDate": "2026-01-03T00:00:00Z"}},
+                ]})
+            body_requests += 1
+            return _json_response(200, {"value": [
+                _work_item_payload(1, changed="2026-01-01T00:00:00Z"),
+            ]})
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    def cancel_check() -> None:
+        if metadata_done and cancel_after_metadata:
+            raise RuntimeError("cancelled after metadata")
+
+    connector = AzureDevOpsConnector(
+        "ado:acme/widgets", token="pat-token", min_interval_s=0,
+        transport=httpx.MockTransport(handler),
+        work_item_queries=[{"wiql": "SELECT [System.Id] FROM WorkItems"}],
+        pull_request_queries=[],
+    )
+    if cancel_after_metadata:
+        with pytest.raises(RuntimeError, match="cancelled after metadata"):
+            connector.discover_changed("2026-01-03T00:01:00Z", cancel_check=cancel_check)
+    else:
+        assert connector.discover_changed(
+            "2026-01-03T00:01:00Z", cancel_check=cancel_check,
+        ) == []
+    assert body_requests == (0 if cancel_after_metadata else 1)
