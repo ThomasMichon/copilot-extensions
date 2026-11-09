@@ -1,0 +1,17 @@
+{
+  "comment": "Add an opt-in source-bound headed auth-wait receiver with owned stop and seedless same-session recovery",
+  "changes": [
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
