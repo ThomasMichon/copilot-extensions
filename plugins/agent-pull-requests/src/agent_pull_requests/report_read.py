@@ -100,18 +100,23 @@ class ReportBinding:
     The checkpoint must enforce continued permission and selected owner identity.
     The synchronous collector owns transport/process settlement and returns the
     original exit status and complete JSON text, never raw helper diagnostics.
+    A blocking checkpoint supplies a separate nonblocking final_checkpoint for
+    the last event-loop deadline, authorization and binding recheck.
     """
 
     scope: Mapping
     context_id: str
     checkpoint: Callable[[], None] = field(repr=False)
     collect: Callable[[str, int, Callable[[], float]], tuple[int, str]] = field(repr=False)
+    final_checkpoint: Callable[[], None] | None = field(default=None, repr=False)
 
     def __post_init__(self):
         object.__setattr__(self, "scope", MappingProxyType(report_scope(self.scope)))
         _label(self.context_id)
         if not callable(self.checkpoint) or not callable(self.collect):
             raise ValueError("live report owner callbacks required")
+        if self.final_checkpoint is not None and not callable(self.final_checkpoint):
+            raise ValueError("lightweight report publication callback required")
 
 
 class ReportReader:
@@ -133,7 +138,8 @@ class ReportReader:
         self.max_work_seconds = _seconds(max_work_seconds)
         self.clock, self.wall_clock = clock, wall_clock
 
-    def execute(self, operation, payload, *, expires_at, checkpoint, response_validator=None):
+    def execute(self, operation, payload, *, expires_at, checkpoint, response_validator=None,
+                publication_validator=None):
         parsed = parse_request(operation, payload)
         deadline = self.clock() + min(
             parsed.get("budget_seconds", self.max_work_seconds), self.max_work_seconds,
@@ -160,6 +166,13 @@ class ReportReader:
                 raise ReportUnavailable("report owner checkpoint must enforce current selection")
             return remaining()
 
+        def final_current():
+            remaining()
+            check = binding.final_checkpoint or binding.checkpoint
+            if check() is not None:
+                raise ReportUnavailable("report owner checkpoint must enforce current selection")
+            return remaining()
+
         current()
         if operation == "capabilities":
             value = capabilities(self.scope)
@@ -180,5 +193,7 @@ class ReportReader:
         validate_exchange(value, operation=operation, scope=dict(self.scope), number=parsed.get("number"))
         if response_validator is not None:
             response_validator(value, current)
+        if publication_validator is not None:
+            publication_validator(final_current)
         current()
         return value
