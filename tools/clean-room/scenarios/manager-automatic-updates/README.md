@@ -141,6 +141,14 @@ py -3 tools/clean-room/scenarios/manager-automatic-updates/probe.py qualify --so
 
 ### Independently bounded qualification jobs
 
+The visible positive control waits for the observer's actual show/activation
+callbacks before restoring focus, then for the original foreground callback
+before destroying its window and closing hooks. Each acknowledgment is bounded
+to two seconds within the existing inherited qualification deadline. Direct API
+success or a foreground poll does not replace the required ordered raw events;
+missing callbacks still fail the control. This does not extend any whole-job,
+work, receipt or cleanup allocation.
+
 Keep the venue's whole-job timeout ceiling; do not extend it to fit the combined
 fixture. Use separate supervised jobs for input preparation, visible observer
 sensitivity, handover/cadence, failed-successor preservation and Linux native

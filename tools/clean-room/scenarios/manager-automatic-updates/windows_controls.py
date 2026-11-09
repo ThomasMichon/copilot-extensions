@@ -119,7 +119,11 @@ def run_controls(workdir: Path, *, allow_visible_controls: bool) -> dict:
                       label="positive-control foreground")
                 report["activation_observed"] = True
                 report["focus_restoration_required"] = True
+                # Direct API observations do not acknowledge asynchronous WinEvent delivery.
+                observer.wait_for_event("show-event", hwnd)
+                activation = observer.wait_for_event("foreground-event", hwnd)
                 restore_focus(api, original, report)
+                observer.wait_for_event("foreground-event", original, after=activation)
                 api._check(api.user.DestroyWindow(hwnd), "destroy owned positive-control window")
                 hwnd = 0
             except BaseException as exc:

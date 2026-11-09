@@ -10,7 +10,7 @@ import time
 from typing import TYPE_CHECKING, Protocol
 
 from native import UnsupportedNative
-from identity import failure_details
+from identity import failure_details, until
 
 if TYPE_CHECKING:
     from windows_api import WinAPI
@@ -104,6 +104,19 @@ class WindowObserver:
 
     def callback_failed(self, exc: BaseException) -> None:
         self.callback_error = self._failed("callback", exc)
+
+    def wait_for_event(self, kind: str, hwnd: int, *, after: int = -1) -> int:
+        def captured() -> int | None:
+            with self.lock:
+                return next((
+                    index for index, event in enumerate(self.events)
+                    if index > after and event["kind"] == kind and event.get("hwnd") == hwnd
+                ), None)
+
+        index = until(captured, lambda index: index is not None, timeout=2,
+                      label=f"{kind} callback for control HWND {hwnd}")
+        assert index is not None
+        return index
 
     def event(self, event: int, hwnd: int, object_id: int, child_id: int,
               source_thread: int, generated_ms: int, delivery_delay_ms: int = 0) -> None:

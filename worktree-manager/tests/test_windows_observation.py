@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import threading
 from types import ModuleType, SimpleNamespace
+from typing import Callable
 from unittest.mock import Mock
 
 import pytest
@@ -327,7 +328,7 @@ def test_positive_control_explicitly_shows_a_hidden_startup_window(
     finalizer: str | None,
 ) -> None:
     module = importlib.import_module("windows_controls")
-    state = SimpleNamespace(visible=False, foreground=10, events=[])
+    state = SimpleNamespace(visible=False, foreground=10, events=[], pending=[])
 
     def show(
         hwnd: int, after: None, x: int, y: int, width: int, height: int, flags: int,
@@ -336,14 +337,14 @@ def test_positive_control_explicitly_shows_a_hidden_startup_window(
         assert flags == 0x0057
         state.visible = becomes_visible
         if becomes_visible:
-            state.events.append({"kind": "show-event", "hwnd": hwnd})
+            state.pending.append({"kind": "show-event", "hwnd": hwnd})
         return True
 
     def activate(hwnd: int) -> bool:
         if hwnd == rejected_focus:
             return False
         state.foreground = hwnd
-        state.events.append({"kind": "foreground-event", "hwnd": hwnd})
+        state.pending.append({"kind": "foreground-event", "hwnd": hwnd})
         return True
 
     def check(value: object, action: str) -> None:
@@ -359,6 +360,12 @@ def test_positive_control_explicitly_shows_a_hidden_startup_window(
 
         def __exit__(self, *_args: object) -> None:
             pass
+
+        def wait_for_event(self, kind: str, hwnd: int, *, after: int = -1) -> int:
+            state.events.extend(state.pending)
+            state.pending.clear()
+            return next(index for index, event in enumerate(state.events)
+                        if index > after and event["kind"] == kind and event["hwnd"] == hwnd)
 
         def packet(self) -> dict:
             if finalizer == "observer":
@@ -437,6 +444,51 @@ def test_positive_control_proof_needs_show_and_both_foreground_events(probe):
         )
     assert not module.sensitivity({**packet, "passed": True}, 20, 10)
     assert not module.sensitivity({**packet, "maximum_observation_gap_seconds": 0.501}, 20, 10)
+
+
+def test_control_event_wait_observes_delayed_ordered_callback_without_native_inspection(
+    probe: ModuleType, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = importlib.import_module("windows_observation")
+    api = DesktopStub(probe)
+    observer = probe.WindowObserver(api)
+    observer.event(3, 10, 0, 0, 123, 100)
+    observer.event(3, 20, 0, 0, 123, 101)
+    api.process = Mock(side_effect=AssertionError("inspection while waiting for callback"))
+
+    def poll(
+        action: Callable[[], int | None], accept: Callable[[int | None], bool],
+        *, timeout: float, label: str,
+    ) -> int:
+        assert timeout == 2
+        assert not accept(action())
+        observer.event(3, 10, 0, 0, 123, 102)
+        result = action()
+        assert accept(result)
+        assert result is not None
+        return result
+
+    monkeypatch.setattr(module, "until", poll, raising=False)
+    assert observer.wait_for_event("foreground-event", 10, after=1) == 2
+    api.process.assert_not_called()
+
+
+def test_control_event_wait_keeps_missing_callback_a_bounded_failure(
+    probe: ModuleType, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = importlib.import_module("windows_observation")
+    observer = probe.WindowObserver(DesktopStub(probe))
+
+    def timeout(
+        action: Callable[[], int | None], accept: Callable[[int | None], bool],
+        **kwargs: object,
+    ) -> None:
+        assert not accept(action())
+        raise TimeoutError("qualification deadline: foreground-event")
+
+    monkeypatch.setattr(module, "until", timeout, raising=False)
+    with pytest.raises(TimeoutError, match="foreground-event"):
+        observer.wait_for_event("foreground-event", 10)
 
 
 @pytest.mark.parametrize(("thread", "pid", "valid"), [(1, 2, True), (0, 2, False), (1, 0, False)])
@@ -582,6 +634,10 @@ def test_positive_control_failures_keep_focus_unknown_and_cleanup_truth(
 
         def __exit__(self, *args):
             pass
+
+        def wait_for_event(self, kind, hwnd, *, after=-1):
+            return next(index for index, event in enumerate(self.packet()["raw_events"])
+                        if index > after and event["kind"] == kind and event["hwnd"] == hwnd)
 
         def packet(self):
             return {
