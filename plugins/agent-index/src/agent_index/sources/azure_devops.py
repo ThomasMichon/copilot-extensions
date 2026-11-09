@@ -181,6 +181,12 @@ class AzureDevOpsConnector:
         for chunk in _chunks(ids, self._batch_size):
             if cancel_check:
                 cancel_check()
+            if since_dt:
+                chunk = self._work_item_ids_in_window(chunk, since_dt)
+                if not chunk:
+                    continue
+                if cancel_check:
+                    cancel_check()
             result = self._http.post_json(
                 self._project_path("_apis", "wit", "workitemsbatch"),
                 params={"api-version": _DEFAULT_API_VERSION},
@@ -193,6 +199,35 @@ class AzureDevOpsConnector:
                     comments = self._work_item_comments(item.get("id"))
                     entries.append(self._work_item_entry(item, comments))
         return entries
+
+    def _work_item_ids_in_window(self, ids: list[int], since: datetime) -> list[int]:
+        result = self._http.post_json(
+            self._project_path("_apis", "wit", "workitemsbatch"),
+            params={"api-version": _DEFAULT_API_VERSION},
+            json={
+                "ids": ids,
+                "fields": ["System.Id", "System.ChangedDate"],
+                "errorPolicy": "fail",
+            },
+        )
+        expected = set(ids)
+        seen: set[int] = set()
+        changed: set[int] = set()
+        for item in _values(result.data):
+            item_id = item.get("id") if isinstance(item, dict) else None
+            if type(item_id) is not int or item_id not in expected or item_id in seen:
+                raise ValueError("Azure DevOps work-item metadata has invalid identities")
+            fields = item.get("fields")
+            stamp = fields.get("System.ChangedDate") if isinstance(fields, dict) else None
+            changed_at = _parse_datetime(stamp) if isinstance(stamp, str) else None
+            if changed_at is None:
+                raise ValueError("Azure DevOps work-item metadata has no valid ChangedDate")
+            seen.add(item_id)
+            if changed_at >= since:
+                changed.add(item_id)
+        if seen != expected:
+            raise ValueError("Azure DevOps work-item metadata batch is incomplete")
+        return [item_id for item_id in ids if item_id in changed]
 
     def _work_item_ids(self) -> list[int]:
         if not self._work_item_queries:
