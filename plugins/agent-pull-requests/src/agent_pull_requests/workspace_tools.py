@@ -15,6 +15,7 @@ from .review_intent import identifier
 from .workspace_selection import supports_selection
 from .review_comment_observation import supports as supports_comment_observation
 from .workspace_comment_mapping import supports as supports_mapping
+from .workspace_terminal_mapping import selected as terminal_mapping_selected
 
 TOOL_PROTOCOL = "agent-pull-requests.workspace-tools/v1"
 COMMANDS = ("capabilities", "load", "sync", "materialize", "source", "source-read", "submit", "inspect", "events", "receipt",
@@ -168,6 +169,8 @@ class WorkspaceTools:
                     and supports_prepared_review(backend.get("prepared_review_contract"))
                 ))
             ]
+            if terminal_mapping_selected(backend):
+                operations.append("retained-comment")
             if (
                 callable(self.comment_preparer) and "submit" in available
                 and supports_prepared_review(backend.get("prepared_review_contract"))
@@ -261,7 +264,9 @@ class WorkspaceTools:
         capabilities = await self.capabilities()
         if command not in capabilities["operations"]:
             raise WorkspaceToolUnavailable("workspace_operation_unsupported")
-        if needs_prepared_review(command, request) and not supports_prepared_review(
+        if needs_prepared_review(command, request) and not (
+            command == "retained-comment" and terminal_mapping_selected(capabilities["backend_contract"])
+        ) and not supports_prepared_review(
             capabilities["backend_contract"].get("prepared_review_contract")
         ):
             raise WorkspaceToolUnavailable("prepared_review_contract_unsupported")
