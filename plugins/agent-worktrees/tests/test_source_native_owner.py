@@ -22,7 +22,7 @@ REPOSITORY = Path(__file__).resolve().parents[3]
 prepared_native_runtime_source = runtime_fixture.native_runtime_source
 
 
-def _copy_native_checkout(plugin: Path, repository: Path, checkout: Path) -> None:
+def _copy_native_checkout(plugin: Path, repository: Path, checkout: Path, *, ignore=None) -> None:
     assert not checkout.is_relative_to(repository)
     if plugin in (repository / "source", repository / "source/plugins/agent-worktrees"):
         repository = repository / "source"
@@ -30,10 +30,10 @@ def _copy_native_checkout(plugin: Path, repository: Path, checkout: Path) -> Non
     if plugin == repository:
         shutil.copytree(
             plugin, checkout / "plugins/agent-worktrees",
-            ignore=shutil.ignore_patterns(".git"),
+            ignore=ignore or shutil.ignore_patterns(".git"),
         )
     else:
-        shutil.copytree(repository, checkout)
+        shutil.copytree(repository, checkout, ignore=ignore)
 
 
 @pytest.mark.parametrize("nested", [False, True])
@@ -67,6 +67,26 @@ def test_native_checkout_refuses_recursive_destination(tmp_path, nested):
     with pytest.raises(AssertionError):
         _copy_native_checkout(plugin, repository, checkout)
     assert not checkout.exists()
+
+
+@pytest.mark.parametrize("standalone", [False, True])
+def test_native_checkout_preserves_runtime_only_copy_exclusions(tmp_path, standalone):
+    repository = tmp_path / "repository"
+    source = repository / "source"
+    plugin = source if standalone else source / "plugins/agent-worktrees"
+    tests = plugin / "tests"
+    tests.mkdir(parents=True)
+    (plugin / "pyproject.toml").write_text("frozen package", encoding="utf-8")
+    (tests / "test_fixture.py").write_text("not a runtime input", encoding="utf-8")
+    (repository / ".git").mkdir()
+    checkout = tmp_path / "checkout"
+    _copy_native_checkout(
+        plugin, repository, checkout,
+        ignore=shutil.ignore_patterns(".git", "tests", "__pycache__", "*.pyc"),
+    )
+    assert (checkout / "plugins/agent-worktrees/pyproject.toml").is_file()
+    assert not (checkout / "plugins/agent-worktrees/tests").exists()
+    assert not (checkout / ".git").exists()
 
 
 def test_native_checkout_resolves_standalone_git_root(tmp_path, monkeypatch):

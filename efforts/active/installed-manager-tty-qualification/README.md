@@ -426,3 +426,10 @@ inventory; unsupported execution must not be reported as a successful gate.
   fixture, copy and recursion cases passed through canonical containment;
   scoped Ruff and whitespace checks passed. Updated publication and fresh
   current-head review remain required.
+- A complete shared-fixture call-site check also found the native seed runtime
+  deriving its source root by parent depth. It now resolves the real Git root
+  with its existing bounded process owner and uses the same normalization
+  helper, preserving the original runtime-only copy exclusions.
+  Nine copy, exclusion and recursion controls passed with the native consumer
+  module imported through canonical containment; scoped Ruff and whitespace
+  checks passed. No additional shared-fixture consumer assumes the old root.
