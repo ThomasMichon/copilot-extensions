@@ -98,6 +98,7 @@ class _DeadlineHTTPSHandler(HTTPSHandler):
 class Collection:
     records: tuple[dict, ...] = ()
     error: str = ""
+    count_verified: bool = False
 
     @property
     def complete(self) -> bool:
@@ -188,11 +189,13 @@ class AdoReader:
             raise ProviderError("ADO observation returned an unexpected JSON shape")
         return result, continuation
 
-    def collection(self, url, *, skip_paging=False, continuation_paging=False) -> Collection:
+    def collection(self, url, *, skip_paging=False, continuation_paging=False,
+                   require_count=False) -> Collection:
         records = []
         seen_pages = set()
         seen_tokens = set()
         token = ""
+        count_verified = True
         try:
             for page in range(201):
                 query = {"$top": 100, "$skip": page * 100} if skip_paging else None
@@ -205,6 +208,9 @@ class AdoReader:
                 if continuation and not continuation_paging:
                     raise ProviderError("ADO observation collection supplied an unsupported continuation")
                 count = body.get("count")
+                count_verified = count_verified and type(count) is int
+                if require_count and type(count) is not int:
+                    raise ProviderError("ADO observation collection lacks native count evidence")
                 if count is not None and (type(count) is not int or count != len(values)):
                     raise ProviderError("ADO observation collection count is inconsistent")
                 signature = json.dumps(values, sort_keys=True)
@@ -221,7 +227,7 @@ class AdoReader:
                     token = continuation
                     continue
                 if continuation_paging or not skip_paging or len(values) < 100:
-                    return Collection(tuple(records))
+                    return Collection(tuple(records), count_verified=count_verified)
             raise ProviderError("ADO observation pagination limit reached")
         except ObservationCredentialError:
             raise
@@ -293,11 +299,11 @@ class AdoReader:
         except ProviderError as exc:
             return Collection(tuple(records[:MAX_RECORDS]), str(exc))
 
-    def iterations(self) -> Collection:
-        return self.collection(self.base + "/iterations?api-version=7.1")
+    def iterations(self, *, require_count=False) -> Collection:
+        return self.collection(self.base + "/iterations?api-version=7.1", require_count=require_count)
 
-    def threads(self) -> Collection:
-        return self.collection(self.base + "/threads?api-version=7.1")
+    def threads(self, *, require_count=False) -> Collection:
+        return self.collection(self.base + "/threads?api-version=7.1", require_count=require_count)
 
     def statuses(self) -> Collection:
         return self.collection(self.base + "/statuses?api-version=7.1")

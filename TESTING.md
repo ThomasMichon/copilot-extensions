@@ -35,6 +35,26 @@ that remaining gate, real assertions, cleanup and resource bounds. Required
 CI and review remain unchanged; a shared native quiet window still needs its
 affected owners' agreement.
 
+### Selected native ADO discussion resolution
+
+The focused Worktrees packet `--test-file tests/test_ado_thread_resolution.py
+--test-file tests/test_ado_pr_remediation.py --test-file tests/test_pr_readiness.py`
+exercises the actual parser, claimant/target admission, native identity and effective
+permission evaluator against synthetic ADO responses. It retains a real
+frontend/owner process seam and concurrent consumed-ledger owners. The dedicated
+frontend packet is `--test-file tests/test_native_thread_resolution.py --test-file
+tests/test_native_reviewer_request.py --test-file tests/test_native_cli.py`.
+Use the existing contained plugin runner; these are source controls, not live
+provider or host-runtime operations.
+
+The controls cover selected status-only PATCH, independent PR state, full
+candidate/thread movement, incomplete evidence, refusal, response loss, late
+completion, crash/restart, conflicting keys and read-only recovery. New/old
+runtime negotiation preserves unsupported results and never calls bulk or raw
+forge fallback. Required unit-only CI is unchanged. Native Windows,
+installed/account/HTTP and complete three-provider lifecycle acceptance remain
+separate; a synthetic pass and platform skips do not qualify them.
+
 ## Owner-only hosted Windows escape hatch
 
 `windows-qualification.yml` is an explicit manual lane on a disposable
