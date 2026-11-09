@@ -133,6 +133,7 @@ def _qualify_native_worktrees(
         PSMUX_DATA_DIR=str(mux_data), PSMUX_CONFIG_FILE=os.devnull,
         PSMUX_NO_WARM="1", PSMUX_SERVER_DEBUG="1",
         WORKTREE_PANE_MIN_RUNTIME="0", WORKTREE_PANE_WAIT_TIMEOUT="0",
+        WORKTREE_SETUP_LOG=str(temporary / "native-phase.log"),
         LOCALAPPDATA=str(local_app_data), TEMP=str(temporary), TMP=str(temporary),
         WORKTREE_MANAGER_ROOT=str(tmp_path / "manager-runtime"), UV_OFFLINE="1",
         UV_CACHE_DIR=str(tmp_path / "uv-cache"),
@@ -622,6 +623,8 @@ class Mux {
                         for path in (
                             *(home / ".psmux").glob("*.log"),
                             *(temporary / "worktree-setup-logs").glob("setup-*.log"),
+                            *((temporary / "native-phase.log",)
+                              if (temporary / "native-phase.log").exists() else ()),
                             *((tmp_path / "mux-commands.txt",)
                               if (tmp_path / "mux-commands.txt").exists() else ()),
                         )

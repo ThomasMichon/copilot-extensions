@@ -404,6 +404,39 @@ def test_finite_phase_uses_powershell_location_not_environment_cwd(tmp_path):
     assert reply["environment"] == {"DATE_LITERAL": "2026-01-01T00:00:00Z"}
 
 
+@pytest.mark.parametrize("configured_log", [False, True])
+def test_finite_phase_preserves_failure_diagnostics_without_accepting_a_reply(tmp_path, configured_log):
+    bootstrap = tmp_path / "refused.py"
+    bootstrap.write_text(
+        "import sys\n"
+        "sys.stdout.write('{\"recorded\":true}')\n"
+        "sys.stderr.write('Native preparation refused: fixture\\n')\n"
+        "sys.exit(3)\n",
+        encoding="utf-8",
+    )
+    setup_log = tmp_path / "setup.log"
+    driver = tmp_path / "refused.ps1"
+    driver.write_text(
+        f". {_literal(SCRIPT)}\n"
+        f"$env:WORKTREE_SETUP_LOG = {_literal(setup_log) if configured_log else '$null'}\n"
+        f"$runtime = @{{Python={_literal(Path(sys.executable))};Bootstrap={_literal(bootstrap)}}}\n"
+        f"$reply = Invoke-AwNativeSeedPhase {_literal(tmp_path)} @('--phase','prepare') -Runtime $runtime\n"
+        "ConvertTo-Json -InputObject @{reply=$reply} -Compress\n",
+        encoding="utf-8",
+    )
+    result = run_caller_owned(
+        [shutil.which("pwsh"), "-NoProfile", "-NoLogo", "-File", str(driver)],
+        cwd=tmp_path, timeout=15, max_stdout_bytes=8192, max_stderr_bytes=8192,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout) == {"reply": None}
+    assert result.stderr == "Native preparation refused: fixture\n"
+    if configured_log:
+        assert setup_log.read_text(encoding="utf-8") == result.stderr
+    else:
+        assert not setup_log.exists()
+
+
 def test_headed_discovery_is_read_only_strict_and_cached_per_selected_slot(tmp_path):
     driver = tmp_path / "discovery.ps1"
     driver.write_text(
