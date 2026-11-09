@@ -44,7 +44,8 @@ Extensions are discovered two ways (union, deduped), each pointing at a
    ``module:callable`` paths.
 
 Loading is idempotent and fail-open: a broken extension is logged and skipped,
-never crashing the daemon or CLI.
+never crashing the daemon or CLI. Loader failures are retained so strict
+configuration consumers can refuse incomplete policy instead of falling back.
 """
 
 from __future__ import annotations
@@ -138,6 +139,7 @@ class ExtensionRegistry:
         self._startup_hooks: list[_Ranked] = []
         self._seq = 0
         self._loaded = False
+        self._load_failed = False
 
     # -- registration ----------------------------------------------------
 
@@ -325,20 +327,27 @@ class ExtensionRegistry:
                 return result
         return None
 
-    def collect_config(self, cwd: str | None) -> dict[str, Any]:
+    def collect_config(self, cwd: str | None, *, strict: bool = False) -> dict[str, Any]:
         """Merge config-source contributions.
 
         Sources run in priority order; a lower-priority source only fills keys a
-        higher-priority one did not set. Returns a flat mapping.
+        higher-priority one did not set. Strict consumers refuse provider errors
+        instead of selecting a fallback policy.
         """
+        if strict and self._load_failed:
+            raise ValueError("Extension discovery or registration failed")
         merged: dict[str, Any] = {}
         for ranked in self._config_sources:
             try:
                 contribution = ranked.fn(cwd)
             except Exception as exc:
+                if strict:
+                    raise ValueError("Configuration source failed") from None
                 log.warning("Config source %r raised: %s", ranked.name, exc)
                 continue
             if not isinstance(contribution, dict):
+                if strict:
+                    raise ValueError("Configuration source returned an invalid contribution")
                 continue
             for key, value in contribution.items():
                 merged.setdefault(key, value)
@@ -431,10 +440,12 @@ def _env_targets() -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
-def _entry_point_registers() -> list[Callable]:
+def _entry_point_registers(registry: ExtensionRegistry | None = None) -> list[Callable]:
     try:
         from importlib.metadata import entry_points
     except Exception:
+        if registry is not None:
+            registry._load_failed = True
         return []
     try:
         eps = entry_points()
@@ -445,6 +456,8 @@ def _entry_point_registers() -> list[Callable]:
             else eps.get(ENTRY_POINT_GROUP, [])
         )
     except Exception as exc:
+        if registry is not None:
+            registry._load_failed = True
         log.warning("Entry-point discovery failed: %s", exc)
         return []
     registers: list[Callable] = []
@@ -452,10 +465,14 @@ def _entry_point_registers() -> list[Callable]:
         try:
             fn = ep.load()
         except Exception as exc:
+            if registry is not None:
+                registry._load_failed = True
             log.warning("Could not load extension entry point %r: %s", ep.name, exc)
             continue
         if callable(fn):
             registers.append(fn)
+        elif registry is not None:
+            registry._load_failed = True
     return registers
 
 
@@ -465,16 +482,19 @@ def load_extensions(registry: ExtensionRegistry) -> ExtensionRegistry:
         return registry
     registry._loaded = True
 
-    registers: list[Callable] = list(_entry_point_registers())
+    registers: list[Callable] = list(_entry_point_registers(registry))
     for target in _env_targets():
         fn = _resolve_register(target)
         if fn is not None:
             registers.append(fn)
+        else:
+            registry._load_failed = True
 
     for register in registers:
         try:
             register(registry)
         except Exception as exc:
+            registry._load_failed = True
             name = getattr(register, "__module__", "?")
             log.warning("Extension register %s failed: %s", name, exc)
     return registry
