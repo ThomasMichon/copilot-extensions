@@ -314,17 +314,8 @@ def conclude_disposable_worker(
     and session identities verbatim. It owns both the disposable verdict and
     exact-ID managed teardown; preservation skips never remove anything.
     """
-    args = [
-        "conclude-disposable",
-        "--worktree",
-        worktree,
-        "--policy",
-        "disposable-cli",
-        "--owner",
-        owner,
-        "--remove",
-        "--json",
-    ]
+    args = ["conclude-disposable", "--worktree", worktree, "--policy", "disposable-cli",
+            "--owner", owner, "--remove", "--json"]
     if session:
         args += ["--session", session]
 
@@ -364,23 +355,37 @@ def conclude_dispatch_attempt(
     timeout: float = 30.0,
     project: str | None = None,
     worktree_path: str | None = None,
+    creation_nonce: str | None = None,
 ) -> dict:
-    """Safely conclude one provenance-verified dispatch-created worktree."""
-    args = [
-        "conclude-disposable",
-        "--worktree",
-        worktree,
-        "--policy",
-        "dispatch-attempt",
-        "--reservation",
-        reservation_key,
-        "--owner",
-        owner,
-        "--remove",
-        "--json",
-    ]
-    if session:
-        args += ["--session", session]
+    """Safely conclude one dispatch-created (or Bridge-created, by nonce) worktree.
+
+    Dispatch provenance is always tried first, so a preallocated worker that
+    Bridge merely targeted keeps its exact reservation proof. Only a record
+    without dispatch provenance falls back to Bridge's retained creation
+    nonce; a runtime without that policy preserves the workspace."""
+    def conclude(*proof: str) -> dict:
+        args = ["conclude-disposable", "--worktree", worktree, *proof,
+                "--owner", owner, "--remove", "--json", *(["--session", session] if session else [])]
+        return _run_dispatch_conclusion(
+            worktree, args, timeout=timeout, project=project, worktree_path=worktree_path)
+
+    payload = conclude("--policy", "dispatch-attempt", "--reservation", reservation_key)
+    if not creation_nonce or payload.get("reason") != "dispatch-provenance-missing":
+        return payload
+    try:
+        return conclude("--policy", "bridge-creation", "--creation-nonce", creation_nonce)
+    except _UnsupportedConclusionPolicy:
+        return {**payload, "bridge_creation": "unsupported-runtime"}
+
+
+class _UnsupportedConclusionPolicy(DisposableConclusionError):
+    """The installed agent-worktrees runtime predates a conclusion policy."""
+
+
+def _run_dispatch_conclusion(
+    worktree: str, args: list[str], *, timeout: float,
+    project: str | None, worktree_path: str | None,
+) -> dict:
     prefix = _agent_worktrees_launch_prefix()
     if prefix is None:
         raise DisposableConclusionError("agent-worktrees CLI not found on this host")
@@ -400,13 +405,8 @@ def conclude_dispatch_attempt(
     if actual.get("project") != project or actual.get("path") != worktree_path:
         raise DisposableConclusionError("allocation identity changed; workspace preserved")
     result = subprocess.run(  # noqa: S603 -- fixed argv, launcher resolved locally
-        [*prefix, "--project", project, *args],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        env=agent_worktrees_environment(),
-        **no_window_kwargs(),
+        [*prefix, "--project", project, *args], check=False, capture_output=True, text=True,
+        timeout=timeout, env=agent_worktrees_environment(), **no_window_kwargs(),
     )
     try:
         payload = json.loads(result.stdout or "{}")
@@ -415,10 +415,13 @@ def conclude_dispatch_attempt(
             (result.stderr or "").strip()[:300]
             or "agent-worktrees returned invalid dispatch conclusion output"
         ) from exc
+    stderr = (result.stderr or "").strip()
+    if result.returncode == 2 and ("invalid choice" in stderr or "unrecognized arguments" in stderr):
+        raise _UnsupportedConclusionPolicy(stderr[-300:])
     if result.returncode != 0 or not isinstance(payload, dict) or payload.get("error"):
         detail = payload.get("error") if isinstance(payload, dict) else None
         raise DisposableConclusionError(
-            str(detail or (result.stderr or "").strip() or "dispatch conclusion failed")[:300]
+            str(detail or stderr or "dispatch conclusion failed")[:300]
         )
     return payload
 
