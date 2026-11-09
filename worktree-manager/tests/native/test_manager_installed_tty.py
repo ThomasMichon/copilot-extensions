@@ -296,8 +296,7 @@ def _run(arguments, env, cwd, diagnostics, label, *, timeout=None):
     return out.read_text(encoding="utf-8").strip()
 
 
-def _payloads(root, identity, env, diagnostics):
-    import prepare_runtime_source
+def _candidate_snapshot(root, identity, env, diagnostics):
     from agent_procutil import no_window_kwargs
 
     actual = _run(["git", "rev-parse", "HEAD"], env, REPO, diagnostics, "candidate-head")
@@ -308,7 +307,7 @@ def _payloads(root, identity, env, diagnostics):
     result = subprocess.run(
         ["git", "archive", "--format=tar", "--output", str(archive), actual,
          "worktree-manager", "plugins/agent-worktrees", "libs", "tools", "docs",
-         ".github/plugin/marketplace.json"],
+         "plugins/agent-containers/setup.py", ".github/plugin/marketplace.json"],
         cwd=REPO, env=env, timeout=30, capture_output=True, check=False, **no_window_kwargs(),
     )
     if result.returncode:
@@ -324,6 +323,13 @@ def _payloads(root, identity, env, diagnostics):
                 raise RuntimeError("Candidate archive contains a non-file or unsafe path")
         source.extractall(snapshot, filter="data")
     archive.unlink()
+    return snapshot
+
+
+def _payloads(root, identity, env, diagnostics):
+    import prepare_runtime_source
+
+    snapshot = _candidate_snapshot(root, identity, env, diagnostics)
     marketplace = root / "payloads" / ".github" / "plugin"
     marketplace.mkdir(parents=True)
     shutil.copy2(snapshot / ".github" / "plugin" / "marketplace.json",
@@ -1006,6 +1012,38 @@ def test_native_cmd_project_binstub_handles_space_path(tmp_path):
     assert b"NATIVE PROJECT COMMAND REACHED" in console.output
 
 
+def test_sparse_candidate_materializes_invocation_admission_toolkit(tmp_path):
+    from materialize_main import materialize_payload_invocation_into
+
+    diagnostics = tmp_path / "diagnostics"
+    diagnostics.mkdir()
+    env = _git_environment()
+    env.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path))
+    commit = _run(["git", "rev-parse", "HEAD"], env, REPO, diagnostics, "source-head")
+    tree = _run(["git", "rev-parse", "HEAD^{tree}"], env, REPO, diagnostics, "source-tree")
+    identity = {"candidate_commit": commit, "candidate_tree": tree, "source_commit": commit}
+
+    snapshot = _candidate_snapshot(tmp_path, identity, env, diagnostics)
+    consumer = snapshot / "plugins" / "agent-worktrees"
+    log = materialize_payload_invocation_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=snapshot,
+    )
+    assert log and not any(entry.startswith("SKIP ") for entry in log), log
+    toolkit = consumer / "scripts" / "_runtime_admission"
+    inventory = json.loads((toolkit / "toolkit.json").read_text(encoding="utf-8"))
+    assert inventory["files"]
+    assert all((toolkit / relative).is_file() for relative in inventory["files"])
+    resource = Path("plugins") / "agent-containers" / "setup.py"
+    assert (toolkit / resource).read_bytes() == (
+        snapshot / resource
+    ).read_bytes()
+    (snapshot / resource).unlink()
+    refused = materialize_payload_invocation_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=snapshot,
+    )
+    assert len(refused) == 1 and refused[0].startswith("SKIP Invocation materialization:")
+
+
 def test_unreaped_error_preserves_enclosing_sandboxes_and_original_exception(tmp_path, monkeypatch):
     import runpy
     from types import SimpleNamespace
@@ -1229,6 +1267,11 @@ if "pytest" in sys.modules:
     test_inherited_git_context_cannot_redirect_private_repository = pytest.mark.skipif(
         os.name != "nt", reason="Native Windows fixture environment",
     )(test_inherited_git_context_cannot_redirect_private_repository)
+    test_sparse_candidate_materializes_invocation_admission_toolkit = pytest.mark.timeout(180)(
+        pytest.mark.skipif(os.name != "nt", reason="Native Windows candidate preparation owner")(
+            test_sparse_candidate_materializes_invocation_admission_toolkit,
+        ),
+    )
 
 
 if __name__ == "__main__":
