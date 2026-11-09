@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import importlib.util
 import io
 import json
@@ -668,7 +667,7 @@ def test_prepared_native_membership_reuses_original_association(tmp_path, monkey
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows registered pre-tool consumer")
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
-@pytest.mark.parametrize("case", ["read", "write", "revoked", "cold-read", "cold-write"])
+@pytest.mark.parametrize("case", ["read", "write", "revoked", "cold-read", "cold-write", "read-batch"])
 def test_registered_pre_tool_entry_reuses_prepared_membership(tmp_path, monkeypatch, shell, case):
     executable = shutil.which(shell)
     if not executable:
@@ -681,9 +680,11 @@ def test_registered_pre_tool_entry_reuses_prepared_membership(tmp_path, monkeypa
     session.mkdir(parents=True)
     payload = {
         "sessionId": "pre-tool", "cwd": str(workspace),
-        "toolName": "view" if case in {"read", "cold-read"} else "edit",
+        "toolName": "view" if case in {"read", "cold-read", "read-batch"} else "edit",
         "toolArgs": {"path": "non-ascii-\u00e9.txt", "text": "quote'\"\\\n\t"},
     }
+    if case == "read-batch":
+        payload["toolCalls"] = [{"name": "edit", "args": payload["toolArgs"]}]
     if not case.startswith("cold-"):
         assert module.admitted(payload, home=tmp_path)
     plugin = tmp_path / "payload"
@@ -697,11 +698,6 @@ def test_registered_pre_tool_entry_reuses_prepared_membership(tmp_path, monkeypa
         "pr_supersede_guard.py",
     ):
         shutil.copyfile(SCRIPTS / name, scripts / name)
-    contract = json.loads((scripts / "hook-read-policy.json").read_text(encoding="utf-8"))
-    for guard in contract["guards"]:
-        text = (scripts / guard).read_text(encoding="utf-8").replace("\r\n", "\n")
-        contract["guards"][guard] = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    (scripts / "hook-read-policy.json").write_text(json.dumps(contract), encoding="utf-8")
     observed = tmp_path / "policy-input"
     (scripts / "resolve-runtime.ps1").write_text(
         "$AwPy='" + sys.executable.replace("'", "''") + "'\n",
@@ -735,7 +731,7 @@ def test_registered_pre_tool_entry_reuses_prepared_membership(tmp_path, monkeypa
     assert result.stderr == b""
     if case.startswith("cold-"):
         assert (session / "agent-worktrees" / "managed-session.json").is_file()
-    if case in {"write", "cold-write"}:
+    if case in {"write", "cold-write", "read-batch"}:
         assert observed.read_bytes() == raw.encode("utf-8")
         assert json.loads(result.stdout) == {
             "permissionDecision": "deny", "permissionDecisionReason": "fixture policy",
@@ -743,6 +739,116 @@ def test_registered_pre_tool_entry_reuses_prepared_membership(tmp_path, monkeypa
     else:
         assert not observed.exists()
         assert result.stdout == b""
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows registered prepared-cell pre-tool consumer")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("case", ["view", "rg", "glob", "guard-drift", "incomplete", "receipt", "write", "read-batch"])
+def test_registered_prepared_cell_membership_read_requires_complete_native_proof(tmp_path, monkeypatch, shell, case):
+    from types import SimpleNamespace
+    import test_registry_paths as fixtures
+
+    executable = shutil.which(shell)
+    if not executable:
+        if os.environ.get("AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP") == "1":
+            pytest.fail(f"{shell} is required")
+        pytest.skip(f"{shell} is unavailable")
+    native_run = subprocess.run
+    monkeypatch.setattr(fixtures, "subprocess", SimpleNamespace(
+        run=lambda *args, **kwargs: native_run(
+            *args, **(kwargs | no_window_kwargs() | {"timeout": 10}),
+        ),
+    ))
+    anchor, legacy = fixture_project(tmp_path)
+    workspace = fixture_linked_worktree(tmp_path, anchor)[0]
+    plugin = fixtures._payload(tmp_path, "selected")
+    scripts = plugin / "scripts"
+    for name in (
+        "pre-tool-hook.ps1", "managed-session.ps1", "managed_session.py",
+        "execution_platform.py", "managed_project_identity.py", "remote_identity.py",
+        "guarded_anchor_map.py", "hook_policy_process.py", "hook-read-policy.json",
+        "statelessness_guard.py", "cross_repo_guard.py", "anchor_write_guard.py", "pr_supersede_guard.py",
+    ):
+        shutil.copyfile(SCRIPTS / name, scripts / name)
+    context, registry = fixtures._stamp(
+        tmp_path / "durable", plugin, marketplace="selected", repository="example/selected",
+    )
+    for name in ("projects.yaml", "repos.yaml"):
+        (registry / name).write_text((legacy / name).read_text())
+    fixtures._select(monkeypatch, context, plugin)
+    session = tmp_path / ".copilot" / "session-state" / "pre-cell"
+    session.mkdir(parents=True)
+    event = {
+        "sessionId": "pre-cell", "cwd": str(workspace),
+        "toolName": case if case in {"view", "rg", "glob"} else "edit" if case == "write" else "view",
+        "toolArgs": {"path": "non-ascii-\u00e9.txt", "text": "quote'\"\\\n\t"},
+    }
+    if case == "read-batch":
+        event["toolCalls"] = [{"name": "edit", "args": event["toolArgs"]}]
+    assert load("managed_session").admitted(event, home=tmp_path)
+    marker = session / "agent-worktrees" / "managed-session.json"
+    if case == "incomplete":
+        value = json.loads(marker.read_text())
+        value.pop("installation")
+        marker.write_text(json.dumps(value))
+    elif case == "receipt":
+        context.write_text(context.read_text() + "\n")
+    elif case == "guard-drift":
+        with (scripts / "anchor_write_guard.py").open("a", encoding="utf-8") as output:
+            output.write("\n# changed guard implementation\n")
+    membership = tmp_path / "membership-interpreter"
+    validation = tmp_path / "context-validator"
+    policy = tmp_path / "policy-input"
+    with (scripts / "managed-session.ps1").open("a", encoding="utf-8") as output:
+        output.write(
+            "\nfunction Get-ManagedWorktreesPython { "
+            + "[IO.File]::WriteAllText('" + str(membership).replace("'", "''") + "', 'called'); "
+            + "return '" + sys.executable.replace("'", "''") + "' }\n"
+        )
+    (scripts / "installation-context" / "installation-context.ps1").write_text(
+        "[IO.File]::WriteAllText('" + str(validation).replace("'", "''") + "', 'called')\n"
+        + "Write-Output '" + json.dumps({"pluginRoot": str(registry)}).replace("'", "''") + "'\n"
+        + "$global:LASTEXITCODE = 0\n",
+        encoding="utf-8",
+    )
+    (scripts / "resolve-runtime.ps1").write_text(
+        "$AwPy='" + sys.executable.replace("'", "''") + "'\n", encoding="utf-8",
+    )
+    shutil.copyfile(scripts / "hook_policy_process.py", scripts / "hook_policy_process_original.py")
+    (scripts / "hook_policy_process.py").write_text(
+        "import base64,json,sys\nfrom pathlib import Path\n"
+        + "from hook_policy_process_original import _watch_caller\n"
+        + "if __name__ == '__main__':\n"
+        + f"    Path({str(policy)!r}).write_bytes(base64.b64decode(sys.stdin.readline()))\n"
+        + "    print(json.dumps({'permissionDecision':'deny','permissionDecisionReason':'fixture policy'}))\n",
+        encoding="utf-8",
+    )
+    flag = tmp_path / "default-stop.json"
+    flag.write_text('{"active":true}', encoding="utf-8")
+    env = environment(tmp_path, workspace)
+    env.update(
+        COPILOT_EXTENSIONS_CONTEXT=str(context), COPILOT_PLUGIN_ROOT=str(plugin),
+        AGENT_WORKTREES_PAYLOAD_ROOT=str(plugin), PRETOOL_KILLSWITCH_STATE_FILE=str(flag),
+    )
+    env.pop("AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION", None)
+    entry = json.loads((SCRIPTS.parent / "hooks.json").read_text(encoding="utf-8"))["hooks"]["preToolUse"][0]
+    raw = json.dumps(event, ensure_ascii=False, indent=2).encode("utf-8")
+    result = native_run(
+        [executable, "-NoProfile", "-NonInteractive", "-Command", entry["powershell"]],
+        input=raw, capture_output=True, timeout=10,
+        cwd=workspace, env=env, **no_window_kwargs(),
+    )
+    assert result.returncode == 0 and not result.stderr, result.stdout + result.stderr
+    assert membership.exists() is (case in {"incomplete", "receipt"})
+    policy_required = case not in {"view", "rg", "glob"}
+    assert validation.exists() is policy_required
+    assert policy.exists() is policy_required
+    if policy_required:
+        assert policy.read_bytes() == raw
+        assert json.loads(result.stdout)["permissionDecision"] == "deny"
+    else:
+        assert result.stdout == b""
+    assert not (legacy / "cache").exists()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows prepared cell membership")
