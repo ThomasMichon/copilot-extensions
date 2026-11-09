@@ -61,13 +61,17 @@ def test_permission_write_access_is_rechecked_under_its_owner_lock(checkout, kin
 def test_expired_git_probe_is_a_structured_refusal_without_move_custody(checkout, monkeypatch, capsys):
     from agent_worktrees import worktree_ops_cli as cli
 
-    def expired(*args):
+    def expired(*args, **kwargs):
         raise subprocess.TimeoutExpired(["git", "rev-parse"], 10)
     monkeypatch.setattr(cli.cfg, "load_config", lambda: checkout.config)
-    monkeypatch.setattr(relocation, "_git", expired)
+    monkeypatch.setattr(relocation.git_ops, "git", expired)
+    monkeypatch.setattr(
+        relocation, "_stopped",
+        lambda *_args: pytest.fail("the expired destination probe must refuse before owner probes"),
+    )
     args = SimpleNamespace(
         capabilities=False, worktree_id=checkout.record.worktree_id,
-        destination=str(checkout.destination), apply=False, abort=False,
+        destination=str(checkout.destination), apply=True, abort=False,
     )
     assert cli.cmd_move(args) == 1
     result = json.loads(capsys.readouterr().out)
