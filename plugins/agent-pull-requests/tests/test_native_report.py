@@ -19,6 +19,10 @@ from test_report_read import reports as reports
 
 @pytest.fixture
 def native(tmp_path, monkeypatch):
+    return native_fixture(tmp_path, monkeypatch)
+
+
+def native_fixture(tmp_path, monkeypatch):
     if os.name == "nt":
         pytest.skip("fixture executable is POSIX; native Windows qualification remains separate")
     root = Path(__file__).resolve().parents[3]
@@ -74,12 +78,13 @@ def native(tmp_path, monkeypatch):
         "  assert args[6:]==['-f','variables[owner]=example','-f','variables[name]=project','-F','variables[number]=7']\n"
         "  if os.environ.get('FIXTURE_NONZERO'):print('fixture-secret',file=sys.stderr);sys.exit(1)\n"
         "  if os.environ.get('FIXTURE_FAIL'):print('{\"errors\":[{\"message\":\"fixture-secret\"}]}');sys.exit(0)\n"
-        "  print(json.dumps({'data':{'repository':{'pullRequest':{'reviewThreads':{'nodes':[{'path':'x','comments':{'nodes':[{'body':'body\\r\\ntext','author':{'login':'fixture'}}]}}]}}}}}))\n"
+        "  body='body\\r\\ntext' if not os.environ.get('FIXTURE_LARGE') else 'λ\\r\\n'*int(os.environ.get('FIXTURE_THREAD_REPEATS','11000'))\n"
+        "  print(json.dumps({'data':{'repository':{'pullRequest':{'reviewThreads':{'nodes':[{'path':'x','comments':{'nodes':[{'body':body,'author':{'login':'fixture'}}]}}]}}}}}))\n"
         " else:\n"
         "  assert args[3:]==['https://api.github.com/repos/example/project/pulls/7','-H','Accept: application/vnd.github.diff']\n"
         "  if os.environ.get('FIXTURE_FAIL'):print('fixture-secret',file=sys.stderr);sys.exit(1)\n"
         "  if os.environ.get('FIXTURE_NONZERO'):print('fixture-secret',file=sys.stderr);sys.exit(1)\n"
-        "  if os.environ.get('FIXTURE_LARGE'):sys.stdout.buffer.write(b'x'*40000);sys.exit(0)\n"
+        "  if os.environ.get('FIXTURE_LARGE'):sys.stdout.buffer.write(b'x'*int(os.environ.get('FIXTURE_REPORT_BYTES','40000'))+'λ\\r\\ntail'.encode());sys.exit(0)\n"
         "  if os.environ.get('FIXTURE_ROTATE_AFTER_REPORT'):\n"
         "   p=pathlib.Path(os.environ['FIXTURE_REGISTRY']);p.write_text('{\"account_map\":{\"example\":\"replacement\"}}')\n"
         "  sys.stdout.buffer.write(b'diff --git a/x b/x\\r\\n+body\\rtail')\n",
@@ -137,6 +142,18 @@ def test_actual_native_children_keep_one_budget_and_use_pinned_reads(native, mon
         assert report["threads"][0]["comments"][0]["text"] == "body\r\ntext"
     else:
         assert report["diff"] == "diff --git a/x b/x\r\n+body\rtail"
+
+
+def test_selected_executing_support_is_passive_and_refuses_prior_capture_api(native, monkeypatch):
+    from agent_worktrees.github_account_observation import SelectedGitHubAccount
+
+    owner, _, calls, _, _ = native
+    owner.check_support()
+    assert calls() == []
+    monkeypatch.setattr(SelectedGitHubAccount, "capture", lambda self, stage, arguments: None)
+    with pytest.raises(ValueError, match="native report APIs unsupported"):
+        owner.check_support()
+    assert calls() == []
 
 
 @pytest.mark.parametrize("setting,value", [

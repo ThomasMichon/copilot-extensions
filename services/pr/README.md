@@ -18,7 +18,7 @@ tests select the same checkout's PR and Fleet sources explicitly:
 python tools/run-standalone-tests.py services/pr --prepare --timeout 180
 ```
 
-All fourteen Python source/test files are admitted to strict MyPy on the Linux and
+The Python source/test files are admitted to strict MyPy on the Linux and
 Windows analysis targets at the declared Python 3.10 minimum:
 `python tools/typecheck.py service-pr --prepare`, then
 `python tools/typecheck.py service-pr --strict`. JSON documents, runtime
@@ -157,6 +157,58 @@ rather than provisioning over it or stripping its binding to make an old image
 start. Remote request/replay/ACK payloads and the native callback store are
 unchanged. A supported image update must retain this storage contract as well
 as separately proving writer transfer and data compatibility.
+
+### Optional native reports
+
+The [reviewed report-host contract](../../efforts/active/durable-pr-watch-delegation/standalone-report-host.md)
+adds a strict optional `reports` object to the existing version-1 host config:
+
+```json
+{
+  "reports": {
+    "response_bytes": 8388608,
+    "bindings": [
+      {
+        "principal": "caller-a",
+        "target": "repository-a",
+        "source_config": "/run/config/worktrees.json",
+        "scope": {
+          "provider": "github",
+          "endpoint": "github.com",
+          "account": "account-a",
+          "repo": "example/repository"
+        },
+        "context_id": "selected-native-report"
+      }
+    ]
+  }
+}
+```
+
+This partial example grants no enrollment or provider access. Each entry must
+match one existing admitted caller/target and its exact account/repository.
+Only the existing GitHub.com adapter is selected. Unknown/duplicate fields,
+unsupported scopes and non-absolute native configuration references refuse.
+The explicit integer response ceiling is 32768..8388608 bytes. It reaches the
+actual connector handler; [bounded v2 reports](../../plugins/agent-pull-requests/docs/report-bounded.md)
+also require the executing SDK request's selected allowance. V1 and ordinary
+watch/workspace responses retain their existing bounds.
+
+The launch owner must explicitly supply compatible Worktrees native APIs in
+the selected service process through its existing distribution mechanism.
+Missing optional support refuses before connector admission, without probing
+credentials. The service does not install Worktrees or select an executable,
+token command or import path from this object. Default hosts require no
+Worktrees Python import or dependency and keep their 32 KiB handler ceiling.
+Loading, provisioning and starting the host do not resolve report credentials.
+Each admitted request uses the native owner's current policy and authenticated
+selected account under the existing request, operation budget and drain.
+Observation credentials are not report credentials.
+
+Reports are transient: no report cache, replay event or disk migration is added.
+Removing the optional selection restores the baseline without rewriting state.
+Source fixtures qualify fresh isolated hosting, not live providers, native
+Windows execution, retained hosts, installed activation or rollout.
 
 ### Optional native read-only workspaces
 

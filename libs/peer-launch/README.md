@@ -14,7 +14,7 @@ namespace and governance receipts. Peer validators selected from independently
 updated payloads are loaded fresh.
 Supported peers are `agent-worktrees`, `agent-bridge`, `agent-codespaces`,
 `agent-containers`, `agent-dispatch`, `agent-ssh`, `agent-machines`, and
-`agent-pull-requests` -- each a canonical
+`agent-pull-requests`, plus `agent-vault` -- each a canonical
 `libs/installation-context` adopter in its own right. Adding a peer requires
 three coordinated steps, not just a `PEERS` mapping entry: (1) the mapping
 entry itself; (2) target-specific environment rebinding in
@@ -174,6 +174,32 @@ through this boundary. Machines needs only the canonical receipt, payload and
 runtime-root rebinding; foreign `AGENT_MACHINES_*` overrides are scrubbed.
 Legacy peer consumers can use `legacy_peer_environment()` for the same
 caller-routing scrub without manufacturing a namespaced receipt.
+
+Vault is also an opt-in same-cell peer target. Its environment uses the native
+Vault owner's installation identity, home/run/cache/endpoint geometry and
+service suffix, not the caller's database, cached context or endpoint overrides.
+Windows service identity is normalized using the owning launcher's invariant
+casing rules, including Unicode paths, rather than preserving original casing.
+Linux C/UTF-8 qualification retains the owning `tr` pipeline's byte-oriented
+normalization, not Python's Unicode `.lower()`. These are native-platform
+identities, not a promise of identical suffixes across operating systems.
+This opt-in Vault target supports native Windows and Linux; other native
+platforms refuse before owner execution rather than assuming equivalent
+suffix or service semantics. Ordinary peer targets and Vault entrypoints keep
+their existing platform behavior.
+Linux peer invocation requires `sha256sum` or `shasum`, matching the native
+owner's SHA-256 route; it refuses before execution rather than inventing the
+legacy checksum fallback's service identity. Ordinary Vault launchers retain
+their existing fallback unchanged.
+No provisioning is permitted by that invocation. Explicit configuration selection
+still travels through Vault's native `--configuration-root`; peer selection
+does not choose a database, unlock it, install a key or start a service.
+The existing dynamic and retained-prefix APIs keep receipt/governance checks
+and immutable build pinning. An older boundary refuses this target without a
+legacy/PATH fallback; no ordinary caller selects it automatically.
+The disposable native process control qualifies selection, exact argv and
+environment rebinding using a synthetic peer module, not credential or setup
+readiness. Actual Vault/SSH, logon and enrollment qualification remain separate.
 
 Bridge uses this boundary for `handoff-check`'s `agent-worktrees
 handoffs-check` call. Because `--execute` mutates predecessor state, a

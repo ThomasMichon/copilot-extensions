@@ -392,9 +392,29 @@ An SDK embedding can select `handler=HandlerBinding(fleet, gateway, handle)`
 instead of `backend_origin`. These choices are mutually exclusive. The trusted
 async handler receives an immutable `ServiceRequest` with the checked method,
 prefix-stripped target, allowed header tuples, bounded body and `CallerContext`.
-It returns a `ServiceResponse(status, headers=(), body=b"")`. Handler responses
-are buffered and limited to 32 KiB, then use the existing chunk/ACK path; this
-does not change the HTTP backend's 8 MiB response or streaming behavior.
+It returns a `ServiceResponse(status, headers=(), body=b"")`. Ordinary handler
+responses are buffered and limited to 32 KiB, then use the existing chunk/ACK
+path; this does not change the HTTP backend's 8 MiB response or streaming behavior.
+
+Trusted outbound embeddings may select
+`HandlerBinding(fleet, gateway, handle, response_limit=selected_bytes)` and return
+`BoundedServiceResponse(status, headers=(), body=b"")` from the same
+`gateway_service_handler` module. The integer bound must be 32 KiB through
+8 MiB. Only a binding above 32 KiB accepts this type; ordinary `ServiceResponse`
+retains its 32 KiB construction/emission bound even there. The bounded constructor
+enforces 8 MiB; the emitter enforces the actual smaller binding budget before headers.
+
+The connector supplies `request.response_limit` from its executing binding.
+This keyword-only, process-local field defaults to 32 KiB, not a wire context
+field, header, credential or offline permit. Handlers can check it before
+acquiring or advertising a larger application profile. A request/binding budget
+mismatch refuses before handler invocation. Manual request construction does
+not authenticate a caller; old/missing APIs do not imply support.
+`LocalHandlerBinding` retains 32 KiB and accepts only ordinary `ServiceResponse`.
+
+Larger buffered responses retain authenticated context, original lifetime,
+per-chunk ACK backpressure, expiry, disconnect and cleanup custody. No frame,
+chunk, request, total-response, queue, concurrency or deadline ceiling increases.
 
 This mode explicitly negotiates `caller-context-v1` through the existing
 service-admit body and attachment confirmation. Legacy connectors send and

@@ -8,12 +8,12 @@
       "fallback": {
         "destination": ".github/copilot/context-fallbacks/agent-dispatch/blocked-task-fallback.md",
         "renderedBytes": 2744,
-        "renderedSha256": "be3854e6ea368bad54fe3cf4b51a23336e790adbb8b1e6c8a9953846fe3bd017"
+        "renderedSha256": "2af5f7085f52944c7949db9888ff6d64f848139763696a2e65ccb81d4b9ebc41"
       },
       "plugin": "agent-dispatch@copilot-extensions",
-      "pluginVersion": "0.18.323-dev1",
+      "pluginVersion": "0.18.324-dev1",
       "renderedBytes": 1465,
-      "renderedSha256": "1869e1c301e2ef5b7f9617b7fe6b6daea44d81385e2282ca1abd48e6f571e561",
+      "renderedSha256": "e94a42c576b01bc973a1757918a60356fa7c58f2d94ca2c9b3fd58f5c0ed365a",
       "sourceId": "blocked-task-fallback",
       "template": "instructions/blocked-task-fallback.instructions.md",
       "templateBytes": 1958,
@@ -27,12 +27,12 @@
       "fallback": {
         "destination": ".github/copilot/context-fallbacks/agent-dispatch/session-guidance.md",
         "renderedBytes": 1014,
-        "renderedSha256": "2ea96f698f79e1819ef8db50021237b3ad2a3cd4fde8d8aebdc7a4e6595ea6d5"
+        "renderedSha256": "75a6ad511a895d1ae14f654edc4d4f9ae57037be1eb9c0eec528d9da32e0179a"
       },
       "plugin": "agent-dispatch@copilot-extensions",
-      "pluginVersion": "0.18.323-dev1",
+      "pluginVersion": "0.18.324-dev1",
       "renderedBytes": 1440,
-      "renderedSha256": "a2dd123444d5563a2033c7711199a7a1b947981eec08240b7d394052c163eabb",
+      "renderedSha256": "8e9add199d249affa2ba3b3fae6ea32ed3fb522c9a858a84317e877339da293b",
       "sourceId": "session-guidance",
       "template": "instructions/session-guidance.instructions.md",
       "templateBytes": 244,
@@ -46,12 +46,12 @@
       "fallback": {
         "destination": ".github/copilot/context-fallbacks/copilot-extensions-harness/commented-review-verdict.md",
         "renderedBytes": 1795,
-        "renderedSha256": "53e8995640ea118cfac068c94b9aad47e6da2a9aea12cb86cfd9dcbf4b2a9066"
+        "renderedSha256": "db30cbe6dce61c9a6361316edec7de2a6e967eb3cfdff794c5910c45bbe3946b"
       },
       "plugin": "copilot-extensions-harness@copilot-extensions",
-      "pluginVersion": "0.1.32-dev1",
+      "pluginVersion": "0.1.33-dev1",
       "renderedBytes": 1538,
-      "renderedSha256": "cb53351e3fa517fd7f2e055029278ccc367f3a603aa46ac3f6228ab507db846f",
+      "renderedSha256": "20e8c1fa379802633901f46ce4be5d638af95f032c3a5ebe3ffaf066e2e3545b",
       "sourceId": "commented-review-verdict",
       "template": "instructions/commented-review-verdict.instructions.md",
       "templateBytes": 979,
@@ -65,12 +65,12 @@
       "fallback": {
         "destination": ".github/copilot/context-fallbacks/copilot-extensions-harness/contribution-boundary.md",
         "renderedBytes": 1246,
-        "renderedSha256": "fe6b1abd215cf4cdd84ac52d5889b47f4a2baa06484d2e9d9800a3fe04545914"
+        "renderedSha256": "e8623555e86078f143d4011762d92ccabac6b7ac404574cfcef854bb1f99ebbd"
       },
       "plugin": "copilot-extensions-harness@copilot-extensions",
-      "pluginVersion": "0.1.32-dev1",
+      "pluginVersion": "0.1.33-dev1",
       "renderedBytes": 1523,
-      "renderedSha256": "1e2011c270b7c99fab5b85c4a0afc05d48429b0c7dc810c193a20e6b6d9264af",
+      "renderedSha256": "b8cfc9ee20d5efcddbda6ad968a2cafa1e336a12a550fd44629fa011f0f87e49",
       "sourceId": "contribution-boundary",
       "template": "instructions/contribution-boundary.instructions.md",
       "templateBytes": 439,
@@ -84,12 +84,12 @@
       "fallback": {
         "destination": ".github/copilot/context-fallbacks/copilot-extensions-harness/cross-repo-debug-tracking.md",
         "renderedBytes": 3016,
-        "renderedSha256": "78d5b2e09998b9a28d8c03001d11447b102e5b2043870ed218b41eed590dc3eb"
+        "renderedSha256": "d79e779fd5032e609d9b92c67738329cc277838fc5667429196ee096c8fea7d5"
       },
       "plugin": "copilot-extensions-harness@copilot-extensions",
-      "pluginVersion": "0.1.32-dev1",
+      "pluginVersion": "0.1.33-dev1",
       "renderedBytes": 1543,
-      "renderedSha256": "1c2c62eb68738059aeba9f29b92888f9ebf53bc5d718bcb6633fcf32fea988f8",
+      "renderedSha256": "93da67828f37cb50c64cba7f8da94dba27f15ad48c9a47b1f5171ad99cb99ed5",
       "sourceId": "cross-repo-debug-tracking",
       "template": "instructions/cross-repo-debug-tracking.instructions.md",
       "templateBytes": 2196,
@@ -103,12 +103,12 @@
       "fallback": {
         "destination": ".github/copilot/context-fallbacks/copilot-extensions-harness/validate-and-promote-triage.md",
         "renderedBytes": 2277,
-        "renderedSha256": "337503084db8ccbbee096ccea8d0de6d008cb17955362545e6699adc2f4ab9b3"
+        "renderedSha256": "5ffb41e4a7260f933d2dba2c65d82ffc3a7a76b4e45113d98f7ce53e5d1c07c3"
       },
       "plugin": "copilot-extensions-harness@copilot-extensions",
-      "pluginVersion": "0.1.32-dev1",
+      "pluginVersion": "0.1.33-dev1",
       "renderedBytes": 1553,
-      "renderedSha256": "0328d57dac737f66ca333bc8c553596219c2744a71d51a77825431b972fc7e7c",
+      "renderedSha256": "74a169436e703463ab23e45929d9d2fc9aff6b2be017b6f183b6f2ff51bdf795",
       "sourceId": "validate-and-promote-triage",
       "template": "instructions/validate-and-promote-triage.instructions.md",
       "templateBytes": 1451,

@@ -39,7 +39,7 @@ def _release_payload(destination: Path, plugin: str) -> Path:
         messages = materializer["materialize_uv_editable_ref_into"](
             source_consumer_dir=source, dest_consumer_dir=payload, canonical_root=ROOT,
         )
-        messages += materializer["mie"].materialize_ref_into(
+        messages += materializer["materialize_installer_engine_ref_into"](
             source_consumer_dir=source, dest_consumer_dir=payload, canonical_root=ROOT,
         )
     finally:

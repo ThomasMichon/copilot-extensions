@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Generate checked-in payload-local command shims from plugin manifests."""
 from __future__ import annotations
-
+import ast
+import sys
 import argparse
 import hashlib
 import json
@@ -10,13 +11,11 @@ import re
 import stat
 from pathlib import Path
 from typing import Any
-
 REPO = Path(__file__).resolve().parents[2]
 TEMPLATES = Path(__file__).resolve().parent / "templates"
 SCHEMA = "copilot-extensions.payload-invocation"
 LEGACY_VERSION = 1
 VERSION = 2
-
 _PLUGIN = re.compile(r"^[a-z][a-z0-9-]*$")
 _COMMAND = re.compile(r"^[a-z][a-z0-9-]*$")
 _MODULE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$")
@@ -33,8 +32,9 @@ _PROVISION_MODES = {"snapshot", "direct"}
 _INSTALLATION_CONTEXT_MODES = {"legacy", "required"}
 
 
-def _eligible_core_runtime_plugins() -> set[str]:
-    marketplace_path = REPO / ".github" / "plugin" / "marketplace.json"
+def _eligible_core_runtime_plugins(canonical_root: Path | None = None) -> set[str]:
+    canonical_root = canonical_root or REPO
+    marketplace_path = canonical_root / ".github" / "plugin" / "marketplace.json"
     try:
         marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -59,7 +59,7 @@ def _eligible_core_runtime_plugins() -> set[str]:
             or not isinstance(source, str)
         ):
             continue
-        plugin_root = REPO / source
+        plugin_root = canonical_root / source
         if (plugin_root / "pyproject.toml").is_file():
             eligible.add(name)
     return eligible
@@ -82,7 +82,7 @@ def _load_command(path: Path, value: object, *, label: str) -> dict[str, str]:
     return command
 
 
-def load_manifest(path: Path) -> dict[str, Any]:
+def load_manifest(path: Path, *, canonical_root: Path | None = None) -> dict[str, Any]:
     data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
     manifest_version = data.get("version")
     if (
@@ -240,7 +240,7 @@ def load_manifest(path: Path) -> dict[str, Any]:
     ):
         raise ValueError(f"{path}: invalid catalogGate: {catalog_gate!r}")
     if installation_context == "required":
-        if plugin not in _eligible_core_runtime_plugins():
+        if plugin not in _eligible_core_runtime_plugins(canonical_root or REPO):
             raise ValueError(
                 f"{path}: installationContext required is limited to "
                 "runtime-bearing core suite plugin identities"
@@ -769,8 +769,10 @@ def render(
     return rendered
 
 
-def expected_files(manifest: Path) -> dict[Path, str | bytes]:
-    data = load_manifest(manifest)
+def expected_files(manifest: Path, *, canonical_root: Path | None = None) -> dict[Path, str | bytes]:
+    root = canonical_root or REPO
+    templates = root / "libs/payload-invocation/templates"
+    data = load_manifest(manifest, canonical_root=root)
     installer = str(data["installer"])
     protected_paths: set[Path] = set()
     for suffix in (".sh", ".ps1"):
@@ -791,27 +793,16 @@ def expected_files(manifest: Path) -> dict[Path, str | bytes]:
         dispatcher = data["payloadDispatcher"]
         assert isinstance(dispatcher, dict)
         for path, template in (
-            (
-                output / command_id,
-                "dispatcher-posix.tmpl" if dispatcher["posix"] else "posix-shim.tmpl",
-            ),
-            (
-                output / f"{command_id}.ps1",
-                "dispatcher-powershell.tmpl"
-                if dispatcher["windows"]
-                else "powershell-shim.tmpl",
-            ),
+            (output / command_id, "dispatcher-posix.tmpl" if dispatcher["posix"] else "posix-shim.tmpl"),
+            (output / f"{command_id}.ps1",
+             "dispatcher-powershell.tmpl" if dispatcher["windows"] else "powershell-shim.tmpl"),
             (output / f"{command_id}.cmd", "cmd-shim.tmpl"),
         ):
             if path in protected_paths:
                 raise ValueError(f"{manifest}: generated path collision: {path}")
             if path in generated:
                 raise ValueError(f"{manifest}: duplicate generated path: {path}")
-            generated[path] = render(
-                (TEMPLATES / template).read_text(encoding="utf-8"),
-                data,
-                command=command,
-            )
+            generated[path] = render((templates / template).read_text(encoding="utf-8"), data, command=command)
     catalog_prefix = "catalog-multi" if data["multiCommandManifest"] else "catalog"
     posix_catalog_template = (
         "catalog-posix-shell.tmpl"
@@ -819,35 +810,22 @@ def expected_files(manifest: Path) -> dict[Path, str | bytes]:
         else f"{catalog_prefix}-posix.tmpl"
     )
     catalog_outputs: tuple[tuple[Path, str], ...] = (
-        (
-            manifest.parent / "scripts" / "emit-command-catalog.sh",
-            posix_catalog_template,
-        ),
-        (
-            manifest.parent / "scripts" / "emit-command-catalog.ps1",
-            f"{catalog_prefix}-powershell.tmpl",
-        ),
+        (manifest.parent / "scripts" / "emit-command-catalog.sh", posix_catalog_template),
+        (manifest.parent / "scripts" / "emit-command-catalog.ps1", f"{catalog_prefix}-powershell.tmpl"),
     )
     if data["inProcessCatalog"]:
-        catalog_outputs += (
-            (manifest.parent / "scripts" / "emit_command_catalog.py", "catalog-python.tmpl"),
-        )
+        catalog_outputs += ((manifest.parent / "scripts" / "emit_command_catalog.py", "catalog-python.tmpl"),)
     protected_paths.update(path for path, _template in catalog_outputs)
     command_paths = set(generated)
     collisions = sorted(command_paths & protected_paths)
     if collisions:
-        raise ValueError(
-            f"{manifest}: generated path collision: {', '.join(map(str, collisions))}"
-        )
+        raise ValueError(f"{manifest}: generated path collision: {', '.join(map(str, collisions))}")
     for path, template in catalog_outputs:
         if path in generated:
             raise ValueError(f"{manifest}: duplicate generated path: {path}")
-        generated[path] = render(
-            (TEMPLATES / template).read_text(encoding="utf-8"),
-            data,
-        )
+        generated[path] = render((templates / template).read_text(encoding="utf-8"), data)
     if data["catalogBinding"] or data["installerLifecycle"]:
-        binding_source = (TEMPLATES.parent / "command_binding.py").read_text(encoding="utf-8")
+        binding_source = (templates.parent / "command_binding.py").read_text(encoding="utf-8")
         binding_paths = [manifest.parent / "scripts" / "command_binding.py"]
         if data["catalogBindingModule"]:
             binding_paths.append(manifest.parent / str(data["catalogBindingModule"]))
@@ -860,15 +838,13 @@ def expected_files(manifest: Path) -> dict[Path, str | bytes]:
             )
             if lifecycle_path in generated or lifecycle_path in protected_paths:
                 raise ValueError(f"{manifest}: generated path collision: {lifecycle_path}")
-            generated[lifecycle_path] = (TEMPLATES.parent / "command_lifecycle.py").read_text(
-                encoding="utf-8"
-            )
+            generated[lifecycle_path] = (templates.parent / "command_lifecycle.py").read_text(encoding="utf-8")
             human_root = lifecycle_path.parent / "_lifecycle_human"
             # Bootstrap cannot import a runtime that the admitted child has yet to build.
             for name, source in (
-                ("__init__.py", REPO / "libs/update-telemetry/src/update_telemetry/human.py"),
-                ("redact.py", REPO / "libs/update-telemetry/src/update_telemetry/redact.py"),
-                ("capabilities.py", REPO / "libs/update-telemetry/src/update_telemetry/capabilities.py"),
+                ("__init__.py", root / "libs/update-telemetry/src/update_telemetry/human.py"),
+                ("redact.py", root / "libs/update-telemetry/src/update_telemetry/redact.py"),
+                ("capabilities.py", root / "libs/update-telemetry/src/update_telemetry/capabilities.py"),
             ):
                 asset = human_root / name
                 if asset in generated or asset in protected_paths:
@@ -878,12 +854,17 @@ def expected_files(manifest: Path) -> dict[Path, str | bytes]:
         import importlib.util
 
         spec = importlib.util.spec_from_file_location(
-            "_payload_runtime_admission", TEMPLATES.parent / "runtime_admission.py",
+            "_payload_runtime_admission", Path(__file__).resolve().parent / "runtime_admission.py",
         )
         assert spec and spec.loader
         toolkit = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(toolkit)
-        for relative, content in toolkit.expected_files(REPO).items():
+        previous_bytecode = sys.dont_write_bytecode
+        try:
+            sys.dont_write_bytecode = True
+            spec.loader.exec_module(toolkit)
+        finally:
+            sys.dont_write_bytecode = previous_bytecode
+        for relative, content in toolkit.expected_files(root).items():
             path = manifest.parent / "scripts" / "_runtime_admission" / relative
             if path in generated or path in protected_paths:
                 raise ValueError(f"{manifest}: generated path collision: {path}")
@@ -898,65 +879,119 @@ def display_path(path: Path) -> str:
         return str(path)
 
 
-def process_manifest(manifest: Path, *, check: bool) -> list[str]:
-    errors: list[str] = []
-    for path, expected in expected_files(manifest).items():
-        executable = (
-            path.suffix == "" or path.name == "emit-command-catalog.sh"
-            or "_runtime_admission" in path.parts and path.suffix == ".sh"
-        )
-        if check:
+def write_generated(path: Path, content: str | bytes) -> None:
+    """Use the same byte, newline and executable contract in every owned venue."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(content, bytes):
+        path.write_bytes(content)
+    else:
+        path.write_text(content, encoding="utf-8", newline="\n")
+    if (
+        path.suffix == "" or path.name == "emit-command-catalog.sh"
+        or "_runtime_admission" in path.parts and path.suffix == ".sh"
+    ):
+        path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+
+def validate_output_paths(manifest: Path, outputs: dict[Path, str | bytes]) -> None:
+    """Validate the complete normal output inventory without requiring mirrors."""
+    root = manifest.parent.absolute()
+    planned = {path.absolute() for path in outputs if isinstance(path, Path)}
+    for path, content in outputs.items():
+        if not isinstance(path, Path) or not isinstance(content, (str, bytes)):
+            raise ValueError(f"{manifest}: invalid generated output inventory")
+        path = path.absolute()
+        if ".." in path.parts or not path.is_relative_to(root):
+            raise ValueError(f"{manifest}: generated output escapes its payload: {path}")
+        if any(parent in planned for parent in path.parents):
+            raise ValueError(f"{manifest}: generated output path conflict: {path}")
+        for component in (path, *path.parents):
+            if component.exists() or component.is_symlink():
+                info = component.lstat()
+                if (
+                    stat.S_ISLNK(info.st_mode)
+                    or getattr(info, "st_file_attributes", 0) & 0x400
+                    or not (stat.S_ISREG(info.st_mode) if component == path else stat.S_ISDIR(info.st_mode))
+                    or stat.S_ISREG(info.st_mode) and info.st_nlink != 1
+                ):
+                    raise ValueError(f"{manifest}: generated output has unsafe custody: {component}")
+            if component == root:
+                break
+
+
+def source_check(manifest: Path, *, canonical_root: Path | None = None) -> list[str]:
+    """Validate canonical production, not the freshness of committed mirrors."""
+    outputs = expected_files(manifest, canonical_root=canonical_root)
+    validate_output_paths(manifest, outputs)
+    errors = []
+    for path, content in outputs.items():
+        if path.suffix == ".py":
             try:
-                actual = (
-                    path.read_bytes() if isinstance(expected, bytes)
-                    else path.read_text(encoding="utf-8")
-                )
-            except OSError:
-                actual = b"" if isinstance(expected, bytes) else ""
-            if actual != expected:
-                errors.append(f"{display_path(path)}: generated content is stale")
-            if (
-                executable
-                and os.name != "nt"
-                and path.exists()
-                and not path.stat().st_mode & stat.S_IXUSR
-            ):
-                errors.append(f"{display_path(path)}: POSIX shim is not executable")
+                ast.parse(content, filename=str(path))
+            except (SyntaxError, ValueError) as error:
+                errors.append(f"{display_path(path)}: invalid canonical generated Python: {error}")
+    return errors
+
+
+def check_generated(path: Path, expected: str | bytes, *, exact_bytes: bool = False) -> list[str]:
+    errors = []
+    try:
+        actual = path.read_bytes() if exact_bytes or isinstance(expected, bytes) else path.read_text(encoding="utf-8")
+    except OSError:
+        actual = b"" if exact_bytes or isinstance(expected, bytes) else ""
+    wanted = expected.encode("utf-8") if exact_bytes and isinstance(expected, str) else expected
+    if actual != wanted:
+        errors.append(f"{display_path(path)}: generated content is stale")
+    if (
+        (path.suffix == "" or path.name == "emit-command-catalog.sh"
+         or "_runtime_admission" in path.parts and path.suffix == ".sh")
+        and os.name != "nt" and path.exists() and not path.stat().st_mode & stat.S_IXUSR
+    ):
+        errors.append(f"{display_path(path)}: POSIX shim is not executable")
+    return errors
+
+
+def process_manifest(manifest: Path, *, check: bool, canonical_root: Path | None = None) -> list[str]:
+    errors: list[str] = []
+    outputs = expected_files(manifest, canonical_root=canonical_root)
+    validate_output_paths(manifest, outputs)
+    for path, expected in outputs.items():
+        if check:
+            errors.extend(check_generated(path, expected))
             continue
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if isinstance(expected, bytes):
-            path.write_bytes(expected)
-        else:
-            path.write_text(expected, encoding="utf-8", newline="\n")
-        if executable:
-            path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+        write_generated(path, expected)
         print(f"generated {display_path(path)}")
     return errors
 
 
-def discover_manifests() -> list[Path]:
-    return sorted((REPO / "plugins").glob("*/payload-invocation.json"))
+def discover_manifests(canonical_root: Path | None = None) -> list[Path]:
+    return sorted(((canonical_root or REPO) / "plugins").glob("*/payload-invocation.json"))
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, canonical_root: Path | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("manifests", nargs="*", type=Path)
     parser.add_argument("--all", action="store_true", help="process every plugin manifest")
-    parser.add_argument("--check", action="store_true", help="fail when generated files drift")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--check", action="store_true", help="fail when actual generated files drift")
+    mode.add_argument("--source-check", action="store_true", help="validate canonical inputs and planned outputs without writing or requiring mirrors")
     args = parser.parse_args(argv)
 
-    manifests = discover_manifests() if args.all else [path.resolve() for path in args.manifests]
+    manifests = discover_manifests(canonical_root) if args.all else [path.resolve() for path in args.manifests]
     if not manifests:
         parser.error("provide a manifest or use --all")
 
     errors: list[str] = []
     for manifest in manifests:
-        errors.extend(process_manifest(manifest, check=args.check))
+        errors.extend(source_check(manifest, canonical_root=canonical_root) if args.source_check
+                      else process_manifest(manifest, check=args.check, canonical_root=canonical_root))
     if errors:
         print("\n".join(errors))
         return 1
     if args.check:
         print(f"payload-invocation: {len(manifests)} manifest(s) in sync")
+    elif args.source_check:
+        print(f"payload-invocation: {len(manifests)} canonical manifest(s) valid; output equality not claimed")
     return 0
 
 

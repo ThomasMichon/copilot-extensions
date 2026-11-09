@@ -305,6 +305,53 @@ def test_grouped_preparation_assets_refuse_unsafe_or_overlapping_targets(
     assert not driver.exists()
 
 
+def test_invocation_tooling_is_retained_and_rechecked_with_preparer(preparation_assets):
+    helper, payload, driver, _tool = preparation_assets
+    tooling = payload.parent / "libs/payload-invocation"
+    tooling.mkdir(parents=True)
+    names = ("generate.py", "runtime_admission.py")
+    for name in names:
+        (tooling / name).write_text("# pinned " + name + "\n", encoding="utf-8")
+    (payload / "launch-wrapper-assets.json").write_text(json.dumps({
+        "schema": "copilot-extensions.launch-wrapper-assets", "version": 1,
+        "canonicalDir": "libs/payload-invocation", "payloadDir": "scripts/libs/payload-invocation",
+        "files": list(names),
+    }), encoding="utf-8")
+    retained, _share = helper.retain(payload, driver)
+    for name in names:
+        assert (retained / "scripts/libs/payload-invocation" / name).read_bytes() == (
+            tooling / name
+        ).read_bytes()
+    (retained / "scripts/libs/payload-invocation/generate.py").write_text("damaged\n")
+    with pytest.raises(RuntimeError, match="preparation assets differ"):
+        helper.retain(payload, driver)
+
+
+@pytest.mark.parametrize("materialized", [False, True])
+def test_preparation_assets_refuse_shared_targets_across_manifests(preparation_assets, materialized):
+    helper, payload, driver, tool = preparation_assets
+    directory = "scripts/libs/payload-invocation"
+    library = payload.parent / "libs/payload-invocation" / tool.name
+    library.parent.mkdir(parents=True)
+    library.write_text("VALUE = 2\n", encoding="utf-8")
+    (payload / "packaged-assets.json").write_text(json.dumps({
+        "schema": "copilot-extensions.packaged-assets", "version": 2, "groups": [{
+            "canonicalDir": "tools", "payloadDir": directory, "files": [tool.name],
+        }],
+    }), encoding="utf-8")
+    (payload / "launch-wrapper-assets.json").write_text(json.dumps({
+        "schema": "copilot-extensions.launch-wrapper-assets", "version": 1,
+        "canonicalDir": "libs/payload-invocation", "payloadDir": directory, "files": [tool.name],
+    }), encoding="utf-8")
+    if materialized:
+        target = payload / directory / tool.name
+        target.parent.mkdir(parents=True)
+        target.write_text("VALUE = 1\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="Duplicate"):
+        helper.retain(payload, driver)
+    assert not driver.exists()
+
+
 def test_preparation_asset_change_during_freezing_is_not_published(preparation_assets, monkeypatch):
     helper, payload, driver, tool = preparation_assets
     freeze = helper.engine.freeze_inputs
