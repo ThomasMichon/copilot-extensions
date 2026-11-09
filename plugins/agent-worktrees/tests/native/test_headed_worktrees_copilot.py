@@ -370,10 +370,28 @@ class Mux {
             "tracking_path.mkdir(parents=True,exist_ok=True);"
             "record=tracking.create_new_record(sys.argv[2],'worktree/native-copilot',str(checkout),"
             "'native-copilot','fixture',cfg.detect_platform() if managed else 'win32',"
-            "tracking_path);print(json.dumps(str(record.yaml_path)))",
+            "tracking_path)\n"
+            "if sys.argv[3]=='embody':\n"
+            "    authority=cfg.inrepo_config_path(checkout);authority.parent.mkdir(parents=True,exist_ok=True)\n"
+            "    authority.write_text(json.dumps({'default_branch':'dev'}),encoding='utf-8')\n"
+            "print(json.dumps(str(record.yaml_path)))",
             checkout, worktree_id, control, mux_directory,
         )
         record = Path(initialized)
+        if public_embody:
+            git = shutil.which("git")
+            assert git, "The public caller requires a real fixture repository"
+            for arguments in (
+                ["init", "--initial-branch=dev"],
+                ["add", ".copilot-extensions/agent-worktrees/config.yaml"],
+                ["-c", "user.name=Native fixture", "-c", "user.email=fixture@example.invalid",
+                 "-c", "commit.gpgsign=false", "commit", "-m", "Declare fixture repository authority"],
+            ):
+                initialized_git = run_caller_owned(
+                    [git, *arguments], cwd=checkout, env=environment, timeout=15,
+                    max_stdout_bytes=8192, max_stderr_bytes=8192,
+                )
+                assert initialized_git.returncode == 0, initialized_git.stdout + initialized_git.stderr
         if manager:
             selected = runtime(
                 "import json;from agent_worktrees import config;"
