@@ -582,3 +582,21 @@ inventory; unsupported execution must not be reported as a successful gate.
   construction and real TTY interaction are still owed through the supported
   owner-only disposable Windows lane. This local preparation test is not a
   substitute for those or for the post-activation frozen-candidate proof.
+- Published Dev PR #11771 at
+  `44c6a116be96346b8cf48838aa7c9bf8a461cad5`; required CI passed and Copilot's
+  review reported no open issues, with actual Windows qualification still
+  pending.
+- Owner-only run 42715623014 tested that exact source. The new sparse
+  materialization regression passed in 11.789 seconds. Both fresh runtimes
+  constructed and project registration succeeded, but the terminal witness
+  failed before its readiness assertion (138.600 seconds for the whole case).
+  Retained output shows the project bootstrap and Manager UI with the current
+  uppercase `WORKTREES` tab; the old case-sensitive `Worktrees` predicate
+  never recognized it. The observed root exit remains a failure, not a pass.
+- The readiness predicate now accepts the tab's display casing while still
+  requiring an alternate-screen terminal and the named project bootstrap.
+  Focused controls reject missing-project, missing-terminal and startup-only
+  output. Input response, installed-process attribution, successful interactive
+  exit and strict negative-control classification remain mandatory. A new
+  exact-head full native result is required; rendered output alone is not
+  qualification.

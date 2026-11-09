@@ -450,6 +450,15 @@ def _visible(output):
     return re.sub(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))", "", text)
 
 
+def _picker_rendered(output):
+    text = _visible(output)
+    return (
+        b"\x1b[?1049h" in output
+        and "tty-harness" in text
+        and "worktrees" in text.casefold()
+    )
+
+
 def _image(console, handle):
     import ctypes
     from ctypes import wintypes
@@ -491,11 +500,7 @@ def _witness(shell, stub, env, project, diagnostics, manager_python, engine_pyth
             raise TimeoutError(f"{shell}: no {label} within the native 30-second boundary")
 
         try:
-            wait(lambda: (
-                b"\x1b[?1049h" in console.output
-                and "tty-harness" in _visible(console.output)
-                and "Worktrees" in _visible(console.output)
-            ), "rendered project Picker")
+            wait(lambda: _picker_rendered(console.output), "rendered project Picker")
             descendants = console.pin_descendants()
             offers = []
             for path in Path(env["TEMP"]).glob("ce-terminal-*/request.json"):
@@ -1010,6 +1015,17 @@ def test_native_cmd_project_binstub_handles_space_path(tmp_path):
         code = console.wait(5000)
     assert code == 7, console.output.decode("utf-8", "replace")
     assert b"NATIVE PROJECT COMMAND REACHED" in console.output
+
+
+def test_picker_readiness_accepts_tab_casing_but_requires_project_and_alternate_screen():
+    for label in (b"Worktrees", b"WORKTREES"):
+        assert _picker_rendered(b"\x1b[?1049hWorktree Picker - tty-harness\n" + label)
+    for output in (
+        b"tty-harness WORKTREES",
+        b"\x1b[?1049hWorktree Picker - tty-harness\nResolving project binding",
+        b"\x1b[?1049hWorktree Manager\nWORKTREES",
+    ):
+        assert not _picker_rendered(output)
 
 
 def test_sparse_candidate_materializes_invocation_admission_toolkit(tmp_path):
