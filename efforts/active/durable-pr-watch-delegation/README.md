@@ -314,8 +314,13 @@ The [size-qualified response contract](bounded-report-response.md), reviewed in
 #11694 under #11692,
 reuses the existing 8 MiB channel while preserving current 32 KiB caller-aware
 handler/report defaults. Its opt-in SDK prerequisite merged in #11699; the
-parallel report profile and native capture/client budget composition remain
-separate. SDK source qualification is not installed or provider acceptance.
+parallel report profile and native capture/client budget composition merged
+in #11702. Their finite source qualification is not explicit standalone
+configuration, installed hosting or provider acceptance.
+The [explicit standalone report-host proposal](standalone-report-host.md)
+selects the existing reader/native adapter and actual SDK handler ceiling
+through strict optional host configuration. Review precedes implementation;
+fresh isolated qualification is not retained-host enrollment or rollout.
 
 - [x] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence)
   (merged in #10380; implementation, provider and adoption gates remain).
@@ -1068,13 +1073,23 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
+- [x] Qualify the finite opt-in v2 report/native-budget composition (#11702):
+  259 focused cases cover actual native-child, SDK/Gateway TLS and source CLI
+  delivery above 1 MiB under an 8 MiB selection, encoded/capture/client limits,
+  mixed peers, lifetime/backpressure and joined cleanup. Ordinary native
+  1 MiB defaults and v1 raw-JSON compatibility/32 KiB encoded limits remain.
+  The actor-free packet passes 4,665; all six finite
+  [response-contract source obligations](bounded-report-response.md#serial-delivery-and-validation)
+  are resolved. Explicit standalone configuration, installed/live-provider,
+  native Windows and broader CLI/HTTP/Dispatch acceptance remain open.
+
 - [x] Qualify the finite opt-in caller-aware SDK response prerequisite (#11699):
   152 focused handler/caller/local cases cover actual larger TLS delivery,
   bounded construction/emission, legacy/local refusal, ACK backpressure,
   expiry, disconnect, withdrawal and joined cleanup. The actor-free unit
-  packet passes 4,665. PR report-v2/native-budget composition, the combined
-  response-contract validation, installed/live-provider, native Windows and
-  full CLI/HTTP acceptance remain open.
+  packet passes 4,665. The report-v2/native-budget composition and combined
+  response-contract source validation subsequently merged in #11702 above;
+  installed/live-provider, native Windows and full CLI/HTTP acceptance remain open.
 
 - [x] Qualify the finite optional selected GitHub.com report owner (#11686):
   actual configuration/strict account policy, explicit verified CLI-store
