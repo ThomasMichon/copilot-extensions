@@ -250,7 +250,8 @@ def pool_lane_load(
     accounting: ReservationAccountability | None = None,
     ahead_of: tuple[float, str] | None = None,
     cutoff: int | None = None,
-    exclude_task: str | None = None,
+    exclude_key: str | None = None,
+    exclude_waiter: str | None = None,
 ) -> int:
     """Lanes held by running bodies plus suspended reactivations waiting for one.
 
@@ -259,7 +260,9 @@ def pool_lane_load(
     fresh placements, in the order they asked; ``ahead_of`` counts only the
     waiters before that one. Classification stops once the load reaches
     ``cutoff``, so a saturated pool never classifies its remaining history.
-    ``exclude_task`` omits that task's own rows when it asks for its own lane.
+    A body asking for its own lane omits only its waking reservation
+    (``exclude_key``) and its own waiter entry (``exclude_waiter``); older
+    accountable attempts of the same task still count.
     """
     waiting = conn.execute(
         "SELECT a.task_id, a.lane_wait_since FROM task_pool_assignments a"
@@ -272,7 +275,7 @@ def pool_lane_load(
     ).fetchall()
     load = sum(
         1 for row in waiting
-        if row["task_id"] != exclude_task
+        if row["task_id"] != exclude_waiter
         and (ahead_of is None or (row["lane_wait_since"], row["task_id"]) < ahead_of)
     )
     if cutoff is not None and load >= cutoff:
@@ -286,7 +289,7 @@ def pool_lane_load(
         " WHERE a.registration_id = ? AND a.machine = ? AND a.env = ?",
         identity,
     ):
-        if exclude_task is not None and row["task_id"] == exclude_task:
+        if exclude_key is not None and row["key"] == exclude_key:
             continue
         if row["state"] == SpawnState.COLD and row["lane_recovery_requested_at"] is None:
             load += accounting.send_unresolved(row)

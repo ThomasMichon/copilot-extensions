@@ -123,10 +123,14 @@ class SpawnHistoryMixin:
         permit exactly one configured pool instance is bound to it, so it keeps
         holding that lane instead of blocking every pool. Ambiguous or unmatched rows
         are reported and left untouched; nothing is fenced, released or rewritten.
+        A row with no recorded worktree (an in-flight launch) is not safely
+        adoptable, because pool publication requires that workspace; it is
+        reported as ``workspace_unrecorded`` and can be adopted once recorded.
         Every row stays unresolved while the pool catalog is not ready, since an
         incomplete catalog cannot prove a pool is the only match. An adopted row is
         accounting-only: it gains no pool recovery assignment, so a parked legacy
-        body keeps its legacy cold-resume owner.
+        body keeps its legacy cold-resume owner, which still waits for a free
+        lane in its bound pool before restarting the body.
         """
         if apply and (not permitted or not reason.strip()):
             raise TaskError("legacy capacity adoption requires permission and a reason")
@@ -158,6 +162,10 @@ class SpawnHistoryMixin:
                 ]
                 if not catalog.ready:
                     unresolved["catalog_not_ready"].append(row["key"])
+                elif len(matches) == 1 and not row["worktree"]:
+                    # A bound row must publish into its recorded workspace; a
+                    # launch that has not recorded one stays legacy for now.
+                    unresolved["workspace_unrecorded"].append(row["key"])
                 elif len(matches) == 1:
                     adopt.append((row, matches[0]))
                 else:

@@ -285,47 +285,76 @@ def recovery_wake(conn: sqlite3.Connection, task: Task, wake_id: str) -> bool:
     )
 
 
-def _admit_cold_wake(owner: Any, wake: Any) -> None:
-    """Route any other wake of a parked pool body through lane admission.
+def admit_cold_lane(owner: Any, row: sqlite3.Row) -> None:
+    """Refuse restarting a parked pool body while its bound pool is full.
 
-    A detached-run completion or other wake for a cold body would otherwise run
-    it without a lane. Reacquire the lane atomically, or defer the wake without
-    spending an attempt while the pool is full.
+    Runs inside the reservation's write transaction for every route that
+    restarts a cold body (legacy supervisor resume, detached-run completion or
+    other non-recovery wakes). The lane is the reservation's immutable pool
+    binding, so adopted accounting-only bindings are admitted too. A
+    reactivation already admitted by recovery reconciliation is not rechecked.
+    The refusal is send-unresolved, so wake drains defer without spending an
+    attempt and the legacy resume route retries later.
     """
     from .queue_execution_custody import ExecutionSendUnresolved
     from .queue_pool_placement import pool_lane_load
     catalog = getattr(owner, "_pool_catalog_from_conn", None)
-    if catalog is None:
+    if row["state"] != SpawnState.COLD or catalog is None:
         return
-    with owner._connect() as conn:
-        conn.execute("BEGIN")
-        assignment = recovery_assignment(conn, wake.task_id)
-        reservation = assignment and conn.execute(
-            "SELECT * FROM spawn_reservations WHERE key=?", (assignment["reservation_key"],),
+    with owner._connect() as probe:
+        binding = probe.execute(
+            "SELECT registration_id, machine, env FROM pool_reservation_bindings WHERE reservation_key=?",
+            (row["key"],),
         ).fetchone()
-        if reservation is None or reservation["state"] != SpawnState.COLD:
+        if binding is None:
             return
-        identity = (assignment["registration_id"], assignment["machine"], assignment["env"])
+        admitted = probe.execute(
+            "SELECT 1 FROM task_pool_assignments WHERE reservation_key=? AND assignment_released=0"
+            " AND recovery_requested_at IS NOT NULL", (row["key"],),
+        ).fetchone()
+        if admitted is not None:
+            return
+        identity = (binding["registration_id"], binding["machine"], binding["env"])
         pool = next(
-            (d for d in catalog(conn, now=owner._now(None)).definitions if d.identity == identity), None,
+            (d for d in catalog(probe, now=owner._now(None)).definitions if d.identity == identity), None,
         )
-    if pool is None:
-        return
-
-    def lane_guard(row: sqlite3.Row) -> None:
-        if row["state"] != SpawnState.COLD:
+        if pool is None:
             return
-        with owner._connect() as probe:
-            load = pool_lane_load(
-                probe, identity, cutoff=pool.max_concurrent, exclude_task=row["task_id"],
-            )
-        if load >= pool.max_concurrent:
-            raise ExecutionSendUnresolved("cold pool body is waiting for a free lane")
+        load = pool_lane_load(
+            probe, identity, cutoff=pool.max_concurrent,
+            exclude_key=row["key"], exclude_waiter=row["task_id"],
+        )
+    if load >= pool.max_concurrent:
+        raise ExecutionSendUnresolved("cold pool body is waiting for a free lane")
 
+
+def _admit_cold_wake(owner: Any, wake: Any) -> None:
+    """Route any other wake of a parked pool body through lane admission.
+
+    A detached-run completion or other wake for a cold body would otherwise run
+    it without a lane. Reacquire the lane atomically (``record_spawn`` applies
+    ``admit_cold_lane``), or defer the wake while the pool is full. A body with
+    no recovery assignment (an adopted legacy binding) uses its latest attempt.
+    """
+    with owner._connect() as conn:
+        assignment = recovery_assignment(conn, wake.task_id)
+        reservation = conn.execute(
+            "SELECT s.* FROM spawn_reservations s"
+            " JOIN pool_reservation_bindings b ON b.reservation_key = s.key WHERE s.key=?",
+            (assignment["reservation_key"],),
+        ).fetchone() if assignment else conn.execute(
+            "SELECT s.* FROM spawn_reservations s"
+            " JOIN pool_reservation_bindings b ON b.reservation_key = s.key"
+            " WHERE s.task_id=? AND s.attempt = ("
+            "SELECT MAX(attempt) FROM spawn_reservations WHERE task_id=?)",
+            (wake.task_id, wake.task_id),
+        ).fetchone()
+    if reservation is None or reservation["state"] != SpawnState.COLD:
+        return
     owner.record_spawn(
         reservation["key"], session_handle=reservation["session_handle"],
         worktree=reservation["worktree"], startup_complete=True,
-        startup_revision=reservation["startup_revision"], lane_guard=lane_guard,
+        startup_revision=reservation["startup_revision"],
     )
 
 

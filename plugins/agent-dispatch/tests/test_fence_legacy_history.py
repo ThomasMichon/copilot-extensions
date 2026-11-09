@@ -242,7 +242,7 @@ def test_adopt_legacy_binds_accountable_rows_to_their_only_pool(queue, capacity)
     from tests.test_pool_placement import place, pool, publish, task
     live = queue.create("live")
     legacy, _ = queue.reserve_spawn(live.id, now=1000.0)
-    queue.record_spawn(legacy.key, session_handle="native-live", now=1000.0)
+    queue.record_spawn(legacy.key, session_handle="native-live", worktree="live-worktree", now=1000.0)
     publish(queue, pool(capacity=capacity))
     with pytest.raises(TaskError, match="legacy capacity"):
         place(queue, task(queue))
@@ -336,6 +336,109 @@ def test_adopted_cold_legacy_body_keeps_its_legacy_resume_owner(queue, tmp_path)
     assert resumed == ["legacy-session"]
     assert queue.get_reservation(reservation.key).state == "spawned"
     assert queue.get(parked.id).status == "started"
+
+
+def _adopted_cold_body(queue):
+    from tests.test_pool_placement import pool, publish
+
+    parked = queue.create("parked")
+    reservation, _ = queue.reserve_spawn(parked.id)
+    queue.record_spawn(
+        reservation.key, startup_complete=True, startup_revision=1,
+        session_handle="local-body:legacy-session", worktree="legacy-worktree",
+    )
+    queue.claim_one("legacy-owner", task_id=parked.id)
+    queue.start(parked.id, "legacy-owner")
+    queue.suspend(parked.id, "legacy-owner", reason="turn ended")
+    queue.record_cold(reservation.key)
+    publish(queue, pool())
+    assert queue.adopt_legacy_capacity(apply=True, permitted=True, reason="migration")["adopted"] == 1
+    return parked, reservation
+
+
+def _occupy_pool(queue):
+    from tests.test_pool_placement import place, record_native, task
+
+    running, _ = place(queue, task(queue))
+    record_native(queue, running)
+    queue.record_spawn(running.key, session_handle="native", startup_complete=True, startup_revision=1)
+    return running
+
+
+def _free_lane(queue, key):
+    with queue._connect() as conn:
+        conn.execute("UPDATE spawn_reservations SET state='cold' WHERE key=?", (key,))
+
+
+def test_adopted_cold_body_legacy_resume_waits_for_a_free_lane(queue, tmp_path):
+    from agent_dispatch.ordinary_agent_storage import reservation_native_facts
+    from agent_dispatch.supervisor import Supervisor
+    from tests.test_supervisor import QueueBackedClient
+
+    class FactsClient(QueueBackedClient):
+        def get_reservation(self, key):
+            return {**super().get_reservation(key), **reservation_native_facts(queue, key)}
+
+    parked, reservation = _adopted_cold_body(queue)
+    running = _occupy_pool(queue)
+    queue.submit_steer(parked.id, fields={"continue": True}, sender="producer")
+    resumed = []
+    supervisor = Supervisor(
+        FactsClient(queue), repo=parked.repo, machine="host-a",
+        spawn_fn=lambda _task: pytest.fail("must resume the parked body, not replace it"),
+        local_body_target_dir_fn=lambda _sid: str(tmp_path),
+        local_body_verdict_fn=lambda _sid: "gone",
+        local_resume_fn=lambda sid, _prompt: resumed.append(sid) or True, nudge=False,
+    )
+    supervisor.release_resumed_cold_tasks()
+    assert resumed == []
+    assert queue.get_reservation(reservation.key).state == "cold"
+    assert queue.get_reservation(reservation.key).attempt == reservation.attempt
+    assert queue.get(parked.id).resume_requested
+    _free_lane(queue, running.key)
+    supervisor._resume_retry_after.clear()
+    assert supervisor.release_resumed_cold_tasks() == 1
+    assert resumed == ["legacy-session"]
+    assert queue.get_reservation(reservation.key).state == "spawned"
+
+
+def test_adopted_cold_body_detached_wake_waits_for_a_free_lane(queue):
+    from agent_dispatch.queue_execution_custody import ExecutionSendUnresolved
+    from agent_dispatch.queue_pool_recovery import prepare_recovery_wake
+
+    parked, reservation = _adopted_cold_body(queue)
+    waiter = queue.register_run_waiter(
+        parked.id, pid=123, host="host-a", start_token="waiter-start",
+        resume_worktree="legacy-worktree", command=["synthetic-wait"],
+    )
+    running = _occupy_pool(queue)
+    queue.recover_dead_run_waiter(
+        parked.id, generation=waiter["generation"], reason="external",
+        message="continue", sender="recovery",
+    )
+    [wake] = queue.list_run_waiter_wakes(parked.id)
+    with pytest.raises(ExecutionSendUnresolved, match="free lane"):
+        prepare_recovery_wake(queue, wake)
+    assert queue.get_reservation(reservation.key).state == "cold"
+    _free_lane(queue, running.key)
+    prepare_recovery_wake(queue, wake)
+    assert queue.get_reservation(reservation.key).state == "spawned"
+
+
+def test_adopt_legacy_leaves_a_launch_without_a_recorded_workspace_publishable(queue):
+    from tests.test_pool_placement import pool, publish
+
+    launching = queue.create("launching")
+    reservation, _ = queue.reserve_spawn(launching.id)
+    publish(queue, pool())
+    result = queue.adopt_legacy_capacity(apply=True, permitted=True, reason="migration")
+    assert result["adopted"] == 0
+    assert result["unresolved"]["workspace_unrecorded"] == [reservation.key]
+    with queue._connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM pool_reservation_bindings").fetchone()[0] == 0
+    queue.record_spawn(reservation.key, session_handle="local-body:launch", worktree="launch-worktree")
+    assert queue.get_reservation(reservation.key).session_handle == "local-body:launch"
+    assert queue.adopt_legacy_capacity(apply=True, permitted=True, reason="migration")["adopted"] == 1
 
 
 def test_client_posts_legacy_history_controls_with_control_identity():
