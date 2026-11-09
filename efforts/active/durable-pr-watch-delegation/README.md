@@ -285,10 +285,14 @@ The [explicit native reviewer-request contract](native-reviewer-request.md)
 cleared review in #11645; its finite native source merged in #11647.
 Windows, provider, installed and HTTP qualification remain open;
 request acceptance is not evidence that a fresh review exists.
-The [native creation-cancellation proposal](native-creation-cancellation.md)
-selects only the existing unpublished-reservation owner. Remote closure,
-reason-comment publication and abandoned-claim settlement remain separate;
-the proposal is not executing support or complete `pr-abandon` parity.
+The [native creation-cancellation contract](native-creation-cancellation.md)
+cleared review in #11651; its finite native source adapter merged in #11653 and selects only the
+existing unpublished-reservation owner. Remote closure, reason-comment
+publication and abandoned-claim settlement remain separate; source qualification
+is not installed support or complete `pr-abandon` parity.
+The [explicit native thread-read proposal](native-thread-read.md) reuses the
+existing checkout-free Worktrees read owner. It adds no transport or watcher;
+implementation, installed/HTTP qualification and thread resolution stay open.
 
 - [x] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence)
   (merged in #10380; implementation, provider and adoption gates remain).
@@ -1041,6 +1045,16 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
+- [x] Qualify finite native unpublished-creation cancellation (#11653):
+  exact full worktree/creation selection, original revision/reason recovery,
+  actual receiver declaration and one existing-owner dispatch. The final
+  cancellation/routing packet passes 149 cases with five platform skips;
+  actual creation/status/cancellation composition and old-caller subprocess
+  pass 82. Preserve unknown committed/lost outcomes, owner evidence,
+  frontend recovery inputs and source/sibling/claim/finalization custody.
+  Windows, installed/provider/HTTP and remote abandonment/comment/claim
+  integration remain open; this is not complete legacy parity.
+
 - [x] Qualify finite explicit-target native reviewer requests (#11647).
   Preserve tracked nudge selection, transport and no-op behavior; use the
   actual target/provider and distinguish API acceptance from a fresh verdict.
@@ -1319,6 +1333,101 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-08 - Native thread-read boundary proposed
+
+- Inspected the existing explicit Worktrees parser, neutral-CWD entry,
+  target/configuration resolution, report builder, ADO discussion reader and
+  dedicated native CLI consumers. Worktrees already supplies the read owner;
+  the dedicated client lacks the thin adapter.
+- Proposed the existing version-1 baseline without a new capability RPC or
+  provider transport. Preserve incomplete/null completeness, changed-candidate
+  evidence, nested provider fields and valid error reports; a successful read
+  is not writeback or merge authority.
+- This is a review-first contract only. Isolated parser/process/provider
+  qualification and implementation remain open, alongside the full parent
+  Plan and Validation Plan. No runtime, host or consumer activation changed.
+- Documentation lint has no errors; its root-effort size warning remains
+  open documentation-maintenance work under this parent. Split historical
+  journal material without losing canonical Plan/Validation/approval custody.
+
+### 2026-11-08 - Native cancellation merged; entire parent return
+
+- #11653 merged as `0887674795dc64228f973f90798412842d4c536c` at
+  22:48 PT after genuine current-head Copilot Approval `5822410308` on
+  `3d8b97d923777f3c32e4f9d41c74c83507071cbc`, no open findings and all three
+  required checks green. Normal managed completion used only the documented
+  missing-CODEOWNER exception. No review/CI or live-effect gate was waived.
+- Reconciled the source through normal `pr-complete`: seven redundant local
+  commits dropped with the owner's backup retained, source aligned to the
+  merged base, required contribution trailers present.
+- Read the entire canonical Plan and Validation Plan after merge, not only
+  the cancellation sub-contract. Credited only the finite source leaf above.
+  Retention/attention, all-publisher/protected-writer, full CLI/HTTP/Dispatch,
+  three-provider, installed/container/shadow and retained-origin gates stay open.
+- Next bounded source action: inspect existing explicit native thread-read
+  parser/result and consumer contracts, then propose the smallest missing
+  read-only CLI convergence boundary for review. Remote close/reason-comment
+  work remains separate; no new forge transport, ledger or live effect is
+  authorized by this selection.
+
+### 2026-11-08 - Native cancellation source qualification
+
+- Current-head Balanced review had no open issues but requested human
+  assessment of qualification history versus current guarantees. Replaced the
+  contract's iterative test-count narrative with a current-evidence table and
+  explicit remaining qualification; retained the complete correction history
+  here. No runtime guarantee or validation result changed.
+- Full review then identified missing blank-selector admission on the
+  governed peer path. Reused the existing parser validator before peer
+  selection/discovery; three managed-peer controls reproduce that boundary.
+  Final affected isolated suite: 149 passed, five platform skips.
+- The next bounded re-review added two distinct findings, repeated at five
+  locations: missing-stderr fallback and original-target recovery evidence.
+  Centralized text-only stderr handling and added frontend-owned original
+  selectors/reason without altering receiver evidence. The final affected
+  isolated subset passed 146 tests with five platform skips.
+- A subsequent Comment review could not run its full agentic suite. Addressed
+  missing-stdout diagnostics and redundant error fallback; retained malformed
+  owner fields under the reviewed payload-preservation contract. Documented
+  and tested full-receipt success output as the existing native convention,
+  rather than silently changing it to a lossy summary. The final affected
+  isolated subset passed 143 tests with five platform skips.
+- Current-head review on #11653 found that plain owner-error output hid the
+  frontend's unknown-outcome recovery guidance. Retained the owner error and
+  printed the distinct diagnostic; the affected isolated cancellation/routing
+  subset passed 139 tests with five platform skips, including two plain-output
+  controls. A fresh review is required for the correction.
+- Implemented the contract reviewed in #11651 as a thin native-only
+  `cancel-creation` frontend. The same selected receiver supplies read-only
+  support/attempt discovery and one existing cancellation-owner dispatch.
+  Original worktree, creation, revision and reason remain selected; no forge
+  transport, cancellation algorithm, resource ledger or remote close was added.
+- Bounded isolated native routing/process controls passed 167 tests with five
+  existing platform skips. Actual creation/status/cancellation composition,
+  receipt recovery, source/sibling/claim custody and an old caller subprocess
+  passed 82 tests. A committed cancellation with a lost response remains
+  `unknown`; no fallback or automatic replay occurs.
+- Two fixture corrections preserved the real owners: select a file rather
+  than the fixture's existing worktrees directory, and supply the fixture's
+  admitted project context. The legacy output control uses the real JSON
+  output boundary. Bootstrap HTTP 504 recovery changed only a disposable
+  vendor-download URL while retaining the pinned hash and isolation.
+- Source implementation is awaiting its own review. Windows execution,
+  installed/provider/HTTP qualification, remote abandonment/comment/claim
+  integration and the complete parent acceptance remain open.
+
+### 2026-11-08 - Merge the native cancellation contract and return to implementation
+
+- #11651 merged as `50b618a194ef8a5e11e6effc30ed4d4b21184dc1`
+  after genuine current-head Copilot approval with no findings and all three
+  required checks green. Normal source completion retained the existing
+  parent and source claims; the contract does not implement its frontend.
+- Re-read the complete parent Plan and Validation Plan after merge. Continue
+  the reviewed native-only local-cancellation adapter, actual selected receiver
+  discovery and isolated owner/process qualification. Remote abandonment,
+  all-publisher comment identity, HTTP, provider, installed and operational
+  acceptance remain open.
 
 ### 2026-11-08 - Merge the abandonment prerequisite and select local cancellation
 
