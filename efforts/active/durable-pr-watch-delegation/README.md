@@ -298,8 +298,13 @@ The [explicit native diff-read contract](native-diff-read.md), reviewed in
 #11659, defines a bounded
 checkout-free reader over the existing provider primitive while preserving
 tracked `pr-diff`, honest ADO refusal and unknown completeness/revision
-evidence. Finite receiver/frontend source is qualified below; installed,
+evidence. Finite receiver/frontend source merged in #11661; installed,
 live-provider and workspace generation acceptance remain independent.
+The proposed [existing-owner HTTP report boundary](owner-report-read.md)
+adds a read-only thread/diff exchange through the existing authenticated
+Gateway without treating raw reports as principal-bound generations.
+Review precedes implementation; large-report, native-command adopter,
+installed and live-provider acceptance remain separate.
 
 - [x] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence)
   (merged in #10380; implementation, provider and adoption gates remain).
@@ -1052,7 +1057,7 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
-- [x] Qualify the finite [explicit native diff-read source boundary](native-diff-read.md#compatibility-and-qualification)
+- [x] Qualify the finite [explicit native diff-read source boundary](native-diff-read.md#compatibility-and-qualification) (#11661)
   after contract review: 149 native cases with five Windows-only skips and
   362 actual owner/read/provider/tracked cases. Real subprocess provider
   methods retain target/endpoint selection, tracked compatibility and honest
@@ -1355,6 +1360,8 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+- [2026-11-09 - Native diff-read source merged; full parent return](journal/2026/11.09%20Native%20diff-read%20source%20merged.md)
 
 ### 2026-11-09 - Native diff-read source qualification
 
