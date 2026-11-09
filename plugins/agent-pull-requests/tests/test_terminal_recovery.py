@@ -31,6 +31,7 @@ def expires() -> int:
 
 def prepare(
     workspace: tuple, *, selected: dict | None = None, attempt: bool = True, capture: bool = False,
+    materialize: bool = False,
 ) -> tuple:
     operations, _, backend, original, initial, _ = workspace
     owner = operations.store
@@ -39,6 +40,11 @@ def prepare(
     recovery.adopt(lifecycle_checkpoint=lambda: None, expires_at=expires())
     load(operations, initial["id"])
     current = operations.cache.lookup(initial["scope"])["generation"]
+    if materialize:
+        operations.execute(
+            "lookup", {"number": current["scope"]["number"], "generation_id": current["id"]},
+            expires_at=expires(), checkpoint=lambda: None,
+        )
     intent = copy.deepcopy(selected if selected is not None else original)
     intent.update(scope=current["scope"], generation_id=current["id"])
     if intent["version"] == 2:

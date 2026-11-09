@@ -85,6 +85,7 @@ class ReplayStore:
         self, root: Path, namespace: str, *, clock: Callable[[], float] = time.time,
         service_identity: ReplayServiceIdentity | None = None,
         terminal_retention: bool = False, terminal_recovery: bool = False,
+        terminal_cache_retirement: bool = False,
     ) -> None:
         if type(terminal_retention) is not bool:
             raise ValueError("explicit terminal reader selection required")
@@ -92,6 +93,9 @@ class ReplayStore:
         if type(terminal_recovery) is not bool or terminal_recovery and not terminal_retention:
             raise ValueError("recovery reader requires explicit terminal reader selection")
         self.terminal_recovery = terminal_recovery
+        if type(terminal_cache_retirement) is not bool or terminal_cache_retirement and not terminal_recovery:
+            raise ValueError("cache retirement reader requires explicit recovery reader selection")
+        self.terminal_cache_retirement = terminal_cache_retirement
         if service_identity is not None and not isinstance(service_identity, ReplayServiceIdentity):
             raise ValueError("typed replay service identity required")
         self.root = Path(root)
@@ -174,6 +178,11 @@ class ReplayStore:
         mappings = "review_comment_mapping_version" in document
         terminal = "terminal_retention_version" in document
         recovery = "terminal_recovery_version" in document
+        retirement = "terminal_cache_retirement_version" in document
+        if retirement:
+            if not self.terminal_cache_retirement or not recovery:
+                raise ReplayStoreInvalid("terminal cache retirement reader unavailable for adopted owner")
+            names.update(("terminal_cache_retirement_version", "terminal_cache_retirement"))
         if recovery:
             if not self.terminal_recovery or not terminal:
                 raise ReplayStoreInvalid("terminal recovery reader unavailable for adopted owner")
@@ -244,6 +253,12 @@ class ReplayStore:
                 validate(document, self.namespace)
             except (KeyError, TypeError, ValueError):
                 raise ReplayStoreInvalid("invalid persisted terminal retention") from None
+        if retirement:
+            from .terminal_cache_retirement import validate as validate_retirement
+            try:
+                validate_retirement(document)
+            except (KeyError, TypeError, ValueError):
+                raise ReplayStoreInvalid("invalid persisted terminal cache retirement") from None
         WatchReplay(self.namespace, state=document["replay"], commit=lambda _state: None, clock=self.clock)
         if self._replay_reservation(document["replay"]) > capacities["replay_bytes"]:
             raise ReplayStoreInvalid("replay state exceeds its reserved capacity")
