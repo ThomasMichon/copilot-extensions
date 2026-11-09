@@ -113,6 +113,18 @@ def cmd_ready(args: argparse.Namespace) -> int:
     return 0 if result["ok"] else 1
 
 
+def readiness_project_unavailable(argv: list[str], message: str) -> int:
+    """Preserve strict readiness syntax and its pre-dispatch failure envelope."""
+    from . import pr_readiness
+
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+    add_parsers(parser.add_subparsers(dest="command", required=True))
+    args = parser.parse_args(argv)
+    result = pr_readiness.outcome(args.repo, args.number, error=message)
+    output._json_output(result) if args.json else print(result)
+    return 1
+
+
 def cmd_update(args):
     from . import pr_cli, pr_metadata
 

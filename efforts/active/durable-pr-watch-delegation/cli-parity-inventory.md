@@ -171,7 +171,7 @@ adoption and three-provider parity remain later acceptance, not this slice.
   authorized live-provider or installed-consumer evidence. Source tests and a
   merged proposal alone close neither this matrix nor the parent effort.
 
-The finite source candidate passes 52 Worktrees author/readiness/tracked-ready
+The finite source candidate passes 54 Worktrees author/readiness/tracked-ready
 controls and 84 native frontend cases with five Windows-only cases skipped on
 Linux. The actual frontend, Worktrees parser/resolver and Azure DevOps provider
 compose in one fixture; a separate real subprocess exercises capability and
@@ -186,3 +186,6 @@ outcome. Missing, empty or non-string capability providers refuse before
 dispatch. Synthesized failures use the same schema/version and retain the
 provider once resolved; both actual owner-result controls were rerun after
 that frontend correction.
+The actual projectless dispatcher also preserves the versioned not-attempted
+refusal after a valid delivered-policy capability probe, including project
+resolution exceptions and strict invalid-option rejection.

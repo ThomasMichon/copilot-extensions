@@ -253,3 +253,60 @@ def test_ready_actual_native_frontend_worktrees_and_provider(
         assert result["actions"]["draft"]["status"] == "not-attempted"
         assert result["provider"] is None and result["error"] == "no claimant"
         assert not backend.methods
+
+
+def test_ready_actual_frontend_without_registered_project_keeps_refusal(
+    backend: Backend, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.syspath_prepend(str(Path(__file__).parents[2] / "agent-pull-requests" / "src"))
+    from agent_pull_requests import __main__ as frontend, native_author
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cfg, "_ACTIVE_PROJECT", None)
+    policy = tmp_path / "worker.json"
+    policy.write_text(json.dumps({
+        "repo_name": "pr-worker",
+        "repos": {"pr-worker": {"anchor": str(tmp_path), "worktree_root": "",
+                              "pr": {"enabled": True, "provider": "azure-devops",
+                                     "repository": REPO, "api_base": ORG}}},
+    }), encoding="utf-8")
+    calls = []
+
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(argv[1])
+        with output.capture_json_output() as capture, redirect_stdout(StringIO()):
+            code = cli.main(argv[1:])
+        return subprocess.CompletedProcess(argv, code, capture.getvalue(), "")
+
+    monkeypatch.setattr(native_author, "run_command", run)
+    monkeypatch.setattr(frontend, "_WATCH_INVOCATION", None)
+    selector = tmp_path / "worktrees"
+    selector.touch()
+    assert frontend.main([
+        "ready", "--repo", REPO, "--number", "7", "--config", str(policy),
+        "--worktrees-command", str(selector), "--json",
+    ]) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["schema"] == pr_readiness.SCHEMA and result["version"] == 1
+    assert result["actions"]["draft"]["status"] == "not-attempted"
+    assert result["provider"] is None and "no registered invocation project" in result["error"]
+    assert calls == ["pr-author-capabilities", "pr-author-ready"]
+    assert not backend.methods
+
+
+def test_ready_project_resolution_exception_and_strict_syntax(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail(*args: Any) -> None:
+        raise ValueError("project registry unavailable")
+
+    monkeypatch.setattr(cli.front_door_cli, "resolve_invocation_project", fail)
+    argv = ["pr-author-ready", "--repo", REPO, "--number", "7", "--json"]
+    with output.capture_json_output() as capture:
+        assert cli.main(argv) == 1
+    result = json.loads(capture.getvalue())
+    assert result == pr_readiness.outcome(REPO, 7, error="project registry unavailable")
+    with pytest.raises(SystemExit) as exc:
+        cli.main([*argv, "--auto"])
+    assert exc.value.code == 2
