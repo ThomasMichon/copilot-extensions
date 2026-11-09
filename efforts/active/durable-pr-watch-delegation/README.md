@@ -277,10 +277,10 @@ details, not additional operator quotations or live deployment authority.
 
 _Operator-required outcome; agent-recommended slices and validation._
 
-The [CLI parity inventory](cli-parity-inventory.md) carries the next finite
-draft-to-ready contract, reviewed in #11641. Its Azure DevOps provider and explicit
-native invocation still need implementation and qualification; readiness
-does not grant merge consent or release a hold.
+The [CLI parity inventory](cli-parity-inventory.md) records the draft-to-ready
+contract reviewed in #11641 and its finite native source delivery in #11643.
+Windows, provider, installed and HTTP parity acceptance remain separate;
+readiness does not grant merge consent or release a hold.
 
 - [x] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence)
   (merged in #10380; implementation, provider and adoption gates remain).
@@ -1033,6 +1033,14 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
+- [x] Qualify finite explicit-target native draft readiness (#11643), preserving
+  tracked ready and legacy-hold behavior. The final owner packet passes 54 cases;
+  the native frontend passes 84 with five Windows-only skips and verified
+  cleanup. Actual delivered-policy/projectless refusal, target/provider
+  validation, versioned outcomes, single draft-only mutation and uncertain
+  result no-replay controls are covered. Windows/live-provider/installed/HTTP
+  parity and the broader CLI matrix remain open.
+
 - [x] Qualify finite standalone terminal mapping selection, missing/incompatible
   core and prior-constructor behavior, strict parser/rollback, fresh-only
   interrupted adoption and validation-only retained serving (#11639).
@@ -1293,6 +1301,39 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-08 - Specify explicit native reviewer requests before implementation
+
+- The existing CLI inventory's nudge gap is distinct from tracked Worktrees
+  selection. Its provider result records API acceptance, not a fresh verdict;
+  a generic subprocess failure cannot prove a request was not accepted.
+- The [finite proposed contract](native-reviewer-request.md) preserves tracked
+  syntax and no-op behavior, selects the existing target/provider owner and
+  distinguishes accepted requests, known no-ops, refusals and uncertainty.
+  Actual parser/provider, native-client and mixed-version validation remain
+  open pending review-first implementation.
+- No runtime, live request, installed adoption, legacy retirement or parent
+  acceptance row is completed by this source-only proposal.
+
+### 2026-11-08 - Merge native draft readiness and resume the CLI inventory
+
+- #11643 merged as `15601b6c7e5daa174dcfeb020fa2b7e50b6d9c3d` after
+  current-head Copilot approval with no findings, resolved threads and all
+  required CI green. The PR gate was awaited explicitly; two initially
+  reported green guards did not substitute for it.
+- The reviewed corrections preserve pre-dispatch refusals and diagnostics,
+  require provider evidence before dispatch, retain a versioned uncertain
+  result with its known provider, and cover the actual projectless dispatcher.
+  Final isolated source qualification is 54 owner and 84 native cases with
+  five Windows-only skips; source reconciliation retired only the five
+  redundant merged commits through the managed path.
+- Read both complete parent Plan/Validation sections after merge: 82 root and
+  11 companion rows remain unfinished. No provider, installed, HTTP parity,
+  full retention, all-publisher or parent completion is inferred.
+- Next: inspect the remaining native reviewer-request/nudge gap through its
+  existing Worktrees/provider owner and unsupported/no-op semantics, then
+  select the smallest compatible source refinement before changing behavior.
+  Protected credential work and host activation remain outside this slice.
 
 ### 2026-11-08 - Qualify explicit native draft readiness source
 
