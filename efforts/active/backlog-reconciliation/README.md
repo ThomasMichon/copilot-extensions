@@ -3102,6 +3102,10 @@ sources, transferring owners or turning partial/planning gains into completion.
 - [ ] Produce an evidence-backed prerequisite graph and sequencing plan for a
   stable harness that progresses toward vision, distinguishing independent
   parallel work from actual blockers.
+  The [historical-endpoint follow-through](<journal/2026/11.09 roadmap-receiving-routes.md#historical-endpoint-follow-through>)
+  routes nine retired tracking identities to their audited receiving slices
+  and leaves #9377 explicitly unqualified. Historical relationship counts,
+  scoped alternatives, actual owners and all completion gates remain unchanged.
 - [ ] _(Agent-recommended)_ Run larger, disjoint research waves, initially
   four sets of 50 issues, reusing unchanged admitted evidence and refreshing
   changed source/refinements rather than restarting the entire corpus.
