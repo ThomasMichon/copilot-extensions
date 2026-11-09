@@ -32,10 +32,12 @@ dependencies = [
     # Preserve the embedded libraries' ordinary external constraints.
     "pyyaml>=6.0",
     "pyyaml>=6.0.3",
+    "websockets>=15,<16",
 ]
 
 [dependency-groups]
 first-party-core = [
+    "agent-copilot-driver-core", "agent-repository-policy",
     "agent-process-telemetry", "agent-plugin-resolve", "agent-procutil",
     "agent-dropin-registry", "agent-plugin-activation", "agent-work-coalescing-singleton",
     "agent-zdd", "agent-remote-login-shell", "agent-machine-transport", "agent-ssh-manager",
@@ -44,6 +46,8 @@ first-party-core = [
 ]
 
 [tool.uv.sources]
+agent-copilot-driver-core = { path = "../libs/copilot-driver-core", editable = true }
+agent-repository-policy = { path = "../libs/repository-policy", editable = true }
 agent-single-instance-lease = { path = "../libs/single-instance-lease", editable = true }
 agent-ssh-manager = { path = "../libs/ssh-manager", editable = true }
 agent-process-telemetry = { path = "../libs/process-telemetry", editable = true }

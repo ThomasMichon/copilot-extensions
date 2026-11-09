@@ -16,6 +16,8 @@ import time
 from agent_procutil import no_window_kwargs
 from single_instance_lease import AlreadyRunningError, SingleInstance
 
+from agent_remote_driver.mux_observation_types import ObservationUnavailable
+
 
 class CreationUncertain(RuntimeError):
     """A dispatched mux client failed without disproving pane creation."""
@@ -27,6 +29,10 @@ def is_psmux(binary: str) -> bool:
 
 def has_session(binary: str, session: str, *, timeout: float = 2) -> bool:
     """Distinguish an absent mux session from an unavailable query."""
+    if is_psmux(binary):
+        from agent_remote_driver.mux_observation import observe_psmux
+
+        return observe_psmux(session, timeout=timeout).presence()
     result = subprocess.run(
         [binary, "has-session", "-t", session], capture_output=True, timeout=timeout,
         cwd=str(Path.home()), **no_window_kwargs(),
@@ -50,9 +56,12 @@ def session_gate(session: str, *, exists, enabled: bool):
     deadline = time.monotonic() + 15
     try:
         while True:
-            if exists():
-                yield False
-                return
+            try:
+                if exists():
+                    yield False
+                    return
+            except ObservationUnavailable:
+                pass
             try:
                 lease.acquire()
                 break
@@ -153,11 +162,15 @@ def run_session(argv: list[str], session: str, release) -> subprocess.CompletedP
                     return subprocess.CompletedProcess(argv, child.returncode, *values)
                 except subprocess.TimeoutExpired:
                     remaining = deadline - time.monotonic()
-                    if pending and remaining > 0 and has_session(
-                        argv[0], session, timeout=min(2, remaining),
-                    ):
-                        release()
-                        pending = False
+                    if pending and remaining > 0:
+                        try:
+                            present = has_session(argv[0], session, timeout=min(2, remaining))
+                        except ObservationUnavailable:
+                            # A dispatched server may still be publishing its rendezvous.
+                            continue
+                        if present:
+                            release()
+                            pending = False
         except BaseException as error:
             if child.poll() is None:
                 child.kill()

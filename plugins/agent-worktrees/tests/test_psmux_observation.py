@@ -12,13 +12,21 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent_worktrees import launch_seed_exec, psmux_observation as reader, reclaim, resume_seed, sessions
+from agent_worktrees import launch_seed_exec, reclaim, resume_seed, sessions
 from agent_worktrees import windows_mux_processes as native
-from agent_worktrees.mux_list_result import MuxObservationUnavailable
+from agent_remote_driver import mux_inventory as reader
+from agent_remote_driver.mux_observation import observe_psmux as observe_native_psmux
+from agent_remote_driver.mux_observation_types import ObservationUnavailable as MuxObservationUnavailable
 
 
 @pytest.fixture
 def registered(tmp_path, monkeypatch):
+    from agent_remote_driver import mux_observation
+
+    monkeypatch.setattr(
+        mux_observation, "observe_psmux",
+        lambda *a, **kw: mux_observation.Observation("unknown", "pane-unobserved"),
+    )
     monkeypatch.setenv("PSMUX_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(native, "servers", lambda: {101: "123"})
     (tmp_path / "wt-other.pid").write_text("101:123")
@@ -95,6 +103,7 @@ def test_namespaced_registration_preserves_live_session_name(registered, monkeyp
         (registered / f"wt-other.{extension}").rename(registered / f"example__wt-fixture.{extension}")
     monkeypatch.setattr(reader, "_query", lambda *a: ("wt-fixture", 1, 101))
     monkeypatch.setattr(sessions.platform, "system", lambda: "Windows")
+    assert reader.observe_registrations() == {"example__wt-fixture": ("wt-fixture", 1)}
     assert reader.observe() == {"wt-fixture": 1}
     assert sessions.mux_status_many(["fixture"], strict=True)["fixture"].exists
 
@@ -105,6 +114,23 @@ def test_same_session_name_in_multiple_namespaces_remains_unknown(registered, mo
     (registered / "example__wt-other.port").write_text("12346")
     (registered / "example__wt-other.key").write_text("b" * 16)
     monkeypatch.setattr(reader, "_query", lambda port, *a: ("wt-other", 1, 101 if port == 12345 else 202))
+    with pytest.raises(MuxObservationUnavailable, match="ambiguous"):
+        reader.observe()
+
+
+def test_namespace_qualified_absence_preserves_complete_coverage_and_legacy_api(registered, monkeypatch):
+    from agent_remote_driver import mux_observation
+
+    monkeypatch.setattr(native, "servers", lambda: {101: "123", 202: "456"})
+    (registered / "example__wt-other.pid").write_text("202:456")
+    (registered / "example__wt-other.port").write_text("12346")
+    (registered / "example__wt-other.key").write_text("b" * 16)
+    monkeypatch.setattr(reader, "_query", lambda port, *a: ("wt-other", 1, 101 if port == 12345 else 202))
+    monkeypatch.setattr(mux_observation, "observe_psmux", observe_native_psmux)
+    monkeypatch.setenv("COPILOT_DRIVER_PSMUX_NAMESPACE", "another")
+    assert reader.observe(qualified=True) == {"wt-other": 1, "example__wt-other": 1}
+    assert mux_observation.observe_psmux("wt-other", data_dir=registered).status == "absent"
+    assert mux_observation.observe_psmux_many(["wt-other"])["wt-other"].status == "absent"
     with pytest.raises(MuxObservationUnavailable, match="ambiguous"):
         reader.observe()
 
@@ -143,7 +169,12 @@ def test_relative_data_directory_refuses_before_native_observation(monkeypatch):
         reader.observe()
 
 
-@pytest.mark.parametrize("mode,expected", [("server -s fixture", {101: "123"}), ("attach-session -t fixture", {})])
+@pytest.mark.parametrize("mode,expected", [
+    ("server -s fixture", {101: "123"}), ("attach-session -t fixture", {}),
+    ("-L example attach-session -t fixture", {}),
+    ("-L example new-session -d -s fixture", {}),
+    ("-L example set-option -t fixture status on", {}),
+])
 def test_native_census_distinguishes_clients_without_executing_them(monkeypatch, mode, expected):
     monkeypatch.setattr(native, "_processes", lambda: [(101, "psmux.exe")])
     monkeypatch.setattr(native.locks, "process_start_time", lambda pid: "123")

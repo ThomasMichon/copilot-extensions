@@ -1866,23 +1866,32 @@ def test_sweep_mux_failure_labels_all_published_and_initial_demanded_rosters(tmp
         owner.shutdown()
 
 
-def test_psmux_sweep_publishes_independent_rosters_without_probing_or_pruning(tmp_path, monkeypatch):
+@pytest.mark.parametrize("present", [False, True])
+def test_psmux_sweep_publishes_independent_rosters_without_probing_or_pruning(
+    tmp_path, monkeypatch, present,
+):
     import subprocess
+    from agent_remote_driver import mux_observation
 
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
     m._register_session_for_monitor("wt-a", "/w/a", session_incarnation="$1:100")
     monkeypatch.setattr(status_monitor_runtime, "_core_helper", lambda _name, local: local)
     monkeypatch.setattr(m, "_monitor_list_sessions", status_monitor_runtime._monitor_list_sessions)
+    monkeypatch.setattr(mux_observation, "list_psmux", lambda: {
+        "wt-b": mux_observation.Observation("present", clients=2, incarnation="$2:101"),
+    } if present else None)
     monkeypatch.setattr(subprocess, "run", lambda *a, **kw: pytest.fail("passive PSMux execution"))
     projects = []
+    catalogs = []
     assert m._monitor_sweep(
         "psmux", "T", "P", set(), picker_projects={"project"},
-        catalog_observer=lambda _: pytest.fail("unknown catalog observed as complete"),
+        catalog_observer=catalogs.append,
         roster_publisher=lambda: projects.append(m.cfg.project_name()),
         roster_failure=lambda _: pytest.fail("independent roster marked failed"),
-    ) == -1
+    ) == (1 if present else -1)
     assert projects == ["project"]
+    assert catalogs == ([{"wt-b"}] if present else [])
     assert (reg / "wt-a").read_text() == "/w/a"
 
 
