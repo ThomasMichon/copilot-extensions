@@ -105,6 +105,10 @@ def test_namespaced_vault_retains_same_cell_and_rejects_changed_receipt(tmp_path
         selected.verify()
 
 
+@pytest.mark.skipif(
+    sys.platform != "win32" and not sys.platform.startswith("linux"),
+    reason="Native Vault peer invocation supports Windows and Linux only",
+)
 def test_native_installed_vault_binding_rechecks_receipt_before_child(tmp_path, monkeypatch):
     from agent_worktrees import _installation_context as primitive, repository_ssh_setup, repository_setup
 

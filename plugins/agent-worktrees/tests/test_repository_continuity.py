@@ -108,17 +108,24 @@ def test_old_fleet_refuses_selected_ssh_before_bootstrap_or_private_request(sour
     "vault-healthy-request", "vault-healthy-pin",
     "vault-late-ready", "vault-late-request", "vault-late-pin",
     "vault-v5-order", "vault-v5-locked", "vault-v5-healthy",
+    "vault-v5-owner-before-enroll", "vault-v5-owner-before-prepare",
+    "vault-v5-owner-before-config", "vault-v5-owner-before-install",
 ])
 def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
     source, tmp_path, monkeypatch, failure,
 ):
     from agent_worktrees import repository_ssh_setup as ssh_setup
+    owner_changed = False
     data_only = isinstance(failure, str) and failure.startswith("vault-v5-")
     if data_only:
         failure = failure.replace("vault-v5-", "vault-")
         from agent_worktrees import repository_vault
 
-        monkeypatch.setattr(repository_vault, "selected", lambda: object())
+        def verify_owner():
+            if owner_changed:
+                raise setup.SetupError("Installed Vault selection changed")
+
+        monkeypatch.setattr(repository_vault, "selected", lambda: SimpleNamespace(verify=verify_owner))
 
     path = source / setup.DECLARATION
     declaration = json.loads(path.read_text())
@@ -202,14 +209,17 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
         install_application=install,
     )
     monkeypatch.setattr(ssh_setup, "_installer", lambda: owner)
-    monkeypatch.setattr(
-        ssh_setup, "status",
-        lambda *_args, **_kwargs: failure == "already-ready" or (
+    def status(*_args, **_kwargs):
+        nonlocal owner_changed
+        if failure == "vault-owner-before-config" and "enroll" in events:
+            owner_changed = True
+        return failure == "already-ready" or (
             isinstance(failure, str) and failure.startswith("vault-healthy")
         ) or (
             isinstance(failure, str) and failure.startswith("vault-late") and "enroll" in events
-        ) or "install" in events,
-    )
+        ) or "install" in events
+
+    monkeypatch.setattr(ssh_setup, "status", status)
     monkeypatch.setattr(ssh_setup.shutil, "which", lambda *_args: sys.executable)
 
     def vault_runtime(selection, arguments, *, timeout, invocation=None):
@@ -247,6 +257,7 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
     monkeypatch.setattr(ssh_setup, "_vault_call", vault_runtime)
 
     def runtime(arguments):
+        nonlocal owner_changed
         if arguments == ["capabilities"]:
             return {"schema": "fleet-manager.capabilities", "version": 1, "capabilities": [
                 continuity.CAPABILITY, "local-projection-v1", ssh_setup.CAPABILITY,
@@ -270,6 +281,10 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
             if "--apply" in arguments:
                 assert arguments[arguments.index("--expected-request-digest") + 1] == description["request_digest"]
             events.append("prepare" if "--apply" in arguments else "inspect")
+            if failure == "vault-owner-before-install" and "--apply" in arguments:
+                owner_changed = True
+            if failure == "vault-owner-before-enroll" and "vault-install" in events:
+                owner_changed = True
             response = (description if not vault or "--key-references-only" in arguments else {
                 name: value for name, value in description.items() if name != "key_files"
             } | {"version": 1})
@@ -286,6 +301,8 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
             assert events.index("vault-prepare") < events.index("vault-install")
             assert "prepare" not in events
             events.append("enroll")
+            if failure == "vault-owner-before-prepare":
+                owner_changed = True
         return {"status": "ready", "stage": "connected"}
 
     monkeypatch.setattr(continuity, "_invoke", runtime)
@@ -313,6 +330,12 @@ def test_normal_ssh_setup_retains_source_admission_and_original_bootstrap_order(
         assert continuity.run(selected_setup, "harness-a", apply=True).status == "ready"
         assert events.index("vault-install") < events.index("enroll") < events.index("final-inspection")
         assert "prepare" not in events and "install" not in events
+    elif data_only and failure.startswith("vault-owner-"):
+        with pytest.raises(setup.SetupError, match="Vault selection changed"):
+            continuity.run(selected_setup, "harness-a", apply=True)
+        assert ("enroll" in events) == (failure != "vault-owner-before-enroll")
+        assert ("prepare" in events) == (failure == "vault-owner-before-install")
+        assert "install" not in events
     elif failure is not None:
         with pytest.raises(setup.SetupError) as refused:
             continuity.run(selected_setup, "harness-a", apply=True)

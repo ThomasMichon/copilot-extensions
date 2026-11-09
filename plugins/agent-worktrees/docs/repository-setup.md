@@ -340,7 +340,13 @@ The engine retains the selected physical runtime/build and installation
 binding across the existing invocation-contract, prepare and install calls.
 It revalidates that selection before and after each bounded child; a changed
 owner, receipt or selected runtime refuses rather than switching midway.
+The normal caller retains that same binding through the subsequent Fleet key
+inspection and rechecks it before enrollment, SSH configuration preparation
+and application installation. It never recaptures a different Vault after
+credential preparation.
 The native peer boundary also enforces its own execution-time governance.
+Native same-cell Vault invocation currently supports Windows and Linux;
+other platforms refuse rather than using another owner.
 Legacy children receive the selected runtime root and no inherited Vault
 credential/cache/endpoint selectors; same-cell children use Vault's native
 rebound environment. Both retain explicit provisioning inhibition and the
