@@ -371,8 +371,9 @@ def test_publication_selection_cleanup_is_off_loop_and_keeps_request_custody(nat
 
 
 @pytest.mark.parametrize("operation", ["threads", "diff"])
-def test_selection_cleanup_failure_cannot_be_swallowed_as_a_provider_report(
-    native_gateway, native, monkeypatch, operation,
+@pytest.mark.parametrize("failure", ["cleanup", "capture"])
+def test_selection_checkpoint_failure_cannot_be_swallowed_as_a_provider_report(
+    native_gateway, native, monkeypatch, operation, failure,
 ):
     from agent_procutil.owned_process import OwnedCleanupError
     from agent_pull_requests import native_report
@@ -387,7 +388,9 @@ def test_selection_cleanup_failure_cannot_be_swallowed_as_a_provider_report(
     def run(argv, **kwargs):
         if inside[0] and not fired[0]:
             fired[0] = True
-            raise OwnedCleanupError(None, cleanup_retry=lambda deadline: settled.append(True))
+            if failure == "cleanup":
+                raise OwnedCleanupError(None, cleanup_retry=lambda deadline: settled.append(True))
+            raise RuntimeError("fixture-private-capture-failure")
         return original_run(argv, **kwargs)
 
     def report(*args, **kwargs):
@@ -408,5 +411,5 @@ def test_selection_cleanup_failure_cannot_be_swallowed_as_a_provider_report(
         await gateway.drain(timeout=2)
 
     asyncio.run(scenario())
-    assert fired[0] and settled == [True]
+    assert fired[0] and settled == ([True] if failure == "cleanup" else [])
     assert all("/pulls/" not in " ".join(call) and "graphql" not in " ".join(call) for call in native[2]())

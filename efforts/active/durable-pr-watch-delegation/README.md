@@ -1375,6 +1375,11 @@ callback an implicit credential store.
 
 ### 2026-11-09 - Native report boundary corrections
 
+- Any unavailable selection checkpoint or capture stays unavailable across
+  provider normalization, including transient failures whose next selection
+  succeeds. Only actual provider access errors become native error reports.
+  The expanded report/Gateway/TLS suite passes 88 isolated cases, including
+  capture and cleanup failures inside both native provider builders.
 - Strict acquisition also rejects duplicate keys in explicit/global YAML,
   operator drop-ins and managed pointers without changing default loaders or
   sharing retained registry state between strict and ordinary scans. Delayed

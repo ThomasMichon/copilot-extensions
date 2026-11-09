@@ -215,8 +215,8 @@ budget. Publication checks run in shielded, tracked workers rather than on the
 Gateway event loop; delayed cleanup retains the admitted request's custody and
 cannot publish a success. Malformed or unavailable contributing configuration
 and duplicate keys in explicit/global/drop-in sources refuse credential
-selection instead of dropping repository policy. Cleanup delay during a
-selection checkpoint remains unavailable even if a provider builder catches
+selection instead of dropping repository policy. A failed selection checkpoint
+or unavailable report transport remains unavailable even if a provider builder catches
 that failure; it cannot become a successful HTTP error-report exchange. Failed
 reads of established committed policy cannot select a divergent checkout;
 confirmed absence and successful same-source recovery remain supported. Provider

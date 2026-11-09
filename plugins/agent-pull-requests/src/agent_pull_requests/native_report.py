@@ -133,14 +133,18 @@ class NativeGitHubReport:
 
             def capture(arguments, *, binary=False):
                 nonlocal cleanup_delayed, transport_unavailable
-                checkpoint()
                 try:
+                    checkpoint()
                     return account.capture("report", arguments, binary=binary, limit=BODY_BYTES)
                 except OwnedCleanupError as error:
                     cleanup_delayed = True
                     _settle(error)
                 except CredentialObservationError as error:
-                    transport_unavailable = error.code in ("timeout", "output-limit", "capture-failed")
+                    if error.code != "access-unconfirmed":
+                        transport_unavailable = True
+                    raise
+                except Exception:
+                    transport_unavailable = True
                     raise
             provider = GitHubProvider(report_capture=capture)
             checkpoint()
