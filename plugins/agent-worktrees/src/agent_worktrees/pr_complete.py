@@ -256,14 +256,32 @@ def complete_worktree(
       upstream, dropping the redundant local commits (no replay).
     - ``rebased``        -- the branch carried genuinely-new commits; rebased onto
       upstream (already-merged commits drop, new ones preserved).
-    - ``error``          -- a blocker (dirty tree, detached HEAD, conflict, …);
-      ``error`` field explains, the branch is left untouched.
+    - ``error``          -- a blocker or unconfirmed completion; ``error``
+      explains and any accumulated recovery ref is retained. An observation
+      failure after history mutation does not promise an unchanged branch.
     """
+    base: dict = {"success": False, "worktree_id": worktree_id}
+    try:
+        return _complete_worktree(
+            worktree_id, config, base, dry_run=dry_run, validate_source=validate_source,
+        )
+    except Exception as exc:
+        return {**base, "success": False, "action": "error",
+                "error": (
+                    f"Source reconciliation is unconfirmed: {exc}. "
+                    "Inspect retained Git state before retrying."
+                )}
+
+
+def _complete_worktree(
+    worktree_id: str, config: Config, base: dict, *, dry_run: bool,
+    validate_source: Callable[[], None] | None,
+) -> dict:
     repo = config.default_repo
     remote = repo.remote
     upstream = f"{remote}/{repo.default_branch}"
     worktree_path = tracking.resolve_worktree_path(worktree_id, repo.worktree_root)
-    base: dict = {"success": False, "worktree_id": worktree_id, "upstream": upstream}
+    base["upstream"] = upstream
 
     def admission_error():
         if validate_source is not None:

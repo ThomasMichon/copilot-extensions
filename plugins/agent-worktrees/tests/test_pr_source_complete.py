@@ -250,6 +250,53 @@ def test_post_backup_validation_timeout_preserves_owner_result_and_recovery(sour
     assert _git("rev-parse", "HEAD", cwd=root) == before
 
 
+@pytest.mark.parametrize("operation", ["reset", "rebase"])
+def test_post_mutation_head_failure_retains_accumulated_owner_and_original_tip(
+    source, monkeypatch, operation,
+):
+    import subprocess
+
+    config, wid, root, _remote = source
+    before_pr = _git("rev-parse", "HEAD", cwd=root)
+    record = tracking.load_record_by_id(wid)
+    record.pr = tracking.PRRecord(
+        state="merged", head_sha=before_pr,
+        base_sha=_git("merge-base", "origin/master", "HEAD", cwd=root),
+    )
+    tracking.save_record(record)
+    _squash_merge_upstream(
+        Path(config.default_repo.anchor), files={"a.txt": "one\n", "b.txt": "two\n"}, msg="squash",
+    )
+    if operation == "rebase":
+        (root / "later.txt").write_text("preserved follow-up\n")
+        _git("add", "later.txt", cwd=root)
+        _git("commit", "-m", "follow-up", cwd=root)
+    args = arguments(source)
+    before = _git("rev-parse", "HEAD", cwd=root)
+    real = git_ops.git
+    mutated = []
+    def run(*argv, **kwargs):
+        if mutated and argv == ("rev-parse", "--short", "HEAD"):
+            if operation == "reset":
+                raise OSError("Git launch failed after reset")
+            raise subprocess.TimeoutExpired(["git", *argv], 30)
+        result = real(*argv, **kwargs)
+        if argv[0] == operation and result.returncode == 0:
+            mutated.append(argv)
+        return result
+    monkeypatch.setattr(git_ops, "git", run)
+    code, value = invoke(args)
+    assert code == 1 and value["status"] == "unknown" and mutated, value
+    assert value["result"]["worktree_id"] == wid
+    assert value["result"]["branch"] == args[2].partition("=")[2]
+    assert _git("rev-parse", value["result"]["backup_ref"], cwd=root) == before
+    assert _git("rev-parse", "HEAD", cwd=root) != before
+    if operation == "rebase":
+        assert (root / "later.txt").read_text() == "preserved follow-up\n"
+    else:
+        assert _git("rev-parse", "HEAD", cwd=root) == _git("rev-parse", "origin/master", cwd=root)
+
+
 @pytest.mark.parametrize("operation", ["completion", "source-publication"])
 def test_source_operations_share_publication_then_metadata_order_with_recovery(
     source, monkeypatch, operation,
