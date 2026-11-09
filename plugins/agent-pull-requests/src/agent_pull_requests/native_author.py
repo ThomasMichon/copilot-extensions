@@ -11,7 +11,7 @@ from .native_command import run_command
 def add_parsers(subparsers, *, repo_type, handler):
     from .native_cli import validate_selector
 
-    for name in ("author-capabilities", "update", "push", "ready", "nudge", "resolve-thread"):
+    for name in ("author-capabilities", "update", "push", "ready", "nudge", "resolve-thread", "reopen-thread"):
         author = subparsers.add_parser(name, help={
             "author-capabilities": "read target-qualified native author capabilities",
             "update": "repair existing native PR metadata without pushing",
@@ -19,6 +19,7 @@ def add_parsers(subparsers, *, repo_type, handler):
             "ready": "move an explicit native draft PR to ready without consent or hold release",
             "nudge": "request the target's configured automated reviewer without a comment",
             "resolve-thread": "close one exact native ADO discussion through the selected Worktrees owner",
+            "reopen-thread": "reopen one exact native ADO discussion through the selected Worktrees owner",
         }[name], allow_abbrev=False)
         author.add_argument("--repo", required=True, type=repo_type)
         author.add_argument("--worktrees-command", required=True, type=validate_selector)
@@ -27,7 +28,7 @@ def add_parsers(subparsers, *, repo_type, handler):
         author.set_defaults(handler=handler)
         if name == "author-capabilities":
             continue
-        if name == "resolve-thread":
+        if name in ("resolve-thread", "reopen-thread"):
             author.add_argument("--number", required=True, type=int)
             author.add_argument("--thread", required=True, type=int)
             author.add_argument("--expected-candidate", required=True)
@@ -88,7 +89,7 @@ def capability(args, prefix: list[str], operation: str | None = None) -> dict:
             not isinstance(body.get("provider"), str) or not body["provider"].strip()
         )
         or operation == "reviewer-request" and body.get("provider") != "github"
-        or operation == "thread-resolve" and body.get("provider") != "azure-devops"
+        or operation in ("thread-resolve", "thread-reopen") and body.get("provider") != "azure-devops"
         or options and body["operations"].get("worker-policy-config") is not True
     ):
         raise ValueError(

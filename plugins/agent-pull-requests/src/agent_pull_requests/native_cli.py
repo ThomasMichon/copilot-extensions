@@ -128,7 +128,7 @@ def run(
         return code
     try:
         launch = prefix_factory() if prefix_factory is not None else [command_path(args.worktrees_command)]
-        if args.command == "resolve-thread":
+        if args.command in ("resolve-thread", "reopen-thread"):
             from .native_thread_resolution import run as resolution_run
             code, payload = resolution_run(args, launch)
         elif args.command == "nudge":
@@ -150,7 +150,7 @@ def run(
         elif args.command == "nudge":
             from .native_reviewer_request import failure
             payload = failure(args.repo, args.number, str(exc))
-        elif args.command == "resolve-thread":
+        elif args.command in ("resolve-thread", "reopen-thread"):
             from .native_thread_resolution import failure
             payload = failure(args, str(exc))
     if args.json:

@@ -48,14 +48,14 @@ def unavailable_project_response(argv: list[str], message: str) -> int | None:
         "worktree-data-read", "worktree-data-allocate",
         "worktree-observations", "worktree-observation-history",
         "agenda-read", "agenda-publish", "agenda-feed",
-        "pr-author-ready", "pr-author-nudge", "pr-thread-resolve",
+        "pr-author-ready", "pr-author-nudge", "pr-thread-resolve", "pr-thread-reopen",
     }:
         return project_resolution_failure(argv, RuntimeError(message))
     return None
 
 
 def project_resolution_failure(argv, error: Exception) -> int:
-    if argv and argv[0] in ("pr-author-ready", "pr-author-nudge", "pr-thread-resolve"):
+    if argv and argv[0] in ("pr-author-ready", "pr-author-nudge", "pr-thread-resolve", "pr-thread-reopen"):
         from .pr_author_cli import readiness_project_unavailable
 
         return readiness_project_unavailable(argv, str(error))

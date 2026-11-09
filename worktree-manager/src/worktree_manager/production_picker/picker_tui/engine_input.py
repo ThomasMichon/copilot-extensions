@@ -173,6 +173,8 @@ class PickerScreenInputMixin:
             # machine on its loader threads; fixture mode re-reads src.load()).
             self.debug = "worktree reload requested"
             self._start_setup_reload_worker()
+            if self._kind() == "worktrees":
+                self._refresh_knowledge_readiness()
             self._poll_orphan_state(force=True)
             self.sel = self.default_sel()
         elif key in ("q", "escape"):

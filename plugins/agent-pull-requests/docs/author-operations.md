@@ -35,7 +35,7 @@ These additive schema-1 capabilities are independent of package versions.
 Do not infer frontend support from the Worktrees peer's declaration alone.
 
 On capable peers, `author-capabilities`, `create`, `update`, `ready`, `nudge`,
-`resolve-thread` and `push` accept
+`resolve-thread`, `reopen-thread` and `push` accept
 `--config <delivered-worker-policy>`. The frontend checks the actual peer
 response before the dependent author operation, and forwards the same explicit
 file. Missing files, unsupported old peers and mismatched worker targets refuse
@@ -173,6 +173,43 @@ Valid owner envelopes, additive fields and nonzero exits are preserved; lost
 frontend output is unknown, not a retry instruction. Isolated source controls
 do not qualify native Windows, installed/account/HTTP or three-provider lifecycle
 acceptance.
+
+## Selected native thread reopening
+
+```text
+<PR command> reopen-thread --repo project/repository --number 42 --thread 9 --expected-candidate sha256:<64-hex-digits> --expected-thread sha256:<64-hex-digits> --operation-id reopen:thread-9 --worktrees-command <Worktrees command> --json
+```
+
+Requires the selected runtime's optional `operations.thread-reopen: true`,
+initially enabled ADO bindings only. Worktrees' `pr-thread-reopen` takes the
+same selection and expectations. Reuse the fresh report, full candidate,
+native principal/permission and iteration requirements described for
+[resolution](#selected-native-thread-resolution); neither capability nor native
+permission supplies operator effect authority.
+
+Only a live discussion in native `fixed`, `wontFix`, `closed` or `byDesign`
+state qualifies. Active, pending, unknown, deleted, system/vote-only,
+incomplete or stale evidence refuses. The sole intended effect is
+`{"status":"active"}` on that thread; it does not reopen the PR, reply,
+edit comments, vote, release holds, grant consent, merge or change siblings.
+Legacy resolution commands and status choices keep their meanings.
+
+`agent-worktrees.pr-thread-reopen`, version 1, retains the same selected
+identity/evidence fields, with `actions.reopening.status`. Only `confirmed`
+has `ok: true` and exit 0. Preflight plus authoritative response/readback
+requires the original candidate and unchanged thread content except status
+and native thread-update timestamp; it is not atomic CAS or exclusive causal proof.
+
+Use a new intentional operation ID. The existing action-scoped ledger consumes
+reopening before dispatch, independently of prior resolution operations; this
+is not global cross-command or cross-installation idempotency. Conflicting keys
+refuse, and interrupted/unknown keys reconcile read-only without another PATCH.
+Later observing an active thread cannot upgrade an original unknown outcome.
+A stored confirmed result describes the original operation, not a promise the
+thread remained active; independent reconciliation observations can show reclosure.
+The conditional client preserves additive fields and uncertainty, with no raw,
+bulk or effectful compatibility fallback. Source controls do not establish
+native Windows, installed/account/HTTP or full lifecycle qualification.
 
 ## Candidate checks and source custody
 

@@ -13,8 +13,8 @@ unrelated requests, and reconciles placement, load and minimum role coverage.
 - **Repo:** copilot-extensions
 - **Branch(es):** managed source worktree; sequential reviewed plan and implementation PRs
 - **Created:** 2026-11-09
-- **Status:** Draft
-- **Vision:** [Agent topology](../../../visions/agent-fabric/agentic-factory/agent-topology/README.md)
+- **Status:** Done
+- **Vision:** [Agent topology](../../../../visions/agent-fabric/agentic-factory/agent-topology/README.md)
 - **Umbrella issue:** #11715
 
 ## Guiding Intent
@@ -43,8 +43,8 @@ Private adopters supply topology and grants, not forks of the reusable concept.
 ## Context
 
 `agent-roles` already provides sustained skills and charters over optional native
-adapters. The [factory vision](../../../visions/agent-fabric/agentic-factory/README.md)
-provides the conversational composition; [fleet loadouts](../../../visions/machine-fleet/loadouts/README.md)
+adapters. The [factory vision](../../../../visions/agent-fabric/agentic-factory/README.md)
+provides the conversational composition; [fleet loadouts](../../../../visions/machine-fleet/loadouts/README.md)
 owns machine composition and capacity intent. Worktrees, Bridge and Dispatch
 retain their native boundaries. Existing fleet-monitor goals and thread
 registers are complementary supervision guidance, not an assignment allocator.
@@ -76,54 +76,54 @@ Live adoption remains a separate explicit decision with its original owner.
 ### Phase 1 - Reviewed intent and contract
 
 - [x] Search prior art and claim #11715; select existing `agent-roles` as owner.
-- [ ] Land the topology vision and this proposal through normal review.
+- [x] Land the topology vision and this proposal through normal review.
 - [x] Bind the native source-worktree effort focus to this canonical effort.
 
 ### Phase 2 - Portable role and assignment document
 
-- [ ] Add a topology-dispatcher skill, fillable charter and native-adapter
+- [x] Add a topology-dispatcher skill, fillable charter and native-adapter
   reference covering admission, discovery, allocation, follow-up, supervision,
   recovery and retirement through their existing owners.
-- [ ] Add a versioned schema and synthetic example for desired machine/role
+- [x] Add a versioned schema and synthetic example for desired machine/role
   topology, complete assignment charters and native-owner associations.
-- [ ] Add a bounded offline validator/overview helper; reject invalid references,
+- [x] Add a bounded offline validator/overview helper; reject invalid references,
   duplicate identities and inconsistent assignment/effect records. Report
   eligible placement and qualified role coverage without launching or mutating.
-- [ ] Preserve persist-before-effect, one-dispatcher custody, stable allocation
+- [x] Preserve persist-before-effect, one-dispatcher custody, stable allocation
   identity, same-worktree head resolution and unresolved-effect recovery.
 
 ### Phase 3 - Consumer proof and delivery
 
-- [ ] Exercise the complete synthetic consumer flow, including restart,
+- [x] Exercise the complete synthetic consumer flow, including restart,
   allocation collision, uncertain launch, same-owner follow-up, temporary work,
   placement constraints and minimum-role coverage.
-- [ ] Update plugin usage and file inventory, add the plugin changefile and
+- [x] Update plugin usage and file inventory, add the plugin changefile and
   complete exact-source checks and normal implementation PR stewardship.
-- [ ] Record release versus installed adoption honestly, and the explicit
+- [x] Record release versus installed adoption honestly, and the explicit
   source-only/no-live-activation disposition.
-- [ ] Reconcile every Plan and Validation Plan item before marking Done.
+- [x] Reconcile every Plan and Validation Plan item before marking Done.
 
 ## Validation Plan
 
-- [ ] Plan: validate changed Markdown links and diff hygiene; obtain normal
+- [x] Plan: validate changed Markdown links and diff hygiene; obtain normal
   independent review and required CI.
-- [ ] Unit/behavior: test malformed and duplicate references, charter changes,
+- [x] Unit/behavior: test malformed and duplicate references, charter changes,
   uncertain effects, current-head succession, temporary work separation,
   disallowed/over-capacity placement and qualified-versus-unknown coverage.
-- [ ] Simple E2E: invoke the actual payload helper as a subprocess on a fresh
+- [x] Simple E2E: invoke the actual payload helper as a subprocess on a fresh
   synthetic topology; persist proposed intent before simulating native results,
   reload and recover the same assignment, then derive the overview.
-- [ ] First-touch: an empty assignment map plus existing-owner discovery must
+- [x] First-touch: an empty assignment map plus existing-owner discovery must
   produce an adoption/reconciliation proposal, not assume a fresh empty fleet.
-- [ ] Native compatibility: inspect the advertised Worktrees/Bridge contracts
+- [x] Native compatibility: inspect the advertised Worktrees/Bridge contracts
   used by the runbook; qualify available read-only resolution paths. Report
   unsupported capabilities explicitly rather than guessing command syntax.
-- [ ] Live external venue: not exercised under this source-only authority;
+- [x] Live external venue: not exercised under this source-only authority;
   document that activation, effects and installed fleet acceptance remain with
   the adopter's separately authorized work, not claimed by synthetic tests.
-- [ ] Run affected plugin tests, skill/metadata checks and changed Python
+- [x] Run affected plugin tests, skill/metadata checks and changed Python
   lint; complete required CI and actual merge for the implementation.
-- [ ] Audit public artifacts for private identifiers, paths and reverse links.
+- [x] Audit public artifacts for private identifiers, paths and reverse links.
 
 ## Proposal
 
@@ -141,3 +141,66 @@ adapter flow. The plan PR is a review gate before implementation, not completion
 - Claimed #11715 and prepared the canonical vision and implementation plan.
   No live fleet effects, deployment or new background work were performed.
 - Bound the native worktree effort focus to Source owner / Phase 1.
+
+### 2026-11-09 - Reviewed plan landed
+
+- #11720 merged after an approving Copilot review at head `48d76d950c`,
+  green required CI and native Maintainer completion.
+- The source worktree synchronized onto `dev`; the implementation slice now
+  begins with the portable role and assignment document. The plan merge does
+  not close #11715 or qualify live activation.
+
+### 2026-11-09 - Portable implementation and consumer proof
+
+- Added the dispatcher skill, complete charter, native-adapter/recovery guide,
+  version-1 JSON Schema and synthetic example in `agent-roles`.
+- The bounded, read-only helper validates references and effect records, exports
+  complete assignments, derives eligible placement and qualified coverage, and
+  routes inquiries through the retained worktree and observed current head.
+  An unaccepted or different assignment identity holds routing; a newer charter
+  awaiting acceptance still permits an inquiry to the established owner.
+- The contained plugin packet passed 102 tests (4.69 seconds of test execution,
+  8.31 seconds including preparation and cleanup). Python F/E9 lint and skill
+  validation passed. Filesystem-only behavior checks are T1; four real-helper
+  subprocess scenarios are T2. Required unit-CI admission is unchanged.
+- Synthetic subprocess evidence covers persist/allocation/launch/reload,
+  uncertain effects, head succession, same-owner follow-up, first-touch
+  reconciliation, and separate temporary work through native-exit evidence.
+  Input bytes remain unchanged. This is offline consumer proof, not a live fleet.
+- Inspected installed Worktrees creation/head-resolution/status and Bridge
+  creation/send contracts. An actual read-only native head lookup resolved its
+  existing worktree correctly. No native allocation, launch, send, retirement or
+  external venue was exercised; those effects require adopter authority.
+- Implementation review, required CI, actual merge and final release/adoption
+  disposition remain open. No fleet activation or installed rollout is implied.
+
+### 2026-11-09 - Implementation review corrections
+
+- #11738's first CI run identified strict typing omissions. The corrected helper
+  and tests pass the repository's strict Python 3.10 contracts for both Linux
+  and Windows, including platform-specific headless subprocess flags.
+- Review corrections retain immutable native-request envelope references and
+  selected send modes before message effects, preserve historical charters
+  after a role's scope changes, and use the repository's default patch bump.
+- The affected plugin packet now passes 109 tests (9.18 seconds of test execution,
+  14.67 seconds including preparation and cleanup); Python F/E9 lint passes.
+  Five T2 subprocess scenarios include unknown-send recovery after saved-state
+  reload and native-head succession without reconstructing the original prompt,
+  caller, key or session. No live send or receipt lookup was performed.
+- Current-head review, required CI and actual merge remain delivery gates.
+
+### 2026-11-09 - Source delivery complete
+
+- #11738 merged to `dev` at `5354412d9e` after an approving exact-head review,
+  resolution of all review threads and green required CI. The usage inventory,
+  patch changefile, 109-test plugin packet, five real-helper subprocess flows,
+  strict Linux/Windows type checks and Python lint are complete.
+- The final public-artifact audit found no private deployment identifiers,
+  filesystem paths or reverse links. Native owners and the source-only authority
+  boundary remain unchanged.
+- The implementation was not yet on `main` at the closeout check. Normal release
+  promotion, separately authorized installation and adopter-owned live acceptance
+  remain distinct from this completed source delivery. No fleet agents were
+  launched, reassigned or retired; no service, schedule or installed payload changed.
+- Every source Plan and Validation Plan item is resolved. #11715 retains archive
+  publication and native effort/worktree settlement until those steps finish.

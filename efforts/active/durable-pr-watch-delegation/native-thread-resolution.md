@@ -180,7 +180,8 @@ remain open under their existing owners; no live thread was changed.
 
 ## Selected native reopening proposal
 
-**Review-first refinement under #7051; not implemented or advertised.** Continue
+**Refinement reviewed in #11741 under #7051; finite source implementation
+merged in #11748.** Continue
 the same provider-neutral lifecycle intent and existing owner, rather than
 treating the delivered close-only operation as reopening support.
 The [native ADO thread-update contract](https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-request-threads/update?view=azure-devops-rest-7.1)
@@ -242,20 +243,25 @@ independent. No marker comment, retry or effectful compatibility path is added.
 
 ### Reopening source controls after review
 
-- [ ] Qualify the actual owner parser, claimant/target/delivered policy,
+- [x] Qualify the actual owner parser, claimant/target/delivered policy,
   native principal and effective permission owner. Prove exactly the selected
   status-only active PATCH and unchanged PR, sibling, comment and vote state.
-- [ ] Exercise the actual native frontend/owner/provider composition and a real
+- [x] Exercise the actual native frontend/owner/provider composition and a real
   process seam. Cover strict invalid syntax, additive result fields, missing/
   malformed/old/rolled-back support and unchanged close-only/legacy behavior.
-- [ ] Admit each supported closed/resolved native state and refuse active,
+- [x] Admit each supported closed/resolved native state and refuse active,
   pending, deleted, system/vote-only, incomplete/duplicate/unaddressable,
   invalid-iteration and stale target/principal/permission evidence.
   Include source/base/ref/repository/thread changes and stable target-only advance.
-- [ ] Inject authoritative rejection, truncated/lost/malformed/late response,
+- [x] Inject authoritative rejection, truncated/lost/malformed/late response,
   readback movement and crash on both sides of dispatch. Prove conflicting-key
   refusal, concurrent same-ledger ownership, original-outcome read-only recovery
   and no second PATCH or synthetic comment, including later re-closure.
-- [ ] Record isolated source controls separately from native Windows,
+- [x] Record isolated source controls separately from native Windows,
   installed/provider-account/HTTP, cross-venue attribution and complete
   three-provider lifecycle acceptance. Preserve both parent completion gates.
+
+The [implementation journal](journal/2026/11.09%20Selected%20native%20reopening%20implementation.md)
+records 414 isolated Worktrees controls and 193 frontend controls with five
+existing platform skips. These qualify the finite source leaf, not installed
+support, provider-account effects or the parent lifecycle acceptance.
