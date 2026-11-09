@@ -56,13 +56,25 @@ subscription or lifecycle reconciliation may occur on this new path.
 
 ## Result and error semantics
 
-The new owner emits `schema: agent-worktrees.pr-diff`, integer `version: 1`,
+The new owner emits `schema: agent-worktrees.pr-diff-read`, integer `version: 1`,
 the exact selected `repo`, positive integer `pr`, nonempty string `provider`,
 boolean `supported`, string `diff`, string `error` and `complete` as boolean
-or null. JSON booleans are not integer versions or PR numbers.
-For the existing provider primitive, `complete` is null on successful
-acquisition and false on error or unsupported acquisition. Neither empty
-nor nonempty diff text establishes complete acquisition or an empty PR.
+or null. This schema is exclusive to the new explicit-target report; the
+tracked command keeps its existing unversioned shape and is not an
+interchangeable report source. JSON booleans are not integer versions or
+PR numbers.
+
+`complete: true` means the report has evidence that all declared diff
+acquisition completed, false means known incomplete acquisition, and null
+means completeness is unknown. A successfully obtained partial report may
+have false completeness and an empty error; acquisition outcome and
+completeness are independent. None of these values establishes candidate
+freshness. The existing provider primitive supplies no completeness
+evidence: this baseline owner emits null on successful acquisition and false
+on error or unsupported acquisition, never true. The frontend nevertheless
+accepts all three values so it can retain valid richer version-1 reports
+without changing their meaning. Neither empty nor nonempty diff text
+establishes complete acquisition or an empty PR.
 
 The new frontend validates the version, required types and exact target
 identity, then preserves the whole valid report, including additive fields
