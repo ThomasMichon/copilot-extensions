@@ -3,7 +3,8 @@
 Back to the [existing-owner report contract](owner-report-read.md) and
 [canonical effort](README.md).
 
-**Review-first proposal under #11680; not implemented or installed support.**
+**Contract reviewed in #11681 under #11680; source implementation pending review,
+not installed support.**
 This agent-recommended slice closes part of
 [one service contract](../../../visions/plugins/agent-pull-requests/README.md#cli-through-one-service-contract).
 It follows the existing
