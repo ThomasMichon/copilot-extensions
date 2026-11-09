@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify explicit terminal retirement against service admission, buffered reads, failed drains and restart/reopen",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

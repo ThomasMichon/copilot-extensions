@@ -158,9 +158,19 @@ Retain only the prior compact terminal summary, not old conversation bodies.
   Source fixtures qualify all declared layouts and actual service-writer
   validation/restart; installed/provider and full lifecycle qualification,
   feedback/write serving and retained-volume reader transition stay open.
-  Next is strict explicit selection through the existing standalone
-  read-only host and its fresh-only storage/provisioning boundary; serving
-  must not adopt a retained volume or infer grants from observation credentials.
+  Strict explicit standalone selection and fresh-only provisioning merged
+  in #11628, including same-PR terminal notification capture under the
+  original request budget. Next is source qualification of the existing
+  explicit retirement lifecycle against actual serving/buffer/drain and
+  restart/reopen boundaries. No new remote retirement operation or automatic
+  cleanup worker is implied; retained-reader transition and broader
+  feedback/write, provider and installed gates remain separate.
+  The focused `test_terminal_service_lifecycle.py` source packet now exercises
+  the real service writer and Gateway admission/drain with populated buffers,
+  disconnected acquisition, failed/cancelled close, exact pending delivery
+  across fresh-reader restart and reopen, and stale retirement refusal.
+  Its connector/native source are synthetic; this finite qualification does
+  not close executing-host, installed, provider or feedback/write acceptance.
 
 Each runtime leaf needs normal review and focused supervised validation.
 Source acceptance is not installed adoption, live provider qualification,
