@@ -142,8 +142,17 @@ def test_native_packet_preserves_public_caller_selection_and_functional_bounds(t
     assert "--allow-host-state" not in argv
 
 
-@pytest.mark.parametrize("mismatch", [False, True])
-def test_native_prerequisites_check_disposable_binaries_and_actual_version(tmp_path, monkeypatch, mismatch):
+@pytest.mark.parametrize("mismatch,mux_output,failure", [
+    (False, "tmux 3.3.8\r\npsmux 3.3.8 (66cf613 2026-08-18)\r\n", None),
+    (True, "psmux 3.3.8", "copilot"),
+    (False, "tmux 3.3.8\npsmux 3.3.9", "psmux"),
+    (False, "tmux 3.3.8", "psmux"),
+    (False, "psmux 3.3.8\npsmux 3.3.8", "psmux"),
+    (False, "psmux 3.3.8-1", "psmux"),
+])
+def test_native_prerequisites_check_disposable_binaries_and_actual_version(
+    tmp_path, monkeypatch, mismatch, mux_output, failure,
+):
     runner = tmp_path / "runner"
     runner.mkdir()
     copilot, mux = runner / "copilot.exe", runner / "psmux.exe"
@@ -164,11 +173,11 @@ def test_native_prerequisites_check_disposable_binaries_and_actual_version(tmp_p
         calls.append((argv, timeout))
         return SimpleNamespace(stdout=(
             "GitHub Copilot CLI 1.0.105-1." if mismatch else "GitHub Copilot CLI 1.0.105."
-        ) if argv[0] == str(copilot) else "psmux 3.3.8")
-    if mismatch:
-        with pytest.raises(ValueError, match="version mismatch"):
+        ) if argv[0] == str(copilot) else mux_output)
+    if failure:
+        with pytest.raises(ValueError, match=f"{failure} native prerequisite version mismatch"):
             worker.native_prerequisites(owned)
-        assert len(calls) == 1
+        assert len(calls) == (1 if failure == "copilot" else 2)
     else:
         assert worker.native_prerequisites(owned) == contract.NATIVE_VERSIONS
         assert calls == [([str(copilot), "--version"], 30), ([str(mux), "-V"], 30)]

@@ -154,7 +154,7 @@ def test_creation_copies_each_time_and_sessionstart_always_queues(copy_workspace
     monkeypatch.setattr(lcr, "_queue_refresh", lambda cwd: queued.append(cwd) or lcr.RefreshResult("queued"))
     second = lcr.prepare_for_launch(root)
     assert second.changed == 1 and not second.reused
-    assert second.publication_revision != first.publication_revision
+    assert second.publication_revision == first.publication_revision
     assert "queued" in lcr.sessionstart_diagnostic(str(root), deadline=time.time() + 3)
     assert queued == [str(root)]
     assert calls == ["snapshot", "snapshot"]
@@ -355,7 +355,7 @@ def test_late_worker_completion_reaches_actual_post_tool_hook(registered_copy_wo
     assert "Restart/new context is required" in notice
     assert "not proof of model admission" in notice
     if publisher == "foreground-partial":
-        assert "partially refreshed" in notice and "Retain reviewed fallback" in notice
+        assert "incomplete" in notice and "Retain reviewed fallback" in notice
     assert not post()
     assert output.read_bytes() == b"fresh guidance"
     if publisher == "post-copy-failure":
@@ -379,6 +379,67 @@ def test_sessionstart_does_not_probe_instruction_or_git_fingerprints(copy_worksp
     assert "queued" in result
     assert queued == [str(root)]
     assert (session / "local-guidance-watch.json").is_file()
+
+
+@pytest.mark.parametrize("change", ["unchanged", "changed", "removed"])
+def test_backup_restart_notice_tracks_content_not_unconditional_copy(
+    registered_copy_workspace, monkeypatch, change,
+):
+    from agent_worktrees import local_cache_worker
+    from test_nudge_status import nudge
+
+    root, home = registered_copy_workspace
+    template, output = provider(root, home, content=b"prepared before discovery")
+    initial = lcr.prepare_for_launch(root)
+    session = home / ".copilot/session-state/prepared-native-session"
+    session.mkdir(parents=True)
+    local_cache_worker.watch_completion(
+        root, "prepared-native-session", initial_revision=initial.publication_revision,
+    )
+    copies = []
+    replace = static.os.replace
+
+    def observe_replace(source, destination):
+        if Path(destination) == output:
+            copies.append(Path(source).read_bytes())
+        return replace(source, destination)
+
+    monkeypatch.setattr(static.os, "replace", observe_replace)
+    if change == "changed":
+        template.write_bytes(b"new guidance after discovery")
+    elif change == "removed":
+        write_json(root / ".github/copilot/settings.json", {"enabledPlugins": {}})
+
+    assert local_cache_worker.run(root, lcr._worker_directory(root)) == 0
+    notice = nudge.decide(
+        {"sessionId": "prepared-native-session", "cwd": str(root)},
+        home=home, env={"AGENT_WORKTREES_NUDGE": "off"},
+    )
+    if change == "unchanged":
+        assert copies == [b"prepared before discovery"], "equal files must still be copied"
+        assert "Restart/new context is required" not in notice
+        assert "no new model admission" in notice
+    else:
+        assert "Restart/new context is required" in notice
+        assert "not proof of model admission" in notice
+
+
+def test_unreadable_old_output_does_not_block_copy_or_hide_restart(copy_workspace, monkeypatch):
+    root, home = copy_workspace
+    _, output = provider(root, home, content=b"current guidance")
+    assert lcr.prepare_for_launch(root).status == "ready"
+    original = static.os.open
+
+    def unreadable(path, flags, *args, **kwargs):
+        if Path(path) == output:
+            raise PermissionError("fixture cannot inspect previous bytes")
+        return original(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(static.os, "open", unreadable)
+    result = lcr.prepare_for_launch(root)
+    assert result.status == "ready" and result.changed == 1
+    assert result.restart_required is True
+    assert output.read_bytes() == b"current guidance"
 
 
 def test_notice_observes_publication_after_backup_result(registered_copy_workspace):

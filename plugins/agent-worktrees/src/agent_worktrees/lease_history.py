@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import timedelta
 
 from .lease_protocol import (
@@ -9,6 +10,58 @@ from .lease_protocol import (
     ReturnedGeneration, parse_timestamp,
 )
 from .service_custody_protocol import CoordinationRecord, ServiceCustodyRecord
+from .provider_effect_protocol import ProviderEffectRecord, validate_begin, validate_settle
+
+
+@dataclass(frozen=True)
+class ResourceHistory:
+    current: CoordinationRecord
+    effects: tuple[tuple[str, ProviderEffectRecord], ...]
+
+
+def validate_history(chain: list[tuple[str, CoordinationRecord]], *,
+                     clock_skew_seconds: int) -> ResourceHistory:
+    """Project settled effects without renewing, releasing or replacing custody."""
+    previous = None
+    parent_oid = ""
+    pending = None
+    effects = []
+    seen = set()
+    margins = [clock_skew_seconds] * len(chain)
+    margin = clock_skew_seconds
+    for index in range(len(chain) - 1, -1, -1):
+        record = chain[index][1]
+        if isinstance(record, ServiceCustodyRecord):
+            margin = record.acceptance_margin_seconds
+        elif isinstance(record, ProviderEffectRecord) and record.event == "begin":
+            margin = record.admission_margin_seconds
+        margins[index] = margin
+    for index, (oid, current) in enumerate(chain):
+        if isinstance(current, ProviderEffectRecord):
+            if current.event == "begin":
+                if pending is not None:
+                    raise ProtocolError("provider resource has an unsettled effect")
+                if current.effect_id in seen:
+                    raise ProtocolError("provider effect_id cannot be reused")
+                validate_begin(previous, current, parent_oid=parent_oid)
+                seen.add(current.effect_id)
+                pending = current
+            else:
+                if pending is None:
+                    raise ProtocolError("provider effect settlement requires an unsettled effect")
+                validate_settle(pending, current, parent_oid=parent_oid)
+                pending = None
+            effects.append((oid, current))
+        else:
+            if pending is not None:
+                raise ProtocolError("provider resource has an unsettled effect")
+            validate_transition(previous, current, parent_oid=parent_oid,
+                                clock_skew_seconds=margins[index])
+            previous = current
+        parent_oid = oid
+    if previous is None:
+        raise ProtocolError("resource history has no task custody")
+    return ResourceHistory(pending or previous, tuple(effects))
 
 
 def validate_transition(
@@ -19,6 +72,8 @@ def validate_transition(
     clock_skew_seconds: int,
 ) -> None:
     """Validate against the actual Git parent, not an asserted receipt alone."""
+    if isinstance(previous, ProviderEffectRecord) or isinstance(current, ProviderEffectRecord):
+        raise ProtocolError("provider effects require complete resource-history validation")
     if isinstance(previous, ServiceCustodyRecord):
         raise ProtocolError("service custody cannot be changed by this protocol generation")
     if isinstance(current, ServiceCustodyRecord):

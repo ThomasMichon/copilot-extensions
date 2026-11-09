@@ -123,7 +123,7 @@ After the reviewed proposal, the operator admitted execution:
 
 ### Phase 3 - Delta-bounded discovery and reconciliation
 
-- [ ] Carry exact changed IDs/ref ranges through intake, queue and connector
+- [x] Carry exact changed IDs/ref ranges through intake, queue and connector
   boundaries; merge duplicate deliveries without erasing distinct changes.
 - [x] Make local Git use commit-range changes and tombstones without enumerating
   all tracked paths and commit history on each ordinary round.
@@ -159,7 +159,7 @@ After the reviewed proposal, the operator admitted execution:
   lifecycle seams rather than creating a second multi-model engine.
 - [x] Demonstrate a generic single-model consumer and an injected multi-model
   consumer use the same engine path without importing private integrations.
-- [ ] Publish a consumer migration recipe and staged compatibility tests.
+- [x] Publish a consumer migration recipe and staged compatibility tests.
   Consumers re-sync the shared engine and remove duplicated orchestration;
   adapter-only patches are not a substitute for shared fixes.
 - [x] Qualify release, actual consumed source and a separately authorized
@@ -195,6 +195,7 @@ source-owner coordination rather than one large rewrite.
 
 Append-only entries are preserved in dated files, newest first.
 
+- [2026-11-09 acceptance reconciliation](journal/2026/11.09%20acceptance-reconciliation.md)
 - [2026-10-27 checkpoint recovery](journal/2026/10.27%20checkpoint-recovery.md)
 - [2026-10-27 provider measurements](journal/2026/10.27%20provider-work-measurements.md)
 - [2026-10-26 storage](journal/2026/10.26%20incremental-indexing-storage.md)

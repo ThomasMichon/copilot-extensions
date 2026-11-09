@@ -1567,6 +1567,17 @@ proof that a path hook never ran. The T3 tier keeps all six controls skipped
 without explicit opt-in. This is a completion-boundary check,
 not package-feed, full installer, selected Dispatch CLI or affected-host recovery
 qualification; no runtime or service is installed.
+Dispatch's `tests/test_supervisor_scheduled_admission.py` separately exercises
+the actual scheduled-entry and on-demand ensure paths in contained Windows
+fixtures. Both PowerShell hosts share one native lane during first and
+overlapping admission. The marked-master control changes interval and extra
+arguments in the same version, then observes the real successor's completed
+cycle and absence of profile markers in its worker environment. Its fixture
+retains the predecessor until cooperative release because the contained SDK's
+kill-on-close Job deliberately owns that successor. This proves configuration
+handoff and readiness, not survival after predecessor cleanup or non-admin
+installed service lifetime. Containment and the original deadlines remain
+unchanged.
 The MCP retirement packet adds native Windows controls for one birth-checked
 incomplete-census refresh, completed processes and retained live-unknown/identity
 refusals. An actual native parent exits during either ownership inspection or
