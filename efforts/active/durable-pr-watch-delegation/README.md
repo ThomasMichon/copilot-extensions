@@ -285,10 +285,11 @@ The [explicit native reviewer-request contract](native-reviewer-request.md)
 cleared review in #11645; its finite native source merged in #11647.
 Windows, provider, installed and HTTP qualification remain open;
 request acceptance is not evidence that a fresh review exists.
-The [native creation-cancellation proposal](native-creation-cancellation.md)
-selects only the existing unpublished-reservation owner. Remote closure,
-reason-comment publication and abandoned-claim settlement remain separate;
-the proposal is not executing support or complete `pr-abandon` parity.
+The [native creation-cancellation contract](native-creation-cancellation.md)
+cleared review in #11651; its finite native source adapter selects only the
+existing unpublished-reservation owner. Remote closure, reason-comment
+publication and abandoned-claim settlement remain separate; source qualification
+is not installed support or complete `pr-abandon` parity.
 
 - [x] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence)
   (merged in #10380; implementation, provider and adoption gates remain).
@@ -1319,6 +1320,39 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-08 - Native cancellation source qualification
+
+- Implemented the contract reviewed in #11651 as a thin native-only
+  `cancel-creation` frontend. The same selected receiver supplies read-only
+  support/attempt discovery and one existing cancellation-owner dispatch.
+  Original worktree, creation, revision and reason remain selected; no forge
+  transport, cancellation algorithm, resource ledger or remote close was added.
+- Bounded isolated native routing/process controls passed 167 tests with five
+  existing platform skips. Actual creation/status/cancellation composition,
+  receipt recovery, source/sibling/claim custody and an old caller subprocess
+  passed 82 tests. A committed cancellation with a lost response remains
+  `unknown`; no fallback or automatic replay occurs.
+- Two fixture corrections preserved the real owners: select a file rather
+  than the fixture's existing worktrees directory, and supply the fixture's
+  admitted project context. The legacy output control uses the real JSON
+  output boundary. Bootstrap HTTP 504 recovery changed only a disposable
+  vendor-download URL while retaining the pinned hash and isolation.
+- Source implementation is awaiting its own review. Windows execution,
+  installed/provider/HTTP qualification, remote abandonment/comment/claim
+  integration and the complete parent acceptance remain open.
+
+### 2026-11-08 - Merge the native cancellation contract and return to implementation
+
+- #11651 merged as `50b618a194ef8a5e11e6effc30ed4d4b21184dc1`
+  after genuine current-head Copilot approval with no findings and all three
+  required checks green. Normal source completion retained the existing
+  parent and source claims; the contract does not implement its frontend.
+- Re-read the complete parent Plan and Validation Plan after merge. Continue
+  the reviewed native-only local-cancellation adapter, actual selected receiver
+  discovery and isolated owner/process qualification. Remote abandonment,
+  all-publisher comment identity, HTTP, provider, installed and operational
+  acceptance remain open.
 
 ### 2026-11-08 - Merge the abandonment prerequisite and select local cancellation
 

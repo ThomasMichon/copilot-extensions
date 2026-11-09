@@ -205,6 +205,11 @@ pending auto-completion is not reported as a completed merge. `--auto`,
 than silently overriding repository policy. Use the central consent workflow
 for a target whose profile does not allow `--now`.
 
+The native-only [unpublished creation cancellation](docs/creation-cancellation.md)
+command uses exact worktree/creation/revision selection and actual operator
+approval. It delegates to the existing Worktrees owner without closing a remote
+PR, posting a comment or releasing source/claim custody.
+
 Each native snapshot read has a 60-second deadline; capability probes retain
 their 20-second deadline and mutations retain a 90-second deadline and bounded
 output. The polling timeout does not cancel an in-flight snapshot: that read

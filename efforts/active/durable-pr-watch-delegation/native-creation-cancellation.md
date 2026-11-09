@@ -3,7 +3,8 @@
 Back to the [CLI parity inventory](cli-parity-inventory.md) and
 [canonical effort](README.md).
 
-**Proposed finite contract; no native frontend is delivered by this document.**
+**Contract reviewed in #11651; finite native source implementation is submitted
+separately. Installed/provider/HTTP acceptance remains open.**
 This closes part of the PR-domain
 [provider-neutral surface](../../../visions/plugins/agent-pull-requests/README.md#first-class-provider-neutral-pr-surface)
 through the existing Worktrees creation owner. It follows
@@ -139,20 +140,45 @@ binding is found. Add the native frontend conditionally, preserving old callers
 on new receivers and explicit pre-effect refusal on old/rolled-back receivers.
 No existing command is deprecated here.
 
-- [ ] Exercise the actual native parser and selected Worktrees process seam:
+- [x] Exercise the actual native parser and selected Worktrees process seam on Linux:
   no-confirm/invalid-input zero dispatch, exact full worktree/creation selection,
   non-active matching attempt, missing/duplicate entries, malformed discovery,
   unsupported receiver and strict unknown-option refusal.
-- [ ] Compose actual creation persistence/cancellation with the frontend in
+- [x] Compose actual creation persistence/cancellation with the frontend in
   isolated state. Prove exact revision/reason forwarding, owner race and
   published/uncertain refusal, original-receipt recovery, retained audit and
   unchanged source, siblings, claims and ordinary finalization gates.
-- [ ] Inject pre-dispatch discovery failure, owner refusal, failed persistence,
+- [x] Inject pre-dispatch discovery failure, owner refusal, failed persistence,
   nonzero subprocess, lost/malformed/mismatched response and timeout. Preserve
   unknown outcomes after dispatch and prove no retry, fallback or remote close.
-- [ ] Cover new/current, new/prior, old/current and receiver rollback through
-  actual parser/process boundaries, including additive result fields and
+- [x] Cover new/current, new/prior and receiver rollback through the selected
+  process, plus old/current through an actual owner parser/handler subprocess, including additive result fields and
   an unsupported optional contract without blanket native rejection.
 - [ ] Record isolated source and native-platform evidence separately from
   installed/provider/HTTP acceptance. Retain the full remote-abandonment,
   prepared reason-comment and broader CLI parity gates in the parent.
+
+### Source qualification
+
+The bounded native suite passed **167 tests with five existing platform skips**;
+the actual Worktrees creation/cancellation suite passed **82 tests**. Tests use
+new isolated fixtures, not retained worktrees or provider state. The selected
+process fixture uses the real native command runner and strict receiver parser;
+the owner composition uses the actual creation persistence, status and
+cancellation handlers with synthetic provider absence. These are complementary
+controls, not proof of installed cross-process provider operation.
+
+Exact original-revision recovery, non-active creation selection, retained audit,
+source/index/HEAD/refs, sibling attempts, resource claims and the source
+finalization precondition are covered. A save-then-lost-response control confirms
+the frontend reports `unknown` despite a committed cancellation and dispatches
+no automatic recovery. Owner race, published/uncertain reservations and failed
+persistence also remain nonzero/unknown after dispatch.
+
+The suites ran inside the existing hardened, network-disconnected test phase.
+A vendor bootstrap URL returned persistent HTTP 504 responses; the successful
+owner run changed only that generated disposable configuration's download URL
+to the vendor's download-query form, retaining the pinned archive/hash and all
+isolation/cleanup controls. No tracked bootstrap, installer or runtime changed.
+Native Windows/PowerShell execution, installed receiver rollout, live provider
+absence and full ordinary-finalization adoption remain separate qualification.
