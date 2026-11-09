@@ -293,9 +293,9 @@ _Operator-required outcome; agent-recommended slices and validation._
   Quiet-observation metadata expiry merged in #11574; it preserves the cursor
   anchor and does not compact body-bearing caches, outboxes or effect receipts.
   The [coordinated terminal-retention refinement](terminal-retention.md)
-  defines the proposed same-owner fence, notification, recovery-only payload
-  and scoped cache/materialization sequence; realization and qualification
-  remain open.
+  was reviewed in #11576. It defines the same-owner fence, notification,
+  recovery-only payload and scoped cache/materialization sequence;
+  realization and qualification remain open.
   Existing normalized ADO load/sync acquisition feeds the explicitly enabled
   journal after confirmed cache publication (#10405); native observation and
   standalone-host adoption remain distinct prerequisites.
@@ -1255,6 +1255,12 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-08 - Review coordinated terminal retention before realization
+
+The [terminal-retention record](journal/2026/11.08%20terminal-retention.md)
+records the finite plan merge and the next T1 storage/admission/notification
+source slice. P1/P2 and runtime retention acceptance remain open.
 
 ### 2026-11-08 - Expire journal metadata during quiet observations
 

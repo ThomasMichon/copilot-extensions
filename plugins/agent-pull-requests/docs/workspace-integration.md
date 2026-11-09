@@ -8,6 +8,9 @@ reader. It adds no installed owner, service, credentials or acquisition fallback
 `GenerationCache`, `ReplayStore` and protected `execute_review`. Construction
 performs no provisioning/adoption, source fetching, installation or credential
 acquisition.
+The internal [terminal-intent embedding](terminal-retention.md) adds explicitly
+adopted epoch fencing and owner drain; it supplies no new serving contract or
+installed activation and leaves these default operations unchanged.
 Construct it only inside the current owner pipeline with an authorized fixed
 native repository/principal scope, read binding and actual write-context factory.
 The factory accepts the selected PR number and returns the normal pinned context;

@@ -10,6 +10,7 @@ from .attention_acquisition import AttentionInputs, observe_attention, unavailab
 from .attention_state import AttentionState
 from .conversation_journal import ConversationJournal, Observation, PROTOCOL
 from .watch_replay_store import ReplayStore, ReplayStoreInvalid
+from .watch_replay import ObservationTarget
 
 
 class ConversationStore:
@@ -57,6 +58,8 @@ class ConversationStore:
         versions: tuple[int, ...] = (3, 4, 5, 6),
     ) -> dict:
         def execute(document: dict) -> dict:
+            if versions == (3,) and "terminal_retention" in document:
+                raise ReplayStoreInvalid("terminal retention serving contract unavailable")
             if document["version"] not in versions:
                 if document["version"] in (4, 5, 6):
                     raise ReplayStoreInvalid("conversation serving contract unavailable for adopted owner layout")
@@ -101,12 +104,17 @@ class ConversationStore:
         reopen: bool = False,
     ) -> dict:
         """Trusted owner-only evidence; never exposed as a caller-supplied HTTP ingest."""
-        return self._transaction(
-            lambda journal: journal.observe(observation, expected=expected, reopen=reopen),
-            expires_at=expires_at,
-            checkpoint=checkpoint,
-            persist=True,
-        )
+        def observe(document: dict) -> dict:
+            if "terminal_retention" in document:
+                raise ReplayStoreInvalid("terminal ingestion requires workspace evidence and delivery target")
+            if document["version"] not in (3, 4, 5, 6):
+                raise ReplayStoreInvalid("conversation journal requires explicit owner adoption")
+            journal = ConversationJournal(document["conversations"])
+            result = journal.observe(observation, expected=expected, reopen=reopen)
+            document["conversations"] = journal.snapshot()
+            return result
+
+        return self.owner._review_transaction(observe, expires_at=expires_at, checkpoint=checkpoint)
 
     def events(
         self,
@@ -136,6 +144,7 @@ class ConversationStore:
         checkpoint: Callable[[], None] | None = None,
         attention: AttentionInputs | None = None,
         comment_mappings: bool = False,
+        terminal_target: ObservationTarget | None = None,
     ) -> dict:
         """Project trusted acquisition under the same journal transaction, not HTTP ingest."""
         from .workspace_conversation import conversation_key, observation_interval, project_generation
@@ -202,6 +211,15 @@ class ConversationStore:
                 )
                 document["attention"] = state.snapshot()
             document["conversations"] = journal.snapshot()
+            if "terminal_retention" in document and result["status"] in ("observed", "unchanged"):
+                from .terminal_retention import observe_live, observe_terminal
+                if value.terminal:
+                    result["retirement"] = observe_terminal(
+                        document, generation["scope"], journal._find(key), terminal_target,
+                        clock=self.owner.clock,
+                    )
+                elif value.complete and value.state == "open":
+                    observe_live(document, generation["scope"], journal._find(key), terminal_target)
             if comment_mappings and result["status"] in ("observed", "unchanged"):
                 from .review_comment_mapping import observe
                 observe(document, generation)
