@@ -63,6 +63,56 @@ def spare(pool):
     return slot
 
 
+@pytest.mark.parametrize("status", ["present", "absent", "unknown"])
+def test_psmux_warm_observation_never_executes_cli_or_retires_unknown(pool, monkeypatch, status):
+    from agent_remote_driver.mux_observation_types import Observation, ObservationUnavailable
+
+    value, calls = pool
+    slot = spare(pool)
+    value.mux = "psmux.exe"
+    monkeypatch.setattr(value, "_alive", lambda slot: warm.WarmPickerPool._alive(value, slot))
+    monkeypatch.setattr(value, "_incarnation", lambda slot: warm.WarmPickerPool._incarnation(value, slot))
+    monkeypatch.setattr(
+        warm.mux_discovery, "observe_psmux",
+        lambda name, **kwargs: Observation(status, incarnation="$1:123" if status == "present" else ""),
+    )
+    if status == "unknown":
+        with pytest.raises(ObservationUnavailable):
+            value._alive(slot)
+        value.close()
+        assert slot.directory.exists() and slot in value._slots
+    else:
+        assert value._alive(slot) is (status == "present")
+        assert value._incarnation(slot) == ("$1:123" if status == "present" else None)
+    assert not calls
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows mux creation environment")
+def test_windows_spare_creation_uses_home_without_inherited_pane_nesting(pool, monkeypatch):
+    from pathlib import Path
+    from worktree_manager import manager_config
+
+    value, _ = pool
+    value.mux = "psmux.exe"
+    value.environment.update({
+        "TMUX": "parent", "TMUX_PANE": "%1", "PSMUX_SESSION": "parent",
+        "PSMUX_TARGET_SESSION": "parent", "PSMUX_CLAUDE_TEAMMATE_MODE": "1",
+        "SAFE_VALUE": "kept",
+    })
+    monkeypatch.setattr(manager_config, "automatic_maintenance_enabled", lambda: True)
+    captured = []
+    monkeypatch.setattr(
+        warm.subprocess, "run",
+        lambda argv, **kwargs: captured.append((argv, kwargs)) or subprocess.CompletedProcess(argv, 0),
+    )
+    value._spawn()
+    _, kwargs = captured[0]
+    assert kwargs["cwd"] == str(Path.home())
+    assert kwargs["env"]["SAFE_VALUE"] == "kept"
+    assert not {"TMUX", "TMUX_PANE", "PSMUX_SESSION", "PSMUX_TARGET_SESSION",
+                "PSMUX_CLAUDE_TEAMMATE_MODE"} & kwargs["env"].keys()
+
+
 def request():
     return {
         "manager_runtime": warm.runtime_identity(), "engine": ["qualified-engine"],

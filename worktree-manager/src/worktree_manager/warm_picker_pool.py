@@ -19,6 +19,7 @@ from agent_procutil import no_window_kwargs
 from zdd.diagnostics import process_start_time
 
 from . import engine_client
+from . import mux_discovery
 from .mux_daemon_process import scrub_session_credentials
 from .warm_picker_worker import publish
 from .warm_picker_contract import KIND as KIND, CONTEXT_KEYS, invocation_context, mux_arguments, runtime_command, runtime_identity, worker_environment
@@ -68,11 +69,16 @@ class WarmPickerPool:
         )
 
     def _alive(self, slot: Slot) -> bool:
+        if not mux_discovery.passive_cli_supported(self.mux):
+            return mux_discovery.observe_psmux(slot.session, timeout=3).presence()
         return self._mux("has-session", "-t", slot.session).returncode == 0
 
     def _incarnation(self, slot: Slot) -> str | None:
         from .mux_discovery import _valid_native_incarnation
 
+        if not mux_discovery.passive_cli_supported(self.mux):
+            observed = mux_discovery.observe_psmux(slot.session, timeout=3)
+            return observed.incarnation if observed.presence() else None
         result = self._mux("display-message", "-p", "-t", slot.session, "#{session_id}:#{session_created}")
         value = (result.stdout or "").strip()
         return value if result.returncode == 0 and _valid_native_incarnation(value) else None
@@ -145,11 +151,16 @@ class WarmPickerPool:
         for key in (engine_client.ENGINE_ARGV_ENV, engine_client.ENGINE_CMD_ENV,
                     "WORKTREE_MANAGER_RESIDENT_BOOTSTRAP"):
             environment.pop(key, None)
+        if os.name == "nt":
+            nesting = {"TMUX", "TMUX_PANE", "PSMUX_SESSION", "PSMUX_TARGET_SESSION",
+                       "PSMUX_CLAUDE_TEAMMATE_MODE"}
+            environment = {key: value for key, value in environment.items() if key.upper() not in nesting}
         self._slots.append(slot)
         result = subprocess.run(
             [self.mux, *self.mux_args, "new-session", "-d", "-s", slot.session, "--", *command],
             stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=5,
-            env=environment, **no_window_kwargs(),
+            env=environment, cwd=str(Path.home()) if os.name == "nt" else None,
+            **no_window_kwargs(),
         )
         slot.incarnation = self._incarnation(slot)
         if result.returncode:
