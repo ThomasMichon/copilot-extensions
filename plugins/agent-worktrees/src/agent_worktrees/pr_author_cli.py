@@ -98,6 +98,7 @@ def capabilities(config, repository: str) -> dict:
             "reviewer-request": pr.enabled and pr.provider == "github",
             "thread-resolve": supported,
             "thread-reopen": supported,
+            "local-source-complete": pr.enabled and pr.provider in ("github", "gitea", "azure-devops"),
         },
         "source_adapter": "reachable-workspace" if supported else None,
         "completion_authority": "target-repository-policy",

@@ -89,6 +89,12 @@ receipt or an old package version cannot replace qualified source custody.
 Missing installed support blocks dependent migration, not ordinary supported
 observation and not permission to fall back to raw provider commands.
 
+The optional native [`complete` source adapter](../../../../agent-pull-requests/docs/author-operations.md#local-source-reconciliation-is-not-finalization)
+uses this managed source's existing `pr-complete` owner with exact local
+branch/head admission. Unlike checkout-free PR reads, it executes from the
+source's own Git top level; it neither imports foreign source nor finalizes
+the worktree or its effort. Unsupported receivers retain ordinary legacy calls.
+
 ADO creation forwards the native draft request and retains the returned draft
 state, including local and foreign retries of an existing PR. A contradicted
 or missing requested draft confirmation appears separately in
