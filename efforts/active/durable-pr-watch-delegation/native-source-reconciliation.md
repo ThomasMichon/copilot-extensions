@@ -3,7 +3,9 @@
 Back to the [CLI parity inventory](cli-parity-inventory.md) and
 [canonical effort](README.md). Bounded coordination: #11753.
 
-**Agent-recommended proposal; review precedes implementation.**
+**Agent-recommended contract reviewed in #11754; source qualification is
+recorded in the [implementation journal](journal/2026/11.09%20Native%20local%20source%20reconciliation.md).
+Independent implementation review and delivery remain open.**
 This source-only slice advances the PR-domain
 [one-service-contract direction](../../../visions/plugins/agent-pull-requests/README.md#cli-through-one-service-contract)
 and [preserved source custody](../../../visions/plugins/agent-pull-requests/README.md#delegated-source-with-preserved-custody).
@@ -127,22 +129,22 @@ An old or rolled-back runtime must not receive the new effectful syntax.
 Package versions, installed payloads and successful forwarding mocks do
 not establish support; no legacy removal window starts here.
 
-- [ ] Qualify the actual guarded Worktrees parser/dispatcher and managed-source
+- [x] Qualify the actual guarded Worktrees parser/dispatcher and managed-source
   admission with exact, stale, abbreviated, dirty, detached, wrong-branch,
   foreign-record/repository and mixed legacy/guarded requests. Prove refusal
   precedes fetch, backup creation and reconciliation.
-- [ ] Use isolated real Git repositories through the existing owner for
+- [x] Use isolated real Git repositories through the existing owner for
   no-op, fast-forward, squash merge, later overlapping upstream edits,
   post-merge commits, unmerged work, conflict, failed backup and preview.
   Prove original-tip recovery, preservation of subsequent work and unchanged
   PR/claim/resource/effort state; retain existing legacy owner controls.
-- [ ] Exercise the real dedicated frontend-to-owner composition, including
+- [x] Exercise the real dedicated frontend-to-owner composition, including
   current/prior runtimes, unsupported/rolled-back receivers, strict invalid
   options, additive evidence and direct/managed-peer command selection.
-- [ ] Inject owner errors, malformed/wrong-source output, nonzero exits,
+- [x] Inject owner errors, malformed/wrong-source output, nonzero exits,
   timeout and output loss/budget failure. Preserve exact owner evidence
   where valid, truthful preview/unknown outcomes and zero automatic replay.
-- [ ] Record source and native-platform qualification separately from
+- [x] Record source and native-platform qualification separately from
   installed adoption, HTTP parity, live-provider evidence and the full
   parent Plan/Validation. Do not retire a legacy command or finalize either
   source or orchestration worktree on the strength of this leaf.

@@ -338,8 +338,9 @@ legacy status choices remain unchanged; installed support is not qualified.
 The [native local source-reconciliation proposal](native-source-reconciliation.md)
 under #11753 composes the existing Worktrees `pr-complete` owner with optional
 exact-source admission and a capability-directed native client. Contract review
-precedes implementation; no remote source mutation, merge evidence, claim
-settlement or finalization is implied.
+cleared in #11754; its [finite source qualification](journal/2026/11.09%20Native%20local%20source%20reconciliation.md)
+passes while independent implementation review and delivery remain open.
+No remote source mutation, merge evidence, claim settlement or finalization is implied.
 
 - [x] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence)
   (merged in #10380; implementation, provider and adoption gates remain).
@@ -1091,6 +1092,13 @@ or silently expanding a bounded source claim.
   bounds and unchanged source/resource ownership.
 
 ## Validation Plan
+
+- [ ] Deliver the finite [native local source-reconciliation controls](native-source-reconciliation.md#compatibility-delivery-and-qualification)
+  after reviewed contract #11754. All five finite source-control rows pass
+  (193 Worktrees and 123 frontend cases, five existing platform skips);
+  independent implementation review, committed-source gates and actual
+  required CI/merge remain open. Preserve legacy source behavior and broader
+  installed/provider/HTTP/resource/effort acceptance.
 
 - [x] Qualify the finite source [selected native reopening refinement](native-thread-resolution.md#reopening-source-controls-after-review)
   after independent contract review (#11741): exact resolved-to-active transition,
