@@ -1323,6 +1323,11 @@ callback an implicit credential store.
 
 ### 2026-11-08 - Native cancellation source qualification
 
+- The next bounded re-review added two distinct findings, repeated at five
+  locations: missing-stderr fallback and original-target recovery evidence.
+  Centralized text-only stderr handling and added frontend-owned original
+  selectors/reason without altering receiver evidence. The final affected
+  isolated subset passed 146 tests with five platform skips.
 - A subsequent Comment review could not run its full agentic suite. Addressed
   missing-stdout diagnostics and redundant error fallback; retained malformed
   owner fields under the reviewed payload-preservation contract. Documented

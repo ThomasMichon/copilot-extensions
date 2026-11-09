@@ -35,6 +35,8 @@ def _failure(args, error, status, body=None):
     payload["frontend"] = {
         **(frontend if isinstance(frontend, dict) else {}),
         "cancellation_status": status, "diagnostic": error,
+        "selected_worktree_id": args.worktree, "selected_pr_id": args.creation,
+        "selected_expected_revision": args.expected_revision, "selected_reason": args.reason,
     }
     return 1, payload
 
@@ -68,11 +70,16 @@ def _confirmed(body, args):
     )
 
 
+def _stderr(response, fallback):
+    value = response.stderr
+    return (value.strip() or fallback) if isinstance(value, str) else fallback
+
+
 def _decode(response):
     try:
         return json.loads(response.stdout)
     except (ValueError, TypeError):
-        raise ValueError(response.stderr.strip() or "Worktrees returned non-JSON cancellation output") from None
+        raise ValueError(_stderr(response, "Worktrees returned non-JSON cancellation output")) from None
 
 
 def run(args, prefix_factory=None):
@@ -98,7 +105,7 @@ def run(args, prefix_factory=None):
         )
         body = _decode(response)
         if response.returncode:
-            raise ValueError(response.stderr.strip() or "Worktrees cancellation discovery failed")
+            raise ValueError(_stderr(response, "Worktrees cancellation discovery failed"))
         _discovery(body, args)
         body = None
         dispatched = True
@@ -109,7 +116,7 @@ def run(args, prefix_factory=None):
         ], timeout=90.0)
         body = _decode(response)
         if response.returncode or not _confirmed(body, args):
-            raise ValueError(response.stderr.strip() or "Worktrees cancellation result is unconfirmed")
+            raise ValueError(_stderr(response, "Worktrees cancellation result is unconfirmed"))
         frontend = body.get("frontend")
         body["frontend"] = {
             **(frontend if isinstance(frontend, dict) else {}), "cancellation_status": "confirmed",

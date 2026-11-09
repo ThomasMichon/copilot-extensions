@@ -131,6 +131,10 @@ def test_postdispatch_invalid_result_is_unknown_never_replayed(command, monkeypa
     value = json.loads(capsys.readouterr().out)
     assert value["frontend"]["cancellation_status"] == "unknown"
     assert "original revision and reason" in value["frontend"]["diagnostic"]
+    assert value["frontend"]["selected_worktree_id"] == WORKTREE
+    assert value["frontend"]["selected_pr_id"] == CREATION
+    assert value["frontend"]["selected_expected_revision"] == 4
+    assert value["frontend"]["selected_reason"] == REASON
     if "error" in damage:
         assert value["error"] == damage["error"]
     assert len(calls) == 2 and calls[1][1] == "pr-abandon"
@@ -207,6 +211,28 @@ def test_malformed_owner_error_is_preserved_with_separate_frontend_diagnostic(co
     assert value["error"] == ["owner", "evidence"]
     assert "outcome is unknown" in value["frontend"]["diagnostic"]
     assert len(calls) == 2
+
+
+@pytest.mark.parametrize("stage", ["decode", "discovery", "dispatch"])
+def test_missing_stderr_never_escapes_outcome_classification(command, monkeypatch, capsys, stage):
+    calls = stub(monkeypatch, discovery(), receipt(success=False))
+    run = native.run_command
+    def missing(argv, **kwargs):
+        response = run(argv, **kwargs)
+        if stage != "dispatch" or argv[1] == "pr-abandon":
+            response.stderr = None
+            response.returncode = 1
+            if stage == "decode":
+                response.stdout = None
+        return response
+    monkeypatch.setattr(native, "run_command", missing)
+    assert cli.main(arguments(command, "--confirm")) == 1
+    value = json.loads(capsys.readouterr().out)
+    assert value["frontend"]["cancellation_status"] == (
+        "unknown" if stage == "dispatch" else "not-attempted"
+    )
+    assert isinstance(value["frontend"]["diagnostic"], str)
+    assert len(calls) == (2 if stage == "dispatch" else 1)
 
 
 @pytest.mark.parametrize("already", [False, True])

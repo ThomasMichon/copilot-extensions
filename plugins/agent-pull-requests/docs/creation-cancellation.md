@@ -31,6 +31,10 @@ alongside the owner error, so recovery guidance remains visible.
 An unknown outcome may include a committed cancellation;
 there is no automatic retry/fallback. Reconcile the original attempt before
 intentional receipt recovery using its original revision and reason.
+Failure output also retains the original inputs as `frontend.selected_worktree_id`,
+`selected_pr_id`, `selected_expected_revision` and `selected_reason`. These
+frontend-owned fields remain correct even if the receiver returned mismatched
+identifiers, which stay unchanged in the owner payload as diagnostic evidence.
 
 As with the other native verbs, success prints the complete JSON owner receipt
 even without `--json`; no human summary discards its evidence. `--json` also

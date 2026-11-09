@@ -178,6 +178,10 @@ error fallback is removed, and malformed owner fields remain retained.
 Default success still prints the full owner receipt, consistently with the
 other native verbs; this is now explicitly documented and tested rather than
 replaced with a lossy human summary.
+The final diagnostics/recovery subset passed **146 tests with five platform
+skips**. Missing stderr now uses one text-only fallback at every failure site.
+Failure output separately carries the original selected worktree, creation,
+revision and reason without overwriting mismatched receiver evidence.
 
 Exact original-revision recovery, non-active creation selection, retained audit,
 source/index/HEAD/refs, sibling attempts, resource claims and the source
