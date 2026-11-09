@@ -43,9 +43,15 @@ the typed transactional placement.
 No workspace, worker or native identity is invented. Workspace preparation and
 startup must follow that commit through the existing allocation/startup owners.
 
-Capacity counts accountable `reserving`, `spawned`, `cold` and `releasing`
+Capacity counts accountable `reserving`, `spawned` and `releasing`
 reservations, failed native/startup effects and unresolved transport custody,
-not caller estimates or task status. Immutable per-reservation pool bindings
+not caller estimates or task status. A `cold` (parked) body holds no lane
+until its reactivation is in flight. A suspended task whose resume finds its
+pool full waits (`lane_wait_since`) instead of over-subscribing; waiting
+reactivations count against the pool, so they take freed lanes before fresh
+placements, and they start in request order when recovery reconciliation
+finds a free lane. A body that never parked keeps its own lane and resumes
+without waiting. Immutable per-reservation pool bindings
 retain older attempts even when the task's current assignment advances.
 Unresolved launch/resume/delivery sends consume the slot of their recorded
 reservation, not every predecessor in the same lineage. Wake sends retain
@@ -97,6 +103,12 @@ Terminal unbound legacy history is reconciled explicitly with
 `reservations fence-history` (see
 [spawn startup fencing](spawn-startup-fencing.md#compatibility-and-graceful-cutover));
 active legacy reservations still settle through their own lifecycle.
+Still-accountable unbound rows can be adopted explicitly with
+`agent-dispatch reservations adopt-legacy`. It previews by default; with
+`--apply --permit --reason <text>` it binds each row to the single published
+pool instance whose filters permit its task on the row's execution machine and
+audits the binding. Rows matching several pools (`ambiguous`) or none
+(`no_matching_pool`) are reported and left unbound.
 
 Supervisor capacity and release sweeps apply `native_release_pending` in the
 reservation query before the bounded result limit. Cleanup retries retain their

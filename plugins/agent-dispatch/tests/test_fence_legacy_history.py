@@ -93,6 +93,18 @@ def test_live_work_and_shared_natives_are_excluded(queue):
     assert _accountable(queue, shared.key)
 
 
+@pytest.mark.parametrize(("status", "fenced"), [("completed", 1), ("abandoned", 1), ("submitted", 0)])
+def test_terminal_task_owner_does_not_protect_its_native(queue, status, fenced):
+    task, reservation = _legacy(queue, "owned", handle="native-owner")
+    with queue._connect() as conn:
+        conn.execute(
+            "UPDATE tasks SET status=?, owner_session_id='native-owner' WHERE id=?", (status, task.id),
+        )
+    result = queue.fence_legacy_history(before=2000.0, apply=True, **ATTESTED)
+    assert result["fenced"] == fenced
+    assert _accountable(queue, reservation.key) is not bool(fenced)
+
+
 def test_every_attempt_sharing_an_open_tasks_native_stays_resumable(queue):
     task, first = _legacy(queue, "open", handle="native-open", concluded=False)
     second, _ = queue.reserve_spawn(task.id, now=1100.0)
@@ -223,3 +235,36 @@ def test_http_requires_control_identity(queue, monkeypatch):
     assert client.post(path, json=body, headers={"Authorization": scheme + " worker-test"}).status_code == 403
     response = client.post(path, json=body, headers={"Authorization": scheme + " control-test"})
     assert response.status_code == 200 and response.json()["fenced"] == 1
+
+
+@pytest.mark.parametrize("capacity", [1, 2])
+def test_adopt_legacy_binds_accountable_rows_to_their_only_pool(queue, capacity):
+    from tests.test_pool_placement import place, pool, publish, task
+    live = queue.create("live")
+    legacy, _ = queue.reserve_spawn(live.id, now=1000.0)
+    queue.record_spawn(legacy.key, session_handle="native-live", now=1000.0)
+    publish(queue, pool(capacity=capacity))
+    with pytest.raises(TaskError, match="legacy capacity"):
+        place(queue, task(queue))
+    preview = queue.adopt_legacy_capacity()
+    assert preview["applied"] is False and preview["adoptable"] == 1
+    with pytest.raises(TaskError):
+        queue.adopt_legacy_capacity(apply=True, permitted=True)
+    result = queue.adopt_legacy_capacity(apply=True, permitted=True, reason="operator migration")
+    assert result["adopted"] == 1 and queue.adopt_legacy_capacity()["adoptable"] == 0
+    assert queue.get_reservation(legacy.key).state == "spawned"
+    if capacity == 1:
+        with pytest.raises(TaskError, match="no eligible pool instance has capacity"):
+            place(queue, task(queue))
+    else:
+        place(queue, task(queue))
+
+
+def test_adopt_legacy_reports_ambiguous_rows_without_binding(queue):
+    from tests.test_pool_placement import pool, publish
+    live = queue.create("live")
+    legacy, _ = queue.reserve_spawn(live.id, now=1000.0)
+    publish(queue, pool("a"), pool("b"))
+    result = queue.adopt_legacy_capacity(apply=True, permitted=True, reason="operator migration")
+    assert result["adopted"] == 0 and result["unresolved"] == {"ambiguous": [legacy.key]}
+    assert _accountable(queue, legacy.key)

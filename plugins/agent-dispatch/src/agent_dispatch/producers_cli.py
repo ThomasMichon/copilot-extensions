@@ -335,6 +335,10 @@ def _cmd_reservations(args: argparse.Namespace) -> int:
                 before=_history_cutoff(args.before), apply=args.apply, permitted=args.permit,
                 confirmed_no_live_holder=args.confirm_no_live_holder, reason=args.reason or "",
             ))
+        if args.reservations_command == "adopt-legacy":
+            return _emit(c.adopt_legacy_capacity(
+                apply=args.apply, permitted=args.permit, reason=args.reason or "",
+            ))
     return 2
 
 
@@ -535,6 +539,15 @@ def register_reservations_command(subparsers: Any) -> None:
     rp.add_argument("--apply", action="store_true")
     rp.add_argument("--permit", action="store_true")
     rp.add_argument("--confirm-no-live-holder", action="store_true")
+    rp.add_argument("--reason")
+    rp.set_defaults(func=_cmd_reservations)
+    rp = res_sub.add_parser(
+        "adopt-legacy",
+        help="preview (default) or apply binding of still-accountable unbound reservations "
+        "to the single pool instance their task can use; ambiguous rows are only reported",
+    )
+    rp.add_argument("--apply", action="store_true")
+    rp.add_argument("--permit", action="store_true")
     rp.add_argument("--reason")
     rp.set_defaults(func=_cmd_reservations)
     rp = res_sub.add_parser(

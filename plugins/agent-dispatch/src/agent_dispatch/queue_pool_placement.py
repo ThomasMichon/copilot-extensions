@@ -245,6 +245,44 @@ def _permits(pool: PoolInstanceDefinition, task: Task) -> bool:
     return pool.filters.permits(attrs)
 
 
+def pool_lane_load(
+    conn: sqlite3.Connection, identity: tuple[str, str, str], *,
+    accounting: ReservationAccountability | None = None,
+    ahead_of: tuple[float, str] | None = None,
+) -> int:
+    """Lanes held by running bodies plus suspended reactivations waiting for one.
+
+    A cold (parked) body holds no lane until its reactivation is in flight.
+    Waiting reactivations take freed lanes before fresh placements, in the
+    order they asked; ``ahead_of`` counts only the waiters before that one.
+    """
+    accounting = accounting or ReservationAccountability(conn)
+    running = 0
+    for row in conn.execute(
+        "SELECT s.*, t.recovery_requested_at AS lane_recovery_requested_at"
+        " FROM pool_reservation_bindings a"
+        " JOIN spawn_reservations s ON s.key = a.reservation_key"
+        " LEFT JOIN task_pool_assignments t ON t.reservation_key = s.key AND t.assignment_released = 0"
+        " WHERE a.registration_id = ? AND a.machine = ? AND a.env = ?",
+        identity,
+    ):
+        if row["state"] == SpawnState.COLD and row["lane_recovery_requested_at"] is None:
+            continue
+        running += accounting.accountable(row)
+    waiting = conn.execute(
+        "SELECT a.task_id, a.lane_wait_since FROM task_pool_assignments a"
+        " JOIN tasks t ON t.id = a.task_id"
+        " WHERE a.registration_id = ? AND a.machine = ? AND a.env = ?"
+        " AND a.assignment_released = 0 AND a.lane_wait_since IS NOT NULL"
+        " AND a.recovery_requested_at IS NULL AND t.status = ? AND t.resume_requested = 1"
+        " AND t.hold_reason IS NULL AND t.awaiting_steer = 0",
+        (*identity, Status.SUSPENDED),
+    ).fetchall()
+    if ahead_of is not None:
+        waiting = [row for row in waiting if (row["lane_wait_since"], row["task_id"]) < ahead_of]
+    return running + len(waiting)
+
+
 def select_pool(
     conn: sqlite3.Connection, task: Task, definitions: tuple[PoolInstanceDefinition, ...],
     *, execution_machine: str | None = None,
@@ -276,18 +314,7 @@ def select_pool(
     for pool in candidates:
         if not _permits(pool, task):
             continue
-        reservations = conn.execute(
-            "SELECT s.* FROM pool_reservation_bindings a"
-            " JOIN spawn_reservations s ON s.key = a.reservation_key"
-            " WHERE a.registration_id = ? AND a.machine = ? AND a.env = ?",
-            pool.identity,
-        ).fetchall()
-        count = 0
-        for row in reservations:
-            count += accounting.accountable(row)
-            if count >= pool.max_concurrent:
-                break
-        if count < pool.max_concurrent:
+        if pool_lane_load(conn, pool.identity, accounting=accounting) < pool.max_concurrent:
             return pool
     if retained is not None:
         raise TaskError("retained pool assignment is waiting for capacity")

@@ -889,6 +889,15 @@ class DispatchClient(PoolDeclineClientMixin, PoolStartupClientMixin, PoolPlaceme
             },
         ))
 
+    def adopt_legacy_capacity(
+        self, *, apply: bool = False, permitted: bool = False, reason: str = "",
+    ) -> dict:
+        return self._unwrap(self._http.post(
+            "/spawn-reservations/history/adopt",
+            headers=self._control_headers(),
+            json={"apply": apply, "permitted": permitted, "reason": reason},
+        ))
+
     # -- external producer resource reservations ----------------------------
 
     def acquire_resource_reservation(

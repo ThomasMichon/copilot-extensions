@@ -654,3 +654,64 @@ def test_expired_suspended_worker_grant_requires_exact_trusted_renewal(
             task_id, "host-a/worktree", owner_session_id="native",
             expected_generation=generation, recovery_revision=revision,
         )["status"] == Status.STARTED
+
+
+def _suspend_placed(q: TaskQueue, native: str, now: float = 101) -> tuple[str, str]:
+    t = task(q)
+    reservation, _ = place(q, t)
+    record_native(q, reservation, worktree=f"wt-{native}", native=native)
+    q.record_spawn(reservation.key, session_handle=native, startup_complete=True, startup_revision=1)
+    started = q.start(
+        t.id, f"host-a/wt-{native}", owner_session_id=native,
+        expected_generation=q.get(t.id).generation, now=now,
+    )
+    q.suspend(t.id, started.owner, reason="intentional wait", cooldown_seconds=None, now=now + 1)
+    return t.id, reservation.key
+
+
+def _cold(q: TaskQueue, key: str) -> None:
+    with q._connect() as conn:
+        conn.execute("UPDATE spawn_reservations SET state=? WHERE key=?", (SpawnState.COLD, key))
+
+
+def test_cold_suspended_body_does_not_hold_a_pool_lane(q: TaskQueue) -> None:
+    _, key, _ = suspended(q)
+    with pytest.raises(TaskError, match="capacity"):
+        place(q, task(q))
+    _cold(q, key)
+    reservation, _ = place(q, task(q))
+    assert reservation.key != key
+
+
+def test_reactivation_waits_for_a_lane_then_outranks_fresh_placement(q: TaskQueue) -> None:
+    task_id, key, _ = suspended(q)
+    _cold(q, key)
+    running, _ = place(q, task(q))
+    request(q, task_id)
+    waiting = q.pool_startup(task_id)
+    assert waiting.recovery_requested_at is None and q.list_wakes(task_id) == []
+    assert q.get(task_id).resume_requested and q.get(task_id).status == Status.SUSPENDED
+    _cold(q, running.key)
+    with pytest.raises(TaskError, match="capacity"):
+        place(q, task(q))
+    assert reconcile_recoveries(q, now=110) == 1
+    assert q.pool_startup(task_id).recovery_requested_at == 110
+    assert len(q.list_wakes(task_id)) == 1
+    with pytest.raises(TaskError, match="capacity"):
+        place(q, task(q))
+
+
+def test_waiting_reactivations_take_freed_lanes_in_request_order(q: TaskQueue) -> None:
+    publish(q, pool())
+    first, first_key = _suspend_placed(q, "native-1")
+    _cold(q, first_key)
+    second, second_key = _suspend_placed(q, "native-2", now=111)
+    _cold(q, second_key)
+    running, _ = place(q, task(q))
+    q.resume(second, "host-a/wt-native-2", wake_requested=True, now=120)
+    q.resume(first, "host-a/wt-native-1", wake_requested=True, now=121)
+    _cold(q, running.key)
+    reconcile_recoveries(q, now=130)
+    assert q.pool_startup(second).recovery_requested_at == 130
+    assert q.pool_startup(first).recovery_requested_at is None
+    assert q.list_wakes(first) == []

@@ -113,6 +113,79 @@ class SpawnHistoryMixin:
         result["tasks"] = len(by_task)
         return result
 
+    def adopt_legacy_capacity(
+        self, *, apply: bool = False, permitted: bool = False, reason: str = "",
+    ) -> dict[str, Any]:
+        """Preview, or apply, binding still-accountable unbound rows to their only pool.
+
+        Pool placement refuses while any unbound reservation is accountable, because
+        its lane cannot be attributed. A row whose task and recorded execution machine
+        permit exactly one configured pool instance is bound to it, so it keeps
+        holding that lane instead of blocking every pool. Ambiguous or unmatched rows
+        are reported and left untouched; nothing is fenced, released or rewritten.
+        """
+        if apply and (not permitted or not reason.strip()):
+            raise TaskError("legacy capacity adoption requires permission and a reason")
+        from .bridge_remote import normalize_host
+        from .queue_pool_placement import _permits
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            timestamp = self._now(None)
+            definitions = self._pool_catalog_from_conn(conn, now=timestamp).definitions
+            accounting = ReservationAccountability(conn)
+            rows = conn.execute(
+                "SELECT s.* FROM spawn_reservations s"
+                " LEFT JOIN pool_reservation_bindings b ON b.reservation_key = s.key"
+                " WHERE b.reservation_key IS NULL ORDER BY s.reserved_at, s.key",
+            ).fetchall()
+            adopt: list[tuple[Any, Any]] = []
+            unresolved: dict[str, list[str]] = collections.defaultdict(list)
+            for row in rows:
+                if not accounting.accountable(row):
+                    continue
+                task = self._fetch(conn, row["task_id"])
+                machine = row["execution_machine"]
+                matches = [
+                    pool for pool in definitions
+                    if task is not None and _permits(pool, task)
+                    and (machine is None or normalize_host(pool.machine) == normalize_host(machine))
+                ]
+                if len(matches) == 1:
+                    adopt.append((row, matches[0]))
+                else:
+                    unresolved["ambiguous" if matches else "no_matching_pool"].append(row["key"])
+            result: dict[str, Any] = {
+                "applied": False, "adoptable": len(adopt),
+                "unresolved": {kind: keys[:_SAMPLE] for kind, keys in sorted(unresolved.items())},
+                "unresolved_counts": {kind: len(keys) for kind, keys in sorted(unresolved.items())},
+                "sample": [
+                    {"key": row["key"], "pool": "/".join(pool.identity)} for row, pool in adopt[:_SAMPLE]
+                ],
+            }
+            if not apply:
+                conn.rollback()
+                return result
+            by_task: dict[str, list[str]] = collections.defaultdict(list)
+            for row, pool in adopt:
+                conn.execute(
+                    "INSERT INTO pool_reservation_bindings VALUES (?, ?, ?, ?, ?)",
+                    (row["key"], *pool.identity,
+                     json.dumps(sorted(pool.filters.permit.get("capabilities", frozenset())))),
+                )
+                by_task[row["task_id"]].append(f"{row['key']}->{'/'.join(pool.identity)}")
+            for task_id, adopted in by_task.items():
+                status_row = conn.execute("SELECT status FROM tasks WHERE id=?", (task_id,)).fetchone()
+                status = status_row["status"] if status_row else None
+                self._audit(
+                    conn, task_id, ts=timestamp, from_status=status, to_status=status,
+                    worker="operator",
+                    note=f"legacy capacity adopted into pool lanes: {', '.join(adopted)}; reason={reason.strip()}",
+                )
+            conn.commit()
+        result["applied"] = True
+        result["adopted"] = len(adopt)
+        return result
+
     @staticmethod
     def _history_identities(
         conn: Any, accounting: ReservationAccountability, row: Any,
@@ -152,7 +225,12 @@ class SpawnHistoryMixin:
     ) -> dict[str, str]:
         """Identities still owned by live work, a task owner or an open task's latest native."""
         protected: dict[str, str] = {}
-        for row in conn.execute("SELECT owner_session_id FROM tasks WHERE owner_session_id IS NOT NULL"):
+        # A terminal task's owner field is history, not a live claim on the native.
+        for row in conn.execute(
+            "SELECT owner_session_id FROM tasks WHERE owner_session_id IS NOT NULL"
+            f" AND status NOT IN ({','.join('?' * len(Status.TERMINAL))})",
+            tuple(Status.TERMINAL),
+        ):
             protected[row["owner_session_id"]] = "shared_live_native"
         open_tasks = {
             row["id"] for row in conn.execute(
