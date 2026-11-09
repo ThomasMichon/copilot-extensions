@@ -193,8 +193,15 @@ class WorkspaceRetention:
         scope, policies = _scope(scope), copy.deepcopy(policies)
         owner = self.workspace.store
         TerminalRecoveryStore(owner)
+
+        def current() -> None:
+            checkpoint()
+            lifecycle_checkpoint()
+            if time.monotonic() >= deadline:
+                raise TimeoutError("terminal workspace drain incomplete")
+
         self.drain(
-            scope, cursor, expires_at=expires_at, checkpoint=checkpoint,
+            scope, cursor, expires_at=expires_at, checkpoint=current,
             deadline=deadline, lifecycle_checkpoint=lifecycle_checkpoint,
         )
         with self._condition:
@@ -202,11 +209,9 @@ class WorkspaceRetention:
                 raise TerminalAdmissionClosed("terminal workspace drain must be rejoined")
 
             def retire(document: dict) -> dict:
-                lifecycle_checkpoint()
-                if time.monotonic() >= deadline:
-                    raise TimeoutError("terminal workspace drain incomplete")
+                current()
                 result = compact(document, scope, cursor, policies)
-                lifecycle_checkpoint()
+                current()
                 return result
 
-            return owner._review_transaction(retire, expires_at=expires_at, checkpoint=checkpoint)
+            return owner._review_transaction(retire, expires_at=expires_at, checkpoint=current)

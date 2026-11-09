@@ -238,6 +238,51 @@ def test_compaction_rejoins_actual_admission_even_after_a_prior_persisted_drain(
     assert compact(prepared)["status"] == "compacted"
 
 
+@pytest.mark.parametrize("cause", ["deadline", "custody"])
+@pytest.mark.parametrize("boundary", [1, 2])
+def test_compaction_rechecks_lifecycle_after_both_complete_envelope_validations(
+    workspace: tuple, monkeypatch: pytest.MonkeyPatch, cause: str, boundary: int,
+) -> None:
+    from types import SimpleNamespace
+    from agent_pull_requests import workspace_retention
+
+    prepared = prepare(workspace)
+    operations, _, intent, _, decision, policies, _ = prepared
+    drain(operations, intent["scope"], decision["cursor"], time.monotonic() + 1)
+    before = operations.store.path.read_bytes()
+    now = [time.monotonic()]
+    deadline = now[0] + 30
+    owned = True
+    validations = 0
+    validate = operations.store._validate_owner
+
+    def lifecycle() -> None:
+        if not owned:
+            raise PermissionError("original workspace custody withdrawn")
+
+    def interrupted(document: dict) -> None:
+        nonlocal owned, validations
+        validate(document)
+        if not document["reviews"] and document["terminal_recovery"]["operations"]:
+            validations += 1
+            if validations == boundary:
+                if cause == "deadline":
+                    now[0] = deadline
+                else:
+                    owned = False
+
+    monkeypatch.setattr(workspace_retention, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    monkeypatch.setattr(operations.store, "_validate_owner", interrupted)
+    with pytest.raises(TimeoutError if cause == "deadline" else PermissionError):
+        operations.retention.compact_recovery(
+            intent["scope"], Cursor(**decision["cursor"]), policies,
+            expires_at=expires(), checkpoint=lambda: None, deadline=deadline,
+            lifecycle_checkpoint=lifecycle,
+        )
+    assert validations == boundary
+    assert operations.store.path.read_bytes() == before
+
+
 @pytest.mark.parametrize("uncertain", [False, True])
 def test_compaction_interruption_keeps_complete_original_or_same_recovery(
     workspace: tuple, monkeypatch: pytest.MonkeyPatch, uncertain: bool,
