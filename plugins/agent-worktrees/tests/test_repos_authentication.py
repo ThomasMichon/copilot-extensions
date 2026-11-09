@@ -138,6 +138,34 @@ def test_owner_account_mapping_uses_same_strict_snapshot(registry, provider, mon
     assert reads == [{"strict": True}]
 
 
+def test_preferred_account_is_observed_without_claiming_an_owner_mapping(registry, provider):
+    registry.write_text(
+        registry.read_text(encoding="utf-8").replace("    account: selected-user\n", "")
+        + "account_map:\n  'github.com:*': selected-user\n", encoding="utf-8",
+    )
+    result = inspect()
+    assert result["selection"]["account"] == "selected-user"
+    assert result["selection"]["account_source"] == "default-account"
+    assert result["identity"]["status"] == "verified"
+
+
+@pytest.mark.parametrize("kind, expected", [
+    ("User", "user"), ("Organization", "organization"), (None, "unknown"),
+])
+def test_repository_owner_kind_comes_from_metadata_not_the_selected_login(
+    registry, provider, kind, expected,
+):
+    calls, responses = provider
+    responses[2] = api({
+        "full_name": "example/sample", "owner": {"type": kind, "private": "sentinel"},
+    })
+    result = inspect()
+    assert result["repository_access"].get("owner_kind", "unknown") == expected
+    assert result["selection"]["account"] == "selected-user"
+    assert len(calls) == 3
+    assert "sentinel" not in json.dumps(result)
+
+
 @pytest.mark.parametrize("stage", ["credential", "identity", "repository"])
 @pytest.mark.parametrize("failure", ["nonzero", "malformed", "timeout", "overflow", "runtime"])
 def test_stage_failures_are_distinct_sanitized_and_not_retried(registry, provider, stage, failure):

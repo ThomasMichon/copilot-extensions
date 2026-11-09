@@ -887,14 +887,23 @@ runtime; agent-bridge only lights up optional dispatch/relay features.
 Host-side `gh` operations (`gh codespace list/create/delete/stop/ssh`, `gh api`,
 and the `gh codespace ssh --config` fetch) run under the `gh` account that can
 access the **target repo's org** — not whatever account is active in the `gh`
-keyring. With two accounts backing different orgs (e.g. `ThomasMichon` for
-`github/*` and `example-operator` for `example-org/*`), the active-account
+keyring. With two accounts backing different repositories (for example
+`operator-public` for selected public repos and `operator-work` for work repos), the active-account
 default would hide or `403`/`404` the other org's CodeSpaces entirely.
 
 - The owner→login mapping is owned by **agent-worktrees** (its `repos.yaml`
-  `account_map` + `accounts.yaml` catalog). agent-codespaces shells out to
+  `account_map` + `accounts.yaml` catalog). Its preferred identity applies after
+  exact repo overrides and explicit owner routes; namespaces never identify the
+  operator. agent-codespaces shells out to
   `agent-worktrees repos account-for <owner/name>` (loose coupling — separate
   venvs) and mints a per-account `GH_TOKEN` for each `gh` subprocess.
+- **Selected credential isolation:** named GitHub CLI store lookups remove
+  inherited token overrides, so a work token cannot shadow an explicit public
+  account choice. If the named store is unavailable, the existing `/user`
+  verifier may reuse an inherited token only when its login matches the selected
+  identity, using the existing helper's remaining verification allowance. Otherwise the
+  operation refuses; it does not switch accounts or start login. Fresh owner
+  observations bypass the process token cache to detect store rotation.
 - **Cross-account discovery:** `gh codespace list` only returns the active
   account's CodeSpaces, so `list` (and status/resolve) enumerate under **every**
   mapped account plus the ambient one and merge, tagging each CodeSpace with its
@@ -934,8 +943,9 @@ default would hide or `403`/`404` the other org's CodeSpaces entirely.
   lock; omitting it preserves the existing behavior and does not activate a wave.
   Explicit probe cleanup errors produce unknown observations and retain caller
   cancellation; they do not establish successful channel teardown.
-- **Fully additive:** with no `account_map` configured, everything collapses to
-  a single ambient `gh` call — today's behavior.
+- **Unpinned baseline:** without a resolved preference, ambient authentication
+  remains available. A resolved identity requires its own credential or a
+  verified same-identity inherited token, never an unverified substitute.
 
 ### Authenticating an account over SSH (device-code flows)
 

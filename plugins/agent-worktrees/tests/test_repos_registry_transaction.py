@@ -42,6 +42,21 @@ def test_writer_refreshes_own_baseline(registry_home):
     assert repos.read_registry().account_map["example"] == "second"
 
 
+def test_existing_owner_map_writes_retain_the_preferred_account(registry_home):
+    repos.set_account_map("github.com:*", "operator-work")
+    repos.add_repo(
+        "dependency", str(registry_home / "dependency"),
+        remote="https://github.com/Publisher/tool",
+    )
+    repos.set_account_map("ServiceOrg", "service-account")
+    registry = repos.read_registry(strict=True)
+    assert registry.default_account == "operator-work"
+    assert registry.account_map["ServiceOrg"] == "service-account"
+    stored = yaml.safe_load(repos._repos_yaml_path().read_text(encoding="utf-8"))
+    assert stored["account_map"]["github.com:*"] == "operator-work"
+    assert "default_account" not in stored
+
+
 @pytest.mark.parametrize("populated", (False, True))
 def test_ordinary_write_retains_loaded_schema_stamp_and_existing_data(registry_home, populated):
     path = repos._repos_yaml_path()

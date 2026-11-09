@@ -9,7 +9,8 @@ agent-worktrees repos authentication contract --json
 ```
 
 `inspect` requires both exact registered names. One strict registry snapshot
-selects the canonical remote and configured `account` or owner `account_map`.
+selects the canonical remote and configured repo, owner-map or preferred
+`default_account` policy.
 An inferred remote owner is not an explicitly selected account: without a
 configured account the result is `selection-required`, with no credential read.
 Version 1 supports only the exact `github.com` host. Other providers/hosts return
@@ -37,10 +38,10 @@ includes its native Configuration `target`, `registry_revision`, UTC
 
 | Field | Meaning |
 |---|---|
-| `selection` | Provider, selected host, canonical repository, configured account and `repository`/`account-map`/`unconfigured` account provenance |
+| `selection` | Provider, selected host, canonical repository, configured account and `repository`/`account-map`/`default-account`/`unconfigured` provenance |
 | `credential` | Existing GitHub CLI credential `available`, or `not-observed`; availability alone verifies neither identity nor access |
 | `identity` | Selected login `verified`, `mismatch`, or `not-observed` |
-| `repository_access` | Exact `repository-metadata-read` verified, or `not-observed`; never write permission |
+| `repository_access` | Exact `repository-metadata-read` verified, or `not-observed`; optional `owner_kind` is `user` or `organization`, never operator identity or write permission |
 | `status` | `observed`, `selection-required`, `unsupported`, `unavailable`, or a sanitized request/registry `failed` |
 | `failure` | When present, bounded `stage`/`code`, and actual child `exit_code`/HTTP `http_status` when available |
 | `unobserved` | Git transport, GCM, write permission, CodeSpaces, MCP and Copilot are explicitly outside this observation |
@@ -53,6 +54,10 @@ output limit, invalid response, identity mismatch and unconfirmed access through
 their stage and observation fields. A 401/403/404 or missing metadata is not
 diagnosed as an expired credential: denial, hidden repositories, scope limits
 and transient failures can be ambiguous.
+Owner kind comes only from the same repository metadata response's `owner.type`,
+with no additional request. Missing or unfamiliar type is omitted and displayed as `unknown`.
+Neither a user nor an organization namespace changes the configured account;
+a user-owned upstream repository does not identify its consumer's public login.
 
 Tokens, credential output, raw provider stderr, API bodies and private headers
 never enter the response. The three stages share one 18-second execution and

@@ -44,12 +44,17 @@ def _environment_context(ambient: str, *, timeout: float = 10) -> tuple[str, dic
     return login.strip(), environment
 
 
-def verified_account_token(account: str, *, timeout: float = 10) -> str | None:
+def verified_account_token(
+    account: str, *, timeout: float = 10, fresh: bool = False,
+) -> str | None:
     """Use an environment credential only after verifying the expected owner."""
     from . import gh_account
 
     started = time.monotonic()
-    token = gh_account.token_for_account(account)
+    token = (
+        gh_account.token_for_account(account, fresh=True) if fresh
+        else gh_account.token_for_account(account)
+    )
     if token:
         return token
     ambient = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")

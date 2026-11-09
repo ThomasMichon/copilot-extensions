@@ -1,4 +1,5 @@
 """The owner projects actual read provenance without mutating its producer."""
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -44,6 +45,15 @@ def test_projected_scope_is_immutable_and_retains_selection_changes(read):
     assert first.configuration != second.configuration
     assert read.bound_accounts == ("a",)
     assert read.provider_configs == (("a", Path("synthetic-provider")),)
+
+
+def test_preferred_policy_change_invalidates_scope_without_changing_accounts(read, monkeypatch):
+    first = owner_inventory.capture_scope()
+    changed = replace(read, routing=replace(read.routing, default_account="a"))
+    monkeypatch.setattr(account_candidates, "read_candidates", lambda: changed)
+    second = owner_inventory.capture_scope()
+    assert first.accounts == second.accounts
+    assert first.configuration != second.configuration
 
 
 def test_same_merged_value_with_indeterminate_provider_is_not_authority(read):

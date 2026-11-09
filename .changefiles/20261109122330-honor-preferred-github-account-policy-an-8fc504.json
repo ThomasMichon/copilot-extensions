@@ -1,0 +1,9 @@
+{
+  "comment": "Honor preferred GitHub account policy and refuse unsupported wildcard-policy receivers",
+  "changes": [
+    {
+      "plugin": "agent-codespaces",
+      "type": "patch"
+    }
+  ]
+}

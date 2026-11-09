@@ -76,12 +76,69 @@ def test_env_for_account_sets_gh_token():
         assert "GITHUB_TOKEN" not in env  # stale token dropped
 
 
-def test_env_for_account_ambient_when_no_token():
+def test_env_for_named_account_never_silently_uses_ambient(monkeypatch):
+    monkeypatch.setenv("GH_TOKEN", "foreign-fixture")
     with patch.object(gh_account.shutil, "which", return_value="gh"), \
          patch.object(gh_account.subprocess, "run") as run:
         run.return_value = MagicMock(returncode=1, stdout="")
-        env = gh_account.env_for_account("nobody", base={"X": "1"})
-        assert env == {"X": "1"}
+        with pytest.raises(RuntimeError, match="no ambient fallback"):
+            gh_account.env_for_account("selected-work", base={"X": "1"})
+
+
+def test_named_store_lookup_cannot_be_shadowed_by_an_inherited_token(monkeypatch):
+    monkeypatch.setenv("GH_TOKEN", "foreign-fixture")
+    monkeypatch.setenv("GITHUB_TOKEN", "another-foreign-fixture")
+    monkeypatch.setenv("GH_DEBUG", "api")
+    monkeypatch.setattr(gh_account.shutil, "which", lambda name: "gh")
+    monkeypatch.setattr("agent_codespaces.picker_auth.credential_token", lambda login: None)
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        assert argv[-2:] == ["--user", "selected-work"]
+        environment = kwargs["env"]
+        assert "GH_TOKEN" not in environment and "GITHUB_TOKEN" not in environment
+        assert "GH_DEBUG" not in environment
+        assert environment["GH_HOST"] == "github.com"
+        return subprocess.CompletedProcess(argv, 0, "selected-store-fixture", "")
+
+    monkeypatch.setattr(gh_account.subprocess, "run", run)
+    environment = gh_account.env_for_account("selected-work")
+    assert environment["GH_TOKEN"] == "selected-store-fixture"
+    assert os.environ["GH_TOKEN"] == "foreign-fixture"
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("observed", ["selected-work", "other-user"])
+def test_inherited_token_is_reused_only_for_the_verified_selected_account(monkeypatch, observed):
+    from agent_codespaces import allocation
+
+    monkeypatch.setenv("GH_TOKEN", "inherited-fixture")
+    monkeypatch.setattr(gh_account, "token_for_account", lambda login: None)
+    monkeypatch.setattr(
+        allocation, "_environment_context",
+        lambda token, **kwargs: (observed, {"GH_TOKEN": token}),
+    )
+    if observed == "selected-work":
+        assert gh_account.env_for_account("selected-work")["GH_TOKEN"] == "inherited-fixture"
+    else:
+        with pytest.raises(RuntimeError, match="no ambient fallback"):
+            gh_account.env_for_account("selected-work")
+
+
+def test_owner_inventory_bypasses_the_process_token_cache(monkeypatch):
+    from agent_codespaces import owner_inventory
+
+    monkeypatch.setattr(gh_account.shutil, "which", lambda name: "gh")
+    monkeypatch.setattr("agent_codespaces.picker_auth.credential_token", lambda login: None)
+    store = {"token": "first-fixture"}
+    monkeypatch.setattr(
+        gh_account.subprocess, "run",
+        lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, store["token"], ""),
+    )
+    assert gh_account.token_for_account("selected-work") == "first-fixture"
+    store["token"] = "rotated-fixture"
+    assert owner_inventory.credential("selected-work") == "rotated-fixture"
 
 
 def test_env_for_account_none_login():
@@ -132,6 +189,63 @@ def test_mapped_accounts_empty_without_map():
          patch.object(gh_account.subprocess, "run") as run:
         run.return_value = MagicMock(returncode=0, stdout='{"account_map": {}}')
         assert gh_account.mapped_accounts() == ()
+
+
+def test_bulk_preferred_account_and_repo_exceptions_are_operator_identities(monkeypatch):
+    payload = {
+        "account_map": {},
+        "default_account": "operator-work",
+        "resolution_version": 1,
+        "unmapped_owner_fallback": False,
+        "repository_accounts": {"Publisher/tool": "operator-public"},
+        "owner_accounts": {"Publisher": "operator-work"},
+    }
+    monkeypatch.setattr(
+        gh_account, "_lookup",
+        lambda *args, **kwargs: subprocess.CompletedProcess([], 0, json.dumps(payload), ""),
+    )
+    fallback = MagicMock(side_effect=AssertionError("redundant account lookup"))
+    monkeypatch.setattr(gh_account, "account_for_repo", fallback)
+    inventory = gh_account.account_inventory()
+    # Unrelated repo exceptions must not require public-account CodeSpace auth.
+    assert inventory.accounts == ("operator-work",)
+    assert inventory.account_for("Publisher/tool") == "operator-public"
+    assert inventory.account_for("Publisher/other") == "operator-work"
+    assert inventory.account_for("UnmappedOrg/product") == "operator-work"
+    assert inventory.account_for("AnotherUser/repo") == "operator-work"
+    fallback.assert_not_called()
+
+
+@pytest.mark.parametrize("preferred", [12, [], "", "two accounts", True])
+def test_malformed_preferred_account_refuses_inventory(monkeypatch, preferred):
+    payload = {
+        "account_map": {}, "default_account": preferred, "resolution_version": 1,
+        "repository_accounts": {}, "owner_accounts": {},
+    }
+    monkeypatch.setattr(
+        gh_account, "_lookup",
+        lambda *args, **kwargs: subprocess.CompletedProcess([], 0, json.dumps(payload), ""),
+    )
+    with pytest.raises(gh_account.AccountInventoryError, match="preferred account"):
+        gh_account.account_inventory()
+
+
+@pytest.mark.parametrize("key", ["github.com:*", "GITHUB.COM:*"])
+@pytest.mark.parametrize("metadata", [
+    {},
+    {"resolution_version": 1, "repository_accounts": {}, "owner_accounts": {},
+     "unmapped_owner_fallback": True},
+    {"resolution_version": 1, "repository_accounts": {}, "owner_accounts": {},
+     "unmapped_owner_fallback": False, "default_account": "different-account"},
+])
+def test_wildcard_policy_refuses_older_or_inconsistent_receivers(monkeypatch, metadata, key):
+    payload = {"account_map": {key: "operator-work"}, **metadata}
+    monkeypatch.setattr(
+        gh_account, "_lookup",
+        lambda *args, **kwargs: subprocess.CompletedProcess([], 0, json.dumps(payload), ""),
+    )
+    with pytest.raises(gh_account.AccountInventoryError, match="preferred account contract"):
+        gh_account.account_inventory()
 
 
 def test_bulk_account_inventory_preserves_exact_precedence_without_another_peer_read(monkeypatch):

@@ -93,7 +93,13 @@ def inspect_github_account(host: str, login: str, repository: str) -> dict:
             or observed_repository.casefold() != repository.casefold()
         ):
             raise CredentialObservationError("repository", "target-mismatch")
+        owner = value.get("owner")
+        kind = owner.get("type") if isinstance(owner, dict) else None
         observations["repository_access"] = {"status": "verified", "capability": "repository-metadata-read"}
+        if kind in ("User", "Organization"):
+            observations["repository_access"]["owner_kind"] = (
+                "user" if kind == "User" else "organization"
+            )
     except CredentialObservationError as exc:
         if exc.stage != "credential":
             observations["credential"] = {"status": "available", "owner": "github-cli"}

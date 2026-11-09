@@ -69,16 +69,11 @@ def credential(account: str | None) -> str:
     """Resolve a credential without silently falling back to another account."""
     from agent_procutil import no_window_kwargs
 
-    from . import gh_account
-
     if account:
-        from .picker_auth import credential_token
+        from .allocation import verified_account_token
 
-        token = credential_token(account)
-        if token is None:
-            # An observation wave must see keyring rotation, unlike the legacy
-            # process-lifetime convenience cache used by ordinary callers.
-            token = gh_account._token_for_account.__wrapped__(account)
+        # Observation waves must see store rotation, not process-cache state.
+        token = verified_account_token(account, fresh=True)
     else:
         token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
         if not token:
@@ -124,6 +119,7 @@ def _read_authority():
         tuple(sorted(read.routing.repositories.items())),
         tuple(sorted(read.routing.owners.items())),
         read.routing.unmapped_owner_fallback,
+        read.routing.default_account,
     )))
     return read, source, _digest(configuration + selection)
 
