@@ -9,9 +9,12 @@ import sys
 import threading
 import time
 
+import numpy as np
 import pytest
 from agent_procutil import no_window_kwargs
+from test_source_aware_store import chunk, cold as cold
 
+from agent_index.indexing.gc import run_source_gc
 from agent_index.indexing.state import IndexState
 
 pytestmark = [
@@ -19,6 +22,26 @@ pytestmark = [
     pytest.mark.effect("filesystem"),
     pytest.mark.effect("process"),
 ]
+
+
+def test_selected_gc_compaction_leaves_retained_content_searchable(cold):
+    config, store = cold
+    retained = chunk("git:live", "needle retained")
+    store.upsert(
+        "small",
+        [chunk("monorepo", "obsolete content"), retained],
+        np.array([[1, 0], [0, 1]], dtype=np.float32),
+    )
+    assert store.ensure_fts_index()
+
+    summary = run_source_gc(config, store, compact=True)
+
+    assert summary["purged"] == {"monorepo": 1}
+    assert summary["chunks_deleted"] == 1
+    results = store.content_store.fts_search("needle")
+    assert [chunk_id for chunk_id, _score in results] == [retained.chunk_id]
+    receipt = store._source_domain.receipt()
+    assert receipt["fts_coverage"]["chunks"] == receipt["versions"]["chunks"]
 
 
 _CHILD = """
@@ -112,11 +135,11 @@ print("EVENT COMPLETE", flush=True)
 
 
 class Child:
-    def __init__(self, data_dir, alias, role):
+    def __init__(self, data_dir, alias, role, *, code=_CHILD, pass_fds=()):
         self.process = subprocess.Popen(  # noqa: S603 -- fixed contained private fixture
-            [sys.executable, "-I", "-u", "-c", _CHILD, str(data_dir), alias, role],
+            [sys.executable, "-I", "-u", "-c", code, str(data_dir), alias, role],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, **no_window_kwargs(),
+            text=True, pass_fds=pass_fds, **no_window_kwargs(),
         )
         self.lines = []
         self.events = queue.Queue()
@@ -216,3 +239,79 @@ if not pid:
         capture_output=True, text=True, timeout=30, **no_window_kwargs(),
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="POSIX descriptor inheritance")
+@pytest.mark.timeout(60)
+def test_fork_during_descriptor_registration_cannot_retain_crashed_owner(tmp_path):
+    code = """
+import os,select,sys,threading
+from agent_index.indexing import source_ownership as ownership
+opened,attempted,returned,release,acquired = [threading.Event() for _ in range(5)]
+native_open = os.open
+def delayed_open(*args, **kwargs):
+    fd = native_open(*args, **kwargs)
+    opened.set()
+    assert release.wait(10)
+    return fd
+ownership.os.open = delayed_open
+def own():
+    with ownership.source_writer(sys.argv[1]):
+        os.write(1, b"EVENT ACQUIRED\\n")
+        acquired.set()
+        threading.Event().wait(20)
+threading.Thread(target=own, daemon=True).start()
+assert opened.wait(10)
+def allow_registration():
+    assert attempted.wait(10)
+    # Old code returns from fork before registration. The fixed before-hook
+    # blocks there, so release registration once that bounded wait expires.
+    returned.wait(0.5)
+    release.set()
+threading.Thread(target=allow_registration, daemon=True).start()
+os.register_at_fork(before=attempted.set, after_in_parent=returned.set)
+pid = os.fork()
+if not pid:
+    os.write(1, b"EVENT CHILD\\n")
+    control = int(sys.argv[2])
+    if select.select([control], [], [], 20)[0]:
+        os.read(control, 1)
+        os.write(1, b"EVENT RELEASED\\n")
+    else:
+        os.write(1, b"EVENT EXPIRED\\n")
+    os._exit(0)
+assert acquired.wait(10)
+os._exit(23)
+"""
+    read_fd, release_fd = os.pipe()
+    owner = None
+    try:
+        owner = Child(
+            tmp_path, str(read_fd), "fork-race", code=code, pass_fds=(read_fd,),
+        )
+        os.close(read_fd)
+        read_fd = None
+        try:
+            observed = {owner.events.get(timeout=20), owner.events.get(timeout=20)}
+        except queue.Empty:
+            pytest.fail(f"Timed out waiting for fork fixture: {''.join(owner.lines)}")
+        assert observed == {"ACQUIRED", "CHILD"}, "".join(owner.lines)
+        assert owner.process.wait(timeout=10) == 23, "".join(owner.lines)
+        result = subprocess.run(  # noqa: S603 -- fixed contained private fixture
+            [sys.executable, "-I", "-c",
+             "import sys; from agent_index.indexing.source_ownership import source_writer;"
+             "\nwith source_writer(sys.argv[1]): pass", str(tmp_path)],
+            capture_output=True, text=True, timeout=10, **no_window_kwargs(),
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+    finally:
+        os.close(release_fd)
+        if read_fd is not None:
+            os.close(read_fd)
+        if owner is not None:
+            owner.process.stdin.close()
+            owner.process.wait(timeout=25)
+            owner.reader.join(25)
+            assert not owner.reader.is_alive()
+            owner.process.stdout.close()
+            assert "EVENT RELEASED\n" in owner.lines, "".join(owner.lines)

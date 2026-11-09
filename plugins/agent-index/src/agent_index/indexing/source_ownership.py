@@ -21,6 +21,14 @@ class SourcePipelineBusy(RuntimeError):
     """Another participating writer owns this data directory."""
 
 
+def _before_fork() -> None:
+    _guard.acquire()
+
+
+def _after_fork_parent() -> None:
+    _guard.release()
+
+
 def _after_fork() -> None:
     global _guard, _threads, _local, _owned_fds
     # Close inherited descriptions without unlocking the parent's shared flock.
@@ -33,7 +41,9 @@ def _after_fork() -> None:
 
 
 if hasattr(os, "register_at_fork"):
-    os.register_at_fork(after_in_child=_after_fork)
+    os.register_at_fork(
+        before=_before_fork, after_in_parent=_after_fork_parent, after_in_child=_after_fork,
+    )
 
 
 def _try_lock(fd: int) -> bool:
@@ -102,8 +112,10 @@ def source_writer(
             yield
             return
         root.mkdir(parents=True, exist_ok=True)
-        fd = os.open(root / ".source-writer-v1.lock", os.O_CREAT | os.O_RDWR, 0o600)
-        _owned_fds.add(fd)
+        # A fork must see either no descriptor or a registered descriptor to close.
+        with _guard:
+            fd = os.open(root / ".source-writer-v1.lock", os.O_CREAT | os.O_RDWR, 0o600)
+            _owned_fds.add(fd)
         locked = False
         try:
             while not _try_lock(fd):
@@ -123,8 +135,9 @@ def source_writer(
                     if locked:
                         _unlock(fd)
                 finally:
-                    _owned_fds.remove(fd)
-                    os.close(fd)
+                    with _guard:
+                        _owned_fds.remove(fd)
+                        os.close(fd)
     finally:
         if os.getpid() == owner_pid:
             mutex.release()

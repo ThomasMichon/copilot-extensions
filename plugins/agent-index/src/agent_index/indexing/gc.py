@@ -115,9 +115,9 @@ def run_source_gc(
         )
         if summary["chunks_deleted"] and not dry_run:
             state.save(config.state_file)
-            multi_store.ensure_fts_index()
             if compact:
                 multi_store.compact()
+            multi_store.ensure_fts_index()
         return summary
 
 _FORGE_SUBTYPES = frozenset({"code", "issues", "pulls", "commits"})

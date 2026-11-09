@@ -117,7 +117,7 @@ def test_gc_owns_state_load_save_and_requested_maintenance(tmp_path, monkeypatch
         )
         monkeypatch.delenv("AGENT_INDEX_STORE_LAYOUT", raising=False)
         result = gc.run_source_gc(config, store, compact=True)
-    assert stages == ["load", "count", "delete", "save", "fts", "compact"]
+    assert stages == ["load", "count", "delete", "save", "compact", "fts"]
     assert result["chunks_deleted"] == 1 and load(config.state_file).sources == {}
 
 
