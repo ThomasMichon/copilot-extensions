@@ -1323,6 +1323,12 @@ callback an implicit credential store.
 
 ### 2026-11-08 - Native cancellation source qualification
 
+- A subsequent Comment review could not run its full agentic suite. Addressed
+  missing-stdout diagnostics and redundant error fallback; retained malformed
+  owner fields under the reviewed payload-preservation contract. Documented
+  and tested full-receipt success output as the existing native convention,
+  rather than silently changing it to a lossy summary. The final affected
+  isolated subset passed 143 tests with five platform skips.
 - Current-head review on #11653 found that plain owner-error output hid the
   frontend's unknown-outcome recovery guidance. Retained the owner error and
   printed the distinct diagnostic; the affected isolated cancellation/routing

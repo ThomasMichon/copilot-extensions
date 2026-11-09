@@ -169,6 +169,46 @@ def test_plain_local_refusal_does_not_duplicate_the_same_diagnostic(command, mon
     assert captured.err.count("agent-pull-requests:") == 1 and not calls
 
 
+def test_plain_success_retains_complete_owner_receipt_like_other_native_verbs(command, monkeypatch, capsys):
+    value = receipt(future={"evidence": "retain"})
+    calls = stub(monkeypatch, discovery(), value)
+    assert cli.main([v for v in arguments(command, "--confirm") if v != "--json"]) == 0
+    captured = capsys.readouterr()
+    assert not captured.err
+    assert json.loads(captured.out) == {**value, "frontend": {"cancellation_status": "confirmed"}}
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("stage", ["pr-status", "pr-abandon"])
+def test_missing_stdout_preserves_receiver_diagnostic_and_stage_outcome(
+    command, monkeypatch, capsys, stage,
+):
+    calls = stub(monkeypatch, discovery(), receipt())
+    run = native.run_command
+    def missing(argv, **kwargs):
+        response = run(argv, **kwargs)
+        if argv[1] == stage:
+            response.stdout, response.stderr = None, f"{stage}: result stream unavailable"
+        return response
+    monkeypatch.setattr(native, "run_command", missing)
+    assert cli.main(arguments(command, "--confirm")) == 1
+    value = json.loads(capsys.readouterr().out)
+    assert f"{stage}: result stream unavailable" in value["error"]
+    assert value["frontend"]["cancellation_status"] == (
+        "not-attempted" if stage == "pr-status" else "unknown"
+    )
+    assert len(calls) == (1 if stage == "pr-status" else 2)
+
+
+def test_malformed_owner_error_is_preserved_with_separate_frontend_diagnostic(command, monkeypatch, capsys):
+    calls = stub(monkeypatch, discovery(), {"success": False, "error": ["owner", "evidence"]})
+    assert cli.main(arguments(command, "--confirm")) == 1
+    value = json.loads(capsys.readouterr().out)
+    assert value["error"] == ["owner", "evidence"]
+    assert "outcome is unknown" in value["frontend"]["diagnostic"]
+    assert len(calls) == 2
+
+
 @pytest.mark.parametrize("already", [False, True])
 def test_nonactive_exact_attempt_preserves_original_revision_reason_and_additions(
     command, monkeypatch, capsys, already,

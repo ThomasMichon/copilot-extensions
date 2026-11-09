@@ -172,6 +172,12 @@ Review found that a preserved owner error hid frontend recovery guidance in
 human-readable output. The corrected cancellation/routing subset passed
 **139 tests with five platform skips**, including non-JSON owner errors and
 duplicate-diagnostic suppression. Owner JSON remains unchanged.
+The next review refinement passed **143 tests with five platform skips**:
+missing stdout retains the receiver diagnostic at either stage, redundant
+error fallback is removed, and malformed owner fields remain retained.
+Default success still prints the full owner receipt, consistently with the
+other native verbs; this is now explicitly documented and tested rather than
+replaced with a lossy human summary.
 
 Exact original-revision recovery, non-active creation selection, retained audit,
 source/index/HEAD/refs, sibling attempts, resource claims and the source

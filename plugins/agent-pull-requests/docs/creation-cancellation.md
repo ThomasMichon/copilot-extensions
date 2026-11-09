@@ -32,6 +32,11 @@ An unknown outcome may include a committed cancellation;
 there is no automatic retry/fallback. Reconcile the original attempt before
 intentional receipt recovery using its original revision and reason.
 
+As with the other native verbs, success prints the complete JSON owner receipt
+even without `--json`; no human summary discards its evidence. `--json` also
+selects structured failure output. Malformed owner fields remain retained for
+reconciliation; the separate frontend diagnostic is always explanatory text.
+
 This cancels a qualified local reservation only: it never closes a remote PR,
 posts a reason comment, changes source or releases claims/finalization gates.
 Remote abandonment remains a separate operation. Source/process qualification

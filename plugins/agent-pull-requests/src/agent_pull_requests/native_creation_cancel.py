@@ -29,8 +29,7 @@ def _failure(args, error, status, body=None):
     payload = dict(body) if isinstance(body, dict) else {}
     payload.setdefault("worktree_id", args.worktree)
     payload.setdefault("pr_id", args.creation)
-    payload.setdefault("error", error)
-    if not payload["error"]:
+    if not payload.get("error"):
         payload["error"] = error
     frontend = payload.get("frontend")
     payload["frontend"] = {
@@ -72,7 +71,7 @@ def _confirmed(body, args):
 def _decode(response):
     try:
         return json.loads(response.stdout)
-    except ValueError:
+    except (ValueError, TypeError):
         raise ValueError(response.stderr.strip() or "Worktrees returned non-JSON cancellation output") from None
 
 
