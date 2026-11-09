@@ -159,6 +159,19 @@ GitHub snapshot. GitHub full acquisition and durable
 recovery within one item's comment pages remain separate adapter work; they are
 not supplied by this bounded polling contract.
 
+Azure DevOps retains operator-supplied WIQL and saved queries verbatim. Its
+legacy timestamp discovery first requests only `System.Id` and
+`System.ChangedDate` in batches of at most 200 query-selected identities, then
+hydrates full bodies and comments only for identities in the overlap window.
+Missing, duplicate, unexpected or invalid metadata refuses acquisition rather
+than silently dropping work. Explicit full discovery still fetches every
+selected body; ID-only listing remains unchanged. This reduces body transfer,
+not the number of selected identities: ordinary discovery still scans all
+query-selected IDs and timestamps. Azure DevOps does not yet implement the
+shared paged acquisition journal, durable query progress, immutable full
+snapshots or authoritative tombstones. This legacy optimization does not
+qualify those delta-bounded or recovery gates.
+
 An external provider's existing `content-current-commit --source SOURCE` reply
 may add `source_delta` with contract `agent-index.source-delta`, explicit
 `versions`, canonical `family`, stable nonsecret `account` and effective
