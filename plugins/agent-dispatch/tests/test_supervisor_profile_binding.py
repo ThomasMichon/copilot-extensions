@@ -64,6 +64,7 @@ def test_master_profile_reconfiguration_refuses_nonresident_or_nonfinite_setting
 @pytest.mark.parametrize("invalid", [
     "AGENT_DISPATCH_SUPERVISE_INTERVAL=not-a-number\n",
     "AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=--unknown-fixture-option\n",
+    "AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=--source-candidate fixture\n",
     "AGENT_DISPATCH_SUPERVISE_MACHINE=other-machine\n",
     "AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=--env other-environment\n",
 ])
@@ -84,12 +85,13 @@ def test_invalid_live_profile_keeps_incumbent_and_recovers_after_valid_edit(tmp_
     slot.touch()
     (tmp_path / "current-version").write_text("1.0")
     now = [100.0]
+    target_checks = []
     lock = FakeLock()
     daemon = _daemon(
         FakeClient([]), FakeLauncher(), lock=lock, clock=lambda: now[0],
         self_update_enabled=True, self_update_argv=argv,
         self_update_install_dir=lambda: tmp_path, self_update_running_version="1.0",
-        self_update_stale_target=lambda *_: None, self_update_poll_interval=1,
+        self_update_stale_target=lambda *_: target_checks.append(True), self_update_poll_interval=1,
     )
     assert daemon.acquire_singleton()
     monkeypatch.setattr(daemon, "_recheck_governance", lambda _: None)
@@ -106,8 +108,76 @@ def test_invalid_live_profile_keeps_incumbent_and_recovers_after_valid_edit(tmp_
     assert daemon._self_update_argv == argv
     assert binding.next_generation == binding.generation
     assert captured == []
+    assert target_checks == []
     profile.write_text(original + "AGENT_DISPATCH_SUPERVISE_INTERVAL=7\n")
     now[0] += 2
     assert daemon._maybe_self_update() is True
     assert lock.released
+    assert target_checks == [True]
     assert captured == [[slot, "-m", "agent_dispatch", *profile_arguments(_parse_env_file(profile, strict=True))]]
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_source_primary_binding_reuses_startup_defaults_on_live_edit(tmp_path, monkeypatch, legacy):
+    from agent_dispatch import source_start
+    from agent_dispatch.supervisor_profile import MasterProfile, take_master_profile, OWNER_ENV
+    from tests.test_source_supervisor_startup import _sources
+
+    _sources(monkeypatch)
+    primary = tmp_path / "supervisor.env"
+    primary.write_text(
+        "AGENT_DISPATCH_SUPERVISE_MODE=serve\nAGENT_DISPATCH_SUPERVISE_MACHINE=fixture\n"
+        + ("AGENT_DISPATCH_SUPERVISE_LABELS=fixture\n" if legacy else ""),
+    )
+    initial = source_start.supervisor_plan(tmp_path)
+    binding = MasterProfile(primary, initial.profile_generation, initial.argv, source_primary=True)
+    daemon = SimpleNamespace(
+        _self_update_stale_target=lambda *_: tmp_path / "selected-python", _self_update_argv=initial.argv,
+        machine=initial.machine, env=initial.env,
+    )
+    binding.configure(daemon)
+    primary.write_text(primary.read_text() + "AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=--no-declared\n")
+    daemon._self_update_stale_target(tmp_path, "same-version")
+    changed = source_start.supervisor_plan(tmp_path)
+    assert changed.args.interval == initial.args.interval == 5
+    assert changed.args.legacy_env is initial.args.legacy_env is legacy
+    assert daemon._self_update_argv == list(changed.argv)
+    for key, value in binding.environment().items():
+        monkeypatch.setenv(key, value)
+    incoming = take_master_profile(daemon._self_update_argv)
+    assert incoming.source_primary and OWNER_ENV not in os.environ
+    assert incoming.generation == changed.profile_generation
+
+
+@pytest.mark.parametrize("name", ["supervisor.env", "supervisors/named.env"])
+def test_compatibility_bindings_keep_their_own_interval_and_legacy_defaults(tmp_path, name):
+    from agent_dispatch import __main__ as cli
+    from agent_dispatch.supervisor_profile import MasterProfile, OWNER_ENV
+    from agent_dispatch.supervisor_lane_status import profile_arguments
+    from agent_dispatch.registrar_discovery import _parse_env_file
+
+    profile = tmp_path / name
+    profile.parent.mkdir(parents=True, exist_ok=True)
+    profile.write_text("AGENT_DISPATCH_SUPERVISE_MODE=serve\nAGENT_DISPATCH_SUPERVISE_MACHINE=fixture\n")
+    binding = MasterProfile(profile, None, profile_arguments(_parse_env_file(profile, strict=True)))
+    daemon = SimpleNamespace(
+        _self_update_stale_target=lambda *_: tmp_path / "selected-python",
+        machine="fixture", env="default",
+    )
+    binding.configure(daemon)
+    profile.write_text(profile.read_text() + "AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=--no-declared\n")
+    daemon._self_update_stale_target(tmp_path, "same")
+    parsed = cli.build_parser().parse_args(daemon._self_update_argv)
+    assert parsed.interval == 30 and parsed.legacy_env is True
+    assert OWNER_ENV not in binding.environment()
+
+
+def test_partial_binding_metadata_is_not_a_marker_free_old_producer(monkeypatch):
+    from agent_dispatch.supervisor_lane_status import PROFILE_ENV, GENERATION_ENV
+    from agent_dispatch.supervisor_profile import OWNER_ENV, take_master_profile
+
+    monkeypatch.delenv(PROFILE_ENV, raising=False)
+    monkeypatch.delenv(OWNER_ENV, raising=False)
+    monkeypatch.setenv(GENERATION_ENV, "unconfirmed-generation")
+    with pytest.raises(ValueError, match="argument owner"):
+        take_master_profile()

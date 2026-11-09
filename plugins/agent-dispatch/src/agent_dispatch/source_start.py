@@ -455,6 +455,8 @@ class SupervisorStartupPlan:
     env: str
     scope: str
     argv: tuple[str, ...] = ()
+    profile: Path | None = None
+    profile_generation: str | None = None
 
 
 @dataclass(frozen=True)
@@ -479,9 +481,11 @@ def supervisor_plan(root: Path, *, profiles_only=False) -> SupervisorStartupPlan
     try:
         primary.lstat()
     except FileNotFoundError:
+        primary_content = None
         environment = {}
     else:
-        environment = _parse_env_file(primary, strict=True)
+        primary_content = primary.read_bytes()
+        environment = _parse_env_file(primary, strict=True, content=primary_content)
     def modern_declarations():
         result = read_supervisor_declarations(RegistrarSources())
         if not result.complete:
@@ -562,7 +566,11 @@ def supervisor_plan(root: Path, *, profiles_only=False) -> SupervisorStartupPlan
     if remote_dispatch.is_peer_machine(machine):
         raise RuntimeError("Source startup cannot take a foreign supervisor scope")
     scope = supervisor_lease_scope(machine, env)
-    return SupervisorStartupPlan(root, args, machine, env, scope, tuple(argv))
+    if primary_content is not None and primary.read_bytes() != primary_content:
+        raise RuntimeError("Source supervisor primary profile changed during preflight")
+    profile = primary if mode == "serve" else None
+    generation = hashlib.sha256(primary_content).hexdigest() if profile is not None else None
+    return SupervisorStartupPlan(root, args, machine, env, scope, tuple(argv), profile, generation)
 
 
 def ensure_supervisor(root: Path, *, plan=_UNPLANNED) -> dict:
@@ -608,16 +616,31 @@ def ensure_supervisor(root: Path, *, plan=_UNPLANNED) -> dict:
     if plan.argv:
         argv = list(plan.argv)
     authority = supervisor_authority_target(args)
-    child = None
-    prepared = read_prepared(root, __version__, scope, authority=authority)
+    from .supervisor_profile import MasterProfile
+
+    binding = (
+        MasterProfile(plan.profile, plan.profile_generation, argv, source_primary=True)
+        if plan.profile is not None else None
+    )
     expected_settings = effective_settings(args)
+    criteria = (
+        {"expected": {"settings": expected_settings, "profile_binding": binding.preparation()}}
+        if binding is not None else {}
+    )
+    child = None
+    prepared = read_prepared(root, __version__, scope, authority=authority, **criteria)
     if prepared is not None and prepared.get("settings") != expected_settings:
         raise RuntimeError("selected supervisor effective settings do not match startup plan")
     if prepared is None and not is_locked(lock):
-        child = spawn_candidate(sys.executable, argv, root=root, version=__version__)
+        child = spawn_candidate(
+            sys.executable, argv, root=root, version=__version__,
+            **({"profile_binding": binding.environment()} if binding is not None else {}),
+        )
     deadline = time.monotonic() + 60.0
     while True:
         require_selected_source()
+        if binding is not None and hashlib.sha256(binding.path.read_bytes()).hexdigest() != binding.generation:
+            raise RuntimeError("Source supervisor primary profile changed during readiness")
         if child is not None and child.poll() is not None and not is_locked(lock):
             raise RuntimeError("selected supervisor exited before application readiness")
         status, error = read_status(runtime_status_path(scope))
@@ -640,7 +663,7 @@ def ensure_supervisor(root: Path, *, plan=_UNPLANNED) -> dict:
                 and math.isfinite(status["updated_at"]) and math.isfinite(status["cycle_started_at"])
                 and status["updated_at"] >= status["cycle_started_at"]
             ):
-                prepared = read_prepared(root, __version__, scope, authority=authority, pid=pid)
+                prepared = read_prepared(root, __version__, scope, authority=authority, pid=pid, **criteria)
                 if prepared is not None and prepared["generation"]["pid"] == pid:
                     if prepared.get("settings") != expected_settings:
                         raise RuntimeError("selected supervisor effective settings do not match startup plan")

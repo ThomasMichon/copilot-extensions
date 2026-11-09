@@ -162,7 +162,7 @@ class CandidateAdmission:
         }
         binding = getattr(daemon, "_master_profile", None)
         if binding is not None:
-            self.record["profile_binding"] = {"path": str(binding.path), "generation": binding.generation}
+            self.record["profile_binding"] = binding.preparation()
         if not self.record["generation"]["start_token"] or not self.record["birth"]:
             raise RuntimeError("supervisor preparation native birth is unavailable")
         pending = path.with_suffix(".pending")
@@ -250,6 +250,9 @@ def configure_admission(daemon, args, guard, clients):
     from .source_start import _path_name, config_identity, require_selected_source
     from .supervise_cli import _client, _supervisor_authority_target, _write_supervisor_cycle_start
 
+    root = _path_name(require_selected_source())
+    if args is not None and getattr(daemon, "_master_profile", None) is None:
+        _adopt_declared_primary(daemon, args, root)
     if getattr(args, "no_declared", False):
         daemon.declared_source = lambda: read_legacy_declarations(enabled=args.legacy_env)
 
@@ -275,10 +278,39 @@ def configure_admission(daemon, args, guard, clients):
         )
 
     admission = CandidateAdmission(
-        _path_name(require_selected_source()), __version__, guard, admitted, probe=probe,
+        root, __version__, guard, admitted, probe=probe,
     )
     clients.callback(admission.close)
     return admission
+
+
+def _adopt_declared_primary(daemon, args, root):
+    from .client_authority import supervisor_authority_target
+    from .source_start import SupervisorStartupPlan, supervisor_plan
+    from .supervisor_profile import MasterProfile, configure_master_profile
+    from .supervisor_registration import registration_scope
+    from .registrar import RegistrarError
+
+    try:
+        (root / "supervisor.env").lstat()
+        plan = supervisor_plan(root)
+        if (
+            not isinstance(plan, SupervisorStartupPlan) or plan.profile is None
+            or getattr(args, "once", False) or getattr(args, "no_single_instance", False)
+            or registration_scope(args) != (daemon.machine, daemon.env)
+            or (plan.machine, plan.env) != (daemon.machine, daemon.env)
+            or effective_settings(args) != effective_settings(plan.args)
+            or supervisor_authority_target(args) != supervisor_authority_target(plan.args)
+        ):
+            return
+        binding = MasterProfile(
+            plan.profile, plan.profile_generation, daemon._self_update_argv, source_primary=True,
+        )
+    except (OSError, ValueError, RuntimeError, RegistrarError):
+        # An unknown primary is not evidence that an unmarked custom role owns it.
+        log.warning("Source primary binding is unconfirmed; unmarked candidate remains unbound")
+        return
+    configure_master_profile(daemon, binding)
 
 
 def spawn_candidate(python, argv, *, root, version, profile_binding=None):
@@ -337,9 +369,7 @@ def _expected_preparation(daemon):
     binding = getattr(daemon, "_master_profile", None)
     return {
         "settings": effective_settings(cli.build_parser().parse_args(daemon._self_update_argv)),
-        "profile_binding": None if binding is None else {
-            "path": str(binding.path), "generation": binding.next_generation,
-        },
+        "profile_binding": None if binding is None else binding.preparation(incoming=True),
     }
 
 

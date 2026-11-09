@@ -17,13 +17,12 @@ def test_unreadable_withdrawal_profile_uses_owned_settlement_before_admission_ro
     tmp_path, monkeypatch, checkpoint, failure, custody,
 ):
     from agent_procutil import daemon_instances
+    from agent_dispatch.supervisor_profile import MasterProfile
 
     daemon, source = _incumbent(tmp_path, monkeypatch)
     profile = tmp_path / "supervisor.env"
     profile.write_text("AGENT_DISPATCH_SUPERVISE_MODE=serve\n")
-    daemon._master_profile = SimpleNamespace(
-        path=profile, next_generation=hashlib.sha256(profile.read_bytes()).hexdigest(),
-    )
+    daemon._master_profile = MasterProfile(profile, hashlib.sha256(profile.read_bytes()).hexdigest())
     receipt = SimpleNamespace(instance_id="a" * 32, registry_root=tmp_path / "registry")
     child = SimpleNamespace(instance_receipt=receipt, poll=lambda: 1 if custody == "settled" else None)
     state = {

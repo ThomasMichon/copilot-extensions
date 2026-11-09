@@ -54,6 +54,11 @@ def scheduling_boundary(command, **options):
         return original([*command[:-1],prefix+command[-1]],**options)
     return original(command,**options)
 owned_process.run_caller_owned=scheduling_boundary
+if os.environ.get('FIXTURE_SOURCE')=='1':
+    from agent_dispatch import pool_source_snapshot,registrar_discovery
+    cohort=lambda *args,**options: pool_source_snapshot.DeclarationRead((),True)
+    pool_source_snapshot.read_supervisor_declarations=cohort
+    registrar_discovery.read_legacy_env_profiles=cohort
 if '-m' in sys.argv and 'supervise' in sys.argv:
     from agent_dispatch import supervisor, diagnostic_logs
     def poll(self,**options):
@@ -81,7 +86,7 @@ if '-m' in sys.argv and 'supervise' in sys.argv:
         def initialize(self,*args,**options):
             def sleep(interval):
                 if (root/'release').exists(): raise KeyboardInterrupt()
-                time.sleep(interval)
+                time.sleep(min(interval,.1))
             options['sleep']=sleep
             original_init(self,*args,**options)
             logging.getLogger('agent-dispatch').setLevel(logging.DEBUG)
@@ -89,7 +94,8 @@ if '-m' in sys.argv and 'supervise' in sys.argv:
             poll(self)
             with (root/'worker-markers').open('a') as stream:
                 stream.write(json.dumps([os.environ.get('AGENT_DISPATCH_SUPERVISOR_PROFILE'),
-                                         os.environ.get('AGENT_DISPATCH_SUPERVISOR_PROFILE_GENERATION')])+'\\n')
+                                         os.environ.get('AGENT_DISPATCH_SUPERVISOR_PROFILE_GENERATION'),
+                                         os.environ.get('AGENT_DISPATCH_SUPERVISOR_PROFILE_OWNER')])+'\\n')
             return supervisor_daemon.ReconcileSummary()
         supervisor_daemon.SupervisorDaemon.__init__=initialize
         supervisor_daemon.SupervisorDaemon.reconcile_once=reconcile
@@ -97,7 +103,7 @@ if '-m' in sys.argv and 'supervise' in sys.argv:
         supervise_cli._client=lambda *args,**options: contextlib.nullcontext(SimpleNamespace(close=lambda:None))
         procutil.spawn_dispatch_daemon=spawn
         if os.environ.get('FIXTURE_SOURCE')=='1':
-            from agent_dispatch import source_start,config,pool_source_snapshot,registrar_discovery
+            from agent_dispatch import source_start,config
             from zdd.diagnostics import process_start_time
             class Client:
                 def close(self): pass
@@ -105,9 +111,6 @@ if '-m' in sys.argv and 'supervise' in sys.argv:
                     return dict(status='ok',runtime_config_identity=source_start.config_identity(config.load_config(),base_dir=root),
                                 slot=dict(pid=os.getpid(),process_start_time=process_start_time(os.getpid())))
             supervise_cli._client=lambda *args,**options: contextlib.nullcontext(Client())
-            cohort=lambda *args,**options: pool_source_snapshot.DeclarationRead((),True)
-            pool_source_snapshot.read_supervisor_declarations=cohort
-            registrar_discovery.read_legacy_env_profiles=cohort
             def release(self):
                 original_release(self)
                 state=self._source_handoff
@@ -318,7 +321,7 @@ def test_marked_master_same_version_profile_handoff_preserves_completed_readines
         original, ready = result["original"], result["ready"]
         assert ready["status"] == "ready" and ready["pid"] != original["pid"]
         assert set((root / "cycles").read_text().splitlines()) == {str(original["pid"]), str(ready["pid"])}
-        assert all(json.loads(line) == [None, None] for line in (root / "worker-markers").read_text().splitlines())
+        assert all(json.loads(line) == [None, None, None] for line in (root / "worker-markers").read_text().splitlines())
 
 
 def test_source_admitted_master_profile_edit_replaces_itself_not_its_retained_preparation(tmp_path, capsys):
@@ -373,19 +376,13 @@ print(json.dumps(dict(original=original,ready=ready,old=old,new=new,version=__ve
         assert set((root / "cycles").read_text().splitlines()) == {
             str(result["original"]["pid"]), str(result["ready"]["pid"]),
         }
-        assert all(json.loads(line) == [None, None] for line in (root / "worker-markers").read_text().splitlines())
+        assert all(json.loads(line) == [None, None, None] for line in (root / "worker-markers").read_text().splitlines())
 
 
-def test_actual_installer_source_supervisor_callback_preserves_supported_primary_flags(tmp_path, capsys):
-    shell = shutil.which("powershell.exe")
-    with application(tmp_path, shell, master=True, source=True) as (root, python, environment, children):
-        profile = root / "supervisor.env"
-        profile.write_text(profile.read_text()
-                           + "AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=--no-declared --env primary-fixture\n")
-        environment["AGENT_DISPATCH_SUPERVISE_MACHINE"] = "fixture"
-        callback = root / "installer-callback.ps1"
-        helper = INSTALLER.parent.parent / "src" / "agent_dispatch" / "windows-scheduling.ps1"
-        callback.write_text(f"""
+def installer_callback(root, profile):
+    callback = root / "installer-callback.ps1"
+    helper = INSTALLER.parent.parent / "src" / "agent_dispatch" / "windows-scheduling.ps1"
+    callback.write_text(f"""
 $ErrorActionPreference='Stop'
 $InstallDir={quote(root)};$ScriptDir={quote(INSTALLER.parent)}
 . {quote(INSTALLER.with_name('versioned_runtime_native.ps1'))}
@@ -407,6 +404,17 @@ if($mode.Count -ne 1){{throw 'installer mode owner is ambiguous'}}
 . ([scriptblock]::Create($mode[0].Extent.Text))
 Invoke-DispatchSupervisorEnsure -Name fixture-supervisor -EnvFile {quote(profile)} -Launcher fixture-unused
 """)
+    return callback
+
+
+def test_actual_installer_source_supervisor_callback_preserves_supported_primary_flags(tmp_path, capsys):
+    shell = shutil.which("powershell.exe")
+    with application(tmp_path, shell, master=True, source=True) as (root, python, environment, children):
+        profile = root / "supervisor.env"
+        profile.write_text(profile.read_text()
+                           + "AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=--no-declared --env primary-fixture\n")
+        environment["AGENT_DISPATCH_SUPERVISE_MACHINE"] = "fixture"
+        callback = installer_callback(root, profile)
         for host in (shell, shutil.which("pwsh")):
             if host is None:
                 continue
@@ -441,3 +449,138 @@ Invoke-DispatchSupervisorEnsure -Name fixture-supervisor -EnvFile {quote(profile
         assert error is None and status["cycle_id"] > 0
         assert status["updated_at"] >= status["cycle_started_at"]
         assert status["generation"]["pid"] == prepared["generation"]["pid"]
+
+
+def test_repeated_actual_installer_callbacks_reconfigure_bound_primary_without_default_drift(tmp_path, capsys):
+    from agent_dispatch.supervisor_source import read_prepared
+    from agent_dispatch.supervisor_registration import supervisor_lease_scope
+    from agent_dispatch.supervisor_status_io import runtime_status_path, read_status
+
+    shell = shutil.which("powershell.exe")
+    with application(tmp_path, shell, master=True, source=True) as (root, python, environment, children):
+        profile = root / "supervisor.env"
+        profile.write_text(
+            "AGENT_DISPATCH_SUPERVISE_MODE=serve\nAGENT_DISPATCH_SUPERVISE_MACHINE=fixture\n"
+            "AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=--env primary-fixture\n",
+        )
+        environment["AGENT_DISPATCH_SUPERVISE_MACHINE"] = "fixture"
+        callback = installer_callback(root, profile)
+        scope = supervisor_lease_scope("fixture", "primary-fixture")
+        version = (root / "current-version").read_text()
+
+        def current():
+            status, error = read_status(runtime_status_path(scope, directory=root / "run"))
+            assert error is None and status["cycle_id"] > 0
+            assert status["updated_at"] >= status["cycle_started_at"]
+            prepared = read_prepared(root, version, scope, pid=status["generation"]["pid"])
+            assert prepared is not None
+            return prepared
+
+        deadline = time.monotonic() + 20
+        states = []
+        for phase in ("initial", "edited"):
+            if phase == "edited":
+                profile.write_text(profile.read_text().replace("--env primary-fixture", "--no-declared --env primary-fixture"))
+            control = launch(root, "callback-" + phase, [shell, "-NoProfile", "-NonInteractive", "-File", str(callback)], environment, children)
+            try:
+                control.wait(timeout=max(0, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                with capsys.disabled():
+                    print(phase + "\n" + diagnostics(root)[-24000:], file=sys.stderr, flush=True)
+                pytest.fail("actual repeated callback timed out in " + phase)
+            assert control.returncode == 0, diagnostics(root)
+            states.append(current())
+            with (root / "callback-phases.log").open("a") as log:
+                log.write(json.dumps({"phase": phase, "prepared": states[-1]}) + "\n")
+        old, new = states
+        assert old["generation"]["pid"] != new["generation"]["pid"]
+        assert old["instance_id"] != new["instance_id"]
+        assert old["profile_binding"]["generation"] != new["profile_binding"]["generation"]
+        for state in states:
+            assert state["profile_binding"]["owner"] == "source-primary"
+            assert state["settings"]["interval"] == 5
+            assert state["settings"]["legacy_env"] is False
+            assert state["settings"]["machine"] == "fixture"
+            assert state["settings"]["env"] == "primary-fixture"
+        assert old["owner"]["authority_target"] == new["owner"]["authority_target"]
+        assert old["settings"]["no_declared"] is False and new["settings"]["no_declared"] is True
+        assert all(json.loads(line) == [None, None, None] for line in (root / "worker-markers").read_text().splitlines())
+
+
+def test_old_marker_free_source_producer_is_accepted_by_new_actual_primary_callback(tmp_path, capsys):
+    from agent_dispatch.supervisor_source import read_prepared
+    from agent_dispatch.supervisor_registration import supervisor_lease_scope
+    from agent_dispatch.supervisor_status_io import runtime_status_path, read_status
+
+    shell = shutil.which("powershell.exe")
+    with application(tmp_path, shell, master=True, source=True) as (root, python, environment, children):
+        primary = root / "supervisor.env"
+        primary.write_text(
+            "AGENT_DISPATCH_SUPERVISE_MODE=serve\nAGENT_DISPATCH_SUPERVISE_MACHINE=fixture\n"
+            "AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=--no-declared --env primary-fixture\n",
+        )
+        environment["AGENT_DISPATCH_SUPERVISE_MACHINE"] = "fixture"
+        program = """
+import json,os,sys,time
+from pathlib import Path
+from agent_dispatch import __version__
+from agent_dispatch.source_start import supervisor_plan
+from agent_dispatch.supervisor_source import spawn_candidate
+from agent_dispatch.supervisor_lane_status import PROFILE_ENV,GENERATION_ENV
+from agent_dispatch.supervisor_profile import OWNER_ENV
+from agent_dispatch.single_instance import is_locked,lock_path_for
+r=Path(sys.argv[1]);plan=supervisor_plan(r)
+assert all(key not in os.environ for key in (PROFILE_ENV,GENERATION_ENV,OWNER_ENV))
+argv=['supervise','serve','--interval',str(plan.args.interval),'--env',plan.env]
+if plan.machine: argv+=['--machine',plan.machine]
+if plan.args.legacy_env: argv+=['--legacy-env']
+if plan.args.no_declared: argv+=['--no-declared']
+# Exact older producer shape: no profile_binding keyword or marker writes.
+child=spawn_candidate(sys.executable,argv,root=r,version=__version__)
+deadline=time.monotonic()+20
+while not is_locked(lock_path_for(r/'run',plan.scope)):
+    if child.poll() is not None or time.monotonic()>=deadline:
+        raise RuntimeError('old producer candidate did not admit')
+    time.sleep(.02)
+(r/'old-producer-ready.log').write_text(json.dumps(dict(pid=child.pid,argv=argv,markers=False)))
+# Retain this contained caller's Job until the fixture's explicit release.
+while not (r/'release').exists(): time.sleep(.02)
+"""
+        deadline = time.monotonic() + 20
+        producer = launch(root, "old-producer", [str(python), "-I", "-B", "-c", program, str(root)], environment, children)
+        ready_file = root / "old-producer-ready.log"
+        while not ready_file.exists():
+            if producer.poll() is not None or time.monotonic() >= deadline:
+                with capsys.disabled():
+                    print(diagnostics(root)[-24000:], file=sys.stderr, flush=True)
+                pytest.fail("marker-free producer did not reach actual Source admission")
+            time.sleep(.02)
+        produced = json.loads(ready_file.read_text())
+        scope = supervisor_lease_scope("fixture", "primary-fixture")
+        version = (root / "current-version").read_text()
+        admitted = read_prepared(root, version, scope, pid=produced["pid"])
+        assert admitted is not None, diagnostics(root)
+        assert admitted.get("profile_binding", {}).get("owner") == "source-primary"
+        with (root / "old-producer-admission.log").open("w") as log:
+            log.write(json.dumps(admitted))
+        callback = installer_callback(root, primary)
+        control = launch(root, "new-reader", [shell, "-NoProfile", "-NonInteractive", "-File", str(callback)], environment, children)
+        try:
+            control.wait(timeout=max(0, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            with capsys.disabled():
+                details = diagnostics(root)
+                print("new-reader\n" + ready_file.read_text() + "\n" + details[:1600] + details[-22000:],
+                      file=sys.stderr, flush=True)
+            pytest.fail("new primary reader did not accept the marker-free producer")
+        assert control.returncode == 0, diagnostics(root)
+        status, error = read_status(runtime_status_path(scope, directory=root / "run"))
+        assert error is None and status["cycle_id"] > 0
+        assert status["updated_at"] >= status["cycle_started_at"]
+        assert status["generation"]["pid"] == produced["pid"]
+        record = read_prepared(root, (root / "current-version").read_text(), scope, pid=produced["pid"])
+        assert record is not None
+        assert record["profile_binding"]["owner"] == "source-primary"
+        assert Path(record["profile_binding"]["path"]) == primary
+        assert record["settings"]["interval"] == 5 and record["settings"]["legacy_env"] is False
+        assert all(json.loads(line) == [None, None, None] for line in (root / "worker-markers").read_text().splitlines())

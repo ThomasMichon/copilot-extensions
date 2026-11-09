@@ -137,6 +137,9 @@ arguments are not part of the effective supervisor-settings identity.
 Malformed live profile arguments are recoverable configuration errors: parser
 exits do not terminate the incumbent, and rejected input does not replace its
 captured arguments or generation. A later valid edit can retry normally.
+Live edits also reject the private `--source-candidate` admission flag before
+selecting a target or committing arguments; that flag belongs only to the
+existing candidate owner.
 Live edits cannot change the master's machine/environment scope: that is a
 different singleton and worker cohort, not a settings-only handoff. Such an
 edit is rejected while the current master and its captured scope remain active.
@@ -159,6 +162,21 @@ their declaration intent, authority and singleton scope. Explicitly disabled
 modern discovery qualifies only the requested legacy cohort, or a known empty
 cohort when legacy discovery is also off. Unknown options, passive-admission
 arguments and nonresident modes are rejected before coordinator mutation.
+Initial primary Source startup binds the exact parsed profile bytes and path
+before launch. Repeated startup waits for that captured incoming generation's
+completed readiness while the incumbent performs its existing handoff.
+An optional argument-owner field in the existing master binding makes live
+Source-primary edits reuse the same planner as startup: the default interval
+remains 5 seconds and legacy discovery follows the configured cohort. Existing
+compatibility and named bindings retain their 30-second/legacy-enabled defaults.
+All binding markers, including that owner, are removed before worker spawning.
+An older update producer need not know these optional markers. The new selected
+Source candidate's existing admission owner can derive the binding when a valid
+primary `MODE=serve` file already exists and its captured arguments, canonical
+scope and authority match the actual candidate. Mismatched custom roles and
+explicit compatibility/named bindings are not relabeled. Missing or unreadable
+primary input does not establish a binding, and a later-created profile is not
+silently attached to an already-running unmarked master.
 
 The coordinator launcher's physical nested-slot fallback delegates to the
 co-deployed canonical resolver, including its completion-marker and reparse

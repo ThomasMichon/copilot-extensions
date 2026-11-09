@@ -14,6 +14,73 @@ from tests.test_supervisor_daemon import FakeClient, FakeLauncher, FakeLock, _da
 VERSION = "1.2.3+source." + "a" * 40 + "." + "b" * 16 + ".profile." + "c" * 16
 
 
+@pytest.mark.parametrize("case", ["matching", "settings", "scope", "authority", "absent", "unreadable", "explicit-named"])
+def test_old_source_caller_without_markers_gets_matching_primary_binding(tmp_path, monkeypatch, case):
+    from contextlib import ExitStack
+    from agent_dispatch import __main__ as cli, source_start, supervisor_source
+    from agent_dispatch.supervisor_lane_status import PROFILE_ENV, GENERATION_ENV
+    from agent_dispatch.supervisor_profile import OWNER_ENV, MasterProfile
+    from tests.test_source_supervisor_startup import _sources
+
+    for key in (PROFILE_ENV, GENERATION_ENV, OWNER_ENV):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path))
+    _sources(monkeypatch)
+    primary = tmp_path / "supervisor.env"
+    primary.write_text(
+        "AGENT_DISPATCH_SUPERVISE_MODE=serve\n"
+        "AGENT_DISPATCH_SUPERVISE_MACHINE=anomalous-potato\n"
+        "AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=--no-declared\n",
+    )
+    plan = source_start.supervisor_plan(tmp_path)
+    # Older producers reconstructed effective flags and sent no binding markers.
+    argv = ["supervise", "serve", "--interval", "5.0", "--env", "default",
+            "--machine", "anomalous-potato", "--no-declared"]
+    if case == "settings":
+        argv[3] = "7"
+    elif case == "scope":
+        argv[5] = "other-scope"
+    elif case == "authority":
+        argv = ["--url", "http://127.0.0.1:7777", *argv]
+    args = cli.build_parser().parse_args(argv)
+    daemon = _daemon(
+        FakeClient([]), FakeLauncher(), lock=FakeLock(),
+        self_update_enabled=True, self_update_argv=argv,
+        self_update_install_dir=lambda: tmp_path,
+    )
+    daemon.env = args.env
+    existing = None
+    if case == "absent":
+        primary.unlink()
+    elif case == "unreadable":
+        original_read = Path.read_bytes
+
+        def denied(path):
+            if path == primary:
+                raise PermissionError("fixture primary read refused")
+            return original_read(path)
+
+        monkeypatch.setattr(Path, "read_bytes", denied)
+    elif case == "explicit-named":
+        named = tmp_path / "supervisors" / "named.env"
+        named.parent.mkdir()
+        named.write_text("AGENT_DISPATCH_SUPERVISE_MODE=serve\n")
+        existing = MasterProfile(named, None, argv)
+        daemon._master_profile = existing
+    monkeypatch.setattr(source_start, "require_selected_source", lambda: tmp_path)
+    with ExitStack() as clients:
+        supervisor_source.configure_admission(daemon, args, object(), clients)
+        binding = getattr(daemon, "_master_profile", None)
+        if case != "matching":
+            assert binding is existing
+            return
+        assert binding is not None, "new Source admission did not adopt the matching old producer"
+        assert binding.source_primary
+        assert binding.path == primary and binding.generation == plan.profile_generation
+        assert binding.arguments == argv
+        assert all(key not in os.environ for key in (PROFILE_ENV, GENERATION_ENV, OWNER_ENV))
+
+
 def test_preparation_directory_io_is_not_an_absent_candidate(tmp_path, monkeypatch):
     from agent_dispatch import supervisor_source
 

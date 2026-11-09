@@ -176,7 +176,7 @@ def test_supervisor_intent_io_failure_refuses_before_coordinator_mutation(monkey
             encoding="utf-8",
         )
         (profiles / "fixture.env").write_text("unsupported-line\n", encoding="utf-8")
-    original_read, original_iterdir = Path.read_text, Path.iterdir
+    original_read, original_bytes, original_iterdir = Path.read_text, Path.read_bytes, Path.iterdir
 
     def read(path, *args, **kwargs):
         if (kind == "primary-read" and path == primary) or (
@@ -190,12 +190,70 @@ def test_supervisor_intent_io_failure_refuses_before_coordinator_mutation(monkey
             raise PermissionError("fixture profile enumeration denied")
         return original_iterdir(path)
 
+    def read_bytes(path):
+        if kind == "primary-read" and path == primary:
+            raise PermissionError("fixture configuration read denied")
+        return original_bytes(path)
+
     monkeypatch.setattr(Path, "read_text", read)
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
     monkeypatch.setattr(Path, "iterdir", iterdir)
     from agent_dispatch.registrar import RegistrarError
 
     with pytest.raises((OSError, RegistrarError)):
         _command(monkeypatch, tmp_path)()
+
+
+def test_primary_plan_binds_the_bytes_actually_parsed_not_a_racing_second_read(tmp_path, monkeypatch):
+    import hashlib
+    from agent_dispatch import registrar_discovery, source_start
+
+    _sources(monkeypatch)
+    primary = tmp_path / "supervisor.env"
+    content = b"AGENT_DISPATCH_SUPERVISE_MODE=serve\nAGENT_DISPATCH_SUPERVISE_INTERVAL=5\n"
+    primary.write_bytes(content)
+    original = registrar_discovery._parse_env_file
+
+    def racing_read(path, **options):
+        if path != primary:
+            return original(path, **options)
+        path.write_bytes(content.replace(b"=5", b"=9"))
+        try:
+            return original(path, **options)
+        finally:
+            path.write_bytes(content)
+
+    monkeypatch.setattr(registrar_discovery, "_parse_env_file", racing_read)
+    plan = source_start.supervisor_plan(tmp_path)
+    assert plan.args.interval == 5
+    assert plan.profile == primary
+    assert plan.profile_generation == hashlib.sha256(content).hexdigest()
+
+
+@pytest.mark.parametrize("change", ["changed", "missing", "unreadable"])
+def test_captured_primary_binding_refuses_drift_before_candidate_creation(tmp_path, monkeypatch, change):
+    from agent_dispatch import source_start, supervisor_source
+
+    _sources(monkeypatch)
+    primary = tmp_path / "supervisor.env"
+    primary.write_text("AGENT_DISPATCH_SUPERVISE_MODE=serve\n")
+    plan = source_start.supervisor_plan(tmp_path)
+    if change == "changed":
+        primary.write_text(primary.read_text() + "# later generation\n")
+    elif change == "missing":
+        primary.unlink()
+    else:
+        original = Path.read_bytes
+
+        def denied(path):
+            if path == primary:
+                raise PermissionError("fixture binding read refused")
+            return original(path)
+
+        monkeypatch.setattr(Path, "read_bytes", denied)
+    monkeypatch.setattr(supervisor_source, "spawn_candidate", lambda *_args, **_kwargs: pytest.fail("stale binding startup"))
+    with pytest.raises((OSError, ValueError), match="binding|refused|cannot find|No such file"):
+        source_start.ensure_supervisor(tmp_path, plan=plan)
 
 
 def test_missing_optional_supervisor_configuration_is_absent(monkeypatch, tmp_path):
