@@ -21,6 +21,152 @@ SERVICE_UTILS = PLUGIN / "scripts" / "service-utils.ps1"
 pytestmark = pytest.mark.guard
 
 
+def _run_signed_base_python_fixture(tmp_path: Path, body: str, **environment: str):
+    powershell = shutil.which("powershell.exe") if os.name == "nt" else None
+    if not powershell:
+        pytest.skip("Windows PowerShell 5.1 is unavailable")
+    script = tmp_path / "signed python fixture.ps1"
+    script.write_text(
+        r"""
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+if ($PSVersionTable.PSVersion.Major -ne 5) { throw 'Expected Windows PowerShell 5.1' }
+$tokens = $null
+$errors = $null
+$source = Get-Content -LiteralPath $env:INSTALLER -Raw
+$ast = [System.Management.Automation.Language.Parser]::ParseInput(
+    $source, [ref]$tokens, [ref]$errors
+)
+if ($errors.Count) { throw 'Installer did not parse' }
+foreach ($name in @('Invoke-NativeCapture', 'Get-SignedBasePython')) {
+    $definition = $ast.Find({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -eq $name
+    }, $true)
+    if (-not $definition) { throw "Missing installer function: $name" }
+    Invoke-Expression $definition.Extent.Text
+}
+function Get-Command {
+    param($Name, [switch]$All, $ErrorAction)
+    if ($Name -in @('python', 'python3')) {
+        [pscustomobject]@{ Path = $env:SIGNED_PYTHON }
+    }
+}
+function Get-ChildItem { }
+$script:signatureCalls = 0
+""" + body,
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        [powershell, "-NoProfile", "-NonInteractive", "-File", str(script)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+        env={
+            **os.environ,
+            "INSTALLER": str(INSTALLER),
+            "SIGNED_PYTHON": sys.executable,
+            **environment,
+        },
+        **no_window_kwargs(),
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert not proc.stderr, proc.stderr
+    return json.loads(proc.stdout)
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+def test_signed_base_python_actual_ps51_probe_and_native_signature(tmp_path: Path):
+    python_home = tmp_path / "Python with spaces"
+    executable = python_home / "Scripts" / "python.exe"
+    executable.parent.mkdir(parents=True)
+    shutil.copy2(sys.executable, executable)
+    (python_home / "pyvenv.cfg").write_text(
+        f"home = {Path(sys._base_executable).parent}\n"
+        "include-system-site-packages = false\n",
+        encoding="utf-8",
+    )
+    result = _run_signed_base_python_fixture(
+        tmp_path,
+        r"""
+Import-Module (Join-Path $PSHOME 'Modules\Microsoft.PowerShell.Security\Microsoft.PowerShell.Security.psd1')
+function Get-AuthenticodeSignature {
+    $script:signatureCalls++
+    [pscustomobject]@{ Status = 'Valid' }
+}
+$selected = Get-SignedBasePython
+$fixtureSignatureCalls = $script:signatureCalls
+Remove-Item Function:\Get-AuthenticodeSignature
+$nativeStatus = (Microsoft.PowerShell.Security\Get-AuthenticodeSignature $env:SIGNED_PYTHON).Status.ToString()
+$nativeSelected = Get-SignedBasePython
+[pscustomobject]@{
+    selected = $selected
+    signatureCalls = $fixtureSignatureCalls
+    nativeStatus = $nativeStatus
+    nativeSelected = $nativeSelected
+} | ConvertTo-Json -Compress
+""",
+        SIGNED_PYTHON=str(executable),
+    )
+    assert result["selected"] == str(executable)
+    assert result["signatureCalls"] == 1
+    assert result["nativeSelected"] == (
+        str(executable) if result["nativeStatus"] == "Valid" else None
+    )
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.parametrize(
+    ("version", "exit_code", "signature", "accepted", "signature_calls"),
+    [
+        ("3.10", 0, "Valid", False, 0),
+        ("3.11", 0, "Valid", True, 1),
+        ("3.13", 0, "Valid", True, 1),
+        ("3.11.0", 0, "Valid", False, 0),
+        ("3.11", 1, "Valid", False, 0),
+        ("3.11", 0, "NotSigned", False, 1),
+        ("3.11", 0, "HashMismatch", False, 1),
+        ("3.11", 0, "Throw", False, 1),
+    ],
+)
+def test_signed_base_python_selection_preserves_version_and_signature_gates(
+    tmp_path: Path, version: str, exit_code: int, signature: str,
+    accepted: bool, signature_calls: int,
+):
+    result = _run_signed_base_python_fixture(
+        tmp_path,
+        r"""
+function Invoke-NativeCapture {
+    [pscustomobject]@{
+        ExitCode = [int]$env:PROBE_EXIT
+        Output = $env:PROBE_VERSION
+    }
+}
+function Get-AuthenticodeSignature {
+    $script:signatureCalls++
+    if ($env:SIGNATURE_STATUS -eq 'Throw') { throw 'Fixture signature failure' }
+    [pscustomobject]@{ Status = $env:SIGNATURE_STATUS }
+}
+$selected = Get-SignedBasePython
+[pscustomobject]@{
+    selected = $selected
+    signatureCalls = $script:signatureCalls
+} | ConvertTo-Json -Compress
+""",
+        PROBE_VERSION=version,
+        PROBE_EXIT=str(exit_code),
+        SIGNATURE_STATUS=signature,
+    )
+    assert result["selected"] == (sys.executable if accepted else None)
+    assert result["signatureCalls"] == signature_calls
+
+
 def test_context_stage_captures_both_streams_before_wait_and_retains_unsettled_stage():
     installer = INSTALLER.read_text(encoding="utf-8")
     stage = installer.split("$contextStart = ", 1)[1].split(

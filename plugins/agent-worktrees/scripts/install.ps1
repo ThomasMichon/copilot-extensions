@@ -2862,7 +2862,7 @@ function Get-SignedBasePython {
         if (-not (Test-Path $c)) { continue }
         # Must be a real interpreter >= 3.11 ...
         $result = Invoke-NativeCapture {
-            & $c -c 'import sys;print("%d.%d" % sys.version_info[:2])'
+            & $c -c 'import sys;print(sys.version_info.major,sys.version_info.minor,sep=chr(46))'
         }
         $ver = if ($result.ExitCode -eq 0) { $result.Output } else { '' }
         if (-not ($ver -match '^(\d+)\.(\d+)$')) { continue }
