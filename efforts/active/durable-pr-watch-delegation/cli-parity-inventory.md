@@ -26,14 +26,14 @@ proof that all legacy operations can be retired.
 | `create-pr`, `pr-create` / `pr create` | Correct source/target, publication checks, head/base policy, exact body, attribution, claim recovery, existing-PR reconciliation | Existing native `create` composition; full HTTP/source-publication parity open |
 | `push-changes`, update and revision reporting | Same PR head, exact source custody, stale-approval handling, no unrelated source import | Bounded native author/source adapter delivered in #10402; complete client migration open |
 | `set-pr` / tracked association | Explicit target/provider/branch selection, multiple PRs, durable original obligation | Worktrees metadata/claim owner retained; central registration cannot replace it |
-| `pr-ready` | Draft-to-ready without implicitly granting consent | [Review-first native contract](#draft-to-ready-native-convergence); implementation and qualification open |
+| `pr-ready` | Draft-to-ready without implicitly granting consent | [Finite explicit native source delivered in #11643](#draft-to-ready-native-convergence); complete HTTP/provider/installed parity open |
 | `pr-status`, snapshot/status | Tracked versus explicit target, no-live, actual native votes/gates/consent, unavailable evidence | Native `status` baseline; full HTTP parity open |
 | `pr-watch cursor/wait` | Default criteria, cursor races, meaningful transitions, independent timeout semantics and consent wake | Existing native watch and replay baseline; new cursor journal is separate until qualified |
 | `pr-watch subscribe/stop/ownerstatus` | Same registration/cancel ownership, identities, ACK/restart and independent deadlines | Existing durable watches; caller-driven sets/selections still open |
 | `pr-watch threads`, thread resolution | On-demand bodies, current/reviewed candidate, author/reviewer ownership and provider-native resolution | Existing native reads; workspace source is ADO-first; three-provider end-to-end open |
 | `pr-comment`, `pr-review` | Distinct non-verdict comment and named review; selected exact-candidate writeback and unknown outcomes | Protected workspace submission source exists; installed HTTP/CLI adoption open |
 | `pr-watch reply/requeue` | Existing ADO thread/revision/idempotency and eligible evaluation/retry semantics | ADO-only bounded native operations; no generic rerun claim |
-| `pr-nudge` | Bound reviewer request or truthful unsupported/no-op; no coding-agent mention side effect | Successor integration open |
+| `pr-nudge` | Bound reviewer request or truthful unsupported/no-op; no coding-agent mention side effect | [Explicit native contract proposed for review](native-reviewer-request.md); successor integration open |
 | `pr-publication-labels` and author metadata | Metadata-only repair, exact body/reviewer/work-item meaning, preserve unrelated values | Bounded native metadata repair delivered in #10402; author amendment A4-A5 retains full scope |
 | `pr-merge` | Distinguish consent, human-only and direct completion; exact head, required policy/checks/holds, no privilege escalation | Native adapter uses target policy; explicit CLI differences are not parity |
 | `pr-complete` | Source reconciliation after authoritative merge, preserve subsequent work; not finalize | Worktrees source authority retained; successor invokes it rather than remote source mutation |
@@ -67,7 +67,8 @@ subset of tests passes.
 
 ## Draft-to-ready native convergence
 
-**Contract reviewed in #11641; source qualification below is not installed
+**Contract reviewed in #11641; finite native source merged in #11643.
+Source qualification below is not installed
 acceptance.** This finite source slice
 closes part of the PR-domain
 [provider-neutral surface](../../../visions/plugins/agent-pull-requests/README.md#first-class-provider-neutral-pr-surface)
@@ -171,7 +172,7 @@ adoption and three-provider parity remain later acceptance, not this slice.
   authorized live-provider or installed-consumer evidence. Source tests and a
   merged proposal alone close neither this matrix nor the parent effort.
 
-The finite source candidate passes 54 Worktrees author/readiness/tracked-ready
+The merged finite source passes 54 Worktrees author/readiness/tracked-ready
 controls and 84 native frontend cases with five Windows-only cases skipped on
 Linux. The actual frontend, Worktrees parser/resolver and Azure DevOps provider
 compose in one fixture; a separate real subprocess exercises capability and
