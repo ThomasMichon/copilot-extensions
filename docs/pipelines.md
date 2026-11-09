@@ -1948,7 +1948,9 @@ whatever changefiles are pending; nothing here is hand-edited directly.
 > through the same map, even without a library source edit. Unchanged baseline
 > entries, release-note-only edits and removed intents do not create new
 > obligations. Consumer coverage still requires this PR's own newly added
-> changefiles, not coincidental pending entries from an earlier PR.
+> changefiles, not coincidental pending entries from an earlier PR. Intent and
+> coverage reads use the resolved Git revisions, not checkout contents; Git
+> symlink modes are rejected even when the checkout contains a regular file.
 
 **All version files for a plugin must be bumped together in the same
 commit.** If any file is out of sync: a stale `plugin.json` makes

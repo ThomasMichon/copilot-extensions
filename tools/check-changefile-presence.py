@@ -32,7 +32,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from changefile import VALID_TYPES, read_changefiles
+from changefile import VALID_TYPES
 
 
 def _load_check_version_bump():
@@ -113,10 +113,36 @@ def _changefile_intents(data: object, label: str) -> set[tuple[str, str]]:
     return intents
 
 
+def _read_changefile_intents(
+    cvb, revision: str, relative: Path, *, baseline: bool = False,
+) -> set[tuple[str, str]]:
+    label = f"{'baseline changefile' if baseline else 'changefile'} {relative}"
+    entry = cvb._git("ls-tree", "-z", "--full-tree", revision, "--", relative.as_posix())
+    records = entry.stdout.split("\0")
+    if entry.returncode or len(records) != 2 or records[-1]:
+        raise RuntimeError(f"could not read {label}")
+    metadata, separator, name = records[0].partition("\t")
+    fields = metadata.split()
+    if not separator or name != relative.as_posix() or len(fields) != 3:
+        raise RuntimeError(f"invalid tree entry for {label}")
+    mode, kind, oid = fields
+    if mode == "120000":
+        raise RuntimeError(f"symlinked {label}")
+    if mode not in {"100644", "100755"} or kind != "blob":
+        raise RuntimeError(f"not a regular {label}")
+    blob = cvb._git("cat-file", "blob", oid)
+    if blob.returncode:
+        raise RuntimeError(f"could not read {label}")
+    try:
+        return _changefile_intents(json.loads(blob.stdout), label)
+    except json.JSONDecodeError as error:
+        raise RuntimeError(f"invalid {label}: {error}") from error
+
+
 def _changed_library_intents(cvb, base: str, head: str) -> set[str]:
     """Expand only added/changed bump entries, not unrelated baseline intents."""
     result = cvb._git(
-        "diff", "--name-status", "-z", "--no-renames", "--diff-filter=AM", f"{base}..{head}",
+        "diff", "--name-status", "-z", "--no-renames", "--diff-filter=AMT", f"{base}..{head}",
         "--", ".changefiles",
     )
     if result.returncode:
@@ -134,26 +160,12 @@ def _changed_library_intents(cvb, base: str, head: str) -> set[str]:
             selected.append((status, path))
     if not selected:
         return set()
-    pending = {path.name: (path, data) for path, data in read_changefiles()}
     libraries = set()
     for status, relative in selected:
-        # The shared reader reports and skips unreadable files. A selected skip
-        # cannot mean "no intents" here, even for an otherwise content-free PR.
-        if relative.name not in pending:
-            raise RuntimeError(f"unreadable changefile {relative}")
-        path, data = pending[relative.name]
-        if path.is_symlink():
-            raise RuntimeError(f"symlinked changefile {relative}")
-        current = _changefile_intents(data, str(relative))
+        current = _read_changefile_intents(cvb, head, relative)
         previous: set[tuple[str, str]] = set()
-        if status == "M":
-            blob = cvb._git("show", f"{base}:{relative.as_posix()}", "--")
-            if blob.returncode:
-                raise RuntimeError(f"could not read baseline changefile {relative}")
-            try:
-                previous = _changefile_intents(json.loads(blob.stdout), str(relative))
-            except json.JSONDecodeError as error:
-                raise RuntimeError(f"invalid baseline changefile {relative}: {error}") from error
+        if status in {"M", "T"}:
+            previous = _read_changefile_intents(cvb, base, relative, baseline=True)
         for plugin, _kind in current - previous:
             if plugin.startswith("libs/"):
                 library = plugin[len("libs/"):]
@@ -209,13 +221,18 @@ def plugins_with_pending_changefiles(base_ref: str, head_ref: str = "HEAD") -> s
     """Plugins named by a changefile THIS PR's own diff adds -- see
     :func:`added_changefile_names` for why this is scoped to the diff rather
     than every changefile currently pending in the repo."""
-    added = added_changefile_names(base_ref, head_ref)
+    cvb = _load_check_version_bump()
+    resolved = _resolve_mbase(cvb, base_ref, head_ref)
+    if resolved is None:
+        return set()
+    base, head = resolved
+    added = added_changefile_names(base, head)
     plugins: set[str] = set()
-    for path, data in read_changefiles():
-        if path.name not in added:
-            continue
-        for change in data.get("changes", []):
-            plugins.add(change["plugin"])
+    for name in sorted(added):
+        plugins.update(
+            plugin for plugin, _kind in
+            _read_changefile_intents(cvb, head, Path(".changefiles") / name)
+        )
     return plugins
 
 

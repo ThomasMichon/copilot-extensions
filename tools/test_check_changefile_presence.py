@@ -333,3 +333,66 @@ def test_unreadable_baseline_changefile_cannot_hide_changed_library_intent(repo:
     result = _run(repo)
     assert result.returncode == 1, result.stdout + result.stderr
     assert "baseline changefile" in result.stderr.lower()
+
+
+@pytest.mark.parametrize("checkout_intent", [None, "alpha", "{broken"])
+def test_library_intent_uses_selected_head_not_checkout(repo: Path, checkout_intent: str | None):
+    _nested_library_base(repo)
+    _write(repo, ".changefiles/library.json", json.dumps(_intent("libs/leaf")))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "library intent at selected head")
+    _git(repo, "update-ref", "refs/heads/candidate", "HEAD")
+    _git(repo, "checkout", "-q", "--detach", "origin/main")
+    if checkout_intent is not None:
+        content = checkout_intent if checkout_intent == "{broken" else json.dumps(
+            _intent(checkout_intent)
+        )
+        _write(repo, ".changefiles/library.json", content)
+
+    result = _run(repo, "--head", "candidate")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "alpha: content changed" in result.stderr
+
+
+@pytest.mark.parametrize("covered", [False, True])
+def test_consumer_coverage_uses_selected_head_not_checkout(repo: Path, covered: bool):
+    _nested_library_base(repo)
+    _write(repo, ".changefiles/library.json", json.dumps(_intent("libs/leaf")))
+    _write(repo, ".changefiles/consumer.json", json.dumps(_intent("alpha" if covered else "beta")))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "selected consumer coverage")
+    _write(repo, ".changefiles/consumer.json", json.dumps(_intent("beta" if covered else "alpha")))
+
+    result = _run(repo)
+    assert result.returncode == (0 if covered else 1), result.stdout + result.stderr
+    if not covered:
+        assert "alpha: content changed" in result.stderr
+
+
+@pytest.mark.parametrize(("baseline_mode", "head_mode"), [
+    (None, "120000"), ("100644", "120000"), ("120000", "100644"),
+])
+def test_git_symlink_changefile_rejected_even_with_regular_checkout_file(
+    repo: Path, baseline_mode: str | None, head_mode: str,
+):
+    _nested_library_base(repo)
+    data = _intent("libs/leaf")
+    data["changes"].append({"plugin": "alpha", "type": "patch"})
+    content = json.dumps(data)
+    blob = subprocess.run(
+        ["git", "hash-object", "-w", "--stdin"], cwd=repo, input=content,
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    _write(repo, ".changefiles/library.json", content)
+    if baseline_mode is not None:
+        _git(repo, "update-index", "--add", "--cacheinfo",
+             f"{baseline_mode},{blob},.changefiles/library.json")
+        _git(repo, "commit", "-qm", "baseline changefile mode")
+        _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _git(repo, "update-index", "--add", "--cacheinfo",
+         f"{head_mode},{blob},.changefiles/library.json")
+    _git(repo, "commit", "-qm", "symlink mode in selected tree")
+
+    result = _run(repo)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "symlinked" in result.stderr
