@@ -204,6 +204,12 @@ async def _serve(config: HostConfig, scope: LaunchScope, stop: asyncio.Event) ->
     if stop.is_set():
         return
     scope.check()
+    report_options: dict[str, Any] = {}
+    if config.reports is not None:
+        report_options = {
+            "reports": config.reports.readers(config.operation_seconds),
+            "response_limit": config.reports.response_bytes,
+        }
     credentials = load_service_credentials(
         proof_key_file=config.proof_key_file, access_token_file=config.access_token_file,
     )
@@ -214,6 +220,7 @@ async def _serve(config: HostConfig, scope: LaunchScope, stop: asyncio.Event) ->
         proof_key=credentials.proof_key, authority=scope.deadline, checkpoint=scope.check,
         gateway_ca=str(config.gateway_ca) if config.gateway_ca else None,
         interval=config.interval, workspaces=workspaces,
+        **report_options,
     )
 
     async def observe() -> None:

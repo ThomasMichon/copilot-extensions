@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from inspect import signature
 import logging
 import os
 from pathlib import Path
@@ -44,6 +45,33 @@ class NativeGitHubReport:
         if not isinstance(config_path, Path) or not config_path.is_absolute():
             raise ValueError("native report needs its trusted owner's absolute config path")
         self.config_path, self.context_id = config_path, _label(context_id)
+
+    @staticmethod
+    def check_support() -> None:
+        """Check selected executing APIs without resolving policy or credentials."""
+        try:
+            from agent_worktrees.github_account_observation import SelectedGitHubAccount
+            from agent_worktrees.github_credentials import CredentialObservationError
+            from agent_worktrees.pr_report_target import worker_main
+            from agent_worktrees.pr_diff_report import diff_report
+            from agent_worktrees.pr_thread_report import thread_report
+            from agent_worktrees.providers.github import GitHubProvider
+
+            signature(SelectedGitHubAccount).bind(
+                "github.com", "selected", "example/project", budget=None, checkpoint=None,
+            )
+            signature(SelectedGitHubAccount.capture).bind(
+                None, "report", [], binary=False, limit=BODY_BYTES,
+            )
+            signature(SelectedGitHubAccount.verify).bind(None)
+            if not issubclass(CredentialObservationError, Exception):
+                raise ValueError("native credential error contract unavailable")
+            signature(GitHubProvider).bind(report_capture=None)
+            signature(worker_main).bind()
+            for report in (diff_report, thread_report):
+                signature(report).bind(None, "example/project", 1, api_base="https://api.github.com")
+        except (ImportError, AttributeError, TypeError, ValueError):
+            raise ValueError("selected native report APIs unsupported") from None
 
     def resolve(self, remaining, *, response_limit=BODY_BYTES):
         """Compose actual selection, credential, provider and caller-owned seams."""
