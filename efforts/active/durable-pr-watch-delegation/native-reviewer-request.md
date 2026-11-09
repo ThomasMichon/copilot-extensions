@@ -3,13 +3,13 @@
 Back to the [CLI parity inventory](cli-parity-inventory.md) and
 [canonical effort](README.md).
 
-**Agent-recommended contract for review before implementation.** This finite
+**Contract reviewed in #11645; finite source candidate awaiting review.** This finite
 slice closes part of the PR-domain
 [provider-neutral surface](../../../visions/plugins/agent-pull-requests/README.md#first-class-provider-neutral-pr-surface)
 through the existing Worktrees/provider owner. It follows
 [version-skew-safe contracts](../../../docs/patterns/service-contract-evolution.md)
 and the [author custody boundary](author-publication.md#ownership-and-exclusions).
-It is not delivered syntax, installed acceptance or permission to write.
+Source qualification is not installed acceptance or permission to write.
 
 ## Baseline and proposed boundary
 
@@ -102,18 +102,30 @@ rolled-back owners receive the declared pre-effect optional-feature refusal.
 No legacy syntax is deprecated or retired here. HTTP mutations, installed
 consumer migration and three-provider parity remain later acceptance.
 
-- [ ] Qualify the explicit parser, claimant, target policy and actual provider
+- [x] Qualify the explicit parser, claimant, target policy and actual provider
   with mapped, unbound/unmapped, unsupported, terminal, draft, malformed and
   wrong-target controls; preserve the existing tracked nudge regression suite.
-- [ ] Exercise the actual native frontend-to-Worktrees/provider path with a
+- [x] Exercise the actual native frontend-to-Worktrees/provider path with a
   synthetic forge and prove a single request, exact configured reviewer and
   no comment, source, consent, vote, hold or completion side effects.
-- [ ] Cover authoritative rejection, lost response, nonzero subprocess,
+- [x] Cover authoritative rejection, lost response, nonzero subprocess,
   malformed/mismatched owner output and timeout; preserve honest uncertainty
   and prove no retry, fallback or duplicate publication.
-- [ ] Exercise old/new callers, old/new selected runtimes, rollback, additive
+- [x] Exercise old/new callers, old/new selected runtimes, rollback, additive
   capability fields, strict invalid arguments and delivered-policy refusal.
   Include a real process boundary, not only argv-forwarding assertions.
 - [ ] Record isolated source and native-platform qualification separately from
   authorized live-provider, installed and HTTP evidence; leave parent
   acceptance open until its own complete matrix is satisfied.
+
+The finite isolated Worktrees/provider/legacy packet passes 398 cases.
+The final request-owner subset passes 33, overlapping that packet and adding
+four explicit target/policy refusal cases. Reserved worker bindings require
+their explicit marker before policy resolution. The coupled
+request/author/readiness/worker-policy packet passes 180 cases, including eight
+marker-refusal controls across discovery and author operations. The native frontend packet passes
+116 with five Windows-only cases skipped on Linux, including an actual
+subprocess for capability and worker-policy forwarding. Synthetic provider
+responses exercise the actual frontend, parser, target resolver and GitHub
+transport owner; no live request is made. Cleanup is verified. Windows,
+live-provider, installed, HTTP and broader CLI parity remain open.

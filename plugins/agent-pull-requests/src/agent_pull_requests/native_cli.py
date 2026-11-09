@@ -111,7 +111,10 @@ def run(
 ) -> int:
     try:
         launch = prefix_factory() if prefix_factory is not None else [command_path(args.worktrees_command)]
-        if args.command in ("author-capabilities", "update", "push", "ready"):
+        if args.command == "nudge":
+            from .native_reviewer_request import run as nudge_run
+            code, payload = nudge_run(args, launch)
+        elif args.command in ("author-capabilities", "update", "push", "ready"):
             from .native_author import run as author_run
             code, payload = author_run(args, launch)
         else:
@@ -124,6 +127,9 @@ def run(
         if args.command == "ready":
             from .native_author import readiness_failure
             payload = readiness_failure(args.repo, args.number, str(exc))
+        elif args.command == "nudge":
+            from .native_reviewer_request import failure
+            payload = failure(args.repo, args.number, str(exc))
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True))
     elif payload.get("error"):

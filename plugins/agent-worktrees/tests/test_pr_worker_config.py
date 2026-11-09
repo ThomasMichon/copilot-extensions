@@ -126,7 +126,7 @@ def test_author_export_is_explicit_and_never_transfers_self_merge_grants(
     data["repos"]["target"]["pr"].update(
         enabled=True, required=True, automerge_label="auto-complete",
         approval_required=True, allow_stale_approval=True,
-        bypass_policy=True, self_approve=True, merge_actor="submitter-direct",
+        bypass_policy=True, self_approve=True, merge_actor="submitter-direct", reviewer="copilot",
     )
     host.write_text(json.dumps(data), "utf-8")
     output = tmp_path / "worker-author.json"
@@ -143,11 +143,13 @@ def test_author_export_is_explicit_and_never_transfers_self_merge_grants(
         assert policy["allow_stale_approval"] and policy["automerge_label"] == "auto-complete"
         assert not policy["bypass_policy"] and not policy["self_approve"]
         assert policy["merge_actor"] == "" and policy["roles"] is None
+        assert policy["reviewer"] == "copilot"
         from agent_worktrees import pr_author_cli, pr_config
         loaded = pr_author_cli.load_author_config(str(output), "project/repo")
         assert pr_config._pr_flow_profile(loaded.default_repo).profile == "pr-agent-merge"
     else:
         assert "enabled" not in policy and "automerge_label" not in policy
+        assert "reviewer" not in policy
 
 
 @pytest.mark.parametrize("enabled", [False, True])
