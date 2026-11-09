@@ -30,14 +30,14 @@ proof that all legacy operations can be retired.
 | `pr-status`, snapshot/status | Tracked versus explicit target, no-live, actual native votes/gates/consent, unavailable evidence | Native `status` baseline; full HTTP parity open |
 | `pr-watch cursor/wait` | Default criteria, cursor races, meaningful transitions, independent timeout semantics and consent wake | Existing native watch and replay baseline; new cursor journal is separate until qualified |
 | `pr-watch subscribe/stop/ownerstatus` | Same registration/cancel ownership, identities, ACK/restart and independent deadlines | Existing durable watches; caller-driven sets/selections still open |
-| `pr-watch threads`, thread resolution | On-demand bodies, current/reviewed candidate, author/reviewer ownership and provider-native resolution | Existing native reads; workspace source is ADO-first; three-provider end-to-end open |
+| `pr-watch threads`, thread resolution | On-demand bodies, current/reviewed candidate, author/reviewer ownership and provider-native resolution | Existing Worktrees read owner; [dedicated native read adapter proposed](native-thread-read.md); workspace source is ADO-first; resolution and three-provider end-to-end open |
 | `pr-comment`, `pr-review` | Distinct non-verdict comment and named review; selected exact-candidate writeback and unknown outcomes | Protected workspace submission source exists; installed HTTP/CLI adoption open |
 | `pr-watch reply/requeue` | Existing ADO thread/revision/idempotency and eligible evaluation/retry semantics | ADO-only bounded native operations; no generic rerun claim |
 | `pr-nudge` | Bound reviewer request or truthful unsupported/no-op; no coding-agent mention side effect | [Finite explicit native source merged in #11647](native-reviewer-request.md); Windows/provider/installed/HTTP parity open |
 | `pr-publication-labels` and author metadata | Metadata-only repair, exact body/reviewer/work-item meaning, preserve unrelated values | Bounded native metadata repair delivered in #10402; author amendment A4-A5 retains full scope |
 | `pr-merge` | Distinguish consent, human-only and direct completion; exact head, required policy/checks/holds, no privilege escalation | Native adapter uses target policy; explicit CLI differences are not parity |
 | `pr-complete` | Source reconciliation after authoritative merge, preserve subsequent work; not finalize | Worktrees source authority retained; successor invokes it rather than remote source mutation |
-| `pr-abandon` | Exact operator-approved close/cancel and revision confirmation; no inferred abandonment | [Local creation-cancellation frontend proposed](native-creation-cancellation.md); remote close/comment/claim integration remains separate and open |
+| `pr-abandon` | Exact operator-approved close/cancel and revision confirmation; no inferred abandonment | [Local creation-cancellation source merged in #11653](native-creation-cancellation.md), following #11651; native-platform/installed and remote close/comment/claim integration remain open |
 | `pr-research`, checks and evidence helpers | Same target policy, independent review/check evidence, caller-owned workspace and supported refusal | Existing policy/evidence owners retained; migration inventory remains open |
 
 This is the initial source inventory, not proof it is exhaustive. Before

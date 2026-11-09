@@ -109,6 +109,17 @@ def _read(args: argparse.Namespace, prefix: list[str]) -> tuple[int, dict]:
 def run(
     args: argparse.Namespace, *, prefix_factory: Callable[[], list[str]] | None = None,
 ) -> int:
+    if args.command == "cancel-creation":
+        from .native_creation_cancel import run as cancellation_run
+        code, payload = cancellation_run(args, prefix_factory)
+        if args.json or not payload.get("error"):
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            print(f"agent-pull-requests: {payload['error']}", file=sys.stderr)
+            diagnostic = payload["frontend"].get("diagnostic")
+            if diagnostic and diagnostic != payload["error"]:
+                print(f"agent-pull-requests: {diagnostic}", file=sys.stderr)
+        return code
     try:
         launch = prefix_factory() if prefix_factory is not None else [command_path(args.worktrees_command)]
         if args.command == "nudge":
