@@ -193,7 +193,7 @@ class AzureDevOpsConnector:
                 json={"ids": chunk, "$expand": "all"},
                 purpose="item_body",
             )
-            self._observe_records(_values(result.data), kind="workitems")
+            self._observe_records(result.data, kind="workitems")
             for item in _values(result.data):
                 if isinstance(item, dict):
                     if since_dt and not self._work_item_in_window(item, since_dt):
@@ -240,11 +240,12 @@ class AzureDevOpsConnector:
         for query in self._work_item_queries:
             result = self._run_work_item_query(query)
             if isinstance(result.data, dict):
-                self._observe_records(result.data.get("workItems", []), kind="query")
-                relations = result.data.get("workItemRelations", [])
-                self._observe_records([
-                    relation.get("target") for relation in relations if isinstance(relation, dict)
-                ], kind="query")
+                self._observe_records(result.data.get("workItems"), kind="query")
+                relations = result.data.get("workItemRelations")
+                if isinstance(relations, list):
+                    self._observe_records([
+                        relation.get("target") for relation in relations if isinstance(relation, dict)
+                    ], kind="query")
             ids.extend(_work_item_ids_from_result(result.data))
         return list(dict.fromkeys(ids))
 
@@ -254,8 +255,15 @@ class AzureDevOpsConnector:
     ) -> None:
         from agent_index.indexing.work_counts import observe_acquisition
 
+        if kind in {"workitems", "pulls", "pull_comments"} and isinstance(records, dict):
+            records = records.get("value")
         if not isinstance(records, list):
             return
+        if kind == "pull_comments":
+            records = [
+                comment for thread in records if isinstance(thread, dict)
+                and isinstance(thread.get("comments"), list) for comment in thread["comments"]
+            ]
         is_pull = kind in {"pulls", "pull_comments"}
         counts = observe_acquisition(self._pulls_source if is_pull else self._workitems_source)
         if counts is None:
@@ -383,7 +391,7 @@ class AzureDevOpsConnector:
                 params=params,
                 purpose="identity_page",
             ):
-                self._observe_records(_values(result.data), kind="pulls")
+                self._observe_records(result.data, kind="pulls")
                 for item in _values(result.data):
                     if not isinstance(item, dict):
                         continue
@@ -484,11 +492,11 @@ class AzureDevOpsConnector:
             if exc.response.status_code == httpx.codes.NOT_FOUND:
                 return []
             raise
+        self._observe_records(result.data, kind="pull_comments")
         comments: list[dict[str, Any]] = []
         for thread in _values(result.data):
             if not isinstance(thread, dict):
                 continue
-            self._observe_records(thread.get("comments", []), kind="pull_comments")
             for comment in thread.get("comments", []):
                 if isinstance(comment, dict):
                     comments.append(comment)

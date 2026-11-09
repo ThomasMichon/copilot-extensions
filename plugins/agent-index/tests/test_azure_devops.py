@@ -809,3 +809,49 @@ def test_ado_parsed_pull_counts_include_list_bodies_and_duplicates_not_metadata(
             "identity_records": 4, "item_body_records": 2, "comment_body_records": 0,
         },
     }
+
+
+@pytest.mark.parametrize("comments", [False, True])
+@pytest.mark.parametrize("payload", [{}, [], {"value": []}])
+def test_ado_parsed_empty_pull_pages_differ_from_unrecognized_envelopes(comments, payload):
+    connector = AzureDevOpsConnector(
+        "ado:acme/widgets", token="pat-token", min_interval_s=0,
+        transport=httpx.MockTransport(lambda _request: _json_response(200, payload)),
+        work_item_queries=[], pull_request_queries=[{"status": "all"}],
+    )
+
+    @measure_reindex
+    def run():
+        if comments:
+            assert connector._pull_request_comments({
+                "pullRequestId": 1, "repository": {"id": "repo-1"},
+            }) == []
+        else:
+            assert list(connector._iter_pull_requests(since=None)) == []
+        return {}
+
+    assert run()["work_counts"]["acquisition_by_source"] == (
+        {"ado:acme/widgets:pulls": {
+            "identity_records": 0, "item_body_records": 0, "comment_body_records": 0,
+        }} if payload != {} else {}
+    )
+
+
+@pytest.mark.parametrize("payload", [{}, {"workItems": []}, {"workItemRelations": []}])
+def test_ado_parsed_empty_query_pages_differ_from_unrecognized_envelopes(payload):
+    connector = AzureDevOpsConnector(
+        "ado:acme/widgets", token="pat-token", min_interval_s=0,
+        transport=httpx.MockTransport(lambda _request: _json_response(200, payload)),
+        work_item_queries=[{"wiql": "Operator query"}], pull_request_queries=[],
+    )
+
+    @measure_reindex
+    def run():
+        assert connector._work_item_ids() == []
+        return {}
+
+    assert run()["work_counts"]["acquisition_by_source"] == (
+        {"ado:acme/widgets:workitems": {
+            "identity_records": 0, "item_body_records": 0, "comment_body_records": 0,
+        }} if payload != {} else {}
+    )
