@@ -256,6 +256,54 @@ def test_readiness_only_never_walks_payload_or_qualifies_installers(repair_fixtu
     assert "readinessDeclarationDigest" in owner.evidence()
 
 
+@pytest.mark.parametrize("linked", ["declaration", "action", "directory"])
+@pytest.mark.parametrize("reparse", [False, True])
+def test_readiness_only_refuses_original_linked_paths_before_resolution(
+    repair_fixture, monkeypatch, linked, reparse,
+):
+    import stat
+    from types import SimpleNamespace
+
+    home, project, payload, _, _ = repair_fixture
+    mirror = payload / "plain"
+    mirror.mkdir()
+    if linked == "declaration":
+        source = payload / "installer-readiness.json"
+        destination = mirror / source.name
+        shutil.copyfile(source, destination)
+    elif linked == "action":
+        source = payload / "scripts" / ("action.ps1" if os.name == "nt" else "action.sh")
+        destination = mirror / source.name
+        shutil.copyfile(source, destination)
+    else:
+        source = payload / "scripts"
+        destination = mirror / "scripts"
+        shutil.copytree(source, destination)
+    original_lstat, original_resolve = Path.lstat, Path.resolve
+
+    def lstat(path, *args, **kwargs):
+        if path == source:
+            return SimpleNamespace(
+                st_mode=original_lstat(path).st_mode if reparse else stat.S_IFLNK,
+                st_file_attributes=0x400 if reparse else 0,
+                st_reparse_tag=0,
+            )
+        return original_lstat(path, *args, **kwargs)
+
+    def resolve(path, *args, **kwargs):
+        if path == source:
+            return destination
+        if linked == "directory" and path.is_relative_to(source):
+            return destination / path.relative_to(source)
+        return original_resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", lstat)
+    monkeypatch.setattr(Path, "resolve", resolve)
+    monkeypatch.setattr(repair_api, "_invoke", lambda *a, **k: pytest.fail("linked probe executed"))
+    with pytest.raises(RepairAdmissionError, match="complete enabled-owner inventory"):
+        repair_api.repair(project, home=home, required=True, readiness_only=True)
+
+
 def test_readiness_only_skips_capabilities_but_retains_declared_runtime_claims(
     repair_fixture, monkeypatch,
 ):

@@ -306,6 +306,9 @@ hash unrelated payload files or qualify installer executables. Its purpose-bound
 digest cannot authorize ordinary repair apply, including for an empty required
 set. Full repair planning and apply retain their existing payload hashes,
 per-leaf path checks and installer qualification.
+Declaration and action paths are checked in their original form, including
+payload-relative ancestors, before resolving a target. Symlinks and reparse
+points remain refused even when their destinations stay inside the payload.
 
 Known capability-only payloads without application declarations or runtime
 claims need no application-owner qualification for this read. Unselected optional

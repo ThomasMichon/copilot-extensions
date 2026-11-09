@@ -193,6 +193,15 @@ replacement and rollout remain with their existing owners.
   45 with one platform skip and three unchanged wrapper controls deselected.
 - Strict library checking passed all ten physical files for both Linux and
   Windows targets. Fresh external qualification and reviewed delivery remain.
+- Exact-source disposable Windows qualification passed all 25 selected cases,
+  including both actual callers and the original-budget roster case, at
+  `17e38f0c`. Review then identified original-path information lost by resolution.
+  The shared path resolver now rejects linked declaration/action components
+  before resolution, without restoring a payload walk.
+- Six direct readiness-only symlink/reparse controls and the budget case passed
+  together; the grammar packet still passed 45 with its documented skip and
+  deselections. Both strict platform targets passed again. Refresh exact-source
+  qualification after this guard correction before delivery.
 
 ### 2026-11-09 - Native scope review corrections
 - Review identified creation-namespace drift and a scrubbed teammate flag that
