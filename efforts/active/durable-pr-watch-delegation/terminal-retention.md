@@ -184,8 +184,9 @@ Those broader P1/P2 and parent gates stay open.
 
 ## Retained acquisition mapping composition
 
-This is the next **agent-recommended, review-first** source refinement, not
-implemented storage or serving support. It composes the existing
+This **agent-recommended, review-first** source refinement cleared review in
+#11633. Its first storage/library source leaf is prepared for implementation
+review; optional serving and installed support remain open. It composes the existing
 [persisted acquisition mapping](comment-observation-correlation.md#persisted-acquisition-mapping-refinement)
 with terminal compaction under their same ReplayStore owner. It closes the
 bounded-conversation and original-comment correlation intent above without
@@ -196,9 +197,9 @@ owner.
 
 Both current features are orthogonal extensions on owner-v3/v4/v5/v6, not
 successive base-layout versions. `CommentMappingStore` retains one bounded
-acquired-evidence slot per eligible prepared action. `terminal_recovery.compact`
-currently replaces those body-bearing operations with compact original
-identities and receipts but does not transfer their mapping slots. The current
+acquired-evidence slot per eligible prepared action. At design intake,
+`terminal_recovery.compact` replaced those body-bearing operations with compact
+original identities and receipts but did not transfer their mapping slots. The prior
 `retained-comment` reader selects only active original operations, and the
 terminal read-only receiver intentionally excludes prepared/mapping serving.
 Do not remove that refusal first or claim that sharing a base version makes

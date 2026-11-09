@@ -303,9 +303,10 @@ _Operator-required outcome; agent-recommended slices and validation._
   in #11628. Finite explicit service-lifecycle source qualification merged
   in #11631. Complete retained-reader, mapping/retention composition,
   installed/provider and P1/P2 acceptance remain open.
-  The next review-first [mapping-preservation refinement](terminal-retention.md#retained-acquisition-mapping-composition)
-  keeps acquired slots under their original compact operation before any
-  terminal retained-comment serving expansion; no runtime support is implied.
+  The [mapping-preservation refinement](terminal-retention.md#retained-acquisition-mapping-composition)
+  cleared review in #11633. Next is explicitly adopted lossless slot transfer
+  and scoped library readback before any separately negotiated terminal
+  retained-comment serving expansion; no runtime support is implied.
   Existing normalized ADO load/sync acquisition feeds the explicitly enabled
   journal after confirmed cache publication (#10405); native observation and
   standalone-host adoption remain distinct prerequisites.
