@@ -545,10 +545,15 @@ def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config, request):
         runtime.shutdown()
 
 
-def _instrument_prepared_sender(source):
+def _instrument_prepared_sender(source, *, routing_clock=False):
     start = source.index("function Send-PostToolReadDemand")
     end = source.index("function Get-PostToolRuntimeRoot", start)
     sender = source[start:end]
+    if routing_clock:
+        # Isolate routing from host latency; cold-process controls retain the real clock.
+        clock = "$clock = [Diagnostics.Stopwatch]::StartNew()"
+        assert sender.count(clock) == 1
+        sender = sender.replace(clock, "$clock = [pscustomobject]@{ ElapsedMilliseconds = 0 }")
     allocation = "$client = [Net.Sockets.TcpClient]::new([Net.Sockets.AddressFamily]::InterNetwork)"
     connect = "$connect = $client.ConnectAsync([Net.IPAddress]::Loopback, $port)"
     connect_wait = "if ($remaining -le 0 -or -not $connect.Wait($remaining)) { return }"
@@ -597,7 +602,10 @@ def _instrument_prepared_sender(source):
 
 def _trace_prepared_sender(fixture):
     path = fixture["payload_root"] / "scripts" / "hook-facts.ps1"
-    path.write_text(_instrument_prepared_sender(path.read_text(encoding="utf-8")), encoding="utf-8")
+    path.write_text(
+        _instrument_prepared_sender(path.read_text(encoding="utf-8"), routing_clock=True),
+        encoding="utf-8",
+    )
     harness = fixture["harness"]
     source = harness.read_text(encoding="utf-8")
     terminal = "InvariantCulture)); exit 0"
@@ -607,6 +615,63 @@ def _trace_prepared_sender(fixture):
         "[Console]::Error.WriteLine('sender_diagnostics=' + "
         "(ConvertTo-Json -Compress -InputObject $script:senderDiagnostic)); exit 0"
     )), encoding="utf-8")
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("network")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+def test_post_tool_routing_clock_preserves_real_owner_delivery(tmp_path, shell):
+    from agent_procutil import no_window_kwargs
+    from agent_worktrees.hook_ipc import HookIpcServer
+
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    notices = []
+    received = threading.Event()
+
+    class Server(HookIpcServer):
+        def _on_read_demand(self, request):
+            super()._on_read_demand(request)
+            notices.append(request)
+            received.set()
+
+    server = Server(
+        lambda *args: pytest.fail("read demand must not request synchronous policy"),
+        read_demand_admitted=lambda: True,
+    )
+    server.start()
+    try:
+        discovery = server.rendezvous()
+        source = _instrument_prepared_sender(
+            (PLUGIN / "scripts" / "hook-facts.ps1").read_text(encoding="utf-8"),
+            routing_clock=True,
+        )
+        managed = str(PLUGIN / "scripts" / "managed-session.ps1").replace("'", "''")
+        script = tmp_path / "routing-clock.ps1"
+        script.write_text(
+            f". '{managed}'\n" + source + "\nSend-PostToolReadDemand -Discovery @{\n"
+            "hook_capabilities = @('read-hook-demand-v1'); hook_transport = 'tcp'\n"
+            + "\n".join(
+                f"{key} = '{discovery[key]}'"
+                for key in ("hook_generation", "hook_endpoint", "hook_token")
+            )
+            + "\n}\nConvertTo-Json -Compress -InputObject $script:senderDiagnostic\n",
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-File", str(script)],
+            text=True, capture_output=True, timeout=10, **no_window_kwargs(),
+        )
+        assert result.returncode == 0, result.stderr
+        assert received.wait(2), result.stdout
+        assert len(notices) == 1 and notices[0]["kind"] == "readHookDemand"
+        assert server.has_recent_hook_demand()
+        assert json.loads(result.stdout)["write_complete"] is True
+    finally:
+        server.close()
 
 
 @pytest.mark.portfolio_tier("T2")

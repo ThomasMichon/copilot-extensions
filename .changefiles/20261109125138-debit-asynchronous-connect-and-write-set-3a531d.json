@@ -1,5 +1,5 @@
 {
-  "comment": "Debit asynchronous connect and write setup before waiting within the shared post-tool sender deadline",
+  "comment": "Debit asynchronous sender setup before waiting and separate selected-owner routing controls from real-clock budget qualification",
   "changes": [
     {
       "plugin": "agent-worktrees",

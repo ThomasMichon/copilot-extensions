@@ -7738,12 +7738,13 @@ producer isolation on Linux. The incomplete-association control reaches the
 actual original admission CLI and its caller-watch helper, then verifies the
 one-time prepared-view upgrade. It remains under the same item/child bounds;
 missing native prerequisites are failures in the selected hosted lane.
-The selected-owner post-tool controls instrument only the copied sender to
-report allocation, connection and write progress, elapsed budget and accepted
-receiver connections when a notification is missing. Both shells, the 100 ms
-sender budget and all delivery assertions remain unchanged. Instrumentation
-can perturb timing; these diagnostics do not replace the separate uninstrumented
-cold-process controls or establish a production latency result.
+The selected-owner post-tool routing controls hold only the copied sender's
+elapsed clock at zero, isolating real entry/owner/IPC assertions from optional
+budget-exhaustion drops. Both real shells, sockets, bounded waits and all receiver
+and invalidation assertions remain selected. Phase diagnostics use that controlled
+clock; they are not production latency evidence. The separate uninstrumented
+cold-process controls retain the actual production clock, 100 ms shared budget
+and mandatory notification assertions, without warmup or replay.
 The controlled-clock sender cases charge allocation, async connection setup,
 stream acquisition and async write setup to that same budget before either
 wait; exhaustion never starts an additional wait or retries a notification.
