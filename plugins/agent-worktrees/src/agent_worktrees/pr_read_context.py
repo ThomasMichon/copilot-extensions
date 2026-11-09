@@ -38,8 +38,10 @@ def read_report(verb, prcfg, repo, number, *, api_base="", token=None):
     from .providers import account_token_for_slug, get_provider
     if verb == "threads":
         from .pr_thread_report import thread_report as read
-    else:
+    elif verb == "diff":
         from .pr_diff_report import diff_report as read
+    else:
+        raise ValueError(f"Unknown on-demand report verb: {verb}")
     provider = get_provider(prcfg.provider)
     selected_token = token if token is not None else account_token_for_slug(repo, prcfg)
     return read(provider, repo, number, api_base=api_base or prcfg.api_base, token=selected_token)

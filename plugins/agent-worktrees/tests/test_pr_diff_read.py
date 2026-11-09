@@ -43,6 +43,30 @@ def test_provider_exception_is_valid_failed_report():
     assert report["supported"] is report["complete"] is False
 
 
+@pytest.mark.parametrize("result", [
+    None, {}, PRDiff(supported=1), PRDiff(diff=None), PRDiff(error=None),
+])
+def test_malformed_provider_results_stay_valid_failed_reports(result):
+    class Provider:
+        name = "fixture"
+
+        def get_diff(self, *args, **kwargs):
+            return result
+
+    report = diff_report(Provider(), "example/repository", 7)
+    assert report["error"] and report["diff"] == ""
+    assert report["supported"] is report["complete"] is False
+
+
+def test_unknown_report_verb_refuses_before_provider_or_credential_acquisition(monkeypatch):
+    from agent_worktrees import pr_read_context, providers
+
+    monkeypatch.setattr(providers, "get_provider", lambda *args: pytest.fail("provider acquisition"))
+    monkeypatch.setattr(providers, "account_token_for_slug", lambda *args: pytest.fail("credential acquisition"))
+    with pytest.raises(ValueError, match="Unknown on-demand report verb"):
+        pr_read_context.read_report("difference", object(), "example/repository", 7)
+
+
 @pytest.mark.parametrize("argv", [
     ["diff", "7"], ["diff", "example/repository", "0"],
     ["diff", "example/repository", "-7"], ["diff", "example/repository", "true"],

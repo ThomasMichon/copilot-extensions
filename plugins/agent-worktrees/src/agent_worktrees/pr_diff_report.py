@@ -12,9 +12,12 @@ def diff_report(provider, repo, number, *, api_base="", token=None):
     }
     try:
         result = provider.get_diff(repo, number, api_base=api_base, token=token)
+        supported, text, error = result.supported, result.diff, result.error
+        if type(supported) is not bool or not isinstance(text, str) or not isinstance(error, str):
+            raise ValueError("provider returned an invalid diff result")
     except Exception as exc:
         return {**report, "error": str(exc) or "provider diff acquisition failed"}
     return {
-        **report, "supported": result.supported, "diff": result.diff, "error": result.error,
-        "complete": False if result.error or not result.supported else None,
+        **report, "supported": supported, "diff": text, "error": error,
+        "complete": False if error or not supported else None,
     }

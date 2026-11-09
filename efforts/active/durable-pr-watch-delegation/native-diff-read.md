@@ -131,9 +131,10 @@ no legacy retirement is proposed.
   Keep the canonical Plan and Validation Plan open after finite delivery.
 
 The native diff/routing packet passes 148 cases with five Windows-only
-skips. The actual Worktrees owner/read/observation/tracked packet passes 84,
+skips. The actual Worktrees owner/read/observation/tracked packet passes 90,
 including real subprocess GitHub/Gitea/ADO provider methods with synthetic IO,
 configured-versus-ambient GitHub host selection, missing credentials,
-native refusal and unchanged tracked parser/reconciliation/output.
+native refusal, malformed provider result refusal, unknown report verb
+rejection and unchanged tracked parser/reconciliation/output.
 Both isolated runs verify cleanup. Native Windows/macOS, installed,
 authorized provider-account, HTTP and broader parent parity remain open.
