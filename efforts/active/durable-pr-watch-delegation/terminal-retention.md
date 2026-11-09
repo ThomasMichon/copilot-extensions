@@ -185,8 +185,9 @@ Those broader P1/P2 and parent gates stay open.
 ## Retained acquisition mapping composition
 
 This **agent-recommended, review-first** source refinement cleared review in
-#11633. Its first storage/library source leaf merged in #11634; optional
-serving is the next source leaf and installed support remains open. It composes the existing
+#11633. Its storage/library source leaf merged in #11634 and separately
+negotiated workspace serving in #11636. Standalone selection and installed
+support remain open. It composes the existing
 [persisted acquisition mapping](comment-observation-correlation.md#persisted-acquisition-mapping-refinement)
 with terminal compaction under their same ReplayStore owner. It closes the
 bounded-conversation and original-comment correlation intent above without
@@ -278,6 +279,8 @@ feedback, attention-writer composition or remote retirement.
    Native/Gateway/CLI negotiation, both mixed-version directions, withdrawal
    and rollback controls. Exercise retained reads after populated-cache
    retirement and fresh-reader restart, not just an empty fixture.
+   The finite core source leaf merged in #11636; explicit standalone host
+   selection/qualification and installed support remain separate.
 4. Return to the full T3 and both parent acceptance plans. Source fixtures do
    not qualify installed hosts, retained-volume reader transition, providers,
    all publishers, whole-system retention or operational effects.
