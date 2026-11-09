@@ -413,3 +413,16 @@ inventory; unsupported execution must not be reported as a successful gate.
   out during construction, with owned cleanup completed. The native lane
   already declares 900-second test, group and plugin bounds. Validation
   now uses that existing profile, not a changed timeout or production policy.
+- Draft fixture PR #11696 qualified source
+  `13aff99a06c99178983152ee5f4c46de8ba7608e`: hosted native run
+  42641072850 passed on Linux and Windows. The local actual installer
+  case passed in 416.32 seconds; canonical preparation and verified cleanup
+  completed in 521.31 seconds. The PR is now out of draft.
+- Current-head review found a second consumer of the moved fixture:
+  the native source-preparation copy helper only accepted the old layouts.
+  The helper now normalizes the source child while retaining its original
+  recursive-destination refusal. Focused layout and recursion cases cover
+  old and nested, vendored and separate-library inputs. All nine focused
+  fixture, copy and recursion cases passed through canonical containment;
+  scoped Ruff and whitespace checks passed. Updated publication and fresh
+  current-head review remain required.

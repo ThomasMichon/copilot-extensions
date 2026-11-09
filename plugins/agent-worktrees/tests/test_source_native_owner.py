@@ -23,8 +23,10 @@ prepared_native_runtime_source = runtime_fixture.native_runtime_source
 
 
 def _copy_native_checkout(plugin: Path, repository: Path, checkout: Path) -> None:
-    assert plugin in (repository, repository / "plugins/agent-worktrees")
     assert not checkout.is_relative_to(repository)
+    if plugin in (repository / "source", repository / "source/plugins/agent-worktrees"):
+        repository = repository / "source"
+    assert plugin in (repository, repository / "plugins/agent-worktrees")
     if plugin == repository:
         shutil.copytree(
             plugin, checkout / "plugins/agent-worktrees",
@@ -34,16 +36,18 @@ def _copy_native_checkout(plugin: Path, repository: Path, checkout: Path) -> Non
         shutil.copytree(repository, checkout)
 
 
+@pytest.mark.parametrize("nested", [False, True])
 @pytest.mark.parametrize("standalone", [False, True])
-def test_native_checkout_preserves_both_frozen_layouts(tmp_path, standalone):
-    repository = tmp_path / "source"
-    plugin = repository if standalone else repository / "plugins/agent-worktrees"
+def test_native_checkout_preserves_both_frozen_layouts(tmp_path, standalone, nested):
+    repository = tmp_path / "repository"
+    source = repository / "source" if nested else repository
+    plugin = source if standalone else source / "plugins/agent-worktrees"
     plugin.mkdir(parents=True)
     (plugin / "pyproject.toml").write_text("frozen package", encoding="utf-8")
     (repository / ".git").mkdir()
     if not standalone:
-        (repository / "libs").mkdir()
-        (repository / "libs/dependency").write_text("frozen dependency", encoding="utf-8")
+        (source / "libs").mkdir()
+        (source / "libs/dependency").write_text("frozen dependency", encoding="utf-8")
     (tmp_path / "unrelated").write_text("not source", encoding="utf-8")
     checkout = tmp_path / "checkout"
     _copy_native_checkout(plugin, repository, checkout)
@@ -54,12 +58,14 @@ def test_native_checkout_preserves_both_frozen_layouts(tmp_path, standalone):
         assert (checkout / "libs/dependency").read_text() == "frozen dependency"
 
 
-def test_native_checkout_refuses_recursive_destination(tmp_path):
-    plugin = tmp_path / "source"
-    plugin.mkdir()
-    checkout = plugin / "checkout"
+@pytest.mark.parametrize("nested", [False, True])
+def test_native_checkout_refuses_recursive_destination(tmp_path, nested):
+    repository = tmp_path / "repository"
+    plugin = repository / "source" if nested else repository
+    plugin.mkdir(parents=True)
+    checkout = repository / "checkout"
     with pytest.raises(AssertionError):
-        _copy_native_checkout(plugin, plugin, checkout)
+        _copy_native_checkout(plugin, repository, checkout)
     assert not checkout.exists()
 
 
