@@ -13,6 +13,16 @@
 - **Resident configuration correction:** #10951 (qualified caller context)
 - **Separate prepared qualification:** #10742 under campaign #7028; not the ordinary-installer slice's publication gate
 
+## Goal
+
+Current operator reaffirmation:
+
+> Seems like there are issues with MCP we need to deal with, to fix version-over-version compat and instll success
+
+**Interpretation:** This reaffirms the unchanged Guiding Intent below, including
+fresh physical-generation execution and preserved session reattachment. It does
+not replace the original Request or waive release and installed-consumer gates.
+
 ## Guiding Intent
 
 An update must make fresh `agent-mcp` invocations use the incoming runtime and
@@ -203,6 +213,16 @@ named tracked objective before the whole effort is Done.
 - [ ] **Clean measured sweep:** resolve actual incoming completion and update
   performance; a selected runtime or a successful isolated tool call does not
   make a failed full update successful.
+- [x] **Optional installer backstop source merged:** #11550 delivers the #11534
+  termination-free, addressed-runtime correction; explicit lifecycle-owner
+  cleanup remains separate.
+- [x] **Backstop release verified:** Main
+  `2f22e1803fa7f6e5c85efee839c50881245374ec` contains the reviewed collector,
+  helpers and initializers; both MCP archives retain the matching collector.
+- [x] **Bounded installed backstop proof:** the targeted Windows MCP
+  `0.2.217-dev1` runtime phase and fresh literal bridge passed; all 18 observed
+  MCP-tree native births remained unchanged. This is not full-host or
+  adopted-session reattachment acceptance.
 
 ### Resident configuration-context correction
 
@@ -325,6 +345,9 @@ withdrawal authorizes no GUI effect or change to the SDK's own admission rules.
   automatic inhibition and never authorizes state-holder termination.
 - [ ] Actual consumer evidence distinguishes source qualification, released
   payload, selected runtime and the generation that handles a tool call.
+- [x] **Backstop source controls:** default live-instance preservation, exact
+  runtime scope, interleaved cursors and mixed/rolled-back helper refusal passed;
+  this is not installed MCP constructor or session-handover acceptance.
 - [x] **Deferred to [#10925](https://github.com/ThomasMichon/copilot-extensions/issues/10925):**
   SDK fixture-scoped acquisition and self-profile compatibility validation;
   not an MCP result or prerequisite.
@@ -349,6 +372,10 @@ backend execution. This plan does not assert that reattachment or legacy live
 migration already works.
 
 ## Journal
+
+### 2026-11-08 - Termination-free installer source merged
+
+- [Source qualification, merge and remaining delivery gates](journal/2026/11.08%20termination-free%20installer.md).
 
 ### 2026-11-04 - Kickoff
 

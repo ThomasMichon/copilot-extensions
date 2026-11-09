@@ -147,7 +147,10 @@ class WorkspaceTools:
             ensure = getattr(self.client, "ensure_capabilities", None)
             backend = await self._client_call(ensure, operation=operation) if callable(ensure) else await self._client_call(
                 self.client.exchange, "capabilities", {}, operation=operation)
-            if not isinstance(backend, dict) or backend.get("protocol") != PROTOCOL:
+            from .workspace_terminal_read import supports as supports_terminal
+            if not isinstance(backend, dict) or (
+                backend.get("protocol") != PROTOCOL and not supports_terminal(backend)
+            ):
                 raise WorkspaceToolUnavailable("workspace_contract_unsupported")
             available = backend.get("operations", [])
             operations += [

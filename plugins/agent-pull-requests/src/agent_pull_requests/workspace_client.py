@@ -19,6 +19,7 @@ from .workspace_operations import (
     needs_prepared_review, prepared_review_contract, supports_prepared_review,
     _stock_preparation,
 )
+from .workspace_terminal_read import PROTOCOL as TERMINAL_PROTOCOL, supports as supports_terminal
 
 
 class WorkspaceClientError(ReplayClientError):
@@ -50,7 +51,12 @@ class WorkspaceClient:
         self._read_admission = read_admission
 
     async def _exchange(self, operation, payload, *, checkpoint=None):
-        data = encoded({"binding": self._binding.document(), "request": payload})
+        terminal = self._capabilities is not None and self._capabilities["protocol"] == TERMINAL_PROTOCOL
+        data = encoded({
+            "binding": self._binding.document(), "request": payload,
+            **({"workspace_contract": self._capabilities["terminal_read_contract"]["protocol"]}
+               if terminal and operation != "capabilities" else {}),
+        })
         if len(data) > BODY_BYTES:
             raise WorkspaceClientError("workspace_request_limit", outcome_unknown=False)
         try:
@@ -82,7 +88,10 @@ class WorkspaceClient:
             if len(types) != 1 or types[0].split(";")[0].strip().lower() != "application/json":
                 raise ValueError
             value = json_object(response.body)
-            if value.get("binding") != self._binding.document() or value.get("protocol") != PROTOCOL:
+            protocols = (PROTOCOL, TERMINAL_PROTOCOL) if operation == "capabilities" else (
+                TERMINAL_PROTOCOL if terminal else PROTOCOL,
+            )
+            if value.get("binding") != self._binding.document() or value.get("protocol") not in protocols:
                 raise ValueError
             value.pop("binding")
             return value
@@ -97,15 +106,17 @@ class WorkspaceClient:
         self._capabilities = None
         value = await self._exchange("capabilities", {}, **(
             {"checkpoint": checkpoint} if checkpoint is not None else {}))
+        terminal = value.get("protocol") == TERMINAL_PROTOCOL
         if (
-            value.get("generation_versions") != [1] or value.get("owner_store_versions") != [2]
+            value.get("generation_versions") != [1]
+            or (not supports_terminal(value) if terminal else value.get("owner_store_versions") != [2])
             or value.get("chunk_bytes") != CHUNK_BYTES
             or value.get("max_generation_bytes") != MAX_GENERATION_BYTES
             or not isinstance(value.get("operations"), list)
             or any(not isinstance(name, str) for name in value["operations"])
         ):
             raise WorkspaceClientError("unsupported_workspace_contract")
-        if "events" in value["operations"]:
+        if "events" in value["operations"] and not terminal:
             from .conversation_journal import PROTOCOL as CONVERSATION_PROTOCOL
             if value.get("conversation_contract") != {
                 "protocol": CONVERSATION_PROTOCOL, "owner_store_versions": [3],
