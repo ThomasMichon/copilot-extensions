@@ -447,6 +447,24 @@ def test_candidate_source_view_binds_fragment_membership_bytes_and_diagnostics(t
         destination.write_bytes(path.read_bytes())
     view = views.installation_view(tmp_path, paths, tmp_path / "view" / "installation_context.py")
     view.verify(tmp_path)
+    entry = dict(view.inputs)[views.INSTALLATION_ENTRY].splitlines()
+    helper_line = next(index for index, text in enumerate(entry, 1) if b"def _native_fragment(" in text)
+    mapped_line = next(
+        index for index, source in enumerate(view.lines, 1)
+        if source.path == views.INSTALLATION_ENTRY and source.number == helper_line
+    )
+    assert view.content.splitlines()[mapped_line - 1] == entry[helper_line - 1]
+    assert view.diagnostics(f"{view.output}:{mapped_line}: error: sample\n", tmp_path) == (
+        f"{views.INSTALLATION_ENTRY}:{helper_line}: error: sample\n"
+    )
+    loader = tmp_path / views.INSTALLATION_ENTRY
+    original = loader.read_bytes()
+    altered = original.replace(b"_native_fragment(fragment_path).read_text", b"fragment_path.read_text")
+    assert altered != original
+    loader.write_bytes(altered)
+    with pytest.raises(views.SourceViewError, match="loader changed"):
+        views.installation_view(tmp_path, paths, tmp_path / "refused" / "installation_context.py")
+    loader.write_bytes(original)
     line = view.lines[-1]
     assert view.diagnostics(f"{view.output}:{len(view.lines)}: note: sample\n", tmp_path) == (
         f"{line.path}:{line.number}: note: sample\n"

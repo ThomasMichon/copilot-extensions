@@ -421,7 +421,9 @@ The canonical Installation Context project uses a checker-only composition at
 the actual `_load_fragments()` call. Its complete loader structure must match
 the qualified adapter. The literal fragment tuple determines order; every
 physical fragment must be present exactly once. The separate PowerShell worker
-remains an independent input.
+remains an independent input. The adapter includes the Windows native-read
+helper while keeping compiled filenames in their original lexical spelling;
+the helper itself remains in the checked source.
 
 When that canonical loader is in the physical inventory, every project also
 receives the faithful view as an import root. A consumer can therefore import
@@ -433,17 +435,17 @@ the same byte/membership verification, source mapping and lease-bound cleanup;
 no stub, private-fragment import or missing-import suppression is substituted.
 
 The view preserves physical source lines, normalizing line endings to LF and
-replacing only standalone `from __future__ import annotations` declarations with
-blank mapped lines. It refuses other future imports, changed loader semantics,
-missing/extra fragments and file-wide checker directives. Product code is
-never imported or executed. Each original source first passes non-executing
-compilation, so AST-only acceptance cannot hide runtime syntax errors. Directive
-scanning uses Python's universal-newline interpretation, including CR-only
-sources. Checker diagnostics point back to original fragment
-paths and line numbers. Input and emitted-view bytes are revalidated before a
-result is credited; temporary views are removed while holding the checker lease.
-Views live beside, not inside, the prepared venv because MyPy refuses its own
-environment as an import root.
+replacing the loader call and standalone `from __future__ import annotations`
+declarations with blank mapped lines. It refuses other future imports, changed
+loader semantics, missing/extra fragments and file-wide checker directives.
+Product code is never imported or executed. Each original source first passes
+non-executing compilation, so AST-only acceptance cannot hide runtime syntax
+errors. Directive scanning uses Python's universal-newline interpretation,
+including CR-only sources. Checker diagnostics point back to original loader and
+fragment paths and line numbers. Input and emitted-view bytes are revalidated
+before a result is credited; temporary views are removed while holding the
+checker lease. Views live beside, not inside, the prepared venv because MyPy
+refuses its own environment as an import root.
 
 ```text
 python tools/typecheck.py lib-installation-context
