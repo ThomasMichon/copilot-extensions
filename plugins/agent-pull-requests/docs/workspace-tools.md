@@ -248,6 +248,17 @@ resends comments, reconciles unknown writes or advances handled/ACK/echo state.
 The source implementation and synthetic native/CLI/Gateway controls do not
 enroll a normal installed host or qualify live provider behavior.
 
+An explicitly adopted terminal read-only host may instead offer the separate
+[`terminal-comment-mapping-reader/v1`](terminal-retention.md#optional-terminal-mapping-receiver)
+contract. The same CLI/tool command then returns a declared active/compact
+representation, minimal original prepared identity and `mapping_supported`,
+without inventing a retired source manifest. Unsupported historical retention
+and a supported null slot remain distinct. This does not append an operation
+to terminal-read/v1 or reuse retained-comment-reader/v1's result guarantees;
+the executing optional declaration, not the command spelling, selects the
+result. Prior hosts keep their baseline, and neither form falls back to native
+searches or writes.
+
 The optional [conversation event reader](conversation-journal.md) needs explicit
 owner-v3 storage and serving adoption. It is read-only and capability-selected;
 unbound/prior hosts remain usable for their existing operations. A returned

@@ -20,17 +20,23 @@ HARNESS_DECLARATION = HARNESS_PREFIX + "python-emitted-inputs.json"
 _WRAPPER = r'''
 """Resolve, validate, and explicitly mutate marketplace installation context."""
 from __future__ import annotations
+import os
 from pathlib import Path
 _FRAGMENT_FILES = ()
 def _fragment_directory(script: Path) -> Path:
     if script.drive.casefold() == "\\\\?\\globalroot" and script.root == "\\":
         return script.parent
     return script.resolve().parent
+def _native_fragment(path: Path) -> Path:
+    value = str(path)
+    if os.name != "nt" or value.startswith("\\\\?\\"):
+        return path
+    return Path("\\\\?\\UNC\\" + value[2:] if value.startswith("\\\\") else "\\\\?\\" + value)
 def _load_fragments() -> None:
     fragment_dir = _fragment_directory(Path(__file__))
     for fragment_name in _FRAGMENT_FILES:
         fragment_path = fragment_dir / fragment_name
-        exec(compile(fragment_path.read_text(encoding="utf-8"), str(fragment_path), "exec"), globals())
+        exec(compile(_native_fragment(fragment_path).read_text(encoding="utf-8"), str(fragment_path), "exec"), globals())
 _load_fragments()
 if __name__ == "__main__":
     raise SystemExit(globals()["main"]())
