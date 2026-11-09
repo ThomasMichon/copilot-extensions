@@ -67,7 +67,8 @@ subset of tests passes.
 
 ## Draft-to-ready native convergence
 
-**Review-first contract, not implemented acceptance.** This finite source slice
+**Contract reviewed in #11641; source qualification below is not installed
+acceptance.** This finite source slice
 closes part of the PR-domain
 [provider-neutral surface](../../../visions/plugins/agent-pull-requests/README.md#first-class-provider-neutral-pr-surface)
 and Worktrees'
@@ -154,18 +155,37 @@ while existing operations remain usable. No old syntax is deprecated here.
 HTTP service mutation, ordinary host/worker consumer replacement, installed
 adoption and three-provider parity remain later acceptance, not this slice.
 
-- [ ] Qualify the explicit Worktrees parser, claimant admission, target policy
+- [x] Qualify the explicit Worktrees parser, claimant admission, target policy
   and provider owner with synthetic active-draft, already-ready, terminal,
   malformed, wrong-target and missing-capability controls.
-- [ ] Exercise the actual native frontend-to-Worktrees/provider path, not only
+- [x] Exercise the actual native frontend-to-Worktrees/provider path, not only
   argv assertions. Prove draft-only mutation and preservation of independent
   consent/holds, votes, reviewers and completion options.
-- [ ] Inject pre-write refusal, rejected write, lost response and post-write
+- [x] Inject pre-write refusal, rejected write, lost response and post-write
   readback/identity/lifecycle failures. Preserve honest outcomes and prove no
   create, push, consent, retry or raw-forge fallback.
-- [ ] Cover old/new callers, old/new selected runtimes and provider rollback,
+- [x] Cover old/new callers, old/new selected runtimes and provider rollback,
   additive capability-map fields, strict invalid arguments and invalid explicit
   policy. Preserve the existing tracked ready/legacy-hold regression suite.
 - [ ] Record source and native-platform qualification separately from any
   authorized live-provider or installed-consumer evidence. Source tests and a
   merged proposal alone close neither this matrix nor the parent effort.
+
+The finite source candidate passes 54 Worktrees author/readiness/tracked-ready
+controls and 84 native frontend cases with five Windows-only cases skipped on
+Linux. The actual frontend, Worktrees parser/resolver and Azure DevOps provider
+compose in one fixture; a separate real subprocess exercises capability and
+explicit worker-policy argument forwarding. Provider responses are synthetic.
+No live forge, Windows execution, installed host or HTTP mutation parity is
+qualified by these results. The legacy tracked Azure DevOps `mark_ready`
+refusal is unchanged; explicit author readiness is separately advertised.
+Capability launch/timeout failures and valid claimant refusals remain
+`not-attempted`, preserving their diagnostics; null provider identity is
+accepted only for an otherwise valid pre-dispatch refusal, never an attempted
+outcome. Missing, empty or non-string capability providers refuse before
+dispatch. Synthesized failures use the same schema/version and retain the
+provider once resolved; both actual owner-result controls were rerun after
+that frontend correction.
+The actual projectless dispatcher also preserves the versioned not-attempted
+refusal after a valid delivered-policy capability probe, including project
+resolution exceptions and strict invalid-option rejection.

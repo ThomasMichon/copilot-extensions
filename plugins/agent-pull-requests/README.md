@@ -158,7 +158,8 @@ the timeout elapses (exit code `3`).
 
 ### Explicit native provider commands
 
-Azure DevOps author-side creation, source publication and metadata-only repair
+Azure DevOps author-side creation, source publication, metadata-only repair and
+explicit draft readiness
 use the [capability-directed author workflow](docs/author-operations.md).
 Those operations keep source admission and target policy in Worktrees; source
 support is distinct from release and installed-consumer qualification.
