@@ -1387,6 +1387,11 @@ callback an implicit credential store.
   pass. Both changed plugins remain typing-Pending under #9807; native
   platform, installed/provider, HTTP, workspace and full parent acceptance
   remain open.
+- Required CI identified stale exact-source admission for the changed
+  project router before running units. Bind the actual router/test bytes
+  and add two actor-free exact-command controls, preserving all packet
+  guards and budgets. The complete admitted packet passes 4,665 cases
+  with verified cleanup; no failed test or source gate is bypassed.
 
 ### 2026-11-08 - Native diff-read contract merged; full parent return
 
