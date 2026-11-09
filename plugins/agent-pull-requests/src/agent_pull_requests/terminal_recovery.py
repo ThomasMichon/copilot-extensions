@@ -234,8 +234,13 @@ class TerminalRecoveryStore:
         self, *, lifecycle_checkpoint: Callable[[], None], expires_at: int,
         checkpoint: Callable[[], None] | None = None,
     ) -> dict:
-        if not callable(lifecycle_checkpoint):
+        if not callable(lifecycle_checkpoint) or checkpoint is not None and not callable(checkpoint):
             raise ValueError("actual exclusive reader lifecycle checkpoint required")
+
+        def current() -> None:
+            if checkpoint is not None:
+                checkpoint()
+            lifecycle_checkpoint()
 
         def adopt(document: dict) -> dict:
             lifecycle_checkpoint()
@@ -248,7 +253,7 @@ class TerminalRecoveryStore:
             lifecycle_checkpoint()
             return {"status": status, "protocol": PROTOCOL}
 
-        return self.owner._review_transaction(adopt, expires_at=expires_at, checkpoint=checkpoint)
+        return self.owner._review_transaction(adopt, expires_at=expires_at, checkpoint=current)
 
     @staticmethod
     def selected(document: dict, scope: dict, operation_id: str) -> dict:

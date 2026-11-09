@@ -160,6 +160,38 @@ def test_old_reader_refuses_adoption_without_rewriting_and_original_policy_canno
     assert operations.store.path.read_bytes() == before
 
 
+@pytest.mark.parametrize("boundary", [1, 2])
+def test_recovery_adoption_rechecks_reader_exclusion_after_both_validations(
+    workspace: tuple, monkeypatch: pytest.MonkeyPatch, boundary: int,
+) -> None:
+    operations, _, _, _, _, _ = workspace
+    owner = operations.store
+    owner.terminal_recovery = True
+    recovery = TerminalRecoveryStore(owner)
+    before = owner.path.read_bytes()
+    validate = owner._validate_owner
+    owned = True
+    validations = 0
+
+    def lifecycle() -> None:
+        if not owned:
+            raise PermissionError("exclusive reader custody withdrawn")
+
+    def interrupted(document: dict) -> None:
+        nonlocal owned, validations
+        validate(document)
+        if "terminal_recovery" in document:
+            validations += 1
+            if validations == boundary:
+                owned = False
+
+    monkeypatch.setattr(owner, "_validate_owner", interrupted)
+    with pytest.raises(PermissionError, match="custody withdrawn"):
+        recovery.adopt(lifecycle_checkpoint=lifecycle, expires_at=expires())
+    assert validations == boundary
+    assert owner.path.read_bytes() == before
+
+
 def test_full_review_budget_refuses_compaction_without_eviction_or_other_reservation(workspace: tuple) -> None:
     prepared = prepare(workspace)
     operations, _, intent, _, decision, _, _ = prepared
