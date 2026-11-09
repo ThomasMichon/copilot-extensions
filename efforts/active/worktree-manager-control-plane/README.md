@@ -2253,20 +2253,20 @@ Original Request, status, participants, checked credit and first gates stay._
   admission/creation owner and compose its existing consumer seam. Manager
   installation, interactive New readiness or unrelated Phase 4a completion
   is not a prerequisite for the standalone engine's pure preview.
-- [ ] **M4437-P1:** Offer canonical safe/refusing Finalize on EVERY supported
+- [x] **M4437-P1:** Offer canonical safe/refusing Finalize on EVERY supported
   worktree row; BOTH menu presentation AND actual invocation must agree,
   rather than limiting the route to conversation/unused buckets or changing
   visibility alone.
-- [ ] **M4437-P2:** Explain unmerged/outstanding-objective/work/claim
+- [x] **M4437-P2:** Explain unmerged/outstanding-objective/work/claim
   refusals and expose the existing cleanup/claims/obligations help route.
   An operator should follow dependencies, not substitute force cleanup.
-- [ ] **M4437-P3:** Reuse the canonical confirmation-gated asynchronous
+- [x] **M4437-P3:** Reuse the canonical confirmation-gated asynchronous
   Finalize path and result/progress handling. Reconcile the original
   HEAD-ancestor-or-self-of-default AND no-outstanding-claims safety
   explanation with the actual current canonical content/default-branch/
   PR/obligation/owner policy. Do not reimplement a simplified historical
   predicate, weaken current guards or add an unrelated new ancestry gate.
-- [ ] **M4437-P4:** Retain managed-child/controller, provider-capability,
+- [x] **M4437-P4:** Retain managed-child/controller, provider-capability,
   live/unknown and source/resource boundaries. No hidden direct deletion,
   backend bypass, new cleanup authority or whole-Manager/every-host native
   programme follows from this finite menu/invocation proposal.
@@ -2664,7 +2664,7 @@ tiers without imposing every-host or native-on-every-leaf requirements.
   unsupported cases preserve valid execution. No create-then-delete,
   broad allocator redesign, Manager dependency or unrelated startup/native
   prerequisite is added.
-- [ ] **M4437-V1:** Resolve M4437-P1 through P4 through BOTH actual menu
+- [x] **M4437-V1:** Resolve M4437-P1 through P4 through BOTH actual menu
   construction and canonical invocation/refusal/help across original row
   classes, including dirty/unmerged/claimed, conversation/unused and real
   managed/controller/provider refusal. Preserve confirmations, cancellation,
@@ -2966,6 +2966,20 @@ own scopes. No source/resource/physical custody or updater authority transfers.
   with exit zero. The explicit Finalize diagnostic path now retains both
   streams as a failed result; ordinary engine-client callers are unchanged.
   The expanded focused consumer/custody/transport packet passes 183 cases.
+
+### 2026-11-09 - Finite Finalize source acceptance reconciled
+
+- #11579 merged as `24f3953d034e85cb6280a96427cc27fa3defc364` after
+  final-head approval and green CI. The retained 183-case consumer packet
+  proves the finite M4437-P1 through P4 and M4437-V1 menu, invocation,
+  refusal/help, confirmation/cancel and local/SSH diagnostic contract.
+  Those five rows now reflect the accepted source delivery instead of
+  remaining an unimplemented proposal.
+- This status reconciliation adds no runtime behavior or new test claim.
+  #4437 remains open; release, separately authorized installed acceptance,
+  retained source-workspace finalization and the umbrella's other Plan and
+  Validation Plan items are not completed by these finite source controls.
+  No live Finalize, cleanup, mux probe or rollout is performed or authorized.
 
 ### 2026-11-05 - Planned #5898 terminal/mux receiving
 
