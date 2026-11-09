@@ -368,3 +368,45 @@ def test_publication_selection_cleanup_is_off_loop_and_keeps_request_custody(nat
             await gateway.drain(timeout=5)
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("operation", ["threads", "diff"])
+def test_selection_cleanup_failure_cannot_be_swallowed_as_a_provider_report(
+    native_gateway, native, monkeypatch, operation,
+):
+    from agent_procutil.owned_process import OwnedCleanupError
+    from agent_pull_requests import native_report
+    from agent_pull_requests.watch_replay_client import ReplayClientError
+    from agent_worktrees.providers import github_report_capture
+
+    _, gateway, client, _ = native_gateway
+    inside, fired, settled = [False], [False], []
+    original_run = native_report.run_caller_owned
+    original_report = getattr(github_report_capture, operation)
+
+    def run(argv, **kwargs):
+        if inside[0] and not fired[0]:
+            fired[0] = True
+            raise OwnedCleanupError(None, cleanup_retry=lambda deadline: settled.append(True))
+        return original_run(argv, **kwargs)
+
+    def report(*args, **kwargs):
+        inside[0] = True
+        try:
+            return original_report(*args, **kwargs)
+        finally:
+            inside[0] = False
+
+    monkeypatch.setattr(native_report, "run_caller_owned", run)
+    monkeypatch.setattr(github_report_capture, operation, report)
+
+    async def scenario():
+        await client.capabilities()
+        with pytest.raises(ReplayClientError) as caught:
+            await client.read(operation, {"number": 7, "budget_seconds": 15})
+        assert caught.value.http_status == 503
+        await gateway.drain(timeout=2)
+
+    asyncio.run(scenario())
+    assert fired[0] and settled == [True]
+    assert all("/pulls/" not in " ".join(call) and "graphql" not in " ".join(call) for call in native[2]())

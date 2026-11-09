@@ -110,7 +110,7 @@ def load_config_report(
     return AcquisitionReport("load-config", value, tuple(observations))
 
 
-def yaml_value(path: Path, observations: list[SourceObservation] | None = None) -> dict[str, Any]:
+def yaml_value(path: Path, observations: list[SourceObservation] | None = None, *, strict=False) -> dict[str, Any]:
     from . import config as cfg
 
     if observations is None:
@@ -120,7 +120,9 @@ def yaml_value(path: Path, observations: list[SourceObservation] | None = None) 
         if not present:
             return {}
         with open(path, encoding="utf-8") as stream:
-            raw = cfg.yaml.load(stream, Loader=cfg._YamlSafeLoader)
+            if strict:
+                from .repos_registry_reader import _UniqueRegistryLoader
+            raw = cfg.yaml.load(stream, Loader=_UniqueRegistryLoader if strict else cfg._YamlSafeLoader)
         observe(observations, str(path), "config-yaml", ScanAuthority.COMPLETE)
         if isinstance(raw, dict):
             return raw
@@ -140,13 +142,15 @@ def _load_yaml_safe_report(path: Path) -> AcquisitionReport[dict[str, Any]]:
     return AcquisitionReport("config-yaml", value, tuple(observations))
 
 
-def dropin_value(config_d: Path, *, project_name="", warn=False, observations=None):
+def dropin_value(config_d: Path, *, project_name="", warn=False, observations=None, strict=False):
     from . import config as cfg
     from .config_dropins import scan_config_dropin_registry, warn_config_dropin_findings
 
     if observations is None:
         observations = current_observations()
-    report = scan_config_dropin_registry(config_d, project_name=project_name)
+    report = scan_config_dropin_registry(
+        config_d, project_name=project_name, **({"strict": True} if strict else {}),
+    )
     if warn:
         warn_config_dropin_findings(report)
     observe(observations, str(config_d), "config-dropins", report.authority, findings=owner_findings(report.findings))

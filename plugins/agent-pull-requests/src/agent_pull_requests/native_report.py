@@ -71,8 +71,10 @@ class NativeGitHubReport:
                 "GH_DEBUG", "GH_FORCE_TTY", "GH_HTTP_UNIX_SOCKET",
             }
         }
+        cleanup_delayed = False
 
         def selection():
+            nonlocal cleanup_delayed
             remaining()
             timeout = budget.execution_deadline - time.monotonic()
             if timeout <= 0:
@@ -100,6 +102,7 @@ class NativeGitHubReport:
                     raise ValueError
                 return selected
             except OwnedCleanupError as error:
+                cleanup_delayed = True
                 _settle(error)
             except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
                 raise ReportUnavailable("native report target unavailable or changed") from None
@@ -126,16 +129,15 @@ class NativeGitHubReport:
             raise ReportUnavailable("native report selected account unavailable") from None
 
         def collect(operation, number, checkpoint):
-            delayed_cleanup = False
             transport_unavailable = False
 
             def capture(arguments, *, binary=False):
-                nonlocal delayed_cleanup, transport_unavailable
+                nonlocal cleanup_delayed, transport_unavailable
                 checkpoint()
                 try:
                     return account.capture("report", arguments, binary=binary, limit=BODY_BYTES)
                 except OwnedCleanupError as error:
-                    delayed_cleanup = True
+                    cleanup_delayed = True
                     _settle(error)
                 except CredentialObservationError as error:
                     transport_unavailable = error.code in ("timeout", "output-limit", "capture-failed")
@@ -149,7 +151,7 @@ class NativeGitHubReport:
             except Exception:
                 raise ReportUnavailable("native report acquisition unavailable") from None
             checkpoint()
-            if delayed_cleanup:
+            if cleanup_delayed:
                 raise ReportUnavailable("native report cleanup was delayed")
             if transport_unavailable:
                 raise ReportUnavailable("native report transport unavailable")

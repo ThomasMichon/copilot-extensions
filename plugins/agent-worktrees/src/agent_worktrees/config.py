@@ -934,7 +934,7 @@ def _load_config_uncached(
             machine/global ``repo_name`` values for this load.
         _machine_binding: Internal per-load provenance capture; never a YAML
             setting and never persisted.
-        strict_inrepo_config: Refuse malformed repository policy for finite
+        strict_inrepo_config: Refuse malformed or duplicate YAML policy sources for finite
             selected-owner reads; ordinary callers retain fail-soft loading.
 
     Returns:
@@ -947,13 +947,14 @@ def _load_config_uncached(
     config_acquisition.full_load_started()
     if path is None:
         path = default_config_path()
+    strict_sources = {"strict": True} if strict_inrepo_config else {}
 
     # Tier 1 (lowest): global machine-wide defaults. Lazily migrate the parsed
     # doc to the current schema in memory (never persists here; never raises) so
     # a still-old ~/.agent-worktrees/config.yaml loads correctly before an
     # install/update has rewritten it.
     global_raw = config_migrations.migrate_loaded(
-        _load_yaml_safe(global_config_path()), config_migrations.SCHEMA_CONFIG
+        _load_yaml_safe(global_config_path(), **strict_sources), config_migrations.SCHEMA_CONFIG
     )
     # Tier 3 (highest): machine-local. Optional -- absent is fine. Service
     # config-drop-ins (``<config-dir>/config.d/*.yaml``) form a base UNDER the
@@ -962,7 +963,7 @@ def _load_config_uncached(
     # contributing ``session_env.SUDO_ASKPASS`` -- without editing the shared
     # config.yaml. Drop-ins deep-merge with everything else, so a per-repo
     # ``session_env`` addition survives alongside the repo's own keys.
-    machine_raw = _load_yaml_safe(path)
+    machine_raw = _load_yaml_safe(path, **strict_sources)
     preliminary_repo_name = (
         project
         or machine_raw.get("repo_name")
@@ -973,6 +974,7 @@ def _load_config_uncached(
         path.parent / "config.d",
         project_name=str(preliminary_repo_name or ""),
         warn=True,
+        **strict_sources,
     )
     if dropins:
         machine_raw = _deep_merge(dropins, machine_raw)
@@ -1209,14 +1211,14 @@ def load_project_config(
         set_active_project(previous)
 
 
-def _load_yaml_safe(path: Path) -> dict[str, Any]:
+def _load_yaml_safe(path: Path, *, strict=False) -> dict[str, Any]:
     """Load a YAML file into a dict, returning ``{}`` on any problem.
 
     Never raises: config loading is on the critical path of every command, so a
     missing, empty, or malformed file degrades to an empty mapping rather than
     breaking the whole CLI.
     """
-    return config_acquisition.yaml_value(path)
+    return config_acquisition.yaml_value(path, **({"strict": True} if strict else {}))
 
 
 def _load_inrepo_config(anchor: str, *, strict: bool = False) -> dict[str, Any]:
@@ -1261,6 +1263,7 @@ def _load_config_d(
     *,
     project_name: str = "",
     warn: bool = False,
+    strict: bool = False,
 ) -> dict[str, Any]:
     """Deep-merge validated active entries from a ``config.d`` registry.
 
@@ -1274,7 +1277,9 @@ def _load_config_d(
     independent fault boundary and uncertainty retains only its last-known
     contribution.
     """
-    return config_acquisition.dropin_value(config_d, project_name=project_name, warn=warn)
+    return config_acquisition.dropin_value(
+        config_d, project_name=project_name, warn=warn, **({"strict": True} if strict else {}),
+    )
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:

@@ -282,3 +282,29 @@ def test_valid_utf8_replacement_character_is_not_decoding_loss(committed_target,
         return original(*args, **kwargs)
     monkeypatch.setattr(git_ops, "git", unavailable)
     assert select_report_target(path, "example/project")["account"] == "selected"
+
+
+@pytest.mark.parametrize("source", ["explicit", "global", "dropin", "pointer"])
+def test_duplicate_keys_in_other_config_sources_cannot_drop_credential_policy(target, monkeypatch, source):
+    path, _, _, _, _ = target
+    duplicate = 'repos:\n  target:\n    pr:\n      token_command: helper\n      token_command: ""\n'
+    if source == "explicit":
+        path.write_text(path.read_text().replace(
+            '"provider": "github"',
+            '"provider": "github", "token_command": "helper", "token_command": ""',
+        ), encoding="utf-8")
+    elif source == "global":
+        (path.parent / "global.yaml").write_text(duplicate, encoding="utf-8")
+    else:
+        dropins = path.parent / "config.d"
+        dropins.mkdir()
+        if source == "dropin":
+            (dropins / "policy.yaml").write_text(duplicate, encoding="utf-8")
+        else:
+            (dropins / "policy.json").write_text(
+                '{"schema_version":1,"plugin":"first@market","plugin":"other@market",'
+                '"plugin_root":"/fixture","target":"policy.yaml"}', encoding="utf-8",
+            )
+    monkeypatch.setattr(repos, "account_from_map", lambda *a, **k: pytest.fail("duplicate policy selected account"))
+    with pytest.raises(ValueError):
+        select_report_target(path, "example/project")

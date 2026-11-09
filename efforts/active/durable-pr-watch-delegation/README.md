@@ -1375,6 +1375,12 @@ callback an implicit credential store.
 
 ### 2026-11-09 - Native report boundary corrections
 
+- Strict acquisition also rejects duplicate keys in explicit/global YAML,
+  operator drop-ins and managed pointers without changing default loaders or
+  sharing retained registry state between strict and ordinary scans. Delayed
+  selection cleanup stays sticky across provider error normalization, preventing
+  an unavailable checkpoint from becoming HTTP 200. Isolated qualification
+  passes 444 Worktrees and 86 report/Gateway/TLS cases.
 - Strict committed reads decode actual bytes as UTF-8 on both batch and
   ordered paths, rather than treating a literal replacement character as
   decoding loss. Invalid bytes refuse; valid U+FFFD remains valid policy text.
