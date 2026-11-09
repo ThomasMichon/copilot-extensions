@@ -160,32 +160,19 @@ No existing command is deprecated here.
 
 ### Source qualification
 
-The bounded native suite passed **167 tests with five existing platform skips**;
-the actual Worktrees creation/cancellation suite passed **82 tests**. Tests use
-new isolated fixtures, not retained worktrees or provider state. The selected
-process fixture uses the real native command runner and strict receiver parser;
-the owner composition uses the actual creation persistence, status and
-cancellation handlers with synthetic provider absence. These are complementary
-controls, not proof of installed cross-process provider operation.
+Current source evidence uses new isolated fixtures, not retained worktrees or
+provider state:
 
-Review found that a preserved owner error hid frontend recovery guidance in
-human-readable output. The corrected cancellation/routing subset passed
-**139 tests with five platform skips**, including non-JSON owner errors and
-duplicate-diagnostic suppression. Owner JSON remains unchanged.
-The next review refinement passed **143 tests with five platform skips**:
-missing stdout retains the receiver diagnostic at either stage, redundant
-error fallback is removed, and malformed owner fields remain retained.
-Default success still prints the full owner receipt, consistently with the
-other native verbs; this is now explicitly documented and tested rather than
-replaced with a lossy human summary.
-The final diagnostics/recovery subset passed **146 tests with five platform
-skips**. Missing stderr now uses one text-only fallback at every failure site.
-Failure output separately carries the original selected worktree, creation,
-revision and reason without overwriting mismatched receiver evidence.
-The complete review then identified blank command-selector admission on the
-managed peer path. Reusing the shared parser validator closes that gap before
-peer selection or discovery. Three managed-peer regressions and the affected
-native suite passed **149 tests with five platform skips**.
+| Qualification | Evidence and boundary |
+|---------------|-----------------------|
+| Native cancellation/routing | 149 passed, five platform skips on Linux; actual native command runner and strict receiver-parser processes, including prior support/rollback and managed-peer admission |
+| Worktrees owner composition | 82 passed; actual creation persistence, status and cancellation handlers with synthetic provider absence, plus an old-caller parser/handler subprocess |
+
+These are complementary controls, not proof of installed cross-process
+provider operation. Current output/admission controls cover plain-error
+recovery diagnostics, complete default success receipts, missing stdout/stderr,
+preserved malformed owner fields, original frontend-owned recovery inputs and
+blank command-selector rejection before managed-peer selection or discovery.
 
 Exact original-revision recovery, non-active creation selection, retained audit,
 source/index/HEAD/refs, sibling attempts, resource claims and the source
@@ -195,9 +182,9 @@ no automatic recovery. Owner race, published/uncertain reservations and failed
 persistence also remain nonzero/unknown after dispatch.
 
 The suites ran inside the existing hardened, network-disconnected test phase.
-A vendor bootstrap URL returned persistent HTTP 504 responses; the successful
-owner run changed only that generated disposable configuration's download URL
-to the vendor's download-query form, retaining the pinned archive/hash and all
-isolation/cleanup controls. No tracked bootstrap, installer or runtime changed.
+The [effort journal](README.md#journal) retains review/correction history and the
+disposable bootstrap-download adjustment; its pinned archive/hash and all
+isolation/cleanup controls remained unchanged. No tracked bootstrap, installer
+or runtime installation changed.
 Native Windows/PowerShell execution, installed receiver rollout, live provider
 absence and full ordinary-finalization adoption remain separate qualification.

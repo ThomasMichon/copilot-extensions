@@ -1323,6 +1323,11 @@ callback an implicit credential store.
 
 ### 2026-11-08 - Native cancellation source qualification
 
+- Current-head Balanced review had no open issues but requested human
+  assessment of qualification history versus current guarantees. Replaced the
+  contract's iterative test-count narrative with a current-evidence table and
+  explicit remaining qualification; retained the complete correction history
+  here. No runtime guarantee or validation result changed.
 - Full review then identified missing blank-selector admission on the
   governed peer path. Reused the existing parser validator before peer
   selection/discovery; three managed-peer controls reproduce that boundary.
