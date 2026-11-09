@@ -120,8 +120,8 @@ consumer migration and three-provider parity remain later acceptance.
 
 The finite isolated Worktrees/provider/legacy packet passes 398 cases.
 The final request-owner subset passes 33, overlapping that packet and adding
-four explicit target/policy refusal cases. After review exposed unmarked
-reserved worker bindings falling back to ambient policy, the coupled
+four explicit target/policy refusal cases. Reserved worker bindings require
+their explicit marker before policy resolution. The coupled
 request/author/readiness/worker-policy packet passes 180 cases, including eight
 marker-refusal controls across discovery and author operations. The native frontend packet passes
 116 with five Windows-only cases skipped on Linux, including an actual
