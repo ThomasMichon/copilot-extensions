@@ -342,19 +342,21 @@ class Mux {
     thread = threading.Thread(target=provider.serve_forever, daemon=True)
     thread.start()
     try:
+        # New panes need the private adapter in the normalized setup's own PATH.
         initialized = runtime(
             "import json,sys;from pathlib import Path;from agent_worktrees import tracking,config as cfg;"
             "checkout=Path(sys.argv[1]);project=cfg.project_dir('native-copilot');"
             "project.mkdir(parents=True,exist_ok=True);"
             "(project/'config.yaml').write_text(json.dumps({'repo_name':'native-copilot','machine':'fixture',"
-            "'repos':{'native-copilot':{'anchor':str(checkout),'default_branch':'dev'}}}),encoding='utf-8');"
+            "'repos':{'native-copilot':{'anchor':str(checkout),'default_branch':'dev',"
+            "'session_path':{'windows':[sys.argv[4]]}}}}),encoding='utf-8');"
             "managed=sys.argv[3].startswith('manager-') or sys.argv[3]=='embody';"
             "tracking_path=project/'worktrees' if managed else checkout;"
             "tracking_path.mkdir(parents=True,exist_ok=True);"
             "record=tracking.create_new_record(sys.argv[2],'worktree/native-copilot',str(checkout),"
             "'native-copilot','fixture',cfg.detect_platform() if managed else 'win32',"
             "tracking_path);print(json.dumps(str(record.yaml_path)))",
-            checkout, worktree_id, control,
+            checkout, worktree_id, control, mux_directory,
         )
         record = Path(initialized)
         if manager:
