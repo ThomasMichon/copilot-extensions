@@ -600,3 +600,16 @@ inventory; unsupported execution must not be reported as a successful gate.
   exit and strict negative-control classification remain mandatory. A new
   exact-head full native result is required; rendered output alone is not
   qualification.
+- The changed-head run 42717974211 recognized the rendered UI, then failed
+  during descendant image attribution with Windows error 31. Pinned process
+  handles may outlive short-lived startup helpers. Image queries now skip
+  only handles confirmed exited, including an exit racing the query; an image
+  error on a live process still propagates. The installed Manager must still
+  be identified through a live pinned handle before input is sent.
+- Four focused contained attribution/readiness/negative-control cases passed
+  in 0.62 seconds. These verify that live image-query errors are not swallowed
+  and that only confirmed exits are ignored. This in-process selection used
+  the existing containment owner with a 120-second aggregate bound; the base
+  interpreter lacks pytest-timeout, so its native timeout markers were not
+  exercised. Full native qualification still uses the canonical managed
+  environment and unchanged installed-TTY deadlines.

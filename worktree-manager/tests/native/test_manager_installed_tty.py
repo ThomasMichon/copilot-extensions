@@ -474,6 +474,17 @@ def _image(console, handle):
     return Path(text.value)
 
 
+def _live_image(console, handle):
+    if console.exited(handle):
+        return None
+    try:
+        return _image(console, handle)
+    except OSError:
+        if not console.exited(handle):
+            raise
+        return None
+
+
 def _project_entry_command(shell, stub):
     if shell == "cmd":
         # CALL keeps CMD's /s quote removal away from the encoded path argument.
@@ -512,8 +523,10 @@ def _witness(shell, stub, env, project, diagnostics, manager_python, engine_pyth
             if not offers:
                 raise RuntimeError("Interactive shell bypassed its native terminal capability admission")
             for pid, (name, handle) in descendants.items():
-                image = _image(console, handle)
-                if image.resolve() in (manager_python.resolve(), engine_python.resolve()):
+                image = _live_image(console, handle)
+                if image is not None and image.resolve() in (
+                    manager_python.resolve(), engine_python.resolve(),
+                ) and not console.exited(handle):
                     pinned[str(image.resolve())] = {
                         "pid": pid, "birth": console.birth(handle),
                     }
@@ -1026,6 +1039,43 @@ def test_picker_readiness_accepts_tab_casing_but_requires_project_and_alternate_
         b"\x1b[?1049hWorktree Manager\nWORKTREES",
     ):
         assert not _picker_rendered(output)
+
+
+def test_process_image_attribution_ignores_only_confirmed_exited_handles(monkeypatch):
+    from types import SimpleNamespace
+
+    import pytest
+
+    owner = _live_image.__globals__
+    image = Path("installed-manager-python.exe")
+    handle = object()
+    calls = []
+    states = iter((False,))
+    console = SimpleNamespace(exited=lambda actual: next(states) if actual is handle else None)
+
+    def query(actual_console, actual_handle):
+        assert actual_console is console and actual_handle is handle
+        calls.append(actual_handle)
+        return image
+
+    monkeypatch.setitem(owner, "_image", query)
+    assert _live_image(console, handle) == image
+    states = iter((True,))
+    assert _live_image(console, handle) is None
+    assert calls == [handle]
+
+    error = OSError("controlled image query failure")
+
+    def failed_query(*_args):
+        raise error
+
+    monkeypatch.setitem(owner, "_image", failed_query)
+    states = iter((False, True))
+    assert _live_image(console, handle) is None
+    states = iter((False, False))
+    with pytest.raises(OSError) as caught:
+        _live_image(console, handle)
+    assert caught.value is error
 
 
 def test_sparse_candidate_materializes_invocation_admission_toolkit(tmp_path):
