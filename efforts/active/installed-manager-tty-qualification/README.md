@@ -94,29 +94,29 @@ The following realization details are **agent-recommended**.
 
 - [ ] Reuse the supported native qualification lane with evidence bound to the
   frozen candidate, installation inputs and actual terminal consumer.
-- [ ] Refuse promotion for failed, timed-out, missing, skipped, incomplete or
+- [x] Refuse promotion for failed, timed-out, missing, skipped, incomplete or
   stale qualification; cover these decisions with bounded in-process tests.
-- [ ] Document invocation, input/evidence identity and failure ownership; retain
+- [x] Document invocation, input/evidence identity and failure ownership; retain
   the existing unit coverage, source integrity and publication gates.
 - [ ] Validate and land the implementation through normal review, and verify
   actual gate activation without claiming an unperformed host rollout.
 
 ## Validation Plan
 
-- [ ] The actual installer constructs a fresh fixture; it does not reuse the
+- [x] The actual installer constructs a fresh fixture; it does not reuse the
   operator's selected runtime, caches as installation state, or private repository.
-- [ ] The exact generated project binstub launches the installed Manager under
+- [x] The exact generated project binstub launches the installed Manager under
   a real supported Windows TTY and the observed UI responds to a test input.
-- [ ] Positive and install-success/launch-failure controls exercise the actual
+- [x] Positive and install-success/launch-failure controls exercise the actual
   consumer; process existence, `--version`, mount callbacks or synthetic ready
   files cannot satisfy the TTY assertion.
-- [ ] Timeout, cancellation and failure retain diagnostics and settle only
+- [x] Timeout, cancellation and failure retain diagnostics and settle only
   fixture-owned resources without altering host daemons, sessions or selections.
-- [ ] Gate decision tests reject stale candidate identities and every missing
+- [x] Gate decision tests reject stale candidate identities and every missing
   or non-success result; the live/native witness is not reclassified as unit proof.
 - [ ] A supported promotion run or the existing owner's equivalent exact-candidate
   qualification demonstrates that this gate actually blocks publication.
-- [ ] Source review, required CI and installation-contract checks pass; any
+- [x] Source review, required CI and installation-contract checks pass; any
   unavailable validation tier or actual infrastructure blocker is explicit.
 
 ## Proposal
@@ -333,3 +333,55 @@ inventory; unsupported execution must not be reported as a successful gate.
   Scoped lint and whitespace checks passed.
 - Current-head native qualification, fresh review and required CI remain
   necessary. No Main-controller activation or operator update is claimed.
+
+### 2026-11-07 - Qualified source implementation merged; Main activation next
+
+- Source PR #11398 merged as
+  `c0f2173cd30c5af3532ad4b75f2c3bbdf856e6ff` after exact-head native
+  qualification of `72b76c864b191e7a81cf34d49aeb19934cd167cb`.
+  Hosted run 42439662356, attempt 1 qualified the exact requested/actual
+  source; the real test took 195.898 seconds.
+- Current-head Copilot review 5816193369 had no open findings. Its remaining
+  exact-head-native validation request was satisfied before merge. The latest
+  required unit, guard, lint, source-attribution and workflow checks passed.
+- A description update legitimately retriggered same-head CI. The first merge
+  attempt was refused while that newest required check was expected; the
+  coordinator waited for run 42440169515 to pass before normal managed merge.
+  No CI bypass or raw provider merge was used.
+- The source workspace pulled forward onto the confirmed squash merge.
+  Its native, failure-retention, isolation and bounded gate-decision validation
+  items are resolved; the effort remains Active for actual release enforcement.
+- Next stretch: reviewed workflow-only Main adoption, then an actual frozen
+  candidate run proving the installed-TTY gate participates in publication.
+  The prepared Main controller reconciled without conflict and passed its
+  25 publication-boundary and 42 merge-wait cases. Prepared tests and source
+  merge are not Main activation, released deployment or an operator update.
+
+### 2026-11-09 - Actions context validation fixed before Main activation
+
+- GitHub rejected the Dev workflow and the prepared Main controller because
+  job-level environment expressions cannot reference `runner.temp`.
+  The earlier unit and controller tests did not detect this Actions schema error.
+- The installed-TTY job now resolves its short temporary root in the invoking
+  step and persists that same root for the existing receipt and artifact steps.
+  Candidate identities, deadlines, native controls and promotion decisions
+  are unchanged.
+- The coordinator independently passed 41 installed-Manager gate tests,
+  25 exact-controller publication-boundary tests and 42 merge-wait tests.
+  Scoped Python lint and whitespace checks passed.
+- Checksum-verified actionlint 1.7.12 rejects the previous Main workflow with
+  the same invalid context and accepts both corrected workflow copies.
+  Shellcheck and pyflakes were disabled for this Actions-context check.
+- Both corrections still require normal publication, current-head review and
+  required CI. Main activation and actual frozen-candidate release evidence
+  remain open; this effort is not Done.
+- Dev advanced while the correction was being prepared. PR #11484 already
+  landed the same parser fix, using one early initialization step. The
+  follow-up preserves that implementation and #11563's bounded pinned
+  PSMux acquisition rather than publishing a redundant workflow correction.
+  The stronger forbidden-context regressions remain, adapted to the
+  canonical early initializer. Main still lacks the installed-TTY gate.
+- The latest release attempt, run 42630958288, failed during artifact
+  attestation because no Sigstore verifier could initialize. The existing
+  watchdog report #11691 retains that failure; no attestation policy was
+  weakened and no release retry is claimed as a fix.
