@@ -4,8 +4,8 @@ Back to the [existing report contract](owner-report-read.md),
 [selected native owner](native-report-owner.md) and [canonical effort](README.md).
 
 **Agent-recommended contract reviewed in #11694 under #11692. The finite SDK
-prerequisite merged in #11699; PR report-profile expansion remains pending.
-No installed or live-provider support is claimed.**
+prerequisite merged in #11699; report-profile/native-budget source composition
+merged in #11702. No installed or live-provider support is claimed.**
 This closes part of
 [one service contract](../../../visions/plugins/agent-pull-requests/README.md#cli-through-one-service-contract)
 and follows
@@ -138,29 +138,36 @@ Review this contract first. Then deliver finite source leaves in order:
    handler and local-profile limits remain unchanged (finite source merged in
    #11699; not installed support).
 2. Qualify the explicitly selected v2 reader, Gateway, client/facade and actual
-   native byte-budget composition over that SDK, without installed enrollment.
+   native byte-budget composition over that SDK, without installed enrollment
+   (finite source merged in #11702).
 3. Return to the canonical Plan/Validation and record remaining acceptance.
 
 New isolated fixtures, not operator credentials or retained hosts, must prove:
 
-- [ ] Actual Gateway/connector/SDK and source CLI delivery of complete reports
+- [x] Actual Gateway/connector/SDK and source CLI delivery of complete reports
   above 32 KiB, preserving UTF-8/CRLF, nested/additive fields, unknown
   completeness, native provider errors and owner-exit disagreement.
-- [ ] Actual selected transport/handler/owner support before v2 advertisement;
+- [x] Actual selected transport/handler/owner support before v2 advertisement;
   wrong scope, unsupported local handlers, old SDKs, replaced readers and
   changed byte declarations refuse before body acquisition or publication.
-- [ ] Exact encoded-envelope and capture/client bounds, including escaping and
+- [x] Exact encoded-envelope and capture/client bounds, including escaping and
   metadata overhead; larger-than-admitted reports remain unavailable without
   truncation, body persistence or a second acquisition.
-- [ ] The original budget/lifetime through slow authentication, acquisition,
+- [x] The original budget/lifetime through slow authentication, acquisition,
   backpressure and collection; withdrawal, expiry, disconnect and cancellation
   cannot produce successful EOF or release handler/native cleanup custody early.
-- [ ] Old v1 client/new host, new v2 client/old or rolled-back host, v1/v2
+- [x] Old v1 client/new host, new v2 client/old or rolled-back host, v1/v2
   coexistence and actual new/new TLS transport. Missing support never selects
   an identity-less backend or native fallback.
-- [ ] Record source/platform/resource evidence separately from installed
+- [x] Record source/platform/resource evidence separately from installed
   packaging/hosting, live providers, native Windows, larger-than-existing
   transport ceilings and full CLI/HTTP/Dispatch or parent completion.
+
+The [source qualification journal](journal/2026/11.09%20Bounded%20report%20v2%20source.md)
+records the final 259-case contained report packet, 4,665-case actor-free unit
+packet and current-head approval/required-check merge in #11702. This resolves
+only these finite source obligations. Explicit standalone configuration,
+installed hosting, live providers and broader consumer acceptance remain open.
 
 The host chooses an admitted finite ceiling; current concurrency is not raised.
 Fixture success is not a production memory/throughput claim. This proposal
