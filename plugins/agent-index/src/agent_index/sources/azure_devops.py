@@ -196,7 +196,7 @@ class AzureDevOpsConnector:
                 if isinstance(item, dict):
                     if since_dt and not self._work_item_in_window(item, since_dt):
                         continue
-                    comments = self._work_item_comments(item.get("id"))
+                    comments = self._work_item_comments(item.get("id"), cancel_check=cancel_check)
                     entries.append(self._work_item_entry(item, comments))
         return entries
 
@@ -254,22 +254,46 @@ class AzureDevOpsConnector:
             params={"api-version": _DEFAULT_API_VERSION},
         )
 
-    def _work_item_comments(self, work_item_id: Any) -> list[dict[str, Any]]:
+    def _work_item_comments(
+        self, work_item_id: Any, *, cancel_check: Callable[[], None] | None = None,
+    ) -> list[dict[str, Any]]:
         if work_item_id is None:
             return []
-        try:
-            result = self._http.get_json(
-                self._project_path("_apis", "wit", "workItems", str(work_item_id), "comments"),
-                params={"api-version": _DEFAULT_COMMENT_API_VERSION},
-            )
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == httpx.codes.NOT_FOUND:
-                return []
-            raise
-        if isinstance(result.data, dict):
-            comments = result.data.get("comments") or result.data.get("value") or []
-            return [comment for comment in comments if isinstance(comment, dict)]
-        return []
+        comments: list[dict[str, Any]] = []
+        continuation: str | None = None
+        seen_tokens: set[str] = set()
+        while True:
+            if cancel_check:
+                cancel_check()
+            try:
+                result = self._http.get_json(
+                    self._project_path("_apis", "wit", "workItems", str(work_item_id), "comments"),
+                    params={
+                        "api-version": _DEFAULT_COMMENT_API_VERSION,
+                        "continuationToken": continuation,
+                    },
+                    purpose="comment_page",
+                )
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == httpx.codes.NOT_FOUND and continuation is None:
+                    return []
+                raise
+            data = result.data
+            if not isinstance(data, dict):
+                raise ValueError("Azure DevOps work-item comment page is not an object")
+            page = data.get("comments") if "comments" in data else data.get("value")
+            if not isinstance(page, list) or any(not isinstance(item, dict) for item in page):
+                raise ValueError("Azure DevOps work-item comment page has invalid comments")
+            comments.extend(page)
+            next_token = data.get("continuationToken")
+            if next_token is None or next_token == "":
+                if data.get("nextPage"):
+                    raise ValueError("Azure DevOps work-item comments have no continuation token")
+                return comments
+            if not isinstance(next_token, str) or next_token in seen_tokens:
+                raise ValueError("Azure DevOps work-item comment continuation made no progress")
+            seen_tokens.add(next_token)
+            continuation = next_token
 
     def _discover_pull_requests(
         self,
