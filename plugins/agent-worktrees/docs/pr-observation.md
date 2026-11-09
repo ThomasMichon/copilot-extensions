@@ -78,6 +78,11 @@ watch snapshots, and review workspace generations remain a separate contract.
 Malformed provider results become failed reports; unexpected exceptions expose
 only their class, not potentially sensitive exception text. Normal provider
 result errors retain their existing meaning.
+Explicit diff capture preserves CRLF and bare CR by decoding raw output as
+strict UTF-8; invalid UTF-8 fails. The tracked provider default retains its
+original text normalization. A malformed configured GitHub endpoint refuses
+before invoking `gh`, and supplied tokens override all public/Enterprise token
+aliases rather than inheriting another account's material.
 
 Tracked status remains available; `--no-live` deliberately skips live evidence.
 A failed provider read is a visible `live_error`, not an empty live success.

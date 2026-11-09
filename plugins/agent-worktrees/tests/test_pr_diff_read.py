@@ -22,7 +22,8 @@ def test_provider_result_does_not_invent_complete_or_candidate_evidence(result, 
 
         def get_diff(self, repo, number, **kwargs):
             assert (repo, number, kwargs) == ("example/repository", 7,
-                                              {"api_base": "https://forge.example", "token": None})
+                                              {"api_base": "https://forge.example", "token": None,
+                                               "preserve_line_endings": True})
             return result
 
     report = diff_report(Provider(), "example/repository", 7, api_base="https://forge.example")

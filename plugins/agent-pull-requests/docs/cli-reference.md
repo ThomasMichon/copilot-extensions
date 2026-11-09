@@ -59,6 +59,9 @@ contract remains separate. GitHub honors the configured endpoint, retaining
 ambient/default host selection only when none is configured. No diff is
 persisted in a watch cache or journal. Unsupported old/rolled-back runtimes
 fail explicitly without another invocation.
+Malformed configured GitHub endpoints refuse, and supplied selected tokens
+override public/Enterprise aliases. Explicit capture preserves CRLF/bare CR
+and rejects invalid UTF-8; tracked diff normalization remains unchanged.
 
 ## Native `threads`
 

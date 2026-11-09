@@ -977,12 +977,31 @@ class GitHubProvider:
         return "; ".join(errors)
 
     def get_diff(
-        self, repo: str, number: int, *, api_base: str = "", token: str | None = None
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
+        preserve_line_endings: bool = False,
     ) -> PRDiff:
         """Return the PR's current unified diff via ``gh pr diff``."""
+        try:
+            if api_base:
+                configured = api_base.strip()
+                parsed = urlparse(configured if "://" in configured else "//" + configured)
+                if (
+                    not parsed.hostname or parsed.username or parsed.password
+                    or parsed.scheme not in ("", "http", "https")
+                    or any(character.isspace() for character in parsed.netloc)
+                ):
+                    raise ValueError("invalid configured endpoint")
+            host = self.authority_endpoint(api_base)
+        except ValueError:
+            return PRDiff(supported=False, error="GitHub diff endpoint is invalid")
+        env = self._env(token, host=host)
+        if token:
+            env.update({name: token for name in (
+                "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
+            )})
         proc = run_cli(
             ["gh", "pr", "diff", str(number), "--repo", repo],
-            env=self._env(token, host=self.authority_endpoint(api_base)),
+            env=env, **({"preserve_line_endings": True} if preserve_line_endings else {}),
         )
         if proc.returncode != 0:
             return PRDiff(

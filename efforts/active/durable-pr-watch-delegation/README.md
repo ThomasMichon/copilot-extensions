@@ -1054,7 +1054,7 @@ or silently expanding a bounded source claim.
 
 - [x] Qualify the finite [explicit native diff-read source boundary](native-diff-read.md#compatibility-and-qualification)
   after contract review: 149 native cases with five Windows-only skips and
-  93 actual owner/read/observation/tracked cases. Real subprocess provider
+  362 actual owner/read/provider/tracked cases. Real subprocess provider
   methods retain target/endpoint selection, tracked compatibility and honest
   unsupported/error/completeness evidence. Installed, live-provider, HTTP and
   candidate-bound workspace acceptance remain separate.
@@ -1368,7 +1368,7 @@ callback an implicit credential store.
   retained when no endpoint is configured. Gitea uses its existing endpoint,
   and ADO remains explicitly unsupported for unified diffs.
 - The native packet passes 149 cases with five existing Windows-only skips;
-  final actual-owner/read/observation/tracked qualification passes 93.
+  final actual-owner/read/provider/tracked qualification passes 362.
   Real subprocess fixtures preserve UTF-8/line endings, provider refusal,
   neutral CWD, mixed-version handling and tracked reconciliation/output.
   An initial fixture expected the wrong Gitea API path and omitted the
@@ -1385,6 +1385,16 @@ callback an implicit credential store.
   encoding oversized text, and expose only the exception class for an
   unexpected provider failure. Native result errors remain intact; exception
   text cannot become a second path for accidental secret disclosure.
+- Actual provider CLI text capture normalized CRLF and bare CR before report
+  construction. Add an optional strict UTF-8 byte-capture mode through the
+  existing process owner, selected only by explicit diff acquisition; tracked
+  calls retain their original normalization. Real subprocess controls prove
+  both modes and invalid-UTF-8 refusal, rather than mocking the capture seam.
+- Reject malformed configured GitHub endpoints before `gh` and bind supplied
+  tokens to all public/Enterprise aliases, preserving absent-configuration
+  defaults. Actual synthetic CLI processes prove the selected host/token
+  overrides unrelated ambient values. The Gitea diff helper stays under its
+  existing curl owner while preserving the module ceiling.
 - GitHub vendor-download HTTP 504s blocked disposable fixture preparation.
   Qualification recovered with the same UV version from its canonical
   package feed, independently SHA-256 pinned and older than seven days,

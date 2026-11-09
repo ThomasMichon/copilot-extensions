@@ -42,6 +42,9 @@ selection must work from neutral CWD without a claimant or target checkout.
 Use the target's configured endpoint, including GitHub Enterprise, rather
 than the caller's repository or an unrelated ambient host. Preserve the
 existing default-host behavior when no endpoint is configured.
+Malformed configured GitHub endpoints refuse rather than borrowing that
+default; supplied selected credentials override all public/Enterprise token
+aliases used by the same native CLI.
 Reject missing/blank selection, option-prefixed repo values, invalid numbers
 and unknown arguments before either direct or managed-peer execution.
 The dedicated command is native-only; it accepts no provider, endpoint,
@@ -76,6 +79,10 @@ on error or unsupported acquisition, never true. The frontend nevertheless
 accepts all three values so it can retain valid richer version-1 reports
 without changing their meaning. Neither empty nor nonempty diff text
 establishes complete acquisition or an empty PR.
+Explicit acquisition selects strict byte-preserving UTF-8 capture through
+the existing provider process owner: CRLF and bare CR remain unchanged,
+and invalid UTF-8 fails rather than becoming replacement characters.
+Tracked diff calls keep their existing text-normalization default.
 
 The new frontend validates the version, required types and exact target
 identity, then preserves the whole valid report, including additive fields
@@ -131,10 +138,14 @@ no legacy retirement is proposed.
   Keep the canonical Plan and Validation Plan open after finite delivery.
 
 The native diff/routing packet passes 149 cases with five Windows-only
-skips. The actual Worktrees owner/read/observation/tracked packet passes 93,
+skips. The actual Worktrees owner/read/provider/tracked packet passes 362,
 including real subprocess GitHub/Gitea/ADO provider methods with synthetic IO,
 configured-versus-ambient GitHub host selection, missing credentials,
 native refusal, malformed provider result refusal, unknown report verb
 rejection and unchanged tracked parser/reconciliation/output.
+Actual provider CLI subprocess capture covers CRLF/bare CR, strict UTF-8
+failure and legacy normalization, plus selected Enterprise token aliases
+and malformed endpoint refusal; these are synthetic CLI processes, not
+live forge requests.
 Both isolated runs verify cleanup. Native Windows/macOS, installed,
 authorized provider-account, HTTP and broader parent parity remain open.
