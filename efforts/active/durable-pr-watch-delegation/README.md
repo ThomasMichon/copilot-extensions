@@ -321,7 +321,12 @@ The [explicit standalone report-host contract](standalone-report-host.md), revie
 selects the existing reader/native adapter and actual SDK handler ceiling
 through strict optional host configuration. The finite source implementation
 and fresh isolated controls are recorded in its linked implementation journal;
-ordinary review/CI/merge remains open. This is not retained-host enrollment or rollout.
+they merged in #11712. This is not retained-host enrollment or rollout.
+The [selected native thread-resolution proposal](native-thread-resolution.md)
+defines an optional ADO-first, single-thread status change through the existing
+owner. Read routes stay read-only; provider, runtime, recovery and installed/HTTP
+qualification remain open. It advances #7051 without replacing its lifecycle
+owner or claiming an atomic candidate/thread write.
 
 - [x] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence)
   (merged in #10380; implementation, provider and adoption gates remain).
@@ -1074,6 +1079,22 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
+- [ ] Qualify the finite [selected native thread-resolution contract](native-thread-resolution.md#expansion-and-qualification)
+  after reviewed intent: exact ADO target/principal/candidate/thread, status-only
+  mutation, consumed-key recovery, unknown outcomes and old/new runtime
+  composition. Source controls do not establish atomic CAS, other-provider
+  support, installed/HTTP adoption or the full lifecycle acceptance in #7051.
+
+- [x] Qualify finite explicit standalone report hosting (#11712): 168 full
+  standalone and 68 isolated affected plugin cases cover actual foreground
+  TLS/native delivery above 1 MiB, strict/default/prior/rollback selection,
+  request-only native identity and original writer custody through expiry,
+  withdrawal and delayed native/SDK delivery cleanup. The actor-free packet
+  passes 4,668; strict service typing covers Linux/Windows analysis.
+  All six finite host-contract source controls are resolved. Installed/live
+  providers, native Windows, retained hosts/containers, full CLI/HTTP/Dispatch,
+  activation and rollout acceptance remain open.
+
 - [x] Qualify the finite opt-in v2 report/native-budget composition (#11702):
   259 focused cases cover actual native-child, SDK/Gateway TLS and source CLI
   delivery above 1 MiB under an 8 MiB selection, encoded/capture/client limits,
@@ -1413,6 +1434,7 @@ callback an implicit credential store.
 
 ## Journal
 
+- [2026-11-09 - Selected native thread-resolution proposal](journal/2026/11.09%20Selected%20native%20resolution%20proposal.md)
 - [2026-11-09 - Standalone report-host contract reviewed](journal/2026/11.09%20Standalone%20report%20host%20contract.md)
 - [2026-11-09 - Standalone report-host source implementation](journal/2026/11.09%20Standalone%20report%20host%20implementation.md)
 - [2026-11-09 - Opt-in report v2 source qualification](journal/2026/11.09%20Bounded%20report%20v2%20source.md)
