@@ -110,6 +110,8 @@ acquisition and no report error. Without a host it returns unavailable; it
 does not discover an ambient Gateway, executable, credential or account.
 This is not an ordinary installed HTTP client migration. Existing native
 `threads`/`diff`, workspace and watch syntax remain unchanged.
+An explicitly injected [v2 client](report-bounded.md) can negotiate a larger
+bounded response without changing request JSON, CLI flags or the default host.
 
 ## `status`
 

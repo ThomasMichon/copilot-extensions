@@ -76,12 +76,17 @@ Worktrees detached caller. The candidate must supply `test_public_embody` in
 `tests/native/test_native_seed_application.py`; controller support does not
 provide or qualify that source fixture. The protected controller prepares hash-pinned,
 disposable Copilot 1.0.105 and PSMux 3.3.8 binaries, checks their actual versions,
-and allows at most two transient download retries. Each transfer has a
-30-second deadline; a 90-second retry window includes retry delays, and a
-final transfer started within that window may extend acquisition to 120
-seconds per archive. Failed acquisition retains a request-bound
+and allows at most two transient download retries. One 120-second cancellation
+budget per archive covers connection, response body, output and retry delays;
+an individual transfer is not cut short by a separate 30-second clock.
+Server retry-after instructions stay inside that same cancellation budget.
+The shared PowerShell downloader permits only shorter deadlines, uses no
+credentials and caps buffered archive content at 128 MiB, covering both pins.
+Failed acquisition retains a request-bound
 failed prerequisite result without executing the candidate's native caller.
 The promotion Resume lane uses the same bounded pinned-download policy.
+It checks out the helper from its protected workflow revision, independently
+of the selected Dev candidate; older candidates need not contain the helper.
 The controller requires anonymous access to the configured non-public HTTPS package feed
 from that hosted runner. The repository owner explicitly configures
 `WINDOWS_QUALIFICATION_INDEX_URL` as an Actions secret containing only the feed
@@ -1115,6 +1120,14 @@ deleted or migrated, and storage is not claimed bounded across distinct inputs.
 Every job retains its five-minute ceiling, and the runner's 300-second packet ceiling
 is unchanged. Local workers may use smaller serial selections when the complete
 packet exceeds their available capacity; that is not a full-packet passing claim.
+Manual dispatch with `qualify_promotion_copies=true` additionally runs an
+opt-in Linux job against the exact selected source revision. It composes the
+full repository through the real promotion owner, freezes and imports that
+candidate, verifies every declared Invocation output and Installer mirror,
+and checks direct/transitive Update Driver copies and unchanged source bytes.
+It uses a private Git repository, never pushes or installs a runtime, and
+retains the same five-minute job ceiling. This is not required PR unit CI or
+a replacement for the actual release-candidate gates.
 The real shell acquisition, canonical freezing, queue, finite worker, runtime
 adapter and borrowed participant remain intact; only constructor and suite
 bodies use finite fixtures with a minimal declared source graph and a real
@@ -5493,6 +5506,12 @@ The project-routing controls distinguish the explicit `pr-watch diff` read
 from an unknown similarly named command. They exercise only the existing
 in-process routing predicate, with exact source/node admission; actual
 provider/CLI subprocess qualification remains in the selected plugin packet.
+
+The peer-environment packet reuses the canonical library assertions. Vault
+route rebinding substitutes only its native suffix calculation; platform and
+checksum refusals remain actor-free. These three units do not load a native
+library or start a process. Actual native suffix/environment parity and retained
+same-cell invocation stay in the opt-in `vault-activation` portfolio.
 
 Five binding-projection controls in `test_related_acquisition.py` exercise the
 actual synthesis body with logical paths and substituted canonical-registry
@@ -10179,12 +10198,17 @@ python tools/check-install-contract.py         # runtime-plugin install contract
 python -m pytest -q tools/promotion_unit_tests/test_daemon_cwd_contract.py  # Codespaces owner launch boundary
 python tools/check-version-consistency.py      # plugin.json / pyproject / marketplace versions agree
 python tools/check-marketplace-isolation.py    # report-only legacy installation inventory
-python libs/payload-invocation/generate.py --all --check  # generated payload shims match manifests
+python libs/payload-invocation/generate.py --all --source-check  # canonical producers and owned output inventory
 python tools/sync-installation-context.py --check  # inert exemplar copies match the canonical primitive
 python tools/sync-peer-launch.py --check  # shared native peer boundary matches packaged consumers
 python -m pytest -q libs/peer-launch/tests  # canonical/vendor packaging contracts
 python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fixtures
 ```
+
+For a materialized candidate, Invocation's `--all --check` and Installer
+Engine's default `verify()` retain actual-copy equality. A successful Dev
+source/layout check is not that evidence; the promotion copier verifies its
+real writes before freezing the candidate.
 
 ## Per-plugin coverage (unit suites)
 

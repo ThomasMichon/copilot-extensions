@@ -237,8 +237,10 @@ access errors retain a sanitized native failed report and owner exit; transport
 and cleanup failures remain unavailable. Existing native commands and unselected
 providers are unchanged.
 
-This is not installed HTTP adoption: native Windows execution, larger-report
-transport, retained hosting and live-provider proof remain separate. Gitea,
+The [opt-in v2 report profile](report-bounded.md) additionally composes a finite
+larger response budget through the executing SDK, reader, capture and client.
+V1 retains its existing bound. This is not installed HTTP adoption: native
+Windows execution, retained hosting and live-provider proof remain separate. Gitea,
 Azure DevOps and Enterprise endpoints are unsupported by this adapter, not
 alternate selections. The [source CLI facade](cli-reference.md#source-report-facade)
 still requires explicit host injection.

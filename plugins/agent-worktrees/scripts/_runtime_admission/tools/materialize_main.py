@@ -52,6 +52,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import materialize_installer_engine as mie  # noqa: E402
 import materialize_launch_wrapper_assets as mlwa  # noqa: E402
+import materialize_payload_invocation as mpiv  # noqa: E402
 import nested_uv_editable_ref as nuer  # noqa: E402
 import uv_editable_ref as uer  # noqa: E402
 
@@ -311,6 +312,13 @@ def materialize_uv_editable_ref_into(
         )
         log.append(result)
         if result.startswith("OK"):
+            derived_log = mie.materialize_derived_files(
+                dest_root_r, canonical_root=canonical_root_r,
+                copied_consumer=(canonical, dest_lib_dir),
+            )
+            log.extend(derived_log)
+            if any(line.startswith("SKIP") for line in derived_log):
+                continue
             materialized_libs.add(lib)
             # Fix up any `uv`-editable reference the just-copied canonical
             # lib declares FOR ITSELF (e.g. ssh-manager depending on
@@ -492,12 +500,19 @@ def materialize_installer_engine_ref_into(
     *, source_consumer_dir: Path, dest_consumer_dir: Path, canonical_root: Path,
     dest_root: Path | None = None,
 ) -> list[str]:
-    return mie.materialize_ref_into(
+    log = mie.materialize_ref_into(
         source_consumer_dir=source_consumer_dir,
         dest_consumer_dir=dest_consumer_dir,
         canonical_root=canonical_root,
         dest_root=dest_root,
     )
+    if not any(line.startswith("SKIP") for line in log):
+        log.extend(mie.materialize_derived_files(
+            dest_root or dest_consumer_dir,
+            canonical_root=canonical_root,
+            copied_consumer=(source_consumer_dir, dest_consumer_dir),
+        ))
+    return log
 
 
 def materialize_installer_engine_refs(
@@ -526,6 +541,15 @@ def materialize_launch_wrapper_assets(dest: Path, *, canonical_root: Path) -> li
     return mlwa.materialize_all(dest, canonical_root=canonical_root)
 
 
+def materialize_payload_invocation_into(
+    *, source_consumer_dir: Path, dest_consumer_dir: Path, canonical_root: Path,
+) -> list[str]:
+    """Generate one copied consumer's Invocation assets with the normal owner."""
+    return mpiv.materialize(
+        dest_consumer_dir, canonical_root=canonical_root, source_consumer=source_consumer_dir,
+    )
+
+
 def materialize(
     dest: Path, *, canonical_root: Path,
     file_pointer_candidates: list[Path] | None = None,
@@ -534,6 +558,12 @@ def materialize(
 
     ``canonical_root`` is a parameter (not hardcoded to ``REPO``) so a test
     can point it at an isolated tree instead of the real checkout."""
+    standalone = {dest / extra for extra in _EXTRA_CONSUMER_DIRS}
+    for consumer in sorted(standalone):
+        if consumer.is_dir() and not (consumer / "pyproject.toml").is_file():
+            problems = uer.materialized_local_source_problems(consumer)
+            if problems:
+                return [f"SKIP {problem}" for problem in problems]
     human_sources = mie.validate_human_output_sources(canonical_root)
     log = [
         f"SKIP {pointer_path}: retired directory-pointer kind still present -- refusing"
@@ -546,12 +576,12 @@ def materialize(
     log.extend(materialize_installer_engine_refs(
         dest, canonical_root=canonical_root, human_sources=human_sources,
     ))
+    log.extend(mpiv.materialize(dest, canonical_root=canonical_root))
     log.extend(materialize_launch_wrapper_assets(dest, canonical_root=canonical_root))
     log.extend(mie.materialize_human_output_declarations(
         dest, canonical_root=canonical_root, human_sources=human_sources,
     ))
     consumers = sorted((dest / "plugins").glob("*"))
-    standalone = {dest / extra for extra in _EXTRA_CONSUMER_DIRS}
     consumers.extend(sorted(standalone))
     for consumer in consumers:
         manifest = consumer / "pyproject.toml"

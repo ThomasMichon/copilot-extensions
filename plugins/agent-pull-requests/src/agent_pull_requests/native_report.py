@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from inspect import signature
 import logging
 import os
 from pathlib import Path
@@ -14,7 +15,7 @@ from agent_procutil.owned_budget import OwnedExecutionBudget
 from agent_procutil.owned_process import OwnedCleanupError, run_caller_owned
 from fleet_manager.gateway_service_channel import BODY_BYTES
 
-from .report_read import ReportBinding, ReportUnavailable, report_scope
+from .report_read import ReportBinding, ReportUnavailable, report_scope, response_budget
 
 
 def _settle(error):
@@ -45,8 +46,36 @@ class NativeGitHubReport:
             raise ValueError("native report needs its trusted owner's absolute config path")
         self.config_path, self.context_id = config_path, _label(context_id)
 
-    def resolve(self, remaining):
+    @staticmethod
+    def check_support() -> None:
+        """Check selected executing APIs without resolving policy or credentials."""
+        try:
+            from agent_worktrees.github_account_observation import SelectedGitHubAccount
+            from agent_worktrees.github_credentials import CredentialObservationError
+            from agent_worktrees.pr_report_target import worker_main
+            from agent_worktrees.pr_diff_report import diff_report
+            from agent_worktrees.pr_thread_report import thread_report
+            from agent_worktrees.providers.github import GitHubProvider
+
+            signature(SelectedGitHubAccount).bind(
+                "github.com", "selected", "example/project", budget=None, checkpoint=None,
+            )
+            signature(SelectedGitHubAccount.capture).bind(
+                None, "report", [], binary=False, limit=BODY_BYTES,
+            )
+            signature(SelectedGitHubAccount.verify).bind(None)
+            if not issubclass(CredentialObservationError, Exception):
+                raise ValueError("native credential error contract unavailable")
+            signature(GitHubProvider).bind(report_capture=None)
+            signature(worker_main).bind()
+            for report in (diff_report, thread_report):
+                signature(report).bind(None, "example/project", 1, api_base="https://api.github.com")
+        except (ImportError, AttributeError, TypeError, ValueError):
+            raise ValueError("selected native report APIs unsupported") from None
+
+    def resolve(self, remaining, *, response_limit=BODY_BYTES):
         """Compose actual selection, credential, provider and caller-owned seams."""
+        response_budget(response_limit)
         try:
             import agent_worktrees
             from agent_worktrees.github_account_observation import SelectedGitHubAccount
@@ -135,7 +164,7 @@ class NativeGitHubReport:
                 nonlocal cleanup_delayed, transport_unavailable
                 try:
                     checkpoint()
-                    return account.capture("report", arguments, binary=binary, limit=BODY_BYTES)
+                    return account.capture("report", arguments, binary=binary, limit=response_limit)
                 except OwnedCleanupError as error:
                     cleanup_delayed = True
                     _settle(error)
@@ -164,4 +193,5 @@ class NativeGitHubReport:
         current()
         def live():
             remaining()
-        return ReportBinding(self.scope, self.context_id, current, collect, final_checkpoint=live)
+        return ReportBinding(self.scope, self.context_id, current, collect, final_checkpoint=live,
+                             response_limit=response_limit)

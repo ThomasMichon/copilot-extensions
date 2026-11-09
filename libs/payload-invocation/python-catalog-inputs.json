@@ -1,10 +1,10 @@
 {
   "kind": "in-process-catalog-v1",
-  "module": "6d40590be7c44c54f365ae43c0e510abe004c0ba5bcac422f57e10f5d3a6ce50",
+  "module": "61c316cc59e577284ad6e5307da55de17d07cfc202fe8cb5a16c079ef16f7be2",
   "functions": {
     "_load_command": "76011bf59a00ec95fe6df935d3fa46331f01c2d3ef9ae04b273d1e060e643a10",
-    "load_manifest": "5eff985cc27b029d7ddbdfd5d5ef7a73d18cf5f54a7c4b1385432a9d29056b87",
+    "load_manifest": "414b727db1eda3843fe3bf326734250a2ddd2789e44f80c52e4409de5a0963c9",
     "render": "21c231674b2840d60c2b17faca5082a83586b5b357a2dd6edbfb3c5a7407c394",
-    "expected_files": "d5bfa8aa540b5031004ddb390c6e88d20244f1a24c2bbb09e67d6cf21c1a7e27"
+    "expected_files": "6b3d3cd9e2ad94f82554c63e78076f2622a805a5198b1cfe1973d28ab70a0dce"
   }
 }

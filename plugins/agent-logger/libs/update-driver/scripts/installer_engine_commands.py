@@ -278,6 +278,78 @@ def _engine(payload: Path, ext: str) -> str:
     return _read(canonical)
 
 
+def _simple_dispatchers(source: str) -> tuple[list[str], str | None]:
+    bodies: dict[str, list[str]] = {"cold_dispatch": [], "early_dispatch": []}
+
+    def capture(match: re.Match[str]) -> str:
+        bodies[match[2]].append(match[3])
+        return match[1] + match[2] + "=DISPATCH"
+
+    structure = re.sub(
+        r"""(?ms)^([ \t]*)(cold_dispatch|early_dispatch)="\$\(cat <<'DISPATCH'\n(.*?)^DISPATCH\n\)" \|\| return 1$""",
+        capture, source,
+    )
+    cold, early = bodies["cold_dispatch"], bodies["early_dispatch"]
+    if len(cold) != 3 or len(early) > 1 or len(_heredocs(source, "DISPATCH")) != len(cold) + len(early):
+        raise RuntimeError("Expected three assigned cold dispatchers and at most one Vault early dispatcher")
+    expected = '    if [[ "$command_name" == agent-vault ]]; then\n'
+    if early:
+        expected += "        early_dispatch=DISPATCH\n"
+    expected += "        cold_dispatch=DISPATCH\n"
+    for product in ("agent-ssh", "agent-pull-requests"):
+        expected += f'    elif [[ "$command_name" == {product} ]]; then\n        cold_dispatch=DISPATCH\n'
+    expected += "    fi\n"
+    if structure.count(expected) != 1:
+        raise RuntimeError("Simple-writer dispatcher product assignments changed")
+    for variable, count in (("cold_dispatch", 3), ("early_dispatch", len(early))):
+        declarations = re.findall(rf'(?m)^    local {variable}=""$', structure)
+        assignments = re.findall(rf"(?m)^[ \t]*{variable}=", structure)
+        if len(declarations) != bool(count) or len(assignments) != count:
+            raise RuntimeError(f"Simple-writer dispatcher declaration changed: {variable}")
+    stub = _sh(source, "EOF")
+    if len(re.findall(r"(?m)^\$cold_dispatch$", stub)) != 1 or (
+        len(re.findall(r"(?m)^\$early_dispatch$", stub)) != bool(early)
+    ):
+        raise RuntimeError("Simple-writer dispatcher substitutions changed")
+    return cold, early[0].removesuffix("\n") if early else None
+
+
+def _simple_ps_dispatchers(source: str) -> tuple[list[str], str | None]:
+    bodies: dict[str, list[str]] = {"coldDispatcher": [], "earlyDispatcher": []}
+
+    def capture(match: re.Match[str]) -> str:
+        bodies[match[2]].append(match[3])
+        return match[1] + "$" + match[2] + " = DISPATCH"
+
+    structure = re.sub(
+        r"(?ms)^([ \t]*)\$(coldDispatcher|earlyDispatcher) = @'\n(.*?)^'@$",
+        capture, source,
+    )
+    cold, early = bodies["coldDispatcher"], bodies["earlyDispatcher"]
+    if len(cold) != 3 or len(early) > 1:
+        raise RuntimeError("Expected three assigned PowerShell cold dispatchers and at most one Vault early dispatcher")
+    expected = "    if ($CommandName -ceq 'agent-vault') {\n"
+    if early:
+        expected += "        $earlyDispatcher = DISPATCH\n"
+    expected += "        $coldDispatcher = DISPATCH\n"
+    for product in ("agent-ssh", "agent-pull-requests"):
+        expected += f"    }} elseif ($CommandName -ceq '{product}') {{\n        $coldDispatcher = DISPATCH\n"
+    expected += "    }\n"
+    if structure.count(expected) != 1:
+        raise RuntimeError("PowerShell simple-writer dispatcher product assignments changed")
+    for variable, count in (("coldDispatcher", 3), ("earlyDispatcher", len(early))):
+        declarations = re.findall(rf"(?m)^    \${variable} = ''$", structure)
+        assignments = re.findall(rf"(?m)^[ \t]*\${variable} = ", structure)
+        if len(declarations) != bool(count) or len(assignments) != count + bool(count):
+            raise RuntimeError(f"PowerShell simple-writer dispatcher declaration changed: {variable}")
+    stub, _expandable = _ps(source, "ps1Content")
+    if len(re.findall(r"(?m)^\$coldDispatcher$", stub)) != 1 or (
+        len(re.findall(r"(?m)^\$earlyDispatcher$", stub)) != bool(early)
+    ):
+        raise RuntimeError("PowerShell simple-writer dispatcher substitutions changed")
+    return cold, early[0].removesuffix("\n") if early else None
+
+
 def _simple(payload: Path, root: Path, product: str, module: str) -> dict[str, tuple[str, ...]]:
     sh_install = _native(payload, product, "sh")
     ps_install = _native(payload, product, "ps1")
@@ -322,28 +394,20 @@ def _simple(payload: Path, root: Path, product: str, module: str) -> dict[str, t
     sh = _function(_engine(payload, "sh"), "write_simple_binstub")
     ps = _function(_engine(payload, "ps1"), "Write-SimpleBinstub", True)
     branch = ("agent-vault", "agent-ssh", "agent-pull-requests").index(product)
-    cold_sh = re.findall(
-        r"(?ms)^[ \t]*cold_dispatch=\"\$\(cat <<'DISPATCH'\n(.*?)^DISPATCH\n", sh,
-    )
-    cold_ps = re.findall(r"(?ms)^\s*\$coldDispatcher = @'\n(.*?)^'@", ps)
+    cold_sh, early_sh = _simple_dispatchers(sh)
+    cold_ps, early_ps = _simple_ps_dispatchers(ps)
     if len(cold_sh) != 3 or len(cold_ps) != 3:
         raise RuntimeError("Expected three declared simple-writer cold dispatchers")
-    early_sh = re.findall(
-        r"(?ms)^[ \t]*early_dispatch=\"\$\(cat <<'DISPATCH'\n(.*?)^DISPATCH\n", sh,
-    )
-    early_ps = re.findall(r"(?ms)^\s*\$earlyDispatcher = @'\n(.*?)^'@", ps)
-    if (
-        len(early_sh) != (1 if "$early_dispatch" in sh else 0)
-        or len(early_ps) != (1 if "$earlyDispatcher" in ps else 0)
-    ):
-        raise RuntimeError("Unsupported simple-writer early dispatcher declaration")
-    shell_bodies = tuple(_expand(_sh(sh, "EOF"), {
+    shell_values = {
         "command_name": product, "module_name": module,
-        "runtime_root_literal": _bash_quote(path),
         "snapshot_installer_literal": "scripts/install.sh",
         "no_self_provision_env": no_provision,
         "cold_dispatch": cold_sh[branch].removesuffix("\n"),
-        "early_dispatch": early_sh[0].removesuffix("\n") if branch == 0 and early_sh else "",
+    }
+    if early_sh is not None:
+        shell_values["early_dispatch"] = early_sh if product == "agent-vault" else ""
+    shell_bodies = tuple(_expand(_sh(sh, "EOF"), {
+        **shell_values, "runtime_root_literal": _bash_quote(path),
     }) for path in _shell_paths(root))
     values = {
         "runtimeRootLiteral": str(root).replace("'", "''"),
@@ -351,8 +415,9 @@ def _simple(payload: Path, root: Path, product: str, module: str) -> dict[str, t
         "moduleLiteral": module, "commandLiteral": product,
         "NoSelfProvisionEnv": no_provision, "CommandName": product,
         "coldDispatcher": cold_ps[branch].removesuffix("\n"),
-        "earlyDispatcher": early_ps[0].removesuffix("\n") if branch == 0 and early_ps else "",
     }
+    if early_ps is not None:
+        values["earlyDispatcher"] = early_ps if product == "agent-vault" else ""
     result = {
         product: shell_bodies,
         product + ".ps1": (_render_ps(ps, "ps1Content", values),),

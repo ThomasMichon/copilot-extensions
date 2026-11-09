@@ -16,6 +16,7 @@ from agent_procutil import no_window_kwargs
 from agent_worktrees.push_timeout import run_bounded
 
 import test_python_runtime_install as runtime_fixture
+from test_source_native_owner import _copy_native_checkout
 
 pytestmark = [
     pytest.mark.timeout(900),
@@ -58,11 +59,6 @@ def installed_native_runtime(tmp_path_factory, native_runtime_source):
     root = home / ".agent-worktrees"
     original, _original_commit = native_runtime_source
     source = owned / "consumer-source"
-    shutil.copytree(
-        original.parents[1], source,
-        ignore=shutil.ignore_patterns(".git", "tests", "__pycache__", "*.pyc"),
-    )
-    plugin = source / "plugins/agent-worktrees"
     environment = {
         key: value for key, value in os.environ.items()
         if not key.startswith(("GIT_", "COPILOT_EXTENSIONS_", "AGENT_WORKTREES_"))
@@ -78,6 +74,17 @@ def installed_native_runtime(tmp_path_factory, native_runtime_source):
     environment["PATH"] = os.pathsep.join((str(mux_dir), environment.get("PATH", "")))
     git = shutil.which("git")
     assert git, "Real runtime provenance requires Git"
+    resolved = run_caller_owned(
+        [git, "-C", str(original), "rev-parse", "--show-toplevel"],
+        env=environment, cwd=owned, timeout=30,
+        max_stdout_bytes=65536, max_stderr_bytes=65536,
+    )
+    assert resolved.returncode == 0, resolved.stdout + resolved.stderr
+    _copy_native_checkout(
+        original, Path(resolved.stdout.strip()).resolve(), source,
+        ignore=shutil.ignore_patterns(".git", "tests", "__pycache__", "*.pyc"),
+    )
+    plugin = source / "plugins/agent-worktrees"
     hooks = owned / "empty-hooks"
     hooks.mkdir()
     git_prefix = [

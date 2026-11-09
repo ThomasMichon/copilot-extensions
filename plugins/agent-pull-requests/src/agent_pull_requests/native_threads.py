@@ -36,8 +36,8 @@ def add_parser(subparsers, *, repo_type, handler):
     parser.set_defaults(handler=handler)
 
 
-def _report(text, repo, number):
-    if not isinstance(text, str) or len(text.encode("utf-8")) > 1_048_576:
+def _report(text, repo, number, *, max_bytes=1_048_576):
+    if not isinstance(text, str) or len(text) > max_bytes or len(text.encode("utf-8")) > max_bytes:
         raise ValueError("native thread report is unavailable or exceeds its size budget")
     try:
         body = json.loads(text)

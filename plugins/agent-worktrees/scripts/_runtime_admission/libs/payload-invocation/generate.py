@@ -1,0 +1,999 @@
+#!/usr/bin/env python3
+"""Generate checked-in payload-local command shims from plugin manifests."""
+from __future__ import annotations
+import ast
+import sys
+import argparse
+import hashlib
+import json
+import os
+import re
+import stat
+from pathlib import Path
+from typing import Any
+REPO = Path(__file__).resolve().parents[2]
+TEMPLATES = Path(__file__).resolve().parent / "templates"
+SCHEMA = "copilot-extensions.payload-invocation"
+LEGACY_VERSION = 1
+VERSION = 2
+_PLUGIN = re.compile(r"^[a-z][a-z0-9-]*$")
+_COMMAND = re.compile(r"^[a-z][a-z0-9-]*$")
+_MODULE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$")
+_RUNTIME_ROOT = re.compile(r"^\.[a-z0-9-]+$")
+_ENV = re.compile(r"^[A-Z][A-Z0-9_]+$")
+_PURPOSE = re.compile(r"^[A-Za-z0-9 ._/-]+$")
+_OUTPUT_DIR = re.compile(r"^[a-z0-9][a-z0-9_./-]*$")
+_INSTALLER = re.compile(r"^[a-z][a-z0-9-]*$")
+_DISPATCHER = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_./-]*$")
+_BOOT_TRACE_LOG_FILE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_./-]*$")
+_WINDOWS_CATALOG_SHIMS = {"powershell", "cmd"}
+_POSIX_CATALOG_MODES = {"python", "shell"}
+_PROVISION_MODES = {"snapshot", "direct"}
+_INSTALLATION_CONTEXT_MODES = {"legacy", "required"}
+
+
+def _eligible_core_runtime_plugins(canonical_root: Path | None = None) -> set[str]:
+    canonical_root = canonical_root or REPO
+    marketplace_path = canonical_root / ".github" / "plugin" / "marketplace.json"
+    try:
+        marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            f"{marketplace_path}: cannot load canonical marketplace roster: {exc}"
+        ) from exc
+    if not isinstance(marketplace, dict) or not isinstance(
+        marketplace.get("plugins"), list
+    ):
+        raise ValueError(
+            f"{marketplace_path}: canonical marketplace roster is invalid"
+        )
+    eligible: set[str] = set()
+    for entry in marketplace["plugins"]:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name")
+        source = entry.get("source")
+        if (
+            not isinstance(name, str)
+            or not _PLUGIN.fullmatch(name)
+            or not isinstance(source, str)
+        ):
+            continue
+        plugin_root = canonical_root / source
+        if (plugin_root / "pyproject.toml").is_file():
+            eligible.add(name)
+    return eligible
+
+
+def _load_command(path: Path, value: object, *, label: str) -> dict[str, str]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{path}: invalid {label}: {value!r}")
+    checks = {
+        "command": _COMMAND,
+        "module": _MODULE,
+        "purpose": _PURPOSE,
+    }
+    command: dict[str, str] = {}
+    for field, pattern in checks.items():
+        field_value = value.get(field)
+        if not isinstance(field_value, str) or not pattern.fullmatch(field_value):
+            raise ValueError(f"{path}: invalid {label}.{field}: {field_value!r}")
+        command[field] = field_value
+    return command
+
+
+def load_manifest(path: Path, *, canonical_root: Path | None = None) -> dict[str, Any]:
+    data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    manifest_version = data.get("version")
+    if (
+        data.get("schema") != SCHEMA
+        or not isinstance(manifest_version, int)
+        or isinstance(manifest_version, bool)
+        or manifest_version not in {LEGACY_VERSION, VERSION}
+    ):
+        raise ValueError(
+            f"{path}: expected {SCHEMA} version {LEGACY_VERSION} or {VERSION}"
+        )
+    runtime_root_field = (
+        "runtimeRoot" if manifest_version == LEGACY_VERSION else "legacyRuntimeRoot"
+    )
+    shared_checks = {runtime_root_field: _RUNTIME_ROOT, "noSelfProvisionEnv": _ENV}
+    for field, pattern in shared_checks.items():
+        value = data.get(field)
+        if not isinstance(value, str) or not pattern.fullmatch(value):
+            raise ValueError(f"{path}: invalid {field}: {value!r}")
+    if manifest_version == LEGACY_VERSION:
+        if "legacyRuntimeRoot" in data or "installationContext" in data:
+            raise ValueError(
+                f"{path}: version 1 cannot declare installation-context fields"
+            )
+        installation_context: Any = "legacy"
+    else:
+        if "runtimeRoot" in data:
+            raise ValueError(f"{path}: version 2 uses legacyRuntimeRoot")
+        installation_context = data.get("installationContext")
+        if installation_context not in _INSTALLATION_CONTEXT_MODES:
+            raise ValueError(
+                f"{path}: invalid installationContext: {installation_context!r}"
+            )
+
+    raw_commands = data.get("commands")
+    if raw_commands is None:
+        command = _load_command(
+            path,
+            {field: data.get(field) for field in ("command", "module", "purpose")},
+            label="command",
+        )
+        commands = [command]
+        plugin = data.get("plugin", command["command"])
+        if plugin != command["command"]:
+            raise ValueError(
+                f"{path}: legacy plugin must equal command; use commands[] for "
+                "distinct plugin identity"
+            )
+    else:
+        if any(field in data for field in ("command", "module", "purpose")):
+            raise ValueError(
+                f"{path}: commands cannot be combined with top-level command/module/purpose"
+            )
+        if not isinstance(raw_commands, list) or not raw_commands:
+            raise ValueError(f"{path}: commands must be a non-empty list")
+        commands = [
+            _load_command(path, value, label=f"commands[{index}]")
+            for index, value in enumerate(raw_commands)
+        ]
+        plugin = data.get("plugin")
+    if not isinstance(plugin, str) or not _PLUGIN.fullmatch(plugin):
+        raise ValueError(f"{path}: invalid plugin: {plugin!r}")
+    command_ids = [command["command"] for command in commands]
+    if len(command_ids) != len(set(command_ids)):
+        raise ValueError(f"{path}: duplicate command id")
+    output_dir = data.get("outputDir", "bin")
+    if (
+        not isinstance(output_dir, str)
+        or not _OUTPUT_DIR.fullmatch(output_dir)
+        or ".." in Path(output_dir).parts
+    ):
+        raise ValueError(f"{path}: invalid outputDir: {output_dir!r}")
+    installer = data.get("installer", "install")
+    if not isinstance(installer, str) or not _INSTALLER.fullmatch(installer):
+        raise ValueError(f"{path}: invalid installer: {installer!r}")
+    windows_catalog_shim = data.get("windowsCatalogShim", "powershell")
+    if windows_catalog_shim not in _WINDOWS_CATALOG_SHIMS:
+        raise ValueError(
+            f"{path}: invalid windowsCatalogShim: {windows_catalog_shim!r}"
+        )
+    posix_catalog_mode = data.get("posixCatalogMode", "python")
+    if posix_catalog_mode not in _POSIX_CATALOG_MODES:
+        raise ValueError(
+            f"{path}: invalid posixCatalogMode: {posix_catalog_mode!r}"
+        )
+    if posix_catalog_mode == "shell" and raw_commands is not None:
+        raise ValueError(f"{path}: shell posixCatalogMode supports one command")
+    provision_mode = data.get("provisionMode", "snapshot")
+    if provision_mode not in _PROVISION_MODES:
+        raise ValueError(f"{path}: invalid provisionMode: {provision_mode!r}")
+    session_start_bootstrap = data.get("sessionStartBootstrap", True)
+    if not isinstance(session_start_bootstrap, bool):
+        raise ValueError(
+            f"{path}: invalid sessionStartBootstrap: {session_start_bootstrap!r}"
+        )
+    payload_root_env = data.get("payloadRootEnv", "")
+    if not isinstance(payload_root_env, str) or (
+        payload_root_env and not _ENV.fullmatch(payload_root_env)
+    ):
+        raise ValueError(f"{path}: invalid payloadRootEnv: {payload_root_env!r}")
+    boot_trace_log_file = data.get("bootTraceLogFile", "logs/boot-trace.jsonl")
+    if (
+        not isinstance(boot_trace_log_file, str)
+        or not _BOOT_TRACE_LOG_FILE.fullmatch(boot_trace_log_file)
+        # The character-class regex above permits an empty path component
+        # (e.g. "logs//boot.jsonl", a leading/trailing "/") since "/" is a
+        # valid character anywhere in the class; reject those explicitly,
+        # since an empty component would silently break the writer's
+        # directory-creation logic at runtime (Copilot review, PR #3310).
+        or not all(boot_trace_log_file.split("/"))
+        or ".." in Path(boot_trace_log_file).parts
+    ):
+        raise ValueError(
+            f"{path}: invalid bootTraceLogFile: {boot_trace_log_file!r}"
+        )
+    payload_dispatcher = data.get("payloadDispatcher", {})
+    if not isinstance(payload_dispatcher, dict):
+        raise ValueError(
+            f"{path}: invalid payloadDispatcher: {payload_dispatcher!r}"
+        )
+    normalized_dispatcher: dict[str, str] = {}
+    for platform in ("posix", "windows"):
+        value = payload_dispatcher.get(platform, "")
+        if not isinstance(value, str) or (
+            value
+            and (
+                not _DISPATCHER.fullmatch(value)
+                or ".." in Path(value).parts
+                or not (path.parent / value).is_file()
+            )
+        ):
+            raise ValueError(
+                f"{path}: invalid payloadDispatcher.{platform}: {value!r}"
+            )
+        normalized_dispatcher[platform] = value
+    if bool(normalized_dispatcher["posix"]) != bool(
+        normalized_dispatcher["windows"]
+    ):
+        raise ValueError(
+            f"{path}: payloadDispatcher must declare both posix and windows"
+        )
+    powershell_pipeline_input = data.get("powershellPipelineInput", False)
+    if not isinstance(powershell_pipeline_input, bool):
+        raise ValueError(f"{path}: powershellPipelineInput must be a boolean")
+    if powershell_pipeline_input and not normalized_dispatcher["windows"]:
+        raise ValueError(f"{path}: powershellPipelineInput requires a payloadDispatcher")
+    catalog_gate = data.get("catalogGate", "")
+    if not isinstance(catalog_gate, str) or (
+        catalog_gate
+        and (
+            not _DISPATCHER.fullmatch(catalog_gate)
+            or ".." in Path(catalog_gate).parts
+            or not (path.parent / catalog_gate).is_file()
+        )
+    ):
+        raise ValueError(f"{path}: invalid catalogGate: {catalog_gate!r}")
+    if installation_context == "required":
+        if plugin not in _eligible_core_runtime_plugins(canonical_root or REPO):
+            raise ValueError(
+                f"{path}: installationContext required is limited to "
+                "runtime-bearing core suite plugin identities"
+            )
+        if not payload_root_env:
+            raise ValueError(
+                f"{path}: installationContext required needs payloadRootEnv"
+            )
+        if not all(normalized_dispatcher.values()):
+            raise ValueError(
+                f"{path}: installationContext required needs payloadDispatcher "
+                "for both platforms"
+            )
+    catalog_binding = data.get("catalogBinding", False)
+    if not isinstance(catalog_binding, bool):
+        raise ValueError(f"{path}: catalogBinding must be a boolean")
+    in_process_catalog = data.get("inProcessCatalog", False)
+    if not isinstance(in_process_catalog, bool):
+        raise ValueError(f"{path}: inProcessCatalog must be a boolean")
+    if in_process_catalog and (catalog_gate or catalog_binding):
+        raise ValueError(f"{path}: inProcessCatalog cannot compose catalogGate or catalogBinding")
+    installer_lifecycle = data.get("installerLifecycle", False)
+    if not isinstance(installer_lifecycle, bool):
+        raise ValueError(f"{path}: installerLifecycle must be a boolean")
+    runtime_admission = data.get("runtimeAdmissionToolkit", False)
+    if not isinstance(runtime_admission, bool):
+        raise ValueError(f"{path}: runtimeAdmissionToolkit must be a boolean")
+    if runtime_admission and installation_context != "required":
+        raise ValueError(f"{path}: runtimeAdmissionToolkit requires installation context")
+    if installer_lifecycle and (
+        (manifest_version != LEGACY_VERSION and installation_context != "required")
+        or not (path.parent / "scripts/installation-context/installation_context.py").is_file()
+    ):
+        raise ValueError(f"{path}: installerLifecycle requires a vendored installation primitive")
+    binding_module = data.get("catalogBindingModule", "")
+    if (
+        not isinstance(binding_module, str)
+        or binding_module and (
+            not _DISPATCHER.fullmatch(binding_module)
+            or ".." in Path(binding_module).parts
+            or not binding_module.startswith("src/")
+            or not binding_module.endswith("/_command_binding.py")
+        )
+    ):
+        raise ValueError(f"{path}: invalid catalogBindingModule")
+    if binding_module and not catalog_binding:
+        raise ValueError(f"{path}: catalogBindingModule requires catalogBinding")
+    if catalog_binding and (
+        installation_context != "required"
+        or posix_catalog_mode != "python"
+        or not (path.parent / "scripts/installation-context/installation_context.py").is_file()
+    ):
+        raise ValueError(f"{path}: catalogBinding requires a vendored installation primitive")
+    data["runtimeRoot"] = data[runtime_root_field]
+    data["installationContext"] = installation_context
+    data["outputDir"] = output_dir
+    data["installer"] = installer
+    data["windowsCatalogShim"] = windows_catalog_shim
+    data["posixCatalogMode"] = posix_catalog_mode
+    data["provisionMode"] = provision_mode
+    data["sessionStartBootstrap"] = session_start_bootstrap
+    data["payloadRootEnv"] = payload_root_env
+    data["bootTraceLogFile"] = boot_trace_log_file
+    data["payloadDispatcher"] = normalized_dispatcher
+    data["powershellPipelineInput"] = powershell_pipeline_input
+    data["catalogGate"] = catalog_gate
+    data["catalogBinding"] = catalog_binding
+    data["inProcessCatalog"] = in_process_catalog
+    data["installerLifecycle"] = installer_lifecycle
+    data["runtimeAdmissionToolkit"] = runtime_admission
+    data["catalogBindingModule"] = binding_module
+    data["plugin"] = plugin
+    data["commands"] = commands
+    data["multiCommandManifest"] = raw_commands is not None
+    return data
+
+
+def render(
+    template: str,
+    data: dict[str, Any],
+    *,
+    command: dict[str, str] | None = None,
+) -> str:
+    commands = data["commands"]
+    assert isinstance(commands, list) and commands
+    selected = command or commands[0]
+    assert isinstance(selected, dict)
+    output_parts = Path(str(data["outputDir"])).parts
+    payload_up = "/".join(".." for _part in output_parts)
+    output_dir = str(data["outputDir"])
+    catalog_specs = [
+        {
+            "id": item["command"],
+            "relativePath": f"{output_dir}/{item['command']}",
+            "purpose": item["purpose"],
+        }
+        for item in commands
+    ]
+    windows_catalog_suffix = (
+        ".cmd" if data["windowsCatalogShim"] == "cmd" else ".ps1"
+    )
+    windows_catalog_shell = (
+        "cmd" if data["windowsCatalogShim"] == "cmd" else "direct"
+    )
+    # A .cmd shim runs under cmd.exe, which ends a command at a newline: a
+    # multi-line argument is silently cut off there, and nothing downstream can
+    # tell. Say so where an agent reads the argv.
+    windows_catalog_note_ps = (
+        "    ''\n"
+        "    'Each `argv` here is a `.cmd` shim: `cmd.exe` ends the command at a newline, "
+        "so a multi-line argument is silently cut off. Pass multi-line or quote-heavy "
+        "input through stdin or a file option instead.'\n"
+        if data["windowsCatalogShim"] == "cmd" else ""
+    )
+    windows_cmd_host_block = (
+        'set "_PSHOST="\n'
+        'for /f "delims=" %%I in (\'"%SystemRoot%\\System32\\where.exe" '
+        "pwsh 2^>nul') do if not defined _PSHOST set \"_PSHOST=%%I\"\n"
+        'if not defined _PSHOST set "_PSHOST=%SystemRoot%\\System32\\'
+        'WindowsPowerShell\\v1.0\\powershell.exe"\n'
+        '"%_PSHOST%" -NoProfile -ExecutionPolicy Bypass -File "%_PS1%" %*'
+    )
+    installer_name = str(data["installer"])
+    if data["provisionMode"] == "direct":
+        provision_posix = 'bash "$_installer" provision >&2'
+        provision_powershell = (
+            "& $_hostExe -NoProfile -ExecutionPolicy Bypass -File "
+            "$_installer provision 2>&1 |\n"
+            "    ForEach-Object { [Console]::Error.WriteLine($_) }\n"
+            "$_provisionRc = $LASTEXITCODE"
+        )
+    else:
+        provision_posix = (
+            'bash "$_installer" stamp >&2\n'
+            '_snapshot="$(cat "$_runtime_root/payload-dir" 2>/dev/null || true)"\n'
+            f'_snapshot_installer="$_snapshot/scripts/{installer_name}.sh"\n'
+            'if [ ! -f "$_snapshot_installer" ]; then\n'
+            "    printf '[%s] stamped snapshot installer not found: %s\\n' \\\n"
+            '        "$_command" "$_snapshot_installer" >&2\n'
+            "    exit 127\n"
+            "fi\n"
+            'bash "$_snapshot_installer" provision >&2'
+        )
+        provision_powershell = (
+            "& $_hostExe -NoProfile -ExecutionPolicy Bypass -File "
+            "$_installer stamp 2>&1 |\n"
+            "    ForEach-Object { [Console]::Error.WriteLine($_) }\n"
+            "$_provisionRc = $LASTEXITCODE\n\n"
+            "        if ($_provisionRc -eq 0) {\n"
+            "            $_snapshot = ''\n"
+            "            try { $_snapshot = "
+            "([IO.File]::ReadAllText((Join-Path $_runtimeRoot "
+            "'payload-dir'))).Trim() } catch {}\n"
+            "            $_snapshotInstaller = if ($_snapshot) { "
+            f"Join-Path $_snapshot 'scripts\\{installer_name}.ps1' "
+            "} else { '' }\n"
+            "            if (-not ($_snapshotInstaller -and "
+            "(Test-Path -LiteralPath $_snapshotInstaller))) {\n"
+            "                [Console]::Error.WriteLine("
+            '"[$_command] stamped snapshot installer not found: '
+            '$_snapshotInstaller")\n'
+            "                $_provisionRc = 127\n"
+            "            } else {\n"
+            "                & $_hostExe -NoProfile -ExecutionPolicy Bypass "
+            "-File $_snapshotInstaller provision 2>&1 |\n"
+            "                    ForEach-Object { "
+            "[Console]::Error.WriteLine($_) }\n"
+            "                $_provisionRc = $LASTEXITCODE\n"
+            "            }\n"
+            "        }"
+        )
+    catalog_specs_ps = [
+        {
+            "id": item["command"],
+            "relativePath": (
+                f"{output_dir}/{item['command']}{windows_catalog_suffix}".replace(
+                    "/", "\\"
+                )
+            ),
+            "purpose": item["purpose"],
+        }
+        for item in commands
+    ]
+    flight_python = (
+        "runtime_status = 'Backend installation: could not be verified. No setup or service startup was attempted.'\n"
+        "try:\n"
+        "    import importlib.util\n"
+        "    import sys\n"
+        "    sys.dont_write_bytecode = True\n"
+        "    flight_spec = importlib.util.spec_from_file_location(\n"
+        "        '_payload_flight_check', root / 'scripts' / 'command_binding.py'\n"
+        "    )\n"
+        "    assert flight_spec and flight_spec.loader\n"
+        "    flight_module = importlib.util.module_from_spec(flight_spec)\n"
+        "    flight_spec.loader.exec_module(flight_module)\n"
+        "    runtime_status = flight_module.runtime_installation_status(\n"
+        f"        catalog.get('binding'), Path.home() / '{data['runtimeRoot']}'\n"
+        "    )\n"
+        "except (ImportError, OSError, ValueError, AssertionError):\n"
+        "    pass\n"
+    )
+    values = {
+        "PLUGIN": str(data["plugin"]),
+        "COMMAND": str(selected["command"]),
+        "MODULE": str(selected["module"]),
+        "RUNTIME_ROOT": str(data["runtimeRoot"]),
+        "BOOT_TRACE_LOG_FILE": str(data["bootTraceLogFile"]),
+        "BOOT_TRACE_LOG_FILE_PS": str(data["bootTraceLogFile"]).replace("/", "\\"),
+        "NO_SELFPROVISION_ENV": str(data["noSelfProvisionEnv"]),
+        "PURPOSE": str(selected["purpose"]),
+        "OUTPUT_DIR": str(data["outputDir"]),
+        "OUTPUT_DIR_PS": str(data["outputDir"]).replace("/", "\\"),
+        "PAYLOAD_UP": payload_up,
+        "PAYLOAD_UP_PS": payload_up.replace("/", "\\"),
+        "PAYLOAD_UP_WIN": payload_up.replace("/", "\\"),
+        "INSTALLER": str(data["installer"]),
+        "WINDOWS_CATALOG_SUFFIX": windows_catalog_suffix,
+        "WINDOWS_CATALOG_SHELL": windows_catalog_shell,
+        "WINDOWS_CATALOG_NOTE_PS": windows_catalog_note_ps,
+        "WINDOWS_CMD_HOST_BLOCK": windows_cmd_host_block,
+        "POWERSHELL_PIPELINE_SETUP": (
+            "$ProgressPreference = 'SilentlyContinue'\n"
+            if data["powershellPipelineInput"] else ""
+        ),
+        "PROVISION_POSIX": provision_posix,
+        "PROVISION_POWERSHELL": provision_powershell,
+        "CATALOG_GATE_POSIX": (
+            f'catalog_gate="$self_root/{data["catalogGate"]}"\n'
+            'if ! "$py" -E -X utf8 "$catalog_gate" --check --cwd "$PWD"; then\n'
+            "    printf '%s\\n' '{}'\n"
+            "    exit 0\n"
+            "fi\n"
+            if data["catalogGate"]
+            else ""
+        ),
+        "CATALOG_GATE_POWERSHELL": (
+            "$catalogGate = Join-Path $selfRoot "
+            f"'{str(data['catalogGate']).replace('/', chr(92))}'\n"
+            "$python = Get-Command python -ErrorAction SilentlyContinue\n"
+            "if (-not $python) { $python = Get-Command py -ErrorAction SilentlyContinue }\n"
+            "if (-not $python) { Write-Output '{}'; exit 0 }\n"
+            "& $python.Source -E -X utf8 $catalogGate --check "
+            "--cwd (Get-Location).Path *> $null\n"
+            "if ($LASTEXITCODE -ne 0) { Write-Output '{}'; exit 0 }\n"
+            if data["catalogGate"]
+            else ""
+        ),
+        "CATALOG_BINDING_PYTHON": (
+            "import importlib.util\n"
+            "import sys\n"
+            "from pathlib import Path\n\n"
+            "sys.dont_write_bytecode = True\n"
+            "root = Path(os.environ['SELF_ROOT'])\n"
+            "spec = importlib.util.spec_from_file_location(\n"
+            "    '_payload_command_binding', root / 'scripts' / 'command_binding.py'\n"
+            ")\n"
+            "assert spec and spec.loader\n"
+            "binding_module = importlib.util.module_from_spec(spec)\n"
+            "spec.loader.exec_module(binding_module)\n"
+            "catalog['binding'] = binding_module.binding_for_payload(\n"
+            f"    root, '{data['plugin']}', Path.home() / '{data['runtimeRoot']}'\n"
+            ")\n"
+            if data["catalogBinding"] else ""
+        ),
+        "CATALOG_BINDING_ENV_POSIX": (
+            'SELF_ROOT="$self_root" '
+        ),
+        "CATALOG_BINDING_FLAGS_POSIX": (
+            " -I -B -X utf8"
+        ),
+        "CATALOG_FLIGHT_PYTHON": (
+            "from pathlib import Path\n"
+            "root = Path(os.environ['SELF_ROOT'])\n" + flight_python
+        ),
+        "CATALOG_FLIGHT_IN_PROCESS": "\n".join(
+            "    " + line if line else "" for line in flight_python.splitlines()
+        ) + "\n",
+        "CATALOG_FLIGHT_POWERSHELL": (
+            ""
+            if data["catalogBinding"]
+            else (
+                "$runtimeStatus = 'Backend installation: could not be verified. No setup or service startup was attempted.'\n"
+                f"$flightRoot = Join-Path $env:USERPROFILE '{data['runtimeRoot']}'\n"
+                "$flightResolver = Join-Path $selfRoot 'scripts\\resolve-runtime.ps1'\n"
+                "if ($env:COPILOT_EXTENSIONS_CONTEXT) {\n"
+                "    $runtimeStatus = 'Backend installation: could not be verified for this installation context. No setup was attempted.'\n"
+                "} elseif (-not (Test-Path -LiteralPath $flightRoot)) {\n"
+                "    $runtimeStatus = 'Backend installation: not installed. Explicit package setup is required.'\n"
+                "} elseif (Test-Path -LiteralPath $flightResolver -PathType Leaf) {\n"
+                "    $previousRuntimeRoot = $env:AGENT_RT_ROOT\n"
+                "    try {\n"
+                "        $env:AGENT_RT_ROOT = $flightRoot\n"
+                "        $AgentRtPy = $null\n"
+                "        . $flightResolver -TraceMode read-only\n"
+                "        $runtimeStatus = if ($AgentRtPy) {\n"
+                "            'Backend installation: already installed. This read-only flight check does not start the service or establish service liveness.'\n"
+                "        } else {\n"
+                "            'Backend installation: incomplete or unavailable. Explicit package setup is required.'\n"
+                "        }\n"
+                "    } catch {} finally { $env:AGENT_RT_ROOT = $previousRuntimeRoot }\n"
+                "}\n"
+            )
+        ),
+        "CATALOG_FLIGHT_POSIX_SHELL": (
+            'runtime_status="$(\n'
+            '    if [ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]; then\n'
+            "        printf '%s' 'Backend installation: could not be verified for this installation context. No setup was attempted.'\n"
+            f'    elif [ ! -e "$HOME/{data["runtimeRoot"]}" ]; then\n'
+            "        printf '%s' 'Backend installation: not installed. Explicit package setup is required.'\n"
+            '    elif [ -f "$self_root/scripts/resolve-runtime.sh" ]; then\n'
+            "        set +e\n"
+            f'        AGENT_RT_ROOT="$HOME/{data["runtimeRoot"]}"\n'
+            "        AGENT_RT_RESOLVE_TRACE_MODE=read-only\n"
+            '        AGENT_RT_PY=""\n'
+            '        . "$self_root/scripts/resolve-runtime.sh"\n'
+            '        if [ -n "$AGENT_RT_PY" ]; then\n'
+            "            printf '%s' 'Backend installation: already installed. This read-only flight check does not start the service or establish service liveness.'\n"
+            "        else\n"
+            "            printf '%s' 'Backend installation: incomplete or unavailable. Explicit package setup is required.'\n"
+            "        fi\n"
+            "    else\n"
+            "        printf '%s' 'Backend installation: could not be verified. No setup or service startup was attempted.'\n"
+            "    fi\n"
+            ')"\n'
+        ),
+        "CATALOG_BINDING_POWERSHELL": (
+            "$bindingUtf8 = New-Object Text.UTF8Encoding($false)\n"
+            "$OutputEncoding = $bindingUtf8\n"
+            "if ([Console]::OutputEncoding.CodePage -ne 65001) { [Console]::OutputEncoding = $bindingUtf8 }\n"
+            "function Write-CatalogBindingTrace([string]$Phase) {\n"
+            "    if ($env:COPILOT_EXTENSIONS_BOOT_TRACE) {\n"
+            "        $timestamp = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()\n"
+            f"        [Console]::Error.WriteLine('::boot-trace:: plugin={data['plugin']} "
+            "phase=' + $Phase + ' t=' + $timestamp)\n"
+            "    }\n"
+            "}\n"
+            "Write-CatalogBindingTrace 'catalog-binding-start'\n"
+            "$bindingPython = $null\n"
+            "$bindingJson = $null\n"
+            "$bindingHelper = Join-Path $selfRoot 'scripts\\command_binding.py'\n"
+            f"$legacyRoot = Join-Path $env:USERPROFILE '{data['runtimeRoot']}'\n"
+            "$bindingBootstrap = 'import os,runpy,sys,time; "
+            "sys.exit(124) if sys.version_info < (3,11) else None; "
+            f"print(''::boot-trace:: plugin={data['plugin']} phase=catalog-python-start t='' "
+            "+ str(int(time.time()*1000)),file=sys.stderr,flush=True) "
+            "if os.environ.get(''COPILOT_EXTENSIONS_BOOT_TRACE'') else None; "
+            "print(sys.executable,flush=True); sys.argv=sys.argv[1:]; "
+            "runpy.run_path(sys.argv[0],run_name=''__main__'')'\n"
+            "$bindingLauncher = Get-Command py -CommandType Application -ErrorAction SilentlyContinue "
+            "| Select-Object -First 1\n"
+            "Write-CatalogBindingTrace 'catalog-launcher-discovered'\n"
+            "if ($bindingLauncher) {\n"
+            "    Write-CatalogBindingTrace 'catalog-launcher-start'\n"
+            "    $candidate = @(& $bindingLauncher.Source -3 -I -B -E -X utf8 -c "
+            "$bindingBootstrap "
+            f"$bindingHelper --payload-root $selfRoot --plugin-id '{data['plugin']}' "
+            "--legacy-root $legacyRoot --flight-check)\n"
+            "    $bindingExitCode = $LASTEXITCODE\n"
+            "    Write-CatalogBindingTrace 'catalog-launcher-complete'\n"
+            "    if ($candidate.Count -gt 0 -and "
+            "[System.IO.File]::Exists([string]$candidate[0])) {\n"
+            "        $bindingPython = [string]$candidate[0]\n"
+            "        $bindingJson = ($candidate | Select-Object -Skip 1) -join \"`n\"\n"
+            "    }\n"
+            "}\n"
+            "if (-not $bindingPython) {\n"
+            "    foreach ($name in @('python3', 'python')) {\n"
+            "        $candidate = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue "
+            "| Where-Object { $_.Source -notmatch '[\\\\/]WindowsApps[\\\\/]' } | Select-Object -First 1\n"
+            "        if ($candidate) {\n"
+            "            Write-CatalogBindingTrace 'catalog-helper-start'\n"
+            "            $response = @(& $candidate.Source -I -B -E -X utf8 -c $bindingBootstrap "
+            f"$bindingHelper --payload-root $selfRoot --plugin-id '{data['plugin']}' "
+            "--legacy-root $legacyRoot --flight-check)\n"
+            "            $bindingExitCode = $LASTEXITCODE\n"
+            "            Write-CatalogBindingTrace 'catalog-helper-complete'\n"
+            "            if ($response.Count -gt 0 -and [System.IO.File]::Exists([string]$response[0])) {\n"
+            "                $bindingPython = [string]$response[0]\n"
+            "                $bindingJson = ($response | Select-Object -Skip 1) -join \"`n\"\n"
+            "                break\n"
+            "            }\n"
+            "        }\n"
+            "    }\n"
+            "}\n"
+            "Write-CatalogBindingTrace 'catalog-interpreter-resolved'\n"
+            "$catalog['binding'] = @{ schema = 'copilot-extensions.command-installation-binding'; "
+            "version = 1; status = 'unresolved'; reason = 'binding-interpreter-unavailable'; "
+            "source = $null; installation = $null }\n"
+            "$runtimeStatus = 'Backend installation: could not be verified. No setup or service startup was attempted.'\n"
+            "if ($bindingPython) {\n"
+            "    if ($null -eq $bindingJson) {\n"
+            "        Write-CatalogBindingTrace 'catalog-helper-start'\n"
+            "        $bindingJson = & $bindingPython -I -B -E -X utf8 $bindingHelper "
+            f"--payload-root $selfRoot --plugin-id '{data['plugin']}' --legacy-root $legacyRoot --flight-check\n"
+            "        $bindingExitCode = $LASTEXITCODE\n"
+            "        Write-CatalogBindingTrace 'catalog-helper-complete'\n"
+            "    }\n"
+            "    if ($bindingExitCode -eq 0) {\n"
+            "        try {\n"
+            "            if ([string]::IsNullOrWhiteSpace($bindingJson)) { throw 'Binding response is empty' }\n"
+            "            $flight = $bindingJson | ConvertFrom-Json -ErrorAction Stop\n"
+            "            $catalog['binding'] = $flight.binding\n"
+            "            $runtimeStatus = [string]$flight.runtimeStatus\n"
+            "        }\n"
+            "        catch { [Console]::Error.WriteLine($_); $catalog['binding'].reason = 'binding-response-invalid' }\n"
+            "    } else { $catalog['binding'].reason = 'binding-resolver-failed' }\n"
+            "}\n"
+            "Write-CatalogBindingTrace 'catalog-binding-complete'\n"
+            if data["catalogBinding"] else ""
+        ),
+        "PAYLOAD_DISPATCH_POSIX": (
+            (
+                f'export {data["payloadRootEnv"]}="$_payload_root"\n'
+                if data["payloadRootEnv"]
+                else ""
+            )
+            + (
+                'export COPILOT_EXTENSIONS_PAYLOAD_COMMAND="$_command"\n'
+                f'export COPILOT_EXTENSIONS_PAYLOAD_MODULE="{selected["module"]}"\n'
+                if data["multiCommandManifest"]
+                else ""
+            )
+            + (
+                "if ! command -v bash >/dev/null 2>&1; then\n"
+                f"    printf '[{selected['command']}] required payload "
+                "dispatcher needs bash.\\n' >&2\n"
+                "    exit 126\n"
+                "fi\n"
+                f'exec bash "$_payload_root/{data["payloadDispatcher"]["posix"]}" "$@"'
+                if data["installationContext"] == "required"
+                else f'exec "$_payload_root/{data["payloadDispatcher"]["posix"]}" "$@"'
+            )
+            if data["payloadDispatcher"]["posix"]
+            else ""
+        ),
+        "PAYLOAD_DISPATCH_POWERSHELL": (
+            (
+                f"$env:{data['payloadRootEnv']} = $_payloadRoot\n"
+                if data["payloadRootEnv"]
+                else ""
+            )
+            + (
+                "$env:COPILOT_EXTENSIONS_PAYLOAD_COMMAND = $_command\n"
+                f"$env:COPILOT_EXTENSIONS_PAYLOAD_MODULE = '{selected['module']}'\n"
+                if data["multiCommandManifest"]
+                else ""
+            )
+            + "$_payloadDispatcher = Join-Path $_payloadRoot "
+            f"'{str(data['payloadDispatcher']['windows']).replace('/', chr(92))}'\n"
+            + (
+                "if ($MyInvocation.ExpectingInput -and $MyInvocation.Line) {\n"
+                "    (Get-Variable input -ValueOnly) | & $_payloadDispatcher @args\n"
+                "} else {\n"
+                "    & $_payloadDispatcher @args\n"
+                "}\n"
+                if data["powershellPipelineInput"]
+                else "& $_payloadDispatcher @args\n"
+            )
+            + "exit $LASTEXITCODE"
+            if data["payloadDispatcher"]["windows"]
+            else ""
+        ),
+        "PAYLOAD_ROOT_ENV_POSIX": (
+            f'export {data["payloadRootEnv"]}="$_payload_root"\n'
+            if data["payloadRootEnv"]
+            else ""
+        ),
+        "PAYLOAD_ROOT_ENV_POWERSHELL_BEFORE": (
+            "    $_payloadRootEnvPrevious = "
+            f"[Environment]::GetEnvironmentVariable('{data['payloadRootEnv']}', "
+            "'Process')\n"
+            f"    $env:{data['payloadRootEnv']} = $_payloadRoot\n"
+            "    try {\n"
+            if data["payloadRootEnv"]
+            else ""
+        ),
+        "PAYLOAD_ROOT_ENV_POWERSHELL_AFTER": (
+            "    $_payloadRc = $LASTEXITCODE\n"
+            "    } finally {\n"
+            "        if ($null -eq $_payloadRootEnvPrevious) { "
+            f"Remove-Item Env:{data['payloadRootEnv']} "
+            "-ErrorAction SilentlyContinue } else { "
+            f"$env:{data['payloadRootEnv']} = $_payloadRootEnvPrevious }}\n"
+            "    }\n"
+            if data["payloadRootEnv"]
+            else ""
+        ),
+        "PAYLOAD_ROOT_ENV_POWERSHELL_EXIT_CODE": (
+            "$_payloadRc" if data["payloadRootEnv"] else "$LASTEXITCODE"
+        ),
+        "CATALOG_SPECS_JSON": json.dumps(
+            catalog_specs, ensure_ascii=True, separators=(",", ":")
+        ),
+        "CATALOG_SPECS_JSON_PS": json.dumps(
+            catalog_specs_ps, ensure_ascii=True, separators=(",", ":")
+        ),
+        "CATALOG_PLUGIN_PYTHON": repr(data["plugin"]),
+        "CATALOG_SPECS_PYTHON": repr(catalog_specs),
+        "CATALOG_INSTALLER_PYTHON": repr(data["installer"]),
+        "CATALOG_WINDOWS_SUFFIX_PYTHON": repr(windows_catalog_suffix),
+        "CATALOG_WINDOWS_SHELL_PYTHON": repr(windows_catalog_shell),
+        "CATALOG_MULTI_PYTHON": repr(data["multiCommandManifest"]),
+        "CATALOG_CONTRACT_JSON": json.dumps(
+            {
+                "plugin": data["plugin"],
+                "commands": catalog_specs,
+                "windowsCatalogShim": data["windowsCatalogShim"],
+            },
+            ensure_ascii=True,
+            separators=(",", ":"),
+        ),
+    }
+    rendered = template
+    for key, value in values.items():
+        rendered = rendered.replace(f"@@{key}@@", value)
+    digest_placeholder = "@@CATALOG_FILE_SHA256@@"
+    if digest_placeholder in rendered:
+        unsigned = rendered.replace(digest_placeholder, "")
+        rendered = rendered.replace(
+            digest_placeholder,
+            hashlib.sha256(unsigned.encode("utf-8")).hexdigest(),
+        )
+    remaining = sorted(set(re.findall(r"@@[A-Z_]+@@", rendered)))
+    if remaining:
+        raise ValueError(f"unresolved template fields: {', '.join(remaining)}")
+    return rendered
+
+
+def expected_files(manifest: Path, *, canonical_root: Path | None = None) -> dict[Path, str | bytes]:
+    root = canonical_root or REPO
+    templates = root / "libs/payload-invocation/templates"
+    data = load_manifest(manifest, canonical_root=root)
+    installer = str(data["installer"])
+    protected_paths: set[Path] = set()
+    for suffix in (".sh", ".ps1"):
+        installer_path = manifest.parent / "scripts" / f"{installer}{suffix}"
+        if not installer_path.is_file():
+            raise ValueError(f"{manifest}: installer not found: {installer_path}")
+        resolver_path = manifest.parent / "scripts" / f"resolve-runtime{suffix}"
+        if not resolver_path.is_file():
+            raise ValueError(f"{manifest}: runtime resolver not found: {resolver_path}")
+        protected_paths.update((installer_path, resolver_path))
+    output = manifest.parent / str(data["outputDir"])
+    generated: dict[Path, str | bytes] = {}
+    commands = data["commands"]
+    assert isinstance(commands, list)
+    for command in commands:
+        assert isinstance(command, dict)
+        command_id = str(command["command"])
+        dispatcher = data["payloadDispatcher"]
+        assert isinstance(dispatcher, dict)
+        for path, template in (
+            (output / command_id, "dispatcher-posix.tmpl" if dispatcher["posix"] else "posix-shim.tmpl"),
+            (output / f"{command_id}.ps1",
+             "dispatcher-powershell.tmpl" if dispatcher["windows"] else "powershell-shim.tmpl"),
+            (output / f"{command_id}.cmd", "cmd-shim.tmpl"),
+        ):
+            if path in protected_paths:
+                raise ValueError(f"{manifest}: generated path collision: {path}")
+            if path in generated:
+                raise ValueError(f"{manifest}: duplicate generated path: {path}")
+            generated[path] = render((templates / template).read_text(encoding="utf-8"), data, command=command)
+    catalog_prefix = "catalog-multi" if data["multiCommandManifest"] else "catalog"
+    posix_catalog_template = (
+        "catalog-posix-shell.tmpl"
+        if data["posixCatalogMode"] == "shell"
+        else f"{catalog_prefix}-posix.tmpl"
+    )
+    catalog_outputs: tuple[tuple[Path, str], ...] = (
+        (manifest.parent / "scripts" / "emit-command-catalog.sh", posix_catalog_template),
+        (manifest.parent / "scripts" / "emit-command-catalog.ps1", f"{catalog_prefix}-powershell.tmpl"),
+    )
+    if data["inProcessCatalog"]:
+        catalog_outputs += ((manifest.parent / "scripts" / "emit_command_catalog.py", "catalog-python.tmpl"),)
+    protected_paths.update(path for path, _template in catalog_outputs)
+    command_paths = set(generated)
+    collisions = sorted(command_paths & protected_paths)
+    if collisions:
+        raise ValueError(f"{manifest}: generated path collision: {', '.join(map(str, collisions))}")
+    for path, template in catalog_outputs:
+        if path in generated:
+            raise ValueError(f"{manifest}: duplicate generated path: {path}")
+        generated[path] = render((templates / template).read_text(encoding="utf-8"), data)
+    if data["catalogBinding"] or data["installerLifecycle"]:
+        binding_source = (templates.parent / "command_binding.py").read_text(encoding="utf-8")
+        binding_paths = [manifest.parent / "scripts" / "command_binding.py"]
+        if data["catalogBindingModule"]:
+            binding_paths.append(manifest.parent / str(data["catalogBindingModule"]))
+        for path in binding_paths:
+            if path in generated or path in protected_paths:
+                raise ValueError(f"{manifest}: generated path collision: {path}")
+            generated[path] = binding_source
+            lifecycle_path = path.with_name(
+                "_command_lifecycle.py" if path.name.startswith("_") else "command_lifecycle.py"
+            )
+            if lifecycle_path in generated or lifecycle_path in protected_paths:
+                raise ValueError(f"{manifest}: generated path collision: {lifecycle_path}")
+            generated[lifecycle_path] = (templates.parent / "command_lifecycle.py").read_text(encoding="utf-8")
+            human_root = lifecycle_path.parent / "_lifecycle_human"
+            # Bootstrap cannot import a runtime that the admitted child has yet to build.
+            for name, source in (
+                ("__init__.py", root / "libs/update-telemetry/src/update_telemetry/human.py"),
+                ("redact.py", root / "libs/update-telemetry/src/update_telemetry/redact.py"),
+                ("capabilities.py", root / "libs/update-telemetry/src/update_telemetry/capabilities.py"),
+            ):
+                asset = human_root / name
+                if asset in generated or asset in protected_paths:
+                    raise ValueError(f"{manifest}: generated path collision: {asset}")
+                generated[asset] = source.read_text(encoding="utf-8")
+    if data["runtimeAdmissionToolkit"]:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            "_payload_runtime_admission", Path(__file__).resolve().parent / "runtime_admission.py",
+        )
+        assert spec and spec.loader
+        toolkit = importlib.util.module_from_spec(spec)
+        previous_bytecode = sys.dont_write_bytecode
+        try:
+            sys.dont_write_bytecode = True
+            spec.loader.exec_module(toolkit)
+        finally:
+            sys.dont_write_bytecode = previous_bytecode
+        for relative, content in toolkit.expected_files(root).items():
+            path = manifest.parent / "scripts" / "_runtime_admission" / relative
+            if path in generated or path in protected_paths:
+                raise ValueError(f"{manifest}: generated path collision: {path}")
+            generated[path] = content
+    return generated
+
+
+def display_path(path: Path) -> str:
+    try:
+        return path.relative_to(REPO).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def write_generated(path: Path, content: str | bytes) -> None:
+    """Use the same byte, newline and executable contract in every owned venue."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(content, bytes):
+        path.write_bytes(content)
+    else:
+        path.write_text(content, encoding="utf-8", newline="\n")
+    if (
+        path.suffix == "" or path.name == "emit-command-catalog.sh"
+        or "_runtime_admission" in path.parts and path.suffix == ".sh"
+    ):
+        path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+
+def validate_output_paths(manifest: Path, outputs: dict[Path, str | bytes]) -> None:
+    """Validate the complete normal output inventory without requiring mirrors."""
+    root = manifest.parent.absolute()
+    planned = {path.absolute() for path in outputs if isinstance(path, Path)}
+    for path, content in outputs.items():
+        if not isinstance(path, Path) or not isinstance(content, (str, bytes)):
+            raise ValueError(f"{manifest}: invalid generated output inventory")
+        path = path.absolute()
+        if ".." in path.parts or not path.is_relative_to(root):
+            raise ValueError(f"{manifest}: generated output escapes its payload: {path}")
+        if any(parent in planned for parent in path.parents):
+            raise ValueError(f"{manifest}: generated output path conflict: {path}")
+        for component in (path, *path.parents):
+            if component.exists() or component.is_symlink():
+                info = component.lstat()
+                if (
+                    stat.S_ISLNK(info.st_mode)
+                    or getattr(info, "st_file_attributes", 0) & 0x400
+                    or not (stat.S_ISREG(info.st_mode) if component == path else stat.S_ISDIR(info.st_mode))
+                    or stat.S_ISREG(info.st_mode) and info.st_nlink != 1
+                ):
+                    raise ValueError(f"{manifest}: generated output has unsafe custody: {component}")
+            if component == root:
+                break
+
+
+def source_check(manifest: Path, *, canonical_root: Path | None = None) -> list[str]:
+    """Validate canonical production, not the freshness of committed mirrors."""
+    outputs = expected_files(manifest, canonical_root=canonical_root)
+    validate_output_paths(manifest, outputs)
+    errors = []
+    for path, content in outputs.items():
+        if path.suffix == ".py":
+            try:
+                ast.parse(content, filename=str(path))
+            except (SyntaxError, ValueError) as error:
+                errors.append(f"{display_path(path)}: invalid canonical generated Python: {error}")
+    return errors
+
+
+def check_generated(path: Path, expected: str | bytes, *, exact_bytes: bool = False) -> list[str]:
+    errors = []
+    try:
+        actual = path.read_bytes() if exact_bytes or isinstance(expected, bytes) else path.read_text(encoding="utf-8")
+    except OSError:
+        actual = b"" if exact_bytes or isinstance(expected, bytes) else ""
+    wanted = expected.encode("utf-8") if exact_bytes and isinstance(expected, str) else expected
+    if actual != wanted:
+        errors.append(f"{display_path(path)}: generated content is stale")
+    if (
+        (path.suffix == "" or path.name == "emit-command-catalog.sh"
+         or "_runtime_admission" in path.parts and path.suffix == ".sh")
+        and os.name != "nt" and path.exists() and not path.stat().st_mode & stat.S_IXUSR
+    ):
+        errors.append(f"{display_path(path)}: POSIX shim is not executable")
+    return errors
+
+
+def process_manifest(manifest: Path, *, check: bool, canonical_root: Path | None = None) -> list[str]:
+    errors: list[str] = []
+    outputs = expected_files(manifest, canonical_root=canonical_root)
+    validate_output_paths(manifest, outputs)
+    for path, expected in outputs.items():
+        if check:
+            errors.extend(check_generated(path, expected))
+            continue
+        write_generated(path, expected)
+        print(f"generated {display_path(path)}")
+    return errors
+
+
+def discover_manifests(canonical_root: Path | None = None) -> list[Path]:
+    return sorted(((canonical_root or REPO) / "plugins").glob("*/payload-invocation.json"))
+
+
+def main(argv: list[str] | None = None, *, canonical_root: Path | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("manifests", nargs="*", type=Path)
+    parser.add_argument("--all", action="store_true", help="process every plugin manifest")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--check", action="store_true", help="fail when actual generated files drift")
+    mode.add_argument("--source-check", action="store_true", help="validate canonical inputs and planned outputs without writing or requiring mirrors")
+    args = parser.parse_args(argv)
+
+    manifests = discover_manifests(canonical_root) if args.all else [path.resolve() for path in args.manifests]
+    if not manifests:
+        parser.error("provide a manifest or use --all")
+
+    errors: list[str] = []
+    for manifest in manifests:
+        errors.extend(source_check(manifest, canonical_root=canonical_root) if args.source_check
+                      else process_manifest(manifest, check=args.check, canonical_root=canonical_root))
+    if errors:
+        print("\n".join(errors))
+        return 1
+    if args.check:
+        print(f"payload-invocation: {len(manifests)} manifest(s) in sync")
+    elif args.source_check:
+        print(f"payload-invocation: {len(manifests)} canonical manifest(s) valid; output equality not claimed")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

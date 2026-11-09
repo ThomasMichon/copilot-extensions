@@ -310,10 +310,18 @@ The [selected native report-owner contract](native-report-owner.md), reviewed in
 merged in #11686 without changing legacy native authentication or implying
 host adoption. Large-report, native-platform, installed/live-provider and full
 CLI/HTTP acceptance remain separate.
-The [size-qualified response proposal](bounded-report-response.md) under #11692
+The [size-qualified response contract](bounded-report-response.md), reviewed in
+#11694 under #11692,
 reuses the existing 8 MiB channel while preserving current 32 KiB caller-aware
-handler/report defaults. Review its opt-in SDK prerequisite and parallel report
-profile before runtime expansion; no installed or provider acceptance is implied.
+handler/report defaults. Its opt-in SDK prerequisite merged in #11699; the
+parallel report profile and native capture/client budget composition merged
+in #11702. Their finite source qualification is not explicit standalone
+configuration, installed hosting or provider acceptance.
+The [explicit standalone report-host contract](standalone-report-host.md), reviewed in #11705,
+selects the existing reader/native adapter and actual SDK handler ceiling
+through strict optional host configuration. The finite source implementation
+and fresh isolated controls are recorded in its linked implementation journal;
+ordinary review/CI/merge remains open. This is not retained-host enrollment or rollout.
 
 - [x] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence)
   (merged in #10380; implementation, provider and adoption gates remain).
@@ -1066,6 +1074,24 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
+- [x] Qualify the finite opt-in v2 report/native-budget composition (#11702):
+  259 focused cases cover actual native-child, SDK/Gateway TLS and source CLI
+  delivery above 1 MiB under an 8 MiB selection, encoded/capture/client limits,
+  mixed peers, lifetime/backpressure and joined cleanup. Ordinary native
+  1 MiB defaults and v1 raw-JSON compatibility/32 KiB encoded limits remain.
+  The actor-free packet passes 4,665; all six finite
+  [response-contract source obligations](bounded-report-response.md#serial-delivery-and-validation)
+  are resolved. Explicit standalone configuration, installed/live-provider,
+  native Windows and broader CLI/HTTP/Dispatch acceptance remain open.
+
+- [x] Qualify the finite opt-in caller-aware SDK response prerequisite (#11699):
+  152 focused handler/caller/local cases cover actual larger TLS delivery,
+  bounded construction/emission, legacy/local refusal, ACK backpressure,
+  expiry, disconnect, withdrawal and joined cleanup. The actor-free unit
+  packet passes 4,665. The report-v2/native-budget composition and combined
+  response-contract source validation subsequently merged in #11702 above;
+  installed/live-provider, native Windows and full CLI/HTTP acceptance remain open.
+
 - [x] Qualify the finite optional selected GitHub.com report owner (#11686):
   actual configuration/strict account policy, explicit verified CLI-store
   identity, pinned provider reads, one request budget and original cleanup
@@ -1387,6 +1413,11 @@ callback an implicit credential store.
 
 ## Journal
 
+- [2026-11-09 - Standalone report-host contract reviewed](journal/2026/11.09%20Standalone%20report%20host%20contract.md)
+- [2026-11-09 - Standalone report-host source implementation](journal/2026/11.09%20Standalone%20report%20host%20implementation.md)
+- [2026-11-09 - Opt-in report v2 source qualification](journal/2026/11.09%20Bounded%20report%20v2%20source.md)
+- [2026-11-09 - Bounded SDK response owner qualified for source review](journal/2026/11.09%20Bounded%20SDK%20response%20owner.md)
+- [2026-11-09 - Size-qualified response contract reviewed; SDK owner first](journal/2026/11.09%20Size-qualified%20response%20contract.md)
 - [2026-11-09 - Native report-owner source merged; parent acceptance retained](journal/2026/11.09%20Native%20report%20owner%20source.md)
 
 ### 2026-11-09 - Native report boundary corrections

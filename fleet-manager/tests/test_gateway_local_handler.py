@@ -221,6 +221,32 @@ def local_binding(rig, handler):
     return LocalHandlerBinding(manifest.slots[0], handler)
 
 
+def test_local_owner_does_not_advertise_or_accept_outbound_large_response(tmp_path):
+    from fleet_manager.gateway_service_channel import BODY_BYTES
+    from fleet_manager.gateway_service_handler import BoundedServiceResponse
+
+    async def scenario():
+        rig = Rig(tmp_path)
+        received = []
+
+        async def handle(local):
+            received.append(local.request)
+            assert local.request.response_limit == BODY_BYTES
+            return BoundedServiceResponse(200, body=b"x" * (BODY_BYTES + 1))
+
+        try:
+            await rig.start(local_handlers=(local_binding(rig, handle),))
+            async with await rig.request() as response:
+                assert response.status == 400
+                assert await response.json() == {"error": "invalid-backend-response"}
+            assert len(received) == 1 and not rig.state.channels
+            with pytest.raises(RequestDisconnected):
+                received[0].lifetime.check()
+        finally:
+            await rig.close()
+    asyncio.run(scenario())
+
+
 def test_real_tls_local_owner_commits_and_replays_original_journal_operation(tmp_path):
     async def scenario():
         rig = Rig(tmp_path)
