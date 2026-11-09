@@ -330,9 +330,11 @@ Read routes stay read-only; installed/account/HTTP and three-provider
 qualification remain open. It advances #7051 without replacing its lifecycle
 owner or claiming an atomic candidate/thread write.
 Its [selected reopening refinement](native-thread-resolution.md#selected-native-reopening-proposal)
-is a review-first proposal only. The new optional action would compose the same
-owner for an exact resolved-to-active transition; current close-only commands,
-legacy status choices and advertised support remain unchanged.
+cleared independent review in #11741. Its
+[source implementation and controls](journal/2026/11.09%20Selected%20native%20reopening%20implementation.md)
+compose the same owner for an exact resolved-to-active transition; independent
+implementation review and merge remain pending. Close-only commands and
+legacy status choices remain unchanged; installed support is not qualified.
 
 - [x] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence)
   (merged in #10380; implementation, provider and adoption gates remain).
@@ -1085,11 +1087,13 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
-- [ ] Qualify the [selected native reopening refinement](native-thread-resolution.md#reopening-source-controls-after-review)
-  only after independent contract review: exact resolved-to-active transition,
+- [x] Qualify the finite source [selected native reopening refinement](native-thread-resolution.md#reopening-source-controls-after-review)
+  after independent contract review (#11741): exact resolved-to-active transition,
   native action authority, same candidate/thread, status-only write, original
   consumed-operation outcomes, strict peers and unchanged close-only behavior.
-  No runtime reopening support or installed/provider/HTTP parity is claimed.
+  All five linked source controls pass (414 Worktrees and 193 frontend controls,
+  five existing platform skips). Independent implementation review/merge remain
+  pending; no installed/provider/HTTP or native Windows parity is claimed.
 
 - [x] Qualify the finite [selected native thread-resolution contract](native-thread-resolution.md#expansion-and-qualification) (#11728)
   after reviewed intent: exact ADO target/principal/candidate/thread, status-only
@@ -1451,6 +1455,7 @@ callback an implicit credential store.
 ## Journal
 
 - [2026-11-09 - Selected native thread-resolution source implementation](journal/2026/11.09%20Selected%20native%20resolution%20implementation.md)
+- [2026-11-09 - Selected native reopening source implementation](journal/2026/11.09%20Selected%20native%20reopening%20implementation.md)
 - [2026-11-09 - Selected native thread-resolution proposal](journal/2026/11.09%20Selected%20native%20resolution%20proposal.md)
 - [2026-11-09 - Standalone report-host contract reviewed](journal/2026/11.09%20Standalone%20report%20host%20contract.md)
 - [2026-11-09 - Standalone report-host source implementation](journal/2026/11.09%20Standalone%20report%20host%20implementation.md)

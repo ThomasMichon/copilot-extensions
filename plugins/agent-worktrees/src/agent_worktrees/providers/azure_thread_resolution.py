@@ -22,7 +22,8 @@ class Resolver:
 
     def __init__(self, provider: Any, repo: str, number: int, thread: int, *, api_base: str,
                  token: str | None, operation_id: str, expected_candidate: str, expected_thread: str,
-                 state_dir: Path | None = None, reader_factory: Callable = AdoMutator) -> None:
+                 state_dir: Path | None = None, reader_factory: Callable = AdoMutator,
+                 reopening: bool = False) -> None:
         validate(repo, number, thread, operation_id, expected_candidate, expected_thread)
         self.remediator = Remediator(provider, repo, number, api_base=api_base, token=token,
                                      state_dir=state_dir, reader_factory=reader_factory)
@@ -34,11 +35,15 @@ class Resolver:
         self.observed_candidate: dict | None = None
         self.observed_thread: dict | None = None
         self.consumed_write = False
+        self.reopening = reopening
+        self.operation = "thread-reopen" if reopening else "thread-resolve"
+        self.desired_status = "active" if reopening else "closed"
+        self.desired_values = ("active", 1) if reopening else ("closed", 4)
 
     def result(self, **kwargs: Any) -> dict:
         return outcome(*self.fields, provider="azure-devops", actor=self.actor,
                        observed_candidate=self.observed_candidate,
-                       observed_thread=self.observed_thread, **kwargs)
+                       observed_thread=self.observed_thread, reopening=self.reopening, **kwargs)
 
     def principal(self) -> str:
         identity = self.reader.identity().get("authorizedUser")
@@ -86,8 +91,12 @@ class Resolver:
             raise RemediationError("Full candidate fingerprint changed")
         if thread_fingerprint(row) != self.expected_thread:
             raise RemediationError("Selected thread fingerprint changed")
-        if row.get("status") not in ("active", 1):
-            raise RemediationError("Only an active native discussion can be resolved")
+        allowed = ("fixed", "wontFix", "closed", "byDesign", 2, 3, 4, 5) if self.reopening else ("active", 1)
+        if type(row.get("status")) is bool or row.get("status") not in allowed:
+            raise RemediationError(
+                "Only a resolved native discussion can be reopened" if self.reopening
+                else "Only an active native discussion can be resolved"
+            )
         if not isinstance((row.get("pullRequestThreadContext") or {}).get("iterationContext"), dict):
             raise RemediationError("Selected discussion lacks native iteration association")
 
@@ -103,7 +112,7 @@ class Resolver:
                                    error="Operation was consumed before interruption; no automatic replay")
         result = deepcopy(original)
         result["reconciled"] = True
-        # A later closed state is independent observation, not operation attribution.
+        # A later state is independent observation, not operation attribution.
         try:
             self.snapshot()
         except (ValueError, TypeError, KeyError, AttributeError, OSError, RuntimeError):
@@ -118,9 +127,9 @@ class Resolver:
         if type(pr.get("pullRequestId")) is not int or pr["pullRequestId"] != self.fields[1]:
             raise RemediationError("Native PR identity differs from the selected target")
         self.actor = self.principal()
-        key = "thread-resolve:" + digest(self.fields[3])
-        request_hash = digest([target, self.actor, "thread-resolve", self.thread,
-                               self.expected_candidate, self.expected_thread, "closed"])
+        key = self.operation + ":" + digest(self.fields[3])
+        request_hash = digest([target, self.actor, self.operation, self.thread,
+                               self.expected_candidate, self.expected_thread, self.desired_status])
         with self.remediator.ledger(target).locked() as ledger:
             prior = ledger.records.get(key)
             if prior is not None:
@@ -140,18 +149,23 @@ class Resolver:
             ledger.consume(key, request_hash, thread_id=self.thread, actor=self.actor,
                            candidate=latest[1], expected_thread=self.expected_thread, result=pending)
             try:
-                response = self.reader.thread_status(
-                    self.thread, "closed", authoritative_rejection=True,
+                response = (
+                    self.reader.reopen_thread(self.thread, authoritative_rejection=True)
+                    if self.reopening else self.reader.thread_status(
+                        self.thread, "closed", authoritative_rejection=True,
+                    )
                 )
                 thread_fingerprint(response)
-                if (response.get("id") != self.thread or response.get("status") not in ("closed", 4)
+                if (response.get("id") != self.thread or type(response.get("status")) is bool
+                        or response.get("status") not in self.desired_values
                         or _content(response) != _content(original_row)):
                     raise RemediationError("Native status response does not confirm the selected discussion")
                 _, observed, row = self.snapshot()
-                if (observed != latest[1] or row.get("status") not in ("closed", 4)
+                if (observed != latest[1] or type(row.get("status")) is bool
+                        or row.get("status") not in self.desired_values
                         or _content(row) != _content(original_row)):
                     raise RemediationError("Native candidate or discussion changed after dispatch")
-                result = self.result(status="confirmed", reason="resolved")
+                result = self.result(status="confirmed", reason="reopened" if self.reopening else "resolved")
             except AdoWriteRejected as exc:
                 result = self.result(status="failed", reason="native-rejected", error=str(exc))
             except (ValueError, TypeError, KeyError, AttributeError, OSError, RuntimeError) as exc:
@@ -162,7 +176,8 @@ class Resolver:
 
 def resolve(provider: Any, repo: str, number: int, thread: int, *, operation_id: str,
             expected_candidate: str, expected_thread: str, api_base: str, token: str | None,
-            state_dir: Path | None = None, reader_factory: Callable = AdoMutator) -> dict:
+            state_dir: Path | None = None, reader_factory: Callable = AdoMutator,
+            reopening: bool = False) -> dict:
     """Refuse before dispatch, or retain an honest consumed operation outcome."""
     fields = (repo, number, thread, operation_id, expected_candidate, expected_thread)
     owner = None
@@ -171,6 +186,7 @@ def resolve(provider: Any, repo: str, number: int, thread: int, *, operation_id:
             provider, repo, number, thread, api_base=api_base, token=token,
             operation_id=operation_id, expected_candidate=expected_candidate,
             expected_thread=expected_thread, state_dir=state_dir, reader_factory=reader_factory,
+            reopening=reopening,
         )
         return owner.run()
     except (ValueError, TypeError, KeyError, AttributeError, OSError, RuntimeError) as exc:
@@ -178,4 +194,5 @@ def resolve(provider: Any, repo: str, number: int, thread: int, *, operation_id:
             if owner.consumed_write:
                 return owner.result(status="unknown", reason="write-unconfirmed", error=str(exc))
             return owner.result(reason="preflight-refused", error=str(exc))
-        return outcome(*fields, provider="azure-devops", reason="invalid-input", error=str(exc))
+        return outcome(*fields, provider="azure-devops", reason="invalid-input", error=str(exc),
+                       reopening=reopening)

@@ -352,6 +352,11 @@ class AzureDevOpsProvider:
         from .azure_thread_resolution import resolve
         return resolve(self, repo, number, thread, **kwargs)
 
+    def reopen_selected_thread(self, repo: str, number: int, thread: int, **kwargs: Any) -> dict:
+        """Reopen one fingerprint-pinned native thread through the same status owner."""
+        from .azure_thread_resolution import resolve
+        return resolve(self, repo, number, thread, reopening=True, **kwargs)
+
     def ready_pull(self, repo: str, number: int, *, api_base: str = "",
                    token: str | None = None) -> dict:
         """Perform the optional explicit-target draft-only author transition."""
