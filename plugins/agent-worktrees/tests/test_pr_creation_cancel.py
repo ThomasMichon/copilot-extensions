@@ -360,7 +360,7 @@ def test_parser_preserves_strict_rejection(options):
 
 
 @pytest.mark.parametrize("gate", ["none", "dirty", "child", "other-pr"])
-def test_ordinary_finalization_keeps_all_other_gates(reservation, gate):
+def test_ordinary_finalization_keeps_all_other_gates(reservation, gate, git_only_mux):
     config, wid, wt, _remote, path, _record, _provider = reservation
     assert cancel(reservation)["success"]
     git_ops.git("reset", "--hard", "origin/master", cwd=str(wt))

@@ -297,14 +297,17 @@ class TestAbandonPr:
         assert "already merged" in result["error"]
         assert fake.close_calls == 0
 
+    @pytest.mark.parametrize("warning", [
+        "comment post failed: unauthorized", "(comment post failed: unauthorized)",
+    ])
     def test_comment_post_failure_is_a_warning_not_a_fatal_error(
-        self, tmp_path, monkeypatch,
+        self, tmp_path, monkeypatch, warning,
     ):
         rec = self._record(tmp_path, monkeypatch)
 
         class _WarnProvider(self._fake_provider().__class__):
             def close_pull(self, repo, number, *, api_base="", token=None, comment=""):
-                return "comment post failed: unauthorized"
+                return warning
 
         self._patch(monkeypatch, _WarnProvider())
         result = pr_ops.abandon_pr(
@@ -314,6 +317,39 @@ class TestAbandonPr:
         assert "comment post failed" in result["warning"]
         reloaded = tracking.load_record(rec.yaml_path)
         assert reloaded.active_pr().state == "closed"
+
+    def test_actual_github_comment_and_close_failure_retains_pr_and_claim(
+        self, tmp_path, monkeypatch,
+    ):
+        from types import SimpleNamespace
+
+        from agent_worktrees.providers import github
+
+        rec = self._record(tmp_path, monkeypatch)
+        provider = github.GitHubProvider()
+        monkeypatch.setattr(provider, "get_pull", self._fake_provider().get_pull)
+        self._patch(monkeypatch, provider)
+        calls = []
+
+        def fail(argv, **kwargs):
+            calls.append(argv)
+            return SimpleNamespace(returncode=1, stdout="", stderr="authorization denied")
+
+        monkeypatch.setattr(github, "run_cli", fail)
+        result = pr_ops.abandon_pr(
+            "wt-a", self._config(), reason="superseded", confirm=True,
+        )
+        assert result["success"] is False
+        assert result["error"].startswith("gh pr close failed")
+        assert "comment post failed:" in result["error"]
+        assert [call[:3] for call in calls] == [
+            ["gh", "pr", "comment"], ["gh", "pr", "close"],
+        ]
+        reloaded = tracking.load_record(rec.yaml_path)
+        assert reloaded.active_pr().state == "open"
+        assert not reloaded.active_pr().closed_at
+        assert reloaded.resources[0].state == "active"
+        assert not claim_history.history_for_ref(pr_ops._pr_claim_ref(rec.pr))
 
     def test_real_close_failure_is_fatal_and_leaves_claim_untouched(
         self, tmp_path, monkeypatch,
