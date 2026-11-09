@@ -5,8 +5,8 @@ Back to the [CLI parity inventory](cli-parity-inventory.md) and
 [#7051](https://github.com/ThomasMichon/copilot-extensions/issues/7051) and its
 [normalized contract](../pr-lifecycle-conformance/contract.md).
 
-**Contract reviewed in #11714; SOURCE controls pass, implementation review/merge
-remains open.** This finite
+**Contract reviewed in #11714; finite SOURCE implementation merged in #11728.**
+This finite
 ADO-first slice advances the PR-domain
 [provider-neutral surface](../../../visions/plugins/agent-pull-requests/README.md#first-class-provider-neutral-pr-surface)
 and Worktrees'
@@ -174,6 +174,88 @@ deprecated here and no HTTP/report-read mutation is introduced.
   lifecycle acceptance. Keep the parent Plan and Validation Plan open.
 
 The [source implementation journal](journal/2026/11.09%20Selected%20native%20resolution%20implementation.md)
-records the focused Linux controls and remaining review/delivery gate. Native
+records the focused Linux controls and reviewed delivery. Native
 Windows, installed/provider-account/HTTP and complete lifecycle qualification
 remain open under their existing owners; no live thread was changed.
+
+## Selected native reopening proposal
+
+**Review-first refinement under #7051; not implemented or advertised.** Continue
+the same provider-neutral lifecycle intent and existing owner, rather than
+treating the delivered close-only operation as reopening support.
+The [native ADO thread-update contract](https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-request-threads/update?view=azure-devops-rest-7.1)
+includes `active` separately from `fixed`, `wontFix`, `closed`, `byDesign`
+and `pending`. The current remediation status allowlist does not include
+`active`; neither `pr-thread-resolve` nor its native client may reinterpret
+their close-only contract.
+
+Add optional `operations.thread-reopen: true` to the same target-qualified
+author-capabilities version-1 response, initially for enabled ADO bindings
+only. Proposed Worktrees `pr-thread-reopen` and native `reopen-thread` take
+the same strict repo/number/native-thread, expected-candidate/expected-thread,
+operation-ID and optional delivered-policy selectors as resolution.
+The native client also requires its exact `--worktrees-command`.
+Unsupported GitHub/Gitea, absent/malformed support and old/rolled-back receivers
+refuse before dispatch, without a raw forge or bulk fallback.
+
+Compose the merged complete candidate/discussion reader, actual authenticated
+principal, repository/target-branch permission evaluator, remediation transport
+and consumed-before-write ledger. Current base freshness remains independent
+of the historical iteration target. No new credential, policy, storage,
+watcher or service owner is introduced. Capability and native contribution
+permission still do not supply operator effect authority.
+
+Only an exact live discussion in native `fixed`, `wontFix`, `closed` or
+`byDesign` state qualifies, with valid iteration association. Already-active,
+pending, unknown, deleted, system/vote-only, incomplete or stale evidence
+refuses without mutation. Preserve full candidate/thread and principal/
+permission rechecks immediately before dispatch.
+The sole intended effect is `{"status":"active"}` on that selected thread.
+Do not reply, edit comments, recreate deleted data, resolve siblings, reopen
+the PR itself, vote, release holds, grant consent, merge, publish source or
+settle claims.
+
+The ledger binds the reopening action and requested active state with the
+same target, principal, full candidate and thread revision. The caller supplies
+a new intentional operation ID; reopening cannot reinterpret, clear or replay
+a consumed resolution operation. Idempotency remains action-scoped under the
+existing ledger, not a new global cross-command or cross-installation guarantee.
+Conflicting keys refuse, intent is durable before dispatch, and consumed/
+interrupted/unknown reopening keys reconcile read-only with no second PATCH.
+
+Return `agent-worktrees.pr-thread-reopen`, version 1, retaining the same selected
+identity, operation ID, provider/principal, expected/observed evidence,
+reason/error fields and `actions.reopening.status`.
+Only `confirmed` has `ok: true` and exit 0; `not-attempted`, authoritative
+`failed` and `unknown` exit nonzero. The existing resolution schema/action
+and all old syntax/defaults/outputs keep their meanings.
+Confirmation requires an authoritative same-thread response and same-candidate
+active readback with no change except status/native thread-update timestamp.
+Comment bodies, authors and comment timestamps remain unchanged.
+
+This remains preflight plus readback, not atomic CAS or exclusive causal proof.
+Lost, truncated, malformed, timed-out, late or changed response/readback stays
+unknown. Later observing an active thread cannot upgrade that original
+unknown outcome. Likewise, a stored confirmed result describes the original
+operation, not a guarantee the thread stayed active; later observations remain
+independent. No marker comment, retry or effectful compatibility path is added.
+
+### Reopening source controls after review
+
+- [ ] Qualify the actual owner parser, claimant/target/delivered policy,
+  native principal and effective permission owner. Prove exactly the selected
+  status-only active PATCH and unchanged PR, sibling, comment and vote state.
+- [ ] Exercise the actual native frontend/owner/provider composition and a real
+  process seam. Cover strict invalid syntax, additive result fields, missing/
+  malformed/old/rolled-back support and unchanged close-only/legacy behavior.
+- [ ] Admit each supported closed/resolved native state and refuse active,
+  pending, deleted, system/vote-only, incomplete/duplicate/unaddressable,
+  invalid-iteration and stale target/principal/permission evidence.
+  Include source/base/ref/repository/thread changes and stable target-only advance.
+- [ ] Inject authoritative rejection, truncated/lost/malformed/late response,
+  readback movement and crash on both sides of dispatch. Prove conflicting-key
+  refusal, concurrent same-ledger ownership, original-outcome read-only recovery
+  and no second PATCH or synthetic comment, including later re-closure.
+- [ ] Record isolated source controls separately from native Windows,
+  installed/provider-account/HTTP, cross-venue attribution and complete
+  three-provider lifecycle acceptance. Preserve both parent completion gates.
