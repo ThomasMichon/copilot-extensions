@@ -86,6 +86,7 @@ class ReplayStore:
         service_identity: ReplayServiceIdentity | None = None,
         terminal_retention: bool = False, terminal_recovery: bool = False,
         terminal_cache_retirement: bool = False,
+        terminal_comment_mapping: bool = False,
     ) -> None:
         if type(terminal_retention) is not bool:
             raise ValueError("explicit terminal reader selection required")
@@ -96,6 +97,9 @@ class ReplayStore:
         if type(terminal_cache_retirement) is not bool or terminal_cache_retirement and not terminal_recovery:
             raise ValueError("cache retirement reader requires explicit recovery reader selection")
         self.terminal_cache_retirement = terminal_cache_retirement
+        if type(terminal_comment_mapping) is not bool or terminal_comment_mapping and not terminal_recovery:
+            raise ValueError("terminal mapping reader requires explicit recovery reader selection")
+        self.terminal_comment_mapping = terminal_comment_mapping
         if service_identity is not None and not isinstance(service_identity, ReplayServiceIdentity):
             raise ValueError("typed replay service identity required")
         self.root = Path(root)
@@ -179,6 +183,14 @@ class ReplayStore:
         terminal = "terminal_retention_version" in document
         recovery = "terminal_recovery_version" in document
         retirement = "terminal_cache_retirement_version" in document
+        if "terminal_comment_mapping_version" in document:
+            if (
+                not self.terminal_comment_mapping or not recovery or not mappings
+                or type(document["terminal_comment_mapping_version"]) is not int
+                or document["terminal_comment_mapping_version"] != 1
+            ):
+                raise ReplayStoreInvalid("terminal comment mapping reader unavailable for adopted owner")
+            names.add("terminal_comment_mapping_version")
         if retirement:
             if not self.terminal_cache_retirement or not recovery:
                 raise ReplayStoreInvalid("terminal cache retirement reader unavailable for adopted owner")

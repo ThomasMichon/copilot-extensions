@@ -11,6 +11,7 @@ from . import review_intent
 from .attention import Cursor
 from .review_workspace import _digest, _scope
 from .terminal_retention import TerminalRetentionStore
+from . import review_comment_mapping
 
 PROTOCOL = "agent-pull-requests.terminal-recovery/v1"
 MAX_RECORDS = review_intent.MAX_OPERATIONS
@@ -46,7 +47,13 @@ def _reservation(record: dict, receipt_bytes: int) -> int:
         action["receipt"] = None
         if action["state"] == "unknown":
             action["state"] = "confirmed"
-    return len(review_intent.encoded(baseline)) + len(record["actions"]) * (receipt_bytes + 512) + 1024
+        if "comment_observation" in action:
+            action["comment_observation"] = None
+    slots = sum("comment_observation" in action for action in record["actions"])
+    return (
+        len(review_intent.encoded(baseline)) + len(record["actions"]) * (receipt_bytes + 512)
+        + slots * review_comment_mapping.MAX_SLOT_BYTES + 1024
+    )
 
 
 def validate(document: dict) -> int:
@@ -125,6 +132,16 @@ def validate(document: dict) -> int:
                 if write == prepared["comment_id"] or write in writes:
                     raise ValueError("duplicate compact prepared write")
                 writes.add(write)
+            if "comment_observation" in action:
+                if (
+                    document.get("terminal_comment_mapping_version") != 1
+                    or "prepared" not in action
+                ):
+                    raise ValueError("compact mapping requires explicit reader adoption and preparation")
+                expected.add("comment_observation")
+                review_comment_mapping.validate_slot(
+                    action["comment_observation"], action_state=action["state"],
+                )
             if set(action) != expected:
                 raise ValueError("compact action contains unsupported data")
             action_id = review_intent.text(action["id"], 128)
@@ -187,6 +204,8 @@ def compact(document: dict, scope: dict, cursor: Cursor, policies: dict) -> dict
         if operation is None or operation["intent"]["scope"] != scope:
             raise ValueError("original terminal operation unavailable")
         selected = operation["intent"]
+        if review_comment_mapping.FIELD in operation and document.get("terminal_comment_mapping_version") != 1:
+            raise ValueError("lossless terminal mapping adoption required before compaction")
         record = {
             "protocol": PROTOCOL,
             **{name: copy.deepcopy(selected[name]) for name in (
@@ -212,6 +231,10 @@ def compact(document: dict, scope: dict, cursor: Cursor, policies: dict) -> dict
                     name: prepared["identity"][name] for name in ("comment_id", "write_id")
                 }
                 action["prepared"]["body_id"] = prepared["body_id"]
+                if chosen["id"] in operation.get(review_comment_mapping.FIELD, {}):
+                    action["comment_observation"] = copy.deepcopy(
+                        operation[review_comment_mapping.FIELD][chosen["id"]],
+                    )
             record["actions"].append(action)
         record["reserved_bytes"] = _reservation(record, document["capacities"]["receipt_bytes"])
         retained.append(record)
@@ -313,6 +336,8 @@ class TerminalRecoveryStore:
             if not review_intent.confirms(validated, state, current["scope"]):
                 raise ValueError("recovery readback does not confirm the selected native target")
             state.update(state="confirmed", receipt=validated)
+            if "comment_observation" in state:
+                state["comment_observation"] = None
             return state
 
         return self.owner._review_transaction(record, expires_at=expires_at, checkpoint=current)
