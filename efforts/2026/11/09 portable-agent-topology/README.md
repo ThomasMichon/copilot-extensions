@@ -13,8 +13,8 @@ unrelated requests, and reconciles placement, load and minimum role coverage.
 - **Repo:** copilot-extensions
 - **Branch(es):** managed source worktree; sequential reviewed plan and implementation PRs
 - **Created:** 2026-11-09
-- **Status:** Active
-- **Vision:** [Agent topology](../../../visions/agent-fabric/agentic-factory/agent-topology/README.md)
+- **Status:** Done
+- **Vision:** [Agent topology](../../../../visions/agent-fabric/agentic-factory/agent-topology/README.md)
 - **Umbrella issue:** #11715
 
 ## Guiding Intent
@@ -43,8 +43,8 @@ Private adopters supply topology and grants, not forks of the reusable concept.
 ## Context
 
 `agent-roles` already provides sustained skills and charters over optional native
-adapters. The [factory vision](../../../visions/agent-fabric/agentic-factory/README.md)
-provides the conversational composition; [fleet loadouts](../../../visions/machine-fleet/loadouts/README.md)
+adapters. The [factory vision](../../../../visions/agent-fabric/agentic-factory/README.md)
+provides the conversational composition; [fleet loadouts](../../../../visions/machine-fleet/loadouts/README.md)
 owns machine composition and capacity intent. Worktrees, Bridge and Dispatch
 retain their native boundaries. Existing fleet-monitor goals and thread
 registers are complementary supervision guidance, not an assignment allocator.
@@ -97,11 +97,11 @@ Live adoption remains a separate explicit decision with its original owner.
 - [x] Exercise the complete synthetic consumer flow, including restart,
   allocation collision, uncertain launch, same-owner follow-up, temporary work,
   placement constraints and minimum-role coverage.
-- [ ] Update plugin usage and file inventory, add the plugin changefile and
+- [x] Update plugin usage and file inventory, add the plugin changefile and
   complete exact-source checks and normal implementation PR stewardship.
-- [ ] Record release versus installed adoption honestly, and the explicit
+- [x] Record release versus installed adoption honestly, and the explicit
   source-only/no-live-activation disposition.
-- [ ] Reconcile every Plan and Validation Plan item before marking Done.
+- [x] Reconcile every Plan and Validation Plan item before marking Done.
 
 ## Validation Plan
 
@@ -121,9 +121,9 @@ Live adoption remains a separate explicit decision with its original owner.
 - [x] Live external venue: not exercised under this source-only authority;
   document that activation, effects and installed fleet acceptance remain with
   the adopter's separately authorized work, not claimed by synthetic tests.
-- [ ] Run affected plugin tests, skill/metadata checks and changed Python
+- [x] Run affected plugin tests, skill/metadata checks and changed Python
   lint; complete required CI and actual merge for the implementation.
-- [ ] Audit public artifacts for private identifiers, paths and reverse links.
+- [x] Audit public artifacts for private identifiers, paths and reverse links.
 
 ## Proposal
 
@@ -188,3 +188,19 @@ adapter flow. The plan PR is a review gate before implementation, not completion
   reload and native-head succession without reconstructing the original prompt,
   caller, key or session. No live send or receipt lookup was performed.
 - Current-head review, required CI and actual merge remain delivery gates.
+
+### 2026-11-09 - Source delivery complete
+
+- #11738 merged to `dev` at `5354412d9e` after an approving exact-head review,
+  resolution of all review threads and green required CI. The usage inventory,
+  patch changefile, 109-test plugin packet, five real-helper subprocess flows,
+  strict Linux/Windows type checks and Python lint are complete.
+- The final public-artifact audit found no private deployment identifiers,
+  filesystem paths or reverse links. Native owners and the source-only authority
+  boundary remain unchanged.
+- The implementation was not yet on `main` at the closeout check. Normal release
+  promotion, separately authorized installation and adopter-owned live acceptance
+  remain distinct from this completed source delivery. No fleet agents were
+  launched, reassigned or retired; no service, schedule or installed payload changed.
+- Every source Plan and Validation Plan item is resolved. #11715 retains archive
+  publication and native effort/worktree settlement until those steps finish.
