@@ -20,6 +20,7 @@ pr-watch snapshot Project/repository 7 --json
 pr-watch status Project/repository 7 --json
 pr-status --repo Project/repository --pr 7 --json
 pr-watch threads Project/repository 7 --json
+pr-watch diff Project/repository 7 --json
 pr-status --repo Project/repository --pr 7 --threads --json
 pr-watch cursor Project/repository 7
 pr-watch wait Project/repository 7 --since <cursor> --until any --timeout 600 --json
@@ -60,18 +61,41 @@ Each readable thread also reports a reply fingerprint or an explicit
 A push during a discussion read is reported as `candidate_changed`, not used to
 erase older-round feedback. An explicit target status cannot mix tracked-worktree
 options or resolve threads.
+
+On-demand `diff` requires an explicit repository and positive PR number,
+and calls the existing provider primitive without tracked reconciliation.
+Its `agent-worktrees.pr-diff-read` version-1 report carries repo, PR, provider,
+supported, diff text, error and completeness. The current primitive supplies
+no candidate identity or completeness proof: success has `complete: null`,
+error or unsupported acquisition has `complete: false`. Exit 0 requires
+supported acquisition without a report error, not complete/current review
+evidence. Azure DevOps explicitly reports unified diff unsupported. GitHub
+honors configured `api_base` for diff reads, retaining ordinary ambient/default
+host selection only when it is absent. Tracked `pr-diff` keeps its worktree
+selection, reconciliation, existing JSON shape and output semantics; its GitHub
+provider now honors that same configured endpoint. No diff is persisted in
+watch snapshots, and review workspace generations remain a separate contract.
+Malformed provider results become failed reports; unexpected exceptions expose
+only their class, not potentially sensitive exception text. Normal provider
+result errors retain their existing meaning.
+Explicit diff capture preserves CRLF and bare CR by decoding raw output as
+strict UTF-8; invalid UTF-8 fails. The tracked provider default retains its
+original text normalization. A malformed configured GitHub endpoint refuses
+before invoking `gh`, and supplied tokens override all public/Enterprise token
+aliases rather than inheriting another account's material.
+
 Tracked status remains available; `--no-live` deliberately skips live evidence.
 A failed provider read is a visible `live_error`, not an empty live success.
 One-shot reads do not acquire durable responsibility and can run in the shared
 owner's non-checkout process context. An explicit target resolves through its
 registered control-plane configuration; no project or target is guessed.
-Within one `snapshot`, `status` or `threads` command, configuration loads share
+Within one `snapshot`, `status`, `threads` or `diff` command, configuration loads share
 control-plane PR discovery and committed configuration reads. Each invocation
 starts a fresh acquisition scope, even inside a resident configuration cache.
 Credentials and provider responses are not cached by that scope. Cursor and
 polling-wait dispatch are unchanged; reduced discovery work does not guarantee
 a successful read within a caller's deadline.
-Canonical explicit `pr-watch snapshot/status/threads <repo> <number>` calls
+Canonical explicit `pr-watch snapshot/status/threads/diff <repo> <number>` calls
 without a project override enter that same handler before loading the root
 lifecycle command surface. Explicit-project calls retain the ordinary front
 door and skip only the unrelated deferred command cluster for these reads.
@@ -79,7 +103,7 @@ Implicit targets, aliases, cursor, waits, remediation and subscription commands
 retain their existing dispatch. No credential, provider response or target policy
 is omitted, and the caller's timeout and honest incomplete/error outcomes remain
 unchanged. Startup work reduction is not installed or tail-latency qualification.
-The CLI front door admits `pr-watch snapshot/status/threads` and explicit
+The CLI front door admits `pr-watch snapshot/status/threads/diff` and explicit
 `pr-status --repo ... --pr ...` in that context; tracked status, durable waits
 and publication retain their project/worktree requirements.
 The owner's internal `pr-watch deliver` callback also runs from its neutral

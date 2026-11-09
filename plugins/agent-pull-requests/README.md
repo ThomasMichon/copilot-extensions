@@ -13,6 +13,8 @@ commands into a separate, API-first surface:
 - `status`, `create`, `merge`, and `wait` are all implemented.
 - Native [on-demand thread reads](docs/cli-reference.md#native-threads)
   reuse the existing configured Worktrees provider owner without a target checkout.
+- Native [unified-diff reads](docs/cli-reference.md#native-diff) use that same
+  target-qualified owner, preserving unsupported and unknown evidence.
 
 ## Installation
 

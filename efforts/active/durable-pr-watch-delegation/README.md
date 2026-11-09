@@ -294,11 +294,12 @@ The [explicit native thread-read contract](native-thread-read.md), reviewed in
 #11655, reuses the existing checkout-free Worktrees read owner; finite native
 source merged in #11657. It adds no transport or watcher. Native-platform,
 installed/HTTP qualification, live providers and thread resolution stay open.
-The [explicit native diff-read proposal](native-diff-read.md) adds a bounded
+The [explicit native diff-read contract](native-diff-read.md), reviewed in
+#11659, defines a bounded
 checkout-free reader over the existing provider primitive while preserving
 tracked `pr-diff`, honest ADO refusal and unknown completeness/revision
-evidence. Review precedes receiver/frontend implementation; workspace
-generation acquisition remains independent.
+evidence. Finite receiver/frontend source is qualified below; installed,
+live-provider and workspace generation acceptance remain independent.
 
 - [x] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence)
   (merged in #10380; implementation, provider and adoption gates remain).
@@ -1051,11 +1052,12 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
-- [ ] Qualify the [explicit native diff-read boundary](native-diff-read.md#compatibility-and-qualification)
-  after contract review: actual owner/frontend process, selected target and
-  endpoint, unchanged tracked compatibility, three synthetic provider methods,
-  honest unsupported/error/completeness and mixed-version behavior. Installed,
-  live-provider, HTTP and candidate-bound workspace acceptance remain separate.
+- [x] Qualify the finite [explicit native diff-read source boundary](native-diff-read.md#compatibility-and-qualification)
+  after contract review: 149 native cases with five Windows-only skips and
+  362 actual owner/read/provider/tracked cases. Real subprocess provider
+  methods retain target/endpoint selection, tracked compatibility and honest
+  unsupported/error/completeness evidence. Installed, live-provider, HTTP and
+  candidate-bound workspace acceptance remain separate.
 
 - [x] Qualify finite explicit-target native thread reading (#11657): 148 native
   parser/routing cases with five Windows-only skips and 43 actual-owner
@@ -1353,6 +1355,78 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-09 - Native diff-read source qualification
+
+- Implemented the contract reviewed in #11659 through the existing one-shot
+  read/configuration and provider owners. The additive native-only frontend
+  dispatches once, validates the exact target/report and retains complete
+  valid evidence independently of command outcome. No transport, watcher,
+  diff archive, mutation or claimant is introduced.
+- GitHub diff acquisition now honors its configured endpoint through the
+  existing provider host helper; ordinary ambient/default behavior is
+  retained when no endpoint is configured. Gitea uses its existing endpoint,
+  and ADO remains explicitly unsupported for unified diffs.
+- The native packet passes 149 cases with five existing Windows-only skips;
+  final actual-owner/read/provider/tracked qualification passes 362.
+  Real subprocess fixtures preserve UTF-8/line endings, provider refusal,
+  neutral CWD, mixed-version handling and tracked reconciliation/output.
+  An initial fixture expected the wrong Gitea API path and omitted the
+  generic tracked JSON version; actual boundaries corrected those
+  expectations without changing tracked behavior.
+- A module-size guard caught the enlarged dispatcher. Keeping on-demand
+  provider/account selection in the existing read-context module restores
+  the ceiling; the final owner packet also covers existing thread readers.
+- Validate provider return fields inside the failure-report boundary, so
+  absent or malformed results remain valid failed reports. Reject unknown
+  on-demand report verbs before selecting a provider or acquiring credentials.
+  Six focused regressions cover those failure classes.
+- Require positive support at report dispatch, bound UTF-8 sizing before
+  encoding oversized text, and expose only the exception class for an
+  unexpected provider failure. Native result errors remain intact; exception
+  text cannot become a second path for accidental secret disclosure.
+- Actual provider CLI text capture normalized CRLF and bare CR before report
+  construction. Add an optional strict UTF-8 byte-capture mode through the
+  existing process owner, selected only by explicit diff acquisition; tracked
+  calls retain their original normalization. Real subprocess controls prove
+  both modes and invalid-UTF-8 refusal, rather than mocking the capture seam.
+- Reject malformed configured GitHub endpoints before `gh` and bind supplied
+  tokens to all public/Enterprise aliases, preserving absent-configuration
+  defaults. Actual synthetic CLI processes prove the selected host/token
+  overrides unrelated ambient values. The Gitea diff helper stays under its
+  existing curl owner while preserving the module ceiling.
+- GitHub vendor-download HTTP 504s blocked disposable fixture preparation.
+  Qualification recovered with the same UV version from its canonical
+  package feed, independently SHA-256 pinned and older than seven days,
+  selected only in generated disposable configuration. Resource limits,
+  offline test execution and verified cleanup remain; no tracked bootstrap
+  or installed runtime changed. This does not qualify the GitHub bootstrap.
+- Fatal lint, install/headless/module guards and documentation consistency
+  pass. Both changed plugins remain typing-Pending under #9807; native
+  platform, installed/provider, HTTP, workspace and full parent acceptance
+  remain open.
+- Required CI identified stale exact-source admission for the changed
+  project router before running units. Bind the actual router/test bytes
+  and add two actor-free exact-command controls, preserving all packet
+  guards and budgets. The complete admitted packet passes 4,665 cases
+  with verified cleanup; no failed test or source gate is bypassed.
+
+### 2026-11-08 - Native diff-read contract merged; full parent return
+
+- #11659 merged as `02ae0268e0d1b2518d204c9d67090b2709e422f4` at
+  23:50 PT after genuine current-head Copilot Approval `5822914588` on
+  `83cea490c3099a738e25109b8a6663c760fc2439`, all three findings resolved
+  and every required check green. Normal managed completion used only the
+  documented additional-CODEOWNER exception; review and CI remained required.
+- Normal `pr-complete` retained a backup and removed three redundant local
+  commits, aligning source to the confirmed merged base. Contribution
+  trailers remain in the merge commit. The parent issue remains open.
+- Re-read the complete root Plan and Validation Plan after merge. Credit
+  only reviewed intent: receiver/frontend realization and every native,
+  provider, installed, HTTP, workspace and retained-parent exit remain open.
+- Next source action: implement the additive explicit-target diff read
+  through the existing one-shot read and provider owners, then qualify
+  actual parser/process and provider behavior. No live activation is granted.
 
 ### 2026-11-08 - Native diff-read boundary proposed
 
