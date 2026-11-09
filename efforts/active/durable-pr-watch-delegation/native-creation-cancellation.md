@@ -3,8 +3,8 @@
 Back to the [CLI parity inventory](cli-parity-inventory.md) and
 [canonical effort](README.md).
 
-**Contract reviewed in #11651; finite native source implementation is submitted
-separately. Installed/provider/HTTP acceptance remains open.**
+**Contract reviewed in #11651; finite native source merged in #11653.
+Installed/provider/HTTP acceptance remains open.**
 This closes part of the PR-domain
 [provider-neutral surface](../../../visions/plugins/agent-pull-requests/README.md#first-class-provider-neutral-pr-surface)
 through the existing Worktrees creation owner. It follows
