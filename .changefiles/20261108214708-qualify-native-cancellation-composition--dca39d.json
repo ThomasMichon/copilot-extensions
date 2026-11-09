@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify native cancellation composition with actual creation persistence, recovery, races and retained source custody.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
