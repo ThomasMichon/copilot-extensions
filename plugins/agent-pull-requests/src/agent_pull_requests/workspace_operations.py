@@ -92,6 +92,7 @@ class WorkspaceOperations:
                  selection_preparer_deadline: bool = False,
                  selection_owned_edits: bool = False,
                  retention_target: Callable | None = None,
+                 retention_target_deadline: bool = False,
                  terminal_reads: bool = False,
                  write_context_factory: Callable[..., Callable] | None = None) -> None:
         writers = (write_context, write_context_factory)
@@ -110,6 +111,8 @@ class WorkspaceOperations:
             or type(prepared_reviews) is not bool
             or type(comment_mappings) is not bool
             or type(terminal_reads) is not bool
+            or type(retention_target_deadline) is not bool
+            or retention_target_deadline and retention_target is None
             or terminal_reads and (
                 not conversations or retention_target is None or any(writers)
                 or feedback_owner is not None or prepared_reviews or comment_mappings
@@ -160,6 +163,7 @@ class WorkspaceOperations:
         self.selection_preparer_deadline = selection_preparer_deadline
         self.selection_owned_edits = selection_owned_edits
         self.retention_target = retention_target
+        self.retention_target_deadline = retention_target_deadline
         self.terminal_reads = terminal_reads
         from .workspace_retention import WorkspaceRetention
         self.retention = WorkspaceRetention(self)
@@ -357,10 +361,14 @@ class WorkspaceOperations:
                 )
                 if previous is None:
                     raise WorkspaceUnavailable("selected comparison generation unavailable")
-            terminal_target = (
-                self.retention_target(copy.deepcopy(scope))
-                if retention_epoch is not None and self.retention_target is not None else None
-            )
+            terminal_target = None
+            if retention_epoch is not None and self.retention_target is not None:
+                terminal_target = (
+                    self.retention_target(
+                        copy.deepcopy(scope), expires_at=expires_at, checkpoint=check,
+                    ) if self.retention_target_deadline else self.retention_target(copy.deepcopy(scope))
+                )
+                check()
             observed = self.read_owner.read({
                 "schema": REQUEST_SCHEMA, "version": 1, "binding_ref": self.binding_ref,
                 "number": number, "budget_seconds": deadline - time.monotonic(),

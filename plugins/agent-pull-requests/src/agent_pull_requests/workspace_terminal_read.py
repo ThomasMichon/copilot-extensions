@@ -30,6 +30,13 @@ def contract() -> dict:
     }
 
 
+def target_capture_contract() -> dict:
+    return {
+        "protocol": "agent-pull-requests.terminal-target-capture/v1",
+        "phase": "before_acquisition", "budget": "request_checkpoint_and_expiry",
+    }
+
+
 def supports(value: object) -> bool:
     if not isinstance(value, dict):
         return False
