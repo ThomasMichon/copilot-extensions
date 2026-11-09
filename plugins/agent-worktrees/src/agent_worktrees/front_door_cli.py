@@ -48,12 +48,17 @@ def unavailable_project_response(argv: list[str], message: str) -> int | None:
         "worktree-data-read", "worktree-data-allocate",
         "worktree-observations", "worktree-observation-history",
         "agenda-read", "agenda-publish", "agenda-feed",
+        "pr-author-ready",
     }:
         return project_resolution_failure(argv, RuntimeError(message))
     return None
 
 
 def project_resolution_failure(argv, error: Exception) -> int:
+    if argv and argv[0] == "pr-author-ready":
+        from .pr_author_cli import readiness_project_unavailable
+
+        return readiness_project_unavailable(argv, str(error))
     if argv and argv[0] in {"worktree-data-read", "worktree-data-allocate"}:
         from .worktree_data_cli import project_unavailable
 

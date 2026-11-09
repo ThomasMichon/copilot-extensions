@@ -78,6 +78,9 @@ metadata-only repair. Worktrees remains the underlying owner:
 `--expected-head` inputs for current built-in publication checks; `pr-update`
 repairs an existing PR without pushing; `pr-push` publishes an admitted,
 pinned source without forcing the managed caller's branch scheme.
+Optional `pr-author-ready` addresses an explicit target's native draft state
+without changing tracked `pr-ready` selection or releasing holds/consent;
+its outcomes and support window live in that same author workflow.
 
 Query `pr-author-capabilities --repo <target> --json` on the actual selected
 runtime before relying on new operations. The target's own binding governs
