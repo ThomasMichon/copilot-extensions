@@ -75,18 +75,25 @@ def key_binding(context, description: dict) -> None:
         raise protocol.SetupError("Selected Vault directory differs from the SSH request's exact key references.")
 
 
-def _vault_call(selection, arguments: list[str], *, timeout: int) -> tuple[int, dict]:
-    environment = protocol._environment(attended=False)
+def _vault_call(selection, arguments: list[str], *, timeout: int, invocation=None) -> tuple[int, dict]:
+    if invocation is not None:
+        invocation.verify()
+    environment = (
+        dict(invocation.environment) if invocation is not None else protocol._environment(attended=False)
+    )
     environment["AGENT_VAULT_NO_SELFPROVISION"] = "1"
     environment.pop("AGENT_VAULT_PINNED_CONTEXT", None)
     # A routing-only guard must not clear the caller's explicit provisioning inhibition.
     environment.pop("_AGENT_WORKTREES_VAULT_RUNTIME_GUARD", None)
     try:
         completed = run_caller_owned(
-            [str(Path(selection.argv[0]).expanduser()), *selection.argv[1:],
+            [*(invocation.argv if invocation is not None else
+               (str(Path(selection.argv[0]).expanduser()), *selection.argv[1:])),
              "--configuration-root", str(Path(selection.configuration_root).expanduser()), *arguments],
             env=environment, timeout=timeout, max_stdout_bytes=16384, max_stderr_bytes=16384,
         )
+        if invocation is not None:
+            invocation.verify()
         value = json.loads(completed.stdout, object_pairs_hook=protocol._object)
         if not isinstance(value, dict):
             raise ValueError
@@ -114,7 +121,7 @@ def _key_fingerprint(value: object) -> str:
     return "SHA256:" + base64.b64encode(hashlib.sha256(wire).digest()).decode("ascii").rstrip("=")
 
 
-def prepare_key(setup, context, description: dict) -> protocol.Outcome | None:
+def prepare_key(setup, context, description: dict, *, invocation=None) -> protocol.Outcome | None:
     """Reuse the selected owning Vault before any new enrollment or installation."""
     selection = context.ssh_key
     key_binding(context, description)
@@ -126,7 +133,14 @@ def prepare_key(setup, context, description: dict) -> protocol.Outcome | None:
     except OSError:
         raise protocol.SetupError("Selected Vault configuration root is unavailable.") from None
     setup.verify()
-    code, contract = _vault_call(selection, ["invocation-contract", "--json"], timeout=30)
+    invocation_options = {}
+    if selection.owner is not None:
+        if invocation is None:
+            from . import repository_vault
+
+            invocation = repository_vault.selected()
+        invocation_options["invocation"] = invocation
+    code, contract = _vault_call(selection, ["invocation-contract", "--json"], timeout=30, **invocation_options)
     if (
         code != 0 or contract.get("schema") != "agent-vault.invocation"
         or type(contract.get("version")) is not int or contract["version"] != 1
@@ -144,7 +158,7 @@ def prepare_key(setup, context, description: dict) -> protocol.Outcome | None:
                 "--expected-fingerprint", selection.fingerprint,
             ])
         setup.verify()
-        code, result = _vault_call(selection, arguments, timeout=120)
+        code, result = _vault_call(selection, arguments, timeout=120, **invocation_options)
         if operation == "install":
             setup.verify()
         if code != 0:
@@ -276,7 +290,7 @@ def status(description: dict, module, *, require_ready: bool = False) -> bool:
     return True
 
 
-def run(setup, context, arguments: list[str], description: dict, *, apply: bool):
+def run(setup, context, arguments: list[str], description: dict, *, apply: bool, invocation=None):
     from .repository_continuity import _invoke
 
     arguments = [*arguments, "--expected-request-digest", description["request_digest"]]
@@ -285,6 +299,8 @@ def run(setup, context, arguments: list[str], description: dict, *, apply: bool)
         arguments.extend(["--expected-key-fingerprint", context.ssh_key.fingerprint])
     with selected_inputs(description) as (module, selected):
         setup.verify()
+        if invocation is not None:
+            invocation.verify()
         if status(description, module):
             if not same_description(_invoke(arguments), description):
                 raise protocol.SetupError("SSH setup inputs changed during readiness inspection.")
@@ -292,6 +308,8 @@ def run(setup, context, arguments: list[str], description: dict, *, apply: bool)
             return protocol.Outcome("ready", "Selected SSH application has converged its authenticated directory.")
         if not apply:
             return protocol.Outcome("needed", "Selected SSH application requires its normal installation.")
+        if invocation is not None:
+            invocation.verify()
         current = _invoke([*arguments, "--apply"])
         if not same_description(current, description):
             raise protocol.SetupError("SSH setup inputs changed before application construction.")
@@ -299,6 +317,8 @@ def run(setup, context, arguments: list[str], description: dict, *, apply: bool)
         uv = shutil.which("uv")
         if uv is None:
             raise protocol.SetupError("SSH application construction requires the owner's existing UV executable.")
+        if invocation is not None:
+            invocation.verify()
         receipt = module.install_application(
             Path(description["snapshot"]), "fleet-manager", selected.payload, Path(description["root"]),
             uv=Path(uv).absolute(), base_python=Path(sys.executable),
@@ -306,6 +326,8 @@ def run(setup, context, arguments: list[str], description: dict, *, apply: bool)
             expected_hash=description["selection"]["payload_hash"],
         )
         setup.verify()
+        if invocation is not None:
+            invocation.verify()
         current = _invoke(arguments)
         if not same_description(current, description):
             raise protocol.SetupError("SSH setup inputs changed during application construction.")
