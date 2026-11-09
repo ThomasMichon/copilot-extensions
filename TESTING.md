@@ -372,11 +372,20 @@ Manager's opt-in `--test-file tests/test_companion_head_observation.py
 admission, actual private Worktrees file/task receipt reads through the selected
 process, independent durable/Picker facts and old-caller/new-provider compatibility.
 Real Textual controls cover Refresh/reopen, narrow rendering, separately retained
-lineage, source failures, rollback and late-selection fencing. A native Linux
-pidfd witnesses exact blocked optional-child exit on Escape; other-platform
-skips are not native coverage. These are isolated source/process controls, not
+lineage, source failures, rollback and late-selection fencing. A POSIX
+signal-0 poll witnesses exact blocked optional-child exit on Escape (the managed
+test interpreter may lack `os.pidfd_open`); Windows is skipped, and that skip is
+not native coverage. These are isolated source/process controls, not
 installed, native performance or the original live manual-cutover acceptance.
 The required unit-only packet is unchanged.
+
+Manager's `--test-file tests/test_companion_pr_panel_ui.py` packet checks the
+recorded-PR panel at a 40-column viewport (controls stay on screen; wrapped
+rows keep provider text literal plus the point-read state and record caveat)
+and retirement of a blocked real point-read child on Escape, Refresh and
+deselection with no engine cleanup failure. It uses the same POSIX signal-0
+witness and skips Windows; it is source/process evidence, not installed or
+native job-object coverage.
 
 Worktrees' opt-in `--test-file tests/test_handoff_head_observation.py --test-file
 tests/test_lazy_dispatch.py --test-file tests/test_session_lifecycle.py
