@@ -66,8 +66,6 @@ def require_compact(document: dict, terminal: dict) -> None:
         for row in recovered
     ) for identity in terminal["operations"]):
         raise ValueError("all captured operations require compact recovery before cache retirement")
-    if any(row["intent"]["scope"] == terminal["scope"] for row in document["reviews"]):
-        raise ValueError("body-bearing review still owns the terminal scope")
 
 
 class TerminalCacheRetirementStore:
@@ -105,6 +103,8 @@ class TerminalCacheRetirementStore:
         if "terminal_cache_retirement" not in document:
             raise ValueError("terminal cache retirement requires explicit adoption")
         require_compact(document, terminal)
+        if any(row["intent"]["scope"] == scope for row in document["reviews"]):
+            raise ValueError("body-bearing review still owns the terminal scope")
         return terminal, next(
             (row for row in document["terminal_cache_retirement"]["records"]
              if row["scope"] == scope and row["cursor"] == asdict(cursor)), None,

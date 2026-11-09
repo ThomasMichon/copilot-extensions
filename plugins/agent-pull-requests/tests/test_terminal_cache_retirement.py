@@ -348,9 +348,17 @@ def test_reopen_preserves_new_pointer_and_rejects_delayed_old_epoch(workspace):
     reopened = load(operations, None)
     assert reopened["publication"]["status"] == "published"
     pointer = operations.cache.lookup(prepared[2]["scope"])["current_id"]
+    fresh = copy.deepcopy(prepared[2])
+    fresh.update(operation_id="new-epoch-review", generation_id=pointer)
+    admitted = operations.store.admit_review(fresh, expires_at=expires())["operation"]
+    assert admitted["intent"]["operation_id"] == "new-epoch-review"
+    assert all(action["state"] == "unattempted" for action in admitted["actions"])
     with pytest.raises(TerminalAdmissionClosed):
         retire(prepared)
     assert operations.cache.lookup(prepared[2]["scope"])["current_id"] == pointer
+    assert operations.store.inspect_review(
+        fresh["operation_id"], fresh["scope"], expires_at=expires(),
+    ) == admitted
 
 
 @pytest.mark.parametrize("kind", ["intent", "cache"])
