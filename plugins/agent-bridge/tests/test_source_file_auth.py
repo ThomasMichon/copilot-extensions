@@ -215,6 +215,39 @@ async def test_post_transport_failure_is_not_replayed_or_exposed(tmp_path, monke
 
 
 @pytest.mark.asyncio
+async def test_source_loss_and_recovery_never_extend_the_retained_lease(tmp_path, monkeypatch):
+    available, methods = True, []
+
+    def handler(request):
+        methods.append(request.method)
+        if request.method == "GET":
+            return httpx.Response(200, json=discovery())
+        if not available:
+            clock.wall += 10
+            clock.monotonic += 10
+            return httpx.Response(503)
+        return httpx.Response(200, json=response(
+            lease_issued_at=clock.wall - 1, lease_expires_at=clock.wall + 59,
+        ))
+
+    client, clock, _, _ = fixture_client(tmp_path, monkeypatch, handler)
+    original = await client.acquire()
+    available = False
+    with pytest.raises(wire.SourceLeaseError):
+        await client.acquire()
+    assert methods == ["GET", "POST", "GET", "POST"]
+    assert original.remaining_seconds() == 45
+    clock.wall += 46
+    clock.monotonic += 46
+    assert original.remaining_seconds() == 0
+    available = True
+    fresh = await client.acquire()
+    assert fresh.remaining_seconds() == 55
+    assert original.remaining_seconds() == 0
+    assert methods == ["GET", "POST"] * 3
+
+
+@pytest.mark.asyncio
 async def test_caller_deadline_cancels_an_unfinished_exchange_without_retry(tmp_path, monkeypatch):
     methods = []
     async def handler(request):
@@ -268,6 +301,60 @@ async def test_acquire_renew_withdraw_and_recover_preserve_other_native_config(t
     expected["authTokens"]["https://github.com:synthetic"]["token"] = lease.token
     assert document() == expected
     assert not list(root.glob(".bridge-account-auth-*"))
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Native plaintext-file adapter declares POSIX only")
+@pytest.mark.asyncio
+async def test_source_outage_preserves_file_and_fresh_renewal_uses_the_same_owner(tmp_path, monkeypatch):
+    available, generation, posts = True, 1, []
+
+    def handler(request):
+        if request.method == "GET":
+            return httpx.Response(200, json=discovery())
+        posts.append(json.loads(request.content))
+        if not available:
+            return httpx.Response(503)
+        return httpx.Response(200, json=response(
+            token=f"synthetic-token-{generation}", lease_id=str(generation) * 32,
+            lease_issued_at=clock.wall - 1, lease_expires_at=clock.wall + 59,
+        ))
+
+    client, clock, _, _ = fixture_client(tmp_path, monkeypatch, handler)
+    root = tmp_path / ".copilot"
+    root.mkdir(mode=0o700)
+    config = root / "config.json"
+    original = {
+        "theme": "dark",
+        "authTokens": {
+            "https://github.com:synthetic": {"token": "prior-synthetic-token"},
+            "https://github.com:other": {"token": "other-synthetic-token"},
+        },
+    }
+    config.write_text(json.dumps(original), encoding="utf-8")
+    config.chmod(0o600)
+    history = root / "history"
+    history.write_bytes(b"synthetic-native-history")
+    store = CopilotAccountFile(config, account="synthetic")
+    retained = await store.renew(client)
+    before = config.read_bytes()
+    available = False
+    clock.wall += 56
+    clock.monotonic += 56
+    with pytest.raises(wire.SourceLeaseError):
+        await store.renew(client)
+    with pytest.raises(CopilotFileAuthError, match="expired"):
+        store.install(retained)
+    assert config.read_bytes() == before
+    assert retained.remaining_seconds() == 0
+    assert len(posts) == 2
+    available, generation = True, 2
+    fresh = await store.renew(client)
+    expected = json.loads(json.dumps(original))
+    expected["authTokens"]["https://github.com:synthetic"]["token"] = fresh.token
+    assert json.loads(config.read_bytes()) == expected
+    assert history.read_bytes() == b"synthetic-native-history"
+    assert retained.remaining_seconds() == 0
+    assert len(posts) == 3
 
 
 @pytest.mark.skipif(os.name != "posix", reason="Native plaintext-file adapter declares POSIX only")
