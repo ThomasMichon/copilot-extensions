@@ -56,6 +56,7 @@ function Get-NativePreToolStop {
 function Test-NativePreToolRead([object]$Payload, [bool]$PreparedMembership = $false) {
     if (($env:COPILOT_EXTENSIONS_CONTEXT -and -not $PreparedMembership) -or
         $Payload -isnot [Collections.IDictionary]) { return $false }
+    if ($Payload.ContainsKey('toolCalls')) { return $false }
     $name = $Payload.toolName
     if (-not $name) { $name = $Payload.tool_name }
     if ($name -isnot [string] -or $name -cnotin @('view', 'rg', 'glob')) { return $false }

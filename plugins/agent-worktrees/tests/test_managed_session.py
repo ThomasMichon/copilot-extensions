@@ -668,7 +668,7 @@ def test_prepared_native_membership_reuses_original_association(tmp_path, monkey
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows registered pre-tool consumer")
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
-@pytest.mark.parametrize("case", ["read", "write", "revoked", "cold-read", "cold-write"])
+@pytest.mark.parametrize("case", ["read", "write", "revoked", "cold-read", "cold-write", "read-batch"])
 def test_registered_pre_tool_entry_reuses_prepared_membership(tmp_path, monkeypatch, shell, case):
     executable = shutil.which(shell)
     if not executable:
@@ -681,9 +681,11 @@ def test_registered_pre_tool_entry_reuses_prepared_membership(tmp_path, monkeypa
     session.mkdir(parents=True)
     payload = {
         "sessionId": "pre-tool", "cwd": str(workspace),
-        "toolName": "view" if case in {"read", "cold-read"} else "edit",
+        "toolName": "view" if case in {"read", "cold-read", "read-batch"} else "edit",
         "toolArgs": {"path": "non-ascii-\u00e9.txt", "text": "quote'\"\\\n\t"},
     }
+    if case == "read-batch":
+        payload["toolCalls"] = [{"name": "edit", "args": payload["toolArgs"]}]
     if not case.startswith("cold-"):
         assert module.admitted(payload, home=tmp_path)
     plugin = tmp_path / "payload"
@@ -735,7 +737,7 @@ def test_registered_pre_tool_entry_reuses_prepared_membership(tmp_path, monkeypa
     assert result.stderr == b""
     if case.startswith("cold-"):
         assert (session / "agent-worktrees" / "managed-session.json").is_file()
-    if case in {"write", "cold-write"}:
+    if case in {"write", "cold-write", "read-batch"}:
         assert observed.read_bytes() == raw.encode("utf-8")
         assert json.loads(result.stdout) == {
             "permissionDecision": "deny", "permissionDecisionReason": "fixture policy",
@@ -747,13 +749,15 @@ def test_registered_pre_tool_entry_reuses_prepared_membership(tmp_path, monkeypa
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows registered prepared-cell pre-tool consumer")
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
-@pytest.mark.parametrize("case", ["view", "rg", "glob", "guard-drift", "incomplete", "receipt", "write"])
-def test_registered_pre_tool_cell_read_requires_complete_native_proof(tmp_path, monkeypatch, shell, case):
+@pytest.mark.parametrize("case", ["view", "rg", "glob", "guard-drift", "incomplete", "receipt", "write", "read-batch"])
+def test_registered_prepared_cell_membership_read_requires_complete_native_proof(tmp_path, monkeypatch, shell, case):
     from types import SimpleNamespace
     import test_registry_paths as fixtures
 
     executable = shutil.which(shell)
     if not executable:
+        if os.environ.get("AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP") == "1":
+            pytest.fail(f"{shell} is required")
         pytest.skip(f"{shell} is unavailable")
     native_run = subprocess.run
     monkeypatch.setattr(fixtures, "subprocess", SimpleNamespace(
@@ -790,6 +794,8 @@ def test_registered_pre_tool_cell_read_requires_complete_native_proof(tmp_path, 
         "toolName": case if case in {"view", "rg", "glob"} else "edit" if case == "write" else "view",
         "toolArgs": {"path": "non-ascii-\u00e9.txt", "text": "quote'\"\\\n\t"},
     }
+    if case == "read-batch":
+        event["toolCalls"] = [{"name": "edit", "args": event["toolArgs"]}]
     assert load("managed_session").admitted(event, home=tmp_path)
     marker = session / "agent-worktrees" / "managed-session.json"
     if case == "incomplete":

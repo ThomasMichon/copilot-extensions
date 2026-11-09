@@ -579,8 +579,9 @@ for its existing exact `view`/`rg`/`glob` read exemption. It still checks the
 four original guard-source digests before returning without a policy child.
 Fallback admission does not qualify, even if the original resolver refreshes
 the association during that call. Changed guard sources, incomplete or changed
-cell observations, other tool names and writes retain the original validation
-and policy path. The default-installation emergency stop never governs a cell.
+cell observations, other tool names, writes and every `toolCalls` envelope
+retain the original validation and policy path, even with read-labelled
+envelope metadata. The default-installation emergency stop never governs a cell.
 This does not qualify installed or composed hook latency.
 
 New producers remain compatible with old readers, which ignore the additive
