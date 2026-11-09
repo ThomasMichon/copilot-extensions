@@ -433,3 +433,14 @@ inventory; unsupported execution must not be reported as a successful gate.
   Nine copy, exclusion and recursion controls passed with the native consumer
   module imported through canonical containment; scoped Ruff and whitespace
   checks passed. No additional shared-fixture consumer assumes the old root.
+- Fresh review identified the remaining provenance dependency: normalization
+  must recreate the fixture marketplace catalog outside copied package inputs,
+  with its plugin source pointing at the normalized checkout location.
+  The shared helper now supplies that generic catalog and the layout controls
+  resolve its source to the actual copied plugin.
+- The canonical focused packet passed all ten cases, including fresh runtime
+  construction and the real no-seed native backend consumer. Test execution
+  took 281.93 seconds; preparation and verified cleanup completed in
+  395.14 seconds. This closes the observed catalog gap without weakening
+  provenance checks or substituting a source import for installation.
+  Fresh review, required CI, normal release and Main activation remain open.

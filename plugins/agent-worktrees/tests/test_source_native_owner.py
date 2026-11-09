@@ -34,6 +34,12 @@ def _copy_native_checkout(plugin: Path, repository: Path, checkout: Path, *, ign
         )
     else:
         shutil.copytree(repository, checkout, ignore=ignore)
+    marketplace = checkout / ".github/plugin/marketplace.json"
+    marketplace.parent.mkdir(parents=True, exist_ok=True)
+    marketplace.write_text(json.dumps({
+        "name": "runtime-fixture",
+        "plugins": [{"name": "agent-worktrees", "source": "plugins/agent-worktrees"}],
+    }), encoding="utf-8")
 
 
 @pytest.mark.parametrize("nested", [False, True])
@@ -52,6 +58,8 @@ def test_native_checkout_preserves_both_frozen_layouts(tmp_path, standalone, nes
     checkout = tmp_path / "checkout"
     _copy_native_checkout(plugin, repository, checkout)
     assert (checkout / "plugins/agent-worktrees/pyproject.toml").read_text() == "frozen package"
+    catalog = json.loads((checkout / ".github/plugin/marketplace.json").read_text(encoding="utf-8"))
+    assert checkout / catalog["plugins"][0]["source"] == checkout / "plugins/agent-worktrees"
     assert not (checkout / "unrelated").exists()
     assert not (checkout / "plugins/agent-worktrees/.git").exists()
     if not standalone:
