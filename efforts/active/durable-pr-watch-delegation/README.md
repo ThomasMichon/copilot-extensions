@@ -317,10 +317,11 @@ handler/report defaults. Its opt-in SDK prerequisite merged in #11699; the
 parallel report profile and native capture/client budget composition merged
 in #11702. Their finite source qualification is not explicit standalone
 configuration, installed hosting or provider acceptance.
-The [explicit standalone report-host proposal](standalone-report-host.md)
+The [explicit standalone report-host contract](standalone-report-host.md), reviewed in #11705,
 selects the existing reader/native adapter and actual SDK handler ceiling
-through strict optional host configuration. Review precedes implementation;
-fresh isolated qualification is not retained-host enrollment or rollout.
+through strict optional host configuration. The finite source implementation
+and fresh isolated controls are recorded in its linked implementation journal;
+ordinary review/CI/merge remains open. This is not retained-host enrollment or rollout.
 
 - [x] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence)
   (merged in #10380; implementation, provider and adoption gates remain).
@@ -1412,6 +1413,8 @@ callback an implicit credential store.
 
 ## Journal
 
+- [2026-11-09 - Standalone report-host contract reviewed](journal/2026/11.09%20Standalone%20report%20host%20contract.md)
+- [2026-11-09 - Standalone report-host source implementation](journal/2026/11.09%20Standalone%20report%20host%20implementation.md)
 - [2026-11-09 - Opt-in report v2 source qualification](journal/2026/11.09%20Bounded%20report%20v2%20source.md)
 - [2026-11-09 - Bounded SDK response owner qualified for source review](journal/2026/11.09%20Bounded%20SDK%20response%20owner.md)
 - [2026-11-09 - Size-qualified response contract reviewed; SDK owner first](journal/2026/11.09%20Size-qualified%20response%20contract.md)

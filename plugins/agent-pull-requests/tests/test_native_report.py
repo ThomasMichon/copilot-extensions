@@ -19,6 +19,10 @@ from test_report_read import reports as reports
 
 @pytest.fixture
 def native(tmp_path, monkeypatch):
+    return native_fixture(tmp_path, monkeypatch)
+
+
+def native_fixture(tmp_path, monkeypatch):
     if os.name == "nt":
         pytest.skip("fixture executable is POSIX; native Windows qualification remains separate")
     root = Path(__file__).resolve().parents[3]
@@ -138,6 +142,18 @@ def test_actual_native_children_keep_one_budget_and_use_pinned_reads(native, mon
         assert report["threads"][0]["comments"][0]["text"] == "body\r\ntext"
     else:
         assert report["diff"] == "diff --git a/x b/x\r\n+body\rtail"
+
+
+def test_selected_executing_support_is_passive_and_refuses_prior_capture_api(native, monkeypatch):
+    from agent_worktrees.github_account_observation import SelectedGitHubAccount
+
+    owner, _, calls, _, _ = native
+    owner.check_support()
+    assert calls() == []
+    monkeypatch.setattr(SelectedGitHubAccount, "capture", lambda self, stage, arguments: None)
+    with pytest.raises(ValueError, match="native report APIs unsupported"):
+        owner.check_support()
+    assert calls() == []
 
 
 @pytest.mark.parametrize("setting,value", [

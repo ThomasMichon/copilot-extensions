@@ -24,6 +24,7 @@ from single_instance_lease import SingleInstance
 
 from .preparation import PreparationConfig
 from . import terminal
+from .reports import ReportConfig
 
 _LIMIT = 1024 * 1024
 
@@ -181,6 +182,7 @@ class HostConfig:
     operation_seconds: int = 60
     drain_timeout: int = 60
     workspaces: WorkspaceConfig | None = None
+    reports: ReportConfig | None = None
 
     @property
     def status_path(self) -> Path:
@@ -340,6 +342,35 @@ def _workspaces(value: object, bindings: list[WatchScopeBinding],
     )
 
 
+def _reports(value: object, bindings: list[WatchScopeBinding], seconds: int) -> ReportConfig:
+    from .reports import core
+
+    selected = _fields(value, {"response_bytes", "bindings"})
+    # Optional imports stay within explicit selection, including old-core refusal.
+    native, _ = core(selected["response_bytes"])
+    scopes = {(b.principal, b.target): b.scope for b in bindings}
+    readers: list[tuple[str, str, ConsumerScope, Path, dict[str, str], str]] = []
+    for raw in _collection(selected["bindings"]):
+        entry = _fields(raw, {"principal", "target", "source_config", "scope", "context_id"})
+        principal, target = identifier(entry["principal"]), identifier(entry["target"])
+        key = (principal, target)
+        if key not in scopes or any((p, t) == key for p, t, *_ in readers):
+            raise ValueError("report requires one existing admitted caller/target")
+        owner = native(
+            config_path=_path(entry["source_config"]), scope=entry["scope"],
+            context_id=entry["context_id"],
+        )
+        admitted = scopes[key]
+        if (admitted.account, admitted.repo) != (owner.scope["account"], owner.scope["repo"]):
+            raise ValueError("report scope differs from admitted caller/target")
+        readers.append((
+            principal, target, admitted, owner.config_path, dict(owner.scope), owner.context_id,
+        ))
+    config = ReportConfig(selected["response_bytes"], tuple(readers))
+    config.readers(seconds)
+    return config
+
+
 def load_config(path: Path) -> HostConfig:
     path = _path(str(path))
     with path.open("rb") as stream:
@@ -349,7 +380,7 @@ def load_config(path: Path) -> HostConfig:
     value = _fields(json_object(raw), {
         "schema", "version", "root", "namespace", "fleet", "gateway", "slot",
         "gateway_origin", "proof_key_file", "access_token_file", "bindings", "observations",
-    }, {"gateway_ca", "interval", "operation_seconds", "drain_timeout", "workspaces"})
+    }, {"gateway_ca", "interval", "operation_seconds", "drain_timeout", "workspaces", "reports"})
     if value["schema"] != "agent-pull-requests.service" or (
         type(value["version"]) is not int or value["version"] != 1
     ):
@@ -394,6 +425,7 @@ def load_config(path: Path) -> HostConfig:
         drain_timeout=_seconds(value.get("drain_timeout", 60)),
         workspaces=_workspaces(value["workspaces"], bindings, observations, seconds)
         if "workspaces" in value else None,
+        reports=_reports(value["reports"], bindings, seconds) if "reports" in value else None,
     )
     config.store()
     return config

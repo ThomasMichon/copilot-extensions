@@ -3,8 +3,9 @@
 Back to the [canonical effort](README.md), [native report owner](native-report-owner.md)
 and [size-qualified response contract](bounded-report-response.md).
 
-**Agent-recommended, review-first source proposal under #11692 and #6007.
-Not implemented host support, enrollment or rollout authority.**
+**Agent-recommended source contract reviewed in #11705 under #11692 and #6007.
+Finite source implementation is qualified below; ordinary review/CI/merge is
+still open. This is not enrollment or rollout authority.**
 This closes part of
 [one service contract](../../../visions/plugins/agent-pull-requests/README.md#cli-through-one-service-contract)
 and follows
@@ -108,22 +109,23 @@ Expand the host first, select it only where supported, and retire no old route,
 native command or configuration form. A v2 client encountering old or rolled-back
 support refuses without native, v1 or alternate-forge fallback.
 
-After review, deliver one finite source implementation with focused isolated
-controls, not live credentials or retained hosts:
+The finite source implementation has focused isolated controls, not live
+credentials or retained hosts. Evidence and limits are recorded in the
+[implementation journal](journal/2026/11.09%20Standalone%20report%20host%20implementation.md):
 
-- [ ] Actual host parser/defaults: valid explicit bindings and boundary ceilings;
+- [x] Actual host parser/defaults: valid explicit bindings and boundary ceilings;
   unknown/duplicate fields, invalid paths/types/scopes, unsupported providers,
   missing executing APIs and old-host refusal before acquisition.
-- [ ] Actual foreground host, `WatchService`, connector/SDK/Gateway and source
+- [x] Actual foreground host, `WatchService`, connector/SDK/Gateway and source
   client: selected v1/v2 report delivery, complete larger reports and native
   error/exit evidence, plus ordinary watch/workspace controls.
-- [ ] Actual native policy and owned-process seams with synthetic credentials:
+- [x] Actual native policy and owned-process seams with synthetic credentials:
   no config/provision/startup account probes, request-only selected identity,
   changed policy/account refusal and no borrowed observation credentials.
-- [ ] Expiry, withdrawal, disconnect and delayed native/delivery cleanup through
+- [x] Expiry, withdrawal, disconnect and delayed native/delivery cleanup through
   the real host lifetime: no successful partial report, later read, abandoned
   task, early writer release or persisted report/credential bytes.
-- [ ] Default/prior/new/rollback peers and fresh fixture provision/restart:
+- [x] Default/prior/new/rollback peers and fresh fixture provision/restart:
   unchanged store/replay identities and workspace rules, no automatic migration,
   implicit dependency install or second dispatch.
 - [ ] Required affected tests, admitted strict service typing, packaging controls,
