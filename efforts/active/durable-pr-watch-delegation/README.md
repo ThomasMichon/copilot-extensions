@@ -295,7 +295,9 @@ _Operator-required outcome; agent-recommended slices and validation._
   The [coordinated terminal-retention refinement](terminal-retention.md)
   was reviewed in #11576. It defines the same-owner fence, notification,
   recovery-only payload and scoped cache/materialization sequence;
-  realization and qualification remain open.
+  T1 terminal intent/admission/drain and minimal replay notification merged
+  in #11605. T2 recovery-only payload/readback and scoped retirement, T3
+  executing-host qualification and full P1/P2 acceptance remain open.
   Existing normalized ADO load/sync acquisition feeds the explicitly enabled
   journal after confirmed cache publication (#10405); native observation and
   standalone-host adoption remain distinct prerequisites.
@@ -1255,6 +1257,12 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-08 - Land terminal intent without claiming physical retirement
+
+The [terminal-retention journal](journal/2026/11.08%20terminal-retention.md)
+records T1 source merge #11605, its reviewed race/replay corrections and
+the still-open T2/T3 and complete parent acceptance.
 
 ### 2026-11-08 - Review coordinated terminal retention before realization
 

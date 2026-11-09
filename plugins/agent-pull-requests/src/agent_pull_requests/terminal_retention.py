@@ -157,6 +157,11 @@ def require_live(
     if state is None:
         return None
     scope = _scope(scope)
+    if operation_id is not None and any(
+        row["operation_id"] == operation_id
+        for row in document.get("terminal_recovery", {}).get("operations", [])
+    ):
+        raise TerminalAdmissionClosed("historical compact operation is recovery-only")
     admission = next((row for row in state["admissions"] if row["scope"] == scope), None)
     if admission is None or any(
         row["scope"] == scope and row["cursor"]["epoch"] == admission["cursor"]["epoch"]
