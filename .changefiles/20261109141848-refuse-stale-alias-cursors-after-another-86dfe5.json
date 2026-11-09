@@ -1,0 +1,9 @@
+{
+  "comment": "Refuse stale alias cursors after another exact-family acquisition completes",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
