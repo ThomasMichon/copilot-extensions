@@ -1,0 +1,9 @@
+{
+  "comment": "Record Bridge-created ordinary worker worktrees as created so terminal conclusion releases them",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
