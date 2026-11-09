@@ -390,8 +390,8 @@ class AzureDevOpsConnector:
                 self._project_path("_apis", "git", "pullrequests"),
                 params=params,
                 purpose="identity_page",
+                on_page=lambda page: self._observe_records(page.data, kind="pulls"),
             ):
-                self._observe_records(result.data, kind="pulls")
                 for item in _values(result.data):
                     if not isinstance(item, dict):
                         continue

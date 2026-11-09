@@ -84,6 +84,11 @@ repository and account probes as `metadata`, and work-item comments/PR threads
 as `comment_page`. Continuations and failed responses retain their purpose.
 PR listings also return descriptions, even during ID-only path discovery:
 request purpose is not an exclusive payload-content category.
+The existing buffered `paginate_continuation` helper accepts an optional local
+`on_page(ApiResult)` callback after each non-304 JSON result, before requesting
+the next page. Azure DevOps observes PR records there, so later HTTP/JSON failure
+does not erase already-parsed work. The default list return, request order and
+provider protocol stay unchanged; the callback is not an acquisition commit.
 
 `acquisition_by_source[source]` separately counts parsed records at the built-in
 GitHub connector's existing issue-list, targeted-item and comment parsers:

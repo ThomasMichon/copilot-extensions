@@ -855,3 +855,46 @@ def test_ado_parsed_empty_query_pages_differ_from_unrecognized_envelopes(payload
             "identity_records": 0, "item_body_records": 0, "comment_body_records": 0,
         }} if payload != {} else {}
     )
+
+
+@pytest.mark.parametrize("failure", ["http", "json"])
+def test_ado_parsed_pull_pages_remain_counted_after_later_request_failure(failure):
+    seen_tokens = []
+
+    def handler(request):
+        assert request.url.path.endswith("/pullrequests")
+        token = request.url.params.get("continuationToken")
+        seen_tokens.append(token)
+        if token is None:
+            return _json_response(200, {"value": [
+                {"pullRequestId": 1, "description": "First page"},
+                {"pullRequestId": 1, "description": None},
+            ]}, headers={"x-ms-continuationtoken": "next"})
+        if failure == "http":
+            return _json_response(404, {"description": "Not a PR record"})
+        return httpx.Response(200, content=b"invalid json")
+
+    connector = AzureDevOpsConnector(
+        "ado:acme/widgets", token="pat-token", min_interval_s=0,
+        transport=httpx.MockTransport(handler),
+        work_item_queries=[], pull_request_queries=[{"status": "all"}],
+    )
+
+    @measure_reindex
+    def run():
+        error = httpx.HTTPStatusError if failure == "http" else ValueError
+        emitted = []
+        with pytest.raises(error):
+            for entry in connector._iter_pull_requests(since=None):
+                emitted.append(entry)
+        assert emitted == []  # Preserve the existing buffered acquisition behavior.
+        return {}
+
+    counts = run()["work_counts"]
+    assert counts["acquisition_by_source"] == {
+        "ado:acme/widgets:pulls": {
+            "identity_records": 2, "item_body_records": 2, "comment_body_records": 0,
+        },
+    }
+    assert counts["http_by_purpose"]["identity_page"]["attempts"] == 2
+    assert seen_tokens == [None, "next"]
