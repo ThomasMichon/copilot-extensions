@@ -25,6 +25,11 @@ Missing files contribute nothing. Strict readers refuse malformed-present JSON,
 non-object documents and invalid known fields rather than using defaults.
 Non-strict legacy reads tolerate malformed configuration as empty.
 
+Native `http_bindings` selects the opt-in credential-injection policy for
+[authenticated HTTP requests](authenticated-http.md); repository preferences
+cannot replace that policy. Its complete schema and matching rules live in the
+HTTP reference.
+
 ## Dependency selection
 
 The native installer's `-Profile base|ssh` / `--profile base|ssh` selection is
