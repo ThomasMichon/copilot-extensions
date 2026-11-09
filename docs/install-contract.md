@@ -5821,8 +5821,10 @@ The incoming monitor must advertise `status-monitor-async-retirement-v1`,
 guarded preparation recovery and a valid receiver generation. A compatible
 outgoing peer advertises those contracts and retires independently. Missing
 outgoing metadata, a legacy generation or a control timeout does not veto
-installation: native PID/birth and unchanged route custody still identify the
-predecessor. Before promotion, the new resident attempts one bounded
+installation. Native PID/birth qualifies optional predecessor cleanup, not
+incoming election. Structural, unchanged route custody remains mandatory for
+publication even when outgoing native identity cannot be observed. Before
+promotion, the new resident attempts one bounded
 `successor-handoff` notice carrying the exact old and selected successor endpoints.
 It uses the existing health seam to require the running peer's
 `status-monitor-successor-handoff-v1` capability; missing or malformed support
@@ -5852,8 +5854,48 @@ If the predecessor exits before the first grace record is armed, the same gate
 compare-releases its exact fallback under the observed active selection before
 settling custody. A missing active selection or failed route cleanup retains
 custody for retry; no grace record or force permission is fabricated.
-An unrouted, identity-unknown or changed owner remains an explicit refusal.
-This fallback does not weaken the incoming runtime's preparation contract.
+An unrouted or native-identity-unobservable incumbent defers retirement instead
+of refusing the incoming installation. The installation owner preserves exact
+older recovery bytes and the route/discovery observations under
+`status-monitor-observations/`, with durable canonical references protecting
+the retained code. Both cutover locks serialize moving an archived recovery
+record out of the active breadcrumb slot; no older attempt is recovered,
+cancelled, terminated or reported successful. The resident releases these
+references only after positive native exit for every recorded identity.
+Missing or unreadable exit evidence keeps retention pending. Malformed routing,
+archive I/O failure, a concurrent route change and failed incoming identity or
+readiness remain real failures. This fallback does not weaken the incoming
+runtime's preparation contract.
+Malformed observation envelopes report pending retirement through the existing
+resident error path rather than terminating the healthy incoming monitor.
+An undecodable non-null archived breadcrumb retains its bytes and code even
+after readable route/discovery owners exit: those exits cannot account for
+an unknown passive process. Missing archives never hide surviving canonical
+observation references. Refusal callbacks compare the validated raw route
+snapshot, preserving absent legacy generation fields and null optional metadata.
+A previous-only route still requires incoming startup, even without readable
+discovery. Its raw `active: null` is preserved through guarded publication;
+replacement opts out of eager route healing without changing legacy ZDD defaults.
+An unavailable pre-transition reuse probe selects replacement, not installation
+failure; post-publication serving attestation remains strict. Observation
+retention uses bounded reference groups in the existing atomic reference
+transaction, preceded by a durable write-ahead mapping. Interrupted final
+archives and reference commits therefore remain recoverable even after the
+observations change. The write-ahead record precedes the deletion fence, and
+the fence precedes slot inventory capture; a crash before the inventory is
+persisted resumes conservatively under that same fence. Recovery captures every
+pending inventory and atomically publishes their combined references before
+clearing the shared fence. Terminal cleanup intent is durable before reference
+release, so a failed archive deletion never re-retains slots that GC has since
+removed. The installer restores
+archived references before ordinary retirement reservation regardless of whether
+outgoing identity is now readable. Resident reconciliation also restores
+prepared dev-claim references without granting their release. A qualified
+predecessor exiting after observation does not veto unchanged raw-route CAS.
+Deferred dev release carries the original exact claim,
+including when the outgoing slot cannot be identified. Only the owning
+installer's committed outcome grants release, and native exit, current selection
+and exact claim ownership remain mandatory at reconciliation.
 The existing explicit cold-retirement helper retains its held cutover guard,
 authenticated runtime-prefix, native pin and positive-exit checks. Ordinary
 replacement does not invoke that helper before incoming startup or require its

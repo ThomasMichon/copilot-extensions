@@ -629,33 +629,41 @@ def settle_candidate(
                 custody.enter_context(runtime.retention_lease(root, selected, timeout=wait_timeout))
             snapshot = _selector_snapshot(root)
             manifest_snapshot = deployment.read_manifest(root)
+            outgoing_deferred = False
             if monitor_scope:
-                from agent_worktrees.runtime_monitor_abort import recover_abandoned
-                from zdd.cutover_lock import CutoverLock
+                from agent_worktrees import runtime_monitor_replacement as replacement
+                from zdd import breadcrumb
 
-                with CutoverLock(root / "status-monitor-routing"):
-                    recover_abandoned(root)
+                replacement.active(root)
+                outgoing_deferred = replacement.recover(root, runtime=runtime)
+                if breadcrumb.breadcrumb_path(root / "status-monitor-routing").exists():
+                    outgoing_deferred = replacement.retain(root, runtime=runtime) or outgoing_deferred
             try:
                 predecessor = _monitor_identity(root) if monitor_scope else None
             except AsyncRetirementUnsupported as error:
                 predecessor = error.identity[:2]
+            except InstallationRefused:
+                replacement.retain(root, runtime=runtime)
+                outgoing_deferred = True
+                predecessor = None
             serving_slot = None
             if predecessor is not None:
-                serving_slot = _monitor_slot(root, predecessor)
+                try:
+                    serving_slot = _monitor_slot(root, predecessor)
+                except InstallationRefused:
+                    replacement.retain(root, runtime=runtime, predecessor={
+                        "pid": predecessor[0], "start": predecessor[1],
+                    })
+                    outgoing_deferred = True
                 if serving_slot is not None and serving_slot not in (version, previous, selected):
                     custody.enter_context(runtime.retention_lease(root, serving_slot, timeout=wait_timeout))
-            if monitor_scope:
-                from zdd import breadcrumb
-
-                refusal = breadcrumb.recovery_refusal(
-                    cutover.routing_dir(), breadcrumb.read_breadcrumb(cutover.routing_dir()),
+            try:
+                already_serving = (
+                    monitor_scope and not force_monitor_transition
+                    and _candidate_serving(root, candidate_slot)
                 )
-                if refusal is not None:
-                    raise InstallationRefused(f"Monitor recovery refused before publication: {refusal}")
-            already_serving = (
-                monitor_scope and not force_monitor_transition
-                and _candidate_serving(root, candidate_slot)
-            )
+            except (OSError, ValueError, ConnectionError):
+                already_serving = False
             print(
                 f"Runtime {version}: monitor scope={monitor_scope} "
                 f"predecessor={predecessor} already-serving={already_serving}", flush=True,
@@ -683,6 +691,15 @@ def settle_candidate(
                     "release_claim": release_dev_claim if retiring_dev else None,
                 } if predecessor is not None and not already_serving else None
             )
+            deferred_release = release_dev_claim is not None and not retiring_dev and (
+                outgoing_deferred or predecessor is not None and not already_serving
+            )
+            if deferred_release:
+                replacement.retain(
+                    root, runtime=runtime, release_claim=release_dev_claim,
+                    predecessor=retirement_predecessor,
+                )
+                outgoing_deferred = True
             try:
                 if retirement_predecessor is not None:
                     from agent_worktrees import runtime_monitor_retirements as retirements
@@ -705,6 +722,8 @@ def settle_candidate(
                         retirement_predecessor=retirement_predecessor,
                     )
                     summary["self_retirement"] = True
+                    if outgoing_deferred:
+                        summary.setdefault("result", {})["retirement_pending"] = True
                     print(
                         f"Runtime {version}: monitor transition action={summary.get('action')} "
                         f"reason={summary.get('reason')} result={summary.get('result')}", flush=True,
@@ -716,12 +735,16 @@ def settle_candidate(
                     raise InstallationRefused(
                         f"Monitor activation failed after settlement: {(summary.get('result') or {}).get('error')}"
                     )
+                if deferred_release:
+                    replacement.settle_release(root, release_dev_claim, committed=True)
                 deployment.publish(root, manifest)
             except PublicationOutcomePending:
                 if helpers is not None:
                     helpers.keep()
                 raise
             except BaseException:
+                if summary.get("action") == "interrupted" and not handles:
+                    summary["action"] = "preparing"
                 announced = False
                 while True:
                     try:
@@ -737,11 +760,15 @@ def settle_candidate(
                                 from agent_worktrees import runtime_monitor_retirements as retirements
 
                                 retirements.cancel(root, retirement_predecessor, runtime=runtime)
+                            if deferred_release:
+                                replacement.settle_release(root, release_dev_claim, committed=False)
                         elif any(content not in (
                             (version + "\n").encode("utf-8"), (version + "\r\n").encode("utf-8"),
                         ) for content in _selector_snapshot(root).values()):
                             runtime.activate(root, version, link_free=True, dev_owner=dev_owner)
                         if committed:
+                            if deferred_release:
+                                replacement.settle_release(root, release_dev_claim, committed=True)
                             deployment.publish(root, manifest)
                         break
                     except PublicationOutcomePending:
@@ -772,10 +799,10 @@ def settle_candidate(
             "runtime_generation": identity["build_info"].get("runtime_generation"),
             "deployment_manifest_published": True,
             "helpers_published": helpers is not None,
-            "retirement_pending": (summary.get("result") or {}).get("retirement_pending") is True,
+            "retirement_pending": outgoing_deferred or (summary.get("result") or {}).get("retirement_pending") is True,
             "dev_claim_release_pending": (
-                release_dev_claim is not None and retiring_dev
-                and (summary.get("result") or {}).get("retirement_pending") is True
+                release_dev_claim is not None and (retiring_dev or outgoing_deferred)
+                and (outgoing_deferred or (summary.get("result") or {}).get("retirement_pending") is True)
             ),
             "runtime_python": str(runtime.slot_python(root, version)),
             "payload_hash": payload_hash,

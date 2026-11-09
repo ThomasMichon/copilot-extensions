@@ -13,6 +13,23 @@ if TYPE_CHECKING:
     from .routing import Endpoint
 
 
+def raw_active(owner: CutoverOrchestrator) -> dict | None:
+    table = owner.routing.read_table(owner.config_dir)
+    active = table.get("active") if isinstance(table, dict) else None
+    return active if isinstance(active, dict) else None
+
+
+def refuse_current_old(owner: CutoverOrchestrator, result: CutoverResult) -> bool:
+    if owner.refuse_old is None:
+        return False
+    refusal = owner.refuse_old(owner._raw_active())
+    if not refusal:
+        return False
+    result.error = refusal
+    result.steps.append(f"refused: {refusal}")
+    return True
+
+
 def validate_routing_lock_timeout(value: float | None) -> float | None:
     if value is not None:
         try:
