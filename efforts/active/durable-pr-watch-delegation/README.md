@@ -300,8 +300,12 @@ _Operator-required outcome; agent-recommended slices and validation._
   merged in #11614. T2b scoped cache/materialization retirement merged in
   #11623. The optional read-only T3 receiver source merged in #11625;
   strict standalone selection and fresh-only source provisioning merged
-  in #11628. Full executing lifecycle/retained-reader qualification and
-  P1/P2 acceptance remain open.
+  in #11628. Finite explicit service-lifecycle source qualification merged
+  in #11631. Complete retained-reader, mapping/retention composition,
+  installed/provider and P1/P2 acceptance remain open.
+  The next review-first [mapping-preservation refinement](terminal-retention.md#retained-acquisition-mapping-composition)
+  keeps acquired slots under their original compact operation before any
+  terminal retained-comment serving expansion; no runtime support is implied.
   Existing normalized ADO load/sync acquisition feeds the explicitly enabled
   journal after confirmed cache publication (#10405); native observation and
   standalone-host adoption remain distinct prerequisites.
