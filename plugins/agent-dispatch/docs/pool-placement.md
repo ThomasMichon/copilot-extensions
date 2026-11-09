@@ -46,7 +46,11 @@ startup must follow that commit through the existing allocation/startup owners.
 Capacity counts accountable `reserving`, `spawned` and `releasing`
 reservations, failed native/startup effects and unresolved transport custody,
 not caller estimates or task status. A `cold` (parked) body holds no lane
-until its reactivation is in flight. A suspended task whose resume finds its
+until its reactivation is in flight or a wake send to it is unresolved. Any
+other wake for a cold body (for example a detached-run completion) reacquires
+its lane through the same admission check and is deferred, without spending an
+attempt, while the pool is full. Load counting stops once it reaches the pool's
+capacity, so a saturated pool does not classify its remaining history. A suspended task whose resume finds its
 pool full waits (`lane_wait_since`) instead of over-subscribing; waiting
 reactivations count against the pool, so they take freed lanes before fresh
 placements, and they start in request order when recovery reconciliation
@@ -108,7 +112,11 @@ Still-accountable unbound rows can be adopted explicitly with
 `--apply --permit --reason <text>` it binds each row to the single published
 pool instance whose filters permit its task on the row's execution machine and
 audits the binding. Rows matching several pools (`ambiguous`) or none
-(`no_matching_pool`) are reported and left unbound.
+(`no_matching_pool`) are reported and left unbound, and while the pool catalog
+is not ready (pending, expired or invalidated publications) every row is left
+unbound as `catalog_not_ready` with the catalog blockers. Adopted bindings are
+accounting-only: they create no recovery assignment, so a parked adopted body
+keeps its legacy supervisor resume path.
 
 Supervisor capacity and release sweeps apply `native_release_pending` in the
 reservation query before the bounded result limit. Cleanup retries retain their

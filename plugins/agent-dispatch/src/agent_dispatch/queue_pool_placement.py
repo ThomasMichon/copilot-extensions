@@ -249,26 +249,18 @@ def pool_lane_load(
     conn: sqlite3.Connection, identity: tuple[str, str, str], *,
     accounting: ReservationAccountability | None = None,
     ahead_of: tuple[float, str] | None = None,
+    cutoff: int | None = None,
+    exclude_task: str | None = None,
 ) -> int:
     """Lanes held by running bodies plus suspended reactivations waiting for one.
 
-    A cold (parked) body holds no lane until its reactivation is in flight.
-    Waiting reactivations take freed lanes before fresh placements, in the
-    order they asked; ``ahead_of`` counts only the waiters before that one.
+    A cold (parked) body holds no lane until its reactivation is in flight or a
+    wake send to it is unresolved. Waiting reactivations take freed lanes before
+    fresh placements, in the order they asked; ``ahead_of`` counts only the
+    waiters before that one. Classification stops once the load reaches
+    ``cutoff``, so a saturated pool never classifies its remaining history.
+    ``exclude_task`` omits that task's own rows when it asks for its own lane.
     """
-    accounting = accounting or ReservationAccountability(conn)
-    running = 0
-    for row in conn.execute(
-        "SELECT s.*, t.recovery_requested_at AS lane_recovery_requested_at"
-        " FROM pool_reservation_bindings a"
-        " JOIN spawn_reservations s ON s.key = a.reservation_key"
-        " LEFT JOIN task_pool_assignments t ON t.reservation_key = s.key AND t.assignment_released = 0"
-        " WHERE a.registration_id = ? AND a.machine = ? AND a.env = ?",
-        identity,
-    ):
-        if row["state"] == SpawnState.COLD and row["lane_recovery_requested_at"] is None:
-            continue
-        running += accounting.accountable(row)
     waiting = conn.execute(
         "SELECT a.task_id, a.lane_wait_since FROM task_pool_assignments a"
         " JOIN tasks t ON t.id = a.task_id"
@@ -278,9 +270,31 @@ def pool_lane_load(
         " AND t.hold_reason IS NULL AND t.awaiting_steer = 0",
         (*identity, Status.SUSPENDED),
     ).fetchall()
-    if ahead_of is not None:
-        waiting = [row for row in waiting if (row["lane_wait_since"], row["task_id"]) < ahead_of]
-    return running + len(waiting)
+    load = sum(
+        1 for row in waiting
+        if row["task_id"] != exclude_task
+        and (ahead_of is None or (row["lane_wait_since"], row["task_id"]) < ahead_of)
+    )
+    if cutoff is not None and load >= cutoff:
+        return load
+    accounting = accounting or ReservationAccountability(conn)
+    for row in conn.execute(
+        "SELECT s.*, t.recovery_requested_at AS lane_recovery_requested_at"
+        " FROM pool_reservation_bindings a"
+        " JOIN spawn_reservations s ON s.key = a.reservation_key"
+        " LEFT JOIN task_pool_assignments t ON t.reservation_key = s.key AND t.assignment_released = 0"
+        " WHERE a.registration_id = ? AND a.machine = ? AND a.env = ?",
+        identity,
+    ):
+        if exclude_task is not None and row["task_id"] == exclude_task:
+            continue
+        if row["state"] == SpawnState.COLD and row["lane_recovery_requested_at"] is None:
+            load += accounting.send_unresolved(row)
+        else:
+            load += accounting.accountable(row)
+        if cutoff is not None and load >= cutoff:
+            return load
+    return load
 
 
 def select_pool(
@@ -314,7 +328,9 @@ def select_pool(
     for pool in candidates:
         if not _permits(pool, task):
             continue
-        if pool_lane_load(conn, pool.identity, accounting=accounting) < pool.max_concurrent:
+        if pool_lane_load(
+            conn, pool.identity, accounting=accounting, cutoff=pool.max_concurrent,
+        ) < pool.max_concurrent:
             return pool
     if retained is not None:
         raise TaskError("retained pool assignment is waiting for capacity")

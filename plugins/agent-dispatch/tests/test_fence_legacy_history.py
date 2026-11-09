@@ -270,6 +270,74 @@ def test_adopt_legacy_reports_ambiguous_rows_without_binding(queue):
     assert _accountable(queue, legacy.key)
 
 
+def test_adopt_legacy_refuses_to_infer_a_pool_from_an_incomplete_catalog(queue):
+    import hashlib
+
+    from agent_dispatch.registrar_configuration import ConfiguredSupervisorCohort, SupervisorScopeIntent
+    from tests.test_pool_placement import pool
+    live = queue.create("live")
+    legacy, _ = queue.reserve_spawn(live.id, now=1000.0)
+    queue.observe_pool_configured_cohort(ConfiguredSupervisorCohort(
+        "complete", hashlib.sha256(b"configured").hexdigest(), 0,
+        (SupervisorScopeIntent("host-a", "host-a", "linux"), SupervisorScopeIntent("host-b", "host-b", "linux")),
+    ), expected_revision=0)
+    scope = queue.begin_pool_publication(
+        "host-a", "linux", "publisher-a", expected_generation=0, expected_cohort_revision=1,
+    )
+    queue.publish_pool_catalog_scope(
+        "host-a", "linux", scope.publisher_id, generation=scope.generation, expected_revision=0,
+        registration_revision=queue.pool_registration_revision(), expected_cohort_revision=1,
+        input_revision="inputs", definitions=(pool(),),
+    )
+    catalog = queue.pool_catalog_snapshot()
+    assert not catalog.ready and [d.identity for d in catalog.definitions] == [pool().identity]
+    result = queue.adopt_legacy_capacity(apply=True, permitted=True, reason="operator migration")
+    assert result["adopted"] == 0 and result["unresolved"] == {"catalog_not_ready": [legacy.key]}
+    assert result["catalog_blockers"]
+    with queue._connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM pool_reservation_bindings").fetchone()[0] == 0
+
+
+def test_adopted_cold_legacy_body_keeps_its_legacy_resume_owner(queue, tmp_path):
+    from agent_dispatch.ordinary_agent_storage import reservation_native_facts
+    from agent_dispatch.supervisor import Supervisor
+    from tests.test_pool_placement import pool, publish
+    from tests.test_supervisor import QueueBackedClient
+
+    class FactsClient(QueueBackedClient):
+        def get_reservation(self, key):
+            return {**super().get_reservation(key), **reservation_native_facts(queue, key)}
+
+    parked = queue.create("parked")
+    reservation, _ = queue.reserve_spawn(parked.id)
+    queue.record_spawn(
+        reservation.key, startup_complete=True, startup_revision=1,
+        session_handle="local-body:legacy-session", worktree="legacy-worktree",
+    )
+    queue.claim_one("legacy-owner", task_id=parked.id)
+    queue.start(parked.id, "legacy-owner")
+    queue.suspend(parked.id, "legacy-owner", reason="turn ended")
+    queue.record_cold(reservation.key)
+    publish(queue, pool())
+    assert queue.adopt_legacy_capacity(apply=True, permitted=True, reason="migration")["adopted"] == 1
+    facts = reservation_native_facts(queue, reservation.key)
+    assert facts["reservation_pool_bound"] is True and facts["reservation_pool_assignment"] is None
+    queue.submit_steer(parked.id, fields={"continue": True}, sender="producer")
+    assert queue.get(parked.id).resume_requested
+    resumed = []
+    supervisor = Supervisor(
+        FactsClient(queue), repo=parked.repo, machine="host-a",
+        spawn_fn=lambda _task: pytest.fail("must resume the parked body, not replace it"),
+        local_body_target_dir_fn=lambda _sid: str(tmp_path),
+        local_body_verdict_fn=lambda _sid: "gone",
+        local_resume_fn=lambda sid, _prompt: resumed.append(sid) or True, nudge=False,
+    )
+    assert supervisor.release_resumed_cold_tasks() == 1
+    assert resumed == ["legacy-session"]
+    assert queue.get_reservation(reservation.key).state == "spawned"
+    assert queue.get(parked.id).status == "started"
+
+
 def test_client_posts_legacy_history_controls_with_control_identity():
     import httpx
 

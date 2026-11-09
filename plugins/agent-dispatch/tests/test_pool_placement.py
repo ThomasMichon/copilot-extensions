@@ -992,3 +992,30 @@ def test_releasing_retry_records_a_late_replacement_without_inheriting_its_retir
         place(q, task(q))
     q.retire_spawn(retry.key, exact_absence=True)
     assert place(q, task(q))[1]
+
+
+def test_lane_load_stops_classifying_history_once_capacity_is_reached(q, monkeypatch):
+    from agent_dispatch import queue_pool_placement
+    from agent_dispatch.queue_pool_accountability import ReservationAccountability
+    publish(q, pool(capacity=3))
+    for _ in range(3):
+        place(q, task(q))
+    classified = []
+    original = ReservationAccountability.accountable
+    monkeypatch.setattr(
+        ReservationAccountability, "accountable",
+        lambda self, row: classified.append(row["key"]) or original(self, row),
+    )
+    with q._connect() as conn:
+        assert queue_pool_placement.pool_lane_load(conn, pool().identity, cutoff=1) == 1
+        assert len(classified) == 1
+        assert queue_pool_placement.pool_lane_load(conn, pool().identity) == 3
+    cutoffs = []
+    lane_load = queue_pool_placement.pool_lane_load
+    monkeypatch.setattr(
+        queue_pool_placement, "pool_lane_load",
+        lambda *a, **kw: cutoffs.append(kw.get("cutoff")) or lane_load(*a, **kw),
+    )
+    with pytest.raises(TaskError, match="capacity"):
+        place(q, task(q))
+    assert cutoffs == [3]

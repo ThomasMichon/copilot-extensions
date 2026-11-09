@@ -123,6 +123,10 @@ class SpawnHistoryMixin:
         permit exactly one configured pool instance is bound to it, so it keeps
         holding that lane instead of blocking every pool. Ambiguous or unmatched rows
         are reported and left untouched; nothing is fenced, released or rewritten.
+        Every row stays unresolved while the pool catalog is not ready, since an
+        incomplete catalog cannot prove a pool is the only match. An adopted row is
+        accounting-only: it gains no pool recovery assignment, so a parked legacy
+        body keeps its legacy cold-resume owner.
         """
         if apply and (not permitted or not reason.strip()):
             raise TaskError("legacy capacity adoption requires permission and a reason")
@@ -131,7 +135,9 @@ class SpawnHistoryMixin:
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             timestamp = self._now(None)
-            definitions = self._pool_catalog_from_conn(conn, now=timestamp).definitions
+            catalog = self._pool_catalog_from_conn(conn, now=timestamp)
+            # An incomplete catalog could hide the other pools a row may belong to.
+            definitions = catalog.definitions if catalog.ready else ()
             accounting = ReservationAccountability(conn)
             rows = conn.execute(
                 "SELECT s.* FROM spawn_reservations s"
@@ -150,7 +156,9 @@ class SpawnHistoryMixin:
                     if task is not None and _permits(pool, task)
                     and (machine is None or normalize_host(pool.machine) == normalize_host(machine))
                 ]
-                if len(matches) == 1:
+                if not catalog.ready:
+                    unresolved["catalog_not_ready"].append(row["key"])
+                elif len(matches) == 1:
                     adopt.append((row, matches[0]))
                 else:
                     unresolved["ambiguous" if matches else "no_matching_pool"].append(row["key"])
@@ -158,6 +166,7 @@ class SpawnHistoryMixin:
                 "applied": False, "adoptable": len(adopt),
                 "unresolved": {kind: keys[:_SAMPLE] for kind, keys in sorted(unresolved.items())},
                 "unresolved_counts": {kind: len(keys) for kind, keys in sorted(unresolved.items())},
+                "catalog_blockers": list(catalog.blockers),
                 "sample": [
                     {"key": row["key"], "pool": "/".join(pool.identity)} for row, pool in adopt[:_SAMPLE]
                 ],

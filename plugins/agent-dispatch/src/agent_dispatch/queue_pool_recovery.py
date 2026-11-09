@@ -169,7 +169,10 @@ def _wait_for_lane(
     if pool is None:
         return False
     since = assignment["lane_wait_since"]
-    if pool_lane_load(conn, identity, ahead_of=(ts if since is None else since, task.id)) < pool.max_concurrent:
+    if pool_lane_load(
+        conn, identity, ahead_of=(ts if since is None else since, task.id),
+        cutoff=pool.max_concurrent,
+    ) < pool.max_concurrent:
         return False
     if since is None:
         conn.execute(
@@ -282,9 +285,54 @@ def recovery_wake(conn: sqlite3.Connection, task: Task, wake_id: str) -> bool:
     )
 
 
+def _admit_cold_wake(owner: Any, wake: Any) -> None:
+    """Route any other wake of a parked pool body through lane admission.
+
+    A detached-run completion or other wake for a cold body would otherwise run
+    it without a lane. Reacquire the lane atomically, or defer the wake without
+    spending an attempt while the pool is full.
+    """
+    from .queue_execution_custody import ExecutionSendUnresolved
+    from .queue_pool_placement import pool_lane_load
+    catalog = getattr(owner, "_pool_catalog_from_conn", None)
+    if catalog is None:
+        return
+    with owner._connect() as conn:
+        conn.execute("BEGIN")
+        assignment = recovery_assignment(conn, wake.task_id)
+        reservation = assignment and conn.execute(
+            "SELECT * FROM spawn_reservations WHERE key=?", (assignment["reservation_key"],),
+        ).fetchone()
+        if reservation is None or reservation["state"] != SpawnState.COLD:
+            return
+        identity = (assignment["registration_id"], assignment["machine"], assignment["env"])
+        pool = next(
+            (d for d in catalog(conn, now=owner._now(None)).definitions if d.identity == identity), None,
+        )
+    if pool is None:
+        return
+
+    def lane_guard(row: sqlite3.Row) -> None:
+        if row["state"] != SpawnState.COLD:
+            return
+        with owner._connect() as probe:
+            load = pool_lane_load(
+                probe, identity, cutoff=pool.max_concurrent, exclude_task=row["task_id"],
+            )
+        if load >= pool.max_concurrent:
+            raise ExecutionSendUnresolved("cold pool body is waiting for a free lane")
+
+    owner.record_spawn(
+        reservation["key"], session_handle=reservation["session_handle"],
+        worktree=reservation["worktree"], startup_complete=True,
+        startup_revision=reservation["startup_revision"], lane_guard=lane_guard,
+    )
+
+
 def prepare_recovery_wake(owner: Any, wake: Any) -> None:
     """Reacquire a cold reservation through its existing publication owner."""
     if getattr(wake, "pool_recovery_revision", None) is None:
+        _admit_cold_wake(owner, wake)
         return
     with owner._connect() as conn:
         task = owner._fetch(conn, wake.task_id)

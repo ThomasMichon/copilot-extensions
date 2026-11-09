@@ -715,3 +715,28 @@ def test_waiting_reactivations_take_freed_lanes_in_request_order(q: TaskQueue) -
     assert q.pool_startup(second).recovery_requested_at == 130
     assert q.pool_startup(first).recovery_requested_at is None
     assert q.list_wakes(first) == []
+
+
+def test_detached_waiter_completion_waits_for_its_cold_owners_lane(q: TaskQueue) -> None:
+    from agent_dispatch.queue_execution_custody import ExecutionSendUnresolved
+    task_id, key, _ = suspended(q)
+    waiter = q.register_run_waiter(
+        task_id, pid=123, host="host-a", start_token="waiter-start",
+        resume_worktree="host-a/worktree", command=["synthetic-wait"],
+    )
+    _cold(q, key)
+    running, _ = place(q, task(q))
+    q.recover_dead_run_waiter(
+        task_id, generation=waiter["generation"], reason="external",
+        message="continue", sender="recovery",
+    )
+    [wake] = q.list_run_waiter_wakes(task_id)
+    assert getattr(wake, "pool_recovery_revision", None) is None
+    with pytest.raises(ExecutionSendUnresolved, match="free lane"):
+        prepare_recovery_wake(q, wake)
+    assert q.get_reservation(key).state == SpawnState.COLD
+    _cold(q, running.key)
+    prepare_recovery_wake(q, wake)
+    assert q.get_reservation(key).state == SpawnState.SPAWNED
+    with pytest.raises(TaskError, match="capacity"):
+        place(q, task(q))
