@@ -797,7 +797,8 @@ def _registered_owner(api, monkeypatch):
             self.repos, self.srcroot, self.account_map = {}, {}, {}
             self.__dict__.update(fields)
 
-    api.stub("repos", VALID_CLASSES=("reference", "singleton", "worktree", "knowledge"),
+    api.stub("repos", DEFAULT_ACCOUNT_OWNER="github.com:*",
+             VALID_CLASSES=("reference", "singleton", "worktree", "knowledge"),
              _LEGACY_TYPE_MAP={}, RepoEntry=lambda **fields: SimpleNamespace(**fields), ReposRegistry=Registry,
              normalize_class=lambda value: value or "reference",
              normalize_visibility=lambda value: value if value in ("public", "internal", "private") else "")

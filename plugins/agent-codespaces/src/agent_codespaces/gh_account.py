@@ -63,7 +63,7 @@ class AccountInventory:
             return self.default_account
         if self.unmapped_owner_fallback:
             return owner or None
-        return account_for_repo(target)
+        return _legacy_account_for_repo(target)
 
 
 def _creation_flags() -> int:
@@ -76,6 +76,15 @@ def _agent_worktrees_bin() -> str | None:
 
 
 def account_for_repo(slug: str | None) -> str | None:
+    """Resolve through a fresh, policy-qualified account snapshot."""
+    if worktrees.explicit_context():
+        worktrees.validate_context()
+    if not slug:
+        return None
+    return account_inventory().account_for(slug)
+
+
+def _legacy_account_for_repo(slug: str | None) -> str | None:
     """Resolve an account without reusing another installation's cached state."""
     if worktrees.explicit_context():
         worktrees.validate_context()

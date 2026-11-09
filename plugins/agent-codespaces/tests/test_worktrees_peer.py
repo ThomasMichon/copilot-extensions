@@ -74,7 +74,7 @@ def test_every_adapter_uses_same_cell_worktrees(monkeypatch, tmp_path):
     assert gh_account.account_for_repo("owner/repo") == "login"
     assert gh_account.mapped_accounts() == ("login",)
     assert _hook()._aw("related", "list", "--json", "--require-managed", cwd=str(tmp_path)) == "[]"
-    assert len(seen) == 9
+    assert len(seen) == 10
     assert seen[-1][1]["cwd"] == str(tmp_path)
 
 

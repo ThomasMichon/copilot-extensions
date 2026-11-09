@@ -714,6 +714,50 @@ def test_add_repo_persists_account(home: Path):
     assert repos.resolve_account(reg.repos["proj"]) == "host-acct"
 
 
+@pytest.mark.parametrize("interactive", [False, True])
+def test_cli_reregistration_preserves_saved_account_and_git_pin(
+    home: Path, monkeypatch, capsys, interactive,
+):
+    from agent_procutil import no_window_kwargs
+    from agent_worktrees import __main__ as cli, git_ops
+
+    work = home / "pinned"
+    _init_config_repo(work)
+    remote = "https://github.com/publisher/pinned.git"
+    monkeypatch.setattr(git_ops, "_active_gh_account", lambda: None)
+    monkeypatch.setattr(git_ops.shutil, "which", lambda name: name)
+    monkeypatch.setattr(git_ops, "gh_token_for_account", lambda login: "fixture")
+    monkeypatch.setattr(git_ops, "list_gh_accounts", lambda: ["other-work"])
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: interactive)
+    prompts = []
+    monkeypatch.setattr("builtins.input", lambda message: prompts.append(message) or "other-work")
+    repos.add_repo(
+        "pinned", str(work), remote=remote, account="operator-public",
+    )
+
+    def credential_pin():
+        result = subprocess.run(
+            ["git", "-C", str(work), "config", "--local", "--get-regexp", "^credential\\."],
+            check=True, capture_output=True, text=True, **no_window_kwargs(),
+        )
+        values = {}
+        for line in result.stdout.splitlines():
+            key, _, value = line.partition(" ")
+            values.setdefault(key, []).append(value)
+        return values
+
+    original_pin = credential_pin()
+    assert original_pin["credential.https://github.com.username"] == ["operator-public"]
+    assert "--user 'operator-public'" in original_pin["credential.https://github.com.helper"][-1]
+    capsys.readouterr()
+    assert cli.cmd_repos_dispatch(["add", "pinned", str(work), "--remote", remote]) == 0
+    assert repos.read_registry().repos["pinned"].account == "operator-public"
+    assert credential_pin() == original_pin
+    assert not prompts
+    captured = capsys.readouterr()
+    assert "does not select an operator account" not in captured.out + captured.err
+
+
 # --- backfill_credential_pins ------------------------------------------------
 
 

@@ -109,6 +109,11 @@ def _clarify_registration_account(
     from . import git_ops, repos
 
     try:
+        if not explicit_account:
+            entry = repos.read_registry(strict=True).repos.get(name)
+            if entry is not None:
+                explicit_account = entry.account
+                remote = remote or entry.remote
         res = repos.resolve_registration_account(remote, explicit_account)
     except Exception:
         return
