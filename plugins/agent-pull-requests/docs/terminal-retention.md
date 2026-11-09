@@ -89,6 +89,19 @@ Native/Gateway reads and CLI selection. The fixture connector/native source
 does not prove installed hosting, live provider transport, retained-volume
 adoption, feedback/write serving or a complete automatic retirement lifecycle.
 
+`tests/test_terminal_service_lifecycle.py` additionally qualifies the explicit
+lifecycle against the actual service writer, Gateway task accounting and
+populated workspace buffers. Admission is withdrawn before joining requests.
+A disconnected acquisition remains owned until its thread settles; workspace
+drain expiry, service-close expiry and cancelled service close retain the
+writer and original cache/buffer bytes. Successful retirement uses that same
+materialization owner, not a replacement with an empty buffer. Fresh file
+readers then preserve the terminal cursor and exact pending event through
+restart and reopen; delayed old-epoch retirement cannot remove the new
+generation. Only the original exact ACK settles that event. The connector
+and native source remain synthetic, and this adds no executing-host policy,
+remote retirement operation, automatic worker or retained-reader adoption.
+
 ## One terminal decision
 
 The trusted acquisition owner supplies a full normalized generation and the
