@@ -121,6 +121,14 @@ dependency or implementation assignment. Its reciprocal validation/edit
 interface and two satisfied within-producer precedences remain separate from
 the historical 145 relationships.
 
+The [2026-11-09 tracking-route correction](roadmap-current-qualification.md#2026-11-09-tracking-route-correction)
+resolves two stale selection destinations: #9323's unfinished permission
+slice now routes through #9295, and #3002's steering slice through #2879.
+These audited tracking transfers are not prerequisite edges or completed
+fixes. Preserve each original finite alternative and existing claimant;
+neither receiver's unrelated lanes must finish first. The historical
+relationship counts and pinned source findings remain unchanged.
+
 Selected entry decisions already supported by the registers are:
 
 | Selected contribution | What actually precedes it | What does not have to finish first |

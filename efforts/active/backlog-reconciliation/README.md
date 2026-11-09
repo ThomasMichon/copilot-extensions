@@ -3084,6 +3084,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   acceptance remain continuing Phase 2 work, not silently completed coverage.
 - [ ] Identify high-priority fixes and their actual existing efforts, retained
   owners, unresolved acceptance and first bounded work slices.
+  The [2026-11-09 routing correction](roadmap-current-qualification.md#2026-11-09-tracking-route-correction)
+  directs two historical selected slices to their audited OPEN receivers:
+  #9323 to #9295 and #3002 to #2879. It preserves finite alternatives,
+  existing owners and independent parallel lanes; no fix, new priority,
+  implementation readiness or whole-parent prerequisite is inferred.
+  The [dated journal](<journal/2026/11.09 roadmap-receiving-routes.md>) retains
+  the 850-open census, unchanged completion gates and zero new dispositions.
   The agent-recommended [next-decision matrix](roadmap-next-slices.md)
   nominates twelve consequential first slices; their bounded qualification
   is recorded, not an exhaustive priority order or implementation assignment.
