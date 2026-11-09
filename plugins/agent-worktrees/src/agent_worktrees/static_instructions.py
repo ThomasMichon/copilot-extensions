@@ -469,6 +469,19 @@ def prepare_output_namespace(root: Path, *, deadline: float | None = None) -> No
             _ensure_output_ignored(root, exclude, validated_git, (), deadline=deadline)
 
 
+def _replacement_changes_content(path: Path, content: bytes) -> bool:
+    """Observe restart relevance only; never gate the unconditional replacement."""
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NONBLOCK", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        with os.fdopen(os.open(path, flags), "rb") as handle:
+            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                return True
+            return handle.read(len(content) + 1) != content
+    except OSError:
+        return True
+
+
 def publish(root: Path, home: Path, *, deadline: float | None = None) -> preparation.Publication:
     """Resolve inside the publication lock; preflight the whole set before copying."""
     with publication_lock(root, deadline=deadline), ExitStack() as locks:
@@ -552,7 +565,8 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> prepara
                     temporary = Path(handle.name)
                     handle.write(content)
                 _remaining(deadline)
-                note_mutation()
+                if _replacement_changes_content(path, content):
+                    note_mutation()
                 _remaining(deadline)
                 os.replace(temporary, path)
             finally:
@@ -566,5 +580,5 @@ def publish(root: Path, home: Path, *, deadline: float | None = None) -> prepara
         )
         return preparation.Publication(
             changed, removed=len(stale), failures=tuple(desired.failures),
-            publication_revision=revision,
+            publication_revision=revision, restart_required=mutation_started,
         )
