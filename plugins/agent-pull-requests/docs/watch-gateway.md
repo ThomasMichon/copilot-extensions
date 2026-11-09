@@ -133,6 +133,65 @@ returns the replay core's `uncertain/state_commit_uncertain` outcome.
 Neither this nor a transport failure licenses a second request identity or a
 process fallback. Reconcile the original request/event identities.
 
+## Optional existing-owner report reads
+
+`WatchGateway(..., reports={(principal, target): reader})` adds authenticated
+`POST /v1/read/<target>/capabilities|threads|diff` routes without changing watch
+or workspace operations. An absent reader is unsupported (404), not permission
+to discover a native command or another forge. This source embedding requires
+the optional `fleet` extra and a store with its existing service identity.
+
+Construct `report_read.ReportReader(consumer_scope, scope, resolve_binding,
+max_work_seconds=...)` only inside an existing authorized read pipeline.
+`scope` contains exactly `provider`, `endpoint`, `account` and `repo`; its account
+and repo must match the admitted `ConsumerScope`. The trusted resolver receives
+the remaining-budget checkpoint and must establish the actual selected owner,
+target, endpoint and account through its normal configuration/credential gates
+before returning `ReportBinding(scope, context_id, checkpoint, collect)`.
+Constructing these labels does not authorize a read. The live owner checkpoint
+must enforce replacement/withdrawal and current permission. The synchronous
+collector receives `(operation, number, remaining)` and returns the original
+`(exit_code, complete_json_text)`; it owns actual transport/process cleanup.
+No executable, credential, account or endpoint is deserialized from a request.
+
+Every request has exactly `{"binding": <expected ReplayBinding>, "request": ...}`.
+For this report protocol only, the request binding additionally requires
+`report_scope`, containing the selected provider/endpoint/account/repo mapping.
+Both scopes are compared before owner resolution/collection and through
+publication, so replacing a reader with a different endpoint/provider cannot
+perform an unselected read first. Responses retain the original replay binding
+and their separate report scope; watch/workspace binding syntax is unchanged.
+Capabilities request `{}`; reads request positive integer `number` and finite
+positive `budget_seconds`. The selected protocol is
+`agent-pull-requests.report-read/v1`, with profile `owner_executed_report/v1`.
+Responses preserve the whole validated native thread/diff report, original
+`owner_exit`, configured scope, operation/number, owner context and local
+observation interval. Routing labels are not observed forge-principal evidence,
+and raw reports are not review generations or write authority.
+
+`report_client.ReportClient(caller, route_prefix=..., binding=..., scope=...)`
+uses the existing authenticated `ServiceCaller`. Call `capabilities()` before
+`read("threads" | "diff", {"number": ..., "budget_seconds": ...})`. The client
+validates both boundaries and never retries or switches providers. HTTP 200
+means a valid exchange, including valid provider refusal/error reports;
+consumers must inspect `owner_exit`, `supported` and `error`. Null/false
+completeness and additive candidate evidence are preserved.
+
+The complete request/response must fit the current 32 KiB Gateway limit.
+Oversized reports are unavailable, never truncated or persisted. Malformed
+input is 400, permission/expiry 403, binding mismatch 409, absent support 404,
+and unavailable owner/result 503. Exceptions return static diagnostics.
+Bodies exist only in the current exchange, with no replay/cache/journal writes,
+subscriptions, cursor advancement, attention ACK or mutation. Disconnect or
+deadline loss prevents publication, while the existing Gateway retains its
+original task until synchronous collection and owned cleanup settle; drain may
+time out rather than falsely release custody.
+
+This is not installed HTTP adoption: native-command account/endpoint
+qualification, larger-report transport, retained hosting and live-provider
+proof remain separate. The [source CLI facade](cli-reference.md#source-report-facade)
+requires explicit host injection.
+
 ## Finite typed replay client
 
 `agent_pull_requests.watch_replay_client.ReplayClient` uses Fleet's finite

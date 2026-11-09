@@ -3,8 +3,12 @@
 Back to the [CLI parity inventory](cli-parity-inventory.md) and
 [canonical effort](README.md).
 
-**Agent-recommended contract proposal; no implementation or adoption claimed.**
+**Contract reviewed in #11665; finite optional source merged in #11668;
+installed adoption remains pending.**
 The bounded source claim is #11664 under #6007.
+The [selected native owner proposal](native-report-owner.md), tracked in
+#11680, addresses the next account/endpoint/budget adoption gap without
+claiming installed support.
 This source slice closes part of
 [one service contract](../../../visions/plugins/agent-pull-requests/README.md#cli-through-one-service-contract)
 using the existing authenticated Gateway connector and PR-service request owner.
@@ -82,6 +86,13 @@ task/drain owner. The additive protocol is
 
 The envelope contains exactly `binding` and `request`. Unknown request fields,
 booleans in integer positions and nonfinite numbers refuse before collection.
+The request binding contains the exact existing `ReplayBinding` fields plus
+`report_scope`, the caller's selected provider/endpoint/account/repo mapping.
+Compare both before owner resolution or collection, and retain those expectations
+through publication. This prevents a remapped endpoint/provider with otherwise
+unchanged replay labels from being read before the client discovers a mismatch.
+Responses keep the exact existing `ReplayBinding` and their separate report
+scope; the replay and workspace protocols are not changed.
 Capabilities come from the actual configured executing handler and identify
 this protocol, the report profile, supported operations and the existing
 request/response byte limit. They describe the embedding, not universal provider
@@ -159,23 +170,60 @@ embedding and its client/facade through the existing Gateway. Default hosts
 advertise no support until an actual owner is supplied. No live credentials,
 retained-host enrollment, installation, rollout or legacy retirement is implied.
 
-- [ ] Exercise the actual authenticated Gateway/SDK request and source CLI seams
+- [x] Exercise the actual authenticated Gateway/SDK request and source CLI seams
   using new isolated fixtures, distinct caller/target bindings and the real
   Worktrees thread/diff report builders with synthetic GitHub, Gitea and ADO IO.
   Prove ADO unified-diff refusal and keep this distinct from live-provider proof.
-- [ ] Prove actual owner target/account/endpoint selection before collection;
+- [x] Prove actual owner target/account/endpoint selection before collection;
   reject cross-scope caller labels, owner replacement/withdrawal, expired
   callers and request overrides without another read or ambient fallback.
-- [ ] Preserve complete nested/additive reports, lossless text, false/null
+- [x] Preserve complete nested/additive reports, lossless text, false/null
   completeness, candidate changes, valid provider errors and owner-exit/body
   disagreement; reject malformed/mismatched reports and over-limit exchanges.
-- [ ] Exercise disconnect, deadline exhaustion and delayed collector/cleanup
+- [x] Exercise disconnect, deadline exhaustion and delayed collector/cleanup
   settlement through the existing task/drain owner. Verify no retained body,
   cache/journal/cursor write or lifecycle/mutation operation occurs.
-- [ ] Exercise old client/new receiver, new client/unsupported old receiver,
+- [x] Exercise old client/new receiver, new client/unsupported old receiver,
   current receiver and supported rollback through the real request/parser seam.
   Keep strict CLI parsing and existing native/workspace/watch controls.
-- [ ] Record finite source/platform evidence separately from installed hosting,
+- [x] Record finite source/platform evidence separately from installed hosting,
   large-report transport, authenticated native-command adoption, live account/
   provider qualification and full HTTP/CLI parity. Return to the canonical Plan
   and Validation Plan rather than closing the parent on this source leaf.
+
+### Finite source evidence
+
+The optional `ReportReader`/`ReportBinding`, current `WatchGateway` routes,
+`ReportClient` and source-only `report_host` facade are implemented under
+#11664. Contained Linux qualification passed 210 cases with five Windows-only
+native CLI cases skipped. The focused run combines `test_report_read.py`,
+`test_report_transport.py`, `test_report_providers.py`, `test_native_cli.py`,
+`test_workspace_native_only.py`, `test_watch_gateway.py` and `test_cli.py`.
+
+The actual TLS issuer/PoP/SDK/channel fixtures exercise authenticated exchange,
+policy withdrawal, cancellation, channel loss and delayed cleanup under the
+original Gateway task. Separate real Worktrees report/provider fixtures use
+synthetic GitHub/Gitea/ADO IO; ADO diff remains explicitly unsupported, and
+raw thread candidate-change fields remain intact. None of these fixtures
+qualifies live credentials or an installed native-command binding.
+
+Fatal lint, install-contract, headless-launch, module-size and documentation
+consistency checks passed. Version presentation moved to the existing CLI
+output owner to keep command routing within its existing module-size cap.
+The repository-wide enforced typecheck could not complete its
+preflight because the unrelated `lib-config-migrate` checker environment is
+not prepared; no passing whole-repository typecheck is claimed.
+The source implementation merged in #11668. The parent effort,
+large-report transport, authenticated native-command adopter,
+installed/retained hosting, Windows and live-provider acceptance remain open.
+
+Every in-flight exchange is fenced by its discovery epoch
+before an older transport/status/validation failure can change selection.
+The same live owner/deadline checkpoint crosses the worker-to-coroutine
+handoff and the shielded task-to-handler handoff, running immediately before
+publication. The focused report tests cover stale discovery failures after a
+newer success and deadline/owner withdrawal while either coroutine resumption is delayed,
+including withdrawal in the actual task-completion callback.
+The focused report suite passes 62 cases. Endpoint/provider replacement
+between discovery and reading refuses at
+admission before resolving the replacement owner or collecting a report.

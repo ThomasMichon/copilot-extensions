@@ -43,6 +43,13 @@ There are two setup paths:
 
 The runtime is standalone: neither installer nor CLI requires an `agent-worktrees` repo registration.
 
+Standalone consumers with an independent interpreter retain the canonical
+`versioned_runtime*.py` SDK family in `.runtime-bootstrap/` beside the
+`agent_vault/` package. Configuration-owner discovery uses that SDK when no
+interpreter-slot SDK exists. It still requires a completed owner runtime,
+reads its configuration report without provisioning, and refuses owner
+errors or mismatched delivered projections.
+
 Explicit [base/SSH profiles](../README.md#dependency-profiles) add a separate
 immutable slot dimension (`<package>+<profile>`, or
 `<package>+<profile>.source.<commit>.<assembly>`). Unselected legacy base installs
