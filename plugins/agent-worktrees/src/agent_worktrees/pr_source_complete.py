@@ -1,6 +1,8 @@
 """Guarded local admission around the existing source reconciliation owner."""
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 import re
 import subprocess
@@ -8,6 +10,7 @@ import subprocess
 from . import config as cfg, git_ops, output, pr_complete, pr_config, pr_publish
 from . import pr_source_publication, tracking, worktree_identity
 from .git_repository_environment import repository_identity_scope
+from .providers.pr_source import same_repository
 
 SCHEMA = "agent-worktrees.pr-source-complete"
 
@@ -52,7 +55,10 @@ def _admit(args):
     repo = config.default_repo
     remote_url = pr_source_publication._git(root, "remote", "get-url", repo.remote)
     canonical = pr_config._resolve_repo_remote(config, repo)
-    if not canonical or pr_publish._identity(remote_url, str(root)) != pr_publish._identity(canonical, str(root)):
+    if not canonical or not same_repository(
+        pr_publish._identity(remote_url, str(root)),
+        pr_publish._identity(canonical, str(root)), repo.pr.provider,
+    ):
         raise ValueError("Completion upstream remote differs from the source owner's canonical target")
     record = worktree_identity.tracked_invocation_record(
         root, project=config.repo_name, anchor=Path(config.default_repo.anchor),
@@ -86,24 +92,37 @@ def complete(args):
         return _complete(args)
 
 
+@contextmanager
+def _source_lock(root: str) -> Iterator[None]:
+    git_dir = Path(pr_source_publication._git(root, "rev-parse", "--absolute-git-dir"))
+    with (git_dir / "agent-worktrees-complete.lock").open("a+b") as handle:
+        pr_publish._lock_publish_file(handle)
+        try:
+            yield
+        finally:
+            pr_publish._unlock_publish_file(handle)
+
+
 def _complete(args):
     source, result, invoked = None, None, False
     try:
         config, binding = _admit(args)
         source, root, _repo, _remote_url = binding
-        with pr_publish.publish_lock(root):
-            with pr_publish.metadata_lock(source["worktree_id"], project=config.repo_name):
-                def recheck():
+        with _source_lock(root):
+            def recheck():
+                with pr_publish.publish_lock(root), pr_publish.metadata_lock(
+                    source["worktree_id"], project=config.repo_name,
+                ):
                     fresh_config, fresh = _admit(args)
                     if fresh_config.repo_name != config.repo_name or fresh != binding:
                         raise ValueError("Source binding changed before reconciliation")
 
-                recheck()
-                invoked = True
-                result = pr_complete.complete_worktree(
-                    source["worktree_id"], config, dry_run=args.dry_run,
-                    validate_source=recheck,
-                )
+            recheck()
+            invoked = True
+            result = pr_complete.complete_worktree(
+                source["worktree_id"], config, dry_run=args.dry_run,
+                validate_source=recheck,
+            )
         if result.get("success") is not True:
             return outcome(
                 args, source=source, status="unknown", result=result,

@@ -81,7 +81,11 @@ The current source owner's configuration must resolve the explicit target to
 that same repository. No arbitrary workspace, positional worktree, PR number
 or delivered `--config` is accepted. The owner checks the existing record,
 repository, clean source and exact branch/full lowercase commit ID under the
-existing publication/metadata locks. Request-scoped Git isolation prevents
+existing publication/metadata locks. A worktree-local completion lock excludes
+overlapping completions; publication and metadata admission locks are released
+before fetches and Git hooks, then reacquired in that order for source rechecks.
+Provider-aware repository comparison accepts equivalent Azure HTTPS/SSH URLs
+without accepting another repository. Request-scoped Git isolation prevents
 inherited repository/index selectors from redirecting nested Git helpers
 without changing the caller's environment.
 

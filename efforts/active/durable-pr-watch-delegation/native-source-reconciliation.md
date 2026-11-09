@@ -53,6 +53,10 @@ expression. Check the source binding and branch/head under the owning locks
 before invoking the existing reconciliation algorithm; stale or wrong-source
 requests refuse before fetch, backup creation or history mutation.
 Recheck the admitted source after any preparation that could invalidate it.
+Serialize overlapping completions at the worktree, not the clone: shared
+publication/metadata admission locks stay short and ordered, never spanning
+remote fetches or Git hooks. Equivalent provider-supported HTTPS/SSH aliases
+must preserve repository identity rather than refusing the valid source.
 This protects against ordinary stale requests and cooperating source writers;
 it is not a claim of atomic protection against arbitrary external Git writes.
 

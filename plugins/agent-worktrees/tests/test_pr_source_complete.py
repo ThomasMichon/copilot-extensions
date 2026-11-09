@@ -418,3 +418,86 @@ def test_real_frontend_and_selected_owner_process_reconcile_actual_source(source
     assert value["status"] == "confirmed" and value["source"]["worktree_id"] == wid
     assert value["result"]["action"] == "reset-past-squash"
     assert _git("rev-parse", "HEAD", cwd=root) == _git("rev-parse", "origin/master", cwd=root)
+
+
+@pytest.mark.parametrize("repository", ["repository", "different"])
+def test_azure_remote_aliases_preserve_repository_binding(source, monkeypatch, repository):
+    from agent_worktrees import pr_config, pr_source_publication
+
+    config, _wid, _root, _remote = source
+    args = arguments(source)
+    repo = replace(config.default_repo, pr=replace(config.default_repo.pr, provider="azure-devops"))
+    config = replace(config, repos={config.repo_name: repo})
+    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
+    monkeypatch.setattr(
+        pr_config, "resolve_repo_config_for_slug",
+        lambda *a: pr_config.ForeignRepoResolution(repo, config.repo_name, same_as_active=True),
+    )
+    monkeypatch.setattr(
+        pr_config, "_resolve_repo_remote",
+        lambda *a: "https://dev.azure.com/example/project/_git/repository",
+    )
+    original = pr_source_publication._git
+    def git(root, *argv):
+        if argv == ("remote", "get-url", repo.remote):
+            return f"git@ssh.dev.azure.com:v3/example/project/{repository}"
+        return original(root, *argv)
+    monkeypatch.setattr(pr_source_publication, "_git", git)
+    code, value = invoke(args)
+    assert code == (0 if repository == "repository" else 1), value
+    assert value["status"] == ("confirmed" if repository == "repository" else "not-attempted")
+
+
+@pytest.mark.parametrize("preview", [False, True])
+def test_completion_fetch_and_merge_hook_leave_linked_publication_unlocked(
+    source, monkeypatch, tmp_path, preview,
+):
+    from concurrent.futures import ThreadPoolExecutor
+    import shlex
+    from agent_worktrees import pr_publish
+
+    config, wid, root, _remote = source
+    _git("reset", "--hard", "origin/master", cwd=root)
+    other = tmp_path / "linked"
+    _git("worktree", "add", "--detach", str(other), "HEAD", cwd=root)
+    _squash_merge_upstream(
+        Path(config.default_repo.anchor), files={"advance.txt": "upstream\n"}, msg="advance",
+    )
+    marker = tmp_path / "hook-acquired"
+    source_git_dir = Path(_git("rev-parse", "--absolute-git-dir", cwd=root))
+    probe = tmp_path / "hook-probe.py"
+    probe.write_text(
+        "from pathlib import Path\n"
+        "from agent_worktrees import pr_publish\n"
+        f"with pr_publish.publish_lock({str(other)!r}, acquire_timeout=1):\n"
+        f"    Path({str(marker)!r}).write_text('acquired')\n",
+    )
+    hook_dir = Path(_git("rev-parse", "--git-path", "hooks", cwd=root))
+    if not hook_dir.is_absolute():
+        hook_dir = root / hook_dir
+    hook_dir.mkdir(exist_ok=True)
+    hook = hook_dir / "post-merge"
+    hook.write_text(f"#!/bin/sh\n{shlex.quote(sys.executable)} {shlex.quote(str(probe))}\n")
+    hook.chmod(0o700)
+    original = git_ops.fetch
+    phases = []
+    def acquire():
+        with pr_publish.publish_lock(str(other), acquire_timeout=1), pr_publish.metadata_lock(
+            wid, project=config.repo_name, timeout=1,
+        ):
+            with (source_git_dir / "agent-worktrees-complete.lock").open("a+b") as handle:
+                acquired = pr_publish._try_publish_lock(handle)
+                if acquired:
+                    pr_publish._unlock_publish_file(handle)
+                assert not acquired, "the admitted source lost completion exclusion"
+            return True
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        def fetch(*args, **kwargs):
+            assert pool.submit(acquire).result(timeout=3)
+            phases.append("fetch")
+            return original(*args, **kwargs)
+        monkeypatch.setattr(git_ops, "fetch", fetch)
+        code, value = invoke(arguments(source, *(["--dry-run"] if preview else [])))
+    assert code == 0 and value["ok"], value
+    assert phases == ["fetch"]
+    assert marker.exists() is not preview
