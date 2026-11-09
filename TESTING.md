@@ -1120,6 +1120,14 @@ deleted or migrated, and storage is not claimed bounded across distinct inputs.
 Every job retains its five-minute ceiling, and the runner's 300-second packet ceiling
 is unchanged. Local workers may use smaller serial selections when the complete
 packet exceeds their available capacity; that is not a full-packet passing claim.
+Manual dispatch with `qualify_promotion_copies=true` additionally runs an
+opt-in Linux job against the exact selected source revision. It composes the
+full repository through the real promotion owner, freezes and imports that
+candidate, verifies every declared Invocation output and Installer mirror,
+and checks direct/transitive Update Driver copies and unchanged source bytes.
+It uses a private Git repository, never pushes or installs a runtime, and
+retains the same five-minute job ceiling. This is not required PR unit CI or
+a replacement for the actual release-candidate gates.
 The real shell acquisition, canonical freezing, queue, finite worker, runtime
 adapter and borrowed participant remain intact; only constructor and suite
 bodies use finite fixtures with a minimal declared source graph and a real
@@ -10190,12 +10198,17 @@ python tools/check-install-contract.py         # runtime-plugin install contract
 python -m pytest -q tools/promotion_unit_tests/test_daemon_cwd_contract.py  # Codespaces owner launch boundary
 python tools/check-version-consistency.py      # plugin.json / pyproject / marketplace versions agree
 python tools/check-marketplace-isolation.py    # report-only legacy installation inventory
-python libs/payload-invocation/generate.py --all --check  # generated payload shims match manifests
+python libs/payload-invocation/generate.py --all --source-check  # canonical producers and owned output inventory
 python tools/sync-installation-context.py --check  # inert exemplar copies match the canonical primitive
 python tools/sync-peer-launch.py --check  # shared native peer boundary matches packaged consumers
 python -m pytest -q libs/peer-launch/tests  # canonical/vendor packaging contracts
 python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fixtures
 ```
+
+For a materialized candidate, Invocation's `--all --check` and Installer
+Engine's default `verify()` retain actual-copy equality. A successful Dev
+source/layout check is not that evidence; the promotion copier verifies its
+real writes before freezing the candidate.
 
 ## Per-plugin coverage (unit suites)
 
