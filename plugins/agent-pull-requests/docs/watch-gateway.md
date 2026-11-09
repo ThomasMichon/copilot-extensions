@@ -205,6 +205,8 @@ repository account policy in caller-owned selection children. It requires a
 configured repository account or account-map entry, rejects legacy token
 commands/environment bindings, acquires that account's CLI-store entry even
 when active, and verifies its authenticated login before report reads. The
+exact repository entry takes precedence; checkout-free targets use only the
+owner's account-map entry, never another repository's account override. The
 same credential supplies absolute GitHub.com GraphQL and REST diff routes,
 without `gh pr diff`'s auxiliary discovery or ambient token/host overrides.
 Selection is rechecked before requests and publication. Configuration,

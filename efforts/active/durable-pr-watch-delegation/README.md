@@ -1375,6 +1375,11 @@ callback an implicit credential store.
 
 ### 2026-11-09 - Native report boundary corrections
 
+- Checkout-free selection uses only the target owner's account map when no
+  exact repository entry exists, never a sibling repository's account. Strict
+  committed text validation applies equally to batch and ordered recovery
+  paths. These refinements pass 438 Worktrees cases and 18 actual native-adapter
+  cases in isolation; prior 84-case report/Gateway/TLS controls remain unchanged.
 - Preserve a separate lightweight final check after the original Gateway task
   completes: deadline, permission and current binding still apply at the last
   event-loop handoff without starting a subprocess. Keep both prepared-response

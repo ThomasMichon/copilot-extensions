@@ -88,7 +88,8 @@ def test_wrong_or_ambiguous_binding_refuses_before_account_acquisition(target, c
     path, _, document, _, write = target
     change(document)
     write()
-    monkeypatch.setattr(repos, "account_for_github_slug", lambda *a, **k: pytest.fail("selected account before target gate"))
+    monkeypatch.setattr(repos, "account_from_map", lambda *a, **k: pytest.fail("selected account before target gate"))
+    monkeypatch.setattr(repos, "resolve_account", lambda *a, **k: pytest.fail("selected account before target gate"))
     with pytest.raises(ValueError):
         select_report_target(path, "example/project")
 
@@ -146,7 +147,7 @@ def test_unreadable_target_policy_refuses_before_account_acquisition(target, tmp
         return original(source)
 
     monkeypatch.setattr(repos_configuration_sources, "read_bytes", unavailable)
-    monkeypatch.setattr(repos, "account_for_github_slug", lambda *a, **k: pytest.fail("credential policy bypass"))
+    monkeypatch.setattr(repos, "account_from_map", lambda *a, **k: pytest.fail("credential policy bypass"))
     with pytest.raises(PermissionError):
         select_report_target(path, "example/project")
 
@@ -200,7 +201,7 @@ def test_unresolved_committed_policy_never_uses_divergent_checkout(committed_tar
             raise subprocess.TimeoutExpired(args, 1)
         return original(*args, **kwargs)
     monkeypatch.setattr(git_ops, "git", unavailable)
-    monkeypatch.setattr(repos, "account_for_github_slug", lambda *a, **k: pytest.fail("stale policy acquired account"))
+    monkeypatch.setattr(repos, "account_from_map", lambda *a, **k: pytest.fail("stale policy acquired account"))
     with pytest.raises(ValueError, match="committed repository policy"):
         select_report_target(path, "example/project")
 
@@ -223,3 +224,41 @@ def test_confirmed_absent_committed_source_keeps_checkout_selection(committed_ta
     path, _, git = committed_target
     git("symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
     assert select_report_target(path, "example/project")["account"] == "selected"
+
+
+@pytest.mark.parametrize("mapped", [True, False])
+def test_checkout_free_selection_does_not_borrow_sibling_account(target, mapped):
+    path, _, _, registry, write = target
+    registry["repos"]["sibling"] = {
+        "remote": "https://github.com/example/other.git", "account": "sibling-only",
+    }
+    if not mapped:
+        registry["account_map"] = {}
+    write()
+    if mapped:
+        assert select_report_target(path, "example/project")["account"] == "selected"
+    else:
+        with pytest.raises(ValueError, match="explicitly configured"):
+            select_report_target(path, "example/project")
+
+
+@pytest.mark.parametrize("recover", [True, False])
+def test_invalid_utf8_committed_policy_refuses_on_both_read_paths(committed_target, monkeypatch, recover):
+    from agent_worktrees import git_ops
+
+    path, anchor, git = committed_target
+    policy = anchor / ".agent-worktrees" / "config.yaml"
+    policy.write_bytes(b"pr: {to\xffken_command: fixture-helper}\n")
+    git("add", ".agent-worktrees/config.yaml")
+    git("commit", "-m", "fixture invalid bytes")
+    git("update-ref", "refs/remotes/origin/main", "HEAD")
+    policy.write_text("{}\n", encoding="utf-8")
+    original = git_ops.git
+    def unavailable(*args, **kwargs):
+        if recover and kwargs.get("cwd") == anchor and args[0] == "cat-file":
+            raise subprocess.TimeoutExpired(args, 1)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(git_ops, "git", unavailable)
+    monkeypatch.setattr(repos, "account_from_map", lambda *a, **k: pytest.fail("corrupted policy acquired account"))
+    with pytest.raises(ValueError, match="lossless UTF-8"):
+        select_report_target(path, "example/project")

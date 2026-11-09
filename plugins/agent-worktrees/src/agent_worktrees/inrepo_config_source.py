@@ -349,6 +349,8 @@ def _resolve_committed_config(
 
     def _parse(text: str, branch: str, candidate: Path) -> dict[str, Any]:
         source = f"{remote}/{branch}:{candidate.as_posix()}"
+        if strict and "\ufffd" in text:
+            raise ValueError("committed repository policy is not lossless UTF-8")
         if parser is parse_yaml_text_safe:
             return _parse_yaml_text_safe(text, source)
         try:
@@ -364,8 +366,6 @@ def _resolve_committed_config(
         if batch is not None:
             for candidate in rel_path_candidates:
                 if candidate in batch:
-                    if strict and "\ufffd" in batch[candidate]:
-                        raise ValueError("committed repository policy is not lossless UTF-8")
                     return _parse(batch[candidate], branch, candidate)
             return None
         logging.getLogger("agent-worktrees").warning(
