@@ -1,6 +1,8 @@
 """Real Git effect responsibility, without a live provider or adoption writer."""
 
 import json
+import copy
+import shutil
 import subprocess
 import sys
 import time
@@ -11,12 +13,16 @@ import pytest
 from agent_procutil import no_window_kwargs
 
 from agent_worktrees.lease_config import LeaseSettings
-from agent_worktrees.lease_protocol import ProtocolError, serialize_record
+from agent_worktrees.lease_protocol import (
+    ProtocolError, format_timestamp, ref_for, resource, serialize_record,
+)
 from agent_worktrees.lease_store import (
     GitLeaseStore, LeaseLost, ProviderEffectConflict, ProviderEffectSnapshot,
 )
 from agent_worktrees.service_custody_protocol import serialize_custody
-from service_custody_support import BASE, custody_record
+from agent_worktrees.provider_effect_protocol import ProviderEffectRecord, serialize_effect
+from conftest import _published_seed_environment
+from service_custody_support import BASE, custody_record, task_record
 from test_lease_store import git, remote_oid
 from test_service_custody_store import append_raw
 
@@ -68,6 +74,12 @@ def test_restart_and_task_expiry_do_not_clear_native_responsibility(admitted, op
         args.append("new-owner")
     with pytest.raises(ProviderEffectConflict):
         getattr(restarted, operation)(*args)
+    assert remote_oid(remote, task.ref) == claim.oid
+
+
+def test_unsettled_inventory_and_compaction_cannot_clear_effect(admitted):
+    remote, settings, task, claim = admitted
+    restarted = GitLeaseStore(settings, now=lambda: BASE + timedelta(days=3650))
     assert isinstance(restarted.list_resources()[0], ProviderEffectSnapshot)
     assert restarted.squash_stale(retention_days=1) == []
     assert remote_oid(remote, task.ref) == claim.oid
@@ -306,3 +318,61 @@ while not Path(sys.argv[2]).exists():
         if native.poll() is None:
             native.kill()
         native.communicate(timeout=5)
+
+
+@pytest.fixture(scope="session")
+def _cross_margin_seed(tmp_path_factory):
+    """Canonical accepted prefix only; each recovery uses a private real remote."""
+    remote = tmp_path_factory.mktemp("effect-policy-prefix") / "coordination.git"
+    settings = LeaseSettings(origin=str(remote), clock_skew_seconds=10)
+    ref = ref_for(settings.ref_prefix, resource("machine", "service-host"))
+    task = task_record()
+    transferred = replace(
+        task, event="transfer", lease_id="d" * 32, holder="second-owner",
+        issued_at=format_timestamp(BASE + timedelta(seconds=50)),
+        renewed_at=format_timestamp(BASE + timedelta(seconds=50)),
+        expires_at=format_timestamp(BASE + timedelta(seconds=110)),
+    )
+    with _published_seed_environment(tmp_path_factory):
+        git("init", "--template=", "--bare", str(remote))
+        root = append_raw(remote, ref, "", serialize_record(task))
+        parent = append_raw(remote, ref, root, serialize_record(transferred))
+        record = ProviderEffectRecord(
+            schema_version=1, resource=task.resource, state="effect-unsettled", event="begin",
+            effect_id=EFFECT, owner_id="native-owner", provider_id="example-provider",
+            provider_resource_id="immutable-instance", action="stop", request_digest="1" * 64,
+            task_token=parent, predecessor=parent,
+            started_at=format_timestamp(BASE + timedelta(seconds=60)), admission_margin_seconds=10,
+        )
+        oid = append_raw(remote, ref, parent, serialize_effect(record))
+    return remote, transferred, ProviderEffectSnapshot(ref, oid, record)
+
+
+@pytest.fixture
+def cross_margin_history(tmp_path, _cross_margin_seed):
+    seed, transferred, claim = _cross_margin_seed
+    remote = tmp_path / "coordination.git"
+    shutil.copytree(seed, remote, copy_function=shutil.copyfile)
+    return remote, LeaseSettings(origin=str(remote), clock_skew_seconds=10), *copy.deepcopy(
+        (transferred, claim),
+    )
+
+
+@pytest.mark.parametrize("reader_margin", [0, 10, 30, 120])
+def test_cross_margin_restart_can_inspect_and_settle_original_effect(cross_margin_history, reader_margin):
+    remote, settings, transferred, claim = cross_margin_history
+    restarted = GitLeaseStore(
+        replace(settings, clock_skew_seconds=reader_margin),
+        now=lambda: BASE + timedelta(seconds=80),
+    )
+    assert restarted.inspect_effect("machine", "service-host", EFFECT) == claim
+    settled = restarted.settle_effect(
+        "machine", "service-host", claim.oid, effect_id=EFFECT, owner_id="native-owner",
+        outcome="not-started", settlement_digest="2" * 64,
+    )
+    assert restarted.inspect_effect("machine", "service-host", EFFECT) == settled
+    assert restarted.inspect("machine", "service-host").record == transferred
+    if reader_margin == 120:
+        with pytest.raises(LeaseLost, match="safe local deadline"):
+            restarted.renew("machine", "service-host", settled.oid)
+    assert remote_oid(remote, claim.ref) == settled.oid

@@ -113,7 +113,7 @@ records, malformed/unknown envelopes and any successor to service custody in
 this protocol generation. Retirement is not implemented.
 
 The bounded `acceptance_margin_seconds` freezes the admission-time clock policy
-for both the adoption boundary and its task predecessor history. Reading the
+for the adoption boundary and task prefixes not already frozen by an effect. Reading the
 same permanent record with another client's clock-skew configuration cannot
 invalidate it. This margin is historical validation metadata, not a custody
 TTL or authority: a future admitted writer must record its actual selected
@@ -154,8 +154,16 @@ provider embedding. It requires the exact live task fence, a unique attempt ID,
 provider/immutable-resource and native-owner identities, a supported action and
 the exact request digest. Those fields are bindings, not authentication.
 The owner records its actual configured admission margin; callers cannot supply
-a weaker one. This generation does not authorize effects under service custody.
+a weaker one. Admission checks the unrounded clock before serializing a
+whole-second timestamp, so rounding cannot extend the safe interval.
+This generation does not authorize effects under service custody.
 No effect-start or settlement CLI verb is enabled.
+
+Each effect freezes its preceding task prefix with that effect's recorded
+admission policy. Restarted inspection and settlement cannot invalidate that
+prefix by choosing another clock-skew margin. Successive effects retain their
+own prefix policies; task transitions after the last effect still use ordinary
+current task-admission rules until a later effect or adoption freezes them.
 
 `settle_effect` accepts only the current claim token and original attempt/owner.
 The embedding must verify actual native/backend termination or non-start before

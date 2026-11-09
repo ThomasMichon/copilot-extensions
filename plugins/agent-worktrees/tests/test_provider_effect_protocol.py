@@ -155,6 +155,79 @@ def test_begin_rejects_unadmitted_attempt_before_any_push(condition, monkeypatch
         )
 
 
+@pytest.mark.parametrize("margin", [0, 10, 30, 120])
+def test_each_effect_freezes_only_its_preceding_task_prefix(margin):
+    task = task_record()
+    first_transfer = replace(
+        task, event="transfer", lease_id="d" * 32, holder="second-owner",
+        issued_at=format_timestamp(BASE + timedelta(seconds=50)),
+        renewed_at=format_timestamp(BASE + timedelta(seconds=50)),
+        expires_at=format_timestamp(BASE + timedelta(seconds=110)),
+    )
+    pending = begin_record(task_token="d" * 40, predecessor="d" * 40,
+                           started_at=format_timestamp(BASE + timedelta(seconds=60)))
+    settled = replace(
+        pending, state="effect-settled", event="settle", predecessor=CLAIM,
+        settled_at=format_timestamp(BASE + timedelta(seconds=70)),
+        outcome="succeeded", settlement_digest="2" * 64,
+    )
+    prefix = [(PARENT, task), ("d" * 40, first_transfer), (CLAIM, pending), (SETTLED, settled)]
+    assert validate_history(prefix, clock_skew_seconds=margin).current == first_transfer
+    second_transfer = replace(
+        first_transfer, lease_id="e" * 32, holder="third-owner",
+        issued_at=format_timestamp(BASE + timedelta(seconds=80)),
+        renewed_at=format_timestamp(BASE + timedelta(seconds=80)),
+        expires_at=format_timestamp(BASE + timedelta(seconds=140)),
+    )
+    second = replace(
+        pending, effect_id="f" * 32, task_token="e" * 40, predecessor="e" * 40,
+        started_at=format_timestamp(BASE + timedelta(seconds=90)),
+        admission_margin_seconds=30,
+    )
+    assert validate_history(
+        [*prefix, ("e" * 40, second_transfer), ("f" * 40, second)],
+        clock_skew_seconds=margin,
+    ).current == second
+    # A later task transition without a following effect retains reader policy.
+    unsafe = replace(
+        second_transfer, issued_at=format_timestamp(BASE + timedelta(seconds=90)),
+        renewed_at=format_timestamp(BASE + timedelta(seconds=90)),
+    )
+    with pytest.raises(ProtocolError, match="safe deadline"):
+        validate_history([*prefix, ("e" * 40, unsafe)], clock_skew_seconds=30)
+
+
+@pytest.mark.parametrize("margin", [0, 10])
+@pytest.mark.parametrize("offset_ms", [-500, 0, 500])
+def test_effect_admission_checks_unrounded_safe_deadline(margin, offset_ms, monkeypatch):
+    now = BASE + timedelta(seconds=60 - margin, milliseconds=offset_ms)
+    client = GitLeaseStore(
+        LeaseSettings(origin="https://example.invalid/state.git", clock_skew_seconds=margin),
+        now=lambda: now,
+    )
+    monkeypatch.setattr(
+        client, "_inspect_history",
+        lambda _item: ("synthetic-ref", PARENT, ResourceHistory(task_record(), ())),
+    )
+    written = []
+    monkeypatch.setattr(client, "_transition", lambda *args: written.append(args) or CLAIM)
+
+    def admit():
+        return client.begin_effect(
+            "machine", "service-host", PARENT, effect_id="c" * 32, owner_id="native-owner",
+            provider_id="example-provider", provider_resource_id="immutable-instance",
+            action="stop", request_digest="1" * 64,
+        )
+
+    if offset_ms > 0:
+        with pytest.raises(LeaseLost, match="safe deadline"):
+            admit()
+        assert not written
+    else:
+        assert admit().record.started_at == format_timestamp(now)
+        assert len(written) == 1
+
+
 @pytest.mark.parametrize("verb", ["acquire", "borrow", "renew", "release"])
 def test_cli_unsettled_effect_conflict_is_structured_without_success(verb, monkeypatch, capsys):
     from agent_worktrees import lease_cli

@@ -620,13 +620,16 @@ class GitLeaseStore:
             raise ProviderEffectConflict(ProviderEffectSnapshot(ref, oid, history.current))
         if oid != token:
             raise LeaseLost("provider effect task fence is stale")
+        now = self._utc_now(precise=True)
+        if now > history.current.expires() - timedelta(seconds=self.settings.clock_skew_seconds):
+            raise LeaseLost("provider effect admission is after the task safe deadline")
         record = ProviderEffectRecord(
             schema_version=1, resource=history.current.resource,
             state="effect-unsettled", event="begin", effect_id=effect_id,
             owner_id=owner_id, provider_id=provider_id,
             provider_resource_id=provider_resource_id, action=action,
             request_digest=request_digest, task_token=token, predecessor=token,
-            started_at=format_timestamp(self._utc_now()),
+            started_at=format_timestamp(now),
             admission_margin_seconds=self.settings.clock_skew_seconds,
         )
         parse_effect(serialize_effect(record), item)
@@ -709,11 +712,12 @@ class GitLeaseStore:
             has_effect_history=has_effect_history,
         )
 
-    def _utc_now(self) -> datetime:
+    def _utc_now(self, *, precise: bool = False) -> datetime:
         now = self._now()
         if now.tzinfo is None:
             raise ProtocolError("clock returned a naive datetime")
-        return now.astimezone(timezone.utc).replace(microsecond=0)
+        utc = now.astimezone(timezone.utc)
+        return utc if precise else utc.replace(microsecond=0)
 
     def _remote_oid(self, ref: str) -> str | None:
         rows = self._ls_remote(ref)

@@ -27,12 +27,16 @@ def validate_history(chain: list[tuple[str, CoordinationRecord]], *,
     pending = None
     effects = []
     seen = set()
-    margin = next(
-        (record.acceptance_margin_seconds for _, record in chain
-         if isinstance(record, ServiceCustodyRecord)),
-        clock_skew_seconds,
-    )
-    for oid, current in chain:
+    margins = [clock_skew_seconds] * len(chain)
+    margin = clock_skew_seconds
+    for index in range(len(chain) - 1, -1, -1):
+        record = chain[index][1]
+        if isinstance(record, ServiceCustodyRecord):
+            margin = record.acceptance_margin_seconds
+        elif isinstance(record, ProviderEffectRecord) and record.event == "begin":
+            margin = record.admission_margin_seconds
+        margins[index] = margin
+    for index, (oid, current) in enumerate(chain):
         if isinstance(current, ProviderEffectRecord):
             if current.event == "begin":
                 if pending is not None:
@@ -52,7 +56,7 @@ def validate_history(chain: list[tuple[str, CoordinationRecord]], *,
             if pending is not None:
                 raise ProtocolError("provider resource has an unsettled effect")
             validate_transition(previous, current, parent_oid=parent_oid,
-                                clock_skew_seconds=margin)
+                                clock_skew_seconds=margins[index])
             previous = current
         parent_oid = oid
     if previous is None:

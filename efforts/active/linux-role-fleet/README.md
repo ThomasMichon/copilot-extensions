@@ -708,6 +708,21 @@ not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
 
+### 2026-11-09 UTC - Provider-effect review fixes under the existing source gate
+
+The resumed bounded outcome remains source/provider-effect enforcement under
+#7192/#6030/#6236, followed by separately authorized adoption. The next observable
+completion is #11458's reviewed, CI-qualified merge, not a rollout. Its current
+review found two concrete blockers: inspecting-client skew could invalidate an
+effect's task prefix, and whole-second rounding could admit an effect after its
+actual safe deadline. The source fixes freeze each effect's own predecessor
+prefix while preserving subsequent task policy, and compare the precise clock
+before encoding. Focused cross-margin recovery and fractional-boundary
+qualification is in progress. The return path is the same canonical resource
+owner and existing Gateway/provider owners; no new workstream is introduced.
+Live adoption, rollout, credentials, controller changes and temporary-obligation
+discharge remain separately gated. No Plan or Validation checkbox closes.
+
 ### 2026-11-08 UTC - Canonical provider-effect source prepared
 
 The [custody checkpoint](runner-service-custody.md#2026-11-08-utc---canonical-in-flight-effect-source-prepared)

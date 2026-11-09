@@ -232,3 +232,24 @@ remain unchanged.
 No parent checklist item closes. Actual provider guards, forced/local/outage
 paths, qualified executing generations and rollback, Gateway/Fleet binding,
 incumbent-preserving ARC admission and authorized live acceptance remain open.
+
+### 2026-11-09 UTC - Review-fix qualification
+
+#11458's current review found that an inspecting client's margin could
+invalidate a previously admitted effect prefix, and that timestamp truncation
+could admit an effect after its actual safe deadline. Local fixes freeze each
+effect's preceding prefix independently, preserve later task policy, and check
+the precise clock before serializing the admission timestamp.
+
+All 113 pure protocol controls and four real-Git cross-margin restart/settlement
+cases pass on the corrected source. The initial cross-margin case exceeded its
+unchanged per-item deadline during repeated full-history reads; a private copy
+of a canonical prefix now avoids rebuilding that prefix in every case while
+retaining real inspection, CAS settlement and readback. A subsequent regression
+packet timed out in a parameterized mutation case that repeated inventory and
+GC for every mutation. Those shared checks are being separated into one focused
+case; all four actual mutation refusals remain. Neither failed attempt is a
+passing packet, and the remaining regression qualification is still open.
+
+This is not a merged review result, provider rollout, installed-peer
+qualification or live-adoption acceptance. The same parent gates remain open.
