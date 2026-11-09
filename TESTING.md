@@ -177,6 +177,8 @@ returns the manifest. Actual test identities, failure/skip reasons, phase
 progress/timing, available JUnit, bounded logs and named-packet outputs are
 retained in Actions artifacts for seven days. Empty, skipped, failed, timed-out,
 unsupported or partial selections never become unconditional qualification.
+Python child standard streams use UTF-8 regardless of the ambient Windows
+console encoding, so non-ASCII failure diagnostics retain their phase logs.
 The result command exits zero only for qualification, one for a returned
 failed/incomplete result, and two for an unavailable or invalid result.
 Artifacts are immutable run evidence, not patches to execute or apply.
