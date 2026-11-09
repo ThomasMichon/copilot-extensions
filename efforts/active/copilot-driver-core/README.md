@@ -27,6 +27,7 @@ an extraction-only PR or one migrated caller is not completion.
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | Refactor driver | Owns the implementation, tests, serial PRs and closeout | This effort and #10765 |
+| Receiver implementation contributor | Owns source-auth receiver/enforcement implementation and its callable contract; renewal stays disabled | #11758 |
 | Existing component owners | Retain receiving acceptance, custody, startup, retention and permissions | #10636, #5930, #5898, #8669, #5579, #4417, #9364, #8375, #6009, #10052 |
 
 ## Coordination
@@ -34,7 +35,11 @@ an extraction-only PR or one migrated caller is not completion.
 - **Topology:** tightly coupled source work with one owner, one checkout and
   dependency-ordered functional outcomes.
 - **Host (owns PRs):** Refactor driver.
-- **Delegates:** none at proposal time.
+- **Delegates:** source-auth receiver/enforcement implementation and its callable
+  contract move to the contributor owning #11758. The refactor driver releases
+  that build claim, reviews the implementation, and owns native qualification
+  before positive renewal can be enabled. Qualification infrastructure is not
+  a prerequisite for the receiver contributor to start.
 - **Handoff:** continue this canonical effort across contexts. Preserve its
   parent completion gate, exact current slice, effects and one next action.
 - Consume the source delivered in #10692/#10748; do not supersede its separate
@@ -2734,3 +2739,340 @@ cases were deselected, not qualified. A real offline UV compile also accepts
 the controller's empty default-index variable for generic selections without
 installing anything. Keep the immutable candidate local until actual
 protected-controller support admits the named native packet.
+
+### 2026-11-08 - First hosted public-caller request, preparation failure
+
+Observed actual protected-default support at
+`38db7da71b61c963c4572189e5f2bc61f891b179`, then submitted immutable caller
+`0c9c61ee79c58843b9eb0f7a4c8b2ed14c3bd7f3` once through the existing
+append-only qualification ref. Request `ebcb7f916b1945fe8127428a844dc47a`
+ran as Actions run `42467376071`, attempt 1, against that controller.
+Admission passed; pinned prerequisite acquisition failed with HTTP 504 before
+the typed native selection executed. Sanitization and upload steps completed,
+but no request-bound result artifact exists. Neither native caller behavior
+nor native cleanup is qualified. Preserve the original request and transport
+identities rather than submitting or redispatching an ambiguous replacement.
+
+The separate promotion run `42465878191`, pinned to Dev
+`fbd9db7dbe1d9e0ac0352f64c8141a5ed75b9fd4`, also failed on its pinned PSMux
+download returning HTTP 504 before native execution; #11559 tracks that
+failure. The preceding promotion succeeded. Follow up on bounded prerequisite
+download resilience and truthful pre-execution evidence through normal source
+review and promotion, without widening native deadlines or retrying local
+construction. All remaining parent Plan and Validation gates stay open.
+
+The controller-only follow-up is #11563, initially published at
+`9622da5f8db5afc4e164fb384b8bc3f66fdb3e28`. Its 79 focused controls pass,
+including six real loopback download-consumer cases and valid failed
+preparation manifests. Native hashes, caller deadlines and request/ref
+contracts are unchanged. The existing #11559 recovery owner retains the
+single-job promotion retry and its admitted generation; this refactor does
+not rerun or reset it. Review, required CI and protected-controller promotion
+are pending, and no further native request has been submitted.
+
+#11563 is now provider-confirmed merged. The final source
+`e28d12b4d5070f0ee446274e0a4ee556e7d9b739` passed 83 focused controls and
+required CI; the fresh Copilot comment verdict resolved the source findings,
+and the remaining documentation-impact metadata finding was corrected and
+resolved. Normal Maintainer completion omitted the additional CODEOWNER vote;
+no CI gate was bypassed. A first merge attempt correctly refused while a
+newer metadata-triggered source-CI aggregate was pending; completion followed
+its green result, not the earlier green snapshot. Re-read this parent
+immediately after merge. Continue by observing the corrected protected
+controller's promotion before another known-terminal-failure qualification
+attempt. The original hosted request and unqualified fixture are retained;
+no parent Plan or Validation item closes on this controller repair.
+
+The corrected workflow and worker are now verified on protected Main
+`895ca1de917c742d70c690b207b53f56302101e9`, matching the reviewed controller
+source; Dev CI `42470196366` passed. Submitted one new hosted request
+`163a388fca4245798202f76a81a70cf7` for the unchanged public candidate
+`0c9c61ee79c58843b9eb0f7a4c8b2ed14c3bd7f3`. Run `42472186638`, attempt 1,
+is executing against that corrected controller. The already-published input
+needed no new transport envelope or branch. The earlier terminal preparation
+failure remains recorded, not overwritten or redispatched. Native execution
+and exact cleanup remain unqualified until this run's request-bound evidence
+is validated.
+
+### 2026-11-08 - Preparation result and operator-directed pause
+
+Run `42472186638` finished with a validated, request-bound failed result:
+source and selection passed, prerequisite acquisition failed, and no native
+test executed. Copilot archive acquisition completed; PSMux exhausted HTTP
+504 and 30-second transfer timeouts. The result records the failure rather
+than qualifying an empty selection. Hosted feed access, native caller
+behavior and native cleanup remain unproven.
+
+Retained the source-only deadline correction as local commit `976cfcb7fa`,
+not a new PR or protected-controller update. One cancellation token now
+preserves the original 120-second archive budget across headers, body, output
+and at most two retries, instead of shortening every transfer to 30 seconds.
+The 85-case focused file passed before the additional retry-delay deadline
+case; all ten final real PowerShell download cases then passed, including
+body cancellation, retry-delay cancellation and exact server cleanup.
+Relevant lint, headless, trusted-CI, module, documentation and feed guards
+pass. These local controls do not prove successful hosted acquisition.
+
+Paused at operator direction after the existing controller PRs merged.
+No further PR, dispatch, qualification run or schedule is started. Preserve
+the unqualified public fixture, both terminal request identities and all
+existing resource custody. Resume only on explicit operator direction, then
+reconcile the retained deadline correction through the normal publication
+and protected-controller gates before further native qualification. The
+parent remains Active with its remaining Plan and Validation items open.
+
+### 2026-11-09 - Resume the bounded caller-convergence gate
+
+The operator lifted the pause. The root outcome remains complete driver
+convergence and receiving/lifetime acceptance, not the controller repair.
+The next observable outcome is a request-bound hosted public-caller result
+that actually reaches the native consumer with its unchanged assertions and
+cleanup. Acquisition is the current measured blocker; auth-wait,
+same-durable-session recovery, default setup and all-caller-Job lifetime
+acceptance remain open rather than inferred from controller merges.
+
+First reconcile the retained deadline correction with current source and the
+existing recovery owner's scope, then publish only that necessary correction
+through normal review, required CI and protected-controller promotion.
+The existing #11559 recovery owner records its original promotion incident
+as recovered and explicitly retains no source claim on this independent
+follow-up; do not rerun or reset that completed generation. After verified
+receiver support, make one meaningful same-candidate qualification attempt
+and return to the parent caller/default-setup/auth-wait/lifetime gates.
+No new rollout, credential, custody, spending or session-lifecycle authority
+is inferred from resumption. All task-specific holds remain in force.
+
+Published the bounded correction as #11707 at
+`b49eab7bf2cb2960bfc0308fbca90448ed9ad8aa`, after a clean current-source
+pull-forward. The 87-case focused baseline passes; the final protected-helper
+and server-backoff refinement passes all 15 impacted controls, including real
+PowerShell download consumers. The promotion lane obtains the helper from
+its protected workflow revision, so an older selected Dev candidate does
+not acquire a new mandatory file dependency. Review and required CI remain
+pending. No further native run is submitted before verified protected support,
+and this publication closes no parent Plan or Validation item.
+
+#11707 is provider-confirmed merged after exact-head Copilot approval
+`5831455124` at `659321a8fac1a3f686b7b35536b02e8c8ac0c9d9`, no open
+findings and green required CI. The timing finding was addressed with
+subprocess elapsed bounds and a multi-retry shared-clock negative control;
+all 16 real download cases pass. Normal repository-authorized Maintainer
+completion omitted the additional CODEOWNER vote; required CI and accepted
+review were not skipped. Re-read this parent immediately after merge.
+Continue with actual protected-helper promotion and one real same-candidate
+hosted caller attempt. All caller/default-setup/auth-wait/lifetime and
+receiving acceptance gates remain open.
+
+The next release is currently behind workflow-owned Main candidate #11701
+and original publication run `42648954729`. Its source qualification and
+immutable publication succeeded; post-brownout merge recovery failed before
+the merge job started during the provider incident. A newer admission
+correctly refused while that candidate remains active. The provider marked
+the Actions/Checks incident resolved at 18:59 UTC. Posted that changed
+availability evidence to the existing release record without rerunning,
+resetting admission, creating a duplicate generation or taking over its
+owner. Observe the actual protected workflow/helper before dispatching;
+release recovery is not a native product failure or parent acceptance.
+
+The existing release owner subsequently recorded an explicitly authorized
+retirement of #11701 after the provider refused both supported recovery
+paths. It closed unmerged at 19:55 UTC with Main, branch, assets and prior
+qualification evidence retained. A fresh normal qualification is recorded
+under that owner's existing control. This refactor neither closed the
+candidate nor launches a competing generation; resume read-only observation
+of the exact protected downloader before the public-caller gate.
+
+The existing owner's fresh promotion `42688134895` succeeded. Verified the
+reviewed shared-deadline workflow and downloader on protected Main
+`c5d09c6315519dd8f549f7f35785c60800ef8e4e`, then actual receiver preflight
+accepted the named native packet. Submitted one request
+`65f14cb24c544072b89904c7e3829ed4` for unchanged candidate
+`0c9c61ee79c58843b9eb0f7a4c8b2ed14c3bd7f3`; run `42691461498`, attempt 1,
+is executing against that exact controller. No new transport envelope or
+per-request branch was needed. Earlier terminal failures remain preserved.
+Await the request-bound execution/cleanup result; none of the remaining
+native, default-setup, auth-wait or lifetime gates is accepted by dispatch.
+
+Run `42691461498` finished with a valid failed result at version verification,
+not acquisition. Both pinned archives prepared successfully; the worker's
+anonymous hosted feed probe and Copilot version check completed before the
+PSMux check. The real output is `tmux 3.3.8` followed by
+`psmux 3.3.8 (66cf613 2026-08-18)`: the verifier incorrectly counted the
+compatibility banner as a second product version. Source identity passed;
+native caller cases and native cleanup still did not execute.
+
+The bounded two-file correction is #11723 at
+`c69bb4c1025e92e974f329a3c19796eeb3f07b5e`. It checks exactly one PSMux
+product line while rejecting a matching compatibility banner with a wrong
+product version, tmux-only output, duplicate product lines and qualifiers.
+All 22 focused prerequisite/execution/result cases pass, plus F/E9 and diff
+checks. Pins, deadlines and caller assertions are unchanged. Review, required
+CI and protected promotion are pending before another meaningful request.
+No parent acceptance item closes on this verifier correction.
+
+#11723 is provider-confirmed merged after exact-head Copilot approval
+`5832245643`, no active findings and green required CI. Normal
+repository-authorized Maintainer completion omitted the additional
+CODEOWNER vote; accepted review and required CI were not skipped.
+Re-read this parent immediately after merge. Continue by verifying the
+product-banner verifier on the actual protected controller, then run one
+same-candidate public-caller request. This preserves the exact product pin
+and does not close the still-unexecuted caller/auth-wait/lifetime gates.
+
+The actual protected controller now contains the reviewed product-banner
+verifier at `158fbaf559ecadebde6f14167394a2260fc7434c`; provider preflight
+passes. Submitted one request, `27e7257c95244567874e22442d6eaa93`, for unchanged
+candidate `0c9c61ee79c58843b9eb0f7a4c8b2ed14c3bd7f3`. Run `42699294058`,
+attempt 1, is in progress on that exact controller. No transport envelope,
+new request branch, local native retry or changed acceptance bound was needed.
+Await its same-run preparation, native execution and cleanup evidence;
+dispatch alone closes no parent Plan or Validation item.
+
+Run `42699294058` returned a valid failed result for that exact request,
+source and controller. Archive acquisition, the hosted feed probe and pinned
+Copilot/PSMux checks pass. Both real applications construct and install, and
+the public caller admits the packaged Manager and creates its target pane.
+The first native fresh launch then returns code 3 before a headed broker
+receipt exists; resume, same-history, auth-wait and lifetime checks do not run.
+The captured execution receipts retain both operation identities, but the
+finite native-phase helper discards the failing child's stderr and the pane
+has already closed. Preserve this failed run and improve that diagnostic
+boundary before another hosted attempt. Do not infer native cleanup acceptance
+from fixture teardown or widen any startup or construction deadline.
+
+The finite PowerShell helper now preserves nonzero-child stderr on stderr
+and in an already-configured setup log, while still returning no usable reply.
+The native fixture supplies its own private setup-log path and includes that
+file in failure diagnostics. Four focused real-PowerShell tests pass, covering
+configured/absent logging, literal successful replies and the unchanged
+ten-second child bound; F/E9 and diff checks pass. This is diagnostic work,
+not native caller acceptance. The next hosted request must use a new immutable
+candidate containing this change and must retain the original failed run.
+
+Diagnostic candidate `07cb0bbbb7cfc5d5b62437bd7e56484ed8dbade8` ran as
+request `20a655a00e7a47338bed5f4520670719`, run `42702195869`, attempt 1.
+Its exact-source result again passes prerequisites and fails native fresh.
+The retained stderr now identifies the refusal: "Could not verify cold
+Copilot handoff; the seed remains staged." The authoritative liveness
+check refuses unknown observations; no backend or headed broker started.
+Do not weaken that refusal. The private mux adapter did not retain its
+read results, so candidate `81dffebd2ad08089b72d9e9569cd1c6c8ec20a60`
+adds only non-interfering read-result diagnostics. Submitted that candidate
+as request `f5960a980a7740a38247809c00697dd6`, preserving the preceding
+terminal run and the single append-only transport ref. Await that original
+request's result before any further attempt; all parent acceptance remains open.
+
+Run `42703475111`, attempt 1, failed for that exact probe candidate. Its
+private adapter records successful target creation and `has-session` exit 0
+after creation, so target creation alone is not the missing observation.
+The aggregate verifier still hides which mux or binding operation failed.
+Candidate `16c599957d7bc45279dba5bc5c0d68a6112d8f3d` now reports the original
+exception for either failed probe without changing verdict fields, conservative
+unknown-state handling or launch admission. All eight focused liveness cases
+pass; F/E9 and diff checks pass. Submitted request
+`6bc5827ad3074e52827ce9d76fd7dd04`, run `42705351257`, attempt 1, for that
+immutable candidate. Preserve every prior terminal request and inspect the
+new run's original exception before selecting a correction.
+
+Run `42705351257` preserves the concrete failure: the authoritative mux
+presence probe raises Windows error 2 (executable unavailable) from the
+backend environment. The caller's private adapter exists and creates the
+target, but the fixture did not declare that dependency through normalized
+session setup. Candidate `f1f5262bfdd904e55c145d6c62f90349329a31f9` adds only
+the fixture's supported `session_path.windows` declaration; embedded runtime
+scripts compile and F/E9/diff checks pass. Submitted request
+`fa92ee2a7b25425494e63e7aa2c5d5e3` against that immutable candidate without
+changing liveness refusal, startup clocks or native assertions.
+
+Source-auth recovery implementation remains with this effort's owner, not
+only baseline qualification. After the current real-caller baseline, the next
+contract milestone is a reviewed callable receiver/enforcement boundary for
+native UI/in-flight source loss, conservative stop/preserve and cold resume
+of the same durable conversation, followed by its actual native acceptance.
+The proposed observation label is not a callable contract. Dependent renewal
+work may prepare disabled/unsupported/unknown controls now, but positive
+integration readiness requires that implementation and revision-bound proof;
+activation and deployment remain separate gates.
+
+Run `42707411094`, attempt 1, proves the session-path correction: the fresh
+public caller binds the common broker in 12.36 seconds and reaches history,
+live-reuse and controlled-prompt assertions. It then fails the fixture's old
+single-execution-file assumption, before exit and resume qualification.
+The real normalized caller has separate launcher and backend operation records;
+do not discard the launcher records or confuse their process identity with
+the native child. Candidate `979abb44b6d9b0afe9f0ea5201c268acaa683429`
+selects exactly one `backend-command` receipt while retaining the existing
+native PID/birth and terminal exit assertions and rejecting duplicate backends.
+Three focused cases pass (launcher-only, one backend, ambiguous backends);
+F/E9 and diff checks pass. Submitted request
+`ea7c0179578c4f549dca6248ce241516` for the complete focused native case.
+
+Run `42708953945`, attempt 1, proves fresh history/receipts at 21.30 seconds
+and exact fresh retirement at 23.55 seconds. Resume then opens a new home
+screen without a resume identity: this isolated application has no installed
+sessionStart hook, and the fixture had neither a registered worktree head nor
+the normal user-home `.copilot` layout. Candidate
+`2cf9a5d75093d0c4a2e8bdc34ff30f5514182c2c` uses that normal layout and the
+installed public `bind-session` command with the observed native identity and
+pane, verifying the actual worktree head rather than writing fixture state.
+The resume invocation still supplies no explicit resume argument. The testing
+reference now explicitly excludes automatic-hook adoption from this evidence.
+Embedded runtime scripts compile; F/E9 and diff checks pass. Submitted request
+`b6f17302b9b9486f987a845a3c6d9d2e` for that immutable source.
+
+The failed resume also exposed strict UTF-8 decoding of captured runner output
+in the hosted controller: the bound JUnit preserves the native failure, but a
+non-UTF-8 console byte prevents phase-log retention. This controller diagnostic
+defect remains an owned follow-up before parent completion; it does not turn
+the failed native case into a pass or authorize a blind workflow rerun.
+
+The explicit binding attempt in run `42710860824` correctly refused a
+directory without committed receiving-side repository authority. Candidate
+`79d5adadbc9613e9df2b7e3ab9931e061f414a89` supplies a real local-only Git
+repository and committed configuration without a remote or weakened fence.
+Run `42712239092`, attempt 1, for request
+`eac16a9b725a40c0b326b59717e60d32` then passes explicit native binding,
+fresh history/receipts at 23.86 seconds and exact fresh retirement at 26.01
+seconds. Resume selects the correct head and the actual native process
+carries `--resume=<same-id>`, but it runs without a common broker.
+
+This is now a production caller-convergence gap, not missing fixture
+registration. The seedless public `embody` branch in `handoff_cli.py`
+uses `copied_setup_command` only; unlike seeded setup and the normal resolve
+path, it does not enter admission-only deferred execution. The next source
+slice must connect that caller to the same broker while preserving staged
+seed custody, selected resume identity, acquisition owners and liveness
+guards, then requalify the complete real caller.
+
+The separate encoding correction is provider-confirmed merged as #11765
+after exact-head Copilot approval `5833815651` at
+`dfae7ab7a8c1d213d38458501ddc79a75a8053bf`, no open findings and green
+required CI. Nineteen focused controls include a real Unicode-producing,
+failing Python child with inherited `cp1252`; the worker now explicitly
+selects UTF-8 rather than relaxing decoding or outcomes. Normal
+repository-authorized Maintainer completion omitted the additional
+CODEOWNER vote; accepted review and required CI were not skipped.
+Re-read this parent immediately after merge. Protected promotion and
+live use of that corrected controller remain separate from this source merge.
+No parent Plan or Validation item closes on the encoding fix.
+
+### 2026-11-09 - Receiver implementation ownership reassigned
+
+The operator reassigns receiver implementation to the contributor owning
+draft #11758. Release this effort's build claim on that bounded receiver
+scope; the preceding journal's implementation reservation is superseded.
+The refactor driver retains interface coordination, implementation review
+and revision-bound native qualification as the gate before positive renewal.
+The existing qualification infrastructure and public-caller convergence
+work continue independently and must not block receiver implementation.
+No activation, deployment, release bypass or session-lifecycle authority
+is added, and unrelated source/resource claims are unchanged.
+
+Inspected #11758 at `4b818720e4bfe9b20fbb3e972e6d8b6434554eb2`: it is an
+open draft with disabled source-loss controls and the expected native proof
+matrix, not a callable receiver. Confirm that prestage boundary and transfer
+the incomplete contract explicitly: the proposed observation label remains
+non-callable. The implementation contributor must supply the actual interface,
+receiver identity/revision rules and enforcement semantics for review; native
+UI/in-flight source loss, conservative stop/preserve, obsolete-authority
+negatives and same-durable-history resume remain qualification obligations.
