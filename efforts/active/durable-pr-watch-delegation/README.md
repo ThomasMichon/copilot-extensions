@@ -278,7 +278,7 @@ details, not additional operator quotations or live deployment authority.
 _Operator-required outcome; agent-recommended slices and validation._
 
 The [CLI parity inventory](cli-parity-inventory.md) carries the next finite
-review-first draft-to-ready contract. Its Azure DevOps provider and explicit
+draft-to-ready contract, reviewed in #11641. Its Azure DevOps provider and explicit
 native invocation still need implementation and qualification; readiness
 does not grant merge consent or release a hold.
 
@@ -1293,6 +1293,36 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-08 - Qualify explicit native draft readiness source
+
+- The candidate implements the reviewed optional `draft-ready` operation through
+  the target's existing provider/transport owner. Explicit Worktrees and native
+  author parsers preserve the old tracked invocation, draft-only effects,
+  active/identity readback and failed-versus-unknown outcomes without replay.
+- The final isolated source selections pass 51 Worktrees and 76 native frontend
+  cases, with five Windows-only skips and verified cleanup. Initial fixture
+  failures were missing required repository fields and the expected worker-file
+  argv order; corrected fixtures retain the production semantics.
+- Fatal lint and the 13-plugin installation contract pass. The typing inventory
+  keeps both changed plugins pending; the broader enforced preflight stopped at
+  an unprepared unrelated `lib-config-migrate` checker environment after its
+  preceding scopes passed. No plugin strict-typing or full-preflight pass is
+  claimed. Live/provider, Windows, installed, HTTP parity and parent acceptance
+  remain open; current-head review and required CI still gate this candidate.
+
+### 2026-11-08 - Merge the finite draft-ready contract and return to parent gates
+
+- #11641 merged as `7aa41656fc5fe0e4055defd8c4333ba89e2a119f` after
+  current-head Copilot approval, no findings and all three required checks.
+  The earlier approval addressed the pre-attribution head and was not used
+  as current-head authorization; an ordinary re-request obtained a fresh pass.
+- Read both complete parent Plan/Validation sections after the actual merge.
+  Their 82 public and 11 companion unfinished rows remain open. No runtime
+  readiness, provider, installed, HTTP parity or parent completion is claimed.
+- Next: implement the optional target-qualified provider/native author path
+  and its focused source controls under the now-reviewed contract. Existing
+  tracked ready/legacy-hold behavior and all effect/rollout gates stay intact.
 
 ### 2026-11-08 - Specify draft-to-ready native convergence before implementation
 

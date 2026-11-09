@@ -111,7 +111,7 @@ def run(
 ) -> int:
     try:
         launch = prefix_factory() if prefix_factory is not None else [command_path(args.worktrees_command)]
-        if args.command in ("author-capabilities", "update", "push"):
+        if args.command in ("author-capabilities", "update", "push", "ready"):
             from .native_author import run as author_run
             code, payload = author_run(args, launch)
         else:
@@ -121,6 +121,11 @@ def run(
             )
     except (ValueError, RuntimeError, OSError, subprocess.SubprocessError) as exc:
         code, payload = 1, {"error": str(exc), "repo": args.repo}
+        if args.command == "ready":
+            payload.update(
+                number=args.number, ok=False,
+                actions={"draft": {"status": "not-attempted" if isinstance(exc, ValueError) else "unknown"}},
+            )
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True))
     elif payload.get("error"):

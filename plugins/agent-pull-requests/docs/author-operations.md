@@ -9,6 +9,7 @@ on `PATH` or a package version is not a capability response.
 <PR command> author-capabilities --repo project/repository --worktrees-command <Worktrees command> --json
 <PR command> create --repo project/repository --head feature/fix --title "Fix" --body-file <description-file> --draft --source-workspace <absolute-source-root> --expected-head <full-commit> --worktrees-command <Worktrees command> --json
 <PR command> update --repo project/repository --number 42 --body-file <description-file> --reviewer <identity-id> --work-item other-project/123 --worktrees-command <Worktrees command> --json
+<PR command> ready --repo project/repository --number 42 --worktrees-command <Worktrees command> --json
 <PR command> push --repo project/repository --workspace <absolute-source-root> --head feature/fix --expected-head <full-commit> --worktrees-command <Worktrees command> --json
 <PR command> status --repo project/repository --number 42 --worktrees-command <Worktrees command> --json
 <PR command> wait --repo project/repository --number 42 --timeout 600 --worktrees-command <Worktrees command> --json
@@ -33,7 +34,7 @@ and `operations.worker-policy-config`; this frontend separately advertises
 These additive schema-1 capabilities are independent of package versions.
 Do not infer frontend support from the Worktrees peer's declaration alone.
 
-On capable peers, `author-capabilities`, `create`, `update` and `push` accept
+On capable peers, `author-capabilities`, `create`, `update`, `ready` and `push` accept
 `--config <delivered-worker-policy>`. The frontend checks the actual peer
 response before the dependent author operation, and forwards the same explicit
 file. Missing files, unsupported old peers and mismatched worker targets refuse
@@ -60,6 +61,29 @@ PATs are not required. Without an explicitly selected or already inherited
 compatibility credential, ADO operations reuse the existing Azure CLI/Entra
 authentication path. This workflow does not acquire a PAT, change credentials
 or require new token configuration.
+
+## Draft readiness is not merge consent
+
+Native `ready` requires the selected Worktrees runtime's optional
+`operations.draft-ready: true` capability. The initial explicit-target owner
+supports enabled Azure DevOps bindings. It invokes Worktrees'
+`pr-author-ready`, not tracked `pr-ready`; the latter retains its original
+tracked selection and legacy hold-release behavior.
+
+The explicit author operation reads the selected PR's actual repository,
+number, active lifecycle and boolean native draft state before a single
+draft-only update, then verifies authoritative same-target readback. An
+already-ready PR refuses without a write. No hold label, consent,
+auto-completion, vote, reviewer, title, source or claim is changed.
+
+Its `agent-worktrees.pr-ready` version-1 result retains `repo`, `number`,
+`provider` and `actions.draft.status`. Only `confirmed` has `ok: true` and
+exit 0; `not-attempted`, `failed` and `unknown` exit nonzero. A lost native
+response preserves the selected target as unconfirmed rather than falling
+back or replaying. Reconcile this same PR through observation before another
+intentional attempt. Provider readback is not atomic compare-and-swap and
+cannot prevent a later participant change. Unsupported or rolled-back peers
+refuse only this optional operation; existing supported commands remain usable.
 
 ## Candidate checks and source custody
 

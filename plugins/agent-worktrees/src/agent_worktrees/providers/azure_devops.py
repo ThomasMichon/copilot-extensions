@@ -347,6 +347,12 @@ class AzureDevOpsProvider:
         _ = (repo, number, api_base, token, title, wip_title_prefixes)
         return "mark_ready is not supported for azure-devops provider"
 
+    def ready_pull(self, repo: str, number: int, *, api_base: str = "",
+                   token: str | None = None) -> dict:
+        """Perform the optional explicit-target draft-only author transition."""
+        from .azure_readiness import ready
+        return ready(self, repo, number, api_base=api_base, token=token)
+
     def get_snapshot(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
     ) -> PRSnapshot:

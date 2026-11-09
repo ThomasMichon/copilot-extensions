@@ -1,6 +1,7 @@
 """Author-side commands; repository policy and provider effects remain central."""
 from __future__ import annotations
 
+import argparse
 from dataclasses import replace
 from pathlib import Path
 
@@ -35,16 +36,20 @@ def load_author_config(path, repository: str, *, claimant: bool = False):
 
 
 def add_parsers(sub):
-    for name in ("pr-author-capabilities", "pr-update", "pr-push"):
+    for name in ("pr-author-capabilities", "pr-update", "pr-push", "pr-author-ready"):
         parser = sub.add_parser(name, help={
             "pr-author-capabilities": "Report target-qualified author operations without mutation",
             "pr-update": "Repair existing PR metadata without creating or pushing",
             "pr-push": "Publish an admitted delegated source without managed branch renaming",
+            "pr-author-ready": "Move an explicit native draft PR to ready without consent or hold release",
         }[name], allow_abbrev=False)
         parser.add_argument("--repo", required=True)
         parser.add_argument("--config")
         parser.add_argument("--json", action="store_true")
         if name == "pr-author-capabilities":
+            continue
+        if name == "pr-author-ready":
+            parser.add_argument("--number", required=True, type=int)
             continue
         pr_publication_labels_cli.add_options(parser)
         if name == "pr-update":
@@ -75,6 +80,7 @@ def capabilities(config, repository: str) -> dict:
             "qualified-create": supported, "metadata-update": supported,
             "source-push": supported, "remote-evidence": False,
             "worker-policy-config": supported, "worker-policy-export": True,
+            "draft-ready": supported,
         },
         "source_adapter": "reachable-workspace" if supported else None,
         "completion_authority": "target-repository-policy",
@@ -89,6 +95,22 @@ def cmd_capabilities(args):
         return 0
     except (ValueError, OSError, ProviderError) as exc:
         return output._json_error(str(exc)) if args.json else (output.err(str(exc)) or 1)
+
+
+def cmd_ready(args: argparse.Namespace) -> int:
+    """Keep admission failure distinct from an attempted provider transition."""
+    from . import pr_cli, pr_readiness
+
+    try:
+        _, error = pr_cli.require_claimant_worktree("pr-author-ready")
+        if error:
+            raise ValueError(error)
+        config = load_author_config(args.config, args.repo, claimant=True)
+        result = pr_readiness.ready(config, args.repo, args.number)
+    except (ValueError, OSError, ProviderError) as exc:
+        result = pr_readiness.outcome(args.repo, args.number, error=str(exc))
+    output._json_output(result) if args.json else print(result)
+    return 0 if result["ok"] else 1
 
 
 def cmd_update(args):

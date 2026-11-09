@@ -11,11 +11,12 @@ from .native_command import run_command
 def add_parsers(subparsers, *, repo_type, handler):
     from .native_cli import validate_selector
 
-    for name in ("author-capabilities", "update", "push"):
+    for name in ("author-capabilities", "update", "push", "ready"):
         author = subparsers.add_parser(name, help={
             "author-capabilities": "read target-qualified native author capabilities",
             "update": "repair existing native PR metadata without pushing",
             "push": "publish a pinned admitted source workspace through Worktrees",
+            "ready": "move an explicit native draft PR to ready without consent or hold release",
         }[name], allow_abbrev=False)
         author.add_argument("--repo", required=True, type=repo_type)
         author.add_argument("--worktrees-command", required=True, type=validate_selector)
@@ -23,6 +24,9 @@ def add_parsers(subparsers, *, repo_type, handler):
         author.add_argument("--json", action="store_true")
         author.set_defaults(handler=handler)
         if name == "author-capabilities":
+            continue
+        if name == "ready":
+            author.add_argument("--number", required=True, type=int)
             continue
         author.add_argument("--publication-origin")
         author.add_argument("--publication-label", action="append", default=[])
@@ -90,9 +94,12 @@ def create_options(args, prefix: list[str]) -> list[str]:
 def run(args, prefix: list[str]) -> tuple[int, dict]:
     if args.command == "author-capabilities":
         return 0, {**capability(args, prefix), "frontend": {"worker-policy-config": True}}
-    operation = "metadata-update" if args.command == "update" else "source-push"
-    capability(args, prefix, operation)
-    argv = ["pr-update" if args.command == "update" else "pr-push", f"--repo={args.repo}", "--json"]
+    if args.command == "ready" and args.number < 1:
+        raise ValueError("--number must be positive")
+    operation = {"update": "metadata-update", "push": "source-push", "ready": "draft-ready"}[args.command]
+    support = capability(args, prefix, operation)
+    command = {"update": "pr-update", "push": "pr-push", "ready": "pr-author-ready"}[args.command]
+    argv = [command, f"--repo={args.repo}", "--json"]
     argv.extend(config_options(args))
     if args.command == "update":
         if args.number < 1:
@@ -108,6 +115,8 @@ def run(args, prefix: list[str]) -> tuple[int, dict]:
             argv.append(f"--reviewer={value}")
         for value in args.work_item:
             argv.append(f"--work-item={value}")
+    elif args.command == "ready":
+        argv.append(f"--number={args.number}")
     else:
         argv.extend((
             f"--workspace={args.workspace}", f"--branch={args.head}",
@@ -115,9 +124,9 @@ def run(args, prefix: list[str]) -> tuple[int, dict]:
         ))
         if args.expected_remote_head is not None:
             argv.append(f"--expected-remote-head={args.expected_remote_head}")
-    if args.publication_origin:
+    if getattr(args, "publication_origin", None):
         argv.append(f"--publication-origin={args.publication_origin}")
-    argv.extend(f"--publication-label={label}" for label in args.publication_label)
+    argv.extend(f"--publication-label={label}" for label in getattr(args, "publication_label", ()))
     try:
         result = run_command([*prefix, *argv], timeout=90.0)
     except (OSError, RuntimeError, subprocess.SubprocessError, UnicodeError):
@@ -130,14 +139,34 @@ def run(args, prefix: list[str]) -> tuple[int, dict]:
         raise RuntimeError(
             "Native author response is unconfirmed; reconcile the same source/PR before retrying"
         ) from None
-    if isinstance(payload, dict) and result.returncode and payload.get("error") and "repo" not in payload:
+    if (args.command != "ready" and isinstance(payload, dict) and result.returncode
+            and payload.get("error") and "repo" not in payload):
         return result.returncode, payload
     if not isinstance(payload, dict) or payload.get("repo") != args.repo:
         raise RuntimeError("Native author response does not identify the selected target; reconcile before retrying")
-    if args.command == "update" and (
+    if args.command in ("update", "ready") and (
         type(payload.get("number")) is not int or payload["number"] != args.number
     ):
-        raise RuntimeError("Native metadata response does not identify the selected PR; reconcile before retrying")
+        raise RuntimeError("Native author response does not identify the selected PR; reconcile before retrying")
+    if args.command == "ready":
+        action = payload.get("actions")
+        draft = action.get("draft") if isinstance(action, dict) else None
+        status = draft.get("status") if isinstance(draft, dict) else None
+        if (
+            payload.get("schema") != "agent-worktrees.pr-ready"
+            or type(payload.get("version")) is not int or payload["version"] != 1
+            or not isinstance(support.get("provider"), str) or not support["provider"]
+            or payload.get("provider") != support["provider"]
+            or status not in ("not-attempted", "confirmed", "failed", "unknown")
+            or type(payload.get("ok")) is not bool
+            or payload["ok"] != (status == "confirmed")
+            or payload["ok"] and result.returncode
+            or not payload["ok"] and (
+                not isinstance(payload.get("error"), str) or not payload["error"].strip()
+            )
+            or payload["ok"] and payload.get("error")
+        ):
+            raise RuntimeError("Native readiness response is unconfirmed; reconcile this PR before retrying")
     if result.returncode or payload.get("ok") is not True:
         return result.returncode or 1, payload
     if args.command == "push" and (
