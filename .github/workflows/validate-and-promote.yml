@@ -469,7 +469,6 @@ jobs:
       MAIN_BEFORE: ${{ needs.gate.outputs.main_before }}
       CANDIDATE_SHA: ${{ needs.compose-candidate.outputs.candidate_sha }}
       CANDIDATE_TREE: ${{ needs.compose-candidate.outputs.tree }}
-      ACCEPTANCE_ROOT: '${{ runner.temp }}\candidate\it'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -496,6 +495,12 @@ jobs:
             --repo "$GITHUB_WORKSPACE" --directory "$RUNNER_TEMP/frozen-candidate" \
             --dev-sha "$DEV_SHA" --main-before "$MAIN_BEFORE" \
             --candidate-sha "$CANDIDATE_SHA" --checkout "$RUNNER_TEMP/candidate"
+      - name: Select the short acceptance root at the runner boundary
+        shell: pwsh
+        env:
+          ACCEPTANCE_ROOT: '${{ runner.temp }}\candidate\it'
+        run: |
+          "ACCEPTANCE_ROOT=$env:ACCEPTANCE_ROOT" >> $env:GITHUB_ENV
       - name: Install and exercise the generated project binstub in real Windows terminals
         shell: pwsh
         working-directory: '${{ runner.temp }}\candidate'
