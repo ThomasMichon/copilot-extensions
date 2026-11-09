@@ -58,6 +58,8 @@ def _legacy_report(root: Path) -> dict | None:
         slot = slot.parent
     path = slot / ".runtime-bootstrap" / "versioned_runtime.py"
     if not path.is_file() or path.is_symlink():
+        path = Path(__file__).resolve().parents[1] / ".runtime-bootstrap" / "versioned_runtime.py"
+    if not path.is_file() or path.is_symlink():
         path = own_root / "scripts" / "versioned_runtime.py"
     if not path.is_file():
         path = Path(__file__).resolve().parents[2] / "scripts" / "versioned_runtime.py"
