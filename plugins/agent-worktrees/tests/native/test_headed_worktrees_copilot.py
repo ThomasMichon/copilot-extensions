@@ -45,6 +45,19 @@ def _until(check, label, timeout=30, diagnostic=None):
     raise AssertionError(label + ("\n" + diagnostic() if diagnostic else ""))
 
 
+def _backend_execution(attempt):
+    matches = []
+    for path in attempt.glob("*.execution.json"):
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+        if any(
+            event["phase"] == "process-spawned" and event["details"]["boundary"] == "backend-command"
+            for event in receipt["events"]
+        ):
+            matches.append((path, receipt))
+    assert len(matches) <= 1, "The caller published more than one native backend execution"
+    return matches[0] if matches else None
+
+
 @pytest.mark.parametrize("control", ["broker", "native-input", "manager-no-mux", "manager-mux"])
 def test_worktrees_native_fresh_and_resume_keep_one_history_and_real_receipts(tmp_path, control):
     _qualify_native_worktrees(tmp_path, control)
@@ -762,19 +775,13 @@ class Mux {
                 assert pid_alive(state["child_pid"]) and pid_alive(state["pid"])
                 expected = prompts[:3]
             assert [event["data"]["content"] for event in messages() if event["type"] == "user.message"] == expected
-            execution_files = list(attempt.glob("*.execution.json"))
-            execution_file, = execution_files
-
-            def spawned_receipt():
-                receipt = json.loads(execution_file.read_text(encoding="utf-8"))
-                return receipt if any(
-                    event["phase"] == "process-spawned" for event in receipt["events"]
-                ) else None
-
-            backend = _until(
-                spawned_receipt, f"{leg}: native execution did not publish its process receipt",
+            execution_file, backend = _until(
+                lambda: _backend_execution(attempt),
+                f"{leg}: native execution did not publish its process receipt",
                 diagnostic=lambda: (
-                    execution_file.read_text(encoding="utf-8") + "\n"
+                    "\n".join(
+                        path.read_text(encoding="utf-8") for path in attempt.glob("*.execution.json")
+                    ) + "\n"
                     + query("capture-pane", "-p", "-t", target).stdout[-8192:]
                     + "\n" + pane_process()
                 ),
