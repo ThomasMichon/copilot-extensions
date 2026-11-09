@@ -305,8 +305,9 @@ _Operator-required outcome; agent-recommended slices and validation._
   installed/provider and P1/P2 acceptance remain open.
   The [mapping-preservation refinement](terminal-retention.md#retained-acquisition-mapping-composition)
   cleared review in #11633. Explicitly adopted lossless slot transfer and
-  scoped historical library readback merged in #11634. Next is separately
-  negotiated terminal retained-comment serving; installed, provider and
+  scoped historical library readback merged in #11634. Separately negotiated
+  terminal retained-comment serving merged in #11636. Next is explicit
+  standalone host selection and qualification; installed, provider and
   complete T3 acceptance remain open.
   Existing normalized ADO load/sync acquisition feeds the explicitly enabled
   journal after confirmed cache publication (#10405); native observation and
@@ -1025,6 +1026,15 @@ or silently expanding a bounded source claim.
   bounds and unchanged source/resource ownership.
 
 ## Validation Plan
+
+- [x] Qualify finite optional terminal mapping serving through actual adopted
+  storage, Native/Gateway/CLI negotiation, all four owner layouts, populated
+  cache/buffer retirement and fresh file-reader/service restart (#11636).
+  Preserve baseline v1 contracts, missing/withdrawn support, strict rollback,
+  unsupported historical versus null evidence and malformed-value refusal.
+  The final focused suite passes 39 cases; earlier overlapping packets pass
+  173 and 108. Standalone selection and installed/provider/full T3 acceptance
+  remain open.
 
 - [x] Qualify finite mapping data/library controls: original prepared/native
   joins, restart, later writes, unknown/partial/divergent evidence, copied

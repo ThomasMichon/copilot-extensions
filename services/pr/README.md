@@ -437,6 +437,45 @@ real Gateway TLS/PoP with synthetic provider inputs. This is source
 qualification, not retained-host adoption, provider enrollment, production
 cleanup, configuration authority or rollout.
 
+### Optional terminal comment mapping reader
+
+The same trusted `workspaces` object may additionally select
+`"terminal_mapping_reads": true`. It requires `"terminal_reads": true` and
+selects all workspace bindings on that owner. Absence or explicit `false`
+preserves the prior terminal host; other JSON types refuse. The host checks
+the executing core's separate
+`agent-pull-requests.terminal-comment-mapping-reader/v1` declaration before
+passing any new constructor input. Missing, malformed or incompatible support
+refuses the explicit selection without creating state; baseline hosts do not
+require it. Older strict host parsers reject the new field.
+
+Fresh provisioning adopts prepared-intent storage, acquired comment mappings
+and terminal comment mappings under the existing writer lease and deadline,
+after terminal retention/recovery adoption. Prepared-intent storage preserves
+original identities; it does not select preparation hosting or a protected
+writer. Serve only validates existing storage. Selecting this reader on a
+retained volume without its extension does not adopt it or advertise support.
+Interrupted provisioning retains progress and refuses blind reprovisioning.
+Removing the selection or rolling back to a reader that cannot understand the
+adopted extension refuses the volume without rewriting it.
+
+The selected receiver separately advertises scoped `retained-comment` reads
+for original active and compact records. Terminal-read/v1 and the prior
+retained-comment/v1 declaration remain unchanged. The read needs neither a
+cached body nor fresh native acquisition, and preserves original preparation,
+receipt, nullable mapping and correlation semantics. Selection enables no new
+mapping ingestion, preparation, submission, feedback, ACK, attention writer or
+remote retirement operation. Existing lifecycle owners still own compaction
+and physical retirement.
+
+The foreground fixture seeds synthetic original receipt/acquired evidence
+before its first writer, crosses real Gateway TLS/PoP and the workspace CLI,
+then fully drains that writer before isolated owner-side compaction and
+populated-cache retirement. A fresh foreground reader recovers the exact compact
+metadata without another export or replay-store write; authoritative reopen
+uses the cleared cache's actual current state. This qualifies source behavior,
+not retained-host adoption, live provider enrollment, activation or rollout.
+
 ## Independently constructed container
 
 `container/Dockerfile` is an offline wheel-only recipe, not an image published
