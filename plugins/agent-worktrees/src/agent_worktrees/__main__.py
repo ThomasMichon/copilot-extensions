@@ -6473,7 +6473,7 @@ def main(argv: list[str] | None = None, *, publication: object | None = None) ->
     # Explicit one-shot reads need no deferred lifecycle helpers.
     if args_list[0] == "pr-watch":
         from . import pr_cli
-        if not (len(args_list) >= 4 and args_list[1] in ("snapshot", "status", "threads")
+        if not (len(args_list) >= 4 and args_list[1] in ("snapshot", "status", "threads", "diff")
                 and "/" in args_list[2] and not args_list[2].startswith("-")):
             _ensure_cluster_loaded()
         try:

@@ -30,6 +30,39 @@ agent-pull-requests merge  --repo <owner/repo> --number <n> [--squash|--merge|--
 agent-pull-requests wait   --repo <owner/repo> --number <n> [--interval <s>] [--timeout <s>] [--json]
 ```
 
+## Native `diff`
+
+```text
+agent-pull-requests diff --repo <registered-target> --number <positive-number> --worktrees-command <attributable-command> [--json]
+```
+
+Reads a unified diff through the selected Worktrees `pr-watch diff` owner,
+without a claimant worktree or target checkout. The named target supplies
+provider, endpoint and account; managed execution retains same-cell peer
+selection. This native-only command has no default forge route, credential
+or endpoint override, workspace allocation, mutation or automatic retry.
+
+The complete `agent-worktrees.pr-diff-read` version-1 report is emitted in
+both modes, including valid failures. Exit 0 requires owner exit 0,
+`supported: true` and no report error. Extra frontend diagnostics go to
+stderr; when no valid report exists, JSON mode reports a frontend error
+with the requested repo/number instead of an invented empty diff.
+
+Completeness and candidate freshness are independent of acquisition.
+The existing provider primitive yields null completeness on success,
+false on error/unsupported acquisition and no base/head identity.
+The frontend preserves true/false/null completeness and additive evidence
+in any valid report. Empty text is not proof of no changes, and exit 0
+is not a candidate-bound review artifact or write authority. Azure DevOps
+explicitly reports unified diff unsupported; its generation/source workspace
+contract remains separate. GitHub honors the configured endpoint, retaining
+ambient/default host selection only when none is configured. No diff is
+persisted in a watch cache or journal. Unsupported old/rolled-back runtimes
+fail explicitly without another invocation.
+Malformed configured GitHub endpoints refuse, and supplied selected tokens
+override public/Enterprise aliases. Explicit capture preserves CRLF/bare CR
+and rejects invalid UTF-8; tracked diff normalization remains unchanged.
+
 ## Native `threads`
 
 ```text
