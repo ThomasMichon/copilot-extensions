@@ -14,7 +14,7 @@ from agent_procutil.owned_budget import OwnedExecutionBudget
 from agent_procutil.owned_process import OwnedCleanupError, run_caller_owned
 from fleet_manager.gateway_service_channel import BODY_BYTES
 
-from .report_read import ReportBinding, ReportUnavailable, report_scope
+from .report_read import ReportBinding, ReportUnavailable, report_scope, response_budget
 
 
 def _settle(error):
@@ -45,8 +45,9 @@ class NativeGitHubReport:
             raise ValueError("native report needs its trusted owner's absolute config path")
         self.config_path, self.context_id = config_path, _label(context_id)
 
-    def resolve(self, remaining):
+    def resolve(self, remaining, *, response_limit=BODY_BYTES):
         """Compose actual selection, credential, provider and caller-owned seams."""
+        response_budget(response_limit)
         try:
             import agent_worktrees
             from agent_worktrees.github_account_observation import SelectedGitHubAccount
@@ -135,7 +136,7 @@ class NativeGitHubReport:
                 nonlocal cleanup_delayed, transport_unavailable
                 try:
                     checkpoint()
-                    return account.capture("report", arguments, binary=binary, limit=BODY_BYTES)
+                    return account.capture("report", arguments, binary=binary, limit=response_limit)
                 except OwnedCleanupError as error:
                     cleanup_delayed = True
                     _settle(error)
@@ -164,4 +165,5 @@ class NativeGitHubReport:
         current()
         def live():
             remaining()
-        return ReportBinding(self.scope, self.context_id, current, collect, final_checkpoint=live)
+        return ReportBinding(self.scope, self.context_id, current, collect, final_checkpoint=live,
+                             response_limit=response_limit)

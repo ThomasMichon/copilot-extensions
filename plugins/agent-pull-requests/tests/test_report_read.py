@@ -80,6 +80,7 @@ def reports(tmp_path):
     class Caller:
         def __init__(self):
             self.calls, self.change = [], None
+            self.handler_response_limit = BODY_BYTES
             self.principal, self.expires = binding.principal, int(time.time()) + 600
 
         async def request(self, method, target, *, request_headers, body, response_limit):
@@ -87,6 +88,7 @@ def reports(tmp_path):
             response = await gateway.handle(ServiceRequest(
                 CallerContext(binding.fleet, binding.gateway, binding.slot, self.principal, self.expires),
                 method, target, tuple((name.lower(), value) for name, value in request_headers), body,
+                response_limit=self.handler_response_limit,
             ))
             if self.change is not None:
                 return self.change(response)
