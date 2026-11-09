@@ -296,7 +296,8 @@ _Operator-required outcome; agent-recommended slices and validation._
   was reviewed in #11576. It defines the same-owner fence, notification,
   recovery-only payload and scoped cache/materialization sequence;
   T1 terminal intent/admission/drain and minimal replay notification merged
-  in #11605. T2 recovery-only payload/readback and scoped retirement, T3
+  in #11605. T2a compact recovery-only operations and actual protected readback
+  merged in #11614. T2b scoped cache/materialization retirement, T3
   executing-host qualification and full P1/P2 acceptance remain open.
   Existing normalized ADO load/sync acquisition feeds the explicitly enabled
   journal after confirmed cache publication (#10405); native observation and

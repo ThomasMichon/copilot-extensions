@@ -46,6 +46,7 @@ def _plain(path: Path, *, directory: bool = False) -> None:
     info = path.lstat()
     if (
         stat.S_ISLNK(info.st_mode)
+        or not directory and info.st_nlink != 1
         or getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
         or (not stat.S_ISDIR(info.st_mode) if directory else not stat.S_ISREG(info.st_mode))
     ):
@@ -243,6 +244,11 @@ class GenerationCache:
                 "found": generation is not None, "generation": generation,
                 "current_id": current, "freshness": "retained", "effects": "none",
             }
+
+    def _retire_scope(self, scope, progress, *, capture, checkpoint):
+        """Internal lifecycle-owned retirement, never a cache repair operation."""
+        from .generation_retirement import retire_scope
+        return retire_scope(self, scope, progress, capture=capture, checkpoint=checkpoint)
 
     def publish(self, generation: dict, *, expected_current: str | None) -> dict:
         """CAS one target; contention retains the existing OperationLock error."""
