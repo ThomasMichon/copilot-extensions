@@ -966,24 +966,28 @@ def test_staged_start_fallback_uses_preserved_project(provisioned_snapshot):
     )
     runner = state.fixture_root / "staged-start.ps1"
     runner.write_text(
-        "param($Installer,$Python,$Project)\n"
+        "param($Installer,$Python,$Project,$Root)\n"
         "$ErrorActionPreference='Stop'\n"
-        "$LinkPython=$Python;$TaskName='fixture'\n"
+        "$LinkPython=$Python;$TaskName='fixture';$InstallDir=$Root\n"
         "$env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT=$Project\n"
         "function Get-ScheduledTask {}\n"
         "function Start-ScheduledTask {throw 'unexpected task mutation'}\n"
         "$tokens=$null;$errors=$null\n"
         "$ast=[System.Management.Automation.Language.Parser]::ParseFile($Installer,[ref]$tokens,[ref]$errors)\n"
         "if($errors.Count){throw 'Installer parse failed'}\n"
-        "$function=$ast.Find({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Invoke-Start'},$false)\n"
-        ". ([scriptblock]::Create($function.Extent.Text))\n"
+        "foreach($name in @('Get-ActiveVaultPython','Invoke-Start')) {\n"
+        "    $function=$ast.Find({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$false)\n"
+        "    if(-not $function){throw \"Required installer function is missing: $name\"}\n"
+        "    . ([scriptblock]::Create($function.Extent.Text))\n"
+        "}\n"
         "Invoke-Start\n", encoding="utf-8",
     )
     try:
         result = subprocess.run(
             [state.pwsh, "-NoProfile", "-NonInteractive", "-File", str(runner),
              str(state.snapshot / "scripts" / "install.ps1"),
-             str(slot / "Scripts" / "python.exe"), str(project)],
+             str(slot / "Scripts" / "python.exe"), str(project),
+             str(state.home / ".agent-vault")],
             cwd=state.home, env=env, capture_output=True, text=True,
             timeout=30, **agent_procutil.no_window_kwargs(),
         )
