@@ -598,6 +598,15 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [canonical installer-fixture outcome](<journal/2026/11.09 canonical-installer-fixtures.md>)
+records two audited tracking folds into OPEN #11674. All six PowerShell cases,
+eight POSIX cases and three distinct POSIX failure classes remain planned,
+with fourteen unchecked acceptance rows and unchanged source responsibilities.
+No new product source, execution or whole-installation qualification follows.
+Two equal complete scans at 01:52:17 PST measure 853 whole OPEN, 510 original
+and 343 inflow issues, 124 above fixed 729, with 1,051 audited dispositions.
+The campaign and every remaining Plan/Validation gate stay Active.
+
 The [scoped-GitHub quoting and non-text provenance correction](<journal/2026/11.09 scoped-gh-quoting-and-event-provenance.md>)
 selects #810's explicit point-of-use documentation alternative, not a native
 shim or parser change. The narrow event rule admits no outside-authored text
