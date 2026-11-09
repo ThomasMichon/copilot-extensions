@@ -116,6 +116,9 @@ def run(
             print(json.dumps(payload, indent=2, sort_keys=True))
         else:
             print(f"agent-pull-requests: {payload['error']}", file=sys.stderr)
+            diagnostic = payload["frontend"].get("diagnostic")
+            if diagnostic and diagnostic != payload["error"]:
+                print(f"agent-pull-requests: {diagnostic}", file=sys.stderr)
         return code
     try:
         launch = prefix_factory() if prefix_factory is not None else [command_path(args.worktrees_command)]

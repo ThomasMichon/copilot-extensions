@@ -148,6 +148,27 @@ def test_lost_or_failed_dispatch_is_unknown(command, monkeypatch, capsys, value,
     assert len(calls) == 2
 
 
+def test_plain_owner_error_also_exposes_unknown_outcome_and_recovery(command, monkeypatch, capsys):
+    error = "Local creation cancellation refused: test-owned save failure"
+    calls = stub(monkeypatch, discovery(), {"success": False, "error": error}, code=1)
+    args = [value for value in arguments(command, "--confirm") if value != "--json"]
+    assert cli.main(args) == 1
+    captured = capsys.readouterr()
+    assert not captured.out and error in captured.err
+    assert "cancellation outcome is unknown" in captured.err
+    assert "original revision and reason" in captured.err
+    assert "no retry or fallback was attempted" in captured.err
+    assert len(calls) == 2
+
+
+def test_plain_local_refusal_does_not_duplicate_the_same_diagnostic(command, monkeypatch, capsys):
+    calls = stub(monkeypatch, {}, {})
+    assert cli.main([value for value in arguments(command) if value != "--json"]) == 1
+    captured = capsys.readouterr()
+    assert not captured.out and "actual operator approval" in captured.err
+    assert captured.err.count("agent-pull-requests:") == 1 and not calls
+
+
 @pytest.mark.parametrize("already", [False, True])
 def test_nonactive_exact_attempt_preserves_original_revision_reason_and_additions(
     command, monkeypatch, capsys, already,

@@ -168,6 +168,11 @@ the owner composition uses the actual creation persistence, status and
 cancellation handlers with synthetic provider absence. These are complementary
 controls, not proof of installed cross-process provider operation.
 
+Review found that a preserved owner error hid frontend recovery guidance in
+human-readable output. The corrected cancellation/routing subset passed
+**139 tests with five platform skips**, including non-JSON owner errors and
+duplicate-diagnostic suppression. Owner JSON remains unchanged.
+
 Exact original-revision recovery, non-active creation selection, retained audit,
 source/index/HEAD/refs, sibling attempts, resource claims and the source
 finalization precondition are covered. A save-then-lost-response control confirms

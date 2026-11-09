@@ -1323,6 +1323,11 @@ callback an implicit credential store.
 
 ### 2026-11-08 - Native cancellation source qualification
 
+- Current-head review on #11653 found that plain owner-error output hid the
+  frontend's unknown-outcome recovery guidance. Retained the owner error and
+  printed the distinct diagnostic; the affected isolated cancellation/routing
+  subset passed 139 tests with five platform skips, including two plain-output
+  controls. A fresh review is required for the correction.
 - Implemented the contract reviewed in #11651 as a thin native-only
   `cancel-creation` frontend. The same selected receiver supplies read-only
   support/attempt discovery and one existing cancellation-owner dispatch.

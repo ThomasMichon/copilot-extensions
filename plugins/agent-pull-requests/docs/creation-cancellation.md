@@ -26,7 +26,9 @@ Output retains the owner payload and adds `frontend.cancellation_status`:
 `not-attempted` before dispatch, `confirmed` only for an exact valid v1 receipt,
 or `unknown` after a lost, invalid or failed dispatch result. Only `confirmed`
 exits zero. Owner diagnostics survive; `frontend.diagnostic` explains a refusal
-or uncertain result. An unknown outcome may include a committed cancellation;
+or uncertain result. Without `--json`, a distinct frontend diagnostic is printed
+alongside the owner error, so recovery guidance remains visible.
+An unknown outcome may include a committed cancellation;
 there is no automatic retry/fallback. Reconcile the original attempt before
 intentional receipt recovery using its original revision and reason.
 
