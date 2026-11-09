@@ -359,6 +359,7 @@
       "t:clean-room/scenarios/plugin-process-hygiene-convergence/fixtures/plugin_process_hygiene_convergence.py::_spawn::Popen": 1
     },
     "caller-contained": {
+      "v:authenticated_curl.py::execute::create_subprocess_exec": 1,
       "r:plugins/agent-index/scripts/historical_registration_owner.py::NativeTaskOwner.__enter__::Popen": 1,
       "t:core_native_feed_resolution.py::_run_uv::Popen": 1,
       "t:core_native_feed_resolution.py::_serve::serve_forever": 1,

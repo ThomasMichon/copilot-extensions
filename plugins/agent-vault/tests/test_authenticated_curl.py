@@ -372,3 +372,42 @@ def test_encoded_credential_echo_is_withheld(encoding: str) -> None:
     assert value.encode() not in encoded
     with pytest.raises(BindingError, match="response withheld"):
         http.redact(encoded, [value])
+
+
+@pytest.mark.parametrize("echo", [
+    b"Synthetic%2fAbC%3aCredential",
+    b"Synthetic%2FAbC%3aCredential",
+    b'"Synthetic\\/AbC:Credential"',
+    b'"\\u0053ynthetic\\/AbC:Credential"',
+])
+def test_encoding_normalization_preserves_literal_case(echo: bytes) -> None:
+    value = "Synthetic/AbC:Credential"
+    assert http._contains_credential(echo, [value])
+    with pytest.raises(BindingError, match="response withheld"):
+        http.redact(echo, [value])
+    assert not http._contains_credential(echo.lower(), [value])
+
+
+@pytest.mark.parametrize(("body", "suffix"), [
+    (b"", "Synthetic%{http_code}"),
+    (b"Synthetic", "%{http_code}"),
+])
+def test_rendered_output_is_screened_across_body_suffix_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+    body: bytes,
+    suffix: str,
+) -> None:
+    path = document(tmp_path / "bindings.json")
+    monkeypatch.setattr(http, "binding_file", lambda: path)
+    monkeypatch.setattr(http, "curl_binary", lambda: "not-launched")
+    monkeypatch.setattr(http, "_credential", lambda *args: "Synthetic200")
+    monkeypatch.setattr(http, "execute", AsyncMock(return_value=http.CurlResult(body, 200, 0)))
+    assert http.command(
+        argparse.Namespace(curl_arguments=["--", "-w", suffix, URL], prompt=False)
+    ) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "response withheld" in captured.err
+    assert "Synthetic200" not in captured.err

@@ -85,7 +85,8 @@ inherited values equal to a resolved credential. Curl's default config and proxi
 globbing is disabled, and only HTTP(S) protocols are admitted. Native TLS
 verification remains enabled.
 
-Responses are captured before output. A response containing the injected
+Responses are captured before output. The complete rendered output, including
+the write-out suffix and its boundary with the body, is screened. Output containing the injected
 credential, complete auth value, or supported JSON/URL/Base64 representation
 is withheld with a secret-free error, rather than streaming an auth echo into
 the caller. Curl stderr is captured, bounded and never forwarded verbatim.

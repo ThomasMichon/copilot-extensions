@@ -10,11 +10,12 @@ import io
 import json
 import logging
 import os
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from urllib.parse import quote
+from urllib.parse import unquote_to_bytes
 
 from . import config
 from .credential_reads import read_credential
@@ -23,6 +24,7 @@ from .http_bindings import BindingError, HttpBinding, binding_file, read_binding
 
 _STATUS = b"\nagent-vault-http-status:"
 _BODY_LIMIT = 8 * 1024 * 1024
+_JSON_ESCAPE = re.compile(rb'\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}(?:\\u[0-9a-fA-F]{4})?)')
 
 
 @dataclass(frozen=True)
@@ -90,21 +92,24 @@ def authentication(binding: HttpBinding, *, prompt: bool = False) -> tuple[str, 
     return header, protected
 
 
+def _decode_json_escape(match: re.Match[bytes]) -> bytes:
+    try:
+        return json.loads(b'"' + match.group() + b'"').encode("utf-8")
+    except (ValueError, UnicodeError):
+        return match.group()
+
+
 def _contains_credential(body: bytes, protected: list[str]) -> bool:
+    representations = (body, unquote_to_bytes(body), _JSON_ESCAPE.sub(_decode_json_escape, body))
     patterns: set[bytes] = set()
     for value in protected:
         encoded = value.encode("utf-8")
-        escaped_url = quote(value, safe="").encode("ascii")
-        patterns.update(
-            (
-                encoded,
-                base64.b64encode(encoded),
-                json.dumps(value, ensure_ascii=True)[1:-1].encode("utf-8"),
-                escaped_url,
-                escaped_url.lower(),
-            )
-        )
-    return any(pattern and pattern in body for pattern in patterns)
+        patterns.update((encoded, base64.b64encode(encoded)))
+    return any(
+        pattern and pattern in representation
+        for representation in representations
+        for pattern in patterns
+    )
 
 
 def redact(body: bytes, protected: list[str]) -> bytes:
@@ -239,10 +244,10 @@ def command(args: argparse.Namespace) -> int:
         if 300 <= result.status < 400:
             raise BindingError("HTTP redirect refused; credentials were not forwarded")
         body = b"" if arguments.discard_errors and result.status >= 400 else result.body
-        body = redact(body, protected)
         suffix = arguments.write_out.replace("%{http_code}", f"{result.status:03d}")
         suffix = suffix.replace(r"\n", "\n").replace(r"\r", "\r").replace(r"\t", "\t")
-        sys.stdout.buffer.write(body + suffix.encode("utf-8"))
+        output = redact(body + suffix.encode("utf-8"), protected)
+        sys.stdout.buffer.write(output)
         sys.stdout.buffer.flush()
         if result.code:
             print(f"Error: native curl failed (exit {result.code})", file=sys.stderr)
