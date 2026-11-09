@@ -183,7 +183,9 @@ def test_separate_launch_processes_always_copy_current_plugin(standalone_workspa
     assert results[0]["status"] == results[1]["status"] == "ready"
     assert results[0]["changed"] == results[1]["changed"] == 1
     assert results[0]["reused"] is results[1]["reused"] is False
-    assert results[0]["publication_revision"] != results[1]["publication_revision"]
+    assert results[0]["publication_revision"] == results[1]["publication_revision"]
+    assert results[0]["restart_required"] is True
+    assert results[1]["restart_required"] is False
 
 
 @pytest.mark.portfolio_tier("T2")
