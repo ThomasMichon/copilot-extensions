@@ -1785,7 +1785,7 @@ def test_real_python_lifecycle_constructs_then_reuses_without_uv(
 
 
 @pytest.mark.parametrize("discovery", [
-    "missing", "unreadable", "reuse-timeout", "reuse-malformed", "unknown-slot",
+    "missing", "unreadable", "reuse-timeout", "reuse-malformed", "unknown-slot", "retry-references",
 ])
 @pytest.mark.parametrize("release", [False, True])
 def test_previous_only_installation_starts_and_settles_the_incoming_monitor(
@@ -1815,7 +1815,9 @@ def test_previous_only_installation_starts_and_settles_the_incoming_monitor(
     directory = root / "status-monitor-routing"
     directory.mkdir()
     previous = routing.Endpoint("127.0.0.1", 61001, 202, "old", 1, "2002")
-    raw_active = previous.to_dict() if discovery.startswith("reuse-") or discovery == "unknown-slot" else None
+    raw_active = previous.to_dict() if discovery.startswith("reuse-") or discovery in (
+        "unknown-slot", "retry-references",
+    ) else None
     routing.routing_table_path(directory).write_text(json.dumps({
         "version": 1, "active": raw_active, "previous": previous.to_dict() if raw_active is None else None,
     }))
@@ -1890,6 +1892,32 @@ def test_previous_only_installation_starts_and_settles_the_incoming_monitor(
     monkeypatch.setattr(locks, "_pid_alive", lambda pid: pid in (202, 303))
     monkeypatch.setattr(Path, "read_text", read_discovery)
     monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    if discovery == "retry-references":
+        from agent_worktrees import runtime_monitor_identity as identity
+
+        def unavailable(_root):
+            raise driver.InstallationRefused("fixture outgoing identity unavailable")
+        monkeypatch.setattr(driver, "_monitor_identity", unavailable)
+        commit = driver.runtime._leases.commit_runtime_reference_transaction
+        def interrupted(*args, **kwargs):
+            raise OSError("fixture reference commit interrupted")
+        monkeypatch.setattr(driver.runtime._leases, "commit_runtime_reference_transaction", interrupted)
+        with pytest.raises(OSError, match="commit interrupted"):
+            driver.settle_candidate(
+                root, "2.0.0", payload=tmp_path, payload_hash="previous",
+                expected_governance={}, previous=selected, release_dev_claim=claim,
+                dev_owner=owner if release else None,
+            )
+        monkeypatch.setattr(driver.runtime._leases, "commit_runtime_reference_transaction", commit)
+        monkeypatch.setattr(driver, "_monitor_identity", lambda root: (202, "2002"))
+        monkeypatch.setattr(driver, "_monitor_slot", lambda *a: "1.0.0")
+        monkeypatch.setattr(cutover, "routed_monitor_identity", lambda *a, **k: (202, "2002", "1.0.0"))
+        monkeypatch.setattr(identity, "async_predecessor", lambda root, predecessor, **k: (
+            predecessor, {"expected_old": previous},
+        ))
+        monkeypatch.setattr(driver.time, "sleep", lambda seconds: pytest.fail(
+            "installer retry entered permanent settlement after a pending reference transaction",
+        ))
     result = driver.settle_candidate(
         root, "2.0.0", payload=tmp_path, payload_hash="previous",
         expected_governance={}, previous=selected, release_dev_claim=claim,

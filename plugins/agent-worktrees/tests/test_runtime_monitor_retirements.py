@@ -147,6 +147,133 @@ def test_replacement_archive_failure_preserves_canonical_custody_and_code(retain
     assert len(list((root / "status-monitor-observations").glob("*.json"))) == 1
 
 
+def test_observation_fences_gc_before_inventory_capture(retained, monkeypatch):
+    from agent_worktrees import runtime_monitor_replacement as replacement
+
+    root, runtime, _identities, _alive = retained
+    inventory = runtime.list_versions
+    collections = []
+    def collect_after_snapshot(requested):
+        versions = inventory(requested)
+        if collections:
+            return versions
+        collections.append("collecting")
+        try:
+            runtime.gc(root, min_age_days=0)
+        except ValueError as error:
+            assert "transaction is pending" in str(error)
+            collections[0] = "fenced"
+        else:
+            collections[0] = "unfenced"
+        return versions
+    monkeypatch.setattr(runtime, "list_versions", collect_after_snapshot)
+    assert replacement.retain(root, runtime=runtime, predecessor={"pid": 101, "start": "1001"})
+    assert collections == ["fenced"]
+    assert (root / "versions" / "legacy").is_dir()
+    assert runtime._leases.read_runtime_references(root)
+
+
+def test_prepared_observation_repairs_failed_reference_commit_before_resident_reconciliation(
+    retained, monkeypatch,
+):
+    from agent_worktrees import runtime_monitor_replacement as replacement
+
+    root, runtime, _identities, _alive = retained
+    claim = runtime.claim_dev(root, "original-owner", previous_version="current")
+    commit = runtime._leases.commit_runtime_reference_transaction
+    def interrupted(*args, **kwargs):
+        raise OSError("fixture reference commit interrupted")
+    monkeypatch.setattr(runtime._leases, "commit_runtime_reference_transaction", interrupted)
+    with pytest.raises(OSError, match="commit interrupted"):
+        replacement.retain(
+            root, runtime=runtime, predecessor={"pid": 101, "start": "1001"}, release_claim=claim,
+        )
+    monkeypatch.setattr(runtime._leases, "commit_runtime_reference_transaction", commit)
+    owner = retirements.ResidentRetirements(root)
+    owner.refresh()
+    assert owner.pending and owner.error is None
+    assert runtime.read_dev_claim(root, strict=True) == claim
+    assert runtime._leases.read_runtime_references(root)
+    runtime.gc(root, min_age_days=0)
+    assert (root / "versions" / "legacy").is_dir()
+
+
+@pytest.mark.parametrize("failure", ["capture", "mapping"])
+def test_observation_inventory_interruption_keeps_fence_and_recovers_write_ahead_mapping(
+    retained, monkeypatch, failure,
+):
+    from zdd import routing_persistence
+    from agent_worktrees import runtime_monitor_replacement as replacement
+
+    root, runtime, _identities, _alive = retained
+    inventory, write = runtime.list_versions, routing_persistence.write
+    def interrupted_inventory(requested):
+        if failure == "capture":
+            raise OSError("fixture inventory interrupted")
+        return inventory(requested)
+    def interrupted_mapping(path, record):
+        if failure == "mapping" and path.suffix == ".pending" and record["slots"]:
+            raise OSError("fixture inventory interrupted")
+        return write(path, record)
+    monkeypatch.setattr(runtime, "list_versions", interrupted_inventory)
+    monkeypatch.setattr(routing_persistence, "write", interrupted_mapping)
+    with pytest.raises(OSError, match="inventory interrupted"):
+        replacement.retain(root, runtime=runtime, predecessor={"pid": 101, "start": "1001"})
+    monkeypatch.setattr(runtime, "list_versions", inventory)
+    with pytest.raises(ValueError, match="transaction is pending"):
+        runtime.gc(root, min_age_days=0)
+    directory = root / "status-monitor-observations"
+    assert json.loads(next(directory.glob("*.pending")).read_text())["slots"] == []
+    monkeypatch.setattr(routing_persistence, "write", write)
+    assert replacement.recover(root, runtime=runtime)
+    assert len(list(directory.glob("*.json"))) == 1
+    assert not list(directory.glob("*.pending"))
+    assert set(inventory(root)) <= {
+        slot for slots in runtime._leases.read_runtime_references(root).values() for slot in slots
+    }
+
+
+def test_qualified_predecessor_exit_does_not_veto_unchanged_route_selection(retained, monkeypatch):
+    from zdd import routing
+    from zdd.cutover import CutoverOrchestrator
+    from agent_worktrees import runtime_monitor_identity as identity
+    from agent_worktrees import runtime_monitor_replacement as replacement
+    from agent_worktrees import status_monitor_cutover as cutover
+
+    root, _runtime, identities, alive = retained
+    directory = root / "status-monitor-routing"
+    monkeypatch.setattr("zdd.diagnostics.process_start_time", identities.get)
+    old = routing.publish_active(
+        directory, bind="127.0.0.1", port=61001, pid=101, process_start_time="1001",
+    )
+    monkeypatch.setattr(cutover, "routed_monitor_identity", lambda *a, **k: (101, "1001", "legacy"))
+    monkeypatch.setattr(identity, "async_predecessor", lambda *a, **k: (None, {"expected_old": old}))
+    _predecessor, options, deferred = replacement.options(root, None, incumbent_expected=True)
+    assert not deferred
+    alive.clear()
+    identities.clear()
+    monkeypatch.setattr(routing, "_pid_alive", lambda pid: pid in alive)
+    spawned = []
+    def spawn(port):
+        spawned.append(port)
+        alive.add(202)
+        identities[202] = "2002"
+        return SimpleNamespace(
+            pid=202, process_start_time="2002", poll=lambda: None,
+            terminate=lambda: pytest.fail("qualified replacement terminated a daemon"),
+        )
+    orchestrator = CutoverOrchestrator(
+        directory, bind="127.0.0.1", version="new", spawn_passive=spawn,
+        health_check=lambda *a: True, make_client=lambda *a: SimpleNamespace(),
+        pick_free_port=lambda: 61002, self_retirement=True, activate_successor=lambda endpoint: None,
+        **options,
+    )
+    result = orchestrator.run(health_timeout=1, drain_timeout=1)
+    assert result.ok and result.committed, result.to_dict()
+    assert spawned == [61002]
+    assert routing.read_table(directory)["active"]["pid"] == 202
+
+
 @pytest.mark.parametrize("failure", ["archive", "references"])
 def test_changed_observation_recovers_archive_failure_and_more_than_64_retained_slots(
     retained, monkeypatch, failure,

@@ -5881,7 +5881,14 @@ failure; post-publication serving attestation remains strict. Observation
 retention uses bounded reference groups in the existing atomic reference
 transaction, preceded by a durable write-ahead mapping. Interrupted final
 archives and reference commits therefore remain recoverable even after the
-observations change. Deferred dev release carries the original exact claim,
+observations change. The write-ahead record precedes the deletion fence, and
+the fence precedes slot inventory capture; a crash before the inventory is
+persisted resumes conservatively under that same fence. The installer restores
+archived references before ordinary retirement reservation regardless of whether
+outgoing identity is now readable. Resident reconciliation also restores
+prepared dev-claim references without granting their release. A qualified
+predecessor exiting after observation does not veto unchanged raw-route CAS.
+Deferred dev release carries the original exact claim,
 including when the outgoing slot cannot be identified. Only the owning
 installer's committed outcome grants release, and native exit, current selection
 and exact claim ownership remain mandatory at reconciliation.

@@ -81,7 +81,7 @@ def _groups(record: dict, digest: str) -> dict[str, list[str]]:
         return {_REFERENCE_PREFIX + digest: slots}
     return {
         f"{_REFERENCE_PREFIX}/v2/{digest}/{offset // 64}": slots[offset:offset + 64]
-        for offset in range(0, len(slots), 64)
+        for offset in range(0, max(1, len(slots)), 64)
     }
 
 
@@ -122,16 +122,20 @@ def _archives(directory: Path) -> list[tuple[Path, dict]]:
     return records
 
 
-def _references(root: Path, record: dict, digest: str, helper, *, retain: bool) -> None:
-    groups = _groups(record, digest)
-    if not groups:
-        return
+def _references(
+    root: Path, record: dict, digest: str, helper, *, retain: bool,
+    inventory_path: Path | None = None,
+) -> dict:
     with helper._leases.reference_transaction_custody(root):
         if record["version"] == 1:
             references = helper._leases.read_runtime_references(root)
         else:
             transaction = helper._leases.begin_runtime_reference_transaction(root, _REFERENCE_PREFIX)
             references = transaction["owners"]
+            if inventory_path is not None and not record["slots"]:
+                record = {**record, "slots": sorted(helper.list_versions(root))}
+                routing_persistence.write(inventory_path, record)
+        groups = _groups(record, digest)
         expected = {}
         for owner, slots in groups.items():
             previous = references.get(owner, [])
@@ -146,6 +150,42 @@ def _references(root: Path, record: dict, digest: str, helper, *, retain: bool) 
             helper._leases.commit_runtime_reference_transaction(
                 root, _REFERENCE_PREFIX, transaction["token"], desired, expected=expected,
             )
+    return record
+
+
+def _recover_archives(root: Path, directory: Path, helper) -> bool:
+    records = dict(_archives(directory))
+    for path, record in records.items():
+        target = path.with_suffix(".json")
+        if path.suffix == ".pending" and target in records:
+            if record["slots"] != records[target]["slots"]:
+                raise ValueError("Monitor observation inventory changed")
+            continue
+        record = _references(
+            root, record, path.stem, helper, retain=True,
+            inventory_path=path if path.suffix == ".pending" else None,
+        )
+        if path.suffix == ".pending":
+            routing_persistence.write(target, record)
+            path.unlink()
+    for path in records:
+        if path.suffix == ".pending" and path.with_suffix(".json") in records:
+            path.unlink()
+    return bool(records)
+
+
+def recover(root: Path, *, runtime=None) -> bool:
+    """Restore archived deletion barriers before unrelated lifecycle work."""
+    from . import runtime_monitor_retirements as retirements
+
+    directory = root / "status-monitor-observations"
+    if directory.is_symlink():
+        raise ValueError("Monitor observation directory must not be linked")
+    if not directory.exists():
+        return False
+    helper = runtime if runtime is not None else retirements._runtime()
+    with tracking._RecordLock(directory / "inventory", require_sidecar=True):
+        return _recover_archives(root, directory, helper)
 
 
 def retain(
@@ -206,14 +246,17 @@ def retain(
             record = records.get(target) or records.get(pending)
             if record is None:
                 record = {
-                    "version": 2, **content, "slots": sorted(helper.list_versions(root)),
+                    "version": 2, **content, "slots": [],
                     "release_state": "prepared" if release_claim is not None else "retiring",
                 }
                 routing_persistence.write(pending, record)
             elif release_claim is not None and record["release_state"] == "cancelled":
                 record = {**record, "release_state": "prepared"}
                 routing_persistence.write(target if target in records else pending, record)
-            _references(root, record, digest, helper, retain=True)
+            record = _references(
+                root, record, digest, helper, retain=True,
+                inventory_path=pending if target not in records else None,
+            )
             if target not in records:
                 routing_persistence.write(target, record)
             pending.unlink(missing_ok=True)
@@ -301,6 +344,7 @@ def options(root: Path, predecessor: dict | None, *, incumbent_expected: bool) -
             expected.pid, expected.process_start_time,
         ) == observed[:2]:
             # Native identity is needed for cleanup, not for route authority.
+            result["preserve_raw_active"] = True
             result["refuse_old"] = lambda raw: (
                 None if raw == raw_expected else "predecessor route changed"
             )
@@ -330,6 +374,7 @@ def prepare(root: Path, predecessor: dict | None, *, incumbent_expected: bool, c
     guard = CutoverLock(root / "status-monitor-routing")
     guard.acquire(timeout=timeout)
     custody.callback(guard.release)
+    recover(root)
     predecessor, publication_options, deferred = options(
         root, predecessor, incumbent_expected=incumbent_expected,
     )
@@ -359,6 +404,8 @@ def reconcile(root: Path, *, runtime=None, cleanup: bool = True) -> bool:
     helper = runtime if runtime is not None else retirements._runtime()
     pending = False
     with tracking._RecordLock(directory / "inventory", require_sidecar=True):
+        if cleanup:
+            _recover_archives(root, directory, helper)
         archives = _archives(directory)
         known = {owner for path, record in archives for owner in _groups(record, path.stem)}
         if any(

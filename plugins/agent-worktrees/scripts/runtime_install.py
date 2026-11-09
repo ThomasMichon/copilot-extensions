@@ -635,8 +635,9 @@ def settle_candidate(
                 from zdd import breadcrumb
 
                 replacement.active(root)
+                outgoing_deferred = replacement.recover(root, runtime=runtime)
                 if breadcrumb.breadcrumb_path(root / "status-monitor-routing").exists():
-                    outgoing_deferred = replacement.retain(root, runtime=runtime)
+                    outgoing_deferred = replacement.retain(root, runtime=runtime) or outgoing_deferred
             try:
                 predecessor = _monitor_identity(root) if monitor_scope else None
             except AsyncRetirementUnsupported as error:

@@ -414,6 +414,16 @@ migration already works.
   tests with the same five native cases unqualified; the shared cutover and
   refusal files pass 64 tests. These are source results only, not current-head
   review acceptance, required CI, release or installed completion.
+- Further review exposed retry ordering, prepared-claim reference repair, GC
+  between inventory and fencing, and predecessor exit after qualification.
+  Added direct installer retry and actual-GC/selection regressions. Write-ahead
+  intent now precedes the deletion fence and inventory capture, interrupted
+  inventory resumes under that fence, and archived references recover before
+  ordinary retirement reservation and prepared-claim reconciliation. Qualified
+  cleanup also preserves raw-active selection. The complete affected selection
+  passes 376 tests with verified bounded-owner cleanup; the same five native
+  cases remain unqualified. Review, required CI, release, normal full-update
+  performance and session-preserving acceptance remain open.
 - Added a failure-first case to the existing installer-custody controls:
   outgoing native-identity observation is unavailable, but the healthy incoming
   runtime must publish with retirement pending and both slots preserved.
