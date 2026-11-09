@@ -1,0 +1,9 @@
+{
+  "comment": "Reduce canonical source symlink scan allocations while preserving deterministic refusal and fallback behavior",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

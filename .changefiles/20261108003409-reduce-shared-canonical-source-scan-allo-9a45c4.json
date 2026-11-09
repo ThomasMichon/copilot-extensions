@@ -1,0 +1,9 @@
+{
+  "comment": "Reduce shared canonical source-scan allocations while preserving symlink refusal and fallback behavior",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
