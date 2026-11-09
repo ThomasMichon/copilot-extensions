@@ -78,11 +78,22 @@ def test_known_identity_and_owner_refusals_preserve_original_bytes(planning_reco
 @pytest.mark.parametrize("name", ["lifecycle.lock", "launch-admission.lock"])
 def test_existing_lifecycle_marker_is_not_acquired_reaped_or_cleared(planning_record, name):
     fixture = planning_record
-    marker = fixture.ledger.parent / name
+    marker = relocation.launch_seed_state.state_path(fixture.ledger).parent / name
+    marker.parent.mkdir()
     marker.write_bytes(b"original owner evidence")
     with pytest.raises(ValueError, match="idle lifecycle/launch ownership"):
         relocation.plan(fixture.identity, str(fixture.destination), fixture.config)
     assert marker.read_bytes() == b"original owner evidence"
+
+
+@pytest.mark.parametrize("name", ["lifecycle.lock", "launch-admission.lock"])
+def test_unrelated_tracking_root_marker_is_not_a_worktree_owner(planning_record, name):
+    fixture = planning_record
+    marker = fixture.ledger.parent / name
+    marker.write_bytes(b"unrelated owner evidence")
+    with pytest.raises(ValueError, match="qualified passive native owner evidence"):
+        relocation.plan(fixture.identity, str(fixture.destination), fixture.config)
+    assert marker.read_bytes() == b"unrelated owner evidence"
 
 
 def test_move_keeps_strict_action_preflight(planning_record, monkeypatch):

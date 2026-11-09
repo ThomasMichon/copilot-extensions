@@ -49,8 +49,9 @@ def inspect(worktree_id: str, destination: str, config) -> dict:
         raise ValueError(
             "read-only proof cannot recover missing receiving allocation metadata; inspect through its owner"
         )
+    owner_directory = relocation.launch_seed_state.state_path(ledger).parent
     for name in ("lifecycle.lock", "launch-admission.lock"):
-        if os.path.lexists(ledger.parent / name):
+        if os.path.lexists(owner_directory / name):
             raise ValueError("relocation planning cannot confirm idle lifecycle/launch ownership")
     target = Path(destination).expanduser()
     if not target.is_absolute() or target.name != worktree_id:

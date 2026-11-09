@@ -98,3 +98,40 @@ def test_actual_plan_refuses_unknown_without_backend_or_state_effects(tmp_path, 
     record_property("native_cli_returncode", result.returncode)
     record_property("unchanged_state_and_file_identity_sha256", digest)
     record_property("effectful_backend_called", False)
+
+
+def test_recovery_fixture_keeps_strict_routing_and_original_bytes(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    import checkout_cross_volume_fixture as fixture_owner
+
+    ledger = tmp_path / "original.yaml"
+    ledger.write_bytes(b"original allocation evidence")
+    journal = fixture_owner.state.journal_path(ledger)
+    journal.write_bytes(b"original relocation evidence")
+    fixture = SimpleNamespace(
+        record=SimpleNamespace(yaml_path=ledger, worktree_id="original"),
+        destination=tmp_path / "original", config=object(),
+    )
+    calls = []
+
+    def preflight(*args):
+        calls.append(("preflight", args))
+        return {"recovery": True, "apply": False}
+
+    def recover(*args):
+        calls.append(("move", args))
+        assert ledger.read_bytes() == b"original allocation evidence"
+        assert journal.read_bytes() == b"original relocation evidence"
+        return {"phase": "complete", "stage": "original-stage"}
+
+    monkeypatch.setattr(fixture_owner.relocation, "_action_plan", preflight)
+    monkeypatch.setattr(fixture_owner.relocation, "move", recover)
+    monkeypatch.setattr(
+        fixture_owner.relocation, "plan",
+        lambda *_args: pytest.fail("strict recovery fixture entered passive planning"),
+    )
+    result = fixture_owner._recover(fixture, {"stage": "original-stage"})
+    assert result == {"phase": "complete", "stage": "original-stage"}
+    expected = ("original", str(fixture.destination), fixture.config)
+    assert calls == [("preflight", expected), ("move", expected)]
