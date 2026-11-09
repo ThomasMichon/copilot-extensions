@@ -314,17 +314,8 @@ def conclude_disposable_worker(
     and session identities verbatim. It owns both the disposable verdict and
     exact-ID managed teardown; preservation skips never remove anything.
     """
-    args = [
-        "conclude-disposable",
-        "--worktree",
-        worktree,
-        "--policy",
-        "disposable-cli",
-        "--owner",
-        owner,
-        "--remove",
-        "--json",
-    ]
+    args = ["conclude-disposable", "--worktree", worktree, "--policy", "disposable-cli",
+            "--owner", owner, "--remove", "--json"]
     if session:
         args += ["--session", session]
 
@@ -372,22 +363,17 @@ def conclude_dispatch_attempt(
     Bridge merely targeted keeps its exact reservation proof. Only a record
     without dispatch provenance falls back to Bridge's retained creation
     nonce; a runtime without that policy preserves the workspace."""
-    def proof_args(proof: list[str]) -> list[str]:
+    def conclude(*proof: str) -> dict:
         args = ["conclude-disposable", "--worktree", worktree, *proof,
-                "--owner", owner, "--remove", "--json"]
-        return args + ["--session", session] if session else args
+                "--owner", owner, "--remove", "--json", *(["--session", session] if session else [])]
+        return _run_dispatch_conclusion(
+            worktree, args, timeout=timeout, project=project, worktree_path=worktree_path)
 
-    payload = _run_dispatch_conclusion(
-        worktree, proof_args(["--policy", "dispatch-attempt", "--reservation", reservation_key]),
-        timeout=timeout, project=project, worktree_path=worktree_path,
-    )
+    payload = conclude("--policy", "dispatch-attempt", "--reservation", reservation_key)
     if not creation_nonce or payload.get("reason") != "dispatch-provenance-missing":
         return payload
     try:
-        return _run_dispatch_conclusion(
-            worktree, proof_args(["--policy", "bridge-creation", "--creation-nonce", creation_nonce]),
-            timeout=timeout, project=project, worktree_path=worktree_path,
-        )
+        return conclude("--policy", "bridge-creation", "--creation-nonce", creation_nonce)
     except _UnsupportedConclusionPolicy:
         return {**payload, "bridge_creation": "unsupported-runtime"}
 
@@ -419,13 +405,8 @@ def _run_dispatch_conclusion(
     if actual.get("project") != project or actual.get("path") != worktree_path:
         raise DisposableConclusionError("allocation identity changed; workspace preserved")
     result = subprocess.run(  # noqa: S603 -- fixed argv, launcher resolved locally
-        [*prefix, "--project", project, *args],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        env=agent_worktrees_environment(),
-        **no_window_kwargs(),
+        [*prefix, "--project", project, *args], check=False, capture_output=True, text=True,
+        timeout=timeout, env=agent_worktrees_environment(), **no_window_kwargs(),
     )
     try:
         payload = json.loads(result.stdout or "{}")
