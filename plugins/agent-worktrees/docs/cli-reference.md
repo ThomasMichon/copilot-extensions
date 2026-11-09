@@ -1872,6 +1872,33 @@ to the effort after release.
 | `reconcile-plugins` | Reconcile repo-adopted plugin payloads + gated runtimes (JSON output, for launch wrappers) |
 | `uninstall-plugins` | Sweep every deployed core plugin runtime via each plugin's own uninstall action (JSON; dry-run by default) |
 
+### Scoped GitHub passthrough (`repos gh`)
+
+`repos gh <repo> -- <gh arguments...>` runs GitHub CLI with the repository's
+resolved account. Keep using this scoped entry rather than switching to an
+ambient `gh` account when a shell argument fails.
+
+**Windows PowerShell with a `.ps1` entry:** quote comma-joined values such as
+`--json 'number,title'` and `--label 'bug,triaged'`. PowerShell evaluates an
+unquoted literal `number,title` as an array before the script starts; forwarding
+`@args` cannot recover the lost grouping. This differs from a native `gh.exe`
+invocation and can also break a command that combines `--json` with a correctly
+quoted, spaced `--search` value.
+
+```powershell
+$aw = '<agent-worktrees catalog argv[0]>'
+$repo = 'example-owner/example-repo'
+& $aw repos gh $repo -- issue list --repo $repo --json 'number,title' --search 'bug in:title'
+
+$fields = 'number,title'
+& $aw repos gh $repo -- issue list --repo $repo --json $fields
+```
+
+Both a quoted literal and a string variable preserve the comma list through the
+PowerShell script boundary. Quote spaced values normally as well. This guidance
+does not claim that a native Windows shim is installed or repair arguments
+after PowerShell has already split them.
+
 ### Bulk account resolution (`repos account list --json --with-resolutions`)
 
 This optional read-only form adds versioned `repository_accounts`,

@@ -65,6 +65,14 @@ it does not implement fixes, change product behavior, or declare deployment.
   author/editor/comment eligibility, release a source hold or renew an
   acquisition allowance. Verify the event's type, review identity and
   same-repository source; every other provenance and ownership gate remains.
+- **Non-text mention/subscription metadata:** Metadata-only `MentionedEvent`
+  and `SubscribedEvent` actors are not authorship disqualifiers. Still collect
+  their complete metadata; this exception admits no outside-authored text.
+  Original authors, editors, comment authors and edit histories retain their
+  existing qualification, source and ownership gates. Necessary complete-roster
+  and metadata completion rechecks for already-approved consolidations do not
+  require a new per-pass permission request. Body, product-source and
+  PR-description allowances and actual holds are not renewed by these checks.
 - **Baseline:** 1,458 open issues from complete paginated enumeration on
   2026-10-21. The fixed checkpoint is at most 729 open issues.
 - **Inflow:** Refresh the whole queue between batches; include new issues in the
@@ -589,6 +597,12 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 - [x] Preserve the initial cohort and oldest-first cursor in structured session state.
 
 ### Phase 2 - Continuing reconciliation
+
+The [scoped-GitHub quoting and non-text provenance correction](<journal/2026/11.09 scoped-gh-quoting-and-event-provenance.md>)
+selects #810's explicit point-of-use documentation alternative, not a native
+shim or parser change. The narrow event rule admits no outside-authored text
+and renews no body/source allowance. A completed disposition still needs
+the actual reviewed delivery; all source/resource and campaign gates remain.
 
 The [canonical reliability cohort](<journal/2026/11.09 canonical-reliability-cohort.md>)
 records five audited tracking consolidations into OPEN #11663, not five
