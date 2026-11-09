@@ -332,6 +332,9 @@ calls retain the separate selection only after successful discovery. The
 receiver rechecks actual selection and storage on every read. Only this
 selection can serve the active/compact result described above; neither
 terminal-read/v1 nor retained-comment-reader/v1 changes meaning.
+Both client paths validate original identities, revision, minimal prepared
+identity, receipt shape and nullable acquired evidence with the existing
+owner validators; a present but malformed value is not a successful read.
 
 Older terminal-read consumers ignore the additive descriptor and continue
 using their original selection and operations. New consumers with a prior,

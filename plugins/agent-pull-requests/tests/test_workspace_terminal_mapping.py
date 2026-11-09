@@ -258,37 +258,60 @@ def test_legacy_selection_cannot_request_mapping_and_strict_rollback_preserves_c
     assert operations.store.path.read_bytes() == before
 
 
-@pytest.mark.parametrize("change", ["representation", "protocol", "support", "identity"])
-def test_gateway_rejects_malformed_optional_result_without_receipt_or_feedback_change(
-    mapping_reader: tuple, change: str,
+@pytest.mark.parametrize("transport", ["native", "gateway"])
+@pytest.mark.parametrize("change", [
+    "representation", "protocol", "support", "identity", "identity-value", "revision",
+    "prepared", "mapping", "correlated-interval", "correlated-state", "receipt", "no-send",
+])
+def test_clients_reject_malformed_optional_result_without_receipt_or_feedback_change(
+    mapping_reader: tuple, monkeypatch: pytest.MonkeyPatch, transport: str, change: str,
 ) -> None:
-    workspace, _, client, _, caller, _, chosen, _, _ = mapping_reader
-    original = caller.request
+    workspace, _, client, native, _, _, chosen, _, _ = mapping_reader
+    original = workspace[0].execute
     before = workspace[0].store.path.read_bytes()
 
-    async def altered(*args, **kwargs):
-        response = await original(*args, **kwargs)
-        if args[1].endswith("/retained-comment"):
-            result = json.loads(response.body)
+    def altered(operation, payload, **kwargs):
+        response = original(operation, payload, **kwargs)
+        if operation == "retained-comment":
+            result = response["result"]
             if change == "representation":
-                result["result"]["representation"] = "reconstructed"
+                result["representation"] = "reconstructed"
             elif change == "protocol":
-                result["result"]["protocol"] = "agent-pull-requests.retained-comment-observation/v1"
+                result["protocol"] = "agent-pull-requests.retained-comment-observation/v1"
             elif change == "support":
-                result["result"]["mapping_supported"] = 1
+                result["mapping_supported"] = 1
+            elif change == "identity":
+                result.pop("intent_id")
+            elif change == "identity-value":
+                result["intent_id"] = None
+            elif change == "revision":
+                result["revision"]["iteration"] = True
+            elif change == "prepared":
+                result["prepared"]["write_id"] = "invalid"
+            elif change == "mapping":
+                result["mapping"] = "not-an-observation"
+            elif change == "correlated-interval":
+                result["mapping"]["observation"] = None
+            elif change == "correlated-state":
+                result.update(action_state="retired", representation="compact", receipt=None)
+            elif change == "no-send":
+                result["receipt"] = {"origin": "no_send", "platform_ids": {}, "proof": None}
             else:
-                result["result"].pop("intent_id")
-            return replace(response, body=json.dumps(result).encode())
+                result["receipt"]["platform_ids"] = {}
         return response
 
-    caller.request = altered
+    monkeypatch.setattr(workspace[0], "execute", altered)
 
     async def scenario() -> None:
-        await client.capabilities()
-        with pytest.raises(WorkspaceClientError, match="invalid_retained_comment_response"):
-            await client.exchange("retained-comment", {
-                "number": 42, "operation_id": chosen["operation_id"], "action_id": "finding",
-            })
+        payload = {"number": 42, "operation_id": chosen["operation_id"], "action_id": "finding"}
+        if transport == "native":
+            native.exchange("capabilities", {})
+            with pytest.raises(WorkspaceUnavailable, match="invalid terminal comment mapping response"):
+                native.exchange("retained-comment", payload)
+        else:
+            await client.capabilities()
+            with pytest.raises(WorkspaceClientError, match="invalid_retained_comment_response"):
+                await client.exchange("retained-comment", payload)
 
     asyncio.run(scenario())
     assert workspace[0].store.path.read_bytes() == before
