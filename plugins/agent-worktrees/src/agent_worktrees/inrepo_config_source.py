@@ -161,7 +161,7 @@ def _offline_remote_branch_exists(
 
 
 def _read_committed_blob(
-    anchor: Path, remote: str, branch: str, rel_path: Path, deadline: float
+    anchor: Path, remote: str, branch: str, rel_path: Path, deadline: float, *, strict=False,
 ) -> str | None:
     """Text content of ``rel_path`` as committed on ``<remote>/<branch>`` --
     read via ``git show``, so it never depends on (or touches) the anchor's
@@ -174,13 +174,22 @@ def _read_committed_blob(
         proc = git_ops.git(
             "show", spec, cwd=anchor, check=False, capture=True, timeout=timeout,
             isolated_repository=True,
+            **({"input_data": b""} if strict else {}),
         )
     except Exception as exc:
         return _unavailable(spec, "committed-blob", type(exc).__name__)
     if proc.returncode != 0:
         return _unavailable(spec, "committed-blob", "Git blob read failed")
+    text = _committed_text(proc.stdout, strict=True) if strict else proc.stdout
     observe(acquisition.current_observations(), spec, "committed-blob", ScanAuthority.COMPLETE)
-    return proc.stdout
+    return text
+
+
+def _committed_text(raw: bytes, *, strict=False) -> str:
+    try:
+        return raw.decode("utf-8", errors="strict" if strict else "replace")
+    except (UnicodeError, AttributeError):
+        raise ValueError("committed repository policy is not lossless UTF-8") from None
 
 
 def _committed_candidates(
@@ -238,6 +247,7 @@ def _committed_candidates(
 
 def _read_committed_batch(
     anchor: Path, remote: str, branch: str, candidates: tuple[Path, ...], deadline: float,
+    *, strict=False,
 ) -> dict[Path, str] | None:
     timeout = _probe_timeout(deadline)
     if timeout is None:
@@ -275,8 +285,8 @@ def _read_committed_batch(
         end = position + size
         if data[end:end + 1] != b"\n":
             return _unavailable(str(anchor), "committed-batch", "batch result unavailable")
-        found[candidate] = data[position:end].decode("utf-8", errors="replace")
-        if "\ufffd" in found[candidate]:
+        found[candidate] = _committed_text(data[position:end], strict=strict and not found)
+        if not strict and "\ufffd" in found[candidate]:
             _unavailable(f"{remote}/{branch}:{candidate.as_posix()}", "committed-decoding",
                          "replacement text cannot certify lossless UTF-8 acquisition")
         position = end + 1
@@ -349,8 +359,6 @@ def _resolve_committed_config(
 
     def _parse(text: str, branch: str, candidate: Path) -> dict[str, Any]:
         source = f"{remote}/{branch}:{candidate.as_posix()}"
-        if strict and "\ufffd" in text:
-            raise ValueError("committed repository policy is not lossless UTF-8")
         if parser is parse_yaml_text_safe:
             return _parse_yaml_text_safe(text, source)
         try:
@@ -362,7 +370,9 @@ def _resolve_committed_config(
         return value
 
     def _read_config_on(branch: str) -> dict[str, Any] | None:
-        batch = _read_committed_batch(anchor, remote, branch, rel_path_candidates, deadline)
+        batch = _read_committed_batch(
+            anchor, remote, branch, rel_path_candidates, deadline, **({"strict": True} if strict else {}),
+        )
         if batch is not None:
             for candidate in rel_path_candidates:
                 if candidate in batch:
@@ -377,7 +387,9 @@ def _resolve_committed_config(
         for rel_path in rel_path_candidates:
             if present is not None and rel_path.as_posix() not in present:
                 continue
-            text = _read_committed_blob(anchor, remote, branch, rel_path, deadline)
+            text = _read_committed_blob(
+                anchor, remote, branch, rel_path, deadline, **({"strict": True} if strict else {}),
+            )
             if text is not None:
                 return _parse(text, branch, rel_path)
             if strict:

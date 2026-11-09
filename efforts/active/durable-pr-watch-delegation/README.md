@@ -1375,6 +1375,10 @@ callback an implicit credential store.
 
 ### 2026-11-09 - Native report boundary corrections
 
+- Strict committed reads decode actual bytes as UTF-8 on both batch and
+  ordered paths, rather than treating a literal replacement character as
+  decoding loss. Invalid bytes refuse; valid U+FFFD remains valid policy text.
+  The focused Worktrees suite passes 440 isolated cases with both controls.
 - Checkout-free selection uses only the target owner's account map when no
   exact repository entry exists, never a sibling repository's account. Strict
   committed text validation applies equally to batch and ordered recovery

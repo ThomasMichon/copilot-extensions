@@ -262,3 +262,23 @@ def test_invalid_utf8_committed_policy_refuses_on_both_read_paths(committed_targ
     monkeypatch.setattr(repos, "account_from_map", lambda *a, **k: pytest.fail("corrupted policy acquired account"))
     with pytest.raises(ValueError, match="lossless UTF-8"):
         select_report_target(path, "example/project")
+
+
+@pytest.mark.parametrize("recover", [True, False])
+def test_valid_utf8_replacement_character_is_not_decoding_loss(committed_target, monkeypatch, recover):
+    from agent_worktrees import git_ops
+
+    path, anchor, git = committed_target
+    policy = anchor / ".agent-worktrees" / "config.yaml"
+    policy.write_text("marker: \ufffd\n", encoding="utf-8")
+    git("add", ".agent-worktrees/config.yaml")
+    git("commit", "-m", "fixture valid Unicode")
+    git("update-ref", "refs/remotes/origin/main", "HEAD")
+    policy.write_text("{}\n", encoding="utf-8")
+    original = git_ops.git
+    def unavailable(*args, **kwargs):
+        if recover and kwargs.get("cwd") == anchor and args[0] == "cat-file":
+            raise subprocess.TimeoutExpired(args, 1)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(git_ops, "git", unavailable)
+    assert select_report_target(path, "example/project")["account"] == "selected"
