@@ -85,8 +85,11 @@ they are unlimited.
    with that stable creation key. Retain its exact request/receipt and returned
    worktree association before any Bridge launch. Preserve native parent custody,
    paired-state and repository-hosting gates; do not make an untracked checkout.
-5. Persist the launch effect and full seed before sending. Use Bridge's supported
-   existing-worktree embodiment with retained native writer/creation evidence.
+5. Persist the launch effect and full seed before sending. Its `nativeRequest`
+   records the selected mode and an immutable private envelope reference, as
+   specified in the [effect protocol](references/adapters-and-recovery.md#state-and-effect-protocol).
+   Use Bridge's supported existing-worktree embodiment with retained native
+   writer/creation evidence.
    Do not substitute a new workspace or omit a required receipt. Resolve an
    uncertain outcome with its original owner and identities, not another launch.
 6. Record admission, consumption, charter acceptance and goal progress separately.
@@ -98,9 +101,12 @@ they are unlimited.
 
 Resolve the assigned **worktree's current native head**, not a cached session ID.
 Persist the question or revised complete charter and a stable follow-up/effect
-identity before relaying. Use the owner's supported exact-head/idempotent send
-contract; if the head changes during admission, reconcile rather than sending to
-both. Respect holds and pending effects.
+identity before relaying. Save its `nativeRequest` envelope with the original
+session identities, caller/sender, key, exact prompt and mode-specific options.
+Use the owner's supported exact-head/idempotent send contract; if the head changes
+during admission, reconcile rather than sending to both. Receipt-only recovery
+uses the saved original envelope, never a new current-head lookup or reconstructed
+prompt. Respect holds and pending effects.
 
 Any semantic change to the role meaning, scope, expected work, restrictions or
 acceptance increments the assignment charter revision. Keep the prior revision

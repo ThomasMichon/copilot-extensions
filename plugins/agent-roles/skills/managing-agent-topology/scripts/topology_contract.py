@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 ASSETS = Path(__file__).resolve().parents[1] / "assets"
 MAX_BYTES = 2 * 1024 * 1024
@@ -129,7 +129,8 @@ def validate(document: Any) -> dict[str, Any]:
     for assignment in assignments.values():
         if assignment["machine"] not in machines or assignment["role"] not in roles:
             raise ContractError("assignment references an unknown machine or role")
-        if assignment["charter"]["scope"] != roles[assignment["role"]]["scope"]:
+        if (assignment["state"] not in {"completed", "released"}
+                and assignment["charter"]["scope"] != roles[assignment["role"]]["scope"]):
             raise ContractError("assignment charter scope differs from its role")
         owner = assignment["nativeWorktree"]
         if owner and owner["machine"] != assignment["machine"]:
@@ -144,6 +145,8 @@ def validate(document: Any) -> dict[str, Any]:
                 raise ContractError("lifecycle effects require confirmed native outcomes")
             if not lifecycle and effect["state"] == "confirmed":
                 raise ContractError("message effects distinguish admission, consumption and acceptance")
+            if not lifecycle and effect["nativeRequest"] is None:
+                raise ContractError("message effects require their original native request envelope")
             if effect["charterRevision"] > assignment["charter"]["revision"]:
                 raise ContractError("effect references a future charter")
             if effect["kind"] != "allocate" and (owner is None or effect["target"] != owner):
@@ -192,4 +195,4 @@ def validate(document: Any) -> dict[str, Any]:
             or assignments[assignment_id]["nativeWorktree"] != observation["owner"]
         ):
             raise ContractError("owner observation conflicts with its assignment")
-    return document
+    return cast(dict[str, Any], document)

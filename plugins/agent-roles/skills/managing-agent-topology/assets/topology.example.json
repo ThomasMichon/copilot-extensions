@@ -75,12 +75,17 @@
           "id": "allocation-a", "kind": "allocate", "state": "confirmed",
           "charterRevision": 1,
           "target": {"machine": "beta", "project": "example-control", "worktree": "review-a"},
+          "nativeRequest": null,
           "nativeRef": "synthetic:allocation-a"
         },
         {
           "id": "launch-a", "kind": "launch", "state": "accepted",
           "charterRevision": 1,
           "target": {"machine": "beta", "project": "example-control", "worktree": "review-a"},
+          "nativeRequest": {
+            "mode": "bridge-existing-worktree-create",
+            "envelopeRef": "synthetic:immutable-launch-a-envelope-v1"
+          },
           "nativeRef": "synthetic:acceptance-a"
         }
       ],

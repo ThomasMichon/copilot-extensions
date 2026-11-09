@@ -32,7 +32,8 @@ class Topology:
         if observation is None:
             return False
         age = (self.at - timestamp(observation["observedAt"])).total_seconds()
-        return 0 <= age <= self.document["observationMaxAgeSeconds"]
+        max_age: int = self.document["observationMaxAgeSeconds"]
+        return 0 <= age <= max_age
 
     def custody_holds(self) -> list[str]:
         observation = self.observations["dispatcher"]
@@ -143,6 +144,7 @@ class Topology:
             if reasons:
                 unqualified.append({"assignment": assignment["id"], "reasons": reasons})
             else:
+                assert observation is not None
                 counted.add(owner_key(owner))
                 qualified.append({"assignment": assignment["id"], "owner": owner, "head": observation["head"]})
         return {
@@ -191,10 +193,14 @@ class Topology:
             holds.append("assignment-not-accepted-by-owner")
         if self.pending(assignment):
             holds.append("effect-outcome-unsettled-no-replay")
+        target = None
+        if not holds:
+            assert observation is not None
+            target = {"owner": owner, "head": observation["head"]}
         return {
             "status": "held" if holds else "resolved", "assignment": assignment["id"],
             "requestId": request_id, "retainedWorktree": owner,
-            "target": None if holds else {"owner": owner, "head": observation["head"]},
+            "target": target,
             "holds": holds, "advisoryOnly": True, "nativeHeadRecheckRequired": True,
         }
 

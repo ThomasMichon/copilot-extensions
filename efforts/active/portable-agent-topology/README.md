@@ -173,3 +173,18 @@ adapter flow. The plan PR is a review gate before implementation, not completion
   external venue was exercised; those effects require adopter authority.
 - Implementation review, required CI, actual merge and final release/adoption
   disposition remain open. No fleet activation or installed rollout is implied.
+
+### 2026-11-09 - Implementation review corrections
+
+- #11738's first CI run identified strict typing omissions. The corrected helper
+  and tests pass the repository's strict Python 3.10 contracts for both Linux
+  and Windows, including platform-specific headless subprocess flags.
+- Review corrections retain immutable native-request envelope references and
+  selected send modes before message effects, preserve historical charters
+  after a role's scope changes, and use the repository's default patch bump.
+- The affected plugin packet now passes 109 tests (9.18 seconds of test execution,
+  14.67 seconds including preparation and cleanup); Python F/E9 lint passes.
+  Five T2 subprocess scenarios include unknown-send recovery after saved-state
+  reload and native-head succession without reconstructing the original prompt,
+  caller, key or session. No live send or receipt lookup was performed.
+- Current-head review, required CI and actual merge remain delivery gates.

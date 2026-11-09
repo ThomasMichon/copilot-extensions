@@ -134,13 +134,23 @@
     "effect": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "kind", "state", "charterRevision", "target", "nativeRef"],
+      "required": ["id", "kind", "state", "charterRevision", "target", "nativeRequest", "nativeRef"],
       "properties": {
         "id": {"$ref": "#/$defs/text"},
         "kind": {"enum": ["allocate", "launch", "relay", "retire"]},
         "state": {"enum": ["prepared", "unknown", "admitted", "consumed", "accepted", "confirmed", "failed"]},
         "charterRevision": {"type": "integer", "minimum": 1},
         "target": {"type": ["object", "null"], "additionalProperties": false, "required": ["machine", "project", "worktree"], "properties": {"machine": {"$ref": "#/$defs/text"}, "project": {"$ref": "#/$defs/text"}, "worktree": {"$ref": "#/$defs/text"}}},
+        "nativeRequest": {
+          "type": ["object", "null"],
+          "description": "Required for message effects: the selected native mode and an immutable, version-addressed private envelope saved before the effect. The helper does not dereference or authenticate it.",
+          "additionalProperties": false,
+          "required": ["mode", "envelopeRef"],
+          "properties": {
+            "mode": {"$ref": "#/$defs/text"},
+            "envelopeRef": {"$ref": "#/$defs/text"}
+          }
+        },
         "nativeRef": {"$ref": "#/$defs/nullableText"}
       }
     },

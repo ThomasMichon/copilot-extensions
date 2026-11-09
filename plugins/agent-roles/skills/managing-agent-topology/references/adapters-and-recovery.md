@@ -72,6 +72,25 @@ known, not inferred from a timeout. Preserve the native reference and original
 operation ID; a retry policy comes from the original grant and native owner, not
 from an offline status label.
 
+Every launch or relay effect requires `nativeRequest`: its selected native
+`mode` and `envelopeRef` to a durable, immutable/version-addressed private request
+saved **before** sending. Preserve the exact original destination and session
+identities (Bridge and native IDs where applicable), key, caller/sender, complete
+prompt with unchanged text/bytes, writer/creation evidence and mode-specific
+options such as no-resume. Use the native owner's envelope format rather than
+inventing a second transport protocol. Do not retain credentials in this record.
+Lifecycle effects may use the same reference or `null`; their native creation
+and retirement recovery requirements still apply.
+
+The helper validates only this reference's shape; it never fetches it or proves
+immutability, access, authority or receipt-reader compatibility. The dispatcher
+must confirm the original content is durably recoverable before effects.
+Missing or uncertain content blocks the affected action. Preserve the reference
+and selected mode after succession, charter revisions and observation refreshes.
+Receipt-only recovery uses the original session, sender/caller, key and exact
+prompt, not the current worktree alias or a regenerated seed. A new authorized
+follow-up gets a new envelope after unresolved prior effects are reconciled.
+
 Persist a follow-up's complete question or adjustment and link it to its own
 relay effect. Preserve the full revised charter and prior revisions. Native
 acceptance evidence qualifies a revision; a changed file, delivery receipt,
@@ -91,8 +110,8 @@ hand-delete directories or clear a claim.
 | Saved proposal, no allocation attempted | Recheck authority and native admission before the first keyed allocation |
 | Allocation pending or response lost | Retain creation key, destination and remote request ID; use native lookup/recovery, never a new key or machine |
 | Worktree allocated, launch not attempted | Persist launch identity and complete charter; embody only that returned worktree through the supported owner |
-| Launch/send outcome unknown | Inspect the exact original native effect/receipt; no resend, alternate target, replacement or new session |
-| Head succeeded inside the same worktree | Resolve the new native head, retain the assignment and creation identity, then admit a new authorized follow-up with current-head binding |
+| Launch/send outcome unknown | Read the saved original request envelope and inspect its exact native receipt; no resend, alternate target, replacement or new session |
+| Head succeeded inside the same worktree | Preserve old request envelopes for receipt-only recovery; after unsettled effects are reconciled, resolve the new native head and admit a new authorized follow-up with a new envelope |
 | Expected charter differs from accepted revision | Retain the owner; relay or inspect the already-pending update, and report coverage as unqualified until accepted |
 | Unreachable, stale, dormant or unaccepted owner | Retain an explicit unknown/unqualified entry; a shortfall is not automatic replacement authority |
 | New unrelated request | Separate temporary assignment and native worker; preserve standing-role coverage and custody |
