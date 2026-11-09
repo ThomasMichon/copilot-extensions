@@ -388,6 +388,32 @@ def test_publication_is_rechecked_after_prepared_response_handoff(reports, monke
     assert state["calls"] == [("threads", 7)]
 
 
+@pytest.mark.parametrize("gap,status", [
+    ("deadline", 503), ("withdrawal", 403), ("binding", 409), ("owner", 503),
+])
+def test_publication_is_rechecked_after_shielded_task_completion(reports, gap, status):
+    gateway, reader, state = reports[1], reports[2], reports[5]
+    original = gateway._completed
+    def completed(task):
+        original(task)
+        if json.loads(task.result().body).get("operation") == "threads":
+            if gap == "deadline":
+                state["clock"] = 10
+            elif gap == "withdrawal":
+                state["active"] = False
+            elif gap == "binding":
+                gateway.bindings = {}
+            else:
+                gateway.reports = {("caller-a", "project"): ReportReader(
+                    reader.consumer_scope, reader.scope, reader.resolve_binding, max_work_seconds=3,
+                )}
+    gateway._completed = completed
+    with pytest.raises(ReplayClientError) as caught:
+        read(reports[3])
+    assert caught.value.http_status == status
+    assert state["calls"] == [("threads", 7)]
+
+
 @pytest.mark.parametrize("argv", [
     ["report", "diff", "--request", "-", "--account", "other"],
     ["report", "diff", "--req", "-"], ["report", "diff", "--request", "-", "--resolve"],

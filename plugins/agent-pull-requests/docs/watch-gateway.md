@@ -152,6 +152,11 @@ Constructing these labels does not authorize a read. The live owner checkpoint
 must enforce replacement/withdrawal and current permission. The synchronous
 collector receives `(operation, number, remaining)` and returns the original
 `(exit_code, complete_json_text)`; it owns actual transport/process cleanup.
+If the owner checkpoint performs blocking work, supply the optional
+`final_checkpoint` as a separate nonblocking permission check. Blocking
+selection checks run in the original tracked request task's awaited workers;
+the last event-loop check reuses the original deadline, admission and binding
+without launching a child or transferring cleanup custody.
 No executable, credential, account or endpoint is deserialized from a request.
 
 Every request has exactly `{"binding": <expected ReplayBinding>, "request": ...}`.
@@ -207,7 +212,9 @@ credentials and provider children share the original finite execution/cleanup
 budget. Publication checks run in shielded, tracked workers rather than on the
 Gateway event loop; delayed cleanup retains the admitted request's custody and
 cannot publish a success. Malformed or unavailable contributing configuration
-refuses credential selection instead of dropping repository policy. Provider
+refuses credential selection instead of dropping repository policy. Failed
+reads of established committed policy cannot select a divergent checkout;
+confirmed absence and successful same-source recovery remain supported. Provider
 access errors retain a sanitized native failed report and owner exit; transport
 and cleanup failures remain unavailable. Existing native commands and unselected
 providers are unchanged.

@@ -156,4 +156,6 @@ class NativeGitHubReport:
             return int(bool(report["error"] or not report["supported"])), json.dumps(report, allow_nan=False)
 
         current()
-        return ReportBinding(self.scope, self.context_id, current, collect)
+        def live():
+            remaining()
+        return ReportBinding(self.scope, self.context_id, current, collect, final_checkpoint=live)

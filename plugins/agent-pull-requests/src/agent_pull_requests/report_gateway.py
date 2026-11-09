@@ -66,8 +66,10 @@ async def handle(gateway, request):
         return _response(503, {"error": "report_service_unavailable"})
     prepared = asyncio.get_running_loop().create_future()
     handoff = asyncio.Event()
+    final_checks = []
     task = asyncio.create_task(execute(
         gateway, owner, operation, payload, request, target, expected, expected_scope, prepared, handoff,
+        final_checks,
     ))
     gateway._tasks.add(task)
     task.add_done_callback(gateway._completed)
@@ -76,6 +78,10 @@ async def handle(gateway, request):
         handoff.set()
         response = await asyncio.shield(task)
         gateway._check(request)
+        if response.status == 200:
+            if len(final_checks) != 1:
+                raise ReportUnavailable("report publication checkpoint unavailable")
+            final_checks[0]()
         return response
     except asyncio.CancelledError:
         request.lifetime.close()
@@ -86,7 +92,8 @@ async def handle(gateway, request):
         handoff.set()
 
 
-async def execute(gateway, owner, operation, payload, request, target, expected, expected_scope, prepared, handoff):
+async def execute(gateway, owner, operation, payload, request, target, expected, expected_scope,
+                  prepared, handoff, final_checks):
     from .watch_gateway import _response
 
     response = None
@@ -112,6 +119,7 @@ async def execute(gateway, owner, operation, payload, request, target, expected,
         await asyncio.to_thread(
             owner.execute, operation, payload,
             expires_at=request.context.expires_at, checkpoint=checkpoint, response_validator=encode,
+            publication_validator=final_checks.append,
         )
         if publication_checkpoint is None:
             raise ReportUnavailable("report publication checkpoint unavailable")

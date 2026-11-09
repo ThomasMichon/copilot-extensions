@@ -1375,6 +1375,17 @@ callback an implicit credential store.
 
 ### 2026-11-09 - Native report boundary corrections
 
+- Preserve a separate lightweight final check after the original Gateway task
+  completes: deadline, permission and current binding still apply at the last
+  event-loop handoff without starting a subprocess. Keep both prepared-response
+  and task-completion regressions, including owner replacement.
+- Strict committed policy reads refuse unresolved established head/branch/blob
+  acquisition and lossy decoding before credentials. Confirmed absence permits
+  disk policy, while bounded ordered reads may recover the same committed
+  source. Fresh Git fixtures prove a divergent checkout cannot hide a committed
+  token helper after acquisition failure.
+- The final publication/configuration refinements pass 434 focused Worktrees
+  cases and 84 report/Gateway/TLS cases in isolated fixtures.
 - Publication-time selection can perform process work and delayed cleanup.
   Keep both asynchronous publication rechecks in shielded, tracked workers so
   unrelated Gateway requests and drain timers remain responsive while the

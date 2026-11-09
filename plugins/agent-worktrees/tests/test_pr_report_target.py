@@ -1,6 +1,7 @@
 """Use real configuration and registry owners, independent of the caller CWD."""
 
 import json
+import subprocess
 
 import pytest
 
@@ -157,3 +158,68 @@ def test_failed_config_dropin_is_not_an_absent_policy(target):
     (dropins / "policy.yaml").write_text("repos: [", encoding="utf-8")
     with pytest.raises(ValueError, match="acquisition"):
         select_report_target(path, "example/project")
+
+
+@pytest.fixture
+def committed_target(target, tmp_path):
+    from agent_worktrees import git_ops
+
+    path, _, document, _, write = target
+    anchor = tmp_path / "committed-target"
+    anchor.mkdir()
+    def git(*args):
+        return git_ops.git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                           *args, cwd=anchor)
+    git("init", "--template=", "-b", "main")
+    policy = anchor / ".agent-worktrees" / "config.yaml"
+    policy.parent.mkdir()
+    policy.write_text("pr: {token_command: fixture-helper}\n", encoding="utf-8")
+    git("add", ".agent-worktrees/config.yaml")
+    git("commit", "-m", "fixture policy")
+    git("update-ref", "refs/remotes/origin/main", "HEAD")
+    git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    policy.write_text("{}\n", encoding="utf-8")
+    document["repos"]["target"]["anchor"] = str(anchor)
+    write()
+    return path, anchor, git
+
+
+@pytest.mark.parametrize("failure", ["head", "blob", "presence"])
+def test_unresolved_committed_policy_never_uses_divergent_checkout(committed_target, monkeypatch, failure):
+    from agent_worktrees import git_ops
+
+    path, anchor, _ = committed_target
+    original = git_ops.git
+    def unavailable(*args, **kwargs):
+        if kwargs.get("cwd") == anchor and (
+            (failure == "head" and args[0] == "symbolic-ref")
+            or (failure != "head" and args[0] == "cat-file")
+            or (failure == "blob" and args[0] == "show")
+            or (failure == "presence" and "ls-tree" in args)
+        ):
+            raise subprocess.TimeoutExpired(args, 1)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(git_ops, "git", unavailable)
+    monkeypatch.setattr(repos, "account_for_github_slug", lambda *a, **k: pytest.fail("stale policy acquired account"))
+    with pytest.raises(ValueError, match="committed repository policy"):
+        select_report_target(path, "example/project")
+
+
+def test_same_committed_source_recovery_retains_its_credential_policy(committed_target, monkeypatch):
+    from agent_worktrees import git_ops
+
+    path, anchor, _ = committed_target
+    original = git_ops.git
+    def unavailable(*args, **kwargs):
+        if kwargs.get("cwd") == anchor and args[0] == "cat-file":
+            raise subprocess.TimeoutExpired(args, 1)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(git_ops, "git", unavailable)
+    with pytest.raises(ValueError, match="credential selection is unsupported"):
+        select_report_target(path, "example/project")
+
+
+def test_confirmed_absent_committed_source_keeps_checkout_selection(committed_target):
+    path, _, git = committed_target
+    git("symbolic-ref", "--delete", "refs/remotes/origin/HEAD")
+    assert select_report_target(path, "example/project")["account"] == "selected"
