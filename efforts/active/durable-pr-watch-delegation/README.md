@@ -298,7 +298,9 @@ _Operator-required outcome; agent-recommended slices and validation._
   T1 terminal intent/admission/drain and minimal replay notification merged
   in #11605. T2a compact recovery-only operations and actual protected readback
   merged in #11614. T2b scoped cache/materialization retirement merged in
-  #11623; T3 executing-host qualification and full P1/P2 acceptance remain open.
+  #11623. The optional read-only T3 receiver source merged in #11625;
+  strict standalone selection, full executing-host qualification and P1/P2
+  acceptance remain open.
   Existing normalized ADO load/sync acquisition feeds the explicitly enabled
   journal after confirmed cache publication (#10405); native observation and
   standalone-host adoption remain distinct prerequisites.
@@ -1259,7 +1261,7 @@ callback an implicit credential store.
 
 ## Journal
 
-### 2026-11-08 - Land terminal intent, compact recovery and scoped retirement
+### 2026-11-08 - Land terminal intent, retirement and a read-only receiver
 
 The [terminal-retention journal](journal/2026/11.08%20terminal-retention.md)
 records T1/T2 source merges #11605/#11614/#11623, their reviewed race/replay
