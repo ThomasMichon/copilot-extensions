@@ -10,7 +10,7 @@ from .engine_dialogs import ScopeDlgScreen
 from .engine_live_screens import ProgressScreen
 
 # Local and SSH New prompts share target-owned staging, with or without mux.
-# Bare/Anchor have no supported worktree Copilot prompt handoff.
+# Anchor launches have no supported worktree Copilot prompt handoff.
 _SEED_PROMPT_ENABLED = True
 
 class PickerScreenMaintenanceActionsMixin:
@@ -468,8 +468,6 @@ class PickerScreenMaintenanceActionsMixin:
         opts = [
             {"label": "Anchor repo", "on": False,
              "hint": "launch in the main checkout, not a worktree"},
-            {"label": "Bare", "on": False,
-             "hint": "new worktree, no Copilot bootstrap"},
             {"label": "No Mux", "on": False, "hint": "skip PSMux/TMux wrapper"},
         ]
         if (tm, te) == self._src_local():
