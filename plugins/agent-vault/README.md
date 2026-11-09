@@ -246,10 +246,12 @@ agent-vault show "API/OpenAI" -s
 agent-vault lock
 ```
 
-Fetch secrets **at the point of use** instead of exporting them into the shell:
+For API requests, let a supported authenticated CLI/MCP tool hold the credential.
+For generic gaps, use [URL-bound authenticated curl](docs/authenticated-http.md)
+with an owner-approved opt-in binding, never a manual token/header construction:
 
 ```bash
-curl -H "Authorization: Bearer $(agent-vault get 'API/OpenAI')" https://example.invalid/
+agent-vault curl -- -sS https://api.example.test/v1/items
 ```
 
 Supported built-in command groups:
@@ -257,6 +259,7 @@ Supported built-in command groups:
 | Area | Commands |
 |------|----------|
 | Entries | `get`, `batch-get`, `has`, `search`, `list`/`ls`, `show`, `add`, `set-password`, `set-username`, `remove`/`rm`, `move`/`mv` |
+| Authenticated HTTP | `curl -- <supported curl arguments>` (explicit URL binding, no caller-visible credential) |
 | SSH keys | `import-key`, `export-key`, `ssh-key prepare --entry SSH/node-a`, `ssh-key install --entry SSH/node-a --directory <absolute-path>` |
 | Service | `ping`, `start`, `stop`, `lock`, `unlock` (`--terminal`/`--here`) |
 | Config | `which`, `vault list`, `vault add`, `vault set-default`, `vault remove` |
