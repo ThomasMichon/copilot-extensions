@@ -18,6 +18,7 @@ class Publication:
     reused: bool = False
     failures: tuple[str, ...] = ()
     publication_revision: str = ""
+    restart_required: bool | None = None
 
 
 def _check(deadline: float | None) -> None:
@@ -110,7 +111,7 @@ def publication_revision(root: Path) -> str:
 
 
 def record_publication(root: Path, *, changed: bool) -> str:
-    """Record a possible output mutation before writes, never complete readiness."""
+    """Record a possible guidance content change before writes, never readiness."""
     if not changed:
         return publication_revision(root)
     from .local_cache_worker import _write

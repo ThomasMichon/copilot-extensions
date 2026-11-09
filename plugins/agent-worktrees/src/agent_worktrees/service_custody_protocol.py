@@ -16,6 +16,7 @@ from .lease_protocol import (
     validate_holder,
     validate_oid,
 )
+from .provider_effect_protocol import ProviderEffectRecord
 
 SENTINEL = "agent-service-custody-envelope-v1"
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
@@ -45,7 +46,7 @@ class ServiceCustodyRecord:
     acceptance_margin_seconds: int
 
 
-CoordinationRecord = LeaseRecord | ServiceCustodyRecord
+CoordinationRecord = LeaseRecord | ServiceCustodyRecord | ProviderEffectRecord
 
 
 def serialize_custody(record: ServiceCustodyRecord) -> str:
