@@ -34,6 +34,7 @@ class _MappingOptions(TypedDict, total=False):
 
 class _TerminalOptions(TypedDict, total=False):
     terminal_reads: bool
+    terminal_mapping_reads: bool
     retention_target_deadline: bool
     retention_target: Callable[..., ObservationTarget]
 
@@ -104,6 +105,7 @@ class WorkspaceConfig:
     preparations: tuple[tuple[str, str, PreparationConfig], ...] = ()
     comment_mappings: tuple[tuple[str, str], ...] = ()
     terminal_targets: tuple[WatchScopeBinding, ...] = ()
+    terminal_mapping_reads: bool = False
 
     def cache(self, store: ReplayStore) -> GenerationCache:
         return GenerationCache(
@@ -122,6 +124,8 @@ class WorkspaceConfig:
         terminal_options: dict[tuple[str, str], _TerminalOptions] = {}
         if self.terminal_targets:
             terminal.core()
+            if self.terminal_mapping_reads:
+                terminal.mapping_core()
             for binding in self.terminal_targets:
                 def target(
                     scope: dict[str, Any], *, expires_at: int, checkpoint: Callable[[], None],
@@ -136,6 +140,8 @@ class WorkspaceConfig:
                     "terminal_reads": True, "retention_target": target,
                     "retention_target_deadline": True,
                 }
+                if self.terminal_mapping_reads:
+                    terminal_options[(binding.principal, binding.target)]["terminal_mapping_reads"] = True
         preparations = {
             (principal, target): config.select(
                 dict(reader.scope), checkpoint, seconds,
@@ -183,10 +189,17 @@ class HostConfig:
     def store(self) -> ReplayStore:
         if self.workspaces and self.workspaces.terminal_targets:
             terminal.core()
+            mapping_options: dict[str, Any] = {}
+            if self.workspaces.terminal_mapping_reads:
+                terminal.mapping_core()
+                if _mapping_store() is None:
+                    raise ValueError("selected comment mapping core unsupported")
+                mapping_options["terminal_comment_mapping"] = True
             return ReplayStore(
                 self.root, self.namespace,
                 service_identity=ReplayServiceIdentity(self.fleet, self.gateway, self.slot),
                 terminal_retention=True, terminal_recovery=True, terminal_cache_retirement=True,
+                **mapping_options,
             )
         return ReplayStore(
             self.root, self.namespace,
@@ -195,8 +208,11 @@ class HostConfig:
 
     def provision(self) -> None:
         store = self.store()
-        mapping_store = _mapping_store() if self.workspaces and self.workspaces.comment_mappings else None
-        if self.workspaces and self.workspaces.comment_mappings and mapping_store is None:
+        mappings = self.workspaces and (
+            self.workspaces.comment_mappings or self.workspaces.terminal_mapping_reads
+        )
+        mapping_store = _mapping_store() if mappings else None
+        if mappings and mapping_store is None:
             raise ValueError("selected comment mapping core unsupported")
         if self.workspaces is not None and (
             self.root.is_symlink() or self.root.exists() and any(self.root.iterdir())
@@ -222,6 +238,10 @@ class HostConfig:
                 expires_at = int(time.time()) + self.operation_seconds
                 if self.workspaces.terminal_targets:
                     terminal.adopt(store, lifecycle, expires_at)
+                    if self.workspaces.terminal_mapping_reads:
+                        store.adopt_prepared_reviews(
+                            lifecycle_checkpoint=lifecycle, expires_at=expires_at, checkpoint=lifecycle,
+                        )
                 else:
                     store.adopt_prepared_reviews(
                         lifecycle_checkpoint=lifecycle, expires_at=expires_at, checkpoint=lifecycle,
@@ -231,6 +251,10 @@ class HostConfig:
                     )
                 if mapping_store is not None:
                     mapping_store(store).adopt(
+                        lifecycle_checkpoint=lifecycle, expires_at=expires_at, checkpoint=lifecycle,
+                    )
+                if self.workspaces.terminal_mapping_reads:
+                    terminal.mapping_core()(store).adopt(
                         lifecycle_checkpoint=lifecycle, expires_at=expires_at, checkpoint=lifecycle,
                     )
                 self.workspaces.cache(store).provision()
@@ -243,10 +267,17 @@ class HostConfig:
 
 def _workspaces(value: object, bindings: list[WatchScopeBinding],
                 observations: list[NativeObservationBinding], seconds: int) -> WorkspaceConfig:
-    selected = _fields(value, {"bindings", "cache_bytes", "cache_generations"}, {"terminal_reads"})
+    selected = _fields(value, {"bindings", "cache_bytes", "cache_generations"}, {
+        "terminal_reads", "terminal_mapping_reads",
+    })
     terminal_reads = selected.get("terminal_reads", False)
     if type(terminal_reads) is not bool:
         raise ValueError("terminal_reads requires a JSON boolean")
+    terminal_mapping_reads = selected.get("terminal_mapping_reads", False)
+    if type(terminal_mapping_reads) is not bool:
+        raise ValueError("terminal_mapping_reads requires a JSON boolean")
+    if terminal_mapping_reads and not terminal_reads:
+        raise ValueError("terminal_mapping_reads requires terminal_reads")
     cache_bytes, cache_generations = selected["cache_bytes"], selected["cache_generations"]
     if (
         type(cache_bytes) is not int or not 65536 <= cache_bytes <= 1024 * 1024 * 1024
@@ -305,6 +336,7 @@ def _workspaces(value: object, bindings: list[WatchScopeBinding],
         tuple(b for b in bindings if any(
             (p, t) == (b.principal, b.target) for p, t, _ in readers
         )) if terminal_reads else (),
+        terminal_mapping_reads,
     )
 
 
