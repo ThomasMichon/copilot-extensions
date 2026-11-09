@@ -50,13 +50,15 @@ def classic_arguments(environment: dict[str, str]) -> list[str]:
     return arguments
 
 
-def profile_arguments(environment: dict[str, str]) -> list[str]:
+def profile_arguments(
+    environment: dict[str, str], *, master_default_interval="30", master_legacy=True,
+) -> list[str]:
     if environment.get("AGENT_DISPATCH_SUPERVISE_MODE", "").strip().lower() != "serve":
         return classic_arguments(environment)
-    arguments = [
-        "supervise", "serve", "--legacy-env", "--interval",
-        environment.get("AGENT_DISPATCH_SUPERVISE_INTERVAL") or "30",
-    ]
+    arguments = ["supervise", "serve"]
+    if master_legacy:
+        arguments.append("--legacy-env")
+    arguments += ["--interval", environment.get("AGENT_DISPATCH_SUPERVISE_INTERVAL") or master_default_interval]
     if machine := environment.get("AGENT_DISPATCH_SUPERVISE_MACHINE"):
         arguments += ["--machine", machine]
     return arguments + environment.get("AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS", "").split()

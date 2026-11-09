@@ -94,6 +94,40 @@ def test_master_preflight_preserves_actual_modern_and_legacy_source_selection(
     assert plan.machine == "fixture-host"
 
 
+def test_primary_source_profile_captures_supported_extra_scope_and_discovery_intent(tmp_path, monkeypatch):
+    from agent_dispatch import pool_source_snapshot, source_start
+
+    _sources(monkeypatch)
+    monkeypatch.setattr(pool_source_snapshot, "read_supervisor_declarations", lambda _: (
+        pytest.fail("explicit --no-declared must not read modern declarations")
+    ))
+    (tmp_path / "supervisor.env").write_text(
+        "AGENT_DISPATCH_SUPERVISE_MODE=serve\n"
+        "AGENT_DISPATCH_SUPERVISE_MACHINE=fixture-host\n"
+        "AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=--no-declared --env primary-fixture\n",
+    )
+    plan = source_start.supervisor_plan(tmp_path)
+    assert plan.args.no_declared is True and plan.args.legacy_env is False
+    assert (plan.machine, plan.env) == ("fixture-host", "primary-fixture")
+    assert plan.scope == "supervisor:fixture-host:primary-fixture"
+    assert plan.argv[-3:] == ("--no-declared", "--env", "primary-fixture")
+
+
+@pytest.mark.parametrize("extra", [
+    "--unknown-fixture", "--once", "--no-single-instance",
+    "--source-candidate fixture", "--interval not-a-number",
+])
+def test_primary_source_profile_rejects_unsupported_or_nonresident_extras_before_mutation(
+    tmp_path, monkeypatch, extra,
+):
+    _sources(monkeypatch)
+    (tmp_path / "supervisor.env").write_text(
+        "AGENT_DISPATCH_SUPERVISE_MODE=serve\nAGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=" + extra + "\n",
+    )
+    with pytest.raises(ValueError, match="profile arguments|resident admitted role"):
+        _command(monkeypatch, tmp_path)()
+
+
 @pytest.mark.parametrize("interval", ["0", "-1", "nan", "inf"])
 def test_invalid_supervisor_interval_preflight_refuses_before_mutation(
     monkeypatch, tmp_path, interval,

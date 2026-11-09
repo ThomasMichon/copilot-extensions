@@ -454,6 +454,7 @@ class SupervisorStartupPlan:
     machine: str | None
     env: str
     scope: str
+    argv: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -481,9 +482,11 @@ def supervisor_plan(root: Path, *, profiles_only=False) -> SupervisorStartupPlan
         environment = {}
     else:
         environment = _parse_env_file(primary, strict=True)
-    declarations = read_supervisor_declarations(RegistrarSources())
-    if not declarations.complete:
-        raise RuntimeError("supervisor declaration source is unconfirmed")
+    def modern_declarations():
+        result = read_supervisor_declarations(RegistrarSources())
+        if not result.complete:
+            raise RuntimeError("supervisor declaration source is unconfirmed")
+        return result
     mode = environment.get("AGENT_DISPATCH_SUPERVISE_MODE", "").strip().lower()
     legacy = bool(environment.get("AGENT_DISPATCH_SUPERVISE_LABELS", "").strip())
     profiles = root / "supervisors"
@@ -503,6 +506,7 @@ def supervisor_plan(root: Path, *, profiles_only=False) -> SupervisorStartupPlan
     if profiles_only or (legacy and mode != "serve"):
         from .supervisor_lane_status import profile_arguments
 
+        modern_declarations()
         paths = [] if profiles_only else [primary]
         if profiles.is_dir():
             paths += sorted(path for path in profiles.iterdir() if path.suffix == ".env")
@@ -532,27 +536,33 @@ def supervisor_plan(root: Path, *, profiles_only=False) -> SupervisorStartupPlan
             selected.append((path, arguments, hashlib.sha256(content).hexdigest()))
         return ClassicStartupPlan(root, tuple(selected))
     if mode == "legacy":
+        modern_declarations()
         return None
+    from .supervisor_lane_status import profile_arguments
+    from .supervisor_source import read_legacy_declarations
+
+    argv = profile_arguments(
+        {**environment, "AGENT_DISPATCH_SUPERVISE_MODE": "serve"},
+        master_default_interval="5", master_legacy=legacy,
+    )
+    try:
+        args = cli.build_parser().parse_args(argv)
+    except SystemExit as error:
+        raise ValueError("Source supervisor profile arguments are invalid") from error
+    if not math.isfinite(args.interval) or args.interval <= 0:
+        raise ValueError("Source supervisor interval must be finite and positive")
+    if args.once or args.no_single_instance or args.source_candidate is not None:
+        raise ValueError("Source supervisor startup requires its resident admitted role")
+    declarations = read_legacy_declarations(enabled=args.legacy_env) if args.no_declared else modern_declarations()
+    if not declarations.complete:
+        raise RuntimeError("supervisor declaration source is unconfirmed")
     if not declarations.declarations and mode != "serve":
         return None
-    argv = ["supervise", "serve"]
-    if legacy:
-        argv.append("--legacy-env")
-    machine = environment.get("AGENT_DISPATCH_SUPERVISE_MACHINE")
-    if machine:
-        argv += ["--machine", machine]
-    interval = float(environment.get("AGENT_DISPATCH_SUPERVISE_INTERVAL") or "5")
-    if not math.isfinite(interval) or interval <= 0:
-        raise ValueError("Source supervisor interval must be finite and positive")
-    argv += ["--interval", str(interval)]
-    if environment.get("AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS", "").strip():
-        raise ValueError("Source supervisor startup requires explicit structured configuration")
-    args = cli.build_parser().parse_args(argv)
     machine, env = _registration_scope(args)
     if remote_dispatch.is_peer_machine(machine):
         raise RuntimeError("Source startup cannot take a foreign supervisor scope")
     scope = supervisor_lease_scope(machine, env)
-    return SupervisorStartupPlan(root, args, machine, env, scope)
+    return SupervisorStartupPlan(root, args, machine, env, scope, tuple(argv))
 
 
 def ensure_supervisor(root: Path, *, plan=_UNPLANNED) -> dict:
@@ -562,7 +572,7 @@ def ensure_supervisor(root: Path, *, plan=_UNPLANNED) -> dict:
     from .single_instance import is_locked, lock_path_for, read_holder_pid
     from .supervisor_status_io import read_status, runtime_status_path
     from .supervisor_source import effective_settings, read_prepared, spawn_candidate
-    from .client_authority import supervisor_authority_target
+    from .client_authority import supervisor_authority_target, target_cli_args
 
     if plan is _UNPLANNED:
         plan = supervisor_plan(root)
@@ -588,11 +598,15 @@ def ensure_supervisor(root: Path, *, plan=_UNPLANNED) -> dict:
         return {"status": "disabled"}
     args, machine, env, scope = plan.args, plan.machine, plan.env, plan.scope
     lock = lock_path_for(run_dir(), scope)
-    argv = ["supervise", "serve", "--interval", str(args.interval), "--env", env]
+    argv = [*target_cli_args(args), "supervise", "serve", "--interval", str(args.interval), "--env", env]
     if machine:
         argv += ["--machine", machine]
     if args.legacy_env:
         argv.append("--legacy-env")
+    if getattr(args, "no_declared", False):
+        argv.append("--no-declared")
+    if plan.argv:
+        argv = list(plan.argv)
     authority = supervisor_authority_target(args)
     child = None
     prepared = read_prepared(root, __version__, scope, authority=authority)

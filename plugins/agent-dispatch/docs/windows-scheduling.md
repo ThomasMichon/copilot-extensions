@@ -147,6 +147,18 @@ the requested profile generation. These bindings are rechecked before releasing
 the singleton. A same-version peer is an equivalent replacement only when those
 settings, profile binding and authority match; a predecessor with older settings
 or generation cannot make a new candidate stand down.
+If a bound profile disappears or its read is refused during withdrawal, it is
+noncurrent: the existing exact-candidate settlement and admission rollback apply.
+Unconfirmed effects retain their custody instead of becoming successful absence
+or permission to replay a launch.
+
+Primary Source `MODE=serve` planning uses the same profile/CLI argument owner as
+compatibility launch, retaining validated arguments through native startup.
+Supported extras such as `--no-declared` and an explicit environment preserve
+their declaration intent, authority and singleton scope. Explicitly disabled
+modern discovery qualifies only the requested legacy cohort, or a known empty
+cohort when legacy discovery is also off. Unknown options, passive-admission
+arguments and nonresident modes are rejected before coordinator mutation.
 
 The coordinator launcher's physical nested-slot fallback delegates to the
 co-deployed canonical resolver, including its completion-marker and reparse

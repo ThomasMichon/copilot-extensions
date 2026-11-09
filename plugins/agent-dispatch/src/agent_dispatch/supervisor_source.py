@@ -250,6 +250,9 @@ def configure_admission(daemon, args, guard, clients):
     from .source_start import _path_name, config_identity, require_selected_source
     from .supervise_cli import _client, _supervisor_authority_target, _write_supervisor_cycle_start
 
+    if getattr(args, "no_declared", False):
+        daemon.declared_source = lambda: read_legacy_declarations(enabled=args.legacy_env)
+
     def probe():
         with _client(args, ensure=False, allow_ssh_failover=False) as peer:
             health = peer.health()
@@ -316,6 +319,18 @@ def effective_settings(args):
     }
 
 
+def read_legacy_declarations(*, enabled):
+    from .pool_source_snapshot import DeclarationRead
+    from .registrar import RegistrarError
+    from .registrar_discovery import read_legacy_env_profiles
+
+    try:
+        profiles = read_legacy_env_profiles(strict=True) if enabled else ()
+    except (OSError, UnicodeError, RegistrarError):
+        return DeclarationRead((), False, "legacy-source-unavailable")
+    return DeclarationRead(tuple(profiles), True)
+
+
 def _expected_preparation(daemon):
     from . import __main__ as cli
 
@@ -329,7 +344,12 @@ def _expected_preparation(daemon):
 
 
 def _profile_current(binding):
-    return binding is None or hashlib.sha256(Path(binding["path"]).read_bytes()).hexdigest() == binding["generation"]
+    if binding is None:
+        return True
+    try:
+        return hashlib.sha256(Path(binding["path"]).read_bytes()).hexdigest() == binding["generation"]
+    except OSError:
+        return False
 
 
 def _cancel_owned_candidate(child, root):

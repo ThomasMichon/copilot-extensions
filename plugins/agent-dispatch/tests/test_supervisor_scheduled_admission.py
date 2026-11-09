@@ -192,7 +192,14 @@ Write-SupervisorLauncher|Out-Null
                 from agent_dispatch.single_instance import is_locked, lock_path_for
                 from agent_dispatch.supervisor_lane_status import profile_scope
                 from agent_dispatch.supervisor_registration import supervisor_lease_scope
-                scope = supervisor_lease_scope("fixture", "default") if master else profile_scope(root / "supervisor.env")
+                if master:
+                    from agent_dispatch import __main__ as cli
+                    from agent_dispatch.registrar_discovery import _parse_env_file
+                    from agent_dispatch.supervisor_lane_status import profile_arguments
+                    args = cli.build_parser().parse_args(profile_arguments(_parse_env_file(root / "supervisor.env", strict=True)))
+                    scope = supervisor_lease_scope(args.machine, args.env)
+                else:
+                    scope = profile_scope(root / "supervisor.env")
                 if not is_locked(lock_path_for(root / "run", scope)):
                     break
                 time.sleep(.02)
@@ -367,3 +374,70 @@ print(json.dumps(dict(original=original,ready=ready,old=old,new=new,version=__ve
             str(result["original"]["pid"]), str(result["ready"]["pid"]),
         }
         assert all(json.loads(line) == [None, None] for line in (root / "worker-markers").read_text().splitlines())
+
+
+def test_actual_installer_source_supervisor_callback_preserves_supported_primary_flags(tmp_path, capsys):
+    shell = shutil.which("powershell.exe")
+    with application(tmp_path, shell, master=True, source=True) as (root, python, environment, children):
+        profile = root / "supervisor.env"
+        profile.write_text(profile.read_text()
+                           + "AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=--no-declared --env primary-fixture\n")
+        environment["AGENT_DISPATCH_SUPERVISE_MACHINE"] = "fixture"
+        callback = root / "installer-callback.ps1"
+        helper = INSTALLER.parent.parent / "src" / "agent_dispatch" / "windows-scheduling.ps1"
+        callback.write_text(f"""
+$ErrorActionPreference='Stop'
+$InstallDir={quote(root)};$ScriptDir={quote(INSTALLER.parent)}
+. {quote(INSTALLER.with_name('versioned_runtime_native.ps1'))}
+. {quote(helper)}
+function Get-BootstrapPython {{return {quote(sys.executable)}}}
+function Get-ScheduledTask {{param($TaskName,$ErrorAction)}}
+function Register-ScheduledTask {{throw 'host scheduling is excluded'}}
+function Start-ScheduledTask {{throw 'host scheduling is excluded'}}
+function Stop-ScheduledTask {{throw 'host scheduling is excluded'}}
+function Unregister-ScheduledTask {{throw 'host scheduling is excluded'}}
+function Start-DispatchDetachedLogonLauncher {{throw 'Source must retain its admitted application owner'}}
+$tokens=$null;$errors=$null
+$ast=[Management.Automation.Language.Parser]::ParseFile({quote(INSTALLER)},[ref]$tokens,[ref]$errors)
+if($errors.Count){{throw 'source parse failed'}}
+$mode=@($ast.FindAll({{param($node)
+ $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-SupervisorMode'
+}},$true))
+if($mode.Count -ne 1){{throw 'installer mode owner is ambiguous'}}
+. ([scriptblock]::Create($mode[0].Extent.Text))
+Invoke-DispatchSupervisorEnsure -Name fixture-supervisor -EnvFile {quote(profile)} -Launcher fixture-unused
+""")
+        for host in (shell, shutil.which("pwsh")):
+            if host is None:
+                continue
+            parse = (
+                "$tokens=$null;$errors=$null;[void][Management.Automation.Language.Parser]::ParseFile("
+                + quote(callback) + ",[ref]$tokens,[ref]$errors);if($errors.Count){throw ($errors|Out-String)}"
+            )
+            parsed = subprocess.run(
+                [host, "-NoProfile", "-NonInteractive", "-Command", parse],
+                capture_output=True, text=True, timeout=5, creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            assert parsed.returncode == 0, parsed.stderr
+        control = launch(root, "installer-callback", [shell, "-NoProfile", "-NonInteractive", "-File", str(callback)], environment, children)
+        try:
+            control.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            with capsys.disabled():
+                print(diagnostics(root)[-24000:], file=sys.stderr, flush=True)
+            pytest.fail("actual installer Source callback timed out:\n" + diagnostics(root))
+        assert control.returncode == 0, diagnostics(root)
+        from agent_dispatch.supervisor_source import read_prepared
+        from agent_dispatch.supervisor_registration import supervisor_lease_scope
+        from agent_dispatch.supervisor_status_io import runtime_status_path, read_status
+        scope = supervisor_lease_scope("fixture", "primary-fixture")
+        prepared = read_prepared(root, (root / "current-version").read_text(), scope)
+        assert prepared is not None
+        assert prepared["settings"] == {
+            "machine": "fixture", "env": "primary-fixture", "interval": .05,
+            "legacy_env": False, "no_declared": True,
+        }
+        status, error = read_status(runtime_status_path(scope, directory=root / "run"))
+        assert error is None and status["cycle_id"] > 0
+        assert status["updated_at"] >= status["cycle_started_at"]
+        assert status["generation"]["pid"] == prepared["generation"]["pid"]
