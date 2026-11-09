@@ -145,14 +145,15 @@ performance, installed and archival gates remain unchanged.
       provider-open versus locally landed, closed-unmerged, merged, pending
       mergeability, foreign identity, malformed enums/booleans/object IDs,
       provider errors and bounded output failure. Do not mock beyond construction.
-- [ ] Real Textual controls cover explicit one-association selection, literal/
+- [x] Real Textual controls cover explicit one-association selection, literal/
       narrow rendering, Refresh, reassignment/head changes, old/unsupported
       providers, late replies and blocked-read dismissal with exact cleanup.
       All independent views remain usable; no action is performed on a PR.
       Covered by #11194: wide-viewport selection, Refresh, reassignment/head
       changes, old/unsupported providers and late replies with fixture point
-      reads. Still open: narrow PR rendering and blocked real-subprocess
-      dismissal with exact cleanup.
+      reads. The 2026-11-08 controls add 40-column rendering and Escape,
+      Refresh and deselection of a blocked real point-read subprocess (POSIX
+      source tier; see the journal).
 - [x] Record source/private-process/Textual evidence separately from installed,
       native input-ready performance and any future admitted push coverage.
       Required review, green CI, actual merge and immediate whole-parent
@@ -333,3 +334,22 @@ replies, narrow PR rendering and blocked real-subprocess dismissal with exact
 cleanup. Full live topology and every original parent gate remain
 open. No rollout, real daemon wake, live Mux binding, model/data or head/baton
 operation was performed.
+
+### 2026-11-08 - Narrow rendering and blocked-read dismissal controls
+
+`tests/test_companion_pr_panel_ui.py` closes Validation row 4's remainder
+without source changes. At a 40-column viewport the association selector and
+Re-read button stay fully on screen and side by side, and the wrapped graph
+keeps provider markup literal, the point-read state and the record-not-openness
+caveat. A selected association's point read runs the real owned read runner
+against a child process that blocks; Escape, Refresh and deselection each
+retire that child (signal-0 exit witness), leave no engine cleanup failure and,
+for the in-app paths, settle the read thread with no displayed state.
+
+The existing expected-head Escape control used `os.pidfd_open`, which the
+managed test interpreter lacks, so it always skipped; it now uses the same
+portable witness and runs. This is POSIX source/private-process evidence only:
+the Windows job-object path, installed behavior and native performance are not
+exercised. Rows 1-3, full live topology and every original parent gate remain
+open. No rollout, real daemon wake, live Mux binding or head/baton operation
+was performed.
