@@ -313,11 +313,11 @@ def test_duplicate_keys_in_other_config_sources_cannot_drop_credential_policy(ta
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX symlink fixture; native Windows qualification is separate")
 @pytest.mark.parametrize("source", ["global", "repository", "overlay"])
-@pytest.mark.parametrize("kind", ["loop", "dangling"])
+@pytest.mark.parametrize("kind", ["loop", "dangling", "directory"])
 def test_unreadable_policy_link_is_not_confirmed_absence(target, tmp_path, monkeypatch, source, kind):
     path, _, document, _, write = target
     if source == "global":
-        policy = path.parent / "global-link.yaml"
+        policy = path.parent / "global-link" / "config.yaml" if kind == "directory" else path.parent / "global-link.yaml"
         monkeypatch.setattr(config, "global_config_path", lambda: policy)
     else:
         anchor = tmp_path / "linked-target"
@@ -328,9 +328,13 @@ def test_unreadable_policy_link_is_not_confirmed_absence(target, tmp_path, monke
             policy = anchor / config.MARKETPLACE_OVERLAYS_DIR / "fixture" / config.GLOBAL_CONFIG_FILENAME
             monkeypatch.setattr(config.registry_paths, "installation_context_call",
                                 lambda callback: {"marketplaceId": "fixture"})
-        policy.parent.mkdir(parents=True)
         write()
-    policy.symlink_to(policy.name if kind == "loop" else "missing-policy.yaml")
+    if kind == "directory":
+        policy.parent.parent.mkdir(parents=True, exist_ok=True)
+        policy.parent.symlink_to("missing-policy-directory", target_is_directory=True)
+    else:
+        policy.parent.mkdir(parents=True, exist_ok=True)
+        policy.symlink_to(policy.name if kind == "loop" else "missing-policy.yaml")
     monkeypatch.setattr(repos, "account_from_map", lambda *a, **k: pytest.fail("unreadable policy selected account"))
     with pytest.raises((OSError, ValueError)):
         select_report_target(path, "example/project")

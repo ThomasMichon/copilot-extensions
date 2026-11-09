@@ -5188,7 +5188,7 @@
         "plugins/agent-worktrees/src/agent_worktrees/allocation_run.py": "25ad3b7c3d8c9ba5b2d919d44b213cd0dc089fe234c3a0574b358b053ac3f6e2",
         "plugins/agent-worktrees/src/agent_worktrees/create_destination.py": "3456c88283cc279f28e3459338cf097a809ea80bc9e0e22f1f69bf58befe4104",
         "plugins/agent-worktrees/src/agent_worktrees/acquisition_report.py": "a83793221939d9744aa1be72c839bf631d279cee1fc2bb67601ca8fe68c8deed",
-        "plugins/agent-worktrees/src/agent_worktrees/config_acquisition.py": "319bcf135f3c8a2d82d8462879356e8a1e43ac5e271faace4f719ba8f6b0aa8a",
+        "plugins/agent-worktrees/src/agent_worktrees/config_acquisition.py": "32c8e9002fa9595dea20e07ba1a860baa7136cbf93f6a68cea6643d8e365159f",
         "plugins/agent-worktrees/src/agent_worktrees/machine_config.py": "1956b67878baa8cde2ffc2689847f47b7d3f8cdf5abcd7e56386e80d7b6da801",
         "plugins/agent-worktrees/src/agent_worktrees/machine_identity.py": "89e214c05fe89159343935c18fc80b6c882e8c1126248169a74972ea99574fed",
         "plugins/agent-worktrees/src/agent_worktrees/machine_registry_acquisition.py": "8f7d824fef81b1fc728cb14a672e4e5bd7b0fbc02a3fbf76e635c934f9510fcf",

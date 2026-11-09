@@ -87,12 +87,18 @@ def source_exists(path: Path, stage: str, *, strict=False) -> bool:
                 path.stat()
                 present = True
             except FileNotFoundError:
-                try:
-                    path.lstat()
-                except FileNotFoundError:
-                    present = False
-                else:
-                    raise ValueError("configuration source target is unavailable") from None
+                ancestor = path
+                while True:
+                    try:
+                        ancestor.lstat()
+                    except FileNotFoundError:
+                        if ancestor.parent == ancestor:
+                            raise
+                        ancestor = ancestor.parent
+                    else:
+                        ancestor.stat()
+                        present = False
+                        break
         else:
             present = path.exists()
     except Exception as exc:

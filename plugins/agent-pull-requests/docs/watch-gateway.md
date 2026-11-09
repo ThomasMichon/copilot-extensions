@@ -220,6 +220,8 @@ or unavailable report transport remains unavailable even if a provider builder
 catches that failure; it cannot become a successful HTTP error-report exchange.
 Failed strict presence probes, including looping or dangling policy links, are not
 confirmed absence. This applies to global, repository and marketplace policy.
+Absent descendants require a readable first existing ancestor, so dangling
+policy-directory links cannot silently discard configuration.
 Failed reads of established committed policy cannot select a divergent checkout;
 confirmed absence and successful same-source recovery remain supported. Provider
 access errors retain a sanitized native failed report and owner exit; transport

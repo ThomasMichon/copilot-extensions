@@ -1375,6 +1375,11 @@ callback an implicit credential store.
 
 ### 2026-11-09 - Native report boundary corrections
 
+- Confirming an absent policy descendant also validates its first existing
+  ancestor. A dangling policy-directory link remains unavailable rather than
+  silently removing policy. Three directory-link controls join the leaf-link
+  cases across global, repository and marketplace sources; 453 Worktrees
+  cases pass in isolation.
 - Strict presence acquisition uses raw stat outcomes rather than a fail-soft
   existence predicate. Looping and dangling policy links refuse before account
   selection across global, repository and marketplace sources; confirmed
