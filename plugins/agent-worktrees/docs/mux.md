@@ -166,10 +166,13 @@ repair a running server, or qualify another executable with the same protocol.
 Strict action-time Windows checks retain the bounded native reader, now
 owned by Driver behind the existing Worktrees compatibility imports, without
 starting PSMux. It enumerates native PSMux/PMux/TMux process identities and
-matches every server to its PID/birth-qualified registration. It sends only a
+discovers their port/key registrations without requiring `.pid` files, which
+legacy PSMux 3.3.5 servers do not publish. Existing PID/birth sentinels still
+have to match. It sends only a
 fixed authenticated `display-message -p` request directly to each registered
 loopback server, including warm servers, to confirm its current name, PID and
-client count. A second native census and registration read must agree before
+client count. Each reply's PID must belong to the native census, every live
+server must be covered, and a second census and registration read must agree before
 absence can admit a prompted Resume. The normal bound-Copilot check still
 applies independently, including to a bare process.
 
