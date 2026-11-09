@@ -322,6 +322,12 @@ retirement before `shutdown()` returns, raising if native exit is unconfirmed.
 Post-commit failures retain full predecessor identity and a writer-reconciliation
 breadcrumb; keeping a healthy successor serving does not make retirement
 successful. Callers without `expected_old` retain the existing behavior.
+An authoritative replacement may additionally set `preserve_raw_active=True`
+with `refuse_old`. This selects the raw active row, including its absence,
+without eagerly promoting a live `previous` row or choosing it as the incumbent.
+The refusal callback must fence the observed raw value through publication;
+this option does not grant native cleanup authority. The default remains false,
+preserving existing fallback-healing behavior for other callers.
 Nonconditional adopters may set `routing_lock_timeout` on the orchestrator to
 bound each routing and breadcrumb lock acquisition, including rollback. It is
 not a whole-attempt deadline; conditional cutovers use their own request budget

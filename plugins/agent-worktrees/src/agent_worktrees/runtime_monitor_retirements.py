@@ -373,6 +373,19 @@ def _remove_reference(root: Path, record: dict, helper: ModuleType) -> None:
         helper._leases.replace_runtime_references(root, owner, [], expected=previous)
 
 
+def release_exited_claim(root: Path, claim: dict, helper: ModuleType) -> None:
+    """Release exact admitted claim custody only after the caller proves native exits."""
+    with helper._publication_lease(root):
+        selected = claim.get("selected_generation") or "dev"
+        if helper.current_version(root) == selected:
+            raise RuntimeError("Dev runtime is selected before resident-owned release")
+        current = helper.read_dev_claim(root, strict=True)
+        if current is not None:
+            if current != _restored_claim(claim):
+                raise RuntimeError("Dev claim changed before resident-owned release")
+            helper._release_dev(root, claim["owner"])
+
+
 def _cancelled_status(
     root: Path,
     record: dict,
@@ -403,17 +416,20 @@ def _cancel_missing(root: Path, record: dict, runtime: ModuleType | None) -> boo
 
 def reconcile(root: Path, *, runtime: ModuleType | None = None, cleanup: bool = True) -> bool:
     """Keep the elected successor needed; settle only positively exited identities."""
+    from . import runtime_monitor_replacement as replacement
+
+    deferred = replacement.reconcile(root, runtime=runtime, cleanup=cleanup)
     records = _records(root)
     orphans = _orphans(root, records, runtime)
     if not records and not orphans:
-        return False
+        return deferred
     if not cleanup:
-        pending = False
+        pending = deferred
         for record in [record for _path, record in records] + orphans:
             if _demand(record, _exit_state(record)):
                 pending = True
         return pending
-    pending = False
+    pending = deferred
     directory = root / "status-monitor-retirements"
     directory.mkdir(exist_ok=True)
     with tracking._RecordLock(directory / "inventory", require_sidecar=True):
@@ -484,7 +500,9 @@ def pending_slot(root: Path, slot: str, *, include_cancelled: bool = True) -> bo
 
 def pending_claim(root: Path, claim: dict) -> bool:
     """Observe exact deferred custody without releasing or repairing anything."""
-    return any(
+    from . import runtime_monitor_replacement as replacement
+
+    return replacement.pending_claim(root, claim) or any(
         record["state"] != "cancelled" and (
             record["release_claim"] == claim
             or (
@@ -550,6 +568,7 @@ def cancel_prepared_release(root: Path, claim: dict, *, guard, runtime: ModuleTy
     """Cancel exact, proven precommit dev preparations for an authorized retry."""
     from single_instance_lease import SingleInstance
     from zdd import breadcrumb
+    from . import runtime_monitor_replacement as replacement
 
     route_root = root / "status-monitor-routing"
     if (
@@ -561,14 +580,16 @@ def cancel_prepared_release(root: Path, claim: dict, *, guard, runtime: ModuleTy
         return False
     directory = root / "status-monitor-retirements"
     if not directory.exists():
-        return False
+        return replacement.cancel_prepared_release(root, claim, runtime=runtime)
     with tracking._RecordLock(directory / "inventory", require_sidecar=True):
         records = [
             (path, record) for path, record in _records(root)
             if record["slot"] == (claim.get("selected_generation") or "dev")
             and record["state"] != "cancelled"
         ]
-        if not records or any(
+        if not records:
+            return replacement.cancel_prepared_release(root, claim, runtime=runtime)
+        if any(
             record["state"] != "prepared" or record["release_claim"] != claim
             for _path, record in records
         ):
@@ -601,6 +622,8 @@ def cancel_prepared_release(root: Path, claim: dict, *, guard, runtime: ModuleTy
             done, _needed = _cancelled_status(root, {**record, "state": "cancelled"}, runtime)
             if done:
                 path.unlink()
+    if replacement.pending_claim(root, claim):
+        return replacement.cancel_prepared_release(root, claim, runtime=runtime)
     return True
 
 
