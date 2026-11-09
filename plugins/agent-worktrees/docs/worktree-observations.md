@@ -583,6 +583,9 @@ cell observations, other tool names, writes and every `toolCalls` envelope
 retain the original validation and policy path, even with read-labelled
 envelope metadata. The default-installation emergency stop never governs a cell.
 This does not qualify installed or composed hook latency.
+After guard-source changes, regenerate the shipped contract with
+`python tools/render-hook-read-policy.py`. Registered-consumer fixtures copy
+that contract unchanged, so a stale digest cannot be hidden by fixture repair.
 
 New producers remain compatible with old readers, which ignore the additive
 field and retain their old cell path. New readers use an old producer's

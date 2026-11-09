@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import importlib.util
 import io
 import json
@@ -699,11 +698,6 @@ def test_registered_pre_tool_entry_reuses_prepared_membership(tmp_path, monkeypa
         "pr_supersede_guard.py",
     ):
         shutil.copyfile(SCRIPTS / name, scripts / name)
-    contract = json.loads((scripts / "hook-read-policy.json").read_text(encoding="utf-8"))
-    for guard in contract["guards"]:
-        text = (scripts / guard).read_text(encoding="utf-8").replace("\r\n", "\n")
-        contract["guards"][guard] = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    (scripts / "hook-read-policy.json").write_text(json.dumps(contract), encoding="utf-8")
     observed = tmp_path / "policy-input"
     (scripts / "resolve-runtime.ps1").write_text(
         "$AwPy='" + sys.executable.replace("'", "''") + "'\n",
@@ -776,11 +770,6 @@ def test_registered_prepared_cell_membership_read_requires_complete_native_proof
         "statelessness_guard.py", "cross_repo_guard.py", "anchor_write_guard.py", "pr_supersede_guard.py",
     ):
         shutil.copyfile(SCRIPTS / name, scripts / name)
-    contract = json.loads((scripts / "hook-read-policy.json").read_text(encoding="utf-8"))
-    for guard in contract["guards"]:
-        text = (scripts / guard).read_text(encoding="utf-8").replace("\r\n", "\n")
-        contract["guards"][guard] = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    (scripts / "hook-read-policy.json").write_text(json.dumps(contract), encoding="utf-8")
     context, registry = fixtures._stamp(
         tmp_path / "durable", plugin, marketplace="selected", repository="example/selected",
     )
