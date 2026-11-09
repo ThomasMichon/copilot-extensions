@@ -27,7 +27,8 @@ class ReportClient:
 
     async def _exchange(self, operation, payload, *, epoch):
         body = json.dumps(
-            {"binding": self.binding.document(), "request": payload}, allow_nan=False,
+            {"binding": {**self.binding.document(), "report_scope": self.scope},
+             "request": payload}, allow_nan=False,
         ).encode("utf-8")
         if len(body) > BODY_BYTES:
             raise ValueError("report request limit")

@@ -166,7 +166,8 @@ def test_wire_overrides_refuse_before_owner_resolution(reports, payload):
     response = asyncio.run(gateway.handle(ServiceRequest(
         CallerContext("fleet-a", "gateway-a", "service-a", "caller-a", int(time.time()) + 60),
         "POST", "/v1/read/project/threads", (("content-type", "application/json"),),
-        json.dumps({"binding": client.binding.document(), "request": payload}).encode(),
+        json.dumps({"binding": {**client.binding.document(), "report_scope": client.scope},
+                    "request": payload}).encode(),
     )))
     assert response.status == 400
     assert state["calls"] == [] and state.get("resolved", 0) == 0
@@ -210,6 +211,25 @@ def test_post_acquisition_changes_prevent_publication(reports, change, status):
         read(reports[3])
     assert caught.value.http_status == status
     assert state["calls"] == [("threads", 7)]
+
+
+@pytest.mark.parametrize("field,value", [("endpoint", "https://other.example"), ("provider", "gitea")])
+def test_replacement_report_scope_refuses_before_new_owner_resolution_or_collection(reports, field, value):
+    _, gateway, reader, client, _, state, _ = reports
+    async def scenario():
+        await client.capabilities()
+        resolved = state["resolved"]
+        changed = {**dict(reader.scope), field: value}
+        state["binding"] = replace(state["binding"], scope=changed)
+        gateway.reports = {(client.binding.principal, client.binding.target): ReportReader(
+            reader.consumer_scope, changed, reader.resolve_binding, max_work_seconds=3,
+        )}
+        with pytest.raises(ReplayClientError) as caught:
+            await client.read("diff", {"number": 7, "budget_seconds": 2})
+        assert caught.value.http_status == 409
+        assert state["resolved"] == resolved
+    asyncio.run(scenario())
+    assert not state["calls"]
 
 
 def test_full_response_limit_never_truncates_native_fields(reports):

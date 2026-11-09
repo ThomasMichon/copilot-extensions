@@ -155,6 +155,12 @@ collector receives `(operation, number, remaining)` and returns the original
 No executable, credential, account or endpoint is deserialized from a request.
 
 Every request has exactly `{"binding": <expected ReplayBinding>, "request": ...}`.
+For this report protocol only, the request binding additionally requires
+`report_scope`, containing the selected provider/endpoint/account/repo mapping.
+Both scopes are compared before owner resolution/collection and through
+publication, so replacing a reader with a different endpoint/provider cannot
+perform an unselected read first. Responses retain the original replay binding
+and their separate report scope; watch/workspace binding syntax is unchanged.
 Capabilities request `{}`; reads request positive integer `number` and finite
 positive `budget_seconds`. The selected protocol is
 `agent-pull-requests.report-read/v1`, with profile `owner_executed_report/v1`.

@@ -8,7 +8,7 @@ import re
 from fleet_manager.gateway_service_channel import BODY_BYTES
 from fleet_manager.gateway_service_handler import RequestDisconnected
 
-from .report_read import ReportUnavailable, parse_request
+from .report_read import ReportUnavailable, parse_request, report_scope
 from .watch_replay_binding import ReplayBinding, ReplayBindingMismatch
 from .watch_replay_store import ReplayCallerExpired, json_object
 
@@ -48,9 +48,15 @@ async def handle(gateway, request):
         envelope = json_object(request.body)
         if set(envelope) != {"binding", "request"}:
             raise ValueError
-        expected = ReplayBinding.from_document(envelope["binding"])
+        wire_binding = envelope["binding"]
+        if not isinstance(wire_binding, dict) or "report_scope" not in wire_binding:
+            raise ValueError
+        expected_scope = report_scope(wire_binding["report_scope"])
+        expected = ReplayBinding.from_document({
+            name: value for name, value in wire_binding.items() if name != "report_scope"
+        })
         payload = parse_request(operation, envelope["request"])
-        if gateway._binding(request, target) != expected:
+        if gateway._binding(request, target) != expected or dict(owner.scope) != expected_scope:
             raise ReplayBindingMismatch
     except ReplayBindingMismatch:
         return _response(409, {"error": "report_binding_mismatch"})
@@ -60,7 +66,7 @@ async def handle(gateway, request):
         return _response(503, {"error": "report_service_unavailable"})
     publication = []
     task = asyncio.create_task(execute(
-        gateway, owner, operation, payload, request, target, expected, publication,
+        gateway, owner, operation, payload, request, target, expected, expected_scope, publication,
     ))
     gateway._tasks.add(task)
     task.add_done_callback(gateway._completed)
@@ -78,7 +84,7 @@ async def handle(gateway, request):
         return _failure(error)
 
 
-async def execute(gateway, owner, operation, payload, request, target, expected, publication):
+async def execute(gateway, owner, operation, payload, request, target, expected, expected_scope, publication):
     from .watch_gateway import _response
 
     response = None
@@ -96,7 +102,7 @@ async def execute(gateway, owner, operation, payload, request, target, expected,
         gateway._check(request)
         if gateway.store.clock() >= request.context.expires_at:
             raise ReplayCallerExpired
-        if gateway._binding(request, target) != expected:
+        if gateway._binding(request, target) != expected or dict(owner.scope) != expected_scope:
             raise ReplayBindingMismatch
         if gateway.reports.get((request.context.principal, target)) is not owner:
             raise ReportUnavailable("report owner replaced")

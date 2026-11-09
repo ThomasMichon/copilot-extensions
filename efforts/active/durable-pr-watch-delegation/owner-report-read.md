@@ -83,6 +83,13 @@ task/drain owner. The additive protocol is
 
 The envelope contains exactly `binding` and `request`. Unknown request fields,
 booleans in integer positions and nonfinite numbers refuse before collection.
+The request binding contains the exact existing `ReplayBinding` fields plus
+`report_scope`, the caller's selected provider/endpoint/account/repo mapping.
+Compare both before owner resolution or collection, and retain those expectations
+through publication. This prevents a remapped endpoint/provider with otherwise
+unchanged replay labels from being read before the client discovers a mismatch.
+Responses keep the exact existing `ReplayBinding` and their separate report
+scope; the replay and workspace protocols are not changed.
 Capabilities come from the actual configured executing handler and identify
 this protocol, the report profile, supported operations and the existing
 request/response byte limit. They describe the embedding, not universal provider
@@ -211,7 +218,10 @@ Review refinements fence every in-flight exchange by its discovery epoch
 before an older transport/status/validation failure can change selection.
 The same live owner/deadline checkpoint now crosses the worker-to-coroutine
 handoff and the shielded task-to-handler handoff, running immediately before
-publication. The 60-case focused report
+publication. The focused report
 suite passes, including stale discovery failures after a newer success and
 deadline/owner withdrawal while either coroutine resumption is delayed,
 including withdrawal in the actual task-completion callback.
+The final focused report suite passes 62 cases. Endpoint/provider replacement
+between discovery and reading refuses at
+admission before resolving the replacement owner or collecting a report.
