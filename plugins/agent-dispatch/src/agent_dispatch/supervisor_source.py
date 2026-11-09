@@ -258,12 +258,13 @@ def configure_admission(daemon, args, guard, clients):
     return admission
 
 
-def spawn_candidate(python, argv, *, root, version):
+def spawn_candidate(python, argv, *, root, version, profile_binding=None):
     from .procutil import spawn_dispatch_daemon
 
     return spawn_dispatch_daemon(
         [str(python), "-m", "agent_dispatch", *argv, "--source-candidate", version],
         log_name="logs/supervisor-candidate.log", cwd=root,
+        **({"env": dict(os.environ, **profile_binding)} if profile_binding is not None else {}),
     )
 
 
@@ -478,6 +479,8 @@ def advance_handoff(daemon, root, version, target):
             try:
                 child = spawn_candidate(
                     target, list(daemon._self_update_argv), root=root, version=version,
+                    **({"profile_binding": daemon._master_profile.environment()}
+                       if getattr(daemon, "_master_profile", None) is not None else {}),
                 )
             except Exception as error:
                 if (

@@ -57,11 +57,23 @@ def boundary(area, monkeypatch):
             "agent-procutil": "agent-procutil",
             "agent-zdd": "zdd",
         }
+        # Match a source checkout's colocated payload and declared libraries.
+        libraries = area / "libraries"
+        for directory in packages.values():
+            source = ROOT / "libs" / directory
+            destination = libraries / directory
+            destination.mkdir(parents=True)
+            for name in ("pyproject.toml", "README.md"):
+                shutil.copyfile(source / name, destination / name)
+            shutil.copytree(
+                source / "src", destination / "src",
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+            )
         (payload / "pyproject.toml").write_text(
             "[project]\nname=" + json.dumps(plugin) + '\nversion="1.0.0"\n'
             + "dependencies=" + json.dumps(list(packages)) + "\n[tool.uv.sources]\n"
             + "".join(
-                json.dumps(name) + "={path=" + json.dumps(str(ROOT / "libs" / directory)) + "}\n"
+                json.dumps(name) + "={path=" + json.dumps(str(libraries / directory)) + "}\n"
                 for name, directory in packages.items()
             ),
         )

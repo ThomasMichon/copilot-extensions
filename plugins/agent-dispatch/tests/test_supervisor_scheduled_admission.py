@@ -24,7 +24,7 @@ def quote(value):
 
 
 @contextmanager
-def application(tmp_path, shell):
+def application(tmp_path, shell, *, master=False):
     root = tmp_path / "application"
     slot = root / "versions" / agent_dispatch.__version__
     scripts = slot / "Scripts"
@@ -39,11 +39,10 @@ def application(tmp_path, shell):
     shutil.copytree(Path(agent_dispatch.__file__).parent, site / "agent_dispatch",
                     ignore=shutil.ignore_patterns("__pycache__"))
     (site / "fixture_business.py").write_text("""
-import os,time
+import os,time,sys
 from pathlib import Path
-from agent_dispatch import supervisor, diagnostic_logs
-from agent_procutil import owned_process
 root=Path(os.environ['AGENT_DISPATCH_INSTALL_DIR'])
+from agent_procutil import owned_process
 original=owned_process.run_caller_owned
 def scheduling_boundary(command, **options):
     if '-Command' in command and 'Read-DispatchInstallationPolicy' in command[-1]:
@@ -51,16 +50,47 @@ def scheduling_boundary(command, **options):
         return original([*command[:-1],prefix+command[-1]],**options)
     return original(command,**options)
 owned_process.run_caller_owned=scheduling_boundary
-def poll(self,**options):
-    with (root/'cycles').open('a') as stream: stream.write(str(os.getpid())+'\\n')
-    return []
-def wait(self,interval):
-    if (root/'release').exists(): raise KeyboardInterrupt()
-    time.sleep(.02)
-supervisor.Supervisor.poll_once=poll
-supervisor.Supervisor._recheck_governance=lambda *args: None
-supervisor.Supervisor.wait_for_turn_end=wait
-diagnostic_logs.maintain_file_logging=lambda: None
+if '-m' in sys.argv and 'supervise' in sys.argv:
+    from agent_dispatch import supervisor, diagnostic_logs
+    def poll(self,**options):
+        with (root/'cycles').open('a') as stream: stream.write(str(os.getpid())+'\\n')
+        return []
+    def wait(self,interval):
+        if (root/'release').exists(): raise KeyboardInterrupt()
+        time.sleep(.02)
+    supervisor.Supervisor.poll_once=poll
+    supervisor.Supervisor._recheck_governance=lambda *args: None
+    supervisor.Supervisor.wait_for_turn_end=wait
+    diagnostic_logs.maintain_file_logging=lambda: None
+    if os.environ.get('FIXTURE_MASTER')=='1':
+        import contextlib,json,logging
+        from types import SimpleNamespace
+        from agent_dispatch import procutil,supervise_cli,supervisor_daemon
+        original_init=supervisor_daemon.SupervisorDaemon.__init__
+        original_spawn=procutil.spawn_dispatch_daemon
+        def spawn(*args,**options):
+            child=original_spawn(*args,**options)
+            if options.get('log_name')=='logs/supervisor-successor.log':
+                while not (root/'release').exists(): time.sleep(.02)
+            return child
+        def initialize(self,*args,**options):
+            def sleep(interval):
+                if (root/'release').exists(): raise KeyboardInterrupt()
+                time.sleep(interval)
+            options['sleep']=sleep
+            original_init(self,*args,**options)
+            logging.getLogger('agent-dispatch').setLevel(logging.DEBUG)
+        def reconcile(self):
+            poll(self)
+            with (root/'worker-markers').open('a') as stream:
+                stream.write(json.dumps([os.environ.get('AGENT_DISPATCH_SUPERVISOR_PROFILE'),
+                                         os.environ.get('AGENT_DISPATCH_SUPERVISOR_PROFILE_GENERATION')])+'\\n')
+            return supervisor_daemon.ReconcileSummary()
+        supervisor_daemon.SupervisorDaemon.__init__=initialize
+        supervisor_daemon.SupervisorDaemon.reconcile_once=reconcile
+        supervisor_daemon.SupervisorDaemon._recheck_governance=lambda *args: None
+        supervise_cli._client=lambda *args,**options: contextlib.nullcontext(SimpleNamespace(close=lambda:None))
+        procutil.spawn_dispatch_daemon=spawn
 """)
     (site / "fixture.pth").write_text(
         "import site; site.addsitedir(" + repr(sysconfig.get_paths()["purelib"]) + "); import fixture_business\n",
@@ -83,6 +113,12 @@ diagnostic_logs.maintain_file_logging=lambda: None
         if not key.startswith(("AGENT_DISPATCH", "PYTHON"))
     }
     environment.update(AGENT_DISPATCH_INSTALL_DIR=str(root), AGENT_DISPATCH_RUN_DIR=str(root / "run"))
+    if master:
+        environment.update(FIXTURE_MASTER="1", AGENT_DISPATCH_SUPERVISOR_SELF_UPDATE_POLL_S="1")
+        (root / "supervisor.env").write_text(
+            "AGENT_DISPATCH_SUPERVISE_MODE=serve\nAGENT_DISPATCH_SUPERVISE_MACHINE=fixture\n"
+            "AGENT_DISPATCH_SUPERVISE_INTERVAL=.05\n",
+        )
     publisher = root / "publish.ps1"
     publisher.write_text(f"""
 $ErrorActionPreference='Stop'
@@ -98,28 +134,42 @@ if($definition.Count -ne 1){{throw 'writer boundary is ambiguous'}}
 . ([scriptblock]::Create($definition[0].Extent.Text))
 Write-SupervisorLauncher|Out-Null
 """)
-    result = subprocess.run(
-        [shell, "-NoProfile", "-NonInteractive", "-File", str(publisher)],
-        env=environment, capture_output=True, text=True, timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW,
-    )
-    assert result.returncode == 0, result.stderr
-    children = []
-    try:
-        yield root, python, environment, children
-    finally:
-        (root / "release").touch()
-        deadline = time.monotonic() + 30
-        while time.monotonic() < deadline:
-            from agent_dispatch.single_instance import is_locked, lock_path_for
-            from agent_dispatch.supervisor_lane_status import profile_scope
-            if not is_locked(lock_path_for(root / "run", profile_scope(root / "supervisor.env"))):
-                break
-            time.sleep(.02)
-        else:
-            raise AssertionError("contained fixture lane did not finish cooperative release")
-        for child in children:
-            child.wait(timeout=30)
+    if not master:
+        result = subprocess.run(
+            [shell, "-NoProfile", "-NonInteractive", "-File", str(publisher)],
+            env=environment, capture_output=True, text=True, timeout=30,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+        assert result.returncode == 0, result.stderr
+    from agent_procutil.daemon_instances import REGISTRY_ENV, daemon_test_lifecycle
+    with daemon_test_lifecycle(
+        owner="dispatch-scheduled-admission", registry_root=root / "native-custody",
+    ) as native:
+        environment.update(native)
+        environment[REGISTRY_ENV] = str(root / "native-custody")
+        children = []
+        try:
+            yield root, python, environment, children
+        finally:
+            (root / "release").touch()
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
+                from agent_dispatch.single_instance import is_locked, lock_path_for
+                from agent_dispatch.supervisor_lane_status import profile_scope
+                from agent_dispatch.supervisor_registration import supervisor_lease_scope
+                scope = supervisor_lease_scope("fixture", "default") if master else profile_scope(root / "supervisor.env")
+                if not is_locked(lock_path_for(root / "run", scope)):
+                    break
+                time.sleep(.02)
+            else:
+                raise AssertionError("contained fixture lane did not finish cooperative release")
+            for child in children:
+                try:
+                    child.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    child.terminate()  # Exact fixture control, not a worker or daemon inventory.
+                    child.wait(timeout=2)
+                    raise AssertionError("fixture admission control did not finish:\n" + diagnostics(root))
 
 
 def ensure_command(root, python):
@@ -146,10 +196,20 @@ def launch(root, name, command, environment, children):
 
 
 def diagnostics(root):
-    return "\n".join(
+    from agent_procutil._daemon_instance_identity import identity_state
+    from agent_procutil.daemon_instances import inspect_instances
+    fields = ("instance_id", "state", "pid", "birth", "runtime_root")
+    native = [
+        {
+            **{key: row.get(key) for key in fields},
+            "native_state": identity_state(int(row["pid"]), row["birth"]) if row.get("pid") else "unbound",
+        }
+        for row in inspect_instances(root / "native-custody")
+    ]
+    return json.dumps(native) + "\n" + "\n".join(
         str(path.relative_to(root)) + ":\n" + path.read_text(errors="replace")
         for path in root.rglob("*")
-        if path.is_file() and (path.suffix in {".log", ".out", ".err"} or path.name.endswith(".status.json"))
+        if path.is_file() and (path.suffix in {".log", ".out", ".err", ".jsonl"} or path.name.endswith(".status.json"))
     )
 
 
@@ -183,3 +243,37 @@ def test_scheduled_activation_then_ensure_uses_one_native_lane(tmp_path, host, o
         assert ready["status"] == "ready"
         assert ready["native_observed"] is True
         assert set((root / "cycles").read_text().splitlines()) == {str(ready["pid"])}
+
+
+def test_marked_master_same_version_profile_handoff_preserves_completed_readiness(tmp_path, capsys):
+    # Keep the contained predecessor's cleanup Job open; this proves configuration,
+    # not successor survival after caller cleanup.
+    shell = shutil.which("powershell.exe")
+    with application(tmp_path, shell, master=True) as (root, python, environment, children):
+        command = [
+            str(python), "-I", "-B", "-c",
+            "import json,sys; from pathlib import Path; "
+            "from agent_dispatch.supervisor_lane_status import ensure,profile_arguments; "
+            "from agent_dispatch.registrar_discovery import _parse_env_file; "
+            "r=Path(sys.argv[1]); p=r/'supervisor.env'; "
+            "original=ensure(r,p,profile_arguments(_parse_env_file(p,strict=True)),timeout=25); "
+            "(r/'fixture-phase.log').write_text(json.dumps({'initial_ready':original})); "
+            "p.write_text(p.read_text().replace('INTERVAL=.05','INTERVAL=.08')"
+            "+'AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=--no-declared\\n'); "
+            "ready=ensure(r,p,profile_arguments(_parse_env_file(p,strict=True)),timeout=25); "
+            "print(json.dumps({'original':original,'ready':ready}))",
+            str(root),
+        ]
+        control = launch(root, "handoff", command, environment, children)
+        try:
+            control.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            with capsys.disabled():
+                print(diagnostics(root)[-24000:], file=sys.stderr, flush=True)
+            pytest.fail("marked master profile handoff timed out:\n" + diagnostics(root))
+        assert control.returncode == 0, diagnostics(root)
+        result = json.loads((root / "handoff.out").read_text())
+        original, ready = result["original"], result["ready"]
+        assert ready["status"] == "ready" and ready["pid"] != original["pid"]
+        assert set((root / "cycles").read_text().splitlines()) == {str(original["pid"]), str(ready["pid"])}
+        assert all(json.loads(line) == [None, None] for line in (root / "worker-markers").read_text().splitlines())

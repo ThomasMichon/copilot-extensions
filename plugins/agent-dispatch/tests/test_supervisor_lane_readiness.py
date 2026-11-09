@@ -55,6 +55,81 @@ def test_native_life_or_started_cycle_is_not_completed_readiness(native):
         assert len(calls) == 1, "native artifact custody must not grow each cycle"
 
 
+def test_repeated_clean_incarnations_reclaim_only_their_own_status(native):
+    lane, root, profile, argv, guard, _, _ = native
+    for number in range(130):
+        guard.receipt.instance_id = f"{number:032x}"
+        with lane.LaneStatus(root, profile, argv, guard) as status:
+            status.start()
+            status.complete()
+            assert lane.observation(root, profile, argv)["status"] == "ready"
+        assert not status.path.exists()
+    assert not list((root / "run").glob("lane-*.status.json"))
+
+
+def test_clean_exit_refuses_replaced_status_artifact_but_releases_lease(native):
+    lane, _, profile, argv, guard, _, _ = native
+    from agent_dispatch.single_instance import is_locked
+
+    status = lane.LaneStatus(profile.parent, profile, argv, guard)
+    status.__enter__()
+    status.start()
+    status.path.rename(status.path.with_suffix(".retained"))
+    status.path.write_text("foreign replacement")
+    with pytest.raises(OSError):
+        status.__exit__()
+    assert status.path.read_text() == "foreign replacement"
+    assert not is_locked(status.lock.lock_path)
+
+
+def test_dead_crash_records_are_pruned_before_profile_and_installation_bounds(native, monkeypatch):
+    lane, root, profile, argv, guard, _, records = native
+    from agent_dispatch import supervisor_processes
+    from agent_procutil import _daemon_instance_identity as identity
+    from agent_dispatch.supervisor_status_io import runtime_status_path
+
+    monkeypatch.setattr(identity, "identity_state", lambda pid, _: "matching" if pid == os.getpid() else "dead")
+    with lane.LaneStatus(root, profile, argv, guard) as current:
+        current.start()
+        current.complete()
+        original = json.loads(current.path.read_text())
+        foreign = None
+        for number in range(270):
+            payload = json.loads(json.dumps(original))
+            incarnation = f"{number:032x}"
+            other = root / "other.env" if number >= 135 else profile
+            path = runtime_status_path(
+                lane.profile_scope(other) + ":instance:" + incarnation, directory=root / "run",
+            )
+            payload["generation"]["pid"] = os.getpid() + 100000 + number
+            payload["lane_readiness"].update(instance_id=incarnation, profile=str(other))
+            path.write_text(json.dumps(payload))
+            device, inode = identity.path_identity(path)
+            records.append({
+                "instance_id": incarnation, "state": "running", "runtime_root": str(root),
+                "pid": str(payload["generation"]["pid"]), "birth": "fixture-birth",
+                "artifact_count": "1", "artifact_0_path": str(path),
+                "artifact_0_device": device, "artifact_0_inode": inode,
+            })
+            if number == 0:
+                # OS death permits filtering, not deleting a foreign owner's artifact.
+                records[-1]["runtime_root"] = str(root.parent)
+                foreign = path
+        assert lane.observation(root, profile, argv)["status"] == "ready"
+        monkeypatch.setattr(lane, "os", SimpleNamespace(name="nt"))
+        monkeypatch.setattr(supervisor_processes, "iter_windows_processes", lambda: [SimpleNamespace(pid=os.getpid())])
+        monkeypatch.setattr(supervisor_processes, "_is_supervisor_runtime", lambda *_: True)
+        lane.require_observed_incumbents(root)
+        remaining = set((root / "run").glob("lane-*.status.json"))
+        assert {current.path, foreign} <= remaining
+        assert len(remaining) < 270
+        monkeypatch.setattr(supervisor_processes, "iter_windows_processes", lambda: [
+            SimpleNamespace(pid=os.getpid()), SimpleNamespace(pid=os.getpid() + 1),
+        ])
+        with pytest.raises(RuntimeError, match="no duplicate was started"):
+            lane.require_observed_incumbents(root)
+
+
 @pytest.mark.parametrize("change", ["settings", "version", "profile-generation", "birth", "custody", "nonfinite", "no-cycle"])
 def test_readiness_binds_profile_settings_cycle_and_native_generation(native, change, monkeypatch):
     lane, root, profile, argv, guard, _, records = native

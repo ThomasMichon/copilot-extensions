@@ -110,6 +110,7 @@ class LaneStatus:
         self.cycle = 0
         self.started = None
         self.registered = False
+        self.artifact_identity = None
 
     def __enter__(self):
         from .source_start import _path_name
@@ -140,7 +141,7 @@ class LaneStatus:
         self._write(time.time())
 
     def _write(self, completed):
-        from agent_procutil._daemon_instance_identity import birth_identity
+        from agent_procutil._daemon_instance_identity import birth_identity, path_identity
         from .companion import process_start_token
 
         receipt = self.guard.receipt
@@ -158,16 +159,67 @@ class LaneStatus:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         # Keep the artifact's native file identity stable while publishing.
         # A partial concurrent read is unavailable, never readiness.
-        with self.path.open("w", encoding="utf-8") as stream:
+        if self.registered and path_identity(self.path) != self.artifact_identity:
+            raise RuntimeError("classic native status artifact identity changed")
+        with self.path.open("w" if self.registered else "x", encoding="utf-8") as stream:
             json.dump(record, stream, allow_nan=False)
             stream.flush()
             os.fsync(stream.fileno())
         if not self.registered:
+            self.artifact_identity = path_identity(self.path)
             self.guard.add_artifact(self.path)
             self.registered = True
 
     def __exit__(self, *_):
-        self.lock.release()
+        from agent_procutil._daemon_instance_identity import delete_owned_file
+        try:
+            if self.artifact_identity is not None:
+                delete_owned_file(self.path, self.artifact_identity)
+        finally:
+            self.lock.release()
+
+
+def _status_records(root, pattern):
+    """Dead files do not consume live-profile bounds or authorize blind deletion."""
+    from agent_procutil._daemon_instance_identity import delete_owned_file, identity_state
+    from agent_procutil.daemon_instances import DaemonInstanceReceipt, inspect_instances
+    from .source_start import _path_name
+
+    registries = {}
+    reclaimed = False
+    for path in (root / "run").glob(pattern):
+        payload, error = read_status(path)
+        if error or payload is None:
+            continue
+        generation, details = payload.get("generation"), payload.get("lane_readiness")
+        if isinstance(generation, dict) and isinstance(details, dict):
+            pid, birth = generation.get("pid"), details.get("birth")
+            if type(pid) is int and pid > 0 and isinstance(birth, str) and birth:
+                if identity_state(pid, birth) in {"dead", "reused"}:
+                    if reclaimed:
+                        continue
+                    try:
+                        receipt = DaemonInstanceReceipt(details.get("instance_id", ""), Path(details.get("registry_root", "")))
+                        if receipt.registry_root not in registries:
+                            registries[receipt.registry_root] = {
+                                row.get("instance_id"): row for row in inspect_instances(receipt.registry_root)
+                            }
+                        row = registries[receipt.registry_root].get(receipt.instance_id)
+                        if (
+                            row is not None and row.get("pid") == str(pid) and row.get("birth") == birth
+                            and Path(row.get("runtime_root", "")).samefile(root)
+                        ):
+                            for index in range(int(row.get("artifact_count", "0"))):
+                                recorded = Path(row.get(f"artifact_{index}_path", ""))
+                                if _path_name(recorded.absolute()) == _path_name(path.absolute()):
+                                    delete_owned_file(path, (
+                                        row.get(f"artifact_{index}_device"), row.get(f"artifact_{index}_inode"),
+                                    ))
+                                    reclaimed = True
+                    except (OSError, RuntimeError, TypeError, ValueError):
+                        pass  # Proven dead, but deletion authority remains unconfirmed.
+                    continue
+        yield path, payload
 
 
 def serve_classic(supervisor, interval, profile, generation, on_cycle):
@@ -207,14 +259,12 @@ def observation(root: Path, profile: Path, arguments: list[str]) -> dict | None:
     holder_start = process_start_token(holder) if type(holder) is int and holder > 0 else None
     directory = root / "run"
     prefix = runtime_status_path(scope + ":instance:", directory=directory).stem.removesuffix(".status")
-    paths = list(directory.glob(prefix + "*.status.json"))
-    if len(paths) > 128:
-        raise RuntimeError("classic status inventory exceeds its bound")
     matching = []
-    for candidate in paths:
-        value, failure = read_status(candidate)
-        if failure:
-            continue
+    count = 0
+    for candidate, value in _status_records(root, prefix + "*.status.json"):
+        count += 1
+        if count > 128:
+            raise RuntimeError("classic live profile status inventory exceeds its bound")
         generation = value.get("generation") if isinstance(value, dict) else None
         if (isinstance(generation, dict) and generation.get("pid") == holder
                 and holder_start and generation.get("start_token") == holder_start):
@@ -302,12 +352,12 @@ def master_observation(root: Path, arguments: list[str]) -> dict | None:
         return {"status": "starting"}
     generation = payload.get("generation", {})
     pid = generation.get("pid")
-    if (
-        type(pid) is not int or read_holder_pid(lock) != pid
-        or not generation.get("start_token")
-        or process_start_token(pid) != generation["start_token"]
-    ):
+    if type(pid) is not int or not generation.get("start_token"):
         raise RuntimeError("master supervisor native ownership is unconfirmed")
+    if read_holder_pid(lock) != pid or process_start_token(pid) != generation["start_token"]:
+        # A successor may hold the lease before its first publication replaces
+        # the predecessor's status. This is a hold, never absent or ready.
+        return {"status": "starting"}
     native = next(
         (row for row in inspect_instances() if row.get("pid") == str(pid)
          and row.get("state") == "running"
@@ -350,14 +400,8 @@ def require_observed_incumbents(root: Path) -> None:
     processes = [row for row in iter_windows_processes() if _is_supervisor_runtime(row, root)]
     if not processes:
         return
-    paths = list((root / "run").glob("lane-*.status.json"))
-    if len(paths) > 128:
-        raise RuntimeError("classic status inventory exceeds its bound")
     known = set()
-    for path in paths:
-        payload, error = read_status(path)
-        if error:
-            continue
+    for path, payload in _status_records(root, "lane-*.status.json"):
         details = payload.get("lane_readiness", {}) if payload else {}
         if not isinstance(details, dict):
             continue
@@ -397,6 +441,7 @@ def ensure(root: Path, profile: Path, arguments: list[str], *, timeout=60.0, gen
     if not lock.acquire():
         raise RuntimeError("classic readiness ensure is already in progress")
     child = None
+    master_handoff = False
     try:
         deadline = time.monotonic() + timeout
         while True:
@@ -415,7 +460,9 @@ def ensure(root: Path, profile: Path, arguments: list[str], *, timeout=60.0, gen
                     raise
             if result is not None and result["status"] == "ready":
                 return result
-            if result is None and child is None:
+            if arguments[1:2] == ["serve"] and result is not None:
+                master_handoff = True
+            if result is None and child is None and not master_handoff:
                 if arguments[1:2] != ["serve"] or os.name == "nt":
                     require_observed_incumbents(root)
                 environment = dict(os.environ, **{PROFILE_ENV: str(profile), GENERATION_ENV: generation})

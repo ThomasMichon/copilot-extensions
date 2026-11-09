@@ -94,3 +94,61 @@ def test_generated_description_preserves_policy_and_slot_selection(tmp_path, mod
         assert args[args.index("--headless-agent") + 1] == "fixture-agent"
     assert not log.exists()
     assert log.with_suffix(".log.1").stat().st_size == 1024 * 1024 + 1
+
+
+@pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
+@pytest.mark.parametrize("layout", ["nested-slot", "installation-root-only"])
+def test_coordinator_launcher_resolves_physical_nested_slot_not_root_alias(tmp_path, host, layout):
+    shell = shutil.which(host)
+    if shell is None:
+        pytest.skip(f"{host} unavailable")
+    root = tmp_path / "application"
+    (root / "bin").mkdir(parents=True)
+    (root / "versions").mkdir()
+    shutil.copyfile(INSTALLER.with_name("resolve-runtime.ps1"), root / "bin" / "resolve-runtime.ps1")
+    version = "1.0.0"
+    slot = root / "versions" / version
+    prefix = slot / ".venv" if layout == "nested-slot" else root / ".venv"
+    (prefix / "Scripts").mkdir(parents=True)
+    python = prefix / "Scripts" / "python.exe"
+    python.touch()
+    (root / "current-version").write_text(version)
+    if layout == "nested-slot":
+        (slot / ".install-complete.json").write_text(json.dumps({
+            "version": version, "completed_at": "fixture", "pid": 0,
+        }))
+    publisher = root / "publish.ps1"
+    publisher.write_text(f"""
+$ErrorActionPreference='Stop'
+$InstallDir={quote(root)};$LinkDir={quote(root / '.venv')};$LinkPython={quote(python)}
+$tokens=$null;$errors=$null
+$ast=[Management.Automation.Language.Parser]::ParseFile({quote(INSTALLER)},[ref]$tokens,[ref]$errors)
+if($errors.Count){{throw 'source parse failed'}}
+$owner=@($ast.FindAll({{param($node)
+ $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Install-CoordinatorTask'
+}},$true))
+if($owner.Count -ne 1){{throw 'coordinator owner is ambiguous'}}
+$assignment=@($owner[0].FindAll({{param($node)
+ $node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$launcherBody'
+}},$true))
+if($assignment.Count -ne 1){{throw 'coordinator launcher is ambiguous'}}
+. ([scriptblock]::Create($assignment[0].Extent.Text))
+[IO.File]::WriteAllText((Join-Path $InstallDir 'serve-service.ps1'),$launcherBody)
+""")
+    common = [shell, "-NoProfile", "-NonInteractive", "-File"]
+    published = subprocess.run(
+        [*common, str(publisher)], capture_output=True, text=True, timeout=10,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert published.returncode == 0, published.stderr
+    resolved = subprocess.run(
+        [*common, str(root / "serve-service.ps1"), "-ResolveOnly"],
+        capture_output=True, text=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    if layout == "nested-slot":
+        assert resolved.returncode == 0, resolved.stderr
+        assert Path(resolved.stdout.strip()).samefile(python)
+    else:
+        assert resolved.returncode != 0
+        assert "Task runtime unresolved" in resolved.stderr
+    assert not (root / "serve-service.log").exists()

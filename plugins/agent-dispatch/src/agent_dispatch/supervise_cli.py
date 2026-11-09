@@ -401,15 +401,13 @@ def _cmd_supervise_serve(args: argparse.Namespace, *, source_guard=None, source_
     active registration in its own subprocess, reconciling on every tick.
     Single-instance-guarded -- a second daemon for the same scope stands down.
     """
-    readiness_identity = None
-    if os.environ.pop("AGENT_DISPATCH_SUPERVISOR_PROFILE", None):
-        from .supervisor_lane_status import settings_identity
-        readiness_identity = settings_identity(list(sys.argv[1:]))
-    os.environ.pop("AGENT_DISPATCH_SUPERVISOR_PROFILE_GENERATION", None)
     if source_guard is None and getattr(args, "source_candidate", None) is not None:
         from .supervisor_source import entry
 
         return entry(args)
+    from .supervisor_profile import configure_master_profile, take_master_profile
+    profile_binding = take_master_profile(source_argv)
+    readiness_identity = profile_binding.identity if profile_binding else None
     # Never hold the Copilot plugin payload dir as CWD (Windows locks it against
     # `copilot plugin update`); this daemon is lazy-started and inherits the
     # launching session's CWD. Relocate before the long-lived loop.
@@ -488,6 +486,7 @@ def _cmd_supervise_serve(args: argparse.Namespace, *, source_guard=None, source_
             self_update_cooldown=_su_cooldown,
             self_update_argv=source_argv or (list(sys.argv[1:]) if _su_enabled else None),
         )
+        configure_master_profile(daemon, profile_binding)
         admission = None
         if source_guard is not None:
             from .supervisor_source import configure_admission

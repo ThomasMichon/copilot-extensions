@@ -2952,7 +2952,20 @@ if ((Split-Path -Leaf `$_root) -eq 'versions') { `$_root = Split-Path `$_root }
 try { `$_ver = ([IO.File]::ReadAllText((Join-Path `$_root 'current-version'))).Trim() } catch {}
 `$_slot = if (`$_ver) { Join-Path `$_root ('versions\' + `$_ver) } else { '' }
 `$_py = if (`$_slot) { Join-Path `$_slot 'Scripts\python.exe' } else { '' }
-if (`$_slot -and -not [IO.File]::Exists(`$_py)) { `$_py = Join-Path `$_slot '.venv\Scripts\python.exe' }
+if (`$_slot -and -not [IO.File]::Exists(`$_py)) {
+    # Nested immutable slots use the co-deployed resolver's marker/reparse checks.
+    `$_savedRtRoot = `$env:AGENT_RT_ROOT
+    try {
+        `$env:AGENT_RT_ROOT = `$_root
+        `$_resolver = Join-Path `$_root 'bin\resolve-runtime.ps1'
+        `$_py = ''
+        if ([IO.File]::Exists(`$_resolver)) {
+            . `$_resolver -TraceMode read-only
+            `$_py = `$AgentRtPy
+            if (`$_py) { `$_slot = Split-Path (Split-Path `$_py) }
+        }
+    } finally { `$env:AGENT_RT_ROOT = `$_savedRtRoot }
+}
 if (-not (`$_py -and (Test-Path -LiteralPath `$_py))) {
     # #742: marker missing/stale -> prefer last-known-good (the last version
     # activate() published) over a raw newest-slot guess, which could bind a

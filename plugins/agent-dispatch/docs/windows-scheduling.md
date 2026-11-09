@@ -117,6 +117,29 @@ disable standalone classic commands or select a master as a substitute.
 Master cycle-start publication never inherits a predecessor's optional
 readiness identity when the new incarnation did not supply one.
 
+Clean classic exit removes only its own unchanged native status artifact before
+releasing the profile lease. Discovery filters OS-confirmed dead/reused
+incarnations before applying the live per-profile bound. Each scan reclaims at
+most one dead file whose installation and exact file identity match its native
+custody record; it never deletes another artifact or uses age as authority.
+Unreadable or foreign files are not blindly removed. There is no
+installation-wide file-count limit shared by unrelated profiles, and live
+unobserved incumbents still prevent a duplicate start.
+
+Marked `MODE=serve` masters retain the profile path and generation as explicit
+master-only state after removing the environment markers. Same-version profile
+edits use the existing bounded self-update handoff and its governance,
+inhibition, draining and singleton gates; readiness waits through the
+predecessor/successor publication gap rather than starting a competitor.
+Both legacy successors and Source candidates receive the binding explicitly;
+workers never inherit those markers. A Source candidate's private admission
+arguments are not part of the effective supervisor-settings identity.
+
+The coordinator launcher's physical nested-slot fallback delegates to the
+co-deployed canonical resolver, including its completion-marker and reparse
+checks. It does not interpret the installation-root `.venv` alias as an
+immutable selected slot.
+
 Old readers can ignore the optional extension; old writers remain usable
 through their existing compatibility lifecycle, but cannot supply new readiness
 evidence. An unobserved incumbent is reported honestly, without starting a
@@ -124,4 +147,7 @@ duplicate or stopping it. Bounded timeout is not success and does not authorize
 an automatic process sweep or a larger deadline.
 
 These are source contracts. Fixture checks do not prove a clean non-admin host,
-production lifetime survival, or authorized external adoption.
+production lifetime survival, or authorized external adoption. Native fixture
+admission uses its own SDK custody registry and prepared dependencies; inert
+business substitutions are limited to resident invocations, not cache probes
+or readiness clients.
