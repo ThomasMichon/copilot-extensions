@@ -701,14 +701,16 @@ def test_manual_workflow_never_adds_required_ci_or_candidate_write_credentials()
 
 
 @pytest.mark.parametrize("workflow", ["windows-qualification", "validate-and-promote"])
-@pytest.mark.parametrize("responses,body_delay,budget,retry_after", [
-    ((504, 504, 200), 0, 120, None), ((504, 504, 504), 0, 120, None),
-    ((404,), 0, 120, None), ((200,), 2, 1, None), ((504,), 0, 1, None),
-    ((429,), 0, 4, "15"), ((429,), 0, 4, "date"),
+@pytest.mark.parametrize("responses,body_delay,budget,retry_after,expected_attempts", [
+    ((504, 504, 200), 0, 120, None, 3), ((504, 504, 504), 0, 120, None, 3),
+    ((404,), 0, 120, None, 1), ((200,), 2, 1, None, 1), ((504,), 0, 1, None, 1),
+    ((429,), 0, 4, "15", 1), ((429,), 0, 4, "date", 1),
+    # Resetting the timer per attempt would reach the final 200 instead.
+    ((504, 504, 200), 2, 7, None, 2),
 ])
 @pytest.mark.portfolio_tier("T2")
 def test_pinned_native_download_retries_only_transient_failures(
-    tmp_path, workflow, responses, body_delay, budget, retry_after,
+    tmp_path, workflow, responses, body_delay, budget, retry_after, expected_attempts,
 ):
     from windows_qualification_transport import command
     pwsh = shutil.which("pwsh")
@@ -759,15 +761,19 @@ def test_pinned_native_download_retries_only_transient_failures(
     archive = tmp_path / "native archive.zip"
     try:
         argv[argv.index("-Uri") + 1] = f"http://127.0.0.1:{server.server_port}/archive"
+        started = time.monotonic()
         actual = command([
             pwsh, "-NoProfile", "-File", str(helper), *argv[2:],
         ], cwd=tmp_path, check=False)
+        elapsed = time.monotonic() - started
     finally:
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
     assert not thread.is_alive()
-    assert attempts == list(responses)
+    assert attempts == list(responses[:expected_attempts])
+    if budget < 120:
+        assert elapsed < budget + 10, "acquisition exceeded its budget and PowerShell startup allowance"
     assert (actual.returncode == 0) is (responses[-1] == 200 and not body_delay)
     if actual.returncode == 0:
         assert archive.read_bytes() == b"pinned archive"
