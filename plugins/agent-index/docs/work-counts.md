@@ -226,6 +226,13 @@ unindexed-row metadata must fall from one to zero; searchability alone could
 come from fallback scanning. The helper also refuses unknown or incomplete
 post-update coverage before the existing owner can publish it as current.
 
+The existing opt-in `tests/test_native_github_poll_matrix.py` additionally
+requires exact parsed identity/item/comment counts in its ten unchanged rounds.
+Its cross-size comparison includes these counts alongside HTTP purposes and
+engine work. Overlap includes embedded listing bodies, interrupted acquisition
+retains parsed work, resume omits saved-plan records, truncated pages do not
+imply admitted work, and foreign-account refusal remains unobserved.
+
 The broader acceptance matrix remains open: existing-store preparation,
 bounded consolidation over many rounds, hosted pagination/body accounting,
 cluster-enabled composition, source/account isolation at scale, interrupted
