@@ -93,6 +93,10 @@ fallback or another invocation.
 
 ## Source report facade
 
+Selected ADO resolution is a separate
+[native author operation](author-operations.md#selected-native-thread-resolution).
+Neither `threads` nor the report facade below mutates discussions.
+
 The optional [existing-owner report API](watch-gateway.md#optional-existing-owner-report-reads)
 has a source embedding facade:
 

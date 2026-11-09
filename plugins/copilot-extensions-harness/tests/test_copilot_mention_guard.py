@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shlex
 import shutil
 import statistics
@@ -866,6 +867,31 @@ def test_windows_wrapper_module_attribution(
             "shell": shell, "event": event, "baseline_revision": revision,
             "fixed_fixture_aba": samples,
         }))
+
+
+@pytest.mark.parametrize("tool", ["bash", "powershell", "view", "rg", "glob", "PowerShell", "vendor.bash", None])
+def test_registered_matcher_preserves_original_policy_domain(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tool: str | None,
+) -> None:
+    guard = _load_guard()
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "fixture")
+    monkeypatch.setattr(guard, "target_repo_from_manifest", lambda *args: "owner/repository")
+    monkeypatch.setattr(guard, "adopting_harness", lambda *args: True)
+    monkeypatch.setattr(guard, "current_repo_matches", lambda *args, **kwargs: True)
+    monkeypatch.setattr(guard.sys, "stdin", io.StringIO(json.dumps({
+        "toolName": tool, "toolArgs": {"command": 'gh pr comment 1 --body "@copilot review"'},
+    })))
+    assert guard.main() == 0
+    result = capsys.readouterr()
+    assert result.err == ""
+    hook = json.loads((PLUGIN / "hooks.json").read_text())["hooks"]["preToolUse"][0]
+    matcher = hook.get("matcher")
+    selected = matcher is None or re.fullmatch(matcher, tool or "") is not None
+    if result.out:
+        assert json.loads(result.out)["permissionDecision"] == "deny"
+        assert selected, "Registration excluded an event the original evaluator denies"
+    else:
+        assert not selected, "Registration still launches the evaluator for its no-op domain"
 
 
 @pytest.mark.portfolio_tier("T2")

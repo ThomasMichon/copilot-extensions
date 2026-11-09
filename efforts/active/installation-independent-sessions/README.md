@@ -389,16 +389,21 @@ retains the operator's wording.
     unless the adopter deliberately selects absence.
     - [x] Land the Logger/Codespaces source slice (#11202), including exact-head
       native fixture qualification and corrected GUI-interpreter ownership.
-      Dispatch, driver integration and installed acceptance
-      remain separate open work; see the
+      Installed acceptance remains separate open work; see the
       [source journal](<journal/2026/11.08 scheduling-source-qualification.md>).
     - [x] Land the Index source slice (#11430), including refreshed activation
       holds, strict engine-health readiness and UTF-8 policy controls.
-      Actual driver-selector integration and installed non-admin/lifetime
-      acceptance remain open.
+      Installed driver-selector, non-admin and actual lifetime acceptance
+      remain open.
     - [x] Land the Bridge/Vault source slice (#11174), including strict scoped
       repair ownership, retained configuration, current canonical contract
       capture and all review/CI corrections. Installed acceptance remains open.
+    - [x] Land the Dispatch and shared selector-driver source slice (#11447),
+      including actual Index consumer admission, native authenticated re-entry,
+      Source-primary startup/live-edit compatibility and invalid-edit retention.
+      The [source journal](<journal/2026/11.08 scheduling-source-qualification.md>)
+      records exact-source hosted evidence and the final parser regression.
+      Fresh non-admin, post-caller lifetime and installed acceptance remain open.
   - [ ] Prove fresh default absence, repeat-update absence, explicit scheduling
     compatibility and task-only retirement without stopping protected services
     or deleting their state. Missing scheduling support is not permission to

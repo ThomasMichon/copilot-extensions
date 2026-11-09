@@ -94,6 +94,27 @@ wrapper to report that diagnostic while the host-facing hook still exits
 successfully; direct legacy callers retain a zero exit code. Deliberate mention/uninspectable-body denials in an adopted,
 matching repository remain policy decisions, not execution failures.
 
+The camelCase registration uses `matcher: "bash|powershell"`. Copilot CLI
+matches this case-sensitively against the complete runtime `toolName`, before
+launching either shell command. Other tools never reach this guard's shell or
+Python process. This matches the original evaluator's policy domain; it does
+not add a read exemption to another guard or expand aggregate tool metadata.
+Shell input, interpreter lookup, live controls, policy and failure handling
+are unchanged. No input buffering, decoder, source-hash check or cache is added.
+
+This declaration requires Copilot CLI's command-hook matcher support
+(1.0.63 or later); unsupported hosts must retain the previous declaration.
+See the [official matcher contract](https://docs.github.com/en/copilot/reference/hooks-reference#matcher-filtering).
+The provider feature precedes this declaration change; rolling back the
+declaration requires no state migration. A host that ignores the optional
+filter retains the original evaluator's no-op path, but that is not proof of
+support for hosts that reject unknown configuration.
+`registered_matcher_preserves_original_policy_domain` checks the registration
+against real evaluator decisions, including exact shell names, non-shell
+events, case and qualified-name boundaries. Direct wrapper tests bypass host
+registration: they prove the retained evaluator/transport, not live CLI
+filtering or installed throughput.
+
 The Python evaluator first classifies publication syntax locally, using the same tokenizer
 and write predicates as the body scanner. Its ordinary reads and unrelated shell
 commands perform no repository/manifest/body discovery and start no additional child

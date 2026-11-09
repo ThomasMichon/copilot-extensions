@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .base import ProviderError, PRScope, PullResult, run_cli
 from .pr_source import azure_source, pull_payload, source_object, source_text
@@ -346,6 +346,11 @@ class AzureDevOpsProvider:
         """Un-draft is not supported for the CLI-backed azure-devops provider."""
         _ = (repo, number, api_base, token, title, wip_title_prefixes)
         return "mark_ready is not supported for azure-devops provider"
+
+    def resolve_selected_thread(self, repo: str, number: int, thread: int, **kwargs: Any) -> dict:
+        """Close one fingerprint-pinned native thread; never use the bulk resolver."""
+        from .azure_thread_resolution import resolve
+        return resolve(self, repo, number, thread, **kwargs)
 
     def ready_pull(self, repo: str, number: int, *, api_base: str = "",
                    token: str | None = None) -> dict:

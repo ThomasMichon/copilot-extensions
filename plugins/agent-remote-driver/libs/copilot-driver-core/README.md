@@ -62,10 +62,16 @@ Pane and final identity responses must identify the requested session and
 one incarnation; port/key hints must remain unchanged across the reads.
 The final identity also names the current pane, so window-local active flags
 from other windows cannot select the wrong pane.
-Missing port/key/session-ID/PID hints alone never establish absence: Driver
-retains the complete native server/PID-birth coverage reader introduced for
-prompted Resume. A missing live-server registration, unsupported process mode
-or changing inventory remains unknown. Listings share one absence-coverage
+Missing rendezvous hints alone never establish absence: Driver retains the
+complete native server/PID-birth coverage reader introduced for prompted Resume.
+Legacy PSMux 3.3.5 servers publish port/key/session-ID files but no PID sentinel.
+Inventory therefore discovers port/key pairs, authenticates the live reply's
+server PID against the native census, and rechecks process births and registration
+contents afterward. A PID sentinel, when present, must still match.
+Failed PID-less endpoint candidates may be stale; they do not block a complete
+authenticated inventory when every live native server is covered elsewhere.
+An unreachable or unregistered live server, unsupported process mode or changing
+inventory remains unknown. Listings share one absence-coverage
 snapshot within their finite budget; live positive rows use their own reads.
 Selected-namespace absence uses qualified registration identities while still
 covering every native server. The legacy name-only inventory API retains its

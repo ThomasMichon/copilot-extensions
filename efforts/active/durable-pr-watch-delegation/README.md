@@ -322,9 +322,11 @@ selects the existing reader/native adapter and actual SDK handler ceiling
 through strict optional host configuration. The finite source implementation
 and fresh isolated controls are recorded in its linked implementation journal;
 they merged in #11712. This is not retained-host enrollment or rollout.
-The [selected native thread-resolution proposal](native-thread-resolution.md)
-defines an optional ADO-first, single-thread status change through the existing
-owner. Read routes stay read-only; provider, runtime, recovery and installed/HTTP
+The [selected native thread-resolution contract](native-thread-resolution.md),
+reviewed in #11714, defines an optional ADO-first, single-thread status change through the existing
+owner. Its [source implementation and isolated controls](journal/2026/11.09%20Selected%20native%20resolution%20implementation.md)
+pass; independent implementation review/merge remains open.
+Read routes stay read-only; installed/account/HTTP and three-provider
 qualification remain open. It advances #7051 without replacing its lifecycle
 owner or claiming an atomic candidate/thread write.
 
@@ -1084,6 +1086,9 @@ or silently expanding a bounded source claim.
   mutation, consumed-key recovery, unknown outcomes and old/new runtime
   composition. Source controls do not establish atomic CAS, other-provider
   support, installed/HTTP adoption or the full lifecycle acceptance in #7051.
+  All five linked source controls now pass (336 Worktrees and 150 dedicated
+  frontend cases, five existing platform skips); independent implementation
+  review, required CI and merge remain open.
 
 - [x] Qualify finite explicit standalone report hosting (#11712): 168 full
   standalone and 68 isolated affected plugin cases cover actual foreground
@@ -1434,6 +1439,7 @@ callback an implicit credential store.
 
 ## Journal
 
+- [2026-11-09 - Selected native thread-resolution source implementation](journal/2026/11.09%20Selected%20native%20resolution%20implementation.md)
 - [2026-11-09 - Selected native thread-resolution proposal](journal/2026/11.09%20Selected%20native%20resolution%20proposal.md)
 - [2026-11-09 - Standalone report-host contract reviewed](journal/2026/11.09%20Standalone%20report%20host%20contract.md)
 - [2026-11-09 - Standalone report-host source implementation](journal/2026/11.09%20Standalone%20report%20host%20implementation.md)

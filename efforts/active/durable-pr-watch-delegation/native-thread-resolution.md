@@ -5,7 +5,8 @@ Back to the [CLI parity inventory](cli-parity-inventory.md) and
 [#7051](https://github.com/ThomasMichon/copilot-extensions/issues/7051) and its
 [normalized contract](../pr-lifecycle-conformance/contract.md).
 
-**Agent-recommended contract for review, not implemented support.** This finite
+**Contract reviewed in #11714; SOURCE controls pass, implementation review/merge
+remains open.** This finite
 ADO-first slice advances the PR-domain
 [provider-neutral surface](../../../visions/plugins/agent-pull-requests/README.md#first-class-provider-neutral-pr-surface)
 and Worktrees'
@@ -152,22 +153,27 @@ rolled-back owners refuse the optional feature before mutation. Capability
 fetch failure does not invalidate unrelated legacy operations. No form is
 deprecated here and no HTTP/report-read mutation is introduced.
 
-- [ ] Qualify the actual Worktrees parser, claimant/target/policy admission,
+- [x] Qualify the actual Worktrees parser, claimant/target/policy admission,
   native principal and permission owner with synthetic ADO transport responses.
   Prove exactly the selected status-only PATCH, unchanged independent PR state,
   and explicit unsupported GitHub/Gitea behavior without their bulk resolvers.
-- [ ] Exercise the actual frontend-to-owner-to-provider composition and a real
+- [x] Exercise the actual frontend-to-owner-to-provider composition and a real
   process seam. Cover strict invalid syntax, additive report/result fields,
   mixed versions, old defaults and selected-runtime rollback; argv assertions
   alone do not prove semantic parity.
-- [ ] Refuse incomplete pagination/nested reads, duplicate/missing IDs, deleted or
+- [x] Refuse incomplete pagination/nested reads, duplicate/missing IDs, deleted or
   non-active targets, invalid iteration, actor/policy denial and source/base/head
   or selected-thread movement before dispatch. Include same-head base/ref and
   source-repository changes so head-only checks cannot pass.
-- [ ] Inject authoritative rejection, lost response, timeout, malformed/late
+- [x] Inject authoritative rejection, lost response, timeout, malformed/late
   response, changed readback and crash/restart on both sides of dispatch.
   Prove honest unknown outcomes, conflicting-key refusal, read-only consumed-key
   recovery and no second PATCH or synthetic comment, including concurrent callers.
-- [ ] Record isolated source/platform controls separately from native Windows,
+- [x] Record isolated source/platform controls separately from native Windows,
   installed/provider-account/HTTP qualification and full three-provider
   lifecycle acceptance. Keep the parent Plan and Validation Plan open.
+
+The [source implementation journal](journal/2026/11.09%20Selected%20native%20resolution%20implementation.md)
+records the focused Linux controls and remaining review/delivery gate. Native
+Windows, installed/provider-account/HTTP and complete lifecycle qualification
+remain open under their existing owners; no live thread was changed.
