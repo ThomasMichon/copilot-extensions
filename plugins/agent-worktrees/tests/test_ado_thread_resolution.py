@@ -53,8 +53,9 @@ class Response:
 
 
 class Backend:
-    def __init__(self, root: Path | None = None) -> None:
+    def __init__(self, root: Path | None = None, *, reopening: bool = False) -> None:
         self.root = root
+        self.desired_status = "active" if reopening else "closed"
         self.pull = {
             "pullRequestId": 7, "status": "active", "createdBy": {"id": "author"},
             "repository": {"id": REPOSITORY, "name": "repository",
@@ -79,6 +80,8 @@ class Backend:
                           "publishedDate": AT, "lastUpdatedDate": AT}],
         }]
         self.rows.append({**deepcopy(self.rows[0]), "id": 10})
+        if reopening:
+            self.rows[0]["status"] = "closed"
         if root is not None and (root / "native.json").exists():
             self.rows = json.loads((root / "native.json").read_text())
         self.actor = ACTOR
@@ -97,7 +100,7 @@ class Backend:
         if method == "PATCH":
             assert path.endswith("/pullRequests/7/threads/9")
             body = json.loads(request.data)
-            assert body == {"status": "closed"}
+            assert body == {"status": self.desired_status}
             self.writes.append((method, path, body))
             if self.root is not None:
                 with (self.root / "writes").open("a") as stream:
@@ -106,7 +109,7 @@ class Backend:
                 raise HTTPError(url, 403, "denied", {}, None)
             if self.fault == "timeout":
                 raise TimeoutError("bounded send expired")
-            self.rows[0]["status"] = "closed"
+            self.rows[0]["status"] = self.desired_status
             self.rows[0]["lastUpdatedDate"] = "2026-11-09T02:00:00Z"
             if self.root is not None:
                 (self.root / "native.json").write_text(json.dumps(self.rows))
@@ -123,6 +126,16 @@ class Backend:
             response = deepcopy(self.rows[0])
             if self.fault == "wrong-response":
                 response["id"] = 10
+            if self.fault == "bool-response":
+                response["status"] = True
+            if self.fault == "float-response":
+                response["status"] = 1.0
+            if self.fault == "numeric-response":
+                response["status"] = 1
+            if self.fault == "bool-readback":
+                self.rows[0]["status"] = True
+            if self.fault == "reclosed":
+                self.rows[0]["status"] = "closed"
             return Response(response, truncated=self.fault == "truncated-patch")
         assert method == "GET", "no POST, reply, vote, consent, push or alternate transport"
         if path.endswith("/connectionData"):
@@ -444,7 +457,7 @@ def test_strict_cli_never_expands_selection(backend: Backend, extra: list[str]) 
 def process_main(root: str, argv: list[str]) -> int:
     """Actual source CLI with a fixture-only native transport and private ledger."""
     root = Path(root)
-    backend = Backend(root)
+    backend = Backend(root, reopening=argv[0] == "pr-thread-reopen")
     with pytest.MonkeyPatch.context() as monkeypatch:
         configure(monkeypatch, root, backend)
         with output.capture_json_output() as capture:
@@ -453,11 +466,17 @@ def process_main(root: str, argv: list[str]) -> int:
         return code
 
 
+@pytest.mark.parametrize("reopening", [False, True])
 def test_real_process_concurrent_owners_share_consumed_before_write_ledger(
-    backend: Backend, tmp_path: Path,
+    backend: Backend, tmp_path: Path, reopening: bool,
 ) -> None:
     import agent_worktrees
+    if reopening:
+        backend.rows[0]["status"] = "closed"
     expected = backend.expectations()
+    argv = arguments(expected)
+    if reopening:
+        argv[0] = "pr-thread-reopen"
     code = (
         "import json,sys; from test_ado_thread_resolution import process_main; "
         "raise SystemExit(process_main(sys.argv[1],json.loads(sys.argv[2])))"
@@ -469,7 +488,7 @@ def test_real_process_concurrent_owners_share_consumed_before_write_ledger(
     ))
     def run(_: int) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            [sys.executable, "-c", code, str(tmp_path), json.dumps(arguments(expected))],
+            [sys.executable, "-c", code, str(tmp_path), json.dumps(argv)],
             env=env, capture_output=True, text=True, timeout=30,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
@@ -480,14 +499,19 @@ def test_real_process_concurrent_owners_share_consumed_before_write_ledger(
     assert (tmp_path / "writes").read_text().splitlines() == ["PATCH"]
 
 
+@pytest.mark.parametrize("reopening", [False, True])
 def test_actual_frontend_to_owner_to_native_transport_across_real_process(
     backend: Backend, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture,
+    reopening: bool,
 ) -> None:
     monkeypatch.syspath_prepend(str(Path(__file__).parents[2] / "agent-pull-requests" / "src"))
     from agent_pull_requests import __main__ as frontend, native_cli
+    if reopening:
+        backend.rows[0]["status"] = "closed"
     expected = backend.expectations()
     args = frontend.build_parser().parse_args([
-        "resolve-thread", *arguments(expected)[1:], "--worktrees-command", "selected-owner",
+        "reopen-thread" if reopening else "resolve-thread",
+        *arguments(expected)[1:], "--worktrees-command", "selected-owner",
     ])
     code = (
         "import sys; from test_ado_thread_resolution import process_main; "

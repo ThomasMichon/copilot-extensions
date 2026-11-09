@@ -52,7 +52,8 @@ def thread_fingerprint(thread):
             or type(thread.get("isDeleted", False)) is not bool
             or thread.get("isDeleted") is True or not instant(thread.get("lastUpdatedDate"))):
         raise RemediationError("Thread freshness evidence is unavailable")
-    if thread.get("status") not in ("active", "fixed", "wontFix", "closed", "byDesign", "pending",
+    if type(thread.get("status")) not in (int, str) or thread.get("status") not in (
+                                    "active", "fixed", "wontFix", "closed", "byDesign", "pending",
                                     1, 2, 3, 4, 5, 6):
         raise RemediationError("Thread status evidence is unavailable")
     seen = set()
@@ -138,6 +139,12 @@ class AdoMutator(AdoReader):
             raise RemediationError("Unsupported native thread status")
         return self._write("PATCH", self.base + f"/threads/{thread}?api-version=7.1",
                            {"status": status}, authoritative_rejection=authoritative_rejection)
+
+    def reopen_thread(self, thread, *, authoritative_rejection=False):
+        """Reopen only a selected discussion without expanding legacy status choices."""
+        positive(thread, "Thread identity")
+        return self._write("PATCH", self.base + f"/threads/{thread}?api-version=7.1",
+                           {"status": "active"}, authoritative_rejection=authoritative_rejection)
 
 
 class Remediator:
