@@ -1,5 +1,5 @@
 {
-  "comment": "Add an installed public Worktrees caller fixture with current Manager prerequisites.",
+  "comment": "Route seedless public Worktrees cold launches through common broker admission and qualify installed callers.",
   "changes": [
     {
       "plugin": "agent-worktrees",
