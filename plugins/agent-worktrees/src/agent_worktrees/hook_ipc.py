@@ -285,7 +285,7 @@ class HookIpcServer:
             return
         try:
             with self._active_handlers_lock:
-                if self.server.admission_closed or (
+                if self.server.admission_closed or deadline <= time.time() or (
                     self._read_demand_admitted is not None and not self._read_demand_admitted()
                 ):
                     return
