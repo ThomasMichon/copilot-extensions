@@ -34,7 +34,8 @@ and `operations.worker-policy-config`; this frontend separately advertises
 These additive schema-1 capabilities are independent of package versions.
 Do not infer frontend support from the Worktrees peer's declaration alone.
 
-On capable peers, `author-capabilities`, `create`, `update`, `ready`, `nudge` and `push` accept
+On capable peers, `author-capabilities`, `create`, `update`, `ready`, `nudge`,
+`resolve-thread` and `push` accept
 `--config <delivered-worker-policy>`. The frontend checks the actual peer
 response before the dependent author operation, and forwards the same explicit
 file. Missing files, unsupported old peers and mismatched worker targets refuse
@@ -120,6 +121,58 @@ malformed response after dispatch stays unknown, not a known rejection.
 The frontend validates the versioned identity and outcomes and never replays
 or falls back. Observe the same PR before deciding on another intentional
 request; no fresh verdict does not prove that the earlier request failed.
+
+## Selected native thread resolution
+
+```text
+<PR command> resolve-thread --repo project/repository --number 42 --thread 9 --expected-candidate sha256:<64-hex-digits> --expected-thread sha256:<64-hex-digits> --operation-id fix:thread-9 --worktrees-command <Worktrees command> --json
+```
+
+Requires the selected runtime's optional `operations.thread-resolve: true`,
+initially enabled ADO bindings only, and the invoking claimant worktree.
+Worktrees' owner is `pr-thread-resolve` with the same target, native thread,
+expectations and operation ID. Neither command accepts bulk selection,
+tracked selectors or provider/account overrides. GitHub/Gitea are unsupported;
+their legacy bulk resolvers are never an effectful fallback.
+
+Obtain expectations from a fresh native `threads` report. Its additive
+`resolution_candidate` has `available`, `changed`, `candidate` and `error`.
+Only `available: true` supplies `candidate.fingerprint`. Version 1 hashes
+the canonical endpoint, target project/repository/PR, source project/repository,
+both refs, head/base/common commits and current source iteration.
+An unavailable result may retain `observed_candidate` separately.
+Missing native count/nested-comment evidence, ambiguous IDs or candidate movement
+cannot supply an expectation, even when the baseline report is complete or exits 0.
+Use the selected native thread's existing `fingerprint` for `--expected-thread`;
+a display index is not a native identity.
+
+The owner requires actual authenticated principal and effective native read/PR
+contribution permissions at repository and target branch. It brackets complete
+candidate/thread reads and rechecks before dispatch. Only a live active discussion
+with native iteration association qualifies; closed, pending, deleted and
+system/vote-only threads refuse. Comment ownership is not a substitute for native
+action authority. Capability reporting grants no operator authorization.
+
+The sole intended effect is `{"status":"closed"}` on that thread, through the
+existing remediation owner and consumed-before-write ledger. No reply, marker
+comment, sibling resolution, vote, consent, hold, merge, source or claim is changed.
+`agent-worktrees.pr-thread-resolve`, version 1, retains exact requested identity,
+operation ID, provider/principal, expected/observed evidence, `reason`, `error`
+and `actions.resolution.status`. Only `confirmed` has `ok: true` and exit 0.
+`not-attempted`, authoritative `failed` and `unknown` exit nonzero.
+
+This is **preflight plus readback, not atomic compare-and-swap**. Confirmation
+requires the authoritative same-thread response, unchanged candidate and closed
+readback with no content/identity change except status and native thread-update
+timestamp. Comment authors, bodies and timestamps may not change.
+Lost, malformed, timed-out, late or changed readback stays unknown, even if a later
+read sees a closed thread. Keep the same operation ID: consumed keys reconcile
+read-only, and conflicting actor/candidate/thread bindings refuse. There is no
+automatic second PATCH, synthetic attribution comment or alternate transport.
+Valid owner envelopes, additive fields and nonzero exits are preserved; lost
+frontend output is unknown, not a retry instruction. Isolated source controls
+do not qualify native Windows, installed/account/HTTP or three-provider lifecycle
+acceptance.
 
 ## Candidate checks and source custody
 

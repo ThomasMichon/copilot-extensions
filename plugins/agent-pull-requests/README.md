@@ -15,6 +15,9 @@ commands into a separate, API-first surface:
   reuse the existing configured Worktrees provider owner without a target checkout.
 - Native [unified-diff reads](docs/cli-reference.md#native-diff) use that same
   target-qualified owner, preserving unsupported and unknown evidence.
+- Optional [selected ADO thread resolution](docs/author-operations.md#selected-native-thread-resolution)
+  uses exact candidate/thread expectations and the existing consumed-operation
+  ledger; read-only reports and legacy bulk syntax remain unchanged.
 - Optional [existing-owner HTTP reports](docs/watch-gateway.md#optional-existing-owner-report-reads)
   preserve those native bodies and exits through the admitted Gateway; source
   host injection is not installed HTTP adoption or principal-bound review evidence.

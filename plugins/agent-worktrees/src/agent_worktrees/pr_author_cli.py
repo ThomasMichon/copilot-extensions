@@ -38,18 +38,27 @@ def load_author_config(path, repository: str, *, claimant: bool = False):
 
 
 def add_parsers(sub):
-    for name in ("pr-author-capabilities", "pr-update", "pr-push", "pr-author-ready", "pr-author-nudge"):
+    for name in ("pr-author-capabilities", "pr-update", "pr-push", "pr-author-ready",
+                 "pr-author-nudge", "pr-thread-resolve"):
         parser = sub.add_parser(name, help={
             "pr-author-capabilities": "Report target-qualified author operations without mutation",
             "pr-update": "Repair existing PR metadata without creating or pushing",
             "pr-push": "Publish an admitted delegated source without managed branch renaming",
             "pr-author-ready": "Move an explicit native draft PR to ready without consent or hold release",
             "pr-author-nudge": "Request the explicit target's configured automated reviewer without a comment",
+            "pr-thread-resolve": "Close one native ADO discussion with exact candidate/thread expectations",
         }[name], allow_abbrev=False)
         parser.add_argument("--repo", required=True)
         parser.add_argument("--config")
         parser.add_argument("--json", action="store_true")
         if name == "pr-author-capabilities":
+            continue
+        if name == "pr-thread-resolve":
+            parser.add_argument("--number", required=True, type=int)
+            parser.add_argument("--thread", required=True, type=int)
+            parser.add_argument("--expected-candidate", required=True)
+            parser.add_argument("--expected-thread", required=True)
+            parser.add_argument("--operation-id", required=True)
             continue
         if name in ("pr-author-ready", "pr-author-nudge"):
             parser.add_argument("--number", required=True, type=int)
@@ -86,6 +95,7 @@ def capabilities(config, repository: str) -> dict:
             "worker-policy-export": True,
             "draft-ready": supported,
             "reviewer-request": pr.enabled and pr.provider == "github",
+            "thread-resolve": supported,
         },
         "source_adapter": "reachable-workspace" if supported else None,
         "completion_authority": "target-repository-policy",
@@ -125,13 +135,40 @@ def readiness_project_unavailable(argv: list[str], message: str) -> int:
     parser = argparse.ArgumentParser(allow_abbrev=False)
     add_parsers(parser.add_subparsers(dest="command", required=True))
     args = parser.parse_args(argv)
-    if args.command == "pr-author-nudge":
+    if args.command == "pr-thread-resolve":
+        from .pr_thread_resolution import outcome
+        result = outcome(args.repo, args.number, args.thread, args.operation_id,
+                         args.expected_candidate, args.expected_thread,
+                         reason="project-unavailable", error=message)
+    elif args.command == "pr-author-nudge":
         from . import pr_reviewer_request
         result = pr_reviewer_request.outcome(args.repo, args.number, error=message)
     else:
         result = pr_readiness.outcome(args.repo, args.number, error=message)
     output._json_output(result) if args.json else print(result)
     return 1
+
+
+def cmd_thread_resolve(args: argparse.Namespace) -> int:
+    """Keep claimant/policy failure separate from one selected provider effect."""
+    from . import pr_cli, pr_thread_resolution
+
+    try:
+        _, error = pr_cli.require_claimant_worktree("pr-thread-resolve")
+        if error:
+            raise ValueError(error)
+        config = load_author_config(args.config, args.repo, claimant=True)
+        result = pr_thread_resolution.resolve(
+            config, args.repo, args.number, args.thread, operation_id=args.operation_id,
+            expected_candidate=args.expected_candidate, expected_thread=args.expected_thread,
+        )
+    except (ValueError, OSError, ProviderError) as exc:
+        result = pr_thread_resolution.outcome(
+            args.repo, args.number, args.thread, args.operation_id,
+            args.expected_candidate, args.expected_thread, error=str(exc),
+        )
+    output._json_output(result) if args.json else print(result)
+    return 0 if result["ok"] else 1
 
 
 def cmd_nudge(args: argparse.Namespace) -> int:

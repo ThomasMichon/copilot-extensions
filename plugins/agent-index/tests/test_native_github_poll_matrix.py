@@ -308,6 +308,27 @@ def test_hosted_timestamp_overlap_at_three_corpus_sizes(
             )
             assert hosted.requests == expected_http, (name, hosted.requests)
             counts = measurement["counts"]
+            if name == "wrong-account":
+                assert counts["acquisition_by_source"] == {}
+            else:
+                identities, item_bodies, comment_bodies = {
+                    "noop": (0, 0, 0),
+                    "overlap": (2, 4, 2),
+                    "equal-time-edit": (2, 4, 2),
+                    "concurrent-newer": (1, 2, 2),
+                    "catch-up": (1, 2, 2),
+                    "skew": (1, 2, 0),
+                    "interrupted": (2, 4, 2),
+                    "resume": (0, 1, 0),
+                    "truncated": (2, 2, 0),
+                }[name]
+                assert counts["acquisition_by_source"] == {
+                    SOURCE: {
+                        "identity_records": identities,
+                        "item_body_records": item_bodies,
+                        "comment_body_records": comment_bodies,
+                    },
+                }, (name, counts)
             assert counts["upserts_acquired"] == acquired
             assert counts["files_chunked"] == changed
             assert counts["content_rows_upserted"] == rows, (name, counts)

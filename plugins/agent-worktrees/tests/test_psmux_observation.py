@@ -75,7 +75,7 @@ def test_failed_native_query_cannot_admit_a_cold_prompt(registered, monkeypatch,
 
 
 @pytest.mark.parametrize("filename,contents", [
-    ("wt-other.pid", None), ("wt-other.pid", "101:999"), ("wt-other.pid", "101"),
+    ("wt-other.pid", "101:999"), ("wt-other.pid", "101"),
     ("wt-other.port", None), ("wt-other.port", "0"), ("wt-other.key", None),
     ("wt-other.key", "a" * 16 + "\nkill-server"),
 ])
@@ -85,6 +85,76 @@ def test_missing_or_changed_live_registration_stays_unknown(registered, filename
         path.unlink()
     else:
         path.write_text(contents)
+    with pytest.raises(MuxObservationUnavailable):
+        reader.observe()
+
+
+def test_legacy_registration_without_pid_allows_confirmed_absence(registered, monkeypatch):
+    from agent_remote_driver import mux_observation
+
+    (registered / "wt-other.pid").unlink()
+    monkeypatch.setattr(mux_observation, "observe_psmux", observe_native_psmux)
+    assert reader.observe_registrations() == {"wt-other": ("wt-other", 1)}
+    assert mux_observation.observe_psmux("wt-new", data_dir=registered).status == "absent"
+    assert not (registered / "wt-other.pid").exists()
+
+
+def test_mixed_legacy_and_current_servers_keep_complete_coverage(registered, monkeypatch):
+    monkeypatch.setattr(native, "servers", lambda: {101: "123", 202: "456"})
+    (registered / "__warm__.port").write_text("12346")
+    (registered / "__warm__.key").write_text("b" * 16)
+    monkeypatch.setattr(
+        reader, "_query",
+        lambda port, *a: ("wt-other", 1, 101) if port == 12345 else ("__warm__", 0, 202),
+    )
+    assert reader.observe() == {"wt-other": 1, "__warm__": 0}
+    (registered / "__warm__.key").unlink()
+    with pytest.raises(MuxObservationUnavailable):
+        reader.observe()
+
+
+@pytest.mark.parametrize("legacy_live", [False, True])
+@pytest.mark.parametrize("uncovered_live", [False, True])
+def test_refused_legacy_hint_requires_complete_authenticated_coverage(
+    registered, monkeypatch, legacy_live, uncovered_live,
+):
+    if legacy_live:
+        (registered / "wt-other.pid").unlink()
+    servers = {101: "123", 202: "456"} if uncovered_live else {101: "123"}
+    monkeypatch.setattr(native, "servers", lambda: servers)
+    (registered / "exited.port").write_text("12346")
+    (registered / "exited.key").write_text("b" * 16)
+
+    def query(port, *args):
+        if port == 12346:
+            raise ConnectionRefusedError()
+        return "wt-other", 1, 101
+
+    monkeypatch.setattr(reader, "_query", query)
+    if uncovered_live:
+        with pytest.raises(MuxObservationUnavailable, match="missing its registration"):
+            reader.observe()
+    else:
+        assert reader.observe_registrations() == {"wt-other": ("wt-other", 1)}
+    assert (registered / "exited.port").read_text() == "12346"
+
+
+@pytest.mark.parametrize("changed", ["birth", "new-server", "registration", "pid-published"])
+def test_legacy_registration_changes_never_prove_absence(registered, monkeypatch, changed):
+    (registered / "wt-other.pid").unlink()
+
+    def query(*args):
+        if changed == "birth":
+            monkeypatch.setattr(native, "servers", lambda: {101: "999"})
+        elif changed == "new-server":
+            monkeypatch.setattr(native, "servers", lambda: {101: "123", 202: "456"})
+        elif changed == "registration":
+            (registered / "wt-other.port").write_text("12346")
+        else:
+            (registered / "wt-other.pid").write_text("101:123")
+        return "wt-other", 1, 101
+
+    monkeypatch.setattr(reader, "_query", query)
     with pytest.raises(MuxObservationUnavailable):
         reader.observe()
 
@@ -143,7 +213,7 @@ def test_orphan_and_new_server_cannot_be_omitted(registered, monkeypatch):
             reader.observe()
 
 
-def test_registration_change_and_duplicate_pid_refuse(registered, monkeypatch):
+def test_registration_change_refuses(registered, monkeypatch):
     def query(*args):
         (registered / "wt-other.port").write_text("12346")
         return "wt-other", 1, 101
@@ -151,14 +221,30 @@ def test_registration_change_and_duplicate_pid_refuse(registered, monkeypatch):
     monkeypatch.setattr(reader, "_query", query)
     with pytest.raises(MuxObservationUnavailable):
         reader.observe()
-    (registered / "renamed.pid").write_text("101:123")
-    with pytest.raises(MuxObservationUnavailable):
+
+
+def test_duplicate_reported_pid_refuses_without_pid_sentinels(registered, monkeypatch):
+    (registered / "wt-other.pid").unlink()
+    (registered / "renamed.port").write_text("12346")
+    (registered / "renamed.key").write_text("b" * 16)
+    monkeypatch.setattr(
+        reader, "_query",
+        lambda port, *a: ("wt-other" if port == 12345 else "renamed", 1, 101),
+    )
+    with pytest.raises(MuxObservationUnavailable, match="identity is ambiguous"):
         reader.observe()
 
 
-def test_no_native_servers_proves_absence_even_without_a_registry(tmp_path, monkeypatch):
-    monkeypatch.setenv("PSMUX_DATA_DIR", str(tmp_path / "absent"))
+@pytest.mark.parametrize("stale_registry", [False, True])
+def test_no_native_servers_proves_absence_even_without_a_registry(tmp_path, monkeypatch, stale_registry):
+    root = tmp_path / "absent"
+    if stale_registry:
+        root.mkdir()
+        (root / "exited.port").write_text("12345")
+        (root / "exited.key").write_text("a" * 16)
+    monkeypatch.setenv("PSMUX_DATA_DIR", str(root))
     monkeypatch.setattr(native, "servers", lambda: {})
+    monkeypatch.setattr(reader, "_query", lambda *a: pytest.fail("No live server to query"))
     assert reader.observe() == {}
 
 
@@ -242,7 +328,7 @@ def test_deadline_and_registration_byte_limit_preserve_uncertainty(registered, m
     b"OK\nwt-fixture:x:101\n", b"OK\nwt-fixture:2:101\nextra\n", b"x" * 4097,
     b"OK\n\xff:2:101\n",
 ])
-def test_fixed_read_only_wire_contract_requires_auth_and_complete_reply(reply):
+def test_fixed_read_only_wire_contract_requires_auth_and_complete_reply(reply, tmp_path, monkeypatch):
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     listener.listen(1)
@@ -268,7 +354,10 @@ def test_fixed_read_only_wire_contract_requires_auth_and_complete_reply(reply):
     worker.start()
     try:
         if reply in (b"OK\nwt-fixture:2:101\n", b"OK\r\nwt-fixture:2:101\r\n"):
-            assert reader._query(listener.getsockname()[1], "a" * 16, reader.time.monotonic() + 2) == ("wt-fixture", 2, 101)
+            (tmp_path / "wt-fixture.port").write_text(str(listener.getsockname()[1]))
+            (tmp_path / "wt-fixture.key").write_text("a" * 16)
+            monkeypatch.setattr(native, "servers", lambda: {101: "123"})
+            assert reader.observe_registrations(data_dir=tmp_path) == {"wt-fixture": ("wt-fixture", 2)}
         else:
             with pytest.raises(MuxObservationUnavailable):
                 reader._query(listener.getsockname()[1], "a" * 16, reader.time.monotonic() + 2)
