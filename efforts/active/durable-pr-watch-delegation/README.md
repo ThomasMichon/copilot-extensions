@@ -286,10 +286,13 @@ cleared review in #11645; its finite native source merged in #11647.
 Windows, provider, installed and HTTP qualification remain open;
 request acceptance is not evidence that a fresh review exists.
 The [native creation-cancellation contract](native-creation-cancellation.md)
-cleared review in #11651; its finite native source adapter selects only the
+cleared review in #11651; its finite native source adapter merged in #11653 and selects only the
 existing unpublished-reservation owner. Remote closure, reason-comment
 publication and abandoned-claim settlement remain separate; source qualification
 is not installed support or complete `pr-abandon` parity.
+The [explicit native thread-read proposal](native-thread-read.md) reuses the
+existing checkout-free Worktrees read owner. It adds no transport or watcher;
+implementation, installed/HTTP qualification and thread resolution stay open.
 
 - [x] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence)
   (merged in #10380; implementation, provider and adoption gates remain).
@@ -1042,6 +1045,16 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
+- [x] Qualify finite native unpublished-creation cancellation (#11653):
+  exact full worktree/creation selection, original revision/reason recovery,
+  actual receiver declaration and one existing-owner dispatch. The final
+  cancellation/routing packet passes 149 cases with five platform skips;
+  actual creation/status/cancellation composition and old-caller subprocess
+  pass 82. Preserve unknown committed/lost outcomes, owner evidence,
+  frontend recovery inputs and source/sibling/claim/finalization custody.
+  Windows, installed/provider/HTTP and remote abandonment/comment/claim
+  integration remain open; this is not complete legacy parity.
+
 - [x] Qualify finite explicit-target native reviewer requests (#11647).
   Preserve tracked nudge selection, transport and no-op behavior; use the
   actual target/provider and distinguish API acceptance from a fresh verdict.
@@ -1320,6 +1333,43 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-08 - Native thread-read boundary proposed
+
+- Inspected the existing explicit Worktrees parser, neutral-CWD entry,
+  target/configuration resolution, report builder, ADO discussion reader and
+  dedicated native CLI consumers. Worktrees already supplies the read owner;
+  the dedicated client lacks the thin adapter.
+- Proposed the existing version-1 baseline without a new capability RPC or
+  provider transport. Preserve incomplete/null completeness, changed-candidate
+  evidence, nested provider fields and valid error reports; a successful read
+  is not writeback or merge authority.
+- This is a review-first contract only. Isolated parser/process/provider
+  qualification and implementation remain open, alongside the full parent
+  Plan and Validation Plan. No runtime, host or consumer activation changed.
+- Documentation lint has no errors; its root-effort size warning remains
+  open documentation-maintenance work under this parent. Split historical
+  journal material without losing canonical Plan/Validation/approval custody.
+
+### 2026-11-08 - Native cancellation merged; entire parent return
+
+- #11653 merged as `0887674795dc64228f973f90798412842d4c536c` at
+  22:48 PT after genuine current-head Copilot Approval `5822410308` on
+  `3d8b97d923777f3c32e4f9d41c74c83507071cbc`, no open findings and all three
+  required checks green. Normal managed completion used only the documented
+  missing-CODEOWNER exception. No review/CI or live-effect gate was waived.
+- Reconciled the source through normal `pr-complete`: seven redundant local
+  commits dropped with the owner's backup retained, source aligned to the
+  merged base, required contribution trailers present.
+- Read the entire canonical Plan and Validation Plan after merge, not only
+  the cancellation sub-contract. Credited only the finite source leaf above.
+  Retention/attention, all-publisher/protected-writer, full CLI/HTTP/Dispatch,
+  three-provider, installed/container/shadow and retained-origin gates stay open.
+- Next bounded source action: inspect existing explicit native thread-read
+  parser/result and consumer contracts, then propose the smallest missing
+  read-only CLI convergence boundary for review. Remote close/reason-comment
+  work remains separate; no new forge transport, ledger or live effect is
+  authorized by this selection.
 
 ### 2026-11-08 - Native cancellation source qualification
 
