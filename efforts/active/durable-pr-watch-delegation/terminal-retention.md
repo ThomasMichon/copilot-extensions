@@ -160,22 +160,123 @@ Retain only the prior compact terminal summary, not old conversation bodies.
   feedback/write serving and retained-volume reader transition stay open.
   Strict explicit standalone selection and fresh-only provisioning merged
   in #11628, including same-PR terminal notification capture under the
-  original request budget. Next is source qualification of the existing
-  explicit retirement lifecycle against actual serving/buffer/drain and
-  restart/reopen boundaries. No new remote retirement operation or automatic
-  cleanup worker is implied; retained-reader transition and broader
-  feedback/write, provider and installed gates remain separate.
-  The focused `test_terminal_service_lifecycle.py` source packet now exercises
+  original request budget. The focused
+  `test_terminal_service_lifecycle.py` source packet merged in #11631 exercises
   the real service writer and Gateway admission/drain with populated buffers,
   disconnected acquisition, failed/cancelled close, exact pending delivery
   across fresh-reader restart and reopen, and stale retirement refusal.
   Its connector/native source are synthetic; this finite qualification does
   not close executing-host, installed, provider or feedback/write acceptance.
+  The bounded compatibility trace found that compact recovery preserves
+  prepared IDs/receipts but not an operation's retained acquisition slots.
+  The [mapping-preservation refinement](#retained-acquisition-mapping-composition)
+  below addresses that storage gap before extending the terminal receiver.
+  Existing serving refusal remains intentional until a separately reviewed
+  compatible composition is supplied.
+  No new remote retirement operation or automatic cleanup worker is implied;
+  retained-reader transition and broader feedback/write, provider and
+  installed gates remain separate.
 
 Each runtime leaf needs normal review and focused supervised validation.
 Source acceptance is not installed adoption, live provider qualification,
 backup/log retention acceptance or permission to activate a production host.
 Those broader P1/P2 and parent gates stay open.
+
+## Retained acquisition mapping composition
+
+This is the next **agent-recommended, review-first** source refinement, not
+implemented storage or serving support. It composes the existing
+[persisted acquisition mapping](comment-observation-correlation.md#persisted-acquisition-mapping-refinement)
+with terminal compaction under their same ReplayStore owner. It closes the
+bounded-conversation and original-comment correlation intent above without
+adding another mapping database, body archive, acquisition loop or recovery
+owner.
+
+### Preserve evidence before expanding serving
+
+Both current features are orthogonal extensions on owner-v3/v4/v5/v6, not
+successive base-layout versions. `CommentMappingStore` retains one bounded
+acquired-evidence slot per eligible prepared action. `terminal_recovery.compact`
+currently replaces those body-bearing operations with compact original
+identities and receipts but does not transfer their mapping slots. The current
+`retained-comment` reader selects only active original operations, and the
+terminal read-only receiver intentionally excludes prepared/mapping serving.
+Do not remove that refusal first or claim that sharing a base version makes
+these contracts composable.
+
+Extend the existing compact record, transaction and review reservation through
+an explicitly adopted, independently versioned optional storage contract.
+The exact field layout and capacity arithmetic belong to the implementation
+review. A selected capable reader must still preserve non-adopted layouts;
+older strict readers refuse an expanded layout unchanged. The actual lifecycle
+owner excludes incompatible readers before adoption. Reads, startup and normal
+acquisition never adopt, downgrade or silently strip the extension.
+
+Compaction must transfer every captured prepared action's existing nullable
+mapping slot alongside its original compact IDs, content hashes, outcome and
+receipt, in the same complete-envelope replacement. Retain the original
+generation reference, discussion interval/completeness, status/reason and
+available object digest only; no body, executable preparation, source manifest
+or new observation is created. Original action/receipt custody remains
+authoritative. The transferred slot is historical evidence at its recorded
+interval, not current-content or original-native-version proof.
+
+If existing mappings cannot be represented losslessly by the selected compact
+contract, refuse compaction unchanged before cache retirement. A null slot is
+also distinct from unsupported mapping retention; do not silently discard the
+adopted per-action contract merely because it has no positive match. Explicit
+adoption must fund existing active and compact metadata within the same bounded
+review capacity or refuse atomically. Preserve the existing operation/action
+and slot bounds and the native-outcome reservation; never borrow another
+reservation, evict another operation or retain a second unbounded history.
+
+Recovery readback can change a compact unknown action's receipt/state. It must
+invalidate that action's transferred slot in the same transaction, as active
+receipt updates already do. A later receipt cannot inherit an old acquired
+correlation. Reopen does not recalculate a historical compact slot or promote
+the old action into a live/executable operation. Fresh acquisition may update
+eligible active operations only; current tag/body equality never reconstructs
+a retired mapping or confirms an unknown historical effect.
+
+### Scoped read and optional receiver sequence
+
+First extend the existing scoped retained-evidence library read to select either
+the original active action or its compact replacement, never both. Report the
+record representation explicitly and retain its original scope, operation,
+action, intent, prepared identity, body hash, outcome and receipt. Do not invent
+retired preparation fields to satisfy an older response schema. Missing
+preparation, a missing slot and unsupported historical representation stay
+distinct. The read has no cache/body/native-IO dependency and changes no
+receipt, event, attention, handled position, pending age or ACK.
+
+Only after that storage/read provider is reviewed and qualified may a separate
+optional terminal workspace contract expose `retained-comment`. Advertise the
+actual executing/adopted receiver and its supported result representations
+through existing discovery. Preserve terminal-read/v1 and retained-comment/v1
+semantics; do not append an operation to their exact declarations or reuse an
+old result shape with different identity guarantees. New consumers select
+support before sending a request. Missing, malformed, withdrawn or rolled-back
+support refuses only the optional composition before effects, without a GUID
+search or mutation fallback. This does not enable preparation, submission,
+feedback, attention-writer composition or remote retirement.
+
+### Serial delivery and focused validation
+
+1. Review this refinement before changing persisted or serving schemas.
+2. Deliver the explicit existing-owner storage adoption, lossless compaction
+   and scoped library read. Cover real-file restart, strict old-reader refusal,
+   adoption/capacity refusal, null and divergent slots, create/reply/owned-edit,
+   unknown/partial receipts, recovery receipt invalidation, same-epoch retry,
+   interrupted replacement and reopen. Prove byte-identical refusal and
+   original identity/receipt/deadline preservation with no new sends,
+   acquisitions, false confirmation or feedback/ACK/event progress.
+3. Separately expand the optional executing receiver and consumers, with actual
+   Native/Gateway/CLI negotiation, both mixed-version directions, withdrawal
+   and rollback controls. Exercise retained reads after populated-cache
+   retirement and fresh-reader restart, not just an empty fixture.
+4. Return to the full T3 and both parent acceptance plans. Source fixtures do
+   not qualify installed hosts, retained-volume reader transition, providers,
+   all publishers, whole-system retention or operational effects.
 
 ## Validation plan
 
