@@ -171,7 +171,7 @@ def abandon_pr(
         close_result = provider.close_pull(
             repo, number, api_base=api_base, token=token, comment=comment,
         )
-        if close_result and "comment post failed" not in close_result:
+        if close_result and not close_result.startswith(("comment post failed:", "(comment post failed:")):
             return {**base, "error": close_result}
         warning = close_result or ""
 

@@ -3,7 +3,7 @@
 Back to the [CLI parity inventory](cli-parity-inventory.md) and
 [canonical effort](README.md).
 
-**Contract reviewed in #11645; finite source candidate awaiting review.** This finite
+**Contract reviewed in #11645; finite native source merged in #11647.** This finite
 slice closes part of the PR-domain
 [provider-neutral surface](../../../visions/plugins/agent-pull-requests/README.md#first-class-provider-neutral-pr-surface)
 through the existing Worktrees/provider owner. It follows
