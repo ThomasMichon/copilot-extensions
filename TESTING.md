@@ -10308,6 +10308,25 @@ may carry `@pytest.mark.guard` (marketplace + picker integrity, shipped-manifest
 contract, binding invariants), but that marker alone does not admit a test into
 the unit-only release packet.
 
+## Required-application observation budget
+
+The explicit T3 case below runs the actual caller-owned Machines CLI against
+twelve fixture-owned required applications and 128 capability-only plugins.
+Native readiness scripts run; no installer does. It retains New's original
+55-second execution allowance plus five seconds for settlement, with a separate
+75-second test observer covering fixture work. It also checks the returned
+required result, not only process exit or a work-count proxy. This synthetic
+roster is not proof of installed application health or a latency distribution.
+
+```text
+python tools/run-plugin-tests.py agent-machines --allow-explicit-tiers --test-file tests/test_installation_repair.py -k readiness_only_roster_respects_the_original_caller_budget
+```
+
+The focused `-k readiness_only` controls cover no payload walk or installer
+qualification, missing inventory, retained runtime claims, selected optional
+prerequisites, changed actions/declarations, and scope-bound digest refusal.
+The actual-caller case includes a generic v1 payload command and a core v2 owner.
+
 ## Lint + contract gates (before a push)
 
 The install-contract guard exercises actual Worktrees receipt-judgment source

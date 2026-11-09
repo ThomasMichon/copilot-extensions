@@ -299,7 +299,24 @@ ownership. This mode is not install authority or permission to borrow an
 unowned scope. An old runtime lacking support is incompatible; do not retry
 without containment.
 
-Review the returned closure and `planDigest`, then apply that exact selection:
+This caller-owned form observes readiness, not an installer plan. It binds the
+enabled-owner declarations, selected module closure and exact readiness action
+and executable, then revalidates them after observation. It does not recursively
+hash unrelated payload files or qualify installer executables. Its purpose-bound
+digest cannot authorize ordinary repair apply, including for an empty required
+set. Full repair planning and apply retain their existing payload hashes,
+per-leaf path checks and installer qualification.
+
+Known capability-only payloads without application declarations or runtime
+claims need no application-owner qualification for this read. Unselected optional
+owners do not add a required readiness protocol; a selected prerequisite still
+needs its qualified owner. Unknown enabled payloads, malformed declarations and
+incomplete inventory still refuse. Generic payload command/plugin names use the
+same grammar as the canonical payload-invocation generator, not an `agent-` prefix
+restriction.
+
+For ordinary repair planning, without `--caller-owned-readiness`, review the
+returned closure and `planDigest`, then apply that exact selection:
 
 ```text
 agent-machines installation-repair --project-root <project> --module <marketplace-id>::<plugin>/<module> --apply --expected-plan-digest <digest>

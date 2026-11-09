@@ -40,7 +40,7 @@ _MODULE_ID = re.compile(
     r"[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$"
 )
 _COMMAND_ID = re.compile(r"^[a-z][a-z0-9-]*$")
-_PLUGIN_ID = re.compile(r"^agent-[a-z0-9-]+$")
+_PLUGIN_ID = re.compile(r"^[a-z][a-z0-9-]*$")
 _PYTHON_MODULE = re.compile(
     r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$"
 )
