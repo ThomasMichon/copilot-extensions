@@ -1375,6 +1375,10 @@ callback an implicit credential store.
 
 ### 2026-11-09 - Native report boundary corrections
 
+- Strict anchor-registry acquisition refuses before checkout-free selection;
+  a later successful account read cannot erase an earlier anchor failure.
+  Registry-derived policy and one-time read-failure controls pass within the
+  54-case target-policy suite. Ordinary anchor resolution remains fail-soft.
 - Strict selection treats enabled drop-in target loss, unusable targets and
   identity mismatch as unavailable policy, not successful omission. Configured
   plugin activation failures refuse; confirmed disable remains supported.

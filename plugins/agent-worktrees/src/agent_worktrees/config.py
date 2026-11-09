@@ -1035,7 +1035,7 @@ def _load_config_uncached(
             machine_repo = {}
 
         anchor = machine_repo.get("anchor") or _resolve_anchor_from_registry(
-            name, platform
+            name, platform, **strict_sources,
         )
         if not anchor:
             from .pr_related_binding import remember_checkout_free_pr
@@ -1310,24 +1310,27 @@ def _project_name_safe() -> str:
         return ""
 
 
-def _resolve_anchor_from_registry(name: str, platform: str) -> str | None:
+def _resolve_anchor_from_registry(name: str, platform: str, *, strict=False) -> str | None:
     """Return the anchor path for ``name`` from ``repos.yaml``, or None.
 
     Lets a convention-adopted repo load with no machine-local config: the
     machine-specific path comes from the registry, the settings from the
-    repo's own in-repo config. Never raises.
+    repo's own in-repo config. Ordinary callers remain fail-soft; strict
+    selected-owner reads refuse acquisition failures.
     """
     start = config_acquisition.registry_call_started()
     try:
         from . import repos as repos_mod
 
-        registry = repos_mod.read_registry()
+        registry = repos_mod.read_registry(**({"strict": True} if strict else {}))
         entry = registry.repos.get(name)
         if entry is None:
             return None
         return entry.local_path(platform) or None
     except Exception as exc:
         config_acquisition.registry_call_failed("repository-anchor-registry", exc)
+        if strict:
+            raise ValueError("repository anchor registry is unavailable") from None
         return None
     finally:
         config_acquisition.registry_call_finished(start, "repository-anchor-registry")

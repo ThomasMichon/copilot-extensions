@@ -1,6 +1,7 @@
 """Use real configuration and registry owners, independent of the caller CWD."""
 
 import json
+import inspect
 import os
 import subprocess
 
@@ -380,3 +381,33 @@ def test_enabled_dropin_policy_must_be_available_before_account_selection(target
         monkeypatch.setattr(repos, "account_from_map", lambda *a, **k: pytest.fail("unavailable dropin selected account"))
         with pytest.raises(ValueError):
             select_report_target(path, "example/project")
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_anchor_registry_failure_cannot_be_repaired_by_later_account_read(target, tmp_path, monkeypatch, fail):
+    path, _, _, registry, write = target
+    anchor = tmp_path / "registered-policy"
+    policy = anchor / ".agent-worktrees" / "config.yaml"
+    policy.parent.mkdir(parents=True)
+    policy.write_text("pr: {token_command: fixture-helper}\n", encoding="utf-8")
+    registry["repos"]["target"] = {
+        "remote": "https://github.com/example/project.git", "account": "selected",
+        **{platform: str(anchor) for platform in ("linux", "wsl", "windows")},
+    }
+    write()
+    original = repos.read_registry
+    failed, anchor_reads = [False], []
+
+    def read(**kwargs):
+        if inspect.currentframe().f_back.f_code.co_name == "_resolve_anchor_from_registry":
+            anchor_reads.append(kwargs)
+            if fail and not failed[0]:
+                failed[0] = True
+                raise OSError("fixture-private-anchor-failure")
+        return original(**kwargs)
+
+    monkeypatch.setattr(repos, "read_registry", read)
+    monkeypatch.setattr(repos, "resolve_account", lambda *a, **k: pytest.fail("unresolved anchor selected account"))
+    with pytest.raises(ValueError, match="anchor registry" if fail else "credential selection is unsupported"):
+        select_report_target(path, "example/project")
+    assert failed[0] is fail and anchor_reads == [{"strict": True}]
