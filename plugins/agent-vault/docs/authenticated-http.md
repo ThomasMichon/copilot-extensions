@@ -81,7 +81,8 @@ The header is supplied to curl through a private stdin configuration. It never
 appears in argv, a temporary config file, a caller environment variable or
 request diagnostics. Protected credentials found in request operands are refused
 before process launch. The child environment omits TLS key logging, proxies and
-inherited values equal to a resolved credential. Curl's default config and proxies are disabled, URL
+inherited values containing a resolved credential or supported encoding.
+Curl's default config and proxies are disabled, URL
 globbing is disabled, and only HTTP(S) protocols are admitted. Native TLS
 verification remains enabled.
 

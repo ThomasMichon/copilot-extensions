@@ -134,10 +134,16 @@ def test_system_curl_auth_is_private_and_reaches_only_the_bound_endpoint(
         credential_in_environment = any(SECRET in value for value in environment.values())
         assert not credential_in_environment
         assert "SSLKEYLOGFILE" not in environment
+        assert "SYNTHETIC_AUTH_JSON" not in environment
+        assert "SYNTHETIC_AUTH_BASE64" not in environment
         return await original(*argv, **kwargs)
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", launch)
     monkeypatch.setenv("SYNTHETIC_API_CREDENTIAL", SECRET)
+    monkeypatch.setenv("SYNTHETIC_AUTH_JSON", json.dumps({"token": SECRET}))
+    monkeypatch.setenv(
+        "SYNTHETIC_AUTH_BASE64", "value=" + base64.b64encode(SECRET.encode()).decode()
+    )
     environment = dict(os.environ)
     with server(observed) as url:
         configure(monkeypatch, tmp_path, url, scheme)

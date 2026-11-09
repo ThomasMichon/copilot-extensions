@@ -182,7 +182,8 @@ async def execute(
     environment = {
         key: value
         for key, value in os.environ.items()
-        if key.upper() not in excluded and value not in protected
+        if key.upper() not in excluded
+        and not _contains_credential(value.encode("utf-8", errors="surrogatepass"), protected)
     }
     try:
         process = await asyncio.create_subprocess_exec(
