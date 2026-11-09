@@ -78,6 +78,11 @@ counts, and retries do not prove successful acquisition. Other connectors
 using this shared session remain explicitly unclassified until their own
 request owners opt in; this is not provider-wide semantic accounting.
 
+Azure DevOps work-item comment requests additionally opt into `comment_page`,
+including continuation requests and failed responses. Other Azure DevOps
+requests remain unclassified, and its parsed comment-body records remain
+unmeasured; the HTTP purpose does not qualify provider-wide semantic coverage.
+
 `acquisition_by_source[source]` separately counts parsed records at the built-in
 GitHub connector's existing issue-list, targeted-item and comment parsers:
 

@@ -10,6 +10,7 @@ import pytest
 
 from agent_index.sources import get_connector
 from agent_index.sources.azure_devops import AzureDevOpsConnector
+from agent_index.indexing.work_counts import measure_reindex
 
 
 def _json_response(
@@ -577,3 +578,91 @@ def test_ado_incremental_checks_cancellation_and_body_timestamp(
             "2026-01-03T00:01:00Z", cancel_check=cancel_check,
         ) == []
     assert body_requests == (0 if cancel_after_metadata else 1)
+
+
+@pytest.mark.parametrize(
+    "outcome", ["complete", "later-404", "cycle", "missing-token", "bad-page", "cancel"],
+)
+def test_ado_work_item_comment_pages_are_complete_or_refused(outcome: str) -> None:
+    tokens: list[str | None] = []
+    token = "opaque +/&token"
+    first_page_seen = False
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal first_page_seen
+        path = request.url.path
+        if path.endswith("/wiql"):
+            return _json_response(200, {"workItems": [{"id": 42}]})
+        if path.endswith("/workitemsbatch"):
+            return _json_response(200, {"value": [_work_item_payload(42)]})
+        assert path.endswith("/workItems/42/comments")
+        current = request.url.params.get("continuationToken")
+        tokens.append(current)
+        if current is None:
+            first_page_seen = True
+            page = {
+                "comments": [{"id": 1, "text": "First page"}],
+                "continuationToken": token,
+                "nextPage": "https://foreign.example/never-follow-this-url",
+            }
+            if outcome == "missing-token":
+                del page["continuationToken"]
+            return _json_response(200, page)
+        assert current == token
+        if outcome == "later-404":
+            return _json_response(404, {"message": "interrupted continuation"})
+        if outcome == "bad-page":
+            return _json_response(200, {"comments": {"invalid": "not a list"}})
+        return _json_response(200, {
+            "comments": [{"id": 2, "text": "Last page"}],
+            "continuationToken": token if outcome == "cycle" else None,
+        })
+
+    def cancel_check() -> None:
+        if outcome == "cancel" and first_page_seen:
+            raise RuntimeError("cancelled between comment pages")
+
+    connector = AzureDevOpsConnector(
+        "ado:acme/widgets", token="pat-token", min_interval_s=0,
+        transport=httpx.MockTransport(handler),
+        work_item_queries=[{"wiql": "SELECT [System.Id] FROM WorkItems"}],
+        pull_request_queries=[],
+    )
+
+    @measure_reindex
+    def run() -> dict[str, object]:
+        return {"entries": connector.discover(cancel_check=cancel_check)}
+
+    if outcome == "complete":
+        result = run()
+        assert len(result["entries"]) == 1
+        assert "First page" in result["entries"][0].content
+        assert "Last page" in result["entries"][0].content
+        assert result["work_counts"]["http_by_purpose"]["comment_page"]["attempts"] == 2
+    else:
+        error = {
+            "later-404": httpx.HTTPStatusError,
+            "cancel": RuntimeError,
+        }.get(outcome, ValueError)
+        with pytest.raises(error):
+            run()
+    assert tokens == (
+        [None] if outcome in {"cancel", "missing-token"} else [None, token]
+    )
+
+
+@pytest.mark.parametrize("status", [200, 404])
+def test_ado_work_item_comments_preserve_legacy_and_initial_not_found(status: int) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/workItems/42/comments")
+        assert request.url.params.get("continuationToken") is None
+        return _json_response(status, {"value": [{"text": "Legacy comment"}]})
+
+    connector = AzureDevOpsConnector(
+        "ado:acme/widgets", token="pat-token", min_interval_s=0,
+        transport=httpx.MockTransport(handler),
+        work_item_queries=[], pull_request_queries=[],
+    )
+    assert connector._work_item_comments(42) == (
+        [{"text": "Legacy comment"}] if status == 200 else []
+    )
