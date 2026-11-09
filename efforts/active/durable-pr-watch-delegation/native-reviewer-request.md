@@ -120,7 +120,10 @@ consumer migration and three-provider parity remain later acceptance.
 
 The finite isolated Worktrees/provider/legacy packet passes 398 cases.
 The final request-owner subset passes 33, overlapping that packet and adding
-four explicit target/policy refusal cases. The native frontend packet passes
+four explicit target/policy refusal cases. After review exposed unmarked
+reserved worker bindings falling back to ambient policy, the coupled
+request/author/readiness/worker-policy packet passes 180 cases, including eight
+marker-refusal controls across discovery and author operations. The native frontend packet passes
 116 with five Windows-only cases skipped on Linux, including an actual
 subprocess for capability and worker-policy forwarding. Synthetic provider
 responses exercise the actual frontend, parser, target resolver and GitHub

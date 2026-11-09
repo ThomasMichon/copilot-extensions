@@ -171,6 +171,28 @@ def test_invalid_delivered_policy_refuses_without_ambient_fallback(
     assert result["error"] and not backend.calls
 
 
+@pytest.mark.parametrize("marker", [None, "caller"])
+@pytest.mark.parametrize("command", ["pr-author-capabilities", "pr-author-nudge", "pr-author-ready", "pr-update"])
+def test_reserved_worker_policy_requires_its_marker_before_ambient_target_resolution(
+    author, backend, tmp_path, marker, command,
+):
+    policy = tmp_path / "worker.json"
+    raw = {"repos": {"pr-worker": {"pr": {
+        "enabled": True, "provider": "github", "repository": "other/repository",
+    }}}}
+    if marker is not None:
+        raw["repo_name"] = marker
+    policy.write_text(json.dumps(raw), encoding="utf-8")
+    argv = [command, "--repo", REPO, "--config", str(policy), "--json"]
+    if command != "pr-author-capabilities":
+        argv.extend(["--number", "7"])
+    with output.capture_json_output() as capture:
+        assert cli.main(argv) == 1
+    result = json.loads(capture.getvalue())
+    assert "must identify its pr-worker repository" in result["error"]
+    assert not backend.calls
+
+
 @pytest.mark.parametrize("extra", [["--auto"], ["--reviewer", "someone"], ["--worktree", "other"]])
 def test_explicit_parser_rejects_effect_expansion_and_tracked_selectors(author, extra):
     with pytest.raises(SystemExit) as caught:

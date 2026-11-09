@@ -1326,6 +1326,12 @@ callback an implicit credential store.
 - Source review, required CI, native Windows, live-provider, installed and
   HTTP acceptance remain open. No host activation, credentials, rollout,
   protected writer or parent completion is claimed.
+- Review found that an explicit reserved worker binding without its
+  `repo_name` marker could reach ambient policy. The shared author loader now
+  rejects that malformed shape before config resolution, for discovery and
+  every dependent author operation. Ordinary full project configurations
+  retain their supported path. Eight focused regressions and the coupled
+  request/author/readiness/worker packet pass 180 cases with verified cleanup.
 
 ### 2026-11-08 - Merge the native reviewer-request contract and return to parent gates
 

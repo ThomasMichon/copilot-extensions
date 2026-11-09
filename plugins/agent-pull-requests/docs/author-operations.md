@@ -42,6 +42,9 @@ without effects or an ambient-policy fallback. Old callers without this option
 retain their existing behavior; provider rollback requires that old supported
 route or a truthful unsupported-contract result, never replay after an uncertain
 write.
+An explicit file containing the reserved `pr-worker` binding must identify it
+with `repo_name: pr-worker`. Missing or different markers refuse during
+capability reporting and author operations rather than loading ambient policy.
 
 The reserved exported `pr-worker` binding is target-scoped in memory. Author
 operations use its declared PR policy without inheriting a same-slug registry

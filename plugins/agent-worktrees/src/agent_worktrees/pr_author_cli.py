@@ -18,6 +18,8 @@ def load_author_config(path, repository: str, *, claimant: bool = False):
 
     source = Path(path)
     raw = read_explicit_config(source)
+    if "pr-worker" in raw.get("repos", {}) and raw.get("repo_name") != "pr-worker":
+        raise ValueError("Explicit worker policy must identify its pr-worker repository")
     if raw.get("repo_name") != "pr-worker":
         return cfg.load_config(source)
     worker = raw.get("repos", {}).get("pr-worker")
