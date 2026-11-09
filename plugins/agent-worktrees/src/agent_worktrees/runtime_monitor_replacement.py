@@ -16,11 +16,13 @@ from . import locks, tracking
 _REFERENCE_PREFIX = "worktrees-monitor-observation:"
 
 
-def active(root: Path) -> routing.Endpoint | None:
+def active(root: Path, *, fallback: bool = False) -> routing.Endpoint | None:
     """Validate publication storage without probing any outgoing native process."""
     table = routing.read_table(root / "status-monitor-routing", strict=True)
     routing._validate_endpoint_rows(table)
     raw = (table or {}).get("active")
+    if raw is None and fallback:
+        raw = (table or {}).get("previous")
     return routing.Endpoint.from_dict(raw) if raw is not None else None
 
 
@@ -57,16 +59,87 @@ def _record(content: dict) -> dict | None:
     return record if isinstance(record, dict) else None
 
 
+def _content(record: dict) -> dict:
+    keys = ("table", "breadcrumb", "lock", "predecessor")
+    if record.get("version") == 2:
+        keys += ("release_claim",)
+    return {key: record[key] for key in keys}
+
+
+def _digest(content: dict) -> str:
+    return hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()
+
+
+def _groups(record: dict, digest: str) -> dict[str, list[str]]:
+    slots = record["slots"]
+    if record["version"] == 1:
+        return {_REFERENCE_PREFIX + digest: slots}
+    return {
+        f"{_REFERENCE_PREFIX}/v2/{digest}/{offset // 64}": slots[offset:offset + 64]
+        for offset in range(0, len(slots), 64)
+    }
+
+
+def _archives(directory: Path) -> list[tuple[Path, dict]]:
+    if directory.is_symlink():
+        raise ValueError("Monitor observation directory must not be linked")
+    records = []
+    for path in sorted([*directory.glob("*.json"), *directory.glob("*.pending")]):
+        if path.is_symlink() or path.stat().st_size > 1048576:
+            raise ValueError("Monitor observation must be a bounded ordinary file")
+        record = json.loads(path.read_text(encoding="utf-8"))
+        if (
+            type(record.get("version")) is not int or record["version"] not in (1, 2)
+            or path.stem != _digest(_content(record))
+            or not isinstance(record.get("slots"), list)
+            or record.get("release_state", "retiring") not in ("prepared", "retiring", "cancelled")
+        ):
+            raise ValueError("Monitor observation identity changed")
+        claim = record.get("release_claim")
+        if claim is not None and (
+            not isinstance(claim, dict) or not isinstance(claim.get("owner"), str)
+        ):
+            raise ValueError("Monitor observation dev release changed")
+        records.append((path, record))
+    return records
+
+
+def _references(root: Path, record: dict, digest: str, helper, *, retain: bool) -> None:
+    groups = _groups(record, digest)
+    if not groups:
+        return
+    with helper._leases.reference_transaction_custody(root):
+        if record["version"] == 1:
+            references = helper._leases.read_runtime_references(root)
+        else:
+            transaction = helper._leases.begin_runtime_reference_transaction(root, _REFERENCE_PREFIX)
+            references = transaction["owners"]
+        expected = {}
+        for owner, slots in groups.items():
+            previous = references.get(owner, [])
+            if previous and previous != slots:
+                raise ValueError("Monitor observation code custody changed")
+            expected[owner] = previous
+        desired = {owner: slots if retain else [] for owner, slots in groups.items()}
+        if record["version"] == 1:
+            for owner, slots in desired.items():
+                helper._leases.replace_runtime_references(root, owner, slots, expected=expected[owner])
+        else:
+            helper._leases.commit_runtime_reference_transaction(
+                root, _REFERENCE_PREFIX, transaction["token"], desired, expected=expected,
+            )
+
+
 def retain(
     root: Path, *, runtime=None, detach_recovery: bool = False, predecessor: dict | None = None,
-    cutover_guard=None,
+    cutover_guard=None, release_claim: dict | None = None,
 ) -> bool:
     """Archive exact recovery bytes and protect code, never granting retirement.
 
     The installation owner holds its cutover guard. References precede the
-    durable archive so an interrupted archive write still cannot expose code
-    to collection. Only the resident's independent exit reconciliation releases
-    these barriers; this operation never cancels or recovers an older attempt.
+    final archive, with a durable write-ahead mapping first so partial canonical
+    references remain recoverable. Only the resident's independent exit
+    reconciliation releases barriers; this never recovers an older attempt.
     """
     from . import runtime_monitor_retirements as retirements
 
@@ -104,33 +177,88 @@ def retain(
                 "predecessor": {
                     "pid": predecessor["pid"], "process_start_time": predecessor["start"],
                 } if predecessor is not None else None,
+                "release_claim": release_claim,
             }
-            if not table and raw is None and not content["lock"] and predecessor is None:
+            if not table and raw is None and not content["lock"] and predecessor is None and release_claim is None:
                 return False
-            digest = hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()
-            owner = _REFERENCE_PREFIX + digest
+            digest = _digest(content)
             target = directory / (digest + ".json")
-            if target.exists():
-                if target.is_symlink() or target.stat().st_size > 1048576:
-                    raise ValueError("Monitor observation must be a bounded ordinary file")
-                retained = json.loads(target.read_text(encoding="utf-8"))
-                if (
-                    any(retained.get(key) != value for key, value in content.items())
-                    or helper._leases.read_runtime_references(root).get(owner, []) != retained["slots"]
-                ):
-                    raise ValueError("Monitor observation code custody changed")
-                if detach_recovery and raw is not None:
-                    path.unlink()
-                return True
-            versions = helper.list_versions(root)
-            previous = helper._leases.read_runtime_references(root).get(owner, [])
-            versions = sorted(set(versions).union(previous))
-            helper._leases.replace_runtime_references(root, owner, versions, expected=previous)
-            routing_persistence.write(target, {
-                "version": 1, **content, "slots": versions,
-            })
+            pending = target.with_suffix(".pending")
+            records = dict(_archives(directory))
+            record = records.get(target) or records.get(pending)
+            if record is None:
+                record = {
+                    "version": 2, **content, "slots": sorted(helper.list_versions(root)),
+                    "release_state": "prepared" if release_claim is not None else "retiring",
+                }
+                routing_persistence.write(pending, record)
+            elif release_claim is not None and record["release_state"] == "cancelled":
+                record = {**record, "release_state": "prepared"}
+                routing_persistence.write(target if target in records else pending, record)
+            _references(root, record, digest, helper, retain=True)
+            if target not in records:
+                routing_persistence.write(target, record)
+            pending.unlink(missing_ok=True)
             if detach_recovery and raw is not None:
                 path.unlink()
+    return True
+
+
+def settle_release(root: Path, claim: dict, *, committed: bool) -> None:
+    """Only the owning installer grants or revokes its exact deferred release."""
+    directory = root / "status-monitor-observations"
+    with tracking._RecordLock(directory / "inventory", require_sidecar=True):
+        found = False
+        for path, record in _archives(directory):
+            if record.get("release_claim") != claim or record["release_state"] == "cancelled":
+                continue
+            found = True
+            if record["release_state"] == "retiring" and not committed:
+                raise ValueError("Committed monitor dev release cannot be cancelled")
+            routing_persistence.write(path, {
+                **record, "release_state": "retiring" if committed else "cancelled",
+            })
+        if committed and not found:
+            raise ValueError("Deferred monitor dev release custody is missing")
+
+
+def pending_claim(root: Path, claim: dict) -> bool:
+    from .runtime_monitor_retirements import _restored_claim
+
+    return any(
+        record.get("release_claim") is not None
+        and record.get("release_state") != "cancelled"
+        and claim in (record["release_claim"], _restored_claim(record["release_claim"]))
+        for _path, record in _archives(root / "status-monitor-observations")
+    )
+
+
+def cancel_prepared_release(root: Path, claim: dict, *, runtime) -> bool:
+    """Revoke only unchanged, prepublication claim custody under the caller's guard."""
+    directory = root / "status-monitor-observations"
+    if not directory.exists():
+        return False
+    with tracking._RecordLock(directory / "inventory", require_sidecar=True):
+        records = [
+            (path, record) for path, record in _archives(directory)
+            if record.get("release_claim") == claim and record["release_state"] != "cancelled"
+        ]
+        if not records or any(record["release_state"] != "prepared" for _path, record in records):
+            return False
+        with runtime._publication_lease(root):
+            route_root = root / "status-monitor-routing"
+            if (
+                runtime.current_version(root) != (claim.get("selected_generation") or "dev")
+                or runtime.read_dev_claim(root, strict=True) != claim
+                or breadcrumb.breadcrumb_path(route_root).exists()
+            ):
+                return False
+            table = routing.read_table(route_root, strict=True)
+            routing._validate_endpoint_rows(table)
+            if any(record["table"] != table for _path, record in records):
+                return False
+            for path, record in records:
+                routing_persistence.write(path, {**record, "release_state": "cancelled"})
     return True
 
 
@@ -148,7 +276,7 @@ def options(root: Path, predecessor: dict | None, *, incumbent_expected: bool) -
     except (OSError, ValueError, ConnectionError):
         admitted, result = None, {}
     else:
-        if expected is None and observed is None:
+        if expected is None and observed is None and active(root, fallback=True) is None:
             return admitted, result, False
         if observed is not None and expected is not None and (
             expected.pid, expected.process_start_time,
@@ -161,6 +289,7 @@ def options(root: Path, predecessor: dict | None, *, incumbent_expected: bool) -
     retain(root, predecessor=predecessor)
     result = {
         "expected_old": expected,
+        "preserve_raw_active": True,
         "refuse_old": lambda raw: (
             None if raw == (expected.to_dict() if expected is not None else None)
             else "predecessor route changed"
@@ -202,14 +331,16 @@ def reconcile(root: Path, *, runtime=None, cleanup: bool = True) -> bool:
     helper = runtime if runtime is not None else retirements._runtime()
     pending = False
     with tracking._RecordLock(directory / "inventory", require_sidecar=True):
-        for path in sorted(directory.glob("*.json")):
-            if path.is_symlink() or path.stat().st_size > 1048576:
-                raise ValueError("Monitor observation must be a bounded ordinary file")
-            record = json.loads(path.read_text(encoding="utf-8"))
-            content = {key: record[key] for key in ("table", "breadcrumb", "lock", "predecessor")}
-            digest = hashlib.sha256(json.dumps(content, sort_keys=True).encode()).hexdigest()
-            if type(record.get("version")) is not int or record["version"] != 1 or path.stem != digest:
-                raise ValueError("Monitor observation identity changed")
+        archives = _archives(directory)
+        known = {owner for path, record in archives for owner in _groups(record, path.stem)}
+        if any(
+            owner.startswith(_REFERENCE_PREFIX) and owner not in known
+            for owner in helper._leases._read_runtime_reference_state(root, allow_transaction=True)[0]
+        ):
+            raise ValueError("Unidentifiable monitor observation reference remains pending")
+        for path, record in archives:
+            content = _content(record)
+            digest = _digest(content)
             identities = _identities(
                 content["table"], _record(content), content["lock"], content["predecessor"],
             )
@@ -222,12 +353,15 @@ def reconcile(root: Path, *, runtime=None, cleanup: bool = True) -> bool:
                 pending = pending or (observed is not True and identity["pid"] != os.getpid())
             if not identities:
                 pending = True
+            claim = record.get("release_claim")
+            if claim is not None and record["release_state"] == "prepared":
+                pending = True
+                continue
             if cleanup and exited:
-                owner = _REFERENCE_PREFIX + digest
-                previous = helper._leases.read_runtime_references(root).get(owner, [])
-                if previous:
-                    if previous != record["slots"]:
-                        raise ValueError("Monitor observation code custody changed")
-                    helper._leases.replace_runtime_references(root, owner, [], expected=previous)
+                if claim is not None and record["release_state"] == "retiring":
+                    retirements.release_exited_claim(root, claim, helper)
+                _references(root, record, digest, helper, retain=False)
                 path.unlink()
+            elif cleanup:
+                _references(root, record, digest, helper, retain=True)
     return pending

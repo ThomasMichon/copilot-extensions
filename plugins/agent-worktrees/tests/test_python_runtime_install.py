@@ -1784,6 +1784,132 @@ def test_real_python_lifecycle_constructs_then_reuses_without_uv(
         )) == info
 
 
+@pytest.mark.parametrize("discovery", [
+    "missing", "unreadable", "reuse-timeout", "reuse-malformed", "unknown-slot",
+])
+@pytest.mark.parametrize("release", [False, True])
+def test_previous_only_installation_starts_and_settles_the_incoming_monitor(
+    driver, tmp_path, monkeypatch, discovery, release,
+):
+    from types import SimpleNamespace
+    from zdd import diagnostics, process_exit, routing
+    from agent_worktrees import (
+        config as cfg, locks, runtime_monitor_retirements as retirements,
+        status_monitor_cutover as cutover, status_monitor_health,
+        status_monitor_runtime as monitor,
+    )
+
+    root = tmp_path / "runtime"
+    for version in ("1.0.0", "2.0.0"):
+        _slot(driver, root, version)
+    driver.runtime.activate(root, "1.0.0", link_free=True)
+    owner = str(tmp_path / "owner")
+    claim = None
+    selected = "1.0.0"
+    if release:
+        driver.runtime.claim_dev(root, owner, previous_version=selected)
+        _slot(driver, root, "dev")
+        driver.runtime.activate(root, "dev", link_free=True, dev_owner=owner)
+        claim = driver.runtime.read_dev_claim(root, strict=True)
+        selected = "dev"
+    directory = root / "status-monitor-routing"
+    directory.mkdir()
+    previous = routing.Endpoint("127.0.0.1", 61001, 202, "old", 1, "2002")
+    raw_active = previous.to_dict() if discovery.startswith("reuse-") or discovery == "unknown-slot" else None
+    routing.routing_table_path(directory).write_text(json.dumps({
+        "version": 1, "active": raw_active, "previous": previous.to_dict() if raw_active is None else None,
+    }))
+    if discovery == "unknown-slot":
+        (root / "status-monitor.lock").write_text(json.dumps({
+            "pid": 202, "start_time": "2002", "prefix": str(tmp_path),
+        }))
+    spawned = []
+    class Governance:
+        def __init__(self, requested, payload):
+            self.root, self.payload = requested, payload
+            self.manifest_publication = nullcontext
+        def signature(self):
+            return {}
+        def recheck(self):
+            pass
+        def held(self, **kwargs):
+            return nullcontext()
+    class Handle:
+        pid = 303
+        process_start_time = "3003"
+        def poll(self):
+            return None
+        def terminate(self):
+            pytest.fail("replacement must not terminate a daemon")
+    def spawn(python, *, port):
+        assert routing.read_table(directory)["active"] == raw_active
+        spawned.append((python, port))
+        return Handle()
+    read_text = Path.read_text
+    def read_discovery(path, *args, **kwargs):
+        if discovery == "unreadable" and path == root / "status-monitor.lock":
+            raise PermissionError("fixture discovery unavailable")
+        return read_text(path, *args, **kwargs)
+    def health():
+        return {
+            "status": "ready", "published": True, "pid": 303,
+            "runtime_slot": "2.0.0", "runtime_prefix": str(root / "versions" / "2.0.0"),
+        }
+    monkeypatch.setattr(driver, "Governance", Governance)
+    monkeypatch.setattr(driver, "_load_installed", lambda slot: None)
+    monkeypatch.setattr(cfg, "install_dir", lambda: root)
+    monkeypatch.setattr(monitor, "_aw_runtime_home", lambda: root)
+    monkeypatch.setattr(monitor, "_monitor_lock_path", lambda: root / "status-monitor.lock")
+    monkeypatch.setattr(monitor, "_status_monitor_enabled", lambda: True)
+    monkeypatch.setattr(cutover, "routing_dir", lambda *a: directory)
+    monkeypatch.setattr(cutover, "load_or_create_control_token", lambda *a: "fixture")
+    def client(url, **kwargs):
+        def observed_health():
+            if url.endswith(":61001"):
+                if discovery == "reuse-timeout":
+                    raise TimeoutError("fixture outgoing timeout")
+                if discovery == "reuse-malformed":
+                    raise ValueError("fixture malformed outgoing health")
+                if discovery == "unknown-slot":
+                    return {"status": "ready", "pid": 202, "runtime_prefix": str(tmp_path)}
+            return health()
+        return SimpleNamespace(health=observed_health, promote=lambda: {"adopted": True})
+    monkeypatch.setattr(cutover, "ControlClient", client)
+    monkeypatch.setattr(cutover, "spawn_passive", spawn)
+    monkeypatch.setattr(cutover, "pick_free_port", lambda: 61002)
+    monkeypatch.setattr(status_monitor_health, "prepared_check", lambda *a, **k: lambda *a: True)
+    monkeypatch.setattr(cutover.guarded_recovery, "successor_healthy", lambda *a, **k: (
+        routing.read_table(directory)["active"]["pid"] == 303
+    ))
+    monkeypatch.setattr(retirements, "_runtime", lambda: driver.runtime)
+    exited = set()
+    monkeypatch.setattr(process_exit, "observe_original_exit", lambda pid, start: pid in exited)
+    monkeypatch.setattr(diagnostics, "_pid_alive", lambda pid: pid in (202, 303))
+    monkeypatch.setattr(diagnostics, "process_start_time", lambda pid: {202: "2002", 303: "3003"}.get(pid))
+    monkeypatch.setattr(locks, "process_start_time", diagnostics.process_start_time)
+    monkeypatch.setattr(locks, "_pid_alive", lambda pid: pid in (202, 303))
+    monkeypatch.setattr(Path, "read_text", read_discovery)
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    result = driver.settle_candidate(
+        root, "2.0.0", payload=tmp_path, payload_hash="previous",
+        expected_governance={}, previous=selected, release_dev_claim=claim,
+        dev_owner=owner if release else None,
+    )
+    assert len(spawned) == 1
+    assert result["runtime_version"] == "2.0.0" and result["retirement_pending"]
+    assert routing.read_table(directory)["active"]["pid"] == 303
+    assert (root / "deploy-manifest.json").is_file()
+    assert list((root / "status-monitor-observations").glob("*.json"))
+    if release:
+        assert result["dev_claim_release_pending"]
+        assert driver.runtime.read_dev_claim(root, strict=True) == claim
+        assert retirements.reconcile(root, runtime=driver.runtime)
+        assert driver.runtime.read_dev_claim(root, strict=True) == claim
+        exited.add(202)
+        assert not retirements.reconcile(root, runtime=driver.runtime)
+        assert driver.runtime.read_dev_claim(root, strict=True) is None
+
+
 @pytest.mark.parametrize("serving_slot", ["1.0.0", "dev"])
 @pytest.mark.parametrize("activation_fails", [False, True])
 def test_legacy_installer_replaces_unsupported_predecessor_and_keeps_failures_truthful(

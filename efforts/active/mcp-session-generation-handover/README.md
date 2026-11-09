@@ -397,6 +397,16 @@ migration already works.
   300-second timeout is not counted as a pass. Lint, install-contract,
   unchanged module-size and whitespace guards pass. Review, release, actual
   normal-update performance and installed consumer acceptance remain open.
+- Review of #11673 identified six blocking edge cases. Regression-first
+  corrections preserve previous-only startup with raw-active CAS, defer failed
+  outgoing reuse probes, retain exact dev-release obligations even without a
+  known outgoing slot, and use bounded atomic reference groups plus write-ahead
+  archives that survive changed observations. Current local affected-file
+  qualification passes 362 tests; the same five native cases remain
+  unqualified. The shared ZDD cutover suite passes 49 cases, including
+  unchanged legacy healing. Required CI, renewed review, release and installed
+  acceptance remain open; no new deployment or whole-objective completion is
+  claimed.
 - Added a failure-first case to the existing installer-custody controls:
   outgoing native-identity observation is unavailable, but the healthy incoming
   runtime must publish with retirement pending and both slots preserved.

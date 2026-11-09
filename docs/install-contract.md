@@ -5866,6 +5866,18 @@ Missing or unreadable exit evidence keeps retention pending. Malformed routing,
 archive I/O failure, a concurrent route change and failed incoming identity or
 readiness remain real failures. This fallback does not weaken the incoming
 runtime's preparation contract.
+A previous-only route still requires incoming startup, even without readable
+discovery. Its raw `active: null` is preserved through guarded publication;
+replacement opts out of eager route healing without changing legacy ZDD defaults.
+An unavailable pre-transition reuse probe selects replacement, not installation
+failure; post-publication serving attestation remains strict. Observation
+retention uses bounded reference groups in the existing atomic reference
+transaction, preceded by a durable write-ahead mapping. Interrupted final
+archives and reference commits therefore remain recoverable even after the
+observations change. Deferred dev release carries the original exact claim,
+including when the outgoing slot cannot be identified. Only the owning
+installer's committed outcome grants release, and native exit, current selection
+and exact claim ownership remain mandatory at reconciliation.
 The existing explicit cold-retirement helper retains its held cutover guard,
 authenticated runtime-prefix, native pin and positive-exit checks. Ordinary
 replacement does not invoke that helper before incoming startup or require its

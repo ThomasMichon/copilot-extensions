@@ -69,8 +69,10 @@ def test_replacement_archive_failure_preserves_canonical_custody_and_code(retain
     path.write_bytes(content)
     write = routing_persistence.write
 
-    def unavailable(*_args):
-        raise OSError("archive storage unavailable")
+    def unavailable(target, content):
+        if target.suffix == ".json":
+            raise OSError("archive storage unavailable")
+        return write(target, content)
 
     monkeypatch.setattr(routing_persistence, "write", unavailable)
     with CutoverLock(directory) as guard:
@@ -84,6 +86,55 @@ def test_replacement_archive_failure_preserves_canonical_custody_and_code(retain
         assert replacement.retain(root, runtime=runtime, detach_recovery=True, cutover_guard=guard)
     assert not path.exists()
     assert len(list((root / "status-monitor-observations").glob("*.json"))) == 1
+
+
+@pytest.mark.parametrize("failure", ["archive", "references"])
+def test_changed_observation_recovers_archive_failure_and_more_than_64_retained_slots(
+    retained, monkeypatch, failure,
+):
+    from zdd import routing, routing_persistence
+    from agent_worktrees import runtime_monitor_replacement as replacement
+
+    root, runtime, identities, alive = retained
+    monkeypatch.setattr("zdd.diagnostics.process_start_time", identities.get)
+    for index in range(65):
+        version = f"old-{index}"
+        (root / "versions" / version).mkdir()
+        runtime.mark_complete(root, version, payload_hash=version)
+    directory = root / "status-monitor-routing"
+    routing.publish_active(directory, bind="127.0.0.1", port=61001, pid=101, process_start_time="1001")
+    write = routing_persistence.write
+    def interrupted(path, content):
+        if path.suffix == ".json" and path.parent.name == "status-monitor-observations":
+            raise OSError("fixture final archive failure")
+        return write(path, content)
+    monkeypatch.setattr(routing_persistence, "write", interrupted)
+    commit = runtime._leases.commit_runtime_reference_transaction
+    def uncommitted(*args, **kwargs):
+        raise OSError("fixture reference commit failure")
+    if failure == "references":
+        monkeypatch.setattr(runtime._leases, "commit_runtime_reference_transaction", uncommitted)
+    with pytest.raises(OSError, match="failure"):
+        replacement.retain(root, runtime=runtime)
+    if failure == "references":
+        with pytest.raises(ValueError, match="transaction is pending"):
+            runtime.gc(root, min_age_days=0)
+    else:
+        references = runtime._leases.read_runtime_references(root)
+        assert references and all(len(slots) <= 64 for slots in references.values())
+        assert set(runtime.list_versions(root)) <= {slot for slots in references.values() for slot in slots}
+        runtime.gc(root, min_age_days=0)
+    assert len(runtime.list_versions(root)) == 68
+    monkeypatch.setattr(runtime._leases, "commit_runtime_reference_transaction", commit)
+    monkeypatch.setattr(routing_persistence, "write", write)
+    routing.publish_active(directory, bind="127.0.0.1", port=61002, pid=101, process_start_time="1001")
+    assert replacement.retain(root, runtime=runtime)
+    assert replacement.reconcile(root, runtime=runtime)
+    alive.clear()
+    assert not replacement.reconcile(root, runtime=runtime)
+    assert not runtime._leases.read_runtime_references(root)
+    assert not list((root / "status-monitor-observations").glob("*.pending"))
+    assert not list((root / "status-monitor-observations").glob("*.json"))
 
 
 @pytest.mark.parametrize("foreign", [False, True])
@@ -105,6 +156,70 @@ def test_replacement_cannot_detach_custody_without_its_held_cutover_guard(retain
             )
     assert path.is_file()
     assert not (root / "status-monitor-observations").exists()
+
+
+@pytest.mark.parametrize("fault", ["prepared", "selected", "changed-claim"])
+def test_observed_dev_release_keeps_original_claim_and_publication_guards(retained, fault):
+    from agent_worktrees import runtime_monitor_replacement as replacement
+
+    root, runtime, _identities, alive = retained
+    claim = runtime.claim_dev(root, "original-owner", previous_version="current")
+    replacement.retain(
+        root, runtime=runtime, predecessor={"pid": 101, "start": "1001"}, release_claim=claim,
+    )
+    if fault != "prepared":
+        replacement.settle_release(root, claim, committed=True)
+    if fault == "selected":
+        runtime.activate(root, "dev", link_free=True, dev_owner=claim["owner"])
+    elif fault == "changed-claim":
+        runtime._release_dev(root, claim["owner"])
+        runtime.claim_dev(root, "next-owner", previous_version="current")
+    expected = runtime.read_dev_claim(root, strict=True)
+    alive.clear()
+    if fault == "prepared":
+        assert replacement.reconcile(root, runtime=runtime)
+        assert retirements.pending_claim(root, claim)
+    else:
+        with pytest.raises(RuntimeError, match="Dev runtime is selected|Dev claim changed"):
+            replacement.reconcile(root, runtime=runtime)
+    assert runtime.read_dev_claim(root, strict=True) == expected
+    assert runtime._leases.read_runtime_references(root)
+
+
+@pytest.mark.parametrize("route_changed", [False, True])
+def test_abandoned_observed_release_cancels_only_unchanged_prepublication_custody(
+    retained, route_changed,
+):
+    from single_instance_lease import SingleInstance
+    from zdd import routing
+    from agent_worktrees import runtime_monitor_replacement as replacement
+
+    root, runtime, _identities, alive = retained
+    claim = runtime.claim_dev(root, "original-owner", previous_version="current")
+    runtime.activate(root, "dev", link_free=True, dev_owner=claim["owner"])
+    replacement.retain(
+        root, runtime=runtime, predecessor={"pid": 101, "start": "1001"}, release_claim=claim,
+    )
+    route_root = root / "status-monitor-routing"
+    with SingleInstance(route_root, lock_name="cutover.lock") as guard:
+        if route_changed:
+            routing.routing_table_path(route_root).write_text(json.dumps({
+                "version": 1,
+                "active": routing.Endpoint("127.0.0.1", 61001, 101, "old", 1, "1001").to_dict(),
+            }))
+        assert retirements.cancel_prepared_release(root, claim, guard=guard, runtime=runtime) is not route_changed
+    assert retirements.pending_claim(root, claim) is route_changed
+    assert runtime.read_dev_claim(root, strict=True) == claim
+    if not route_changed:
+        replacement.retain(
+            root, runtime=runtime, predecessor={"pid": 101, "start": "1001"}, release_claim=claim,
+        )
+        assert retirements.pending_claim(root, claim)
+        runtime.activate(root, "current", link_free=True)
+        replacement.settle_release(root, claim, committed=True)
+        alive.clear()
+        assert not replacement.reconcile(root, runtime=runtime)
+        assert runtime.read_dev_claim(root, strict=True) is None
 
 
 def test_replacement_does_not_reclassify_malformed_route_as_outgoing_observation(retained, monkeypatch):
