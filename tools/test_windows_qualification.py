@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import base64
 from contextlib import nullcontext
+from email.utils import formatdate
 import importlib.util
 import json
 import os
@@ -14,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
@@ -686,26 +688,44 @@ def test_manual_workflow_never_adds_required_ci_or_candidate_write_credentials()
                     assert step["if"] == (
                         "always() && needs.admit.outputs.packet == 'native-worktrees-embody'"
                     )
+    promotion = yaml.safe_load(
+        (Path(__file__).resolve().parents[1] / ".github/workflows/validate-and-promote.yml").read_text("utf-8"),
+    )
+    steps = promotion["jobs"]["native-resume-windows"]["steps"]
+    helper = next(step for step in steps if step.get("with", {}).get("path") == "native-control")
+    assert helper["with"]["ref"] == "${{ github.workflow_sha }}"
+    assert helper["with"]["persist-credentials"] is False
+    assert helper["with"]["sparse-checkout"] == "tools/download_pinned_native.ps1"
+    acquire = next(step for step in steps if "download_pinned_native.ps1" in step.get("run", ""))
+    assert r'.\native-control\tools\download_pinned_native.ps1' in acquire["run"]
 
 
 @pytest.mark.parametrize("workflow", ["windows-qualification", "validate-and-promote"])
-@pytest.mark.parametrize("responses", [(504, 504, 200), (504, 504, 504), (404,)])
+@pytest.mark.parametrize("responses,body_delay,budget,retry_after", [
+    ((504, 504, 200), 0, 120, None), ((504, 504, 504), 0, 120, None),
+    ((404,), 0, 120, None), ((200,), 2, 1, None), ((504,), 0, 1, None),
+    ((429,), 0, 4, "15"), ((429,), 0, 4, "date"),
+])
 @pytest.mark.portfolio_tier("T2")
-def test_pinned_native_download_retries_only_transient_failures(tmp_path, workflow, responses):
+def test_pinned_native_download_retries_only_transient_failures(
+    tmp_path, workflow, responses, body_delay, budget, retry_after,
+):
     from windows_qualification_transport import command
-    curl = shutil.which("curl.exe") or shutil.which("curl")
-    if curl is None:
-        pytest.skip("curl is unavailable")
+    pwsh = shutil.which("pwsh")
+    if pwsh is None:
+        pytest.skip("PowerShell 7 is unavailable")
     source = Path(__file__).resolve().parents[1] / f".github/workflows/{workflow}.yml"
     definition = yaml.safe_load(source.read_text("utf-8"))
     job = "windows" if workflow == "windows-qualification" else "native-resume-windows"
     step = next(step for step in definition["jobs"][job]["steps"]
-                if step.get("name", "").startswith("Prepare pinned"))
+                if "download_pinned_native.ps1" in step.get("run", ""))
     script = re.sub(r"`[ \t]*\r?\n", " ", step["run"])
     line = next(line.strip() for line in script.splitlines()
-                if line.strip().startswith("curl.exe "))
+                if "download_pinned_native.ps1" in line)
     argv = shlex.split(line, comments=True)
-    argv[argv.index("--output") + 1] = str(tmp_path / "native.zip")
+    helper = source.parents[2] / "tools/download_pinned_native.ps1"
+    argv[argv.index("-OutFile") + 1] = str(tmp_path / "native archive.zip")
+    argv[argv.index("-TimeoutSeconds") + 1] = str(budget)
     attempts = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -715,20 +735,32 @@ def test_pinned_native_download_retries_only_transient_failures(tmp_path, workfl
             body = b"pinned archive" if status == 200 else b"download unavailable"
             self.send_response(status)
             self.send_header("Content-Length", str(len(body)))
+            if retry_after:
+                self.send_header(
+                    "Retry-After", formatdate(time.time() + 15, usegmt=True)
+                    if retry_after == "date" else retry_after,
+                )
             self.end_headers()
-            self.wfile.write(body)
+            time.sleep(body_delay)
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
         def log_message(self, *args):
             pass
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    class Server(ThreadingHTTPServer):
+        daemon_threads = False
+
+    server = Server(("127.0.0.1", 0), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
-    archive = tmp_path / "native.zip"
+    archive = tmp_path / "native archive.zip"
     try:
+        argv[argv.index("-Uri") + 1] = f"http://127.0.0.1:{server.server_port}/archive"
         actual = command([
-            curl, *argv[1:-1], "--noproxy", "127.0.0.1",
-            f"http://127.0.0.1:{server.server_port}/archive",
+            pwsh, "-NoProfile", "-File", str(helper), *argv[2:],
         ], cwd=tmp_path, check=False)
     finally:
         server.shutdown()
@@ -736,6 +768,8 @@ def test_pinned_native_download_retries_only_transient_failures(tmp_path, workfl
         thread.join(timeout=5)
     assert not thread.is_alive()
     assert attempts == list(responses)
-    assert (actual.returncode == 0) is (responses[-1] == 200)
+    assert (actual.returncode == 0) is (responses[-1] == 200 and not body_delay)
     if actual.returncode == 0:
         assert archive.read_bytes() == b"pinned archive"
+    else:
+        assert not archive.exists()
