@@ -185,8 +185,8 @@ Those broader P1/P2 and parent gates stay open.
 ## Retained acquisition mapping composition
 
 This **agent-recommended, review-first** source refinement cleared review in
-#11633. Its first storage/library source leaf is prepared for implementation
-review; optional serving and installed support remain open. It composes the existing
+#11633. Its first storage/library source leaf merged in #11634; optional
+serving is the next source leaf and installed support remains open. It composes the existing
 [persisted acquisition mapping](comment-observation-correlation.md#persisted-acquisition-mapping-refinement)
 with terminal compaction under their same ReplayStore owner. It closes the
 bounded-conversation and original-comment correlation intent above without
@@ -271,6 +271,9 @@ feedback, attention-writer composition or remote retirement.
    interrupted replacement and reopen. Prove byte-identical refusal and
    original identity/receipt/deadline preservation with no new sends,
    acquisitions, false confirmation or feedback/ACK/event progress.
+   The finite source leaf merged in #11634 with 19 new focused cases and a
+   final 89-case layout/cache/owner packet; installed and provider acceptance
+   is not implied.
 3. Separately expand the optional executing receiver and consumers, with actual
    Native/Gateway/CLI negotiation, both mixed-version directions, withdrawal
    and rollback controls. Exercise retained reads after populated-cache
