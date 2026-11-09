@@ -33,7 +33,7 @@ def _disable_status_monitor(monkeypatch):
 
 
 def _ns(**kw):
-    base = {"session": "wt-test", "mux": "psmux", "path": "/w/x", "interval": 5}
+    base = {"session": "wt-test", "mux": "tmux", "path": "/w/x", "interval": 5}
     base.update(kw)
     return argparse.Namespace(**base)
 
@@ -450,6 +450,25 @@ def test_spawn_status_updater_noop_on_empty_id():
     assert m._spawn_status_updater("", "/w/x") is False
 
 
+@pytest.mark.parametrize("registered", [False, True])
+def test_psmux_updater_entrypoints_use_only_the_resident_monitor(monkeypatch, registered):
+    monkeypatch.setattr("shutil.which", lambda name: "psmux.exe" if name == "psmux" else None)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("PSMux CLI observation"))
+    monkeypatch.setattr(updater, "spawn_daemon", lambda *a, **k: pytest.fail("PSMux updater spawn"))
+    monkeypatch.setattr(updater, "_status_monitor_enabled", lambda: True)
+    registrations = []
+    ensures = []
+    monkeypatch.setattr(
+        updater, "_register_session_for_monitor",
+        lambda *args: registrations.append(args) or registered,
+    )
+    monkeypatch.setattr(updater, "_ensure_status_monitor", lambda: ensures.append(True) or True)
+    assert updater._spawn_status_updater("test", "/w/x") is registered
+    assert updater.cmd_status_updater(_ns(mux="psmux")) == 0
+    assert registrations == [("wt-test", "/w/x"), ("wt-test", "/w/x")]
+    assert len(ensures) == (2 if registered else 0)
+
+
 @pytest.mark.parametrize("linked", (False, True))
 def test_parent_agent_home_reaches_real_reservation_before_spawn(tmp_path, monkeypatch, linked):
     from dataclasses import replace
@@ -507,7 +526,7 @@ def test_spawn_status_updater_noop_when_no_live_session(monkeypatch):
     import shutil
 
     monkeypatch.setattr(
-        shutil, "which", lambda x: "/bin/psmux" if x == "psmux" else None)
+        shutil, "which", lambda x: "/bin/tmux" if x == "tmux" else None)
     monkeypatch.setattr(
         subprocess, "run",
         lambda *a, **k: subprocess.CompletedProcess(a, 1, "", ""))
@@ -522,7 +541,7 @@ def test_spawn_status_updater_spawns_detached_when_session_live(monkeypatch):
     import shutil
 
     monkeypatch.setattr(
-        shutil, "which", lambda x: "/bin/psmux" if x == "psmux" else None)
+        shutil, "which", lambda x: "/bin/tmux" if x == "tmux" else None)
     monkeypatch.setattr(
         subprocess, "run",
         lambda *a, **k: subprocess.CompletedProcess(a, 0, "", ""))
@@ -544,7 +563,7 @@ def test_spawn_status_updater_spawns_detached_when_session_live(monkeypatch):
     assert argv[0] == m.sys.executable
     assert argv[1:4] == ["-m", "agent_worktrees", "status-updater"]
     assert argv[argv.index("--session") + 1] == "wt-x"
-    assert argv[argv.index("--mux") + 1] == "psmux"
+    assert argv[argv.index("--mux") + 1] == "tmux"
     assert argv[argv.index("--path") + 1] == "/w/x"
     assert captured["kw"]["console_children"] is True
     assert captured["kw"]["log_path"].name == "status-updater.log"
@@ -582,7 +601,7 @@ def test_spawn_status_updater_roots_child_at_home_not_payload(monkeypatch):
     import shutil
 
     monkeypatch.setattr(
-        shutil, "which", lambda x: "/bin/psmux" if x == "psmux" else None)
+        shutil, "which", lambda x: "/bin/tmux" if x == "tmux" else None)
     monkeypatch.setattr(
         subprocess, "run",
         lambda *a, **k: subprocess.CompletedProcess(a, 0, "", ""))
