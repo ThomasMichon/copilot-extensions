@@ -291,8 +291,14 @@ existing unpublished-reservation owner. Remote closure, reason-comment
 publication and abandoned-claim settlement remain separate; source qualification
 is not installed support or complete `pr-abandon` parity.
 The [explicit native thread-read contract](native-thread-read.md), reviewed in
-#11655, reuses the existing checkout-free Worktrees read owner. It adds no transport or watcher;
-implementation, installed/HTTP qualification and thread resolution stay open.
+#11655, reuses the existing checkout-free Worktrees read owner; finite native
+source merged in #11657. It adds no transport or watcher. Native-platform,
+installed/HTTP qualification, live providers and thread resolution stay open.
+The [explicit native diff-read proposal](native-diff-read.md) adds a bounded
+checkout-free reader over the existing provider primitive while preserving
+tracked `pr-diff`, honest ADO refusal and unknown completeness/revision
+evidence. Review precedes receiver/frontend implementation; workspace
+generation acquisition remains independent.
 
 - [x] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence)
   (merged in #10380; implementation, provider and adoption gates remain).
@@ -1045,6 +1051,20 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
+- [ ] Qualify the [explicit native diff-read boundary](native-diff-read.md#compatibility-and-qualification)
+  after contract review: actual owner/frontend process, selected target and
+  endpoint, unchanged tracked compatibility, three synthetic provider methods,
+  honest unsupported/error/completeness and mixed-version behavior. Installed,
+  live-provider, HTTP and candidate-bound workspace acceptance remain separate.
+
+- [x] Qualify finite explicit-target native thread reading (#11657): 148 native
+  parser/routing cases with five Windows-only skips and 43 actual-owner
+  read/observation cases. Preserve exact reports, incomplete/null completeness,
+  candidate changes, valid failures and pre-dispatch option-prefix refusal.
+  Real subprocess old/new callers exercise actual GitHub/Gitea/ADO builders
+  with synthetic IO. Native-platform, installed/live-provider, HTTP and
+  broader CLI parity remain open.
+
 - [x] Qualify finite native unpublished-creation cancellation (#11653):
   exact full worktree/creation selection, original revision/reason recovery,
   actual receiver declaration and one existing-owner dispatch. The final
@@ -1333,6 +1353,41 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-08 - Native diff-read boundary proposed
+
+- The existing tracked diff operation reconciles a worktree before reading.
+  Its provider result does not carry candidate identity or completeness;
+  Azure DevOps explicitly cannot supply a unified patch. The workspace
+  generation/source reader is a different evidence and custody boundary.
+- Proposed one additive checkout-free owner and native frontend using the
+  existing provider primitive and process budget. Preserve legacy tracked
+  behavior, provider errors, unknown evidence and exact valid reports.
+  The new target-qualified path must honor configured GitHub endpoints;
+  the existing provider method currently ignores that argument.
+- This is review-first intent, not runtime support or provider/installed
+  acceptance. Complete CLI/HTTP, workspace, service and retained-origin
+  parent outcomes remain open.
+
+### 2026-11-08 - Native thread-read source merged; entire parent return
+
+- #11657 merged as `5a0aeafc01d28f3459f75a88f3462d10fe74b81d` at
+  23:22 PT after genuine current-head Copilot Approval `5822662199` on
+  `ff228eba468415eecff6567159b0ffe0e50875ad`, the one finding fixed/resolved
+  and all three required checks green. Normal managed completion used only
+  the documented additional-CODEOWNER exception. No review/CI or live-effect
+  gate was waived.
+- Normal `pr-complete` retained a backup and dropped three redundant local
+  commits, aligning the source to the confirmed merged base. Contribution
+  trailers are present in the merge commit.
+- Re-read the entire root Plan and Validation Plan after merge and credited
+  only the finite native thread-read leaf. Complete retention/attention,
+  all-publisher/protected-writer, CLI/HTTP/Dispatch, provider, installed/fleet
+  and retained-origin acceptance remain open.
+- Next bounded source action: inspect existing explicit native diff/evidence
+  read owners, parsers and consumers, then derive the smallest missing
+  read-only convergence boundary for review if a gap is confirmed. Do not
+  add a second forge transport or treat the thread adapter as full parity.
 
 ### 2026-11-08 - Native thread-read source qualification
 
