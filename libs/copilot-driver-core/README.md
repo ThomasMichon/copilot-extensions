@@ -68,6 +68,8 @@ Legacy PSMux 3.3.5 servers publish port/key/session-ID files but no PID sentinel
 Inventory therefore discovers port/key pairs, authenticates the live reply's
 server PID against the native census, and rechecks process births and registration
 contents afterward. A PID sentinel, when present, must still match.
+Failed PID-less endpoint candidates may be stale; they do not block a complete
+authenticated inventory when every live native server is covered elsewhere.
 An unreachable or unregistered live server, unsupported process mode or changing
 inventory remains unknown. Listings share one absence-coverage
 snapshot within their finite budget; live positive rows use their own reads.

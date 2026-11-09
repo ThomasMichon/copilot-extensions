@@ -113,6 +113,32 @@ def test_mixed_legacy_and_current_servers_keep_complete_coverage(registered, mon
         reader.observe()
 
 
+@pytest.mark.parametrize("legacy_live", [False, True])
+@pytest.mark.parametrize("uncovered_live", [False, True])
+def test_refused_legacy_hint_requires_complete_authenticated_coverage(
+    registered, monkeypatch, legacy_live, uncovered_live,
+):
+    if legacy_live:
+        (registered / "wt-other.pid").unlink()
+    servers = {101: "123", 202: "456"} if uncovered_live else {101: "123"}
+    monkeypatch.setattr(native, "servers", lambda: servers)
+    (registered / "exited.port").write_text("12346")
+    (registered / "exited.key").write_text("b" * 16)
+
+    def query(port, *args):
+        if port == 12346:
+            raise ConnectionRefusedError()
+        return "wt-other", 1, 101
+
+    monkeypatch.setattr(reader, "_query", query)
+    if uncovered_live:
+        with pytest.raises(MuxObservationUnavailable, match="missing its registration"):
+            reader.observe()
+    else:
+        assert reader.observe_registrations() == {"wt-other": ("wt-other", 1)}
+    assert (registered / "exited.port").read_text() == "12346"
+
+
 @pytest.mark.parametrize("changed", ["birth", "new-server", "registration", "pid-published"])
 def test_legacy_registration_changes_never_prove_absence(registered, monkeypatch, changed):
     (registered / "wt-other.pid").unlink()

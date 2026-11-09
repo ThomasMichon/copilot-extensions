@@ -129,7 +129,14 @@ def observe_registrations(
         result = {}
         covered = set()
         for base, (port, key, identity) in registrations.items():
-            name, clients, reported_pid = _query(port, key, deadline)
+            try:
+                name, clients, reported_pid = _query(port, key, deadline)
+            except (OSError, MuxObservationUnavailable):
+                if identity is not None:
+                    raise
+                # Legacy hints can outlive a server. The coverage check below
+                # still requires an authenticated reply from every live PID.
+                continue
             if (
                 reported_pid not in servers
                 or identity is not None and identity != (reported_pid, servers[reported_pid])

@@ -175,6 +175,9 @@ client count. Each reply's PID must belong to the native census, every live
 server must be covered, and a second census and registration read must agree before
 absence can admit a prompted Resume. The normal bound-Copilot check still
 applies independently, including to a bare process.
+An exited legacy server can leave a refused port/key endpoint behind. Failed
+PID-less candidates are tolerated only when other authenticated replies cover
+every live native server; the files are never removed or repaired.
 
 The reader has a five-second total budget, bounded registration/reply sizes
 and process counts. It never writes registrations, starts a server, repairs
