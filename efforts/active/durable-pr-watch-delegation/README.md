@@ -305,9 +305,15 @@ adds a read-only thread/diff exchange through the existing authenticated
 Gateway without treating raw reports as principal-bound generations.
 The optional source embedding merged in #11668; large-report, native-command adopter,
 installed and live-provider acceptance remain separate.
-The [selected native report-owner proposal](native-report-owner.md) under
-#11680 defines a finite GitHub.com-first adopter; runtime implementation follows
-review and does not change legacy native authentication or imply host adoption.
+The [selected native report-owner contract](native-report-owner.md), reviewed in
+#11681 under #11680, defines a finite GitHub.com-first adopter. Implementation
+merged in #11686 without changing legacy native authentication or implying
+host adoption. Large-report, native-platform, installed/live-provider and full
+CLI/HTTP acceptance remain separate.
+The [size-qualified response proposal](bounded-report-response.md) under #11692
+reuses the existing 8 MiB channel while preserving current 32 KiB caller-aware
+handler/report defaults. Review its opt-in SDK prerequisite and parallel report
+profile before runtime expansion; no installed or provider acceptance is implied.
 
 - [x] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence)
   (merged in #10380; implementation, provider and adoption gates remain).
@@ -1060,13 +1066,21 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
+- [x] Qualify the finite optional selected GitHub.com report owner (#11686):
+  actual configuration/strict account policy, explicit verified CLI-store
+  identity, pinned provider reads, one request budget and original cleanup
+  custody. The final target/committed-policy packet passes 97 cases and the
+  actor-free packet passes 4,665; earlier overlapping report/Gateway/TLS and
+  native-adapter packets pass 88 and 22. Linux fixtures are not native Windows,
+  installed hosting, live-provider, large-report or full CLI/HTTP acceptance.
+
 - [x] Qualify the finite optional existing-owner report boundary (#11668):
   configured report scope before resolution/acquisition, full native report and
   original exit preservation, epoch-safe negotiation, current owner/deadline
   checks through worker and shielded task handoffs, and actual Gateway drain.
   Final focused report qualification passes 62 cases; the earlier coupled
-  CLI/watch packet passes 210 with five Windows-only skips. Native-command
-  account binding, larger-report transport, installed/live-provider and full
+  CLI/watch packet passes 210 with five Windows-only skips. Broader native-command
+  adoption, larger-report transport, installed/live-provider and full
   HTTP/CLI acceptance remain open.
 
 - [x] Qualify the finite [explicit native diff-read source boundary](native-diff-read.md#compatibility-and-qualification) (#11661)
@@ -1372,6 +1386,118 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+- [2026-11-09 - Native report-owner source merged; parent acceptance retained](journal/2026/11.09%20Native%20report%20owner%20source.md)
+
+### 2026-11-09 - Native report boundary corrections
+
+- An empty committed batch is not policy-path absence until the existing
+  exact-candidate tree probe confirms it. Missing refs, trees or blobs,
+  non-symbolic remote HEAD and unavailable declared policy branches refuse.
+  Actual Git corruption/absence fixtures and existing source controls pass
+  together in the 97-case target/committed-policy packet.
+- Strict anchor-registry acquisition refuses before checkout-free selection;
+  a later successful account read cannot erase an earlier anchor failure.
+  Registry-derived policy and one-time read-failure controls pass within the
+  54-case target-policy suite. Ordinary anchor resolution remains fail-soft.
+- Strict selection treats enabled drop-in target loss, unusable targets and
+  identity mismatch as unavailable policy, not successful omission. Configured
+  plugin activation failures refuse; confirmed disable remains supported.
+  The 52-case target-policy suite passes with isolated registry/activation fixtures.
+- Confirming an absent policy descendant also validates its first existing
+  ancestor. A dangling policy-directory link remains unavailable rather than
+  silently removing policy. Three directory-link controls join the leaf-link
+  cases across global, repository and marketplace sources; 453 Worktrees
+  cases pass in isolation.
+- Strict presence acquisition uses raw stat outcomes rather than a fail-soft
+  existence predicate. Looping and dangling policy links refuse before account
+  selection across global, repository and marketplace sources; confirmed
+  optional absence remains supported. POSIX link fixtures pass within 450
+  Worktrees cases, and 22 actual native-adapter cases pass in isolation.
+- Any unavailable selection checkpoint or capture stays unavailable across
+  provider normalization, including transient failures whose next selection
+  succeeds. Only actual provider access errors become native error reports.
+  The expanded report/Gateway/TLS suite passes 88 isolated cases, including
+  capture and cleanup failures inside both native provider builders.
+- Strict acquisition also rejects duplicate keys in explicit/global YAML,
+  operator drop-ins and managed pointers without changing default loaders or
+  sharing retained registry state between strict and ordinary scans. Delayed
+  selection cleanup stays sticky across provider error normalization, preventing
+  an unavailable checkpoint from becoming HTTP 200. Isolated qualification
+  passes 444 Worktrees and 86 report/Gateway/TLS cases.
+- Strict committed reads decode actual bytes as UTF-8 on both batch and
+  ordered paths, rather than treating a literal replacement character as
+  decoding loss. Invalid bytes refuse; valid U+FFFD remains valid policy text.
+  The focused Worktrees suite passes 440 isolated cases with both controls.
+- Checkout-free selection uses only the target owner's account map when no
+  exact repository entry exists, never a sibling repository's account. Strict
+  committed text validation applies equally to batch and ordered recovery
+  paths. These refinements pass 438 Worktrees cases and 18 actual native-adapter
+  cases in isolation; prior 84-case report/Gateway/TLS controls remain unchanged.
+- Preserve a separate lightweight final check after the original Gateway task
+  completes: deadline, permission and current binding still apply at the last
+  event-loop handoff without starting a subprocess. Keep both prepared-response
+  and task-completion regressions, including owner replacement.
+- Strict committed policy reads refuse unresolved established head/branch/blob
+  acquisition and lossy decoding before credentials. Confirmed absence permits
+  disk policy, while bounded ordered reads may recover the same committed
+  source. Fresh Git fixtures prove a divergent checkout cannot hide a committed
+  token helper after acquisition failure.
+- The final publication/configuration refinements pass 434 focused Worktrees
+  cases and 84 report/Gateway/TLS cases in isolated fixtures.
+- Publication-time selection can perform process work and delayed cleanup.
+  Keep both asynchronous publication rechecks in shielded, tracked workers so
+  unrelated Gateway requests and drain timers remain responsive while the
+  admitted request retains cleanup custody.
+- Require strict repository policy parsing and refuse failed configuration
+  contributions before account acquisition. Preserve ordinary fail-soft
+  configuration behavior outside this optional selection path.
+- Absolute GraphQL API routes require explicitly nested variables with native
+  string/integer types. Provider access failures remain supported native error
+  reports, distinct from unavailable transport and cleanup.
+- Isolated qualification passed 724 Worktrees cases, including the existing
+  authentication suite against the extracted runner, and 80 report/Gateway/TLS
+  cases. Current-head CI and genuine approval remain required before merge.
+
+### 2026-11-09 - Native report-owner source qualification pending review
+
+- Implemented the reviewed #11681 contract under #11680 as an optional
+  GitHub.com-only source embedding. Reuse actual Worktrees configuration,
+  related-target and strict configured-account selection, the selected
+  CLI-store/authenticated-login observer and existing report normalization.
+  Selection workers and credential/provider children share one request budget;
+  absolute API routes avoid CLI auxiliary discovery and ambient routing.
+- Isolated Linux qualification passed 360 Worktrees cases and 73 report,
+  Gateway/client and TLS transport cases. The final adapter-specific suite
+  passes 15 cases, including exact configured store spelling for equivalent
+  scopes, policy replacement before publication, oversized captures and
+  original Gateway custody during delayed cleanup with and without disconnect.
+  These are new fixture resources, not live GitHub credential/provider proof.
+- The actor-free required packet passed 4,665 cases against the initial source
+  implementation revision; the later account/publication refinements have their
+  focused native qualification. Retain the required current-head CI and genuine
+  review gates before merge. No installed loader, HTTP override fields, new
+  protocol generation, default native behavior or operational enrollment changed.
+- Native Windows execution, other providers, large-report transport, retained
+  hosting and the broader Plan/Validation remain separate. The implementation
+  and its finite source issue are not complete before normal review and merge;
+  afterward return to the whole parent rather than finalizing this worktree.
+
+### 2026-11-09 - Native report-owner contract merged; implementation next
+
+- #11681 merged as `c3a404d2e61b6e50909fc13856a41a9bb4699d1e`
+  at 02:22 Pacific after genuine current-head Approval `5824491264`,
+  no inline findings and all three required CI gates green. Read the full
+  review body and native findings before managed completion; only the admitted
+  additional CODEOWNER exception applied.
+- Normal source reconciliation preserved its backup and the attribution-only
+  commit; merged contribution trailers are verified. No parent or source
+  worktree was finalized. #11680 remains open for its implementation and tests.
+- Returned to the canonical Plan/Validation; its wider acceptance remains open.
+  Next is the reviewed finite
+  GitHub.com native owner adapter with new isolated fixtures, not actual
+  credential acquisition, installed-host configuration, rollout or source
+  completion of the broader program.
 
 ### 2026-11-09 - Native report-owner source trace and proposal
 

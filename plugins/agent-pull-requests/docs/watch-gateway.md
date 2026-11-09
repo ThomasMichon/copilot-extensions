@@ -152,6 +152,11 @@ Constructing these labels does not authorize a read. The live owner checkpoint
 must enforce replacement/withdrawal and current permission. The synchronous
 collector receives `(operation, number, remaining)` and returns the original
 `(exit_code, complete_json_text)`; it owns actual transport/process cleanup.
+If the owner checkpoint performs blocking work, supply the optional
+`final_checkpoint` as a separate nonblocking permission check. Blocking
+selection checks run in the original tracked request task's awaited workers;
+the last event-loop check reuses the original deadline, admission and binding
+without launching a child or transferring cleanup custody.
 No executable, credential, account or endpoint is deserialized from a request.
 
 Every request has exactly `{"binding": <expected ReplayBinding>, "request": ...}`.
@@ -177,7 +182,8 @@ means a valid exchange, including valid provider refusal/error reports;
 consumers must inspect `owner_exit`, `supported` and `error`. Null/false
 completeness and additive candidate evidence are preserved.
 
-The complete request/response must fit the current 32 KiB Gateway limit.
+The complete v1 request/response must fit the current 32 KiB caller-aware
+handler/report limit, independently of the channel's larger response ceiling.
 Oversized reports are unavailable, never truncated or persisted. Malformed
 input is 400, permission/expiry 403, binding mismatch 409, absent support 404,
 and unavailable owner/result 503. Exceptions return static diagnostics.
@@ -187,10 +193,55 @@ deadline loss prevents publication, while the existing Gateway retains its
 original task until synchronous collection and owned cleanup settle; drain may
 time out rather than falsely release custody.
 
-This is not installed HTTP adoption: native-command account/endpoint
-qualification, larger-report transport, retained hosting and live-provider
-proof remain separate. The [source CLI facade](cli-reference.md#source-report-facade)
-requires explicit host injection.
+The optional source adapter `native_report.NativeGitHubReport` supplies a
+Worktrees-backed resolver for GitHub.com only. A trusted host constructs it with
+an absolute `config_path`, the exact report `scope` (endpoint `github.com`) and
+its `context_id`, then passes `adapter.resolve` to `ReportReader`. Both source
+packages and their runtime dependencies must be available in the embedding
+interpreter; missing support refuses instead of invoking a native fallback.
+No default host installs or selects it.
+
+Each exchange re-resolves the explicit Worktrees configuration and strict
+repository account policy in caller-owned selection children. It requires a
+configured repository account or account-map entry, rejects legacy token
+commands/environment bindings, acquires that account's CLI-store entry even
+when active, and verifies its authenticated login before report reads. The
+exact repository entry takes precedence; checkout-free targets use only the
+owner's account-map entry, never another repository's account override. The
+same credential supplies absolute GitHub.com GraphQL and REST diff routes,
+without `gh pr diff`'s auxiliary discovery or ambient token/host overrides.
+Selection is rechecked before requests and publication. Configuration,
+credentials and provider children share the original finite execution/cleanup
+budget. Publication checks run in shielded, tracked workers rather than on the
+Gateway event loop; delayed cleanup retains the admitted request's custody and
+cannot publish a success. Malformed or unavailable contributing configuration
+and duplicate keys in explicit/global/drop-in sources refuse credential
+selection instead of dropping repository policy. A failed selection checkpoint
+or unavailable report transport remains unavailable even if a provider builder
+catches that failure; it cannot become a successful HTTP error-report exchange.
+Failed strict presence probes, including looping or dangling policy links, are not
+confirmed absence. This applies to global, repository and marketplace policy.
+Absent descendants require a readable first existing ancestor, so dangling
+policy-directory links cannot silently discard configuration.
+Missing, unusable or identity-mismatched enabled drop-in policy also refuses.
+Intentional plugin disable remains a confirmed inactive selection.
+Registry-derived anchor acquisition is strict as well: a failed anchor read
+cannot become checkout-free selection after a later account-registry read succeeds.
+Failed reads of established committed policy cannot select a divergent checkout;
+confirmed absence and successful same-source recovery remain supported.
+Policy-path absence requires a readable committed tree; unresolved refs/objects,
+a non-symbolic remote HEAD or an unavailable declared policy branch refuse.
+The existing exact-candidate tree probe runs only for an otherwise ambiguous
+empty batch, not as a repository crawl or network request. Provider
+access errors retain a sanitized native failed report and owner exit; transport
+and cleanup failures remain unavailable. Existing native commands and unselected
+providers are unchanged.
+
+This is not installed HTTP adoption: native Windows execution, larger-report
+transport, retained hosting and live-provider proof remain separate. Gitea,
+Azure DevOps and Enterprise endpoints are unsupported by this adapter, not
+alternate selections. The [source CLI facade](cli-reference.md#source-report-facade)
+still requires explicit host injection.
 
 ## Finite typed replay client
 
