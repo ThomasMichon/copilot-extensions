@@ -358,7 +358,8 @@ tests/test_pr_config_foreign_repo.py --test-file tests/test_pr_related_binding.p
 tests/test_lazy_dispatch.py --allow-explicit-tiers` packet exercises the
 declared optional association fact through actual private tracking files and
 current/frozen-prior parser processes. It covers canonical empty versus
-unknown/omitted evidence, scope/incarnation/reassignment, typed record state,
+unknown/omitted evidence, scope/incarnation/reassignment, typed record state
+(no recorded lifecycle or PR claim qualifies provider openness),
 shared fresh configuration acquisition, independent cached core facts,
 three-provider bindings and unchanged strict parsing. The existing passive
 snapshot supplies a separate effective endpoint; no test acquires real credentials,
@@ -395,6 +396,16 @@ and retirement of a blocked real point-read child on Escape, Refresh and
 deselection with no engine cleanup failure. It uses the same POSIX signal-0
 witness and skips Windows; it is source/process evidence, not installed or
 native job-object coverage.
+
+Manager's `--test-file tests/test_companion_pr_compat_process.py` packet runs
+the real Companion association/point-read caller through the engine-client
+subprocess path against the real Worktrees entry point (tracking location,
+status daemon, configuration and provider fetch replaced) and a frozen prior
+owner. It covers old/new caller-owner pairs, rollback before any snapshot, and
+actual snapshot payload construction through the real codec for open, landed,
+closed-unmerged, merged, pending, foreign, malformed, provider-error and
+oversized replies, with canonical writes and credential acquisition forbidden.
+It is POSIX source/process evidence, not installed or live acceptance.
 
 Worktrees' opt-in `--test-file tests/test_handoff_head_observation.py --test-file
 tests/test_lazy_dispatch.py --test-file tests/test_session_lifecycle.py
