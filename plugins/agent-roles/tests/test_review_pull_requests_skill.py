@@ -109,7 +109,9 @@ def test_skill_frontmatter_layout_and_discoverability() -> None:
     assert f"skills/{SKILL.name}/SKILL.md" in _read(PLUGIN / "README.md")
 
 
-@pytest.mark.parametrize("name", ["review-pull-requests", "monitor-agent-fleet", "triage-issue-backlog"])
+@pytest.mark.parametrize("name", [
+    "review-pull-requests", "monitor-agent-fleet", "triage-issue-backlog", "managing-agent-topology",
+])
 def test_all_links_resolve_and_every_companion_is_reachable(name: str) -> None:
     skill = PLUGIN / "skills" / name
     linked: set[Path] = set()

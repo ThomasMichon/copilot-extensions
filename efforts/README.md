@@ -19,7 +19,7 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Portable Agent Topology](active/portable-agent-topology/README.md) | Draft; portable dispatcher vision and contract before implementation | #11715; payload-only agent-roles extension, native owners retained, no live fleet activation |
+| [Portable Agent Topology](active/portable-agent-topology/README.md) | Active; reviewed plan merged, offline dispatcher implementation qualified; implementation review and delivery remain | #11715; payload-only agent-roles extension, native owners retained, no live fleet activation |
 | [Launch Observation Regressions](active/launch-observation-regressions/README.md) | Draft; caller audit and readiness-discovery correction proposal before implementation | #11722; preserves #11564/#11718 mux owners, admission and operational holds; no rollout |
 | [Derived Disk Hygiene](active/derived-disk-hygiene/README.md) | Active; bytecode, scratch and claim-engine slices merged; guided cleanup delivery, producer/lock integration and rollout observation remain | #10968/#10965/#10966/#10967; independent per-track PRs, no automatic finalize deletion or unapproved cleanup/rollout |
 | [Bridge Delivery Status](active/bridge-delivery-status/README.md) | Draft; model-facing receipt and coalesced host subscription proposal before implementation | #11448; preserves #6394 inbox, #11445 registration and #11298 roster owners; no rollout or peer-session repair |
