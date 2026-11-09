@@ -47,9 +47,11 @@ branches, supported scripts, documentation examples and actual consumers.
 Reconcile new upstream operations rather than freezing this table as a second
 parser reference.
 
-The proposed [existing-owner HTTP report slice](owner-report-read.md)
+The [existing-owner HTTP report contract](owner-report-read.md), reviewed in #11665,
 selects a bounded authenticated thread/diff exchange, not workspace generation
-acquisition or installed client migration. Native account-binding adoption,
+acquisition or installed client migration. Its optional source embedding and
+client preserve complete native reports and acquisition exits with finite
+Gateway task/drain custody. Native account-binding adoption,
 larger reports and complete HTTP/provider qualification remain open.
 
 ## Operation-by-operation proof

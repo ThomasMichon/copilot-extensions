@@ -300,10 +300,10 @@ checkout-free reader over the existing provider primitive while preserving
 tracked `pr-diff`, honest ADO refusal and unknown completeness/revision
 evidence. Finite receiver/frontend source merged in #11661; installed,
 live-provider and workspace generation acceptance remain independent.
-The proposed [existing-owner HTTP report boundary](owner-report-read.md)
+The [existing-owner HTTP report boundary](owner-report-read.md), reviewed in #11665,
 adds a read-only thread/diff exchange through the existing authenticated
 Gateway without treating raw reports as principal-bound generations.
-Review precedes implementation; large-report, native-command adopter,
+The optional source embedding follows that reviewed contract; large-report, native-command adopter,
 installed and live-provider acceptance remain separate.
 
 - [x] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence)
@@ -1361,6 +1361,27 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-11-09 - Existing-owner report source qualification
+
+- Implemented the reviewed #11665 read-only boundary under #11664:
+  fixed admitted owner/scope resolution, live checkpoints, finite synchronous
+  collection, optional existing Gateway routes, SDK client and strict source
+  host-injected facade. Whole native reports and original owner exits remain
+  distinct from principal-bound review generations.
+- Contained Linux qualification passed 210 tests; five Windows-only native
+  CLI cases skipped. Actual TLS/SDK requests and policy/channel/cancellation
+  controls retain the original Gateway task through delayed collector cleanup.
+  Real Worktrees builders/providers use only synthetic GitHub/Gitea/ADO IO;
+  ADO unified diff remains unsupported. Full encoded exchanges above 32 KiB
+  refuse instead of truncating or persisting report bodies.
+- Fatal lint, install-contract, headless-launch, module-size and docs-consistency guards
+  passed. The whole enforced typecheck stopped on an unprepared unrelated
+  checker environment, not a reported source diagnostic. No installed/native
+  binding, live provider, host activation or parent acceptance is claimed.
+  Drive the implementation through normal review/CI/merge, then reconcile the
+  complete root Plan/Validation and continue the remaining source parity work.
+
+- [2026-11-09 - HTTP report contract merged; implementation next](journal/2026/11.09%20HTTP%20report%20contract%20merged.md)
 - [2026-11-09 - Native diff-read source merged; full parent return](journal/2026/11.09%20Native%20diff-read%20source%20merged.md)
 
 ### 2026-11-09 - Native diff-read source qualification

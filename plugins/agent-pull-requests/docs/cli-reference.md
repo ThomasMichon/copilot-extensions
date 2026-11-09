@@ -91,6 +91,26 @@ context remain unmodified; no body is added to a persistent watch cache.
 An incompatible or rolled-back runtime yields an explicit error without
 fallback or another invocation.
 
+## Source report facade
+
+The optional [existing-owner report API](watch-gateway.md#optional-existing-owner-report-reads)
+has a source embedding facade:
+
+```text
+report capabilities
+report threads --request <bounded-json-file-or-stdin-dash>
+report diff --request <bounded-json-file-or-stdin-dash>
+```
+
+Invoke `agent_pull_requests.__main__.main(argv, report_host=client)` from the
+actual embedding with its selected `ReportClient`. Read JSON contains only
+`number` and `budget_seconds`. It discovers the contract before reading and
+emits the whole validated exchange. Exit 0 requires owner exit 0, supported
+acquisition and no report error. Without a host it returns unavailable; it
+does not discover an ambient Gateway, executable, credential or account.
+This is not an ordinary installed HTTP client migration. Existing native
+`threads`/`diff`, workspace and watch syntax remain unchanged.
+
 ## `status`
 
 ```text
