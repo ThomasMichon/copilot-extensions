@@ -109,6 +109,9 @@ def _read(args: argparse.Namespace, prefix: list[str]) -> tuple[int, dict]:
 def run(
     args: argparse.Namespace, *, prefix_factory: Callable[[], list[str]] | None = None,
 ) -> int:
+    if args.command == "threads":
+        from .native_threads import run as threads_run
+        return threads_run(args, prefix_factory)
     if args.command == "cancel-creation":
         from .native_creation_cancel import run as cancellation_run
         code, payload = cancellation_run(args, prefix_factory)

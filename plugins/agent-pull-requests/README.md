@@ -11,6 +11,8 @@ commands into a separate, API-first surface:
 
 - `agent-worktrees` remains unchanged and fully supported.
 - `status`, `create`, `merge`, and `wait` are all implemented.
+- Native [on-demand thread reads](docs/cli-reference.md#native-threads)
+  reuse the existing configured Worktrees provider owner without a target checkout.
 
 ## Installation
 
