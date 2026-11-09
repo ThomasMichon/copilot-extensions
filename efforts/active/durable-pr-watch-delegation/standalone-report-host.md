@@ -4,8 +4,8 @@ Back to the [canonical effort](README.md), [native report owner](native-report-o
 and [size-qualified response contract](bounded-report-response.md).
 
 **Agent-recommended source contract reviewed in #11705 under #11692 and #6007.
-Finite source implementation is qualified below; ordinary review/CI/merge is
-still open. This is not enrollment or rollout authority.**
+Finite source implementation and qualification merged in #11712.
+This is not enrollment or rollout authority.**
 This closes part of
 [one service contract](../../../visions/plugins/agent-pull-requests/README.md#cli-through-one-service-contract)
 and follows
@@ -128,7 +128,7 @@ credentials or retained hosts. Evidence and limits are recorded in the
 - [x] Default/prior/new/rollback peers and fresh fixture provision/restart:
   unchanged store/replay identities and workspace rules, no automatic migration,
   implicit dependency install or second dispatch.
-- [ ] Required affected tests, admitted strict service typing, packaging controls,
+- [x] Required affected tests, admitted strict service typing, packaging controls,
   ordinary review/CI/merge and parent reconciliation. Record Linux source
   evidence separately from native Windows, installed hosting, live providers,
   retained-host/container qualification and complete CLI/HTTP/Dispatch parity.
