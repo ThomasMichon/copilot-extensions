@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import Callable
 import hashlib
 import importlib
 import json
@@ -91,23 +92,33 @@ def verify_prepared(payload: Path) -> None:
         raise ValueError("prepared candidate does not match its recorded runtime source")
 
 
-def prepare(source: Path, output: Path) -> Path:
+def prepare(
+    source: Path, output: Path, *, on_file: Callable[[Path, Path], None] | None = None,
+) -> Path:
     payload = payload_path(source)
     if output.resolve().is_relative_to(payload):
         raise ValueError("prepared scenario must be outside its source")
     output = private_directory(output)
     manager = load_manager(payload)
     before = runtime_hashes(payload)
-    manager["self_install"]._copy_payload(payload, output / "payload")
+    observer = (
+        {"on_file": lambda relative, path: on_file(Path("payload") / relative, path)}
+        if on_file is not None else {}
+    )
+    manager["self_install"]._copy_payload(payload, output / "payload", **observer)
     for path in HERE.iterdir():
         if path.suffix in {".py", ".json", ".sh", ".md"}:
             shutil.copy2(path, output / path.name)
+            if on_file is not None:
+                on_file(Path(path.name), output / path.name)
     if runtime_hashes(payload) != before or runtime_hashes(output / "payload") != before:
         raise AssertionError("source or prepared runtime changed during materialization")
     (output / "prepared.json").write_text(
         json.dumps({"schema": 1, "runtime_hashes": before}, sort_keys=True, indent=2),
         encoding="utf-8",
     )
+    if on_file is not None:
+        on_file(Path("prepared.json"), output / "prepared.json")
     return output
 
 

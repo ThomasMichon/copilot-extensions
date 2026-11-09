@@ -39,6 +39,34 @@ def test_prepare_selfcontained_candidate_without_source_runtime_changes(tmp_path
     ))
 
 
+def test_preparation_observes_entire_final_closure(tmp_path: Path) -> None:
+    repository = Path(__file__).resolve().parents[2]
+    scenario = repository / "tools/clean-room/scenarios/manager-automatic-updates"
+    script = """
+import hashlib, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import fixtures
+observed = {}
+def produced(relative, actual):
+    observed[relative.as_posix()] = hashlib.sha256(actual.read_bytes()).hexdigest()
+output = fixtures.prepare(Path(sys.argv[2]), Path(sys.argv[3]), on_file=produced)
+actual = {
+    path.relative_to(output).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+    for path in output.rglob("*") if path.is_file()
+}
+assert actual == {name: observed[name] for name in actual}
+assert "prepared.json" in actual
+"""
+    completed = subprocess.run(
+        [sys.executable, "-B", "-c", script, str(scenario), str(repository),
+         str(tmp_path / "observed")],
+        capture_output=True, text=True, timeout=45, check=False,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
 @pytest.fixture
 def windows_probe(monkeypatch: pytest.MonkeyPatch) -> tuple:
     scenario = Path(__file__).resolve().parents[2] / "tools/clean-room/scenarios/manager-automatic-updates"

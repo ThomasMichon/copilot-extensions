@@ -38,6 +38,7 @@ import hashlib
 import json
 import re
 import shutil
+from collections.abc import Callable
 from pathlib import Path
 
 try:  # tomllib is stdlib on 3.11+; tomli backports it for this repo's
@@ -126,7 +127,20 @@ def _remove_path(p: Path) -> None:
         p.unlink()
 
 
-def _materialize_one_pointer(pointer_path: Path, *, checkout_root: Path, canonical_root: Path) -> str:
+def _observed_copy(on_file: Callable[[Path], None] | None) -> Callable:
+    def copy(origin: str, destination: str) -> str:
+        result = shutil.copy2(origin, destination)
+        if on_file is not None:
+            on_file(Path(destination))
+        return result
+
+    return shutil.copy2 if on_file is None else copy
+
+
+def _materialize_one_pointer(
+    pointer_path: Path, *, checkout_root: Path, canonical_root: Path,
+    on_file: Callable[[Path], None] | None = None,
+) -> str:
     """Expand a single directory/lib pointer at ``pointer_path`` from
     ``canonical_root``, returning one log line."""
     pointer = json.loads(pointer_path.read_text(encoding="utf-8"))
@@ -224,12 +238,14 @@ def _materialize_one_pointer(pointer_path: Path, *, checkout_root: Path, canonic
 
     _remove_path(dst_sub)
     if src_sub.is_dir():
-        shutil.copytree(src_sub, dst_sub, ignore=shutil.ignore_patterns(".test-runs"))
+        shutil.copytree(src_sub, dst_sub, ignore=shutil.ignore_patterns(".test-runs"),
+                        copy_function=_observed_copy(on_file))
 
     if refresh_tests:
         _remove_path(dst_tests_sub)
         if tests_sub.is_dir():
-            shutil.copytree(tests_sub, dst_tests_sub, ignore=shutil.ignore_patterns(".test-runs"))
+            shutil.copytree(tests_sub, dst_tests_sub, ignore=shutil.ignore_patterns(".test-runs"),
+                            copy_function=_observed_copy(on_file))
 
     if canon_pp.exists() and copy_pp.exists():
         m = _VERSION_RE.search(canon_pp.read_text(encoding="utf-8"))
@@ -237,16 +253,23 @@ def _materialize_one_pointer(pointer_path: Path, *, checkout_root: Path, canonic
             text = copy_pp.read_text(encoding="utf-8")
             copy_pp.write_text(_VERSION_RE.sub(rf"\g<1>{m.group(2)}\g<3>", text, count=1),
                                encoding="utf-8")
+            if on_file is not None:
+                on_file(copy_pp)
 
     pointer_path.unlink()
     return f"OK   {lib_copy_dir} <- {source_rel}"
 
 
-def materialize_libs_dir(libs_dir: Path, *, canonical_root: Path) -> list[str]:
+def materialize_libs_dir(
+    libs_dir: Path, *, canonical_root: Path,
+    on_file: Callable[[Path], None] | None = None,
+) -> list[str]:
     """Expand every directory/lib pointer directly under a single copied-out
     ``libs/`` dir, from ``canonical_root``."""
     return [
-        _materialize_one_pointer(pointer_path, checkout_root=libs_dir, canonical_root=canonical_root)
+        _materialize_one_pointer(
+            pointer_path, checkout_root=libs_dir, canonical_root=canonical_root, on_file=on_file,
+        )
         for pointer_path in find_pointers_in_libs_dir(libs_dir)
     ]
 
@@ -390,7 +413,8 @@ def _uv_source_entry_pattern(name: str, raw_path: str) -> re.Pattern[str]:
 
 
 def _rewrite_uv_editable_source_entry(
-    *, pyproject: Path, name: str, raw_path: str, lib: str
+    *, pyproject: Path, name: str, raw_path: str, lib: str,
+    on_file: Callable[[Path], None] | None = None,
 ) -> str | None:
     """Mirrors ``materialize_main.py``'s identically-named helper -- see
     its docstring for the rewrite contract."""
@@ -407,6 +431,8 @@ def _rewrite_uv_editable_source_entry(
     )
     assert count == 1  # already confirmed via the preflight search() above
     pyproject.write_text(text[:start] + new_table_text + text[end:], encoding="utf-8")
+    if on_file is not None:
+        on_file(pyproject)
     return None
 
 
@@ -453,6 +479,7 @@ def _lib_tree_matches(canonical: Path, copy_dir: Path) -> bool:
 
 def _materialize_one_uv_editable_ref(
     *, canonical: Path, dest_lib_dir: Path, pyproject: Path, name: str, raw_path: str, lib: str,
+    on_file: Callable[[Path], None] | None = None,
 ) -> str:
     """Mirrors ``materialize_main.py``'s identically-named helper -- see
     its docstring for the preflight-then-copy-then-rewrite contract."""
@@ -474,9 +501,10 @@ def _materialize_one_uv_editable_ref(
     if pattern.search(text[start:end]) is None:
         return f"SKIP {pyproject}: could not find {name}'s uv-editable entry to rewrite"
 
-    shutil.copytree(canonical, dest_lib_dir, ignore=_uv_editable_ignore)
+    shutil.copytree(canonical, dest_lib_dir, ignore=_uv_editable_ignore,
+                    copy_function=_observed_copy(on_file))
     error = _rewrite_uv_editable_source_entry(
-        pyproject=pyproject, name=name, raw_path=raw_path, lib=lib
+        pyproject=pyproject, name=name, raw_path=raw_path, lib=lib, on_file=on_file,
     )
     if error is not None:
         return error
@@ -484,7 +512,8 @@ def _materialize_one_uv_editable_ref(
 
 
 def _rewrite_nested_uv_editable_entry(
-    *, pyproject: Path, name: str, raw_path: str
+    *, pyproject: Path, name: str, raw_path: str,
+    on_file: Callable[[Path], None] | None = None,
 ) -> str | None:
     """Mirrors ``materialize_main.py``'s identically-named helper -- see
     its docstring for why a NESTED entry (one belonging to a just-copied
@@ -503,11 +532,14 @@ def _rewrite_nested_uv_editable_entry(
     )
     assert count == 1  # already confirmed via the preflight search() above
     pyproject.write_text(text[:start] + new_table_text + text[end:], encoding="utf-8")
+    if on_file is not None:
+        on_file(pyproject)
     return None
 
 
 def _materialize_nested_uv_editable_refs(
     dest_lib_dir: Path, *, canonical_root: Path, dest_root: Path,
+    on_file: Callable[[Path], None] | None = None,
 ) -> tuple[list[str], set[str]]:
     """Mirrors ``materialize_main.py``'s identically-named function -- see
     its docstring for the full contract (PR #4372: a canonical lib such as
@@ -629,9 +661,10 @@ def _materialize_nested_uv_editable_refs(
                 where = str(nested_canonical) if stray == "." else f"{nested_canonical}/{stray}"
                 log.append(f"SKIP {nested_dest}: {where} is a symlink -- refusing")
                 continue
-            shutil.copytree(nested_canonical, nested_dest, ignore=_uv_editable_ignore)
+            shutil.copytree(nested_canonical, nested_dest, ignore=_uv_editable_ignore,
+                            copy_function=_observed_copy(on_file))
         error = _rewrite_nested_uv_editable_entry(
-            pyproject=dest_pyproject, name=nested_name, raw_path=nested_raw_path,
+            pyproject=dest_pyproject, name=nested_name, raw_path=nested_raw_path, on_file=on_file,
         )
         if error is not None:
             log.append(error)
@@ -644,6 +677,7 @@ def _materialize_nested_uv_editable_refs(
 def materialize_uv_editable_ref_into(
     *, source_consumer_dir: Path, dest_consumer_dir: Path, canonical_root: Path,
     dest_root: Path | None = None,
+    on_file: Callable[[Path], None] | None = None,
 ) -> list[str]:
     """Expand every `uv`-editable canonical-reference entry declared in
     ``source_consumer_dir``'s ``pyproject.toml`` into ``dest_consumer_dir``
@@ -739,7 +773,7 @@ def materialize_uv_editable_ref_into(
 
         if lib in materialized_libs:
             error = _rewrite_uv_editable_source_entry(
-                pyproject=pyproject, name=name, raw_path=raw_path, lib=lib
+                pyproject=pyproject, name=name, raw_path=raw_path, lib=lib, on_file=on_file,
             )
             log.append(error if error is not None else f"OK   {dest_lib_dir} <- {raw_path} (alias)")
             continue
@@ -749,7 +783,7 @@ def materialize_uv_editable_ref_into(
 
         result = _materialize_one_uv_editable_ref(
             canonical=canonical, dest_lib_dir=dest_lib_dir, pyproject=pyproject,
-            name=name, raw_path=raw_path, lib=lib,
+            name=name, raw_path=raw_path, lib=lib, on_file=on_file,
         )
         log.append(result)
         if result.startswith("OK"):
@@ -764,6 +798,7 @@ def materialize_uv_editable_ref_into(
             # "already exists" refusal.
             nested_log, nested_materialized = _materialize_nested_uv_editable_refs(
                 dest_lib_dir, canonical_root=canonical_root_r, dest_root=dest_root_r,
+                on_file=on_file,
             )
             log.extend(nested_log)
             materialized_libs.update(nested_materialized)

@@ -63,6 +63,24 @@ Preparation calls the actual `self_install._copy_payload` to materialize the
 candidate dependency closure. The output contains a self-contained `payload/`,
 the probe and its helpers. The rig does not mount the source checkout.
 
+Source-side callers may pass `fixtures.prepare(..., on_file=callback)` to
+collect closure digests during production. The synchronous callback receives
+`(output_relative_path, actual_file_path)` after each completed write, including
+materialized dependencies, rewritten manifests, the completion marker, scenario
+helpers and `prepared.json`. The actual file may still be in the installer's
+staging directory; retain relative names rather than those temporary paths.
+Repeated writes replace earlier observations. Removed pointer stubs are not a
+final roster: reconcile the final ordinary-file/directory roster before using
+the collected map. A callback failure aborts preparation/publication.
+
+The observer is optional and introduces no hashing or concurrency when omitted.
+It lets an owning verifier hash completed files while their bytes are warm,
+instead of rereading the entire closure after production. Such digest reuse is
+limited to that stationary producer lifecycle; later independent jobs still
+verify current bytes, links and the complete roster. Per-file hashing time
+overlaps the preparation span and must not be added to it. Native latency and
+the complete lifecycle acceptance remain separately measured, bounded gates.
+
 ```bash
 tools/clean-room/run.sh --no-token --name-suffix worker-probe \
   --scenario <private-scratch>/prepared-scenario run
