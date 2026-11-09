@@ -305,8 +305,8 @@ eligible units within the same or smaller budget, instead of accumulating them.
 - No fake or omitted admitted-unit evidence, or removal of byte integrity,
   signing, exact locks, source governance or publication authority.
 - No general end-to-end, actual-Git or multi-process integration-test portfolio
-  in promotion; only bounded configured-feed construction/launch and native
-  Windows Resume consumer qualification are exceptions.
+  in promotion; only bounded configured-feed construction/installed-lifecycle
+  and native Windows Resume consumer qualification are exceptions.
 - No implicit authorization for a main repair, stale overwrite, forced tag
   movement or change to independently governed control preservation.
 - No second release channel, competing publisher or separate client provenance
