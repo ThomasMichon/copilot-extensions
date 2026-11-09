@@ -598,6 +598,16 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [repository-boundary and fixture outcomes](<journal/2026/11.09 repository-boundary-and-fixture-outcomes.md>)
+record four further audited tracking folds: three into new OPEN #11678
+and two additional regression rows in existing OPEN #11674. Their six and
+sixteen acceptance rows remain unchecked, with all prior fixture rows and
+existing responsibilities preserved. Claimed #11629 remains untouched;
+#11610 has only partial candidate coverage; external #11664 completion
+receives no campaign credit. Two equal complete scans at 02:10:43 PST
+measure 849 whole OPEN, 510 original and 339 inflow issues, 120 above fixed
+729, with 1,055 audited dispositions. Every remaining parent gate stays open.
+
 The [canonical installer-fixture outcome](<journal/2026/11.09 canonical-installer-fixtures.md>)
 records two audited tracking folds into OPEN #11674. All six PowerShell cases,
 eight POSIX cases and three distinct POSIX failure classes remain planned,
