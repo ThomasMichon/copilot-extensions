@@ -310,10 +310,11 @@ The [selected native report-owner contract](native-report-owner.md), reviewed in
 merged in #11686 without changing legacy native authentication or implying
 host adoption. Large-report, native-platform, installed/live-provider and full
 CLI/HTTP acceptance remain separate.
-The [size-qualified response proposal](bounded-report-response.md) under #11692
+The [size-qualified response contract](bounded-report-response.md), reviewed in
+#11694 under #11692,
 reuses the existing 8 MiB channel while preserving current 32 KiB caller-aware
-handler/report defaults. Review its opt-in SDK prerequisite and parallel report
-profile before runtime expansion; no installed or provider acceptance is implied.
+handler/report defaults. Deliver its opt-in SDK prerequisite before the parallel
+report profile; no runtime, installed or provider acceptance is implied by review.
 
 - [x] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence)
   (merged in #10380; implementation, provider and adoption gates remain).
@@ -1387,6 +1388,8 @@ callback an implicit credential store.
 
 ## Journal
 
+- [2026-11-09 - Bounded SDK response owner qualified for source review](journal/2026/11.09%20Bounded%20SDK%20response%20owner.md)
+- [2026-11-09 - Size-qualified response contract reviewed; SDK owner first](journal/2026/11.09%20Size-qualified%20response%20contract.md)
 - [2026-11-09 - Native report-owner source merged; parent acceptance retained](journal/2026/11.09%20Native%20report%20owner%20source.md)
 
 ### 2026-11-09 - Native report boundary corrections
