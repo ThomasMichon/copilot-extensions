@@ -304,7 +304,9 @@ optional send, not shell advisory evaluation.
 
 The receiver rechecks managed-session membership, current published admission,
 governance and shutdown under the original monitor state lock, with at most
-50 ms lock contention. It rejects batches and non-native tools. Native targets
+50 ms lock contention. It rechecks the wire deadline after acquiring that lock;
+an expired notice cannot invoke the mutation callback or renew demand.
+It rejects batches and non-native tools. Native targets
 come from the guard-owned `tool_call_forms.write_targets`, including every
 structured edit and both patch-move endpoints. Relative paths use the event
 workspace. Unknown targets retain the original workspace invalidation;
