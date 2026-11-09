@@ -182,7 +182,8 @@ means a valid exchange, including valid provider refusal/error reports;
 consumers must inspect `owner_exit`, `supported` and `error`. Null/false
 completeness and additive candidate evidence are preserved.
 
-The complete request/response must fit the current 32 KiB Gateway limit.
+The complete v1 request/response must fit the current 32 KiB caller-aware
+handler/report limit, independently of the channel's larger response ceiling.
 Oversized reports are unavailable, never truncated or persisted. Malformed
 input is 400, permission/expiry 403, binding mismatch 409, absent support 404,
 and unavailable owner/result 503. Exceptions return static diagnostics.

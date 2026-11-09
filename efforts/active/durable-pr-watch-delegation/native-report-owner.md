@@ -3,8 +3,8 @@
 Back to the [existing-owner report contract](owner-report-read.md) and
 [canonical effort](README.md).
 
-**Contract reviewed in #11681 under #11680; source implementation pending review,
-not installed support.**
+**Contract reviewed in #11681; finite optional source merged in #11686 under
+#11680. Installed hosting and live-provider acceptance remain separate.**
 This agent-recommended slice closes part of
 [one service contract](../../../visions/plugins/agent-pull-requests/README.md#cli-through-one-service-contract).
 It follows the existing
@@ -109,21 +109,49 @@ Review this proposal before runtime expansion. Then implement and qualify the
 finite source adapter; ordinary native commands and default hosts keep their
 current behavior. New isolated fixtures, not operator credentials, prove:
 
-- [ ] Actual target/configuration and strict configured-account resolution;
+- [x] Actual target/configuration and strict configured-account resolution;
   neutral CWD, distinct caller/target, ambiguity, account-map changes, wrong
   provider/endpoint and rejected legacy credential bindings before acquisition.
-- [ ] Actual selected-store acquisition and authenticated account matching,
+- [x] Actual selected-store acquisition and authenticated account matching,
   including active-account mismatch, missing/empty/failed credentials, hostile
   ambient routing and credential replacement without fallback or body reads.
-- [ ] Existing Worktrees thread/diff builders through the actual scoped provider
+- [x] Existing Worktrees thread/diff builders through the actual scoped provider
   and process seams; complete nested/additive reports, lossless text, unknown
   completeness, native failures and owner-exit disagreement remain truthful.
-- [ ] One budget and live binding across configuration, credential and provider
+- [x] One budget and live binding across configuration, credential and provider
   stages; withdrawal, timeout, disconnect and delayed cleanup retain original
   task custody without later requests or publication.
-- [ ] Optional old/new/rollback behavior through the real Gateway/client seam;
+- [x] Optional old/new/rollback behavior through the real Gateway/client seam;
   unsupported providers, default-host refusal, unchanged native/workspace/watch
   controls and no retained report/credential data or mutation.
-- [ ] Record source and platform evidence separately from installed hosting,
+- [x] Record source and platform evidence separately from installed hosting,
   live GitHub credentials, Gitea/ADO/Enterprise, large-report transport and full
   CLI/HTTP acceptance. Return to the parent rather than closing it on this leaf.
+
+### Finite source evidence
+
+The optional `NativeGitHubReport` composes actual configuration, strict
+repository-account selection, explicit CLI-store acquisition, authenticated
+login matching and pinned existing-provider reads under one original request
+budget and cleanup task. It adds no installed loader or default-host selection.
+
+Contained Linux qualification includes the final 97-case target/committed-policy
+packet and the 4,665-case actor-free packet at the approved implementation head.
+Earlier overlapping source packets cover 88 report/Gateway/TLS cases and 22
+actual native-adapter cases. These use new fixture state and synthetic
+credentials/provider responses, not an operator account or retained host.
+Current-head review and required CI passed before the source merge.
+
+Strict acquisition refuses unavailable policy, failed registry-derived anchors,
+duplicate keys, unresolved committed Git state and unusable policy links.
+Configured account spelling is retained without borrowing sibling identities.
+Both publication handoffs retain off-loop selection and original cleanup
+custody, followed by a lightweight final deadline/permission/binding check.
+Provider errors remain native reports; unavailable checkpoints and transport
+cannot be normalized into HTTP success.
+
+Native Windows execution, installed packaging/hosting, live GitHub credentials,
+Gitea/ADO/Enterprise, large-report transport and complete CLI/HTTP acceptance
+remain at their canonical parent gates. See the
+[source merge journal](journal/2026/11.09%20Native%20report%20owner%20source.md)
+and [canonical Plan/Validation](README.md).
