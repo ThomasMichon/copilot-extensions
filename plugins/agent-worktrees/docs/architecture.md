@@ -2784,7 +2784,7 @@ focused).
 *group* becomes **one** native container widget = **one tab-stop**, with the arrow
 keys moving *within* it -- never one tab-stop per item. Textual's list widgets are
 each a tab-group by construction: `OptionList` (single-select menus), `SelectionList`
-(multi-select **checkbox lists** -- the New-worktree options `Bare`/`No Mux`/`Local
+(multi-select **checkbox lists** -- the New-worktree options `Anchor repo`/`No Mux`/`AHP`/`Local
 model` and the Clean/Sync scope buckets, both hand-rolled in `ScopeDlgScreen`
 today), and `RadioSet` (pick-exactly-one). Only a *heterogeneous* group the native
 lists don't cover (a `Confirm`/`Cancel` button pair; later, the main-screen chrome)
@@ -2854,7 +2854,7 @@ genuine judgement call; live operator feedback on real data is the tie-breaker.
 
 **NF1 slice 3 -- the checkbox dialogs -> `SelectionList` + the `FocusGroup`
 primitive.** `ScopeDlgScreen` (shared by Clean/Sync scope and the New-worktree
-options `Bare`/`No Mux`/`Local model`/`Anchor repo`) was the picker's genuine
+options `Anchor repo`/`No Mux`/`AHP`/`Local model`) was the picker's genuine
 **multi-select checkbox list**, hand-rolled as a `section`/`idx`/`bidx` cursor over
 a static `Panel`. It now composes a native Textual **`SelectionList`** for the
 toggles (one tab-stop; arrow to move, Space to toggle -- the framework owns focus +

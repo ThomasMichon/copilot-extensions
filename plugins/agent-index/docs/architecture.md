@@ -440,6 +440,27 @@ unapplied v2 acquisition; manual journal deletion is not a supported recovery pa
 Pending work must finish through a journal-capable engine before rolling back
 to an older engine; old runtimes do not implement this recovery contract.
 
+Successful application also records the latest completed cursor for the exact
+canonical acquisition family in `IndexState.completed_family_cursors`. It is
+published in the same atomic JSON replacement as the alias cursor, after store
+application; failed application/publication restores both in-memory values.
+After pending work has replayed, an existing alias whose cursor differs from
+that family's completed cursor refuses incremental acquisition and requests an
+explicit full reindex. For example, alias one at A cannot apply a net A..C
+delta after alias two completed B: a file changed in B and reverted in C could
+otherwise remain incorrectly stored at B. The engine does not copy another
+alias's cursor or account scope, start automatic repair, or clear pending work.
+Equal-cursor aliases and independent families retain their existing behavior.
+
+The family map is additive and optional when loading older state; its absence
+does not prove historical alias consistency. Older writers can omit it, so this
+is a participating-reader repair rule, not mixed-generation source ownership.
+It compares exact-family cursor values, not ancestor/descendant publication or
+mutations that preserve a polling cursor. The existing pending-refresh journal
+continues to own hinted changes. Acquisition-through-checkpoint exclusion,
+source-GC coordination and surviving immutable workers remain the separate
+durable source-lock work in #4220.
+
 When a presented file misses its complete fingerprint, chunk/model selection
 uses derived `embedding_coverage` receipts in the same path-index database.
 Each receipt binds a physical model table and chunk ID to the raw embedding
