@@ -1,0 +1,9 @@
+{
+  "comment": "Measure parsed Azure DevOps acquisition records separately from metadata and HTTP purposes",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
