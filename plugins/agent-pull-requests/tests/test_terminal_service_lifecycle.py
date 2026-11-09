@@ -248,6 +248,7 @@ def test_explicit_lifecycle_joins_disconnected_reads_before_retirement_and_reope
 
             service = service_for(operations, binding)
             await service.start()
+            await wait_for(lambda: service.status()["ready"])
             ack = await service.gateway.handle(replay_request("acknowledge", {
                 "request_id": "terminal-original", "issued_at": issued,
                 "registration_id": receipt["registration_id"], "event_id": pending[0]["event_id"],
