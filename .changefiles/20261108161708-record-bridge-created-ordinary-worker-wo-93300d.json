@@ -1,8 +1,12 @@
 {
-  "comment": "Record Bridge-created ordinary worker worktrees as created so terminal conclusion releases them",
+  "comment": "Release Bridge-created ordinary worker worktrees: record created ownership and conclude them with a new bridge-creation policy proven by the retained Bridge creation nonce",
   "changes": [
     {
       "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
       "type": "patch"
     }
   ]

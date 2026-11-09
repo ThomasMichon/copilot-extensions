@@ -260,6 +260,7 @@ def _default_attempt_conclusion(
     reservation_key: str,
     driver: str,
     *, project: str | None = None, worktree_path: str | None = None,
+    creation_nonce: str | None = None,
 ) -> dict:
     from . import embody
 
@@ -268,7 +269,7 @@ def _default_attempt_conclusion(
         session,
         reservation_key,
         owner=driver,
-        project=project, worktree_path=worktree_path,
+        project=project, worktree_path=worktree_path, creation_nonce=creation_nonce,
     )
 
 

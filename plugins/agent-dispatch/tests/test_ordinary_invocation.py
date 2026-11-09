@@ -52,6 +52,10 @@ def test_bridge_created_worktree_records_created_ownership(intent, creation, exp
     written = record_created_agent(queue, reservation.key, task_generation=task.generation,
                                    agent_info=info, startup_invocation=invocation)
     assert (written.worktree_ownership, written.creating_host) == expected
+    from agent_dispatch.supervisor import _bridge_creation_nonce
+    retained = asdict(queue.get_reservation(reservation.key))
+    assert _bridge_creation_nonce(retained) == "original-nonce"
+    assert _bridge_creation_nonce({**retained, "worktree": "other"}) is None
 
 
 def test_trace_distinguishes_local_bytes_from_sorted_retained_values(intent, tmp_path, monkeypatch):

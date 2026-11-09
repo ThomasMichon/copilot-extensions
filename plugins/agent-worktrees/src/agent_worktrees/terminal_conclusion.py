@@ -20,6 +20,10 @@ from . import terminal_pair_progress
 
 DISPOSABLE_CLI_POLICY = "disposable-cli"  # Historical wire name; interface-neutral.
 DISPATCH_ATTEMPT_POLICY = "dispatch-attempt"
+# A worker workspace created by agent-bridge (which holds no dispatch
+# authority, so the record carries no ``dispatch_attempt``) is proven by the
+# exact creation nonce the creator retained from that creation.
+BRIDGE_CREATION_POLICY = "bridge-creation"
 
 def _normalized(path: str | Path) -> str:
     return os.path.normcase(os.path.normpath(str(path)))
@@ -85,6 +89,19 @@ def _save_session_conclusion(
         "action": "already-concluded" if already else "concluded",
         "session": session_id,
     }, not already
+
+
+def _bridge_creation_reason(
+    record: tracking.WorktreeRecord, creation_nonce: str | None,
+) -> str | None:
+    """Skip reason unless ``record`` is the exact Bridge-created incarnation."""
+    if record.dispatch_attempt is not None:
+        return "dispatch-provenance-present"
+    if not creation_nonce:
+        return "creation-identity-missing"
+    if not record.creation_nonce or record.creation_nonce != creation_nonce:
+        return "creation-nonce-mismatch"
+    return None
 
 
 def _dispatch_ownership_confirmed(
@@ -568,6 +585,7 @@ def conclude_disposable_worktree(
     owner: str,
     policy: str,
     reservation_key: str | None = None,
+    creation_nonce: str | None = None,
 ) -> dict[str, Any]:
     """Prime one exact disposable worktree for the existing managed GC.
 
@@ -575,7 +593,7 @@ def conclude_disposable_worktree(
     failures raise so a higher layer can distinguish a failed conclusion from a
     deliberate preservation decision.
     """
-    if policy not in {DISPOSABLE_CLI_POLICY, DISPATCH_ATTEMPT_POLICY}:
+    if policy not in {DISPOSABLE_CLI_POLICY, DISPATCH_ATTEMPT_POLICY, BRIDGE_CREATION_POLICY}:
         raise ValueError(f"unsupported terminal conclusion policy: {policy!r}")
 
     record_path = Path(record_path)
@@ -617,6 +635,11 @@ def conclude_disposable_worktree(
                     "tracking record identity changed during conclusion"
                 )
             if reason := _identity_reason(record, record_path):
+                result.update(action="skipped", reason=reason)
+                return result
+            if policy == BRIDGE_CREATION_POLICY and (
+                reason := _bridge_creation_reason(record, creation_nonce)
+            ):
                 result.update(action="skipped", reason=reason)
                 return result
             if policy == DISPATCH_ATTEMPT_POLICY:
@@ -837,6 +860,11 @@ def conclude_disposable_worktree(
             if reason := _identity_reason(record, record_path):
                 result.update(action="skipped", reason=reason)
                 return result
+            if policy == BRIDGE_CREATION_POLICY and (
+                reason := _bridge_creation_reason(record, creation_nonce)
+            ):
+                result.update(action="skipped", reason=reason)
+                return result
             if live_reason := _session_is_live(record):
                 result.update(action="skipped", reason=live_reason)
                 return result
@@ -954,6 +982,7 @@ def conclude_disposable_worktree(
 
 
 __all__ = [
+    "BRIDGE_CREATION_POLICY",
     "DISPATCH_ATTEMPT_POLICY",
     "DISPOSABLE_CLI_POLICY",
     "conclude_disposable_worktree",

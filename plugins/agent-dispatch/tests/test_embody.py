@@ -146,6 +146,30 @@ def test_conclude_dispatch_attempt_requests_exact_managed_removal(monkeypatch):
     assert result["action"] == "removed"
 
 
+def test_conclude_dispatch_attempt_proves_bridge_creation_by_nonce(monkeypatch):
+    calls = []
+    monkeypatch.setattr(embody, "resolve_worktree", lambda *_a, **_k: {
+        "project": "widgets", "path": "/fixture/wt-review",
+    })
+    monkeypatch.setattr(
+        embody, "_agent_worktrees_launch_prefix", lambda: ["/usr/bin/agent-worktrees"]
+    )
+    monkeypatch.setattr(
+        embody.subprocess, "run",
+        lambda cmd, **_kwargs: calls.append(cmd)
+        or _completed('{"action":"removed","managed_gc_eligible":false}'),
+    )
+
+    embody.conclude_dispatch_attempt(
+        "wt-review", None, "dispatch-task:task-1:1", owner="ordinary-bridge",
+        project="widgets", worktree_path="/fixture/wt-review", creation_nonce="nonce-a",
+    )
+
+    assert calls[0][4:10] == [
+        "--worktree", "wt-review", "--policy", "bridge-creation", "--creation-nonce", "nonce-a",
+    ]
+
+
 def _conclusion_retry_cli(monkeypatch, rows, record=('{"ok": false}', 1)):
     calls = []
 

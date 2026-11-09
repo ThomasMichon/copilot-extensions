@@ -364,16 +364,23 @@ def conclude_dispatch_attempt(
     timeout: float = 30.0,
     project: str | None = None,
     worktree_path: str | None = None,
+    creation_nonce: str | None = None,
 ) -> dict:
-    """Safely conclude one provenance-verified dispatch-created worktree."""
+    """Safely conclude one provenance-verified dispatch-created worktree.
+
+    A Bridge-created worker workspace carries no dispatch allocation record, so
+    ``creation_nonce`` (retained from Bridge's creation facts) proves it instead.
+    """
+    proof = (
+        ["--policy", "bridge-creation", "--creation-nonce", creation_nonce]
+        if creation_nonce
+        else ["--policy", "dispatch-attempt", "--reservation", reservation_key]
+    )
     args = [
         "conclude-disposable",
         "--worktree",
         worktree,
-        "--policy",
-        "dispatch-attempt",
-        "--reservation",
-        reservation_key,
+        *proof,
         "--owner",
         owner,
         "--remove",
