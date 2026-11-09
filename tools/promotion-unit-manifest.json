@@ -4698,7 +4698,7 @@
         "worktree-manager/src/worktree_manager/engine_acquisition_budget.py": "8184f8974fb1cacb06cdbaeb75bbe4a8995c813a5356e164f362e08da513085d",
         "libs/update-driver/src/update_driver/core.py": "2b997eb1a740a7abf63700bf90cbd9cb8971205470c4cdca8b0f6adc378388ba",
         "libs/update-driver/src/update_driver/authority.py": "5e1604f05fd7233be00a5b15241d54f4fec504e8260d11fca6df8da31bcf7b13",
-        "libs/update-driver/src/update_driver/_invocation.py": "3c818f51690f9fec0cc28b46fcd824ddb7cbaa327e2cf0eac287409d6bb29be1",
+        "libs/update-driver/src/update_driver/_invocation.py": "6349eb9a949313b239461fe5f3fd053afc354983dca8f3b653441cb08ba98f28",
         "worktree-manager/src/worktree_manager/__init__.py": "1b1fc236627940a7b00bf58b1443547b3acb51441de40e3e5225e8dd10a10785",
         "worktree-manager/src/worktree_manager/manager_config.py": "c14c0da49474c721397be47bb0dc1c7760d18cf33082232e4f46746139640ec4",
         "worktree-manager/src/worktree_manager/source_config.py": "7d1ddf9c38da759e378bd5b24eef9005f4ac2606eb758128612c8b1d409717fd",
