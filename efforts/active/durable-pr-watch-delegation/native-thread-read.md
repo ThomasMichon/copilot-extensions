@@ -3,7 +3,8 @@
 Back to the [CLI parity inventory](cli-parity-inventory.md) and
 [canonical effort](README.md).
 
-**Proposed source contract; implementation and qualification remain open.**
+**Contract reviewed in #11655; finite source qualification below is not
+installed or live-provider acceptance.**
 This finite read-only slice closes part of the PR-domain
 [provider-neutral surface](../../../visions/plugins/agent-pull-requests/README.md#first-class-provider-neutral-pr-surface)
 and Worktrees'
@@ -96,23 +97,31 @@ runtime lacking this syntax or envelope returns a truthful incompatibility
 error without a second invocation. Preserve independent existing operations.
 No new preflight RPC, mandatory handshake or legacy retirement is required.
 
-- [ ] Exercise the actual frontend parser and owner dispatcher from a neutral
+- [x] Exercise the actual frontend parser and owner dispatcher from a neutral
   working directory with an explicit target, distinct caller/target binding
   and synthetic GitHub, Gitea and ADO providers. Prove bodies are acquired
   on demand and no claimant, source mutation, vote, comment, resolution,
   merge, registration or persistent body cache is acquired.
-- [ ] Preserve the full report and additive/nested fields through success,
+- [x] Preserve the full report and additive/nested fields through success,
   unsupported/error, incomplete/null completeness and candidate-change cases.
   Include real provider-owner report construction, not only argv assertions;
   do not label synthetic three-provider coverage live-provider parity.
-- [ ] Cover both direct and managed-peer selection, missing/blank selectors,
+- [x] Cover both direct and managed-peer selection, missing/blank selectors,
   invalid PR numbers, strict unknown options, wrong repo/PR, boolean version
   or PR, malformed reports, nonzero exits, stderr-only refusal, timeout and
   output-budget failure. Prove no fallback or second dispatch.
-- [ ] Exercise real parser/process fixtures for old caller/new owner,
+- [x] Exercise real parser/process fixtures for old caller/new owner,
   new caller/version-1 baseline, unsupported old owner and supported rollback.
   Retain existing neutral-CWD Worktrees read controls; no changed legacy
   syntax, output or exit convention is permitted.
 - [ ] Record isolated source/platform qualification separately from installed,
   authorized provider-account and HTTP/CLI consumer migration. Keep the parent
   Plan and Validation Plan open beyond this finite adapter.
+
+The native thread/routing packet passes 140 cases with five Windows-only
+skips. The actual Worktrees read/observation packet passes 43 cases, including
+old and new callers over a real process boundary, neutral CWD and the actual
+GitHub, Gitea and ADO report builders with synthetic transport responses.
+ADO partial acquisition and a changed candidate remain explicit.
+Both isolated runs verify cleanup. Native Windows/macOS, installed,
+authorized provider-account, HTTP and broader CLI parity remain open.

@@ -290,8 +290,8 @@ cleared review in #11651; its finite native source adapter merged in #11653 and 
 existing unpublished-reservation owner. Remote closure, reason-comment
 publication and abandoned-claim settlement remain separate; source qualification
 is not installed support or complete `pr-abandon` parity.
-The [explicit native thread-read proposal](native-thread-read.md) reuses the
-existing checkout-free Worktrees read owner. It adds no transport or watcher;
+The [explicit native thread-read contract](native-thread-read.md), reviewed in
+#11655, reuses the existing checkout-free Worktrees read owner. It adds no transport or watcher;
 implementation, installed/HTTP qualification and thread resolution stay open.
 
 - [x] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence)
@@ -1333,6 +1333,40 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-08 - Native thread-read source qualification
+
+- Implemented the contract reviewed in #11655 with one bounded invocation of
+  the existing Worktrees report owner. The new native-only parser validates
+  required target/runtime selection before direct or managed launch.
+- Preserve exact valid reports, including additive/nested fields, incomplete
+  or unknown completeness, candidate changes and report errors. Keep invocation
+  failures separate on stderr without rewriting owner evidence, inferring an
+  empty discussion list, retrying or adding another forge route.
+- Isolated thread/routing qualification passes 140 cases with five existing
+  Windows-only skips. Actual checkout-free owner/observation qualification
+  passes 43, including old and new process callers, synthetic GitHub/Gitea/ADO
+  provider report construction, partial ADO reads and changed candidates.
+  Cleanup is verified. Windows/macOS, installed/live-provider, HTTP and
+  complete parent acceptance remain open.
+- Documentation lint has no errors. Both the root effort and PR-plugin
+  overview size warnings remain tracked documentation-maintenance work under
+  this parent; preserve canonical contracts when extracting linked material.
+
+### 2026-11-08 - Native thread-read contract merged; full parent return
+
+- #11655 merged as `d075b3f3b990b8ca0339948c2f3e05e961ee9dde` at
+  22:59 PT after genuine current-head Copilot Approval `5822530375` on
+  `27b25b90cf8a2aa353a865df46f1c1ba68696bdf`, no open findings and green
+  required checks. Normal managed completion used only the documented
+  additional-CODEOWNER exception; no review/CI or live-effect gate was waived.
+- Re-read the entire root Plan and Validation Plan after merge. The contract
+  clears only the finite design gate: all implementation/qualification rows
+  and complete parent retention, attention, publication, CLI/HTTP/Dispatch,
+  provider, installed and fleet acceptance remain open.
+- Next is the thin native-only thread-read adapter and focused isolated
+  owner/parser/process qualification under the reviewed boundary. No new
+  transport, watcher, persisted conversation body or thread mutation is added.
 
 ### 2026-11-08 - Native thread-read boundary proposed
 
