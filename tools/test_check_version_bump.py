@@ -107,11 +107,11 @@ def test_revision_diff_is_unambiguously_separated_from_paths(guard_module, monke
 
     def git(*args):
         calls.append(args)
-        return subprocess.CompletedProcess(args, 0, "plugins/alpha/feature.py\n", "")
+        return subprocess.CompletedProcess(args, 0, "plugins/alpha/feature.py\0", "")
 
     monkeypatch.setattr(guard_module, "_git", git)
     assert guard_module._changed_files("a" * 40, "b" * 40) == ["plugins/alpha/feature.py"]
-    assert calls == [("diff", "--name-only", "a" * 40 + ".." + "b" * 40, "--")]
+    assert calls == [("diff", "--name-only", "-z", "a" * 40 + ".." + "b" * 40, "--")]
 
 
 def test_revision_blob_reads_are_unambiguously_separated_from_paths(guard_module, monkeypatch):

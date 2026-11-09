@@ -510,3 +510,19 @@ def test_snapshot_recognizes_multilevel_standalone_consumer(repo: Path):
     result = _run(repo)
     assert result.returncode == 1, result.stdout + result.stderr
     assert "services/pr: content changed" in result.stderr
+
+
+@pytest.mark.parametrize("guard", [SCRIPT.name, "check-version-bump.py"])
+def test_quoted_library_source_path_requires_consumer_bump(repo: Path, guard: str):
+    _git(repo, "config", "core.quotePath", "true")
+    _nested_library_base(repo)
+    _write(repo, "libs/leaf/src/caf\u00e9.py", "value = 1\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "quoted library source change without consumer bump")
+
+    result = subprocess.run(
+        [sys.executable, str(repo / "tools" / guard), "--base", "origin/main"],
+        cwd=repo, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "alpha" in result.stderr

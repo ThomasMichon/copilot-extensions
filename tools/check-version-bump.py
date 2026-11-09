@@ -110,10 +110,10 @@ def _merge_base(base: str, head: str) -> str | None:
 
 
 def _changed_files(base: str, head: str) -> list[str]:
-    r = _git("diff", "--name-only", f"{base}..{head}", "--")
+    r = _git("diff", "--name-only", "-z", f"{base}..{head}", "--")
     if r.returncode != 0:
         raise RuntimeError(r.stderr.strip() or "git diff failed while reading changed files")
-    return [ln.strip() for ln in r.stdout.splitlines() if ln.strip()]
+    return [path for path in r.stdout.split("\0") if path]
 
 
 def _plugin_json_version_at(ref: str, plugin: str) -> str | None:
