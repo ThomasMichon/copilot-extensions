@@ -222,9 +222,10 @@ def test_ready_rejects_legacy_or_effect_expansion_options(author: cfg.Config, ex
     assert exc.value.code == 2
 
 
+@pytest.mark.parametrize("claimant", [True, False])
 def test_ready_actual_native_frontend_worktrees_and_provider(
     backend: Backend, author: cfg.Config, monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], claimant: bool,
 ) -> None:
     monkeypatch.syspath_prepend(str(Path(__file__).parents[2] / "agent-pull-requests" / "src"))
     from agent_pull_requests import __main__ as frontend, native_author
@@ -236,12 +237,19 @@ def test_ready_actual_native_frontend_worktrees_and_provider(
 
     monkeypatch.setattr(native_author, "run_command", run)
     monkeypatch.setattr(frontend, "_WATCH_INVOCATION", None)
+    if not claimant:
+        monkeypatch.setattr(pr_cli, "require_claimant_worktree", lambda *_: (None, "no claimant"))
     selector = tmp_path / "worktrees"
     selector.touch()
     assert frontend.main([
         "ready", "--repo", REPO, "--number", "7",
         "--worktrees-command", str(selector), "--json",
-    ]) == 0
+    ]) == (0 if claimant else 1)
     result = json.loads(capsys.readouterr().out)
-    assert result["schema"] == pr_readiness.SCHEMA and result["ok"]
-    assert backend.methods == ["GET", "PATCH", "GET"]
+    assert result["schema"] == pr_readiness.SCHEMA and result["ok"] is claimant
+    if claimant:
+        assert backend.methods == ["GET", "PATCH", "GET"]
+    else:
+        assert result["actions"]["draft"]["status"] == "not-attempted"
+        assert result["provider"] is None and result["error"] == "no claimant"
+        assert not backend.methods

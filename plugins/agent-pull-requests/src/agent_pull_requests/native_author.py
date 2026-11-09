@@ -56,9 +56,15 @@ def config_options(args) -> list[str]:
 
 def capability(args, prefix: list[str], operation: str | None = None) -> dict:
     options = config_options(args)
-    response = run_command(
-        [*prefix, "pr-author-capabilities", f"--repo={args.repo}", "--json", *options], timeout=20.0,
-    )
+    try:
+        response = run_command(
+            [*prefix, "pr-author-capabilities", f"--repo={args.repo}", "--json", *options], timeout=20.0,
+        )
+    except (OSError, RuntimeError, subprocess.SubprocessError, UnicodeError) as exc:
+        raise ValueError(
+            f"Native author capability probe failed before dispatch: {exc}; "
+            "no author operation was attempted"
+        ) from None
     try:
         body = json.loads(response.stdout)
     except (ValueError, TypeError):
@@ -156,7 +162,10 @@ def run(args, prefix: list[str]) -> tuple[int, dict]:
             payload.get("schema") != "agent-worktrees.pr-ready"
             or type(payload.get("version")) is not int or payload["version"] != 1
             or not isinstance(support.get("provider"), str) or not support["provider"]
-            or payload.get("provider") != support["provider"]
+            or not (
+                payload.get("provider") == support["provider"]
+                or status == "not-attempted" and "provider" in payload and payload["provider"] is None
+            )
             or status not in ("not-attempted", "confirmed", "failed", "unknown")
             or type(payload.get("ok")) is not bool
             or payload["ok"] != (status == "confirmed")

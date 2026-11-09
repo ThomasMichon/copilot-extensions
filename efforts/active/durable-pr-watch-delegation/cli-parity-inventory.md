@@ -171,11 +171,15 @@ adoption and three-provider parity remain later acceptance, not this slice.
   authorized live-provider or installed-consumer evidence. Source tests and a
   merged proposal alone close neither this matrix nor the parent effort.
 
-The finite source candidate passes 51 Worktrees author/readiness/tracked-ready
-controls and 76 native frontend cases with five Windows-only cases skipped on
+The finite source candidate passes 52 Worktrees author/readiness/tracked-ready
+controls and 78 native frontend cases with five Windows-only cases skipped on
 Linux. The actual frontend, Worktrees parser/resolver and Azure DevOps provider
 compose in one fixture; a separate real subprocess exercises capability and
 explicit worker-policy argument forwarding. Provider responses are synthetic.
 No live forge, Windows execution, installed host or HTTP mutation parity is
 qualified by these results. The legacy tracked Azure DevOps `mark_ready`
 refusal is unchanged; explicit author readiness is separately advertised.
+Capability launch/timeout failures and valid claimant refusals remain
+`not-attempted`, preserving their diagnostics; null provider identity is
+accepted only for an otherwise valid pre-dispatch refusal, never an attempted
+outcome.

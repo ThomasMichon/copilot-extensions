@@ -263,6 +263,24 @@ def test_native_ready_lost_result_preserves_target_without_retry(command, monkey
     assert len(calls) == 2
 
 
+@pytest.mark.parametrize("error", [
+    OSError("probe executable unavailable"), subprocess.TimeoutExpired(["capability-probe"], 20),
+])
+def test_native_ready_capability_failure_is_not_an_attempt(command, monkeypatch, capsys, error):
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        raise error
+
+    monkeypatch.setattr(native_author, "run_command", run)
+    assert cli.main(arguments("ready", command)) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["number"] == 7 and result["actions"]["draft"]["status"] == "not-attempted"
+    assert "before dispatch" in result["error"]
+    assert len(calls) == 1 and calls[0][1] == "pr-author-capabilities"
+
+
 def test_native_create_body_file_is_not_expanded_into_process_arguments(command, monkeypatch, capsys, tmp_path):
     path = tmp_path / "long-description.md"
     body = '# "quoted"\r\n\r\n\u03bb\r\n' * 4000
