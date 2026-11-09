@@ -105,7 +105,7 @@ After the reviewed proposal, the operator admitted execution:
   producer/consumer compatibility using the existing contract-evolution policy.
   Legacy providers remain usable through an explicitly observable reconcile
   path; never silently drop a required delta field.
-- [ ] Establish per-stage counters and tiny deterministic fixtures before
+- [x] Establish per-stage counters and tiny deterministic fixtures before
   changing runtime behavior.
 
 ### Phase 2 - Shared no-op, fingerprint and embedding reuse
