@@ -438,6 +438,15 @@ migration already works.
   fingerprint is refreshed without changing nodes, source inventory or budget.
   Renewed current-head review and CI remain required; no installed or
   whole-effort acceptance is claimed.
+- Source CI and the Linux native acceptance job then passed. Windows reached
+  the later native transport controls and exposed six obsolete expectations
+  of eager passive reaping. Updated only that assertion to require explicit
+  deferred ownership and zero reaper effects; native readiness, publication,
+  grace, refusal and rollback assertions remain intact. The exact Windows CI
+  selection reproduced six failures, then passed all eight cases with verified
+  cleanup under unchanged limits. The latest review reports no open findings
+  but remains `COMMENTED`, not a current-head approval. Renewed CI and the
+  separately required approval remain open.
 - Added a failure-first case to the existing installer-custody controls:
   outgoing native-identity observation is unavailable, but the healthy incoming
   runtime must publish with retirement pending and both slots preserved.
