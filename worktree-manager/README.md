@@ -1761,7 +1761,13 @@ in both local and live modes. The last validated observation and button
 identities remain stable while a refresh is pending.
 Missing required knowledge shows **Configure knowledge**, which navigates to
 the native Repositories section and its confirmed existing-repository binding
-action. An unavailable binding payload shows preparation guidance in the
+action. An explicitly unresolved existing binding instead offers
+**Inspect knowledge**. A pending or failed readiness check does not imply
+missing configuration and does not offer setup; its neutral notice distinguishes
+checking from an unavailable read. Worktrees **Reload (r)** retries the same
+bounded asynchronous observation and clears the notice after a successful read,
+without polling or changing configuration. Unknown remains unknown, not ready.
+An unavailable binding payload shows preparation guidance in the
 Repositories banner. Unavailable/failed reads remain explicit; a banner is not
 proof of readiness. Completion refreshes the owner observation and reconciles
 current and saved Worktrees button focus before returning from Configuration.
