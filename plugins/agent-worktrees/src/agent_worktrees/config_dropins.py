@@ -637,6 +637,8 @@ def _managed_decision(
             )
         )
     if source_decision is None or source_decision.status is EntryStatus.INACTIVE:
+        if strict and source_decision is not None:
+            raise ValueError("configured plugin policy is unavailable")
         reason = "not-enabled"
         detail = "plugin is not enabled globally or for this project"
         if source_decision is not None and source_decision.findings:

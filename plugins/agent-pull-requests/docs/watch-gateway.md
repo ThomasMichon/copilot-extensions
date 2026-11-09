@@ -222,6 +222,8 @@ Failed strict presence probes, including looping or dangling policy links, are n
 confirmed absence. This applies to global, repository and marketplace policy.
 Absent descendants require a readable first existing ancestor, so dangling
 policy-directory links cannot silently discard configuration.
+Missing, unusable or identity-mismatched enabled drop-in policy also refuses.
+Intentional plugin disable remains a confirmed inactive selection.
 Failed reads of established committed policy cannot select a divergent checkout;
 confirmed absence and successful same-source recovery remain supported. Provider
 access errors retain a sanitized native failed report and owner exit; transport

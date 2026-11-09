@@ -1375,6 +1375,10 @@ callback an implicit credential store.
 
 ### 2026-11-09 - Native report boundary corrections
 
+- Strict selection treats enabled drop-in target loss, unusable targets and
+  identity mismatch as unavailable policy, not successful omission. Configured
+  plugin activation failures refuse; confirmed disable remains supported.
+  The 52-case target-policy suite passes with isolated registry/activation fixtures.
 - Confirming an absent policy descendant also validates its first existing
   ancestor. A dangling policy-directory link remains unavailable rather than
   silently removing policy. Three directory-link controls join the leaf-link

@@ -338,3 +338,45 @@ def test_unreadable_policy_link_is_not_confirmed_absence(target, tmp_path, monke
     monkeypatch.setattr(repos, "account_from_map", lambda *a, **k: pytest.fail("unreadable policy selected account"))
     with pytest.raises((OSError, ValueError)):
         select_report_target(path, "example/project")
+
+
+@pytest.mark.parametrize("kind", ["missing", "directory", "outside", "root-mismatch", "ambiguous-plugin", "disabled"])
+def test_enabled_dropin_policy_must_be_available_before_account_selection(target, tmp_path, monkeypatch, kind):
+    from dropin_registry import EntryDecision, Finding, ScanAuthority
+    from plugin_activation import ActivationReport
+    from agent_worktrees import config_dropins
+    from test_config_dropins import _active_report, _pointer, _target
+
+    path, _, _, _, _ = target
+    directory = path.parent / "config.d"
+    directory.mkdir()
+    root = tmp_path / "fixture-plugin"
+    policy = _target(root, "repos:\n  target:\n    pr:\n      token_command: fixture-helper\n")
+    if kind in ("missing", "disabled"):
+        policy = root / "missing.yaml"
+    elif kind == "directory":
+        policy = root / "config"
+    elif kind == "outside":
+        policy = _target(tmp_path / "other-plugin")
+    stored_root = tmp_path / "other-root" if kind == "root-mismatch" else root
+    if kind == "root-mismatch":
+        stored_root.mkdir()
+    source = "fixture@example-marketplace"
+    _pointer(directory, source, stored_root, policy)
+    activation = (
+        ActivationReport(authority=ScanAuthority.COMPLETE, decisions={})
+        if kind == "disabled" else _active_report(source, root)
+    )
+    if kind == "ambiguous-plugin":
+        activation = ActivationReport(authority=ScanAuthority.COMPLETE, decisions={
+            source: EntryDecision.inactive(Finding(
+                registry="plugin-activation", entry=source, status="inactive", reason="root-ambiguous",
+            )),
+        })
+    monkeypatch.setattr(config_dropins, "resolve_active_plugins", lambda: activation)
+    if kind == "disabled":
+        assert select_report_target(path, "example/project")["account"] == "selected"
+    else:
+        monkeypatch.setattr(repos, "account_from_map", lambda *a, **k: pytest.fail("unavailable dropin selected account"))
+        with pytest.raises(ValueError):
+            select_report_target(path, "example/project")

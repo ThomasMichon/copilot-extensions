@@ -193,7 +193,9 @@ def dropin_value(config_d: Path, *, project_name="", warn=False, observations=No
                 report.authority is ScanAuthority.INDETERMINATE or decision.status is EntryStatus.INDETERMINATE
             )
             uncertain = retained or decision.status is EntryStatus.INDETERMINATE or any(
-                f.reason == "invalid-entry" for f in decision.findings
+                f.reason == "invalid-entry" or (
+                    strict and f.reason in ("missing-target", "target-unusable", "identity-mismatch")
+                ) for f in decision.findings
             )
             observe(observations, entry, "config-dropin-entry",
                     ScanAuthority.INDETERMINATE if uncertain else ScanAuthority.COMPLETE,
