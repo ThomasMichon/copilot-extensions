@@ -1942,6 +1942,13 @@ whatever changefiles are pending; nothing here is hand-edited directly.
 > malformed or symlinked reachable manifests fail closed rather than hiding
 > consumers. Check both before assuming you've found every plugin a shared-lib
 > change reaches.
+>
+> **Library-only bump intents also require consumer coverage.** The presence
+> guard expands new or changed library bump entries in top-level changefiles
+> through the same map, even without a library source edit. Unchanged baseline
+> entries, release-note-only edits and removed intents do not create new
+> obligations. Consumer coverage still requires this PR's own newly added
+> changefiles, not coincidental pending entries from an earlier PR.
 
 **All version files for a plugin must be bumped together in the same
 commit.** If any file is out of sync: a stale `plugin.json` makes

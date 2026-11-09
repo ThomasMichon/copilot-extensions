@@ -1633,3 +1633,20 @@ migration already works.
 - Review, promotion and actual installed reconciliation remain coordinator-owned.
   #3654's broader pointer work and #6369's source/stamp ownership stay separate.
   No MCP, global/full-update or session-reattachment gate is marked complete.
+
+### 2026-11-09: Changefile-only consumer coverage follow-up
+
+- Current-head review of #11709 found that a library-only bump could still
+  bypass consumer coverage because no canonical source path changed. The
+  presence guard now expands new or changed library bump intents through the
+  transitive map, retaining diff-owned consumer coverage and rejecting
+  unreadable or malformed changed intents.
+- Unchanged baseline entries, note-only edits and removed intents remain
+  unrelated to the current PR. Promotion/version allocation and immutable-slot
+  admission are unchanged. Review, required CI, release and installed acceptance
+  remain coordinator-owned; MCP, full-update and reattachment gates remain open.
+- The failure-first selection reproduced six failures. Related source guards
+  and selected admitted release decisions now pass 108 tests with two explicit
+  native-symlink capability skips and verified cleanup. Admission/source checks
+  retain 4,668 nodes, 663 sources and the 300-second budget without fingerprint
+  changes; this selected evidence is not the full required CI packet.

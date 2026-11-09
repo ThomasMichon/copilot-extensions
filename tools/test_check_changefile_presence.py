@@ -234,3 +234,94 @@ def test_untouched_plugin_is_not_charged(repo: Path):
     result = _run(repo)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "beta" not in result.stdout + result.stderr
+
+
+def _nested_library_base(repo: Path, *, pending: dict | None = None) -> None:
+    _write(repo, "plugins/alpha/pyproject.toml",
+           '[tool.uv.sources]\nparent = { path = "../../libs/parent", editable = true }\n')
+    _write(repo, "libs/parent/pyproject.toml",
+           '[tool.uv.sources]\nleaf = { path = "../leaf", editable = true }\n')
+    _write(repo, "libs/leaf/pyproject.toml", '[project]\nname = "leaf"\nversion = "1.0"\n')
+    if pending is not None:
+        _write(repo, ".changefiles/pending.json", json.dumps(pending))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "nested library baseline")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+
+
+def _intent(plugin: str, kind: str = "patch") -> dict:
+    return {"comment": "release", "changes": [{"plugin": plugin, "type": kind}]}
+
+
+def test_library_changefile_only_requires_nested_consumer_intent(repo: Path):
+    _nested_library_base(repo, pending=_intent("alpha"))
+    _write(repo, ".changefiles/library.json", json.dumps(_intent("libs/leaf")))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "library-only bump intent")
+    result = _run(repo)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "alpha" in result.stderr
+
+    _write(repo, ".changefiles/consumer.json", json.dumps(_intent("alpha")))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "cover the nested consumer")
+    result = _run(repo)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("edit", [
+    "unchanged", "comment", "removed", "removed-entry", "type", "added",
+])
+def test_only_new_or_changed_library_intents_charge_consumers(repo: Path, edit: str):
+    pending = _intent("libs/leaf" if edit != "added" else "libs/parent")
+    _nested_library_base(repo, pending=pending)
+    if edit == "removed":
+        _git(repo, "rm", "--", ".changefiles/pending.json")
+    elif edit != "unchanged":
+        if edit == "comment":
+            pending["comment"] = "clarified release note"
+        elif edit == "removed-entry":
+            pending["changes"] = []
+        elif edit == "type":
+            pending["changes"][0]["type"] = "minor"
+        else:
+            pending["changes"].append({"plugin": "libs/leaf", "type": "patch"})
+        _write(repo, ".changefiles/pending.json", json.dumps(pending))
+    _write(repo, "docs/note.md", "unrelated documentation\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "pending intent delta")
+    result = _run(repo)
+    assert result.returncode == (1 if edit in ("type", "added") else 0), (
+        result.stdout + result.stderr
+    )
+    if edit in ("type", "added"):
+        assert "alpha" in result.stderr
+
+
+@pytest.mark.parametrize("data", [
+    "{broken",
+    json.dumps({"changes": "not-a-list"}),
+    json.dumps({"changes": [{"plugin": "libs/leaf", "type": "unknown"}]}),
+])
+def test_malformed_changefile_only_intent_fails_closed(repo: Path, data: str):
+    _nested_library_base(repo)
+    _write(repo, ".changefiles/library.json", data)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "malformed library intent")
+    result = _run(repo)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "changefile" in result.stderr.lower()
+
+
+def test_unreadable_baseline_changefile_cannot_hide_changed_library_intent(repo: Path):
+    _nested_library_base(repo)
+    _write(repo, ".changefiles/pending.json", "{broken")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "unreadable baseline intent")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _write(repo, ".changefiles/pending.json", json.dumps(_intent("libs/leaf")))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "replace unreadable intent")
+    result = _run(repo)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "baseline changefile" in result.stderr.lower()

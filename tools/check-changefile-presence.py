@@ -8,7 +8,9 @@ targets ``dev`` under the dev-branch-release-pipeline design
 Reuses ``check-version-bump.py``'s plugin-diff detection (which plugin(s) a
 diff touches, including the shared-``libs/<lib>``-fans-out-to-every-consumer
 rule) via a direct file load -- its filename has a hyphen, so it can't be a
-normal ``import`` -- rather than duplicating that logic.
+normal ``import`` -- rather than duplicating that logic. New or changed library
+bump intents also charge that map, even without a library source edit: promotion
+changes the library manifest version, which ships inside every consumer.
 
 **Wired into CI** (`ci.yml`'s `guards + lint` job, `PR-into-dev only`) since
 the dev-branch-release-pipeline cutover; the paragraph below describing it
@@ -23,13 +25,14 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from changefile import read_changefiles
+from changefile import VALID_TYPES, read_changefiles
 
 
 def _load_check_version_bump():
@@ -86,8 +89,73 @@ def touched_plugins(base_ref: str, head_ref: str = "HEAD") -> set[str]:
     changed = cvb._changed_files(mbase, head)
     if not changed:
         return set()
+    changed.extend(
+        f"{library}/pyproject.toml" for library in _changed_library_intents(cvb, mbase, head)
+    )
     consumers = cvb._vendored_consumers()
     return set(cvb._plugins_needing_bump(changed, consumers))
+
+
+def _changefile_intents(data: object, label: str) -> set[tuple[str, str]]:
+    """Validate the existing changefile entry shape before comparing intent."""
+    if not isinstance(data, dict) or not isinstance(data.get("changes"), list):
+        raise RuntimeError(f"invalid changefile {label}: changes must be a list")
+    intents = set()
+    for change in data["changes"]:
+        if (
+            not isinstance(change, dict)
+            or not isinstance(change.get("plugin"), str)
+            or not change["plugin"].strip()
+            or change.get("type") not in VALID_TYPES
+        ):
+            raise RuntimeError(f"invalid changefile {label}: expected plugin and valid bump type")
+        intents.add((change["plugin"], change["type"]))
+    return intents
+
+
+def _changed_library_intents(cvb, base: str, head: str) -> set[str]:
+    """Expand only added/changed bump entries, not unrelated baseline intents."""
+    result = cvb._git(
+        "diff", "--name-status", "--no-renames", "--diff-filter=AM", f"{base}..{head}",
+        "--", ".changefiles",
+    )
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip() or "could not read changed changefiles")
+    selected = []
+    for line in result.stdout.splitlines():
+        status, name = line.split("\t", 1)
+        path = Path(name)
+        if path.parent.as_posix() == ".changefiles" and path.suffix == ".json":
+            selected.append((status, path))
+    if not selected:
+        return set()
+    pending = {path.name: (path, data) for path, data in read_changefiles()}
+    libraries = set()
+    for status, relative in selected:
+        # The shared reader reports and skips unreadable files. A selected skip
+        # cannot mean "no intents" here, even for an otherwise content-free PR.
+        if relative.name not in pending:
+            raise RuntimeError(f"unreadable changefile {relative}")
+        path, data = pending[relative.name]
+        if path.is_symlink():
+            raise RuntimeError(f"symlinked changefile {relative}")
+        current = _changefile_intents(data, str(relative))
+        previous: set[tuple[str, str]] = set()
+        if status == "M":
+            blob = cvb._git("show", f"{base}:{relative.as_posix()}", "--")
+            if blob.returncode:
+                raise RuntimeError(f"could not read baseline changefile {relative}")
+            try:
+                previous = _changefile_intents(json.loads(blob.stdout), str(relative))
+            except json.JSONDecodeError as error:
+                raise RuntimeError(f"invalid baseline changefile {relative}: {error}") from error
+        for plugin, _kind in current - previous:
+            if plugin.startswith("libs/"):
+                library = plugin[len("libs/"):]
+                if not cvb.uer.is_safe_lib_name(library) or "\\" in library:
+                    raise RuntimeError(f"invalid library changefile target {plugin!r}")
+                libraries.add(plugin)
+    return libraries
 
 
 def added_changefile_names(base_ref: str, head_ref: str = "HEAD") -> set[str]:
@@ -166,7 +234,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--head", default="HEAD", help="head ref (default: HEAD)")
     args = ap.parse_args(argv)
 
-    code, missing = check(args.base, args.head)
+    try:
+        code, missing = check(args.base, args.head)
+    except RuntimeError as error:
+        print(f"check-changefile-presence: {error}", file=sys.stderr)
+        return 1
     if missing:
         print("check-changefile-presence: FAILED", file=sys.stderr)
         for plugin in missing:
