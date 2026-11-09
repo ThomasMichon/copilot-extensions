@@ -210,6 +210,8 @@ installed/retained hosting, Windows and live-provider acceptance remain open.
 Review refinements fence every in-flight exchange by its discovery epoch
 before an older transport/status/validation failure can change selection.
 The same live owner/deadline checkpoint now crosses the worker-to-coroutine
-handoff and runs immediately before publication. The 58-case focused report
+handoff and the shielded task-to-handler handoff, running immediately before
+publication. The 60-case focused report
 suite passes, including stale discovery failures after a newer success and
-deadline/owner withdrawal while coroutine resumption is delayed.
+deadline/owner withdrawal while either coroutine resumption is delayed,
+including withdrawal in the actual task-completion callback.

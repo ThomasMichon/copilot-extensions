@@ -13,6 +13,18 @@ from .watch_replay_binding import ReplayBinding, ReplayBindingMismatch
 from .watch_replay_store import ReplayCallerExpired, json_object
 
 
+def _failure(error):
+    from .watch_gateway import _response
+
+    if isinstance(error, ReplayBindingMismatch):
+        return _response(409, {"error": "report_binding_mismatch"})
+    if isinstance(error, (ReplayCallerExpired, PermissionError)):
+        return _response(403, {"error": "report_owner_refused"})
+    if isinstance(error, RequestDisconnected):
+        return _response(503, {"error": "report_request_disconnected"})
+    return _response(503, {"error": "report_owner_unavailable"})
+
+
 async def handle(gateway, request):
     from .watch_gateway import _response
 
@@ -46,17 +58,27 @@ async def handle(gateway, request):
         return _response(400, {"error": "invalid_report_request"})
     if gateway._closing or len(gateway._tasks) >= 8:
         return _response(503, {"error": "report_service_unavailable"})
-    task = asyncio.create_task(execute(gateway, owner, operation, payload, request, target, expected))
+    publication = []
+    task = asyncio.create_task(execute(
+        gateway, owner, operation, payload, request, target, expected, publication,
+    ))
     gateway._tasks.add(task)
     task.add_done_callback(gateway._completed)
     try:
-        return await asyncio.shield(task)
+        response = await asyncio.shield(task)
+        if response.status == 200:
+            if len(publication) != 1:
+                raise ReportUnavailable("report publication checkpoint unavailable")
+            publication[0]()
+        return response
     except asyncio.CancelledError:
         request.lifetime.close()
         raise
+    except Exception as error:
+        return _failure(error)
 
 
-async def execute(gateway, owner, operation, payload, request, target, expected):
+async def execute(gateway, owner, operation, payload, request, target, expected, publication):
     from .watch_gateway import _response
 
     response = None
@@ -65,6 +87,7 @@ async def execute(gateway, owner, operation, payload, request, target, expected)
     def encode(value, current):
         nonlocal response, publication_checkpoint
         publication_checkpoint = current
+        publication.append(current)
         response = _response(200, dict(value, binding=expected.document()))
         if len(response.body) > BODY_BYTES:
             raise ReportUnavailable("report response exceeds transport limit")
@@ -87,11 +110,5 @@ async def execute(gateway, owner, operation, payload, request, target, expected)
             raise ReportUnavailable("report publication checkpoint unavailable")
         publication_checkpoint()
         return response
-    except ReplayBindingMismatch:
-        return _response(409, {"error": "report_binding_mismatch"})
-    except (ReplayCallerExpired, PermissionError):
-        return _response(403, {"error": "report_owner_refused"})
-    except RequestDisconnected:
-        return _response(503, {"error": "report_request_disconnected"})
-    except Exception:
-        return _response(503, {"error": "report_owner_unavailable"})
+    except Exception as error:
+        return _failure(error)
