@@ -1,0 +1,9 @@
+{
+  "comment": "Add opt-in bounded caller-aware handler responses while preserving legacy and local limits",
+  "changes": [
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    }
+  ]
+}

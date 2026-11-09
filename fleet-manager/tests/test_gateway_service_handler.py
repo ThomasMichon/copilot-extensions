@@ -21,12 +21,14 @@ from test_gateway_service_policy import Harness
 from test_runtime_identity import NOW, pair
 
 
-async def connect_handler(rig, handle, *, fleet="fleet-a", gateway="gateway-a"):
+async def connect_handler(
+    rig, handle, *, fleet="fleet-a", gateway="gateway-a", response_limit=BODY_BYTES,
+):
     async def access():
         return rig.access("service-a", 1)
     connector = ServiceConnector(
         slot="service-a", gateway_origin=rig.origin,
-        handler=HandlerBinding(fleet, gateway, handle),
+        handler=HandlerBinding(fleet, gateway, handle, response_limit=response_limit),
         access_token_callback=access, proof_key=rig.h.keys[1].get_op_key("sign"),
         gateway_ca=rig.ca)
     task = asyncio.create_task(connector.connect_once())
@@ -116,7 +118,8 @@ def test_wrong_handler_owner_never_invokes_backend(tmp_path, owner):
     asyncio.run(scenario())
 
 
-def test_real_caller_withdrawal_cancels_handler_before_completion(tmp_path):
+@pytest.mark.parametrize("response_limit", [BODY_BYTES, BODY_BYTES + 1])
+def test_real_caller_withdrawal_cancels_handler_before_completion(tmp_path, response_limit):
     async def scenario():
         async with running(tmp_path) as rig:
             started, stopped = asyncio.Event(), asyncio.Event()
@@ -130,7 +133,7 @@ def test_real_caller_withdrawal_cancels_handler_before_completion(tmp_path):
                 finally:
                     stopped.set()
 
-            await connect_handler(rig, handle)
+            await connect_handler(rig, handle, response_limit=response_limit)
             pending = asyncio.create_task(rig.request("/api/register", "POST"))
             try:
                 await asyncio.wait_for(started.wait(), 3)
@@ -314,7 +317,10 @@ def test_handler_chunk_send_cannot_enter_ack_wait_after_cancellation():
 
 
 @pytest.mark.parametrize("loss", ["deadline", "cancellation"])
-def test_lifetime_closes_before_response_cancellation_cleanup_and_cleanup_is_joined(loss):
+@pytest.mark.parametrize("response_limit", [BODY_BYTES, BODY_BYTES + 1])
+def test_lifetime_closes_before_response_cancellation_cleanup_and_cleanup_is_joined(
+    loss, response_limit,
+):
     async def scenario():
         started, cleanup, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
         frames = []
@@ -337,11 +343,11 @@ def test_lifetime_closes_before_response_cancellation_cleanup_and_cleanup_is_joi
         connector = ServiceConnector(
             slot="service-a", gateway_origin="https://gateway.example",
             access_token_callback=lambda: None, proof_key=None,
-            handler=HandlerBinding("fleet-a", "gateway-a", handle),
+            handler=HandlerBinding("fleet-a", "gateway-a", handle, response_limit=response_limit),
         )
         request = ServiceRequest(
             CallerContext("fleet-a", "gateway-a", "service-a", "caller-a", 2**52),
-            "POST", "/register", (), b"",
+            "POST", "/register", (), b"", response_limit=response_limit,
         )
         exchange = Exchange("1" * 48, request=request)
         pending = asyncio.create_task(connector._exchange(

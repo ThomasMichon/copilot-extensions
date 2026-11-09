@@ -3,8 +3,8 @@
 Back to the [existing report contract](owner-report-read.md),
 [selected native owner](native-report-owner.md) and [canonical effort](README.md).
 
-**Agent-recommended proposal under #11692. Review before SDK or PR runtime
-expansion; no installed or live-provider support is claimed.**
+**Agent-recommended contract reviewed in #11694 under #11692. SDK and PR runtime
+expansion remain pending; no installed or live-provider support is claimed.**
 This closes part of
 [one service contract](../../../visions/plugins/agent-pull-requests/README.md#cli-through-one-service-contract)
 and follows
@@ -66,7 +66,7 @@ Keep `/v1/read/<target>/...`, `agent-pull-requests.report-read/v1`,
 
 An explicitly selected source host may additionally supply:
 
-| Selection | Proposed identity |
+| Selection | Reviewed identity |
 |---|---|
 | Routes | `/v2/read/<target>/capabilities`, `threads`, `diff` |
 | Protocol | `agent-pull-requests.report-read/v2` |
