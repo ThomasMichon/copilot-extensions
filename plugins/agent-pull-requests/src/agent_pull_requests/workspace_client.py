@@ -20,6 +20,7 @@ from .workspace_operations import (
     _stock_preparation,
 )
 from .workspace_terminal_read import PROTOCOL as TERMINAL_PROTOCOL, supports as supports_terminal
+from . import workspace_terminal_mapping as terminal_mapping
 
 
 class WorkspaceClientError(ReplayClientError):
@@ -52,9 +53,12 @@ class WorkspaceClient:
 
     async def _exchange(self, operation, payload, *, checkpoint=None):
         terminal = self._capabilities is not None and self._capabilities["protocol"] == TERMINAL_PROTOCOL
+        selection = self._capabilities["terminal_read_contract"]["protocol"] if terminal else None
+        if operation == "retained-comment" and terminal_mapping.selected(self._capabilities):
+            selection = terminal_mapping.SELECTION
         data = encoded({
             "binding": self._binding.document(), "request": payload,
-            **({"workspace_contract": self._capabilities["terminal_read_contract"]["protocol"]}
+            **({"workspace_contract": selection}
                if terminal and operation != "capabilities" else {}),
         })
         if len(data) > BODY_BYTES:
@@ -148,7 +152,7 @@ class WorkspaceClient:
                 **(unavailable if isinstance(unavailable, dict) else {}),
                 "observe-comment": "unsupported_comment_observation_contract",
             }
-        if "retained-comment" in value["operations"] and (
+        if not terminal and "retained-comment" in value["operations"] and (
             not supports_mapping(value.get("comment_mapping_contract"))
             or not supports_prepared_review(value.get("prepared_review_contract"))
         ):
@@ -180,9 +184,12 @@ class WorkspaceClient:
             if payload != {}:
                 raise WorkspaceClientError("invalid_workspace_capability_request")
             return await self.capabilities(**({"checkpoint": checkpoint} if checkpoint is not None else {}))
-        if self._capabilities is None or operation not in self._capabilities["operations"]:
+        compact_mapping = operation == "retained-comment" and terminal_mapping.selected(self._capabilities)
+        if self._capabilities is None or (
+            operation not in self._capabilities["operations"] and not compact_mapping
+        ):
             raise WorkspaceClientError("workspace_capability_required", outcome_unknown=False)
-        if needs_prepared_review(operation, payload):
+        if needs_prepared_review(operation, payload) and not compact_mapping:
             if checkpoint is not None:
                 checkpoint()
             if not supports_prepared_review(self._capabilities.get("prepared_review_contract")):
@@ -191,7 +198,7 @@ class WorkspaceClient:
             self._capabilities.get("comment_observation_contract"),
         ):
             raise WorkspaceClientError("comment_observation_contract_required", outcome_unknown=False)
-        if operation == "retained-comment" and not supports_mapping(
+        if operation == "retained-comment" and not compact_mapping and not supports_mapping(
             self._capabilities.get("comment_mapping_contract"),
         ):
             raise WorkspaceClientError("comment_mapping_contract_required", outcome_unknown=False)
@@ -228,7 +235,9 @@ class WorkspaceClient:
             or value["result"].get("fresh_native_read") is not False
         ):
             raise WorkspaceClientError("invalid_comment_observation_response", outcome_unknown=False)
-        if operation == "retained-comment" and not valid_mapping_result(value, payload):
+        if operation == "retained-comment" and not (
+            terminal_mapping.valid_result(value, payload) if compact_mapping else valid_mapping_result(value, payload)
+        ):
             raise WorkspaceClientError("invalid_retained_comment_response", outcome_unknown=False)
         if operation == "allocate":
             from .review_selection_store import ReviewSelectionStore

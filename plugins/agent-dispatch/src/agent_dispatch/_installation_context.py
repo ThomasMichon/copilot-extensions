@@ -2,6 +2,7 @@
 """Resolve, validate, and explicitly mutate marketplace installation context."""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 _FRAGMENT_FILES = (
@@ -34,12 +35,19 @@ def _fragment_directory(script: Path) -> Path:
     return script.resolve().parent
 
 
+def _native_fragment(path: Path) -> Path:
+    value = str(path)
+    if os.name != "nt" or value.startswith("\\\\?\\"):
+        return path
+    return Path("\\\\?\\UNC\\" + value[2:] if value.startswith("\\\\") else "\\\\?\\" + value)
+
+
 def _load_fragments() -> None:
     fragment_dir = _fragment_directory(Path(__file__))
     for fragment_name in _FRAGMENT_FILES:
         fragment_path = fragment_dir / fragment_name
         exec(  # noqa: S102 - Fixed canonical fragments share the module namespace.
-            compile(fragment_path.read_text(encoding="utf-8"), str(fragment_path), "exec"),
+            compile(_native_fragment(fragment_path).read_text(encoding="utf-8"), str(fragment_path), "exec"),
             globals(),
         )
 

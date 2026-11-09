@@ -2267,6 +2267,83 @@ def test_source_view_accounts_for_order_bytes_and_physical_lines(
     )
 
 
+def test_native_fragment_loader_remains_source_mapped(tmp_path: Path) -> None:
+    paths = fragment_source(tmp_path)
+    entry = (tmp_path / views.INSTALLATION_ENTRY).read_bytes().splitlines()
+    view = views.installation_view(tmp_path, paths, tmp_path / "view" / "installation_context.py")
+    composed = view.content.splitlines()
+    inputs = {path: content.splitlines() for path, content in view.inputs}
+    assert len(composed) == len(view.lines)
+    for text, source in zip(composed, view.lines):
+        original = inputs[source.path][source.number - 1]
+        replaced = (
+            source.path == views.INSTALLATION_ENTRY and original.strip() == b"_load_fragments()"
+            or source.path != views.INSTALLATION_ENTRY
+            and original == b"from __future__ import annotations"
+        )
+        assert text == (b"" if replaced else original)
+    for token in (
+        b"def _native_fragment(",
+        b"if os.name",
+        b"return Path(",
+        b"compile(_native_fragment(",
+    ):
+        physical = next(index for index, line in enumerate(entry, 1) if token in line)
+        logical = next(
+            index for index, line in enumerate(view.lines, 1)
+            if line.path == views.INSTALLATION_ENTRY and line.number == physical
+        )
+        assert composed[logical - 1] == entry[physical - 1]
+        assert view.diagnostics(f"{view.output}:{logical}: error: sample\n", tmp_path) == (
+            f"{views.INSTALLATION_ENTRY}:{physical}: error: sample\n"
+        )
+
+
+@pytest.mark.parametrize(("old", "new"), [
+    ('if os.name != "nt"', 'if os.name == "nt"'),
+    ("return path\n", "return path.resolve()\n"),
+    ("_native_fragment(fragment_path).read_text", "fragment_path.read_text"),
+    ('str(fragment_path), "exec"', 'str(_native_fragment(fragment_path)), "exec"'),
+])
+def test_source_view_refuses_unqualified_native_loader_changes(
+    tmp_path: Path, old: str, new: str,
+) -> None:
+    paths = fragment_source(tmp_path)
+    entry = tmp_path / views.INSTALLATION_ENTRY
+    content = entry.read_text(encoding="utf-8")
+    assert content.count(old) == 1
+    entry.write_text(content.replace(old, new), encoding="utf-8")
+    with pytest.raises(views.SourceViewError, match="loader changed"):
+        views.installation_view(tmp_path, paths, tmp_path / "view" / "installation_context.py")
+
+
+@pytest.mark.parametrize("directive", [b"# mypy: ignore-errors\n", b"# type: ignore\n"])
+def test_source_view_refuses_loader_wide_suppressions(tmp_path: Path, directive: bytes) -> None:
+    paths = fragment_source(tmp_path)
+    entry = tmp_path / views.INSTALLATION_ENTRY
+    entry.write_bytes(directive + entry.read_bytes())
+    with pytest.raises(views.SourceViewError, match="module-wide checker directives"):
+        views.installation_view(tmp_path, paths, tmp_path / "view" / "installation_context.py")
+
+
+def test_source_view_inlines_the_declared_fragment_order(tmp_path: Path) -> None:
+    paths = fragment_source(tmp_path)
+    entry = tmp_path / views.INSTALLATION_ENTRY
+    content = entry.read_text(encoding="utf-8").replace(
+        '"_installation_context_base.py", "_installation_context_files.py"',
+        '"_installation_context_files.py", "_installation_context_base.py"',
+    )
+    entry.write_text(content, encoding="utf-8")
+    view = views.installation_view(tmp_path, paths, tmp_path / "view" / "installation_context.py")
+    declared = tuple(path for path, _content in view.inputs[1:])
+    assert declared == (
+        "libs/installation-context/_installation_context_files.py",
+        "libs/installation-context/_installation_context_base.py",
+    )
+    mapped = [line.path for line in view.lines if line.path != views.INSTALLATION_ENTRY]
+    assert mapped == [name for name, content in view.inputs[1:] for _line in content.splitlines()]
+
+
 @pytest.mark.parametrize("change", ["source", "order", "view", "extra", "missing", "loader"])
 def test_source_view_refuses_stale_or_incomplete_composition(tmp_path: Path, change: str) -> None:
     """Omission, reordering and changed code cannot reuse an old qualification."""

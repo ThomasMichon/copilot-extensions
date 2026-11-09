@@ -79,10 +79,13 @@ def capabilities(workspace: WorkspaceOperations, *, expires_at: int,
     from .workspace_operations import CHUNK_BYTES, MAX_GENERATION_BYTES
 
     version = adopted_version(workspace, expires_at=expires_at, checkpoint=checkpoint)
+    from .workspace_terminal_mapping import FIELD, available, contract as mapping_contract
+    mapping = available(workspace, expires_at=expires_at, checkpoint=checkpoint)
     return {
         "protocol": PROTOCOL, "operations": list(OPERATIONS),
         "generation_versions": [1], "owner_store_versions": [version],
         "terminal_read_contract": contract(),
+        **({FIELD: mapping_contract()} if mapping else {}),
         "conversation_contract": conversation_contract(version),
         "conversation_acquisition": "workspace-projection/v1",
         "max_generation_bytes": MAX_GENERATION_BYTES, "chunk_bytes": CHUNK_BYTES,
@@ -99,7 +102,13 @@ def serve(workspace: WorkspaceOperations, operation: str, payload: dict, *,
     from .workspace_operations import WorkspaceUnavailable
 
     if workspace.terminal_reads:
-        if operation not in OPERATIONS or operation != "capabilities" and selection != SELECTION:
+        from .workspace_terminal_mapping import SELECTION as MAPPING_SELECTION, available
+        mapping = operation == "retained-comment" and selection == MAPPING_SELECTION and available(
+            workspace, expires_at=expires_at, checkpoint=checkpoint,
+        )
+        if not mapping and (
+            operation not in OPERATIONS or operation != "capabilities" and selection != SELECTION
+        ):
             raise WorkspaceUnavailable("terminal workspace read capability required")
         adopted_version(workspace, expires_at=expires_at, checkpoint=checkpoint)
     elif selection is not None:

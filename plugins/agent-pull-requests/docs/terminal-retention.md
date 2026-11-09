@@ -56,7 +56,10 @@ and an exact `terminal_read_contract`:
 }
 ```
 
-Only `capabilities`, `load`, `sync`, `lookup`, `chunk` and `events` are served.
+Only `capabilities`, `load`, `sync`, `lookup`, `chunk` and `events` are served
+under terminal-read/v1. The separately negotiated
+[compact mapping reader](#optional-terminal-mapping-receiver) does not extend
+that exact operation list.
 The descriptor reports the **actual** adopted owner version (3, 4, 5 or 6);
 its `agent-pull-requests.terminal-conversation/v1` descriptor remains body-free,
 trusted-ingest-only and non-acknowledging. Read-only means no forge mutation;
@@ -298,11 +301,56 @@ an original native version. Protected recovery receipt/state changes clear
 the affected slot in the same envelope. Reopen does not recalculate compact
 history, confirm an unknown effect or restore executable preparation.
 
-This is internal storage/library composition only. Terminal-read/v1 still
-excludes retained-comment, preparation, submission, feedback and retirement
-requests. Optional receiver/client expansion needs its own discovery contract
-and qualification before any new request or result is served. Source fixtures
-do not establish retained-host adoption, provider or installed acceptance.
+### Optional terminal mapping receiver
+
+After storage adoption, a trusted embedding may additionally select
+`WorkspaceOperations(..., terminal_reads=True, terminal_mapping_reads=True)`.
+The existing read-only constructor still excludes writers, prepared receivers,
+active mapping acquisition, feedback and selection preparation. It requires the
+capable `terminal_comment_mapping=True` file reader. Selection does not adopt
+storage; missing adoption disables only the optional mapping declaration.
+
+The executing receiver adds `terminal_comment_mapping_contract` alongside the
+unchanged terminal-read/v1 descriptor and exact baseline operations:
+
+```json
+{
+  "protocol": "agent-pull-requests.terminal-comment-mapping-reader/v1",
+  "operations": ["retained-comment"],
+  "result_protocol": "agent-pull-requests.terminal-comment-observation/v1",
+  "representations": ["active", "compact"],
+  "terminal_comment_mapping_version": 1,
+  "effects": "none"
+}
+```
+
+Native/Fleet clients and the CLI/tool facade discover this separate optional
+operation before sending `retained-comment`. Its request fields remain
+`number`, `operation_id` and `action_id`; Fleet requests select the new
+protocol through the existing `workspace_contract` envelope field. Native
+calls retain the separate selection only after successful discovery. The
+receiver rechecks actual selection and storage on every read. Only this
+selection can serve the active/compact result described above; neither
+terminal-read/v1 nor retained-comment-reader/v1 changes meaning.
+Both client paths validate original identities, revision, minimal prepared
+identity, receipt shape and nullable acquired evidence with the existing
+owner validators; a present but malformed value is not a successful read.
+
+Older terminal-read consumers ignore the additive descriptor and continue
+using their original selection and operations. New consumers with a prior,
+missing or malformed declaration refuse the optional read before dispatch,
+without disabling baseline commands. Withdrawal or a provider rollback after
+discovery refuses the stale optional request without another search, native
+read or mutation fallback. Refreshing discovery drops its selection. A strict
+file-reader rollback remains a separate storage incompatibility and refuses
+expanded state unchanged. No old protocol is deprecated by this expansion.
+
+This adds no remote preparation, submission, feedback, attention writer or
+retirement operation. Reads preserve receipts, events, pending delivery,
+handled positions and ACKs. Isolated Native/Gateway/CLI and service restart
+fixtures cover active and compact reads after populated-cache retirement,
+mixed-version directions and withdrawal. They do not establish retained-host
+adoption, provider or installed acceptance.
 
 ## Scoped cache and server-memory retirement
 
