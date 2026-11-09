@@ -4,7 +4,9 @@ Back to the [existing-owner report API](watch-gateway.md#optional-existing-owner
 
 The source API additionally supports `/v2/read/<target>/capabilities|threads|diff`,
 `agent-pull-requests.report-read/v2` and `owner_executed_report/v2`.
-V1, default hosting and ordinary native commands retain their 32 KiB limit.
+V1 and default hosting retain their 32 KiB response limit. Ordinary native
+`threads`/`diff` commands retain their separate 1 MiB capture and validation
+ceiling; they do not require v2 to read reports above 32 KiB.
 This is not installed enrollment, live-provider qualification or a rollout.
 
 ## Trusted selection
