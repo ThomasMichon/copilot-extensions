@@ -269,7 +269,7 @@ def complete_worktree(
         if validate_source is not None:
             try:
                 validate_source()
-            except (OSError, ValueError, RuntimeError, git_ops.GitError) as exc:
+            except (OSError, ValueError, RuntimeError, git_ops.GitError, subprocess.SubprocessError) as exc:
                 return {**base, "action": "error", "error": str(exc)}
         return None
 

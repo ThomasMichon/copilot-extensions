@@ -223,6 +223,83 @@ def test_guarded_backup_failure_remains_unknown_and_never_reconciles(source, mon
     assert _git("rev-parse", "HEAD", cwd=root) == before
 
 
+def test_post_backup_validation_timeout_preserves_owner_result_and_recovery(source, monkeypatch):
+    import subprocess
+
+    config, _wid, root, _remote = source
+    _squash_merge_upstream(
+        Path(config.default_repo.anchor), files={"a.txt": "one\n", "b.txt": "two\n"}, msg="squash",
+    )
+    args = arguments(source)
+    before = _git("rev-parse", "HEAD", cwd=root)
+    real = git_ops.git
+    saved = []
+    def run(*argv, **kwargs):
+        if saved and argv[:3] == ("--no-replace-objects", "remote", "get-url"):
+            raise subprocess.TimeoutExpired(["git", *argv], 30)
+        result = real(*argv, **kwargs)
+        if argv[0] == "update-ref" and argv[1].startswith("refs/pre-complete-backups/"):
+            saved.append(argv[1])
+        return result
+    monkeypatch.setattr(git_ops, "git", run)
+    code, value = invoke(args)
+    assert code == 1 and value["status"] == "unknown", value
+    assert "timed out" in value["error"]
+    assert value["result"]["backup_ref"] == saved[0]
+    assert _git("rev-parse", saved[0], cwd=root) == before
+    assert _git("rev-parse", "HEAD", cwd=root) == before
+
+
+@pytest.mark.parametrize("operation", ["completion", "source-publication"])
+def test_source_operations_share_publication_then_metadata_order_with_recovery(
+    source, monkeypatch, operation,
+):
+    from concurrent.futures import ThreadPoolExecutor
+    from contextlib import contextmanager
+    from threading import Event
+    from types import SimpleNamespace
+    from agent_worktrees import pr_publish, pr_source_complete, pr_source_publication
+
+    config, wid, root, remote = source
+    requested = Event()
+    real_publish = pr_publish.publish_lock
+    real_metadata = pr_publish.metadata_lock
+    @contextmanager
+    def publish(path, **kwargs):
+        requested.set()
+        with real_publish(path, acquire_timeout=5):
+            yield
+    monkeypatch.setattr(pr_publish, "publish_lock", publish)
+    def evidence(*args, **kwargs):
+        raise pr_source_publication.SourcePublicationError("bounded publication control")
+    monkeypatch.setattr(pr_source_publication, "source_evidence", evidence)
+    args = SimpleNamespace(
+        repo=git_ops.slug_from_url(str(remote)), worktree_id=None, config=None,
+        expected_branch=_git("symbolic-ref", "--short", "HEAD", cwd=root),
+        expected_head=_git("rev-parse", "HEAD", cwd=root), dry_run=True, json=True,
+    )
+    def action():
+        if operation == "completion":
+            return pr_source_complete.complete(args)
+        return pr_source_publication.publish_source(
+            wid, config, target_repo=args.repo, workspace=str(root),
+            branch="feature/topic", expected_head=args.expected_head,
+        )
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        # Existing rewrite/recovery paths acquire this real prefix in this order.
+        with real_publish(str(root), acquire_timeout=5):
+            future = pool.submit(action)
+            assert requested.wait(5), "source operation did not reach publication admission"
+            with real_metadata(wid, project=config.repo_name, timeout=2):
+                pass
+        value = future.result(timeout=15)
+    if operation == "completion":
+        assert value["status"] == "preview" and value["ok"], value
+    else:
+        assert value["publication_state"] == "not_pushed"
+        assert value["error"] == "bounded publication control"
+
+
 def test_legacy_parser_still_runs_without_guards_and_projectless_new_form_is_structured(source, monkeypatch):
     _config, wid, _root, _remote = source
     code, value = invoke(["pr-complete", wid, "--dry-run", "--json"])

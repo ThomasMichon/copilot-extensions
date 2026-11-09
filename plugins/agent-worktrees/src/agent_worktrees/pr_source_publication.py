@@ -168,10 +168,10 @@ def publish_source(worktree_id: str, config: cfg.Config, *, target_repo: str,
             machine=(config.machine, caller.machine, caller.execution_machine),
             source_attribution=repo.pr.source_attribution,
         )
-        with pr_publish.metadata_lock(worktree_id, project=config.repo_name,
-                                      timeout=publication_deadline.lock_wait(timeout)):
-            with pr_publish.publish_lock(str(workspace), push_timeout_seconds=timeout):
-                evidence = source_evidence(repo, target_repo, workspace, branch, expected_head)
+        with pr_publish.publish_lock(str(workspace), push_timeout_seconds=timeout), \
+                pr_publish.metadata_lock(worktree_id, project=config.repo_name,
+                                        timeout=publication_deadline.lock_wait(timeout)):
+            evidence = source_evidence(repo, target_repo, workspace, branch, expected_head)
             root, remote = evidence["workspace"], evidence["remote"]
             with pinned_destination(remote, evidence["push_urls"], evidence["transport_settings"],
                                     fetch_url=evidence["fetch_url"]):

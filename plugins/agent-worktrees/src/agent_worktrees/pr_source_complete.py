@@ -91,8 +91,8 @@ def _complete(args):
     try:
         config, binding = _admit(args)
         source, root, _repo, _remote_url = binding
-        with pr_publish.metadata_lock(source["worktree_id"], project=config.repo_name):
-            with pr_publish.publish_lock(root):
+        with pr_publish.publish_lock(root):
+            with pr_publish.metadata_lock(source["worktree_id"], project=config.repo_name):
                 def recheck():
                     fresh_config, fresh = _admit(args)
                     if fresh_config.repo_name != config.repo_name or fresh != binding:
