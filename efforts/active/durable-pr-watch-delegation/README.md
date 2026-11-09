@@ -332,9 +332,14 @@ owner or claiming an atomic candidate/thread write.
 Its [selected reopening refinement](native-thread-resolution.md#selected-native-reopening-proposal)
 cleared independent review in #11741. Its
 [source implementation and controls](journal/2026/11.09%20Selected%20native%20reopening%20implementation.md)
-compose the same owner for an exact resolved-to-active transition; independent
-implementation review and merge remain pending. Close-only commands and
+compose the same owner for an exact resolved-to-active transition, merged in
+#11748 after independent approval and all required CI. Close-only commands and
 legacy status choices remain unchanged; installed support is not qualified.
+The [native local source-reconciliation proposal](native-source-reconciliation.md)
+under #11753 composes the existing Worktrees `pr-complete` owner with optional
+exact-source admission and a capability-directed native client. Contract review
+precedes implementation; no remote source mutation, merge evidence, claim
+settlement or finalization is implied.
 
 - [x] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence)
   (merged in #10380; implementation, provider and adoption gates remain).
@@ -1092,8 +1097,9 @@ or silently expanding a bounded source claim.
   native action authority, same candidate/thread, status-only write, original
   consumed-operation outcomes, strict peers and unchanged close-only behavior.
   All five linked source controls pass (414 Worktrees and 193 frontend controls,
-  five existing platform skips). Independent implementation review/merge remain
-  pending; no installed/provider/HTTP or native Windows parity is claimed.
+  five existing platform skips), merged in #11748 after current-head independent
+  approval and all actual required checks. No installed/provider/HTTP or native
+  Windows parity is claimed.
 
 - [x] Qualify the finite [selected native thread-resolution contract](native-thread-resolution.md#expansion-and-qualification) (#11728)
   after reviewed intent: exact ADO target/principal/candidate/thread, status-only
