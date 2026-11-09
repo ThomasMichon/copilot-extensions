@@ -5062,7 +5062,7 @@
         "tools/check-docs-consistency.py": "dfe97e241cdf6b93682f1cec16b77c2bf0c6f9b604ab1d50e7cb7b29ad32052d",
         "tools/check-release-controller-compatibility.py": "a8a58ac83af198b2ed7c623107edc11eda768efaea8086bfff9565b3713008af",
         "tools/check-trusted-ci.py": "b18b155f8cd97d7a4234526791b1a854fe1a7e033a3622e8fa1ab6fd3a3bcaef",
-        "tools/check-version-bump.py": "f95836d30ba1fb3876195959216df649a8006f9c70f69e1842f78b3711371d23",
+        "tools/check-version-bump.py": "ac27e7940725ae9a4079c2d91e8f4d4fc368318a95f03870a4a36d8cc6a9e513",
         "tools/ci_pr_unit_reuse.py": "e557303bb418fda2be9a6f52d3754620b5e2150c4586bf48678092904816109b",
         "tools/clean-room/lib/materialized_provenance.py": "8cb8941d68bc5e5b2b39bce86b9e41c0a1362d941da21fb452bead029dba5403",
         "tools/coverage_guided_selection/__init__.py": "29e9e5a122d7f4e2a6be3f8793381df448e8d578ef8c381093edd64db7a65d80",

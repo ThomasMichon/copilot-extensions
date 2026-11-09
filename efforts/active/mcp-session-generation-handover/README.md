@@ -23,6 +23,39 @@ Current operator reaffirmation:
 fresh physical-generation execution and preserved session reattachment. It does
 not replace the original Request or waive release and installed-consumer gates.
 
+### Application-state ownership boundary
+
+> Install shouldn't be messing with a live DB or state file; this is one area where we do have to figure out lock management with the outgoing version, during boot of the incoming service versions
+
+This supplements, rather than replaces, the request above. Installation stages
+software; it does not rewrite or migrate live application DB/state files.
+Incoming boot must coordinate safe compatible access, quiescence or ownership
+transfer with the outgoing state owner before making state changes. This is
+necessary incoming readiness, distinct from optional predecessor cleanup.
+
+### Requested boot and recovery sequence
+
+> For SQLite, I assume we need the existing version to release its lock on the DB and finish pending transactions. When starting the new version of a service, we will need to:
+> 1. Check for existing service version
+> 2. Negotiate handoff with existing service
+> 3. Upon failure to negotiate, force-terminate existing service
+> 4. Check health of existing DB, perform repair/update if needed, take ownership
+> 5. In case of failure, rename existing DB to backup, create new DB in "state recovery mode".
+
+The forced fallback is an outgoing-service lifecycle policy, not permission to
+terminate separate client/session keepers or an arbitrary process tree.
+Ownership and uncertain accepted-operation outcomes remain explicit.
+
+### Durable state authority
+
+> Per my rules: all DBs fundamentally hold recoverable state that should be recomputable from file-system-based state, usually persisted in worktree/session folders, access over SSH, or Git. Only known "violation" is agent-dispatch Tasks, for which we probably should have an agent design a fallback-recover mechanism.
+
+DBs are intended to be rebuildable projections, not the sole authority.
+Dispatch Tasks is the operator-identified known exception; its filesystem
+fallback requires a separate design before DB replacement can be treated as
+lossless recovery. This intent does not claim that every existing DB's
+reconstruction path has already been qualified.
+
 ## Guiding Intent
 
 An update must make fresh `agent-mcp` invocations use the incoming runtime and
@@ -333,7 +366,10 @@ withdrawal authorizes no GUI effect or change to the SDK's own admission rules.
 - [ ] Pair with genuine incoming source-admission, authentication, build,
   permission, I/O and health failures that prevent incoming completion.
   Necessary durable-state compatibility and conflicting-work protection remain
-  enforced; do not require takeover of an unknown foreign listener.
+  enforced; do not require takeover of an unknown foreign listener. Verify that
+  installation does not mutate live application DB/state, and that incoming
+  boot establishes compatible access or an outgoing-owner handoff before state
+  changes or migration, without forcibly closing live handles.
 - [ ] The incoming-complete result leaves outgoing-deferred, handover-pending
   and whole-effort gates visibly distinct. No new selector or manifest alone
   manufactures success, and no old cleanup result reverses healthy incoming

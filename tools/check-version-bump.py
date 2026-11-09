@@ -92,7 +92,7 @@ _PLUGIN_JSON_VERSION = re.compile(r'"version"\s*:\s*"([^"]+)"')
 def _git(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", "-C", str(REPO), *args],
-        capture_output=True, text=True, check=False,
+        capture_output=True, text=True, encoding="utf-8", check=False,
     )
 
 

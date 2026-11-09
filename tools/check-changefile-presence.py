@@ -116,14 +116,19 @@ def _changefile_intents(data: object, label: str) -> set[tuple[str, str]]:
 def _changed_library_intents(cvb, base: str, head: str) -> set[str]:
     """Expand only added/changed bump entries, not unrelated baseline intents."""
     result = cvb._git(
-        "diff", "--name-status", "--no-renames", "--diff-filter=AM", f"{base}..{head}",
+        "diff", "--name-status", "-z", "--no-renames", "--diff-filter=AM", f"{base}..{head}",
         "--", ".changefiles",
     )
     if result.returncode:
         raise RuntimeError(result.stderr.strip() or "could not read changed changefiles")
     selected = []
-    for line in result.stdout.splitlines():
-        status, name = line.split("\t", 1)
+    fields = result.stdout.split("\0")
+    if fields[-1] == "":
+        fields.pop()
+    if len(fields) % 2:
+        raise RuntimeError("invalid changed-changefile path records")
+    for index in range(0, len(fields), 2):
+        status, name = fields[index:index + 2]
         path = Path(name)
         if path.parent.as_posix() == ".changefiles" and path.suffix == ".json":
             selected.append((status, path))
@@ -188,11 +193,10 @@ def added_changefile_names(base_ref: str, head_ref: str = "HEAD") -> set[str]:
     if resolved is None:
         return set()
     mbase, head = resolved
-    r = cvb._git("diff", "--name-only", "--diff-filter=A", f"{mbase}..{head}",
+    r = cvb._git("diff", "--name-only", "-z", "--diff-filter=A", f"{mbase}..{head}",
                  "--", ".changefiles")
     names = set()
-    for ln in r.stdout.splitlines():
-        ln = ln.strip()
+    for ln in r.stdout.split("\0"):
         if not ln:
             continue
         p = Path(ln)

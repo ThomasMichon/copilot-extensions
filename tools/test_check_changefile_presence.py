@@ -253,16 +253,24 @@ def _intent(plugin: str, kind: str = "patch") -> dict:
     return {"comment": "release", "changes": [{"plugin": plugin, "type": kind}]}
 
 
-def test_library_changefile_only_requires_nested_consumer_intent(repo: Path):
+@pytest.mark.parametrize(("library_name", "consumer_name"), [
+    ("library.json", "consumer.json"),
+    ("libr\u00e1ry.json", "consumer.json"),
+    ("library.json", "consum\u00e9r.json"),
+])
+def test_library_changefile_only_requires_nested_consumer_intent(
+    repo: Path, library_name: str, consumer_name: str,
+):
+    _git(repo, "config", "core.quotePath", "true")
     _nested_library_base(repo, pending=_intent("alpha"))
-    _write(repo, ".changefiles/library.json", json.dumps(_intent("libs/leaf")))
+    _write(repo, f".changefiles/{library_name}", json.dumps(_intent("libs/leaf")))
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "library-only bump intent")
     result = _run(repo)
     assert result.returncode == 1, result.stdout + result.stderr
     assert "alpha" in result.stderr
 
-    _write(repo, ".changefiles/consumer.json", json.dumps(_intent("alpha")))
+    _write(repo, f".changefiles/{consumer_name}", json.dumps(_intent("alpha")))
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "cover the nested consumer")
     result = _run(repo)
