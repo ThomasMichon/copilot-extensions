@@ -84,11 +84,14 @@ class ReplayStore:
     def __init__(
         self, root: Path, namespace: str, *, clock: Callable[[], float] = time.time,
         service_identity: ReplayServiceIdentity | None = None,
-        terminal_retention: bool = False,
+        terminal_retention: bool = False, terminal_recovery: bool = False,
     ) -> None:
         if type(terminal_retention) is not bool:
             raise ValueError("explicit terminal reader selection required")
         self.terminal_retention = terminal_retention
+        if type(terminal_recovery) is not bool or terminal_recovery and not terminal_retention:
+            raise ValueError("recovery reader requires explicit terminal reader selection")
+        self.terminal_recovery = terminal_recovery
         if service_identity is not None and not isinstance(service_identity, ReplayServiceIdentity):
             raise ValueError("typed replay service identity required")
         self.root = Path(root)
@@ -170,6 +173,11 @@ class ReplayStore:
         selections = "review_selection_version" in document
         mappings = "review_comment_mapping_version" in document
         terminal = "terminal_retention_version" in document
+        recovery = "terminal_recovery_version" in document
+        if recovery:
+            if not self.terminal_recovery or not terminal:
+                raise ReplayStoreInvalid("terminal recovery reader unavailable for adopted owner")
+            names.update(("terminal_recovery_version", "terminal_recovery"))
         if terminal:
             if not self.terminal_retention or version not in (3, 4, 5, 6):
                 raise ReplayStoreInvalid("terminal retention reader unavailable for adopted owner")
@@ -239,8 +247,11 @@ class ReplayStore:
         WatchReplay(self.namespace, state=document["replay"], commit=lambda _state: None, clock=self.clock)
         if self._replay_reservation(document["replay"]) > capacities["replay_bytes"]:
             raise ReplayStoreInvalid("replay state exceeds its reserved capacity")
+        from .terminal_recovery import binding, validate as validate_recovery
+        recovery_bytes = validate_recovery(document) if recovery else 0
         review_intent.validate_operations(
-            document["reviews"], receipt_bytes=capacities["receipt_bytes"], review_bytes=capacities["review_bytes"],
+            document["reviews"], receipt_bytes=capacities["receipt_bytes"],
+            review_bytes=capacities["review_bytes"] - recovery_bytes,
             versions=(1, 2) if prepared else (1,),
             selections=selections,
             mappings=mappings,
@@ -278,7 +289,8 @@ class ReplayStore:
             try:
                 protocol = READBACK_PROTOCOL if version == 6 else PROTOCOL
                 captures = FeedbackCaptures(document["feedback_captures"], protocol=protocol)
-                captures.validate_bindings(document["reviews"], self.namespace)
+                recovered = [binding(row) for row in document["terminal_recovery"]["operations"]] if recovery else []
+                captures.validate_bindings(document["reviews"] + recovered, self.namespace)
             except ValueError:
                 raise ReplayStoreInvalid("invalid persisted feedback captures") from None
             if captures.capture_bytes() > capacities["feedback_capture_bytes"]:

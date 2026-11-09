@@ -138,8 +138,10 @@ Retain only the prior compact terminal summary, not old conversation bodies.
 
 ## Delivery order and acceptance
 
-- [ ] T1: Expand adopted storage and validators; implement terminal intent,
+- [x] T1: Expand adopted storage and validators; implement terminal intent,
   admission/drain integration and atomic minimal notification progress.
+  Source #11605 is merged; physical retirement and executing-host adoption
+  remain T2/T3, not implied by this finite source result.
 - [ ] T2: Implement compact recovery-only operations and actual protected
   readback, then resumable scoped cache/materialization retirement.
 - [ ] T3: Qualify the executing workspace/reader/service boundary and supported
