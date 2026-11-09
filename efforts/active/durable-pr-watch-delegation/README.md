@@ -277,6 +277,11 @@ details, not additional operator quotations or live deployment authority.
 
 _Operator-required outcome; agent-recommended slices and validation._
 
+The [CLI parity inventory](cli-parity-inventory.md) carries the next finite
+review-first draft-to-ready contract. Its Azure DevOps provider and explicit
+native invocation still need implementation and qualification; readiness
+does not grant merge consent or release a hold.
+
 - [x] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence)
   (merged in #10380; implementation, provider and adoption gates remain).
 - [ ] Complete P1 normalized candidate/conversation/cursor and inert attention
@@ -306,9 +311,10 @@ _Operator-required outcome; agent-recommended slices and validation._
   The [mapping-preservation refinement](terminal-retention.md#retained-acquisition-mapping-composition)
   cleared review in #11633. Explicitly adopted lossless slot transfer and
   scoped historical library readback merged in #11634. Separately negotiated
-  terminal retained-comment serving merged in #11636. Next is explicit
-  standalone host selection and qualification; installed, provider and
-  complete T3 acceptance remain open.
+  terminal retained-comment serving merged in #11636. Explicit standalone
+  host selection, fresh-only adoption and foreground compact-read
+  qualification merged in #11639; installed, provider and complete T3
+  acceptance remain open.
   Existing normalized ADO load/sync acquisition feeds the explicitly enabled
   journal after confirmed cache publication (#10405); native observation and
   standalone-host adoption remain distinct prerequisites.
@@ -1027,6 +1033,16 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
+- [x] Qualify finite standalone terminal mapping selection, missing/incompatible
+  core and prior-constructor behavior, strict parser/rollback, fresh-only
+  interrupted adoption and validation-only retained serving (#11639).
+  The existing foreground Gateway/CLI/native-exporter fixture seeds synthetic
+  original history before its writer, drains before owner-side compaction and
+  populated-cache retirement, then reads exact compact metadata after restart
+  without another export or replay-store write. The final standalone packet
+  passes 132 cases; strict typing passes Linux/Windows analysis. Installed
+  hosts, providers, full retention and P1-P6 acceptance remain open.
+
 - [x] Qualify finite optional terminal mapping serving through actual adopted
   storage, Native/Gateway/CLI negotiation, all four owner layouts, populated
   cache/buffer retirement and fresh file-reader/service restart (#11636).
@@ -1277,6 +1293,44 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-08 - Specify draft-to-ready native convergence before implementation
+
+- The existing CLI inventory's ready row remains open: the dedicated native
+  client has no readiness verb and the Azure DevOps provider explicitly refuses
+  un-draft. Tracked ready selection cannot stand in for an explicit foreign PR.
+- The [bounded contract](cli-parity-inventory.md#draft-to-ready-native-convergence)
+  preserves all tracked syntax, adds optional target-qualified author support,
+  separates draft state from holds/consent and requires honest readback outcomes.
+  Its parser/provider, native-client and mixed-version validation remain open.
+- This is review-first source planning under #6007, not provider implementation,
+  installed adoption, a live write or closure of any parent acceptance row.
+
+### 2026-11-08 - Select the standalone terminal mapping reader
+
+- #11639 merged as `5cc6cd6d87d539866149e1d162c503f7e6a40767` after
+  current-head Copilot approval with no findings and all required CI green.
+  The first managed merge correctly refused the not-yet-reported PR gate;
+  the ordinary watcher observed success before the next managed attempt.
+- `workspaces.terminal_mapping_reads` is explicit, default-off and requires
+  terminal reads. The host checks the executing optional declaration, adopts
+  only under fresh-root lifecycle exclusion and never repairs a retained
+  volume. Prepared-intent storage preserves original metadata without
+  selecting preparation, native mutation or feedback owners.
+- The final standalone packet passes 132 cases with confirmed cleanup;
+  strict typing passes all 16 service targets for Linux and Windows analysis,
+  and fatal lint, module size, documentation and install guards pass. Earlier
+  failed fixture attempts identified live-epoch/generation seeding and the
+  cleared cache's current value; corrected fixtures use the existing owners
+  rather than weakening production admission.
+- Re-read the complete current root Plan/Validation and the companion's
+  acceptance after this merge. The root still has 82 unfinished rows; the
+  companion has 11. No phase, provider, installed/shadow, all-publisher,
+  CLI/Dispatch, fleet or whole-retention gate closes from this finite leaf.
+- Next: return to the existing publication/CLI/consumer inventories and select
+  one finite source convergence gap. Protected credential-source admission
+  stays unavailable; no host activation, retained-volume transition or rollout
+  is authorized by this source milestone.
 
 ### 2026-11-08 - Land terminal intent, retirement and a read-only receiver
 
