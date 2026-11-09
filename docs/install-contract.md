@@ -5866,6 +5866,13 @@ Missing or unreadable exit evidence keeps retention pending. Malformed routing,
 archive I/O failure, a concurrent route change and failed incoming identity or
 readiness remain real failures. This fallback does not weaken the incoming
 runtime's preparation contract.
+Malformed observation envelopes report pending retirement through the existing
+resident error path rather than terminating the healthy incoming monitor.
+An undecodable non-null archived breadcrumb retains its bytes and code even
+after readable route/discovery owners exit: those exits cannot account for
+an unknown passive process. Missing archives never hide surviving canonical
+observation references. Refusal callbacks compare the validated raw route
+snapshot, preserving absent legacy generation fields and null optional metadata.
 A previous-only route still requires incoming startup, even without readable
 discovery. Its raw `active: null` is preserved through guarded publication;
 replacement opts out of eager route healing without changing legacy ZDD defaults.

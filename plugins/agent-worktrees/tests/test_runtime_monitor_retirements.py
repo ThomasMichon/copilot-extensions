@@ -51,9 +51,68 @@ def test_unobservable_replacement_retains_code_and_exact_recovery_until_native_e
     assert archives[0].is_file()
     alive.clear()
     owner.refresh()
-    assert not owner.pending and owner.error is None
-    assert not archives[0].exists()
-    assert not runtime._leases.read_runtime_references(root)
+    if recovery.endswith(b'":'):
+        assert owner.pending and owner.error is None
+        assert archives[0].exists()
+        assert runtime._leases.read_runtime_references(root)
+    else:
+        assert not owner.pending and owner.error is None
+        assert not archives[0].exists()
+        assert not runtime._leases.read_runtime_references(root)
+
+
+@pytest.mark.parametrize("damage", ["{}", "[]", '{"version":2}'])
+def test_malformed_observation_is_pending_instead_of_crashing_the_resident(retained, damage):
+    from agent_worktrees import runtime_monitor_replacement as replacement
+
+    root, runtime, _identities, _alive = retained
+    replacement.retain(root, runtime=runtime, predecessor={"pid": 101, "start": "1001"})
+    archive = next((root / "status-monitor-observations").glob("*.json"))
+    archive.write_text(damage)
+    owner = retirements.ResidentRetirements(root)
+    owner.refresh()
+    assert owner.pending and "observation" in owner.error.lower()
+    assert runtime._leases.read_runtime_references(root)
+
+
+@pytest.mark.parametrize("missing", ["file", "directory"])
+def test_orphaned_observation_references_never_report_completion(retained, missing):
+    from agent_worktrees import runtime_monitor_replacement as replacement
+
+    root, runtime, _identities, _alive = retained
+    replacement.retain(root, runtime=runtime, predecessor={"pid": 101, "start": "1001"})
+    directory = root / "status-monitor-observations"
+    if missing == "directory":
+        directory.rename(root / "preserved-observations")
+    else:
+        next(directory.glob("*.json")).rename(root / "preserved-observation.json")
+    owner = retirements.ResidentRetirements(root)
+    owner.refresh()
+    assert owner.pending and "Unidentifiable monitor observation" in owner.error
+    assert runtime._leases.read_runtime_references(root)
+
+
+@pytest.mark.parametrize("qualified", [False, True])
+def test_replacement_refusal_compares_raw_legacy_metadata_without_normalizing(retained, monkeypatch, qualified):
+    from zdd import routing
+    from agent_worktrees import runtime_monitor_identity as identity
+    from agent_worktrees import runtime_monitor_replacement as replacement
+    from agent_worktrees import status_monitor_cutover as cutover
+
+    root, _runtime, _identities, _alive = retained
+    route_root = root / "status-monitor-routing"
+    route_root.mkdir()
+    raw = {"bind": "127.0.0.1", "port": 61001, "pid": 101, "process_start_time": "1001", "version": None}
+    routing.routing_table_path(route_root).write_text(json.dumps({"active": raw, "previous": None}))
+    def observe(*args, **kwargs):
+        if not qualified:
+            raise ValueError("fixture old native observation unavailable")
+        return 101, "1001", "legacy"
+    monkeypatch.setattr(cutover, "routed_monitor_identity", observe)
+    monkeypatch.setattr(identity, "async_predecessor", lambda *a, **k: (None, {}))
+    _predecessor, options, _deferred = replacement.options(root, None, incumbent_expected=True)
+    assert options["refuse_old"](raw) is None
+    assert options["refuse_old"]({**raw, "generation": 0}) is not None
 
 
 def test_replacement_archive_failure_preserves_canonical_custody_and_code(retained, monkeypatch):

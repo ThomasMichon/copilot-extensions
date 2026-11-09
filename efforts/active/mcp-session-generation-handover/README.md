@@ -407,6 +407,13 @@ migration already works.
   unchanged legacy healing. Required CI, renewed review, release and installed
   acceptance remain open; no new deployment or whole-objective completion is
   claimed.
+- The intervening old-head review also exposed malformed archive envelopes,
+  unreadable breadcrumb cleanup and normalized legacy-route comparisons.
+  Added regression-first corrections, including orphan references after loss
+  of the archive directory. Final affected-file qualification passes 369
+  tests with the same five native cases unqualified; the shared cutover and
+  refusal files pass 64 tests. These are source results only, not current-head
+  review acceptance, required CI, release or installed completion.
 - Added a failure-first case to the existing installer-custody controls:
   outgoing native-identity observation is unavailable, but the healthy incoming
   runtime must publish with retirement pending and both slots preserved.

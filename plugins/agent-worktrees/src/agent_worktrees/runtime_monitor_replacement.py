@@ -16,10 +16,15 @@ from . import locks, tracking
 _REFERENCE_PREFIX = "worktrees-monitor-observation:"
 
 
-def active(root: Path, *, fallback: bool = False) -> routing.Endpoint | None:
-    """Validate publication storage without probing any outgoing native process."""
+def _table(root: Path) -> dict | None:
     table = routing.read_table(root / "status-monitor-routing", strict=True)
     routing._validate_endpoint_rows(table)
+    return table
+
+
+def active(root: Path, *, fallback: bool = False) -> routing.Endpoint | None:
+    """Validate publication storage without probing any outgoing native process."""
+    table = _table(root)
     raw = (table or {}).get("active")
     if raw is None and fallback:
         raw = (table or {}).get("previous")
@@ -54,7 +59,7 @@ def _record(content: dict) -> dict | None:
     try:
         raw = content["breadcrumb"]
         record = json.loads(base64.b64decode(raw, validate=True)) if raw is not None else None
-    except (ValueError, UnicodeError):
+    except (ValueError, UnicodeError, TypeError):
         return None
     return record if isinstance(record, dict) else None
 
@@ -89,12 +94,25 @@ def _archives(directory: Path) -> list[tuple[Path, dict]]:
             raise ValueError("Monitor observation must be a bounded ordinary file")
         record = json.loads(path.read_text(encoding="utf-8"))
         if (
-            type(record.get("version")) is not int or record["version"] not in (1, 2)
-            or path.stem != _digest(_content(record))
-            or not isinstance(record.get("slots"), list)
-            or record.get("release_state", "retiring") not in ("prepared", "retiring", "cancelled")
+            not isinstance(record, dict)
+            or type(record.get("version")) is not int or record["version"] not in (1, 2)
         ):
             raise ValueError("Monitor observation identity changed")
+        required = {"version", "table", "breadcrumb", "lock", "predecessor", "slots"}
+        if record["version"] == 2:
+            required |= {"release_claim", "release_state"}
+        if (
+            set(record) != required
+            or any(record[key] is not None and not isinstance(record[key], dict)
+                   for key in ("table", "lock", "predecessor"))
+            or record["breadcrumb"] is not None and not isinstance(record["breadcrumb"], str)
+            or not isinstance(record["slots"], list)
+            or not all(isinstance(slot, str) for slot in record["slots"])
+            or record.get("release_state", "retiring") not in ("prepared", "retiring", "cancelled")
+            or path.stem != _digest(_content(record))
+        ):
+            raise ValueError("Monitor observation shape or identity changed")
+        routing._validate_endpoint_rows(record["table"])
         claim = record.get("release_claim")
         if claim is not None and (
             not isinstance(claim, dict) or not isinstance(claim.get("owner"), str)
@@ -267,7 +285,8 @@ def options(root: Path, predecessor: dict | None, *, incumbent_expected: bool) -
     from . import status_monitor_cutover as cutover
     from .runtime_monitor_identity import async_predecessor
 
-    expected = active(root)
+    raw_expected = (_table(root) or {}).get("active")
+    expected = routing.Endpoint.from_dict(raw_expected) if raw_expected is not None else None
     try:
         observed = cutover.routed_monitor_identity(root, require_async_retirement=True)
         admitted, result = async_predecessor(
@@ -283,7 +302,7 @@ def options(root: Path, predecessor: dict | None, *, incumbent_expected: bool) -
         ) == observed[:2]:
             # Native identity is needed for cleanup, not for route authority.
             result["refuse_old"] = lambda raw: (
-                None if raw == expected.to_dict() else "predecessor route changed"
+                None if raw == raw_expected else "predecessor route changed"
             )
             return admitted, result, False
     retain(root, predecessor=predecessor)
@@ -291,7 +310,7 @@ def options(root: Path, predecessor: dict | None, *, incumbent_expected: bool) -
         "expected_old": expected,
         "preserve_raw_active": True,
         "refuse_old": lambda raw: (
-            None if raw == (expected.to_dict() if expected is not None else None)
+            None if raw == raw_expected
             else "predecessor route changed"
         ),
     }
@@ -327,6 +346,15 @@ def reconcile(root: Path, *, runtime=None, cleanup: bool = True) -> bool:
     if directory.is_symlink():
         raise ValueError("Monitor observation directory must not be linked")
     if not directory.exists():
+        evidence = root / "runtime-references.json"
+        if not evidence.exists() and not evidence.is_symlink():
+            return False
+        helper = runtime if runtime is not None else retirements._runtime()
+        if any(
+            owner.startswith(_REFERENCE_PREFIX)
+            for owner in helper._leases._read_runtime_reference_state(root, allow_transaction=True)[0]
+        ):
+            raise ValueError("Unidentifiable monitor observation reference remains pending")
         return False
     helper = runtime if runtime is not None else retirements._runtime()
     pending = False
@@ -341,10 +369,13 @@ def reconcile(root: Path, *, runtime=None, cleanup: bool = True) -> bool:
         for path, record in archives:
             content = _content(record)
             digest = _digest(content)
+            recovery = _record(content)
             identities = _identities(
-                content["table"], _record(content), content["lock"], content["predecessor"],
+                content["table"], recovery, content["lock"], content["predecessor"],
             )
-            exited = bool(identities)
+            unreadable = content["breadcrumb"] is not None and recovery is None
+            exited = bool(identities) and not unreadable
+            pending = pending or unreadable
             for identity in identities:
                 observed = breadcrumb.owner_exited({
                     "pid": identity["pid"], "owner_process_start_time": identity["start"],
