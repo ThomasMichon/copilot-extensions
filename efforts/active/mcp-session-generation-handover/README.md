@@ -218,6 +218,11 @@ named tracked objective before the whole effort is Done.
 - [ ] **Clean measured sweep:** resolve actual incoming completion and update
   performance; a selected runtime or a successful isolated tool call does not
   make a failed full update successful.
+  - [ ] **Nested-library version coverage #11704:** release the transitive
+    consumer-map correction and affected-consumer patch changefiles, then verify
+    ordinary reconciliation against the newly versioned payloads. Coordinator
+    retains review, release and installed acceptance; source guards alone do
+    not complete the measured sweep.
 - [x] **Worktrees incoming-monitor source correction:** #11673 merged the
   #11524 correction at `2e575be1a26c789f1b5b1912df626165fb9c7158`
   after current-head approval, required CI and Windows/Linux native acceptance.
@@ -1602,3 +1607,29 @@ migration already works.
   acceptance remain open. The effort remains Active; full adopted-wrapper
   reattachment, historical warm-reuse uncertainty and prepared qualification
   are not closed by these corrective slices.
+
+### 2026-11-09: Nested-library version coverage blocker #11704
+
+- Logger and Machines release payloads included changed nested ZDD metadata
+  without distinct consumer versions. Replacing only the current ZDD manifest
+  with its prior released bytes reproduced the earlier completed content hash;
+  this is changed nested input, not corrupt completion metadata or permission
+  to rewrite immutable completed slots.
+- The bump-consumer map now expands canonical sibling dependencies with the
+  materializer's shared UV parser, deterministic cycle-safe traversal and
+  fail-closed invalid-manifest handling. Both indirect ZDD consumers appear
+  in the actual map; ordinary patch changefiles request distinct releases.
+- Integration also identified Remote Driver, Budget Guidance and Chat as
+  previously omitted indirect consumers. Patch changefiles cover all five
+  missed payloads, not only the two observed installer failures; no additional
+  capability activation is requested.
+- Seven focused source controls failed before the correction and passed after
+  it, covering shared/nested dependencies, consumer forms, cycles, aliases and
+  invalid manifests. This closes a bounded release-accounting gap toward
+  authoritative runtime replacement, not installer admission or lifecycle work.
+- Related bump/changefile/accumulation guards pass 88 tests; two native symlink
+  controls explicitly skip when the platform denies symlink creation. The
+  source-only nested symlink-refusal control passes without native privileges.
+- Review, promotion and actual installed reconciliation remain coordinator-owned.
+  #3654's broader pointer work and #6369's source/stamp ownership stay separate.
+  No MCP, global/full-update or session-reattachment gate is marked complete.

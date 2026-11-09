@@ -25,7 +25,7 @@ What requires a bump, for a push/PR diff (`<base>..HEAD`):
   `docs/`, tests, manifests -- everything ships or informs downstream agents) =>
   `<p>`'s `plugin.json` `version` must differ from the base.
 * **Any file under a top-level, shared `libs/<lib>/`** (the canonical source that
-  is *vendored* into plugins) => **every plugin that vendors `<lib>`** must bump.
+  is *vendored* into plugins) => **every direct or transitive consumer** must bump.
   A shared-lib change reaches every consumer, so each consumer's payload changes
   (see `check-vendored-libs-sync.py`, dotfiles #929).
 
@@ -156,6 +156,63 @@ def _consumer_version_at(ref: str, consumer: str) -> str | None:
     return _pyproject_project_version_at(ref, f"{consumer}/pyproject.toml")
 
 
+def _canonical_dependencies(lib: str) -> set[str]:
+    """Read sibling library edges with the materializer's shared UV parser."""
+    if not uer.is_safe_lib_name(lib):
+        raise SystemExit(f"check-version-bump: unsafe canonical library name {lib!r}")
+    directory = LIBS_DIR / lib
+    pyproject = directory / "pyproject.toml"
+    linked = uer._find_symlinked_ancestor(pyproject, REPO)
+    if linked is not None:
+        raise SystemExit(
+            f"check-version-bump: {linked} is a symlink -- cannot safely "
+            f"determine {lib}'s nested consumers."
+        )
+    if pyproject.exists() and not pyproject.is_file():
+        raise SystemExit(f"check-version-bump: {pyproject} is not a manifest file")
+    try:
+        refs = uer.find_uv_editable_refs(directory)
+    except uer.ManifestUnreadable as exc:
+        raise SystemExit(
+            f"check-version-bump: {exc} -- cannot safely determine "
+            f"{lib}'s nested consumers; fix its pyproject.toml [tool.uv.sources] table."
+        ) from exc
+    dependencies: set[str] = set()
+    for _name, raw_path, dependency, _editable in refs:
+        # Promotion places each nested dependency at the same sibling location.
+        # Never reinterpret an arbitrary escaping path by its basename alone.
+        if (
+            not uer.is_safe_lib_name(dependency)
+            or Path(raw_path).is_absolute()
+            or (directory / raw_path).resolve() != (LIBS_DIR / dependency).resolve()
+        ):
+            raise SystemExit(
+                f"check-version-bump: {pyproject} references {raw_path!r}, "
+                "not a canonical sibling library -- cannot determine nested consumers."
+            )
+        dependencies.add(dependency)
+    return dependencies
+
+
+def _transitive_consumers(direct: dict[str, list[str]]) -> dict[str, list[str]]:
+    """Charge each seed's consumers for its complete, cycle-safe library closure."""
+    consumers: dict[str, set[str]] = {}
+    dependencies: dict[str, set[str]] = {}
+    for seed, names in sorted(direct.items()):
+        pending = [seed]
+        visited: set[str] = set()
+        while pending:
+            lib = pending.pop()
+            if lib in visited:
+                continue
+            visited.add(lib)
+            consumers.setdefault(lib, set()).update(names)
+            if lib not in dependencies:
+                dependencies[lib] = _canonical_dependencies(lib)
+            pending.extend(sorted(dependencies[lib], reverse=True))
+    return {lib: sorted(names) for lib, names in sorted(consumers.items())}
+
+
 def _vendored_consumers() -> dict[str, list[str]]:
     """Map ``lib name -> [consumers that vendor it]`` -- both an ordinary
     in-tree ``<consumer>/libs/*`` real copy AND a `uv`-editable canonical-
@@ -176,7 +233,9 @@ def _vendored_consumers() -> dict[str, list[str]]:
     editable-ref half legitimately needs `iter_consumer_dirs()` (plugins
     with a ``pyproject.toml`` + every top-level, out-of-plugin consumer
     tree, e.g. ``worktree-manager``) since a pointer can only ever live
-    inside a real ``pyproject.toml``."""
+    inside a real ``pyproject.toml``. Canonical sibling dependencies expand
+    every seed's consumers transitively, matching the release materializer,
+    including shared edges and cycles."""
     consumers: dict[str, list[str]] = {}
     if PLUGINS_DIR.is_dir():
         for plugin in sorted(p for p in PLUGINS_DIR.iterdir() if p.is_dir()):
@@ -234,8 +293,6 @@ def _vendored_consumers() -> dict[str, list[str]]:
         for _name, _raw_path, lib, _editable in refs:
             if name not in consumers.get(lib, ()):
                 consumers.setdefault(lib, []).append(name)
-    for lib in consumers:
-        consumers[lib] = sorted(consumers[lib])
     installer_engine_consumers = [
         plugin for plugin in ier.ADOPTERS if (PLUGINS_DIR / plugin).is_dir()
     ]
@@ -253,7 +310,7 @@ def _vendored_consumers() -> dict[str, list[str]]:
     ]
     if packaged_peers:
         consumers["peer-launch"] = packaged_peers
-    return consumers
+    return _transitive_consumers(consumers)
 
 
 def _is_ignored(rel_parts: tuple[str, ...], name: str) -> bool:

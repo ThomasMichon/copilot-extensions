@@ -1936,8 +1936,12 @@ whatever changefiles are pending; nothing here is hand-edited directly.
 > consumer's own top-level `libs/*`), but a lib consumed *solely* through a
 > `uv`-editable canonical-reference pointer (no local copy at all) is
 > invisible to it. `python tools/check-version-bump.py --list` additionally
-> names those pointer-only consumers — check both before assuming you've
-> found every plugin a shared-lib change reaches.
+> names those pointer-only consumers and expands canonical sibling-library
+> dependencies transitively, including shared edges and cycles. A nested
+> library change therefore requires changefiles for indirect consumers too;
+> malformed or symlinked reachable manifests fail closed rather than hiding
+> consumers. Check both before assuming you've found every plugin a shared-lib
+> change reaches.
 
 **All version files for a plugin must be bumped together in the same
 commit.** If any file is out of sync: a stale `plugin.json` makes
