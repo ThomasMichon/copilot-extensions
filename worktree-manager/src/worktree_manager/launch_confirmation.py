@@ -36,7 +36,6 @@ def new_decision(dlg: dict, prompt: str, *, is_local: bool) -> dict:
         "action": "new", "machine": machine, "env": environment, "is_local": is_local,
         "options": {
             "anchor": "Anchor repo" in on,
-            "bare": "Bare" in on,
             "no_mux": "No Mux" in on,
             "ahp": "AHP" in on,
             "local_model": "Local model" in on,
