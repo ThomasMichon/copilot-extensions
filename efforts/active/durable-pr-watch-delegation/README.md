@@ -282,7 +282,8 @@ contract reviewed in #11641 and its finite native source delivery in #11643.
 Windows, provider, installed and HTTP parity acceptance remain separate;
 readiness does not grant merge consent or release a hold.
 The [explicit native reviewer-request contract](native-reviewer-request.md)
-cleared review in #11645. Its implementation and qualification remain open;
+cleared review in #11645; its finite native source merged in #11647.
+Windows, provider, installed and HTTP qualification remain open;
 request acceptance is not evidence that a fresh review exists.
 
 - [x] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence)
@@ -1036,6 +1037,16 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
+- [x] Qualify finite explicit-target native reviewer requests (#11647).
+  Preserve tracked nudge selection, transport and no-op behavior; use the
+  actual target/provider and distinguish API acceptance from a fresh verdict.
+  The owner/provider/legacy packet passes 398 cases; the final shared
+  request/author/readiness/worker-policy packet passes 180, overlapping the
+  former packet and adding malformed reserved-worker marker controls.
+  The native packet passes 116 with five Windows-only skips and verified
+  cleanup. Source qualification is not native Windows, live-provider,
+  installed or HTTP parity.
+
 - [x] Qualify finite explicit-target native draft readiness (#11643), preserving
   tracked ready and legacy-hold behavior. The final owner packet passes 54 cases;
   the native frontend passes 84 with five Windows-only skips and verified
@@ -1304,6 +1315,47 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-08 - Preserve abandonment custody after combined provider failures
+
+- Remaining CLI inventory inspection distinguishes unpublished-attempt
+  cancellation from remote closure, its best-effort reason comment and claim
+  settlement. Neither terminal observation nor `--confirm` supplies operator
+  authority. Native successor integration remains open.
+- Found a directly coupled legacy defect: a GitHub close failure with an
+  appended comment-failure warning was accepted as success because the owner
+  searched for the warning text anywhere in the result. Recognize only the
+  existing warning-only prefixes; preserve close errors, open state and claims.
+  CLI syntax, provider result shape and successful-close semantics are unchanged.
+- The actual GitHub provider transport fixture now covers both failures and
+  confirms no abandoned history or claim release. Existing warning-only forms,
+  cancellation and provider conformance pass: 183 isolated cases with cleanup
+  verified. The initial packet found a test-owned empty-timestamp assertion and
+  a Git-only finalization fixture missing its existing no-mux binding; corrected
+  both without weakening the shared-host command guard.
+- Fatal lint, install-contract and headless-launch checks pass. This finite
+  prerequisite is not native/HTTP parity, prepared reason-comment adoption,
+  installed acceptance or permission for live closure. Continue the inventory
+  and both complete parent gates after reviewed merge.
+
+### 2026-11-08 - Merge native reviewer requests and resume the remaining CLI inventory
+
+- #11647 merged as `20cbf5c3b075162415d7f7e1e5fc129afe90df64` after
+  genuine current-head Copilot approval, both findings fixed and resolved,
+  and all required checks green. The required PR gate was explicitly
+  awaited; no review or CI waiver was used. Merged provenance is verified.
+- The final shared author-policy correction rejects reserved worker
+  bindings with missing or mismatched root markers before ambient loading,
+  including capability reporting. Review-history prose stays in this
+  Journal; the qualification document describes the current invariant.
+- Re-read both entire parent Plan/Validation sections after the actual merge.
+  Their 82 public and 11 companion unfinished rows remain open. Complete
+  CLI/HTTP, all-publisher, retention, Dispatch, provider, installed, shadow
+  and presentation acceptance are not implied by this finite source leaf.
+- Next: inspect the remaining abandonment/close CLI owner, operator-confirmed
+  intent and reason-comment behavior before selecting a compatible source
+  contract. Preserve publication identity and existing resource custody;
+  no live closure, credential work, host activation or rollout is authorized.
 
 ### 2026-11-08 - Qualify the bounded explicit reviewer-request source candidate
 

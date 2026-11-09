@@ -33,7 +33,7 @@ proof that all legacy operations can be retired.
 | `pr-watch threads`, thread resolution | On-demand bodies, current/reviewed candidate, author/reviewer ownership and provider-native resolution | Existing native reads; workspace source is ADO-first; three-provider end-to-end open |
 | `pr-comment`, `pr-review` | Distinct non-verdict comment and named review; selected exact-candidate writeback and unknown outcomes | Protected workspace submission source exists; installed HTTP/CLI adoption open |
 | `pr-watch reply/requeue` | Existing ADO thread/revision/idempotency and eligible evaluation/retry semantics | ADO-only bounded native operations; no generic rerun claim |
-| `pr-nudge` | Bound reviewer request or truthful unsupported/no-op; no coding-agent mention side effect | [Explicit native contract proposed for review](native-reviewer-request.md); successor integration open |
+| `pr-nudge` | Bound reviewer request or truthful unsupported/no-op; no coding-agent mention side effect | [Finite explicit native source merged in #11647](native-reviewer-request.md); Windows/provider/installed/HTTP parity open |
 | `pr-publication-labels` and author metadata | Metadata-only repair, exact body/reviewer/work-item meaning, preserve unrelated values | Bounded native metadata repair delivered in #10402; author amendment A4-A5 retains full scope |
 | `pr-merge` | Distinguish consent, human-only and direct completion; exact head, required policy/checks/holds, no privilege escalation | Native adapter uses target policy; explicit CLI differences are not parity |
 | `pr-complete` | Source reconciliation after authoritative merge, preserve subsequent work; not finalize | Worktrees source authority retained; successor invokes it rather than remote source mutation |
