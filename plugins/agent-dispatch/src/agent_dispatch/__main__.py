@@ -418,11 +418,12 @@ def _spawn_coordinator_process() -> None:
     # hook's CWD is often the plugin payload dir, which on Windows would lock it
     # against `copilot plugin update`), and outlives an installer's command Job.
     spawn_dispatch_daemon(
-        [python, "-m", "agent_dispatch", "serve"], log_name="serve-service.log", env=env
+        [python, "-m", "agent_dispatch", "serve"], log_name="serve-service.log", env=env,
+        console_children=True,
     )
 
 
-def _lazy_start_coordinator(*, timeout: float = 20.0) -> bool:
+def _lazy_start_coordinator(*, timeout: float = 20.0, automatic: bool = True) -> bool:
     """Start a local coordinator if none answers, then wait until it does.
 
     Serialized across concurrent CLI processes via an exclusive lock file so a
@@ -434,6 +435,15 @@ def _lazy_start_coordinator(*, timeout: float = 20.0) -> bool:
 
     if config.has_live_local_coordinator():
         return True
+    if os.name == "nt":
+        from .action_controls import action_decision
+        from .installation_policy import windows_policy
+        from .install_paths import install_dir
+
+        root = install_dir()
+        decision = action_decision("coordinator-replacement", root=root, automatic=automatic)
+        if decision.inhibited or decision.error or not windows_policy(root, observe_supervisor=False)["start_coordinator"]:
+            return False
     rd = config.run_dir()
     try:
         rd.mkdir(parents=True, exist_ok=True)
@@ -480,7 +490,7 @@ def _lazy_start_coordinator(*, timeout: float = 20.0) -> bool:
                 pass
 
 
-def _ensure_local_coordinator(args: argparse.Namespace) -> None:
+def _ensure_local_coordinator(args: argparse.Namespace, *, automatic: bool = True) -> None:
     """Best-effort: ensure a local coordinator is reachable before a client
     command runs, lazily starting one if not.
 
@@ -506,30 +516,19 @@ def _ensure_local_coordinator(args: argparse.Namespace) -> None:
     except Exception:
         pass
     try:
-        _lazy_start_coordinator()
+        if automatic:
+            _lazy_start_coordinator()
+        else:
+            _lazy_start_coordinator(automatic=False)
     except Exception:
         pass
 
 
 def _cmd_ensure_coordinator(args: argparse.Namespace) -> int:
-    """Internal, non-public entrypoint: run the tier-1 user-mode-ensure
-    autostart path and report whether a local coordinator is reachable.
+    """Installer-owned local startup, independent of automatic client inhibition."""
+    from .installation_policy import ensure_coordinator_command
 
-    Exists so a service-lifecycle installer (``install.sh``'s ``do_start``)
-    can trigger exactly the same lazy autostart every ordinary client command
-    already performs via ``_client(..., ensure=True)``/``_ensure_local_coordinator``
-    -- without depending on any specific data-bearing subcommand's own side
-    effects, output shape, or repo-resolution requirements (several real
-    subcommands, e.g. ``list``, resolve/require a repo *before* ever reaching
-    the client/autostart call, so they are not safe/general-purpose triggers).
-    Not part of the public CLI surface (unlisted; leading underscore).
-    """
-    from .client_authority import local_service_args
-
-    _ensure_local_coordinator(local_service_args(args))
-    from .config import has_live_local_coordinator
-
-    return 0 if has_live_local_coordinator() else 1
+    return ensure_coordinator_command(args)
 
 
 def _cmd_stop_coordinator(args: argparse.Namespace) -> int:

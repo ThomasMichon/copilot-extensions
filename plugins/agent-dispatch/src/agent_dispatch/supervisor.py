@@ -3723,6 +3723,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         *,
         interval: float = 30.0,
         on_cycle: Callable[[list[str]], None] | None = None,
+        on_cycle_start: Callable[[], None] | None = None,
     ) -> None:
         """Run :meth:`poll_once` each cycle, waiting between cycles.
 
@@ -3749,6 +3750,8 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                         return
                     continue
                 try:
+                    if on_cycle_start is not None:
+                        on_cycle_start()
                     spawned = self.poll_once()
                     if on_cycle is not None:
                         from .spawn_diagnostics import SpawnDiagnostics

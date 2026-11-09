@@ -98,6 +98,7 @@ def acquire_item(
     if result.not_modified:
         raise ValueError("GitHub hinted acquisition requires a fresh item")
     item = result.data
+    connector._observe_records(item, kind="item")
     updated = validate_item(connector, item, number)
     if minimum_revision is not None and updated < minimum_revision:
         raise ValueError("GitHub hinted response predates a required metadata revision")
@@ -113,6 +114,7 @@ def acquire_item(
             purpose="comment_page",
         )
         data = result.data
+        connector._observe_records(data, kind="comments")
         if result.not_modified or not isinstance(data, list) or len(data) > 100:
             raise ValueError("GitHub hinted comments require complete fresh pages")
         for comment in data:

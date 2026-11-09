@@ -65,6 +65,7 @@ def run(setup: protocol.Setup, name: str, *, apply: bool) -> protocol.Outcome:
             or not {CAPABILITY, context.provider} <= set(capability["capabilities"])):
         raise protocol.SetupError("Installed Fleet executable does not support this selected context.")
     ssh_arguments, description = None, None
+    vault_invocation = None
     if context.ssh_setup is not None:
         from . import repository_ssh_setup as ssh_setup
 
@@ -110,7 +111,13 @@ def run(setup: protocol.Setup, name: str, *, apply: bool) -> protocol.Outcome:
                 return protocol.Outcome("ready", "Selected SSH application has converged its authenticated directory.")
         if not apply:
             return protocol.Outcome("needed", "Selected SSH application requires its normal installation and owning Vault key.")
-        waiting = ssh_setup.prepare_key(setup, context, description)
+        invocation_options = {}
+        if context.ssh_key.owner is not None:
+            from . import repository_vault
+
+            vault_invocation = repository_vault.selected()
+            invocation_options["invocation"] = vault_invocation
+        waiting = ssh_setup.prepare_key(setup, context, description, **invocation_options)
         if waiting is not None:
             return waiting
         current = _invoke(key_arguments)
@@ -119,11 +126,16 @@ def run(setup: protocol.Setup, name: str, *, apply: bool) -> protocol.Outcome:
         setup.verify()
     if needed and apply:
         setup.verify()
+        if vault_invocation is not None:
+            vault_invocation.verify()
         result = _invoke(command + ["--apply"])
     setup.verify()
     if result != {"status": "ready", "stage": "connected"}:
         raise protocol.SetupError("Selected context has not established authenticated outbound access.")
     if ssh_arguments is not None:
-        return ssh_setup.run(setup, context, ssh_arguments, description, apply=apply)
+        return ssh_setup.run(
+            setup, context, ssh_arguments, description, apply=apply,
+            **({"invocation": vault_invocation} if vault_invocation is not None else {}),
+        )
     return protocol.Outcome(
         "ready", "Selected context has authenticated outbound Gateway access; SSH/lifecycle not changed.")

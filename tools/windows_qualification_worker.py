@@ -104,7 +104,10 @@ def native_prerequisites(owned) -> dict:
             raise ValueError(f"{name} prerequisite is not a disposable runner binary")
         reported = owned([str(binary), flag], 30).stdout
         version = NATIVE_VERSIONS[name]
-        if re.findall(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", reported) != [version]:
+        pattern = r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?"
+        if name == "psmux":
+            pattern = rf"(?m)^psmux[ \t]+({pattern})(?=\s|$)"
+        if re.findall(pattern, reported) != [version]:
             raise ValueError(f"{name} native prerequisite version mismatch")
         versions[name] = version
     return versions
