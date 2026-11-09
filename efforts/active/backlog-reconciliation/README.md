@@ -598,6 +598,16 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [repository-boundary and fixture outcomes](<journal/2026/11.09 repository-boundary-and-fixture-outcomes.md>)
+record four further audited tracking folds: three into new OPEN #11678
+and two additional regression rows in existing OPEN #11674. Their six and
+sixteen acceptance rows remain unchecked, with all prior fixture rows and
+existing responsibilities preserved. Claimed #11629 remains untouched;
+#11610 has only partial candidate coverage; external #11664 completion
+receives no campaign credit. Two equal complete scans at 02:10:43 PST
+measure 849 whole OPEN, 510 original and 339 inflow issues, 120 above fixed
+729, with 1,055 audited dispositions. Every remaining parent gate stays open.
+
 The [canonical installer-fixture outcome](<journal/2026/11.09 canonical-installer-fixtures.md>)
 records two audited tracking folds into OPEN #11674. All six PowerShell cases,
 eight POSIX cases and three distinct POSIX failure classes remain planned,
@@ -3074,6 +3084,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   acceptance remain continuing Phase 2 work, not silently completed coverage.
 - [ ] Identify high-priority fixes and their actual existing efforts, retained
   owners, unresolved acceptance and first bounded work slices.
+  The [2026-11-09 routing correction](roadmap-current-qualification.md#2026-11-09-tracking-route-correction)
+  directs two historical selected slices to their audited OPEN receivers:
+  #9323 to #9295 and #3002 to #2879. It preserves finite alternatives,
+  existing owners and independent parallel lanes; no fix, new priority,
+  implementation readiness or whole-parent prerequisite is inferred.
+  The [dated journal](<journal/2026/11.09 roadmap-receiving-routes.md>) retains
+  the 850-open census, unchanged completion gates and zero new dispositions.
   The agent-recommended [next-decision matrix](roadmap-next-slices.md)
   nominates twelve consequential first slices; their bounded qualification
   is recorded, not an exhaustive priority order or implementation assignment.
@@ -3085,6 +3102,10 @@ sources, transferring owners or turning partial/planning gains into completion.
 - [ ] Produce an evidence-backed prerequisite graph and sequencing plan for a
   stable harness that progresses toward vision, distinguishing independent
   parallel work from actual blockers.
+  The [historical-endpoint follow-through](<journal/2026/11.09 roadmap-receiving-routes.md#historical-endpoint-follow-through>)
+  routes nine retired tracking identities to their audited receiving slices
+  and leaves #9377 explicitly unqualified. Historical relationship counts,
+  scoped alternatives, actual owners and all completion gates remain unchanged.
 - [ ] _(Agent-recommended)_ Run larger, disjoint research waves, initially
   four sets of 50 issues, reusing unchanged admitted evidence and refreshing
   changed source/refinements rather than restarting the entire corpus.

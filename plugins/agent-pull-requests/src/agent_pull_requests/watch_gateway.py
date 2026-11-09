@@ -94,6 +94,7 @@ class WatchGateway:
         checkpoint: Callable[[], None] | None = None,
         workspaces=None,
         attention=None,
+        reports=None,
     ) -> None:
         for name in (fleet, gateway, slot):
             identifier(name)
@@ -135,6 +136,15 @@ class WatchGateway:
         ):
             raise ValueError("attention must use the admitted consumer and existing workspace owners")
         self.attention = MappingProxyType(attention)
+        from .report_read import ReportReader
+        reports = {} if reports is None else dict(reports)
+        if any(
+            key not in selected or not isinstance(value, ReportReader)
+            or value.consumer_scope != selected[key]
+            for key, value in reports.items()
+        ):
+            raise ValueError("reports must use the existing admitted scope owner")
+        self.reports = MappingProxyType(reports)
         self._tasks: set[asyncio.Task[ServiceResponse]] = set()
         self._closing = False
 
@@ -156,6 +166,9 @@ class WatchGateway:
             return _response(403, {"error": "watch_caller_refused"})
         if request.target.startswith(("/v2/review/", "/v1/attention/")):
             return await self._handle_workspace(request)
+        if request.target.startswith("/v1/read/"):
+            from .report_gateway import handle
+            return await handle(self, request)
         matched = _PATH.fullmatch(request.target)
         if matched is None:
             return _response(404, {"error": "watch_route_not_found"})
