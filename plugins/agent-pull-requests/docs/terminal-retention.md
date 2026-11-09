@@ -1,6 +1,6 @@
-# Terminal intent, workspace admission and compact recovery
+# Terminal intent, compact recovery and scoped cache retirement
 
-This internal source embedding implements the first part of the reviewed
+This internal source embedding implements the storage/workspace stages of the reviewed
 [terminal-retention sequence](../../../efforts/active/durable-pr-watch-delegation/terminal-retention.md).
 It adds no service, discovery operation or automatic adoption. The existing
 [conversation journal](conversation-journal.md),
@@ -177,8 +177,56 @@ original unknown attempt when it commits.
 Crossing the original deadline during IO or receipt commit reports escalation
 on that same invocation while retaining the unresolved attempt.
 
-This leaf removes selected bodies from the owner file only after actual drain.
-It does **not** retire cache pointers/objects, server buffers or
-generation/cursor bindings, strip a frozen pending event, or qualify installed
-consumers. Those remaining physical-retirement and T3 gates stay open. No
-ordinary file deletion, secure erase, zero-fill or TRIM operation is added.
+## Scoped cache and server-memory retirement
+
+The independent, default-off `terminal_cache_retirement=True` ReplayStore
+reader requires both terminal and recovery reader selection.
+`TerminalCacheRetirementStore(owner).adopt(lifecycle_checkpoint=...,
+expires_at=..., checkpoint=...)` requires recovery adoption and adds
+`terminal_cache_retirement_version: 1` with protocol
+`agent-pull-requests.terminal-cache-retirement/v1` to the same owner envelope.
+An older reader refuses unchanged. Lifecycle exclusion is checked through
+post-callback validation and commit, including terminal-intent adoption.
+There is no CLI/HTTP activation or automatic storage adoption.
+
+The existing workspace lifecycle owner calls
+`operations.retention.retire_cache(scope, cursor, expires_at=..., checkpoint=...,
+deadline=..., lifecycle_checkpoint=...)`. All captured operations must already
+have compact recovery representations. The call rejoins actual admitted work;
+a prior durable drain is insufficient. It then retains the lifecycle condition,
+replay custody, materialization lock and cache lock in that order. No disk lock
+is held while waiting for drain or performing forge IO.
+
+Before any physical mutation, the replay envelope durably captures the exact
+terminal cursor, bounded validated generation IDs and original current pointer.
+Progress shares the existing terminal byte reservation, with at most 1024
+scope/epoch records and 1024 captured objects per record. Full capacity refuses
+without eviction. Valid pre-adoption objects in that exact full scope can be
+captured under the lifecycle owner's exclusion; filenames or generation hashes
+alone never supply authority. Wrong cache namespace/service/limits, corruption,
+unexpected paths and linked files refuse before removal.
+
+The cache owner durably replaces only the selected scope's pointer with `None`
+before unlinking its captured, revalidated immutable objects. Atomic staging
+files and other scopes remain untouched. Uncertain pointer replacement stops
+before object removal; exact retry reads the same pointer and re-acknowledges
+its durability. Partial removal resumes only with the cleared pointer and
+original captured inventory. A new pointer/object is not silently recaptured.
+The existing materialization owner then removes that scope's buffered bytes
+and captured/prior-epoch generation-to-cursor bindings. Client-held bytes
+already delivered cannot be erased remotely.
+
+The owner persists `captured`, `cache_retired` and `complete` stages. A returned
+`status: complete` proves **only scoped cache/server-memory retirement**.
+It does not settle a pending event or unknown effect, establish whole-system
+body-free retention, retire backups/logs, or qualify installed consumers.
+Frozen pending payloads retain exact bytes and IDs until their original
+ACK/cancel/settlement; unknown receipts retain their original recovery policy.
+`delivery_settled` and `recovery_settled` remain false rather than inferring
+either outcome from physical work. Reopen changes the authoritative epoch and
+fences delayed retirement before any pointer/object or memory mutation.
+
+Only ordinary removal of the selected cache's captured files is implemented.
+No whole-cache rebuild, repair, secure erase, zero-fill or TRIM is invoked.
+Executing-host reader/service, skew/restart and supported rollback qualification
+remain T3 gates, separate from isolated source validation and rollout permission.

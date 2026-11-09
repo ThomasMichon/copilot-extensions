@@ -373,6 +373,11 @@ class TerminalRetentionStore:
         if not callable(lifecycle_checkpoint):
             raise ValueError("actual reader lifecycle checkpoint required")
 
+        def current() -> None:
+            if checkpoint is not None:
+                checkpoint()
+            lifecycle_checkpoint()
+
         def adopt(document: dict) -> dict:
             lifecycle_checkpoint()
             if document["version"] not in (3, 4, 5, 6):
@@ -390,7 +395,7 @@ class TerminalRetentionStore:
             lifecycle_checkpoint()
             return {"status": "adopted", "protocol": PROTOCOL}
 
-        return self.owner._review_transaction(adopt, expires_at=expires_at, checkpoint=checkpoint)
+        return self.owner._review_transaction(adopt, expires_at=expires_at, checkpoint=current)
 
     @staticmethod
     def selected(document: dict, scope: dict, cursor: Cursor) -> dict:
