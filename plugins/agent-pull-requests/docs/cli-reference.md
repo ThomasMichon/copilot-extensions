@@ -30,6 +30,34 @@ agent-pull-requests merge  --repo <owner/repo> --number <n> [--squash|--merge|--
 agent-pull-requests wait   --repo <owner/repo> --number <n> [--interval <s>] [--timeout <s>] [--json]
 ```
 
+## Native `threads`
+
+```text
+agent-pull-requests threads --repo <registered-target> --number <positive-number> --worktrees-command <attributable-command> [--json]
+```
+
+Reads discussion bodies on demand through the selected Worktrees
+`pr-watch threads` owner. The named target's binding supplies provider,
+endpoint and account; neither a claimant worktree nor a target checkout is
+required. Managed execution uses the existing same-cell peer selection.
+There is no default GitHub route, token/endpoint override, resolution,
+reply, mutation or automatic retry.
+
+A valid `agent-worktrees.pr-threads` version-1 report is emitted in full in
+both output modes, including valid failure reports. Exit 0 requires a
+successful owner invocation, `supported: true` and no report error; other
+outcomes exit nonzero. Additional frontend diagnostics go to stderr.
+Without a valid report, `--json` emits a frontend error with the requested
+repo/number; plain mode reports the error on stderr.
+
+Completeness and candidate freshness are independent of exit success.
+Preserve `complete: false` or null and any `candidate_changed` or native
+revision fields. An empty list or exit 0 does not prove complete/current
+evidence or authorize a write. Provider-specific IDs, bodies and iteration
+context remain unmodified; no body is added to a persistent watch cache.
+An incompatible or rolled-back runtime yields an explicit error without
+fallback or another invocation.
+
 ## `status`
 
 ```text
