@@ -1320,7 +1320,11 @@ def test_registered_siblings_keep_their_own_account_overrides(monkeypatch):
             for name in ("one", "two")
         }
     )
-    monkeypatch.setattr(repos, "read_registry", lambda: registry)
+    def read_registry(*, strict=False):
+        assert strict is True
+        return registry
+
+    monkeypatch.setattr(repos, "read_registry", read_registry)
     report = auth.report(
         [auth.source(name, f"https://github.com/team/{name}") for name in ("one", "two")],
         env={},
@@ -1343,7 +1347,11 @@ def test_registered_public_remote_normalization_preserves_account_policy(
 
     entry = repos.RepoEntry(name="fixture", remote=remote, account=explicit)
     registry = repos.ReposRegistry(repos={"fixture": entry}, account_map={"team": "mapped"})
-    monkeypatch.setattr(repos, "read_registry", lambda: registry)
+    def read_registry(*, strict=False):
+        assert strict is True
+        return registry
+
+    monkeypatch.setattr(repos, "read_registry", read_registry)
     monkeypatch.setattr(
         repos, "write_registry", lambda *_: pytest.fail("account lookup must be read-only"),
     )
@@ -1375,7 +1383,11 @@ def test_same_slug_on_different_hosts_uses_its_own_registered_account(
             name="enterprise", remote=enterprise, account="enterprise-account",
         ),
     })
-    monkeypatch.setattr(repos, "read_registry", lambda: registry)
+    def read_registry(*, strict=False):
+        assert strict is True
+        return registry
+
+    monkeypatch.setattr(repos, "read_registry", read_registry)
     selected = [
         auth.source("public", f"https://github.com{public_port}/team/repo"),
         auth.source("enterprise", "https://enterprise.test/team/repo"),

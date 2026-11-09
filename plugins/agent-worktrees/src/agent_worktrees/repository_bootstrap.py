@@ -106,8 +106,7 @@ def _account(registry: repos.ReposRegistry, name: str, url: str) -> str:
     if urlsplit(url).hostname != "github.com":
         return ""
     owner = urlsplit(url).path.strip("/").split("/")[0].casefold()
-    index = repos.AccountLookupIndex.from_registry(registry)
-    return index.account_map.get(owner) or ""
+    return repos.account_for_github_owner(owner, registry=registry) or ""
 
 
 def _credential_args(url: str, account: str, *, cwd: Path) -> list[str]:

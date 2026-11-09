@@ -314,6 +314,30 @@ def test_individual_resolution_uses_fresh_preferred_policy_and_repo_exception(mo
     assert len(calls) == 3
 
 
+def test_older_peer_upgrade_cannot_reuse_a_cached_publisher_login(monkeypatch):
+    corrected = False
+    individual_reads = []
+
+    def lookup(*args, **kwargs):
+        if "--json" in args:
+            payload = {"account_map": {}}
+            if corrected:
+                payload.update(
+                    resolution_version=1, repository_accounts={},
+                    owner_accounts={}, unmapped_owner_fallback=False,
+                )
+            return subprocess.CompletedProcess([], 0, json.dumps(payload), "")
+        individual_reads.append(args)
+        return subprocess.CompletedProcess([], 0, "" if corrected else "publisher", "")
+
+    monkeypatch.setattr(gh_account.worktrees, "explicit_context", lambda: False)
+    monkeypatch.setattr(gh_account, "_lookup", lookup)
+    assert gh_account.account_for_repo("publisher/tool") == "publisher"
+    corrected = True
+    assert gh_account.account_for_repo("publisher/tool") is None
+    assert len(individual_reads) == 2
+
+
 def test_bulk_account_inventory_preserves_exact_precedence_without_another_peer_read(monkeypatch):
     payload = {
         "account_map": {"Example": "mapped"},

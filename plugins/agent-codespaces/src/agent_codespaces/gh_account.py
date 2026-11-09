@@ -85,21 +85,9 @@ def account_for_repo(slug: str | None) -> str | None:
 
 
 def _legacy_account_for_repo(slug: str | None) -> str | None:
-    """Resolve an account without reusing another installation's cached state."""
+    """Resolve a legacy target afresh without retaining old owner-derived hints."""
     if worktrees.explicit_context():
         worktrees.validate_context()
-        return _account_for_repo.__wrapped__(slug)
-    return _account_for_repo(slug)
-
-
-@functools.lru_cache(maxsize=256)
-def _account_for_repo(slug: str | None) -> str | None:
-    """Resolve the gh login for a repo ``owner/name`` slug, or None.
-
-    Shells ``agent-worktrees repos account-for <slug>``.  Returns None when
-    agent-worktrees is absent, errors, or reports no preference (the caller
-    then falls back to the ambient ``gh`` account -- today's behavior).
-    """
     if not slug:
         return None
     result = _lookup("repos", "account-for", slug)
@@ -450,6 +438,5 @@ def _account_inventory() -> AccountInventory:
 
 def clear_caches() -> None:
     """Drop memoized lookups (test hook / after an auth change)."""
-    _account_for_repo.cache_clear()
     _token_for_account.cache_clear()
     _mapped_accounts.cache_clear()

@@ -73,6 +73,27 @@ def test_default_account_command_roundtrips_without_owner_inference(tmp_path, mo
     assert repos.account_for_github_slug("Publisher/dependency") is None
 
 
+@pytest.mark.parametrize("login", ["1234", "true", "null", "yes"])
+def test_scalar_shaped_accounts_roundtrip_as_strings(tmp_path, monkeypatch, login):
+    registry_path = tmp_path / "repos.yaml"
+    monkeypatch.setattr(repos, "_repos_yaml_path", lambda: registry_path)
+    assert repos_cli.cmd_repos_dispatch(["account", "default", login]) == 0
+    registry = repos.read_registry(strict=True)
+    assert registry.default_account == login
+    registry.account_map["1234"] = login
+    registry.repos["exception"] = repos.RepoEntry(
+        "exception", remote="https://github.com/Publisher/tool",
+        account=login, copilot_account=login,
+    )
+    repos.write_registry(registry)
+    loaded = repos.read_registry(strict=True)
+    assert loaded.account_map["1234"] == login
+    assert loaded.repos["exception"].account == login
+    assert loaded.repos["exception"].copilot_account == login
+    assert repos_cli.cmd_repos_dispatch(["account", "default", "--unset"]) == 0
+    assert repos.read_registry(strict=True).default_account == ""
+
+
 def test_conflicting_preferred_key_case_variants_refuse_resolution(tmp_path, monkeypatch):
     registry_path = tmp_path / "repos.yaml"
     registry_path.write_text(yaml.safe_dump({"account_map": {

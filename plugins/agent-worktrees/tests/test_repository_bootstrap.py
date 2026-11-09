@@ -110,6 +110,43 @@ def test_selected_account_change_after_acquisition_refuses_registration(
     assert repos.read_registry(strict=True).repos["sample"].local_path() is None
 
 
+@pytest.mark.parametrize("changed", [False, True])
+def test_preferred_account_filters_acquisition_and_revalidation(
+    source, registry, tmp_path, monkeypatch, changed,
+) -> None:
+    selected = "https://github.com/example/sample.git"
+    git(source, "remote", "set-url", "origin", selected)
+    state = repos.read_registry(strict=True)
+    state.default_account = "operator-work"
+    repos.write_registry(state)
+    config = tmp_path / "credential.gitconfig"
+    git(tmp_path, "config", "--file", str(config), "credential.helper", "manager")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    observed = []
+
+    def clone(url, target, args, **kwargs):
+        observed.append(args)
+        assert f"credential.{selected}.username=operator-work" in args
+        assert "credential.gitHubAccountFiltering=true" in args
+        shutil.copytree(source, target)
+        if changed:
+            current = repos.read_registry(strict=True)
+            current.default_account = "different-work"
+            repos.write_registry(current)
+
+    monkeypatch.setattr(bootstrap, "_clone", clone)
+    target = tmp_path / "acquired"
+    if changed:
+        with pytest.raises(protocol.SetupError, match="account changed"):
+            bootstrap.acquire("sample", target, selected)
+        assert "sample" not in repos.read_registry(strict=True).repos
+    else:
+        bootstrap.acquire("sample", target, selected)
+        assert repos.read_registry(strict=True).repos["sample"].local_path() == str(target)
+    assert len(observed) == 1
+
+
 def test_conflicting_alias_accounts_require_selected_account(registry) -> None:
     state = repos.read_registry(strict=True)
     for name in ("first", "second"):
