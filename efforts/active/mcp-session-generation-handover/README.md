@@ -70,6 +70,7 @@ and authorized installed-consumer acceptance. No global validation rule is waive
 | lopsided-gasket | Existing handover implementation and focused qualification | Managed implementation worktree |
 | patient-spanner | Incoming/retirement architecture and acceptance amendment | Managed documentation worktree |
 | squeaky-crank | Bounded #10951 resident configuration-context implementation | Managed source worktree; coordinator owns publication and rollout |
+| stubborn-latch | #11524 Worktrees incoming-monitor publication correction | Coordinator-controlled source worktree; separate from MCP handover implementation |
 | Session-path evidence | Read-only client, host and upstream-state analysis | Coordinator delegation |
 | Activation evidence | Read-only installer, selection and retirement analysis | Coordinator delegation |
 | Keeper evidence | Read-only existing lifecycle/transport primitive analysis | Coordinator delegation |
@@ -95,6 +96,10 @@ and authorized installed-consumer acceptance. No global validation rule is waive
 - Generic SDK observation work belongs to the independent #10925 objective, not
   an MCP implementation slice. Historical journals remain here unchanged; SDK
   progress cannot block this effort's independent implementation or completion.
+- stubborn-latch owns the #11524 Worktrees installer/monitor correction under
+  the coordinator. Lopsided-gasket's MCP handover implementation and retained
+  source changes remain independently owned; this correction does not replace
+  that writer or settle its remaining work.
 
 ## Context
 
@@ -372,6 +377,35 @@ backend execution. This plan does not assert that reattachment or legacy live
 migration already works.
 
 ## Journal
+
+### 2026-11-09 - Incoming-monitor correction resumed
+
+- Claimed #11524 as stubborn-latch, retaining the separate MCP handover owner.
+- The source correction separates outgoing native observations from incoming
+  election. It archives exact unresolved recovery bytes and retains prior code
+  without recovery or termination; structural route CAS and actual incoming
+  preparation, promotion and serving checks remain mandatory.
+- Focused source qualification passed 39 installer, actual-cutover and
+  retention cases, including unavailable outgoing birth, uncertain/corrupt
+  recovery, incoming identity mismatches and archive I/O failure. Broader
+  affected-file qualification, review, release and installed acceptance remain
+  open; this is not a clean full-update or MCP-session-handover result.
+- Final local contract qualification subsequently passed 345 tests across the
+  installer, actual-cutover, retirement and cancellation files, with verified
+  bounded-owner cleanup. Five cases from two expensive native installer
+  scenarios were deselected and remain unqualified; the earlier all-file
+  300-second timeout is not counted as a pass. Lint, install-contract,
+  unchanged module-size and whitespace guards pass. Review, release, actual
+  normal-update performance and installed consumer acceptance remain open.
+- Added a failure-first case to the existing installer-custody controls:
+  outgoing native-identity observation is unavailable, but the healthy incoming
+  runtime must publish with retirement pending and both slots preserved.
+  The current source fails this case before publication; bounded test cleanup
+  was verified. No installed correction is claimed.
+- Conditional route publication already separates the raw predecessor route
+  from native identity of the incoming writer. The remaining implementation
+  must preserve uncertain recovery records and conflicting-work protection,
+  rather than merely suppressing the first outgoing-observation exception.
 
 ### 2026-11-08 - Termination-free installer source merged
 

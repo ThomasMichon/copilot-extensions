@@ -1,0 +1,9 @@
+{
+  "comment": "Publish a ready incoming status monitor independently of outgoing native observation and unresolved recovery, preserving old evidence and code retention",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

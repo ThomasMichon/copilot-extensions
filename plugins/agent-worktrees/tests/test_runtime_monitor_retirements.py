@@ -18,6 +18,113 @@ def native_original_exit():
     return process_exit.observe_original_exit
 
 
+@pytest.mark.parametrize("recovery", [
+    b'{"state":"publication-uncertain","self_retirement":true}',
+    b'{"state":',
+])
+def test_unobservable_replacement_retains_code_and_exact_recovery_until_native_exit(
+    retained, monkeypatch, recovery,
+):
+    import base64
+    from zdd import breadcrumb, routing
+    from zdd.cutover_lock import CutoverLock
+    from agent_worktrees import runtime_monitor_replacement as replacement
+
+    root, runtime, identities, alive = retained
+    directory = root / "status-monitor-routing"
+    monkeypatch.setattr("zdd.diagnostics.process_start_time", identities.get)
+    routing.publish_active(directory, bind="127.0.0.1", port=61001, pid=101, process_start_time="1001")
+    path = breadcrumb.breadcrumb_path(directory)
+    path.write_bytes(recovery)
+    with CutoverLock(directory) as guard:
+        assert replacement.retain(root, runtime=runtime, detach_recovery=True, cutover_guard=guard)
+    archives = list((root / "status-monitor-observations").glob("*.json"))
+    assert len(archives) == 1
+    assert base64.b64decode(json.loads(archives[0].read_text())["breadcrumb"]) == recovery
+    assert not path.exists()
+    runtime.gc(root, min_age_days=0)
+    assert (root / "versions" / "legacy").is_dir()
+    identities.clear()
+    owner = retirements.ResidentRetirements(root)
+    owner.refresh()
+    assert owner.pending and owner.error is None
+    assert archives[0].is_file()
+    alive.clear()
+    owner.refresh()
+    assert not owner.pending and owner.error is None
+    assert not archives[0].exists()
+    assert not runtime._leases.read_runtime_references(root)
+
+
+def test_replacement_archive_failure_preserves_canonical_custody_and_code(retained, monkeypatch):
+    from zdd import breadcrumb, routing_persistence
+    from zdd.cutover_lock import CutoverLock
+    from agent_worktrees import runtime_monitor_replacement as replacement
+
+    root, runtime, _identities, _alive = retained
+    directory = root / "status-monitor-routing"
+    directory.mkdir()
+    path = breadcrumb.breadcrumb_path(directory)
+    content = b'{"state":"publication-uncertain"}'
+    path.write_bytes(content)
+    write = routing_persistence.write
+
+    def unavailable(*_args):
+        raise OSError("archive storage unavailable")
+
+    monkeypatch.setattr(routing_persistence, "write", unavailable)
+    with CutoverLock(directory) as guard:
+        with pytest.raises(OSError, match="archive storage"):
+            replacement.retain(root, runtime=runtime, detach_recovery=True, cutover_guard=guard)
+    assert path.read_bytes() == content
+    assert runtime._leases.read_runtime_references(root)
+    assert (root / "versions" / "legacy").is_dir()
+    monkeypatch.setattr(routing_persistence, "write", write)
+    with CutoverLock(directory) as guard:
+        assert replacement.retain(root, runtime=runtime, detach_recovery=True, cutover_guard=guard)
+    assert not path.exists()
+    assert len(list((root / "status-monitor-observations").glob("*.json"))) == 1
+
+
+@pytest.mark.parametrize("foreign", [False, True])
+def test_replacement_cannot_detach_custody_without_its_held_cutover_guard(retained, foreign):
+    from zdd import breadcrumb
+    from zdd.cutover_lock import CutoverLock
+    from agent_worktrees import runtime_monitor_replacement as replacement
+
+    root, runtime, _identities, _alive = retained
+    directory = root / "status-monitor-routing"
+    directory.mkdir()
+    path = breadcrumb.breadcrumb_path(directory)
+    path.write_bytes(b'{"state":"publication-uncertain"}')
+    with CutoverLock(root / "foreign") as guard:
+        with pytest.raises(ValueError, match="held publication cutover guard"):
+            replacement.retain(
+                root, runtime=runtime, detach_recovery=True,
+                cutover_guard=guard if foreign else None,
+            )
+    assert path.is_file()
+    assert not (root / "status-monitor-observations").exists()
+
+
+def test_replacement_does_not_reclassify_malformed_route_as_outgoing_observation(retained, monkeypatch):
+    from zdd import routing
+    from agent_worktrees import runtime_monitor_replacement as replacement
+    from agent_worktrees import status_monitor_cutover as cutover
+
+    root, _runtime, _identities, _alive = retained
+    directory = root / "status-monitor-routing"
+    directory.mkdir()
+    path = routing.routing_table_path(directory)
+    path.write_text('{"active":{"pid":101}}')
+    monkeypatch.setattr(
+        cutover, "routed_monitor_identity", lambda *a, **k: pytest.fail("malformed route reached native probe"),
+    )
+    with pytest.raises(routing.ActivePublicationRefused):
+        replacement.options(root, None, incumbent_expected=True)
+    assert path.read_text() == '{"active":{"pid":101}}'
+
+
 @pytest.mark.parametrize("nested", [False, True])
 def test_retirement_runtime_helpers_follow_the_retained_slot(tmp_path, monkeypatch, nested):
     slot = tmp_path / "versions" / "current"

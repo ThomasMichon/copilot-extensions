@@ -403,17 +403,20 @@ def _cancel_missing(root: Path, record: dict, runtime: ModuleType | None) -> boo
 
 def reconcile(root: Path, *, runtime: ModuleType | None = None, cleanup: bool = True) -> bool:
     """Keep the elected successor needed; settle only positively exited identities."""
+    from . import runtime_monitor_replacement as replacement
+
+    deferred = replacement.reconcile(root, runtime=runtime, cleanup=cleanup)
     records = _records(root)
     orphans = _orphans(root, records, runtime)
     if not records and not orphans:
-        return False
+        return deferred
     if not cleanup:
-        pending = False
+        pending = deferred
         for record in [record for _path, record in records] + orphans:
             if _demand(record, _exit_state(record)):
                 pending = True
         return pending
-    pending = False
+    pending = deferred
     directory = root / "status-monitor-retirements"
     directory.mkdir(exist_ok=True)
     with tracking._RecordLock(directory / "inventory", require_sidecar=True):

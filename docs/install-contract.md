@@ -5821,8 +5821,10 @@ The incoming monitor must advertise `status-monitor-async-retirement-v1`,
 guarded preparation recovery and a valid receiver generation. A compatible
 outgoing peer advertises those contracts and retires independently. Missing
 outgoing metadata, a legacy generation or a control timeout does not veto
-installation: native PID/birth and unchanged route custody still identify the
-predecessor. Before promotion, the new resident attempts one bounded
+installation. Native PID/birth qualifies optional predecessor cleanup, not
+incoming election. Structural, unchanged route custody remains mandatory for
+publication even when outgoing native identity cannot be observed. Before
+promotion, the new resident attempts one bounded
 `successor-handoff` notice carrying the exact old and selected successor endpoints.
 It uses the existing health seam to require the running peer's
 `status-monitor-successor-handoff-v1` capability; missing or malformed support
@@ -5852,8 +5854,18 @@ If the predecessor exits before the first grace record is armed, the same gate
 compare-releases its exact fallback under the observed active selection before
 settling custody. A missing active selection or failed route cleanup retains
 custody for retry; no grace record or force permission is fabricated.
-An unrouted, identity-unknown or changed owner remains an explicit refusal.
-This fallback does not weaken the incoming runtime's preparation contract.
+An unrouted or native-identity-unobservable incumbent defers retirement instead
+of refusing the incoming installation. The installation owner preserves exact
+older recovery bytes and the route/discovery observations under
+`status-monitor-observations/`, with durable canonical references protecting
+the retained code. Both cutover locks serialize moving an archived recovery
+record out of the active breadcrumb slot; no older attempt is recovered,
+cancelled, terminated or reported successful. The resident releases these
+references only after positive native exit for every recorded identity.
+Missing or unreadable exit evidence keeps retention pending. Malformed routing,
+archive I/O failure, a concurrent route change and failed incoming identity or
+readiness remain real failures. This fallback does not weaken the incoming
+runtime's preparation contract.
 The existing explicit cold-retirement helper retains its held cutover guard,
 authenticated runtime-prefix, native pin and positive-exit checks. Ordinary
 replacement does not invoke that helper before incoming startup or require its

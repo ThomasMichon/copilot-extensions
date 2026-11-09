@@ -556,6 +556,9 @@ def test_source_health_failure_routes_to_canonical_distinct_repair_after_custody
     (False, False, False, None), (True, False, False, None), (False, True, False, None),
     (True, True, False, None), (False, False, True, None),
     (False, False, False, "deferred"), (True, False, False, "committed-rollback"),
+    (False, False, False, "outgoing-identity-unavailable"),
+    (False, False, False, "outgoing-identity-unavailable-already-serving"),
+    (False, False, False, "prepublication-interrupted"),
 ])
 def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
     driver, tmp_path, monkeypatch, rollback, interrupted, activation_failed, special,
@@ -620,7 +623,7 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
                     pytest.fail("rollback/candidate retention was released")
         with driver.runtime.construction_lease(root, "2.0.0", timeout=0):
             pass
-        if interrupted:
+        if interrupted or special == "prepublication-interrupted":
             raise RuntimeError("cutover interrupted")
         if special == "committed-rollback":
             from zdd import breadcrumb
@@ -672,8 +675,17 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
         pytest.fail("normal construction must not adopt a Task")
 
     monkeypatch.setattr(driver.install_driver, "adopt_broker", adopt)
-    monkeypatch.setattr(driver, "_monitor_identity", lambda _root: None)
-    monkeypatch.setattr(driver, "_candidate_serving", lambda *_args: False)
+    if special in {"outgoing-identity-unavailable", "outgoing-identity-unavailable-already-serving"}:
+        def unavailable(*_args, **_kwargs):
+            raise ValueError("Routed monitor process identity is unconfirmed")
+
+        monkeypatch.setattr(cutover, "routed_monitor_identity", unavailable)
+    else:
+        monkeypatch.setattr(driver, "_monitor_identity", lambda _root: None)
+    monkeypatch.setattr(
+        driver, "_candidate_serving",
+        lambda *_args: special == "outgoing-identity-unavailable-already-serving",
+    )
     monkeypatch.setattr(cfg, "install_dir", lambda: root)
     monkeypatch.setattr(cutover, "_acquire_cutover_lock", lambda _root: guard)
     monkeypatch.setattr(cutover, "activate_after_update", actual_transition)
@@ -693,13 +705,21 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
             return "rolled_back"
 
         monkeypatch.setattr(runtime_monitor_recovery, "recover_owned_publication", rolled_back)
+    elif special == "prepublication-interrupted":
+        settlement_actions = []
+
+        def prepublication(*args):
+            settlement_actions.append(args[2]["action"])
+            return False
+
+        monkeypatch.setattr(driver, "_settle_monitor", prepublication)
     else:
         monkeypatch.setattr(driver, "_settle_monitor", lambda *_args: not rollback)
     monkeypatch.setattr(driver.subprocess, "Popen", Process)
-    if rollback or interrupted or activation_failed or special == "deferred":
+    if rollback or interrupted or activation_failed or special in {"deferred", "prepublication-interrupted"}:
         with pytest.raises(subprocess.CalledProcessError):
             driver.install(root, plugin, payload=plugin, uv=tmp_path / "unused", base_python=Path(sys.executable))
-        expected = "1.0.0" if rollback else "2.0.0"
+        expected = "1.0.0" if rollback or special == "prepublication-interrupted" else "2.0.0"
         assert driver.runtime.current_version(root) == expected
         assert driver.runtime.read_last_known_good(root) == expected
         if special == "deferred":
@@ -710,7 +730,11 @@ def test_one_owner_retains_candidate_and_rollback_until_actual_cutover(
         result = driver.install(root, plugin, payload=plugin, uv=tmp_path / "unused", base_python=Path(sys.executable))
         assert result["runtime_version"] == "2.0.0"
         assert driver.runtime.current_version(root) == "2.0.0"
+        if special in {"outgoing-identity-unavailable", "outgoing-identity-unavailable-already-serving"}:
+            assert result["retirement_pending"] is True
     assert previous.is_dir()
+    if special == "prepublication-interrupted":
+        assert settlement_actions == ["preparing"]
     assert authority == ["enter", "leave", "enter", "cutover-released", "leave"]
     for version in ("1.0.0", "2.0.0"):
         with driver.runtime._kernel_lease(root, version, kind="retention", shared=False, timeout=0):
