@@ -9,6 +9,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from types import MappingProxyType
+from typing import TYPE_CHECKING
 
 from fleet_manager.gateway_service_channel import BODY_BYTES
 from fleet_manager.gateway_service_context import identifier
@@ -16,6 +17,9 @@ from fleet_manager.gateway_service_handler import (
     HandlerBinding, RequestDisconnected, ServiceRequest, ServiceResponse,
 )
 from single_instance_lease import OperationLockedError, OperationOwnershipError
+
+if TYPE_CHECKING:
+    from fleet_manager.gateway_service_handler import BoundedServiceResponse
 
 from .watch_replay import MAX_BATCH, ConsumerScope
 from .watch_notification import positive_seconds
@@ -145,13 +149,15 @@ class WatchGateway:
         ):
             raise ValueError("reports must use the existing admitted scope owner")
         self.reports = MappingProxyType(reports)
-        self._tasks: set[asyncio.Task[ServiceResponse]] = set()
+        self._tasks: set[asyncio.Task[ServiceResponse | BoundedServiceResponse]] = set()
         self._closing = False
 
-    def handler_binding(self) -> HandlerBinding:
-        return HandlerBinding(self.fleet, self.gateway, self.handle)
+    def handler_binding(self, *, response_limit: int = BODY_BYTES) -> HandlerBinding:
+        if type(response_limit) is int and response_limit == BODY_BYTES:
+            return HandlerBinding(self.fleet, self.gateway, self.handle)
+        return HandlerBinding(self.fleet, self.gateway, self.handle, response_limit=response_limit)
 
-    async def handle(self, request: ServiceRequest) -> ServiceResponse:
+    async def handle(self, request: ServiceRequest) -> ServiceResponse | BoundedServiceResponse:
         if type(request) is not ServiceRequest:
             raise TypeError("expected trusted service request")
         try:
@@ -166,7 +172,7 @@ class WatchGateway:
             return _response(403, {"error": "watch_caller_refused"})
         if request.target.startswith(("/v2/review/", "/v1/attention/")):
             return await self._handle_workspace(request)
-        if request.target.startswith("/v1/read/"):
+        if request.target.startswith(("/v1/read/", "/v2/read/")):
             from .report_gateway import handle
             return await handle(self, request)
         matched = _PATH.fullmatch(request.target)
@@ -360,7 +366,7 @@ class WatchGateway:
         """Withdraw readiness before joining already-owned operations."""
         self._closing = True
 
-    def _completed(self, task: asyncio.Task[ServiceResponse]) -> None:
+    def _completed(self, task: asyncio.Task[ServiceResponse | BoundedServiceResponse]) -> None:
         self._tasks.discard(task)
         if not task.cancelled() and task.exception() is not None:
             _LOG.error("watch-service-failed code=unexpected-operation-failure")

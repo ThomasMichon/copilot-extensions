@@ -3,8 +3,9 @@
 Back to the [existing report contract](owner-report-read.md),
 [selected native owner](native-report-owner.md) and [canonical effort](README.md).
 
-**Agent-recommended contract reviewed in #11694 under #11692. SDK and PR runtime
-expansion remain pending; no installed or live-provider support is claimed.**
+**Agent-recommended contract reviewed in #11694 under #11692. The finite SDK
+prerequisite merged in #11699; PR report-profile expansion remains pending.
+No installed or live-provider support is claimed.**
 This closes part of
 [one service contract](../../../visions/plugins/agent-pull-requests/README.md#cli-through-one-service-contract)
 and follows
@@ -134,7 +135,8 @@ merge or lifecycle mutation; transport ACK/backpressure remains with its owner.
 Review this contract first. Then deliver finite source leaves in order:
 
 1. Qualify the SDK's opt-in handler response construction/emission while ordinary
-   handler and local-profile limits remain unchanged.
+   handler and local-profile limits remain unchanged (finite source merged in
+   #11699; not installed support).
 2. Qualify the explicitly selected v2 reader, Gateway, client/facade and actual
    native byte-budget composition over that SDK, without installed enrollment.
 3. Return to the canonical Plan/Validation and record remaining acceptance.

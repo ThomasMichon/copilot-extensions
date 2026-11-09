@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 
 from fleet_manager.gateway_service_channel import BODY_BYTES
 from fleet_manager.gateway_service_handler import RequestDisconnected
 
-from .report_read import ReportUnavailable, parse_request, report_scope
+from .report_read import ReportUnavailable, parse_request, report_scope, response_budget
 from .watch_replay_binding import ReplayBinding, ReplayBindingMismatch
 from .watch_replay_store import ReplayCallerExpired, json_object
 
@@ -28,16 +29,27 @@ def _failure(error):
 async def handle(gateway, request):
     from .watch_gateway import _response
 
-    matched = re.fullmatch(r"/v1/read/([a-z0-9][a-z0-9-]{0,63})/([a-z]+)", request.target)
-    if matched is None or matched[2] not in ("capabilities", "threads", "diff"):
+    matched = re.fullmatch(r"/(v[12])/read/([a-z0-9][a-z0-9-]{0,63})/([a-z]+)", request.target)
+    if matched is None or matched[3] not in ("capabilities", "threads", "diff"):
         return _response(404, {"error": "report_route_not_found"})
-    target, operation = matched.groups()
+    version, target, operation = matched.groups()
     key = request.context.principal, target
     if key not in gateway.bindings:
         return _response(403, {"error": "report_scope_refused"})
     owner = gateway.reports.get(key)
     if owner is None:
         return _response(404, {"error": "report_unsupported"})
+    limit = BODY_BYTES
+    if version == "v2":
+        try:
+            # Old SDKs and local embeddings cannot select this request budget.
+            from fleet_manager.gateway_service_handler import BoundedServiceResponse
+
+            limit = response_budget(request.response_limit)
+            if not callable(BoundedServiceResponse) or limit <= BODY_BYTES or limit != owner.response_limit:
+                raise ValueError
+        except (ImportError, AttributeError, ValueError):
+            return _response(404, {"error": "report_unsupported"})
     if request.method != "POST":
         return _response(405, {"error": "report_method_refused"})
     if len(request.body) > BODY_BYTES:
@@ -55,7 +67,7 @@ async def handle(gateway, request):
         expected = ReplayBinding.from_document({
             name: value for name, value in wire_binding.items() if name != "report_scope"
         })
-        payload = parse_request(operation, envelope["request"])
+        payload = parse_request(operation, envelope["request"], response_limit=limit)
         if gateway._binding(request, target) != expected or dict(owner.scope) != expected_scope:
             raise ReplayBindingMismatch
     except ReplayBindingMismatch:
@@ -69,7 +81,7 @@ async def handle(gateway, request):
     final_checks = []
     task = asyncio.create_task(execute(
         gateway, owner, operation, payload, request, target, expected, expected_scope, prepared, handoff,
-        final_checks,
+        final_checks, limit,
     ))
     gateway._tasks.add(task)
     task.add_done_callback(gateway._completed)
@@ -93,7 +105,7 @@ async def handle(gateway, request):
 
 
 async def execute(gateway, owner, operation, payload, request, target, expected, expected_scope,
-                  prepared, handoff, final_checks):
+                  prepared, handoff, final_checks, limit):
     from .watch_gateway import _response
 
     response = None
@@ -102,9 +114,16 @@ async def execute(gateway, owner, operation, payload, request, target, expected,
     def encode(value, current):
         nonlocal response, publication_checkpoint
         publication_checkpoint = current
-        response = _response(200, dict(value, binding=expected.document()))
-        if len(response.body) > BODY_BYTES:
+        body = json.dumps(dict(value, binding=expected.document()), allow_nan=False).encode("utf-8")
+        if len(body) > limit:
             raise ReportUnavailable("report response exceeds transport limit")
+        if limit > BODY_BYTES:
+            from fleet_manager.gateway_service_handler import BoundedServiceResponse
+            response = BoundedServiceResponse(
+                200, (("content-type", "application/json"), ("cache-control", "no-store")), body,
+            )
+        else:
+            response = _response(200, dict(value, binding=expected.document()))
 
     def checkpoint():
         gateway._check(request)
@@ -114,12 +133,17 @@ async def execute(gateway, owner, operation, payload, request, target, expected,
             raise ReplayBindingMismatch
         if gateway.reports.get((request.context.principal, target)) is not owner:
             raise ReportUnavailable("report owner replaced")
+        if limit > BODY_BYTES and (
+            owner.response_limit != limit or request.response_limit != limit
+        ):
+            raise ReportUnavailable("report response selection changed")
 
     try:
         await asyncio.to_thread(
             owner.execute, operation, payload,
             expires_at=request.context.expires_at, checkpoint=checkpoint, response_validator=encode,
             publication_validator=final_checks.append,
+            response_limit=limit,
         )
         if publication_checkpoint is None:
             raise ReportUnavailable("report publication checkpoint unavailable")

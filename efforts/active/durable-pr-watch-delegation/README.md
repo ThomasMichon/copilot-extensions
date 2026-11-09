@@ -313,8 +313,9 @@ CLI/HTTP acceptance remain separate.
 The [size-qualified response contract](bounded-report-response.md), reviewed in
 #11694 under #11692,
 reuses the existing 8 MiB channel while preserving current 32 KiB caller-aware
-handler/report defaults. Deliver its opt-in SDK prerequisite before the parallel
-report profile; no runtime, installed or provider acceptance is implied by review.
+handler/report defaults. Its opt-in SDK prerequisite merged in #11699; the
+parallel report profile and native capture/client budget composition remain
+separate. SDK source qualification is not installed or provider acceptance.
 
 - [x] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence)
   (merged in #10380; implementation, provider and adoption gates remain).
@@ -1067,6 +1068,14 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
+- [x] Qualify the finite opt-in caller-aware SDK response prerequisite (#11699):
+  152 focused handler/caller/local cases cover actual larger TLS delivery,
+  bounded construction/emission, legacy/local refusal, ACK backpressure,
+  expiry, disconnect, withdrawal and joined cleanup. The actor-free unit
+  packet passes 4,665. PR report-v2/native-budget composition, the combined
+  response-contract validation, installed/live-provider, native Windows and
+  full CLI/HTTP acceptance remain open.
+
 - [x] Qualify the finite optional selected GitHub.com report owner (#11686):
   actual configuration/strict account policy, explicit verified CLI-store
   identity, pinned provider reads, one request budget and original cleanup
@@ -1388,6 +1397,7 @@ callback an implicit credential store.
 
 ## Journal
 
+- [2026-11-09 - Opt-in report v2 source qualification](journal/2026/11.09%20Bounded%20report%20v2%20source.md)
 - [2026-11-09 - Bounded SDK response owner qualified for source review](journal/2026/11.09%20Bounded%20SDK%20response%20owner.md)
 - [2026-11-09 - Size-qualified response contract reviewed; SDK owner first](journal/2026/11.09%20Size-qualified%20response%20contract.md)
 - [2026-11-09 - Native report-owner source merged; parent acceptance retained](journal/2026/11.09%20Native%20report%20owner%20source.md)
