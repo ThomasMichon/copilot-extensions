@@ -187,10 +187,31 @@ deadline loss prevents publication, while the existing Gateway retains its
 original task until synchronous collection and owned cleanup settle; drain may
 time out rather than falsely release custody.
 
-This is not installed HTTP adoption: native-command account/endpoint
-qualification, larger-report transport, retained hosting and live-provider
-proof remain separate. The [source CLI facade](cli-reference.md#source-report-facade)
-requires explicit host injection.
+The optional source adapter `native_report.NativeGitHubReport` supplies a
+Worktrees-backed resolver for GitHub.com only. A trusted host constructs it with
+an absolute `config_path`, the exact report `scope` (endpoint `github.com`) and
+its `context_id`, then passes `adapter.resolve` to `ReportReader`. Both source
+packages and their runtime dependencies must be available in the embedding
+interpreter; missing support refuses instead of invoking a native fallback.
+No default host installs or selects it.
+
+Each exchange re-resolves the explicit Worktrees configuration and strict
+repository account policy in caller-owned selection children. It requires a
+configured repository account or account-map entry, rejects legacy token
+commands/environment bindings, acquires that account's CLI-store entry even
+when active, and verifies its authenticated login before report reads. The
+same credential supplies absolute GitHub.com GraphQL and REST diff routes,
+without `gh pr diff`'s auxiliary discovery or ambient token/host overrides.
+Selection is rechecked before requests and publication. Configuration,
+credentials and provider children share the original finite execution/cleanup
+budget; delayed cleanup keeps the original Gateway task and cannot publish a
+success. Existing native commands and unselected providers are unchanged.
+
+This is not installed HTTP adoption: native Windows execution, larger-report
+transport, retained hosting and live-provider proof remain separate. Gitea,
+Azure DevOps and Enterprise endpoints are unsupported by this adapter, not
+alternate selections. The [source CLI facade](cli-reference.md#source-report-facade)
+still requires explicit host injection.
 
 ## Finite typed replay client
 

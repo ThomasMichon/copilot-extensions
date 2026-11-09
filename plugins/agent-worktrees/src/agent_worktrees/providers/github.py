@@ -82,6 +82,9 @@ class GitHubProvider:
 
     name = "github"
 
+    def __init__(self, *, report_capture=None):
+        self._report_capture = report_capture
+
     def confirm_no_pull_by_head_v1(self, repo, head, *, api_base="", token=None) -> bool:
         from .github_head_absence import confirm
         return confirm(self, repo, head, api_base=api_base, token=token)
@@ -882,6 +885,11 @@ class GitHubProvider:
         return owner, name
 
     def _graphql(self, query: str, token: str | None, **fields) -> tuple[dict, str]:
+        if self._report_capture is not None:
+            if query != self._THREADS_QUERY:
+                raise ProviderError("scoped report transport only supports thread reads")
+            from .github_report_capture import threads
+            return threads(self._report_capture, query, fields)
         args = ["gh", "api", "graphql", "-f", f"query={query}"]
         for k, v in fields.items():
             # -F coerces ints/bools; string node ids also pass fine via -F.
@@ -981,6 +989,9 @@ class GitHubProvider:
         preserve_line_endings: bool = False,
     ) -> PRDiff:
         """Return the PR's current unified diff via ``gh pr diff``."""
+        if self._report_capture is not None:
+            from .github_report_capture import diff
+            return diff(self._report_capture, repo, number)
         try:
             if api_base:
                 configured = api_base.strip()

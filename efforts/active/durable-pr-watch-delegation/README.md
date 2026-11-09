@@ -305,9 +305,9 @@ adds a read-only thread/diff exchange through the existing authenticated
 Gateway without treating raw reports as principal-bound generations.
 The optional source embedding merged in #11668; large-report, native-command adopter,
 installed and live-provider acceptance remain separate.
-The [selected native report-owner proposal](native-report-owner.md) under
-#11680 defines a finite GitHub.com-first adopter; runtime implementation follows
-review and does not change legacy native authentication or imply host adoption.
+The [selected native report-owner contract](native-report-owner.md), reviewed in
+#11681 under #11680, defines a finite GitHub.com-first adopter. Implementation
+does not change legacy native authentication or imply host adoption.
 
 - [x] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence)
   (merged in #10380; implementation, provider and adoption gates remain).
@@ -1372,6 +1372,46 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-09 - Native report-owner source qualification pending review
+
+- Implemented the reviewed #11681 contract under #11680 as an optional
+  GitHub.com-only source embedding. Reuse actual Worktrees configuration,
+  related-target and strict configured-account selection, the selected
+  CLI-store/authenticated-login observer and existing report normalization.
+  Selection workers and credential/provider children share one request budget;
+  absolute API routes avoid CLI auxiliary discovery and ambient routing.
+- Isolated Linux qualification passed 360 Worktrees cases and 73 report,
+  Gateway/client and TLS transport cases. The final adapter-specific suite
+  passes 15 cases, including exact configured store spelling for equivalent
+  scopes, policy replacement before publication, oversized captures and
+  original Gateway custody during delayed cleanup with and without disconnect.
+  These are new fixture resources, not live GitHub credential/provider proof.
+- The actor-free required packet passed 4,665 cases against the initial source
+  implementation revision; the later account/publication refinements have their
+  focused native qualification. Retain the required current-head CI and genuine
+  review gates before merge. No installed loader, HTTP override fields, new
+  protocol generation, default native behavior or operational enrollment changed.
+- Native Windows execution, other providers, large-report transport, retained
+  hosting and the broader Plan/Validation remain separate. The implementation
+  and its finite source issue are not complete before normal review and merge;
+  afterward return to the whole parent rather than finalizing this worktree.
+
+### 2026-11-09 - Native report-owner contract merged; implementation next
+
+- #11681 merged as `c3a404d2e61b6e50909fc13856a41a9bb4699d1e`
+  at 02:22 Pacific after genuine current-head Approval `5824491264`,
+  no inline findings and all three required CI gates green. Read the full
+  review body and native findings before managed completion; only the admitted
+  additional CODEOWNER exception applied.
+- Normal source reconciliation preserved its backup and the attribution-only
+  commit; merged contribution trailers are verified. No parent or source
+  worktree was finalized. #11680 remains open for its implementation and tests.
+- Returned to the current root Plan/Validation and the companion acceptance:
+  the 82 public and 11 private open items remain. Next is the reviewed finite
+  GitHub.com native owner adapter with new isolated fixtures, not actual
+  credential acquisition, installed-host configuration, rollout or source
+  completion of the broader program.
 
 ### 2026-11-09 - Native report-owner source trace and proposal
 
