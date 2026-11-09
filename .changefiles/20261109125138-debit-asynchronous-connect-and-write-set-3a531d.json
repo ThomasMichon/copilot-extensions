@@ -1,0 +1,9 @@
+{
+  "comment": "Debit asynchronous connect and write setup before waiting within the shared post-tool sender deadline",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

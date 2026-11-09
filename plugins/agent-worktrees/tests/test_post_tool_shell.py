@@ -550,8 +550,9 @@ def _instrument_prepared_sender(source):
     end = source.index("function Get-PostToolRuntimeRoot", start)
     sender = source[start:end]
     allocation = "$client = [Net.Sockets.TcpClient]::new([Net.Sockets.AddressFamily]::InterNetwork)"
-    connect = "if (-not $client.ConnectAsync([Net.IPAddress]::Loopback, $port).Wait($remaining)) { return }"
-    write = "$null = $client.GetStream().WriteAsync($bytes, 0, $bytes.Length).Wait($remaining)"
+    connect = "$connect = $client.ConnectAsync([Net.IPAddress]::Loopback, $port)"
+    connect_wait = "if ($remaining -le 0 -or -not $connect.Wait($remaining)) { return }"
+    write = "$write = $client.GetStream().WriteAsync($bytes, 0, $bytes.Length)"
     for original, replacement in (
         ("$client = $null", "$script:senderDiagnostic = @{ phase = 'entered' }; $client = $null"),
         (
@@ -562,15 +563,22 @@ def _instrument_prepared_sender(source):
         ),
         (
             connect,
-            "$script:senderDiagnostic.phase = 'connecting'\n" + connect + "\n"
+            "$script:senderDiagnostic.phase = 'connecting'\n" + connect,
+        ),
+        (
+            connect_wait,
+            connect_wait + "\n"
             "$script:senderDiagnostic.phase = 'connected'\n"
             "$script:senderDiagnostic.connected_ms = $clock.ElapsedMilliseconds",
         ),
         (
             write,
-            "$script:senderDiagnostic.phase = 'writing'\n"
+            "$script:senderDiagnostic.phase = 'writing'\n" + write,
+        ),
+        (
+            "$null = $write.Wait($remaining)",
             "$script:senderDiagnostic.write_complete = "
-            "$client.GetStream().WriteAsync($bytes, 0, $bytes.Length).Wait($remaining)\n"
+            "$write.Wait($remaining)\n"
             "$script:senderDiagnostic.phase = 'write-returned'",
         ),
         (
@@ -1035,8 +1043,14 @@ ConvertTo-Json -Compress -InputObject @{ old = $old; prepared = $prepared }
 @pytest.mark.effect("process")
 @pytest.mark.effect("filesystem")
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
-@pytest.mark.parametrize("allocation_ms", [60, 110])
-def test_post_tool_send_debits_allocation_and_connect_from_one_budget(tmp_path, shell, allocation_ms):
+@pytest.mark.parametrize(
+    "allocation_ms,connect_setup_ms,stream_setup_ms,write_setup_ms",
+    [(60, 0, 0, 0), (110, 0, 0, 0), (60, 10, 5, 5),
+     (60, 40, 0, 0), (60, 0, 25, 0), (60, 0, 0, 25)],
+)
+def test_post_tool_send_debits_allocation_and_connect_from_one_budget(
+    tmp_path, shell, allocation_ms, connect_setup_ms, stream_setup_ms, write_setup_ms,
+):
     from agent_procutil import no_window_kwargs
 
     executable = shutil.which(shell)
@@ -1070,7 +1084,7 @@ $script:connectTask = [pscustomobject]@{}
 $script:connectTask | Add-Member ScriptMethod Wait {
     param($remaining)
     $script:connectWaits.Add($remaining)
-    $script:clock.ElapsedMilliseconds = 75
+    $script:clock.ElapsedMilliseconds += 15
     return $true
 }
 $script:writeTask = [pscustomobject]@{}
@@ -1082,15 +1096,20 @@ $script:writeTask | Add-Member ScriptMethod Wait {
 $script:stream = [pscustomobject]@{}
 $script:stream | Add-Member ScriptMethod WriteAsync {
     param($bytes, $offset, $count)
+    $script:clock.ElapsedMilliseconds += [int]$env:WRITE_SETUP_MS
     $script:wire = [Text.Encoding]::UTF8.GetString($bytes, $offset, $count)
     return $script:writeTask
 }
 $script:client = [pscustomobject]@{}
 $script:client | Add-Member ScriptMethod ConnectAsync {
     param($address, $port)
+    $script:clock.ElapsedMilliseconds += [int]$env:CONNECT_SETUP_MS
     return $script:connectTask
 }
-$script:client | Add-Member ScriptMethod GetStream { return $script:stream }
+$script:client | Add-Member ScriptMethod GetStream {
+    $script:clock.ElapsedMilliseconds += [int]$env:STREAM_SETUP_MS
+    return $script:stream
+}
 $script:client | Add-Member ScriptMethod Dispose { $script:disposed++ }
 Send-PostToolReadDemand -Discovery @{
     hook_capabilities = @('read-hook-demand-v1'); hook_transport = 'tcp'
@@ -1105,25 +1124,34 @@ ConvertTo-Json -Compress -InputObject @{
     result = subprocess.run(
         [executable, "-NoProfile", "-NonInteractive", "-File", str(script)],
         text=True, capture_output=True, timeout=10,
-        env={**os.environ, "ALLOCATION_MS": str(allocation_ms)}, **no_window_kwargs(),
+        env={
+            **os.environ, "ALLOCATION_MS": str(allocation_ms),
+            "CONNECT_SETUP_MS": str(connect_setup_ms), "STREAM_SETUP_MS": str(stream_setup_ms),
+            "WRITE_SETUP_MS": str(write_setup_ms),
+        }, **no_window_kwargs(),
     )
     assert result.returncode == 0, result.stderr
     value = json.loads(result.stdout)
     assert value["disposed"] == 1
-    if allocation_ms == 60:
-        assert value["connect"] == [40]
-        assert value["write"] == [25]
+    connect_started = allocation_ms < 100
+    connect_ready_ms = allocation_ms + connect_setup_ms
+    connect_waited = connect_started and connect_ready_ms < 100
+    connected_ms = connect_ready_ms + (15 if connect_waited else 0)
+    write_started = connect_waited and connected_ms < 100
+    write_ready_ms = connected_ms + (stream_setup_ms + write_setup_ms if write_started else 0)
+    write_waited = write_started and write_ready_ms < 100
+    assert value["connect"] == ([100 - connect_ready_ms] if connect_waited else [])
+    assert value["write"] == ([100 - write_ready_ms] if write_waited else [])
+    if write_started:
         assert json.loads(value["wire"])["kind"] == "readHookDemand"
-        assert value["diagnostic"] == {
-            "phase": "write-returned", "allocation_ms": 60, "connected_ms": 75,
-            "elapsed_ms": 75, "write_complete": True,
-        }
     else:
-        assert value["connect"] == value["write"] == []
         assert value["wire"] is None
-        assert value["diagnostic"] == {
-            "phase": "allocated", "allocation_ms": 110, "elapsed_ms": 110,
-        }
+    assert value["diagnostic"]["allocation_ms"] == allocation_ms
+    assert value["diagnostic"]["elapsed_ms"] == write_ready_ms
+    if connect_waited:
+        assert value["diagnostic"]["connected_ms"] == connected_ms
+    if write_waited:
+        assert value["diagnostic"]["write_complete"] is True
 
 
 @pytest.mark.portfolio_tier("T2")

@@ -7744,6 +7744,9 @@ receiver connections when a notification is missing. Both shells, the 100 ms
 sender budget and all delivery assertions remain unchanged. Instrumentation
 can perturb timing; these diagnostics do not replace the separate uninstrumented
 cold-process controls or establish a production latency result.
+The controlled-clock sender cases charge allocation, async connection setup,
+stream acquisition and async write setup to that same budget before either
+wait; exhaustion never starts an additional wait or retries a notification.
 
 The `plugin-activation` target runs the shared activation transaction suite.
 Its `tests/test_preservation_processes.py` packet interrupts real transaction
