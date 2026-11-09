@@ -2568,6 +2568,11 @@ project configuration and worktree record. Worktrees must discover the installed
 current Manager's native pane wrapper; a Worktrees-only fixture does not
 qualify this public Windows launch path. The packaged default setup selects
 the native executable; recovery mode suppresses unrelated host reconciliation.
+The fixture declares its private mux adapter through `session_path` and uses
+the normal user-home `.copilot` layout. With no installed sessionStart hook,
+it explicitly registers the observed native session through the installed
+`bind-session` command and verifies that it becomes the worktree head;
+this is not evidence for automatic hook adoption.
 Fresh launch uses a literal explicit seed, cold resume selects the existing
 conversation without a supplied resume argument, and live reuse must preserve
 the mux incarnation without creating another attempt or replaying a seed.
