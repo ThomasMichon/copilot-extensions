@@ -8,6 +8,7 @@ import httpx
 import pytest
 
 from agent_index.indexing.change_hints import ChangeHints, MetadataRevision, RefRange
+from agent_index.indexing.work_counts import measure_reindex
 from agent_index.sources.github import GitHubConnector
 
 SOURCE = "github:acme/widgets"
@@ -68,8 +69,19 @@ def test_unique_items_revisions_events_and_fresh_paginated_comments():
         ),
     )
     before = envelope.to_json()
+
+    @measure_reindex
+    def run(cursor):
+        return {"delta": provider.discover_hints(envelope, cursor)}
+
     for cursor in ("prior-poll", None):
-        result = provider.discover_hints(envelope, cursor)
+        measured = run(cursor)
+        result = measured["delta"]
+        assert measured["work_counts"]["acquisition_by_source"] == {
+            SOURCE: {
+                "identity_records": 0, "item_body_records": 2, "comment_body_records": 101,
+            },
+        }
         assert result.commit == cursor and not result.deletions and result.complete
         assert [entry.path for entry in result.upserts] == ["issues/1.md", "pulls/2.md"]
         assert "Comment 101" in result.upserts[0].content
@@ -193,3 +205,64 @@ def test_cancellation_precedes_acquisition():
 
     with pytest.raises(RuntimeError, match="cancel"):
         provider.discover_hints(hints(), "prior", cancel_check=cancelled)
+
+
+def test_rejected_comment_records_still_count_without_implying_admission():
+    def handler(request):
+        if request.url.path == "/user":
+            return httpx.Response(200, json={"id": 123})
+        if request.url.path.endswith("/comments"):
+            return httpx.Response(200, json=[
+                {"id": 1, "body": "same"}, {"id": 1, "body": "same"},
+            ])
+        return httpx.Response(200, json=issue(comments=2))
+
+    provider = connector(handler)
+
+    @measure_reindex
+    def run():
+        with pytest.raises(ValueError, match="repeated identities"):
+            provider.discover_hints(hints(), "prior")
+        return {}
+
+    try:
+        counts = run()["work_counts"]
+        assert counts["acquisition_by_source"][SOURCE] == {
+            "identity_records": 0, "item_body_records": 1, "comment_body_records": 2,
+        }
+        assert counts["manifests_acquired"] == counts["upserts_acquired"] == 0
+    finally:
+        provider._client.close()
+
+
+def test_later_comment_page_failure_retains_only_successfully_parsed_records():
+    def handler(request):
+        if request.url.path == "/user":
+            return httpx.Response(200, json={"id": 123})
+        if request.url.path.endswith("/comments"):
+            if request.url.params["page"] == "2":
+                return httpx.Response(404, json={"body": "error is not a comment"})
+            return httpx.Response(
+                200, json=[{"id": i, "body": "comment"} for i in range(1, 101)],
+                headers={"Link": '<https://api.github.com/ignored>; rel="next"'},
+            )
+        return httpx.Response(200, json=issue(comments=101))
+
+    provider = connector(handler)
+
+    @measure_reindex
+    def run():
+        with pytest.raises(httpx.HTTPStatusError):
+            provider.discover_hints(hints(), "prior")
+        return {}
+
+    try:
+        counts = run()["work_counts"]
+        assert counts["acquisition_by_source"][SOURCE] == {
+            "identity_records": 0, "item_body_records": 1, "comment_body_records": 100,
+        }
+        assert counts["http_by_purpose"]["comment_page"]["responses"] == 2
+        assert counts["http_by_purpose"]["comment_page"]["json_results"] == 1
+        assert counts["upserts_acquired"] == 0
+    finally:
+        provider._client.close()

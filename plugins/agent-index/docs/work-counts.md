@@ -78,6 +78,35 @@ counts, and retries do not prove successful acquisition. Other connectors
 using this shared session remain explicitly unclassified until their own
 request owners opt in; this is not provider-wide semantic accounting.
 
+`acquisition_by_source[source]` separately counts parsed records at the built-in
+GitHub connector's existing issue-list, targeted-item and comment parsers:
+
+| Field | Meaning |
+|-------|---------|
+| `identity_records` | Object records in issue-list arrays, including PRs, duplicates and records later rejected by semantic validation. Not unique identities or admitted items. |
+| `item_body_records` | Issue-list or targeted-item objects containing a string or null `body`. A listing can supply both an identity record and an item body; a later targeted fetch counts that body again. |
+| `comment_body_records` | Objects containing a string or null `body` in comment arrays, including duplicate records later rejected. |
+
+Counts describe successful JSON parsing of the expected list/object shape,
+before scope, revision, pagination-completeness and identity admission checks.
+Missing or nontext/non-null body fields do not count as bodies; nonobject array
+members do not count as records. Empty strings and null bodies count as returned
+bodies, not absent traffic. A truncated page contributes its returned records
+even if the acquisition subsequently refuses; no manifest or coverage is implied.
+HTTP retries, 304s, failed statuses and JSON parse failures add no parsed records.
+Already-parsed earlier pages remain counted if a later request fails.
+Resuming a saved acquisition plan does not recount its saved identities or bodies;
+only new provider responses enter these counters.
+
+An empty parsed page creates a source entry with zeros. A missing source entry
+means no participating parser was observed in this invocation, **not zero
+provider work**. Other connectors/transports are not qualified by these counts.
+Nested runs keep separate observations. These additive version-1 fields do not
+add requests or alter provider validation, checkpoints, journals or coverage.
+Consumers read field presence from the actual result: an older producer without
+`acquisition_by_source` is unmeasured, not measured zero. Existing readers may
+ignore the optional mapping; no new invocation or required capability is added.
+
 `http: null` means this transport was not observed in the round, **not zero
 provider traffic**. External providers and other transports remain unmeasured.
 An empty purpose mapping likewise means no classified shared-session boundary
@@ -146,6 +175,10 @@ It also checks purpose totals, closed-label refusal and unchanged POST/
 continuation request payloads.
 `tests/test_hinted_crawl.py` checks real hosted identity acquisition and worker
 serialization of the nested counts.
+The existing GitHub connector, hints and polling tests also qualify parsed
+record counts through synthetic HTTP, including listing bodies, comment pages,
+rejected duplicates, source/nested-scope separation, 304/unmeasured distinction
+and interrupted acquisition followed by journal resume.
 
 ## Native round qualification
 

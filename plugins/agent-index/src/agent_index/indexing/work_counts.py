@@ -25,6 +25,15 @@ class HttpCounts:
 
 
 @dataclass
+class AcquisitionCounts:
+    """Parsed provider records, not unique identities or admitted source work."""
+
+    identity_records: int = 0
+    item_body_records: int = 0
+    comment_body_records: int = 0
+
+
+@dataclass
 class ModelCounts:
     candidate_chunks: int = 0
     reused_chunks: int = 0
@@ -68,6 +77,7 @@ class WorkCounts:
     models: dict[str, ModelCounts] = field(default_factory=dict)
     source_mutations: dict[str, list[MutationResult]] = field(default_factory=dict)
     http_by_purpose: dict[str, HttpCounts] = field(default_factory=dict)
+    acquisition_by_source: dict[str, AcquisitionCounts] = field(default_factory=dict)
 
     def model(self, model_id: str) -> ModelCounts:
         return self.models.setdefault(model_id, ModelCounts())
@@ -78,6 +88,14 @@ _current: ContextVar[WorkCounts | None] = ContextVar("index_work_counts", defaul
 
 def current_counts() -> WorkCounts | None:
     return _current.get()
+
+
+def observe_acquisition(source: str) -> AcquisitionCounts | None:
+    """Observe a source parser without claiming other connectors were measured."""
+    counts = current_counts()
+    if counts is None:
+        return None
+    return counts.acquisition_by_source.setdefault(source, AcquisitionCounts())
 
 
 def observe_http() -> HttpCounts | None:

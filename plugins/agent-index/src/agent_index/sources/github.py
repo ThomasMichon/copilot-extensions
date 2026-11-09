@@ -8,7 +8,7 @@ import os
 import hashlib
 from collections.abc import Callable, Iterable
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import httpx
 
@@ -266,6 +266,7 @@ class GitHubConnector:
         for page in self._paginate(
             f"/repos/{self.owner}/{self.repo}/issues", purpose="identity_page", **params,
         ):
+            self._observe_records(page, kind="listing")
             if isinstance(page, list):
                 for item in page:
                     if isinstance(item, dict):
@@ -276,9 +277,37 @@ class GitHubConnector:
         for page in self._paginate(
             f"/repos/{self.owner}/{self.repo}/issues/{number}/comments", purpose="comment_page",
         ):
+            self._observe_records(page, kind="comments")
             if isinstance(page, list):
                 comments.extend(item for item in page if isinstance(item, dict))
         return comments
+
+    def _observe_records(
+        self, data: object, *, kind: Literal["listing", "item", "comments"],
+    ) -> None:
+        from agent_index.indexing.work_counts import observe_acquisition
+
+        if kind == "item":
+            if not isinstance(data, dict):
+                return
+            records = [data]
+        else:
+            if not isinstance(data, list):
+                return
+            records = data
+        counts = observe_acquisition(self.source_name)
+        if counts is None:
+            return
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            if kind == "listing":
+                counts.identity_records += 1
+            if "body" in record and (record["body"] is None or isinstance(record["body"], str)):
+                if kind == "comments":
+                    counts.comment_body_records += 1
+                else:
+                    counts.item_body_records += 1
 
     def _issue_entry(self, item: dict[str, Any], comments: list[dict[str, Any]]) -> FileEntry:
         number = item["number"]
