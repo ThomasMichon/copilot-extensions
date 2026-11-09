@@ -223,6 +223,72 @@ def test_preparation_requires_native_artifact_custody_not_running_bit(monkeypatc
         "artifact_0_device": device, "artifact_0_inode": inode,
     })
     assert supervisor_source.read_prepared(tmp_path, VERSION, "fixture") == document
+    assert supervisor_source.read_prepared(tmp_path, VERSION, "fixture", exclude_pid=os.getpid()) is None
+    document.update(settings={"interval": 7}, profile_binding={"path": str(tmp_path / "profile.env"), "generation": "new"})
+    path.write_text(json.dumps(document), encoding="utf-8")
+    expected = {key: document[key] for key in ("settings", "profile_binding")}
+    assert supervisor_source.read_prepared(tmp_path, VERSION, "fixture", expected=expected) == document
+    assert supervisor_source.read_prepared(tmp_path, VERSION, "fixture", expected={
+        **expected, "settings": {"interval": 5},
+    }) is None
+    assert supervisor_source.read_prepared(tmp_path, VERSION, "fixture", expected={
+        **expected, "profile_binding": {**expected["profile_binding"], "generation": "old"},
+    }) is None
+
+
+@pytest.mark.parametrize("peer_kind", ["equivalent", "settings", "profile"])
+def test_same_version_candidate_stands_down_only_for_equivalent_preparation(tmp_path, monkeypatch, peer_kind):
+    from agent_dispatch import companion, config, single_instance, supervisor_source as source
+    from agent_dispatch.supervisor_status_io import runtime_status_path
+    from agent_procutil import _daemon_instance_identity as identity, daemon_instances
+
+    daemon = _daemon(FakeClient([]), FakeLauncher(), lock=FakeLock())
+    scope = source.supervisor_lease_scope(daemon.machine, daemon.env)
+    monkeypatch.setattr(config, "run_dir", lambda: tmp_path / "run")
+    monkeypatch.setattr(daemon, "_recheck_governance", lambda _: None)
+    granted = iter([False, True])
+    monkeypatch.setattr(daemon, "acquire_singleton", lambda: next(granted))
+    monkeypatch.setattr(single_instance, "is_locked", lambda _: True)
+    monkeypatch.setattr(single_instance, "read_holder_pid", lambda _: 901)
+    monkeypatch.setattr(companion, "process_start_token", lambda _: "start")
+    monkeypatch.setattr(identity, "identity_state", lambda *_: "matching")
+    status = runtime_status_path(scope)
+    status.parent.mkdir(parents=True)
+    status.write_text(json.dumps({
+        "runtime_version": VERSION, "generation": {"pid": 901, "start_token": "start"},
+    }))
+    directory = tmp_path / "run" / "supervisor-candidates"
+    directory.mkdir()
+    incarnation = "e" * 32
+    path = directory / (incarnation + ".json")
+    own = {
+        "settings": {"interval": 7},
+        "profile_binding": {"path": str(tmp_path / "supervisor.env"), "generation": "new"},
+        "owner": {"authority_target": "fixture"},
+    }
+    peer = {
+        **own, "runtime_version": VERSION, "scope": scope, "instance_id": incarnation,
+        "registry_root": str(tmp_path / "registry"), "birth": "peer-birth",
+        "generation": {"pid": 901, "start_token": "start"}, "progress": {"phase": "prepared"},
+    }
+    if peer_kind == "settings":
+        peer["settings"] = {"interval": 5}
+    elif peer_kind == "profile":
+        peer["profile_binding"] = {**own["profile_binding"], "generation": "old"}
+    path.write_text(json.dumps(peer))
+    device, inode = identity.path_identity(path)
+    monkeypatch.setattr(daemon_instances, "inspect_instances", lambda _: [{
+        "instance_id": incarnation, "state": "running", "runtime_root": str(tmp_path),
+        "pid": "901", "birth": "peer-birth", "artifact_count": "1",
+        "artifact_0_path": str(path), "artifact_0_device": device, "artifact_0_inode": inode,
+    }])
+    admitted = []
+    admission = SimpleNamespace(
+        root=tmp_path, version=VERSION, record=own, prepare=lambda _: None,
+        check=lambda: None, probe=lambda: None, admitted=lambda: admitted.append(True),
+    )
+    assert source.acquire_candidate(daemon, admission, once=False, single_instance=True) is (peer_kind != "equivalent")
+    assert admitted == ([] if peer_kind == "equivalent" else [True])
 
 
 def test_source_retirement_does_not_forget_unit_with_unconfirmed_native_exit(tmp_path):

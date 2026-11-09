@@ -53,3 +53,49 @@ def test_master_profile_reconfiguration_refuses_nonresident_or_nonfinite_setting
     profile.write_text("AGENT_DISPATCH_SUPERVISE_MODE=serve\nAGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=" + extra + "\n")
     with pytest.raises(ValueError, match="resident master"):
         daemon._self_update_stale_target(tmp_path, "current")
+
+
+@pytest.mark.parametrize("invalid", [
+    "AGENT_DISPATCH_SUPERVISE_INTERVAL=not-a-number\n",
+    "AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=--unknown-fixture-option\n",
+])
+def test_invalid_live_profile_keeps_incumbent_and_recovers_after_valid_edit(tmp_path, monkeypatch, invalid):
+    from agent_dispatch import procutil
+    from agent_dispatch.supervisor_profile import MasterProfile
+    from agent_dispatch.supervisor_lane_status import profile_arguments
+    from agent_dispatch.registrar_discovery import _parse_env_file
+    from tests.test_supervisor_daemon import FakeClient, FakeLauncher, FakeLock, _daemon
+
+    profile = tmp_path / "supervisor.env"
+    original = "AGENT_DISPATCH_SUPERVISE_MODE=serve\nAGENT_DISPATCH_SUPERVISE_MACHINE=anomalous-potato\n"
+    profile.write_text(original)
+    argv = profile_arguments(_parse_env_file(profile, strict=True))
+    binding = MasterProfile(profile, None, argv)
+    slot = tmp_path / "versions" / "1.0" / "Scripts" / "python.exe"
+    slot.parent.mkdir(parents=True)
+    slot.touch()
+    (tmp_path / "current-version").write_text("1.0")
+    now = [100.0]
+    lock = FakeLock()
+    daemon = _daemon(
+        FakeClient([]), FakeLauncher(), lock=lock, clock=lambda: now[0],
+        self_update_enabled=True, self_update_argv=argv,
+        self_update_install_dir=lambda: tmp_path, self_update_running_version="1.0",
+        self_update_stale_target=lambda *_: None, self_update_poll_interval=1,
+    )
+    assert daemon.acquire_singleton()
+    monkeypatch.setattr(daemon, "_recheck_governance", lambda _: None)
+    binding.configure(daemon)
+    captured = []
+    monkeypatch.setattr(procutil, "spawn_dispatch_daemon", lambda command, **options: captured.append(command))
+    profile.write_text(original + invalid)
+    assert daemon._maybe_self_update() is False
+    assert not lock.released
+    assert daemon._self_update_argv == argv
+    assert binding.next_generation == binding.generation
+    assert captured == []
+    profile.write_text(original + "AGENT_DISPATCH_SUPERVISE_INTERVAL=7\n")
+    now[0] += 2
+    assert daemon._maybe_self_update() is True
+    assert lock.released
+    assert captured == [[slot, "-m", "agent_dispatch", *profile_arguments(_parse_env_file(profile, strict=True))]]

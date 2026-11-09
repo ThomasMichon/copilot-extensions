@@ -24,16 +24,20 @@ def quote(value):
 
 
 @contextmanager
-def application(tmp_path, shell, *, master=False):
+def application(tmp_path, shell, *, master=False, source=False):
     root = tmp_path / "application"
-    slot = root / "versions" / agent_dispatch.__version__
-    scripts = slot / "Scripts"
-    site = slot / "Lib" / "site-packages"
+    version = agent_dispatch.__version__
+    if source:
+        version += "+source." + "a" * 40 + "." + "b" * 16 + ".profile." + "c" * 16
+    slot = root / "versions" / version
+    prefix = slot / ".venv" if source else slot
+    scripts = prefix / "Scripts"
+    site = prefix / "Lib" / "site-packages"
     scripts.mkdir(parents=True)
     site.mkdir(parents=True)
     python = scripts / "python.exe"
     shutil.copyfile(sys.executable, python)
-    (slot / "pyvenv.cfg").write_text(
+    (prefix / "pyvenv.cfg").write_text(
         f"home = {sys.base_prefix}\ninclude-system-site-packages = false\nversion = {sys.version.split()[0]}\n",
     )
     shutil.copytree(Path(agent_dispatch.__file__).parent, site / "agent_dispatch",
@@ -68,6 +72,7 @@ if '-m' in sys.argv and 'supervise' in sys.argv:
         from agent_dispatch import procutil,supervise_cli,supervisor_daemon
         original_init=supervisor_daemon.SupervisorDaemon.__init__
         original_spawn=procutil.spawn_dispatch_daemon
+        original_release=supervisor_daemon.SupervisorDaemon.release_singleton
         def spawn(*args,**options):
             child=original_spawn(*args,**options)
             if options.get('log_name')=='logs/supervisor-successor.log':
@@ -91,11 +96,39 @@ if '-m' in sys.argv and 'supervise' in sys.argv:
         supervisor_daemon.SupervisorDaemon._recheck_governance=lambda *args: None
         supervise_cli._client=lambda *args,**options: contextlib.nullcontext(SimpleNamespace(close=lambda:None))
         procutil.spawn_dispatch_daemon=spawn
+        if os.environ.get('FIXTURE_SOURCE')=='1':
+            from agent_dispatch import source_start,config,pool_source_snapshot,registrar_discovery
+            from zdd.diagnostics import process_start_time
+            class Client:
+                def close(self): pass
+                def health(self):
+                    return dict(status='ok',runtime_config_identity=source_start.config_identity(config.load_config(),base_dir=root),
+                                slot=dict(pid=os.getpid(),process_start_time=process_start_time(os.getpid())))
+            supervise_cli._client=lambda *args,**options: contextlib.nullcontext(Client())
+            cohort=lambda *args,**options: pool_source_snapshot.DeclarationRead((),True)
+            pool_source_snapshot.read_supervisor_declarations=cohort
+            registrar_discovery.read_legacy_env_profiles=cohort
+            def release(self):
+                original_release(self)
+                state=self._source_handoff
+                if state is not None and state['phase']=='withdrawing':
+                    while not (root/'release').exists(): time.sleep(.02)
+            supervisor_daemon.SupervisorDaemon.release_singleton=release
 """)
     (site / "fixture.pth").write_text(
         "import site; site.addsitedir(" + repr(sysconfig.get_paths()["purelib"]) + "); import fixture_business\n",
     )
-    (root / "current-version").write_text(agent_dispatch.__version__)
+    (root / "current-version").write_text(version)
+    if source:
+        # Construction evidence is fixture input; selected-Source/completion
+        # readers and the native candidate lifecycle are exercised unchanged.
+        bootstrap = slot / ".runtime-bootstrap"
+        bootstrap.mkdir()
+        for helper in INSTALLER.parent.glob("versioned_runtime*.py"):
+            shutil.copyfile(helper, bootstrap / helper.name)
+        (slot / ".install-complete.json").write_text(json.dumps({
+            "version": version, "completed_at": "fixture", "pid": os.getpid(),
+        }))
     (root / "supervisor.env").write_text(
         "AGENT_DISPATCH_SUPERVISE_LABELS=fixture\n"
         "AGENT_DISPATCH_SUPERVISE_EMBODY_BACKEND=script\n"
@@ -119,6 +152,8 @@ if '-m' in sys.argv and 'supervise' in sys.argv:
             "AGENT_DISPATCH_SUPERVISE_MODE=serve\nAGENT_DISPATCH_SUPERVISE_MACHINE=fixture\n"
             "AGENT_DISPATCH_SUPERVISE_INTERVAL=.05\n",
         )
+    if source:
+        environment["FIXTURE_SOURCE"] = "1"
     publisher = root / "publish.ps1"
     publisher.write_text(f"""
 $ErrorActionPreference='Stop'
@@ -276,4 +311,59 @@ def test_marked_master_same_version_profile_handoff_preserves_completed_readines
         original, ready = result["original"], result["ready"]
         assert ready["status"] == "ready" and ready["pid"] != original["pid"]
         assert set((root / "cycles").read_text().splitlines()) == {str(original["pid"]), str(ready["pid"])}
+        assert all(json.loads(line) == [None, None] for line in (root / "worker-markers").read_text().splitlines())
+
+
+def test_source_admitted_master_profile_edit_replaces_itself_not_its_retained_preparation(tmp_path, capsys):
+    # Source handoff also retains the contained predecessor after the real
+    # singleton release, not after cleanup and not before candidate preparation.
+    with application(tmp_path, None, master=True, source=True) as (root, python, environment, children):
+        program = """
+import hashlib,json,sys,time
+from pathlib import Path
+from agent_dispatch import __version__
+from agent_dispatch.supervisor_lane_status import ensure,profile_arguments,PROFILE_ENV,GENERATION_ENV
+from agent_dispatch.registrar_discovery import _parse_env_file
+from agent_dispatch.supervisor_source import spawn_candidate,read_prepared
+from agent_dispatch.supervisor_registration import supervisor_lease_scope
+from agent_dispatch.single_instance import is_locked,lock_path_for
+r=Path(sys.argv[1]);p=r/'supervisor.env'
+arguments=lambda:profile_arguments(_parse_env_file(p,strict=True))
+scope=supervisor_lease_scope('fixture','default')
+child=spawn_candidate(sys.executable,arguments(),root=r,version=__version__,
+    profile_binding={PROFILE_ENV:str(p),GENERATION_ENV:hashlib.sha256(p.read_bytes()).hexdigest()})
+deadline=time.monotonic()+20
+while not is_locked(lock_path_for(r/'run',scope)):
+    if child.poll() is not None or time.monotonic()>=deadline: raise RuntimeError('Source predecessor did not admit')
+    time.sleep(.02)
+original=ensure(r,p,arguments(),timeout=20)
+old=read_prepared(r,__version__,scope,pid=original['pid'])
+assert old is not None
+p.write_text(p.read_text().replace('INTERVAL=.05','INTERVAL=.08')+
+    'AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=--no-declared\\n')
+ready=ensure(r,p,arguments(),timeout=20)
+new=read_prepared(r,__version__,scope,pid=ready['pid'])
+assert new is not None
+print(json.dumps(dict(original=original,ready=ready,old=old,new=new,version=__version__)))
+"""
+        control = launch(root, "source-handoff", [str(python), "-I", "-B", "-c", program, str(root)], environment, children)
+        try:
+            control.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            with capsys.disabled():
+                print(diagnostics(root)[-24000:], file=sys.stderr, flush=True)
+            pytest.fail("Source-admitted profile handoff timed out:\n" + diagnostics(root))
+        assert control.returncode == 0, diagnostics(root)
+        result = json.loads((root / "source-handoff.out").read_text())
+        assert ".profile." in result["version"]
+        assert result["ready"]["status"] == "ready"
+        assert result["ready"]["pid"] != result["original"]["pid"]
+        assert result["old"]["instance_id"] != result["new"]["instance_id"]
+        assert result["old"]["settings"]["interval"] == .05
+        assert result["new"]["settings"]["interval"] == .08
+        assert result["new"]["settings"]["no_declared"] is True
+        assert result["old"]["profile_binding"]["generation"] != result["new"]["profile_binding"]["generation"]
+        assert set((root / "cycles").read_text().splitlines()) == {
+            str(result["original"]["pid"]), str(result["ready"]["pid"]),
+        }
         assert all(json.loads(line) == [None, None] for line in (root / "worker-markers").read_text().splitlines())

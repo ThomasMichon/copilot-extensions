@@ -134,6 +134,16 @@ predecessor/successor publication gap rather than starting a competitor.
 Both legacy successors and Source candidates receive the binding explicitly;
 workers never inherit those markers. A Source candidate's private admission
 arguments are not part of the effective supervisor-settings identity.
+Malformed live profile arguments are recoverable configuration errors: parser
+exits do not terminate the incumbent, and rejected input does not replace its
+captured arguments or generation. A later valid edit can retry normally.
+
+Source handoff excludes the incumbent's own retained preparation and selects
+only incoming effective settings (including declaration-discovery intent) and
+the requested profile generation. These bindings are rechecked before releasing
+the singleton. A same-version peer is an equivalent replacement only when those
+settings, profile binding and authority match; a predecessor with older settings
+or generation cannot make a new candidate stand down.
 
 The coordinator launcher's physical nested-slot fallback delegates to the
 co-deployed canonical resolver, including its completion-marker and reparse

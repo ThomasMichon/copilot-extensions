@@ -35,11 +35,13 @@ class MasterProfile:
 
             selected = original_target(root, running)
             generation = hashlib.sha256(self.path.read_bytes()).hexdigest()
-            self.next_generation = generation
-            daemon._self_update_argv = list(self.arguments)
+            arguments = list(self.arguments)
             if generation != self.generation:
                 arguments = profile_arguments(_parse_env_file(self.path, strict=True))
-                args = cli.build_parser().parse_args(arguments)
+                try:
+                    args = cli.build_parser().parse_args(arguments)
+                except SystemExit as error:
+                    raise ValueError("master profile arguments are invalid") from error
                 if (
                     arguments[:2] != ["supervise", "serve"]
                     or args.once or args.no_single_instance
@@ -47,9 +49,9 @@ class MasterProfile:
                     or hashlib.sha256(self.path.read_bytes()).hexdigest() != generation
                 ):
                     raise ValueError("master profile changed or no longer configures a resident master")
-                daemon._self_update_argv = arguments
-                self.next_generation = generation
                 selected = selected or slot_python(root, read_current_version(root))
+            daemon._self_update_argv = arguments
+            self.next_generation = generation
             return selected
 
         def spawn(python, arguments):

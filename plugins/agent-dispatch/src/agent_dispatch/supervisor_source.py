@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import os
 from pathlib import Path
@@ -21,7 +22,10 @@ def _directory(root: Path) -> Path:
     return root / "run" / "supervisor-candidates"
 
 
-def read_prepared(root: Path, version: str, scope: str, *, authority=None, instance_id=None, pid=None):
+def read_prepared(
+    root: Path, version: str, scope: str, *,
+    authority=None, instance_id=None, pid=None, exclude_pid=None, expected=None,
+):
     from agent_procutil._daemon_instance_identity import identity_state, path_identity
     from agent_procutil.daemon_instances import inspect_instances
     from .source_start import _path_name
@@ -53,7 +57,11 @@ def read_prepared(root: Path, version: str, scope: str, *, authority=None, insta
         if document.get("runtime_version") != version or document.get("scope") != scope:
             continue
         generation = document.get("generation")
+        if exclude_pid is not None and isinstance(generation, dict) and generation.get("pid") == exclude_pid:
+            continue
         if pid is not None and isinstance(generation, dict) and generation.get("pid") != pid:
+            continue
+        if expected is not None and any(document.get(key) != value for key, value in expected.items()):
             continue
         owner = document.get("owner", {})
         if not isinstance(owner, dict):
@@ -152,6 +160,9 @@ class CandidateAdmission:
             "birth": birth_identity(os.getpid()),
             "settings": effective_settings(arguments),
         }
+        binding = getattr(daemon, "_master_profile", None)
+        if binding is not None:
+            self.record["profile_binding"] = {"path": str(binding.path), "generation": binding.generation}
         if not self.record["generation"]["start_token"] or not self.record["birth"]:
             raise RuntimeError("supervisor preparation native birth is unavailable")
         pending = path.with_suffix(".pending")
@@ -170,9 +181,12 @@ class CandidateAdmission:
 
         if read_current_version(self.root) != self.version:
             raise RuntimeError("supervisor candidate Source selection changed")
+        if not _profile_current(self.record.get("profile_binding")):
+            raise RuntimeError("supervisor candidate profile generation changed")
         if read_prepared(
             self.root, self.version, self.record["scope"],
             instance_id=self.record["instance_id"],
+            expected={key: self.record.get(key) for key in ("settings", "profile_binding")},
         ) is None:
             raise RuntimeError("supervisor candidate preparation lost native custody")
 
@@ -217,7 +231,13 @@ def acquire_candidate(daemon, admission, *, once, single_instance):
                 and process_start_token(peer["pid"]) == peer["start_token"]
                 and is_locked(lock_path_for(run_dir(), scope))
                 and read_holder_pid(lock_path_for(run_dir(), scope)) == peer["pid"]
-                and read_prepared(admission.root, admission.version, scope, pid=peer["pid"]) is not None
+                and read_prepared(
+                    admission.root, admission.version, scope, pid=peer["pid"],
+                    **({
+                        "authority": admission.record["owner"]["authority_target"],
+                        "expected": {key: admission.record.get(key) for key in ("settings", "profile_binding")},
+                    } if getattr(admission, "record", None) is not None else {}),
+                ) is not None
             ):
                 return False
         daemon.sleep(daemon.poll_interval)
@@ -290,7 +310,26 @@ def effective_settings(args):
     from .supervisor_registration import registration_scope
 
     machine, env = registration_scope(args)
-    return {"machine": machine, "env": env, "interval": float(args.interval), "legacy_env": bool(args.legacy_env)}
+    return {
+        "machine": machine, "env": env, "interval": float(args.interval),
+        "legacy_env": bool(args.legacy_env), "no_declared": bool(getattr(args, "no_declared", False)),
+    }
+
+
+def _expected_preparation(daemon):
+    from . import __main__ as cli
+
+    binding = getattr(daemon, "_master_profile", None)
+    return {
+        "settings": effective_settings(cli.build_parser().parse_args(daemon._self_update_argv)),
+        "profile_binding": None if binding is None else {
+            "path": str(binding.path), "generation": binding.next_generation,
+        },
+    }
+
+
+def _profile_current(binding):
+    return binding is None or hashlib.sha256(Path(binding["path"]).read_bytes()).hexdigest() == binding["generation"]
 
 
 def _cancel_owned_candidate(child, root):
@@ -465,7 +504,13 @@ def advance_handoff(daemon, root, version, target):
         return _pause_handoff(daemon)
     scope = supervisor_lease_scope(daemon.machine, daemon.env)
     try:
-        ready = read_prepared(root, version, scope, authority=_authority(daemon))
+        expected = _expected_preparation(daemon)
+        if not _profile_current(expected["profile_binding"]):
+            return _retarget_handoff(daemon, state) if state is not None else False
+        ready = read_prepared(
+            root, version, scope, authority=_authority(daemon),
+            exclude_pid=os.getpid(), expected=expected,
+        )
     except (OSError, RuntimeError, ValueError):
         log.warning("source supervisor preparation is unconfirmed; original custody retained", exc_info=True)
         return False
@@ -530,7 +575,12 @@ def advance_handoff(daemon, root, version, target):
     if any(not future.done() for future in _tracked_work(daemon)):
         return False
     try:
-        confirmed = read_prepared(root, version, scope, instance_id=ready["instance_id"])
+        confirmed = read_prepared(
+            root, version, scope, instance_id=ready["instance_id"],
+            authority=_authority(daemon), exclude_pid=os.getpid(), expected=expected,
+        )
+        if not _profile_current(expected["profile_binding"]):
+            return _retarget_handoff(daemon, state)
     except (OSError, RuntimeError, ValueError):
         return False
     if confirmed is None:
