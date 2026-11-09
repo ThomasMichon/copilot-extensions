@@ -130,8 +130,8 @@ no legacy retirement is proposed.
   live-provider, HTTP, generation-bound workspace and complete parent parity.
   Keep the canonical Plan and Validation Plan open after finite delivery.
 
-The native diff/routing packet passes 148 cases with five Windows-only
-skips. The actual Worktrees owner/read/observation/tracked packet passes 90,
+The native diff/routing packet passes 149 cases with five Windows-only
+skips. The actual Worktrees owner/read/observation/tracked packet passes 93,
 including real subprocess GitHub/Gitea/ADO provider methods with synthetic IO,
 configured-versus-ambient GitHub host selection, missing credentials,
 native refusal, malformed provider result refusal, unknown report verb

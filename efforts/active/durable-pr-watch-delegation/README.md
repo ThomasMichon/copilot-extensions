@@ -1053,8 +1053,8 @@ or silently expanding a bounded source claim.
 ## Validation Plan
 
 - [x] Qualify the finite [explicit native diff-read source boundary](native-diff-read.md#compatibility-and-qualification)
-  after contract review: 148 native cases with five Windows-only skips and
-  90 actual owner/read/observation/tracked cases. Real subprocess provider
+  after contract review: 149 native cases with five Windows-only skips and
+  93 actual owner/read/observation/tracked cases. Real subprocess provider
   methods retain target/endpoint selection, tracked compatibility and honest
   unsupported/error/completeness evidence. Installed, live-provider, HTTP and
   candidate-bound workspace acceptance remain separate.
@@ -1367,8 +1367,8 @@ callback an implicit credential store.
   existing provider host helper; ordinary ambient/default behavior is
   retained when no endpoint is configured. Gitea uses its existing endpoint,
   and ADO remains explicitly unsupported for unified diffs.
-- The native packet passes 148 cases with five existing Windows-only skips;
-  final actual-owner/read/observation/tracked qualification passes 90.
+- The native packet passes 149 cases with five existing Windows-only skips;
+  final actual-owner/read/observation/tracked qualification passes 93.
   Real subprocess fixtures preserve UTF-8/line endings, provider refusal,
   neutral CWD, mixed-version handling and tracked reconciliation/output.
   An initial fixture expected the wrong Gitea API path and omitted the
@@ -1381,6 +1381,10 @@ callback an implicit credential store.
   absent or malformed results remain valid failed reports. Reject unknown
   on-demand report verbs before selecting a provider or acquiring credentials.
   Six focused regressions cover those failure classes.
+- Require positive support at report dispatch, bound UTF-8 sizing before
+  encoding oversized text, and expose only the exception class for an
+  unexpected provider failure. Native result errors remain intact; exception
+  text cannot become a second path for accidental secret disclosure.
 - GitHub vendor-download HTTP 504s blocked disposable fixture preparation.
   Qualification recovered with the same UV version from its canonical
   package feed, independently SHA-256 pinned and older than seven days,

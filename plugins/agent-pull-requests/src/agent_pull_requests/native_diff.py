@@ -10,6 +10,8 @@ import sys
 from .native_command import run_command
 from .watch_provider import NATIVE_SNAPSHOT_TIMEOUT, command_path
 
+MAX_REPORT_BYTES = 1_048_576
+
 
 def add_parser(subparsers, *, repo_type, handler):
     """Register a native-only read without a claimant or target checkout."""
@@ -32,7 +34,10 @@ def add_parser(subparsers, *, repo_type, handler):
 
 
 def _report(text, repo, number):
-    if not isinstance(text, str) or len(text.encode("utf-8")) > 1_048_576:
+    if (
+        not isinstance(text, str) or len(text) > MAX_REPORT_BYTES
+        or len(text.encode("utf-8")) > MAX_REPORT_BYTES
+    ):
         raise ValueError("native diff report is unavailable or exceeds its size budget")
     try:
         body = json.loads(text)

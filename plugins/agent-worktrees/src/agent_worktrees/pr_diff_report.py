@@ -16,7 +16,7 @@ def diff_report(provider, repo, number, *, api_base="", token=None):
         if type(supported) is not bool or not isinstance(text, str) or not isinstance(error, str):
             raise ValueError("provider returned an invalid diff result")
     except Exception as exc:
-        return {**report, "error": str(exc) or "provider diff acquisition failed"}
+        return {**report, "error": f"provider diff acquisition failed ({type(exc).__name__})"}
     return {
         **report, "supported": supported, "diff": text, "error": error,
         "complete": False if error or not supported else None,

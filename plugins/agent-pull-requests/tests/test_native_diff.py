@@ -116,6 +116,15 @@ def test_plain_refusal_retains_stderr_diagnostic(command, monkeypatch, capsys):
     assert not captured.out and "diff unavailable in prior runtime" in captured.err
 
 
+def test_oversized_text_refuses_before_utf8_allocation():
+    class OversizedText(str):
+        def encode(self, *args, **kwargs):
+            pytest.fail("oversized text was encoded before refusal")
+
+    with pytest.raises(ValueError, match="size budget"):
+        native._report(OversizedText("x" * (native.MAX_REPORT_BYTES + 1)), "example/repository", 7)
+
+
 @pytest.mark.parametrize("extra", [
     ["--number", "0"], ["--number", "-7"], ["--number", "true"],
     ["--worktrees-command", ""], ["--worktrees-command", " \t"],

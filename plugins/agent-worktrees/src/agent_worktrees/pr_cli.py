@@ -622,7 +622,7 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
             report = read_report(verb, prcfg, args.repo, args.pr,
                                  api_base=args.host, token=resolved_token)
             print(_json.dumps(report))
-            return 1 if report.get("error") or report.get("supported") is False else 0
+            return 1 if report.get("error") or report.get("supported") is not True else 0
         fetch = prw.build_fetch(
             prcfg,
             args.repo,

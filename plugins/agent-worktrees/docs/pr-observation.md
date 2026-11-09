@@ -75,6 +75,9 @@ host selection only when it is absent. Tracked `pr-diff` keeps its worktree
 selection, reconciliation, existing JSON shape and output semantics; its GitHub
 provider now honors that same configured endpoint. No diff is persisted in
 watch snapshots, and review workspace generations remain a separate contract.
+Malformed provider results become failed reports; unexpected exceptions expose
+only their class, not potentially sensitive exception text. Normal provider
+result errors retain their existing meaning.
 
 Tracked status remains available; `--no-live` deliberately skips live evidence.
 A failed provider read is a visible `live_error`, not an empty live success.

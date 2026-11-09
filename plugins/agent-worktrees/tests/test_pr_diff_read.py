@@ -36,10 +36,11 @@ def test_provider_exception_is_valid_failed_report():
         name = "fixture"
 
         def get_diff(self, *args, **kwargs):
-            raise RuntimeError("read unavailable")
+            raise RuntimeError("synthetic-secret-in-unexpected-exception")
 
     report = diff_report(Provider(), "example/repository", 7)
-    assert report["error"] == "read unavailable"
+    assert report["error"] == "provider diff acquisition failed (RuntimeError)"
+    assert "synthetic-secret" not in json.dumps(report)
     assert report["supported"] is report["complete"] is False
 
 
@@ -65,6 +66,20 @@ def test_unknown_report_verb_refuses_before_provider_or_credential_acquisition(m
     monkeypatch.setattr(providers, "account_token_for_slug", lambda *args: pytest.fail("credential acquisition"))
     with pytest.raises(ValueError, match="Unknown on-demand report verb"):
         pr_read_context.read_report("difference", object(), "example/repository", 7)
+
+
+@pytest.mark.parametrize("supported", [None, 0, "true"])
+def test_dispatch_requires_positive_report_support(monkeypatch, capsys, supported):
+    from agent_worktrees import config, pr_config, pr_read_context
+
+    repo = config.RepoConfig(anchor="", worktree_root="", pr=config.PRConfig())
+    monkeypatch.setattr(pr_read_context, "load_read_config", lambda *args: object())
+    monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug",
+                        lambda *args: pr_config.ForeignRepoResolution(repo, "target"))
+    monkeypatch.setattr(pr_read_context, "read_report",
+                        lambda *a, **k: {"supported": supported, "error": "", "diff": ""})
+    assert pr_cli.cmd_pr_watch_dispatch(["diff", "example/repository", "7", "--json"]) == 1
+    assert json.loads(capsys.readouterr().out)["supported"] == supported
 
 
 @pytest.mark.parametrize("argv", [
