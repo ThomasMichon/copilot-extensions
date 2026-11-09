@@ -10,6 +10,15 @@
 - **Sub-issues:** #3905 (existing source-materialization gap), #7029 (source selection and immutable generations), #7030 (deployment boundary and adapters), #7758 (durable installation execution driver)
 - **Future objective:** #7031 (exclusive local plugin-content sourcing; outside this runtime-only campaign)
 
+## Goal
+
+Complete the source-managed runtime installation and wheel-first acceptance
+plans below through small, independently validated contributions. Preserve
+configuration, data, sessions and existing source ownership throughout.
+Deliver the remaining source-install integration incrementally rather than
+making one large refactor the unit of review; source merges do not qualify
+native lifecycle, release or installed adoption.
+
 ## Guiding Intent
 
 The governing completion target is
@@ -171,6 +180,15 @@ commits, materialized payload digests, package versions, profiles and dependency
 locks describe different facts; no new competing artifact authority is needed.
 
 ## Request
+
+**Incremental delivery, verbatim:**
+
+> Split now; preserve #11121 and prepare the smallest first draft slice
+
+The existing effort remains the canonical goal. Keep #11121 and its source
+history intact while preparing replacements; do not close or supersede it
+until the combined replacement diff is verified. Preparing a draft does not
+authorize another review request, merge, native attempt or installed rollout.
 
 **Clean-break wheel/uv migration (2026-11-03), settled summary:** the
 first-party-wheel/uv flow need not remain backward-compatible with the legacy
@@ -460,6 +478,28 @@ receipt; unknown compatibility selects fresh installation within declared
 disposable scope while preserving config and durable data.
 
 ## Plan
+
+### Incremental source-install integration
+
+- [ ] Prepare the first independent source-tree scan slice on current `dev`,
+  including canonical toolkit copies and regressions for ordering, filtering
+  and scan-error fallback. This performance/refusal-preservation foundation
+  does not select or publish a new runtime path.
+- [ ] Carve remaining independent deadline and Git-isolation fixes into
+  separately validated contributions, keeping each bug class and its tests
+  together rather than distributing sibling fixes over review rounds.
+- [ ] Introduce the canonical prepared-application v2 path alongside the
+  supported current path through the existing source selector. Reuse the
+  existing builder, cache, profiles and publication owner; no parallel factory.
+- [ ] Qualify and switch Manager through that selector in its own slice,
+  preserving configuration, data, current selections and recoverability.
+- [ ] Qualify Worktrees and the remaining adopters incrementally through
+  their existing owned adapters, with required generated copies in each slice.
+- [ ] Retire only obsolete v1 implementation after v2 cutover qualification,
+  preserving historical evidence and supported post-migration recovery.
+- [ ] Verify combined replacement changes against the preserved integration
+  source before superseding it. Use dependent PRs only for real dependencies;
+  neither a smaller diff nor a passing review resolves native acceptance.
 
 - [x] Qualify and release source-bound HTTPS feed/artifact redirects without
   mandatory CDN-origin enumeration, preserving explicit destination restrictions,
@@ -1349,6 +1389,14 @@ and serialization are credited, not missing code to reimplement.)_
   restart/cleanup authority or whole-parent completion.
 
 ## Validation Plan
+
+- [ ] Prove the first scan slice on current `dev` without application/SDK
+  integration dependencies; verify deterministic first-link selection,
+  `.test-runs` filtering, scan-error fallback and canonical copied bytes.
+- [ ] Keep required CI and source qualification per slice; qualify selector
+  coexistence, v2 cutover and v1 retirement separately before removing old code.
+- [ ] Verify replacement-stack diff completeness against the preserved source
+  and retain every untransferred parent acceptance item.
 
 - [ ] Prove the [legacy force-fresh and post-migration compatibility matrix](wheel-first-transition.md#legacy-cutover-and-future-compatibility): missing, broken or unsupported legacy tooling does not prevent addressed fresh installation, preserved configuration/data remain usable, and supported generations of the new model retain their declared upgrade/recovery behavior. A plan or README notice is not implementation or host authorization.
 

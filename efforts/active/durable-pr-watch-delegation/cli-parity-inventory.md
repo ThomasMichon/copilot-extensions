@@ -31,7 +31,7 @@ proof that all legacy operations can be retired.
 | `pr-watch cursor/wait` | Default criteria, cursor races, meaningful transitions, independent timeout semantics and consent wake | Existing native watch and replay baseline; new cursor journal is separate until qualified |
 | `pr-watch subscribe/stop/ownerstatus` | Same registration/cancel ownership, identities, ACK/restart and independent deadlines | Existing durable watches; caller-driven sets/selections still open |
 | `pr-watch threads`, thread resolution | On-demand bodies, current/reviewed candidate, author/reviewer ownership and provider-native resolution | [Finite dedicated native read source merged in #11657](native-thread-read.md); workspace source is ADO-first; resolution, installed/HTTP and three-provider live acceptance open |
-| `pr-diff`, review source/evidence | Explicit target binding, unchanged tracked selection, truthful provider support/completeness and candidate limits | [Finite native source qualified after reviewed contract #11659](native-diff-read.md); ADO unified diff remains unsupported; installed/provider/HTTP parity and workspace generations remain separate |
+| `pr-diff`, review source/evidence | Explicit target binding, unchanged tracked selection, truthful provider support/completeness and candidate limits | [Finite native source merged in #11661 after reviewed contract #11659](native-diff-read.md); ADO unified diff remains unsupported; installed/provider/HTTP parity and workspace generations remain separate |
 | `pr-comment`, `pr-review` | Distinct non-verdict comment and named review; selected exact-candidate writeback and unknown outcomes | Protected workspace submission source exists; installed HTTP/CLI adoption open |
 | `pr-watch reply/requeue` | Existing ADO thread/revision/idempotency and eligible evaluation/retry semantics | ADO-only bounded native operations; no generic rerun claim |
 | `pr-nudge` | Bound reviewer request or truthful unsupported/no-op; no coding-agent mention side effect | [Finite explicit native source merged in #11647](native-reviewer-request.md); Windows/provider/installed/HTTP parity open |
@@ -46,6 +46,11 @@ retirement, enumerate registered parser aliases, dispatch-before-argparse
 branches, supported scripts, documentation examples and actual consumers.
 Reconcile new upstream operations rather than freezing this table as a second
 parser reference.
+
+The proposed [existing-owner HTTP report slice](owner-report-read.md)
+selects a bounded authenticated thread/diff exchange, not workspace generation
+acquisition or installed client migration. Native account-binding adoption,
+larger reports and complete HTTP/provider qualification remain open.
 
 ## Operation-by-operation proof
 
