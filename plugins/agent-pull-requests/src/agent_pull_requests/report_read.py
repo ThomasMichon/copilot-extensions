@@ -179,6 +179,6 @@ class ReportReader:
             }
         validate_exchange(value, operation=operation, scope=dict(self.scope), number=parsed.get("number"))
         if response_validator is not None:
-            response_validator(value)
+            response_validator(value, current)
         current()
         return value

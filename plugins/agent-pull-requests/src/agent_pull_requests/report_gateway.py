@@ -60,9 +60,11 @@ async def execute(gateway, owner, operation, payload, request, target, expected)
     from .watch_gateway import _response
 
     response = None
+    publication_checkpoint = None
 
-    def encode(value):
-        nonlocal response
+    def encode(value, current):
+        nonlocal response, publication_checkpoint
+        publication_checkpoint = current
         response = _response(200, dict(value, binding=expected.document()))
         if len(response.body) > BODY_BYTES:
             raise ReportUnavailable("report response exceeds transport limit")
@@ -81,7 +83,9 @@ async def execute(gateway, owner, operation, payload, request, target, expected)
             owner.execute, operation, payload,
             expires_at=request.context.expires_at, checkpoint=checkpoint, response_validator=encode,
         )
-        checkpoint()
+        if publication_checkpoint is None:
+            raise ReportUnavailable("report publication checkpoint unavailable")
+        publication_checkpoint()
         return response
     except ReplayBindingMismatch:
         return _response(409, {"error": "report_binding_mismatch"})

@@ -11,7 +11,7 @@ from types import MappingProxyType
 from types import SimpleNamespace
 
 import pytest
-from fleet_manager.gateway_service_channel import BODY_BYTES
+from fleet_manager.gateway_service_channel import BODY_BYTES, TransportError
 from fleet_manager.gateway_service_handler import CallerContext, ServiceRequest, ServiceResponse
 
 from agent_pull_requests import __main__ as cli
@@ -294,6 +294,59 @@ def test_old_receiver_and_invalid_declaration_do_not_dispatch_report(reports):
     with pytest.raises(ReplayClientError, match="invalid_report_response"):
         read(client)
     assert len(caller.calls) == 1 and not state["calls"]
+
+
+@pytest.mark.parametrize("failure", ["transport", "http", "invalid"])
+def test_stale_discovery_failure_cannot_clear_a_newer_successful_selection(reports, failure):
+    _, _, _, client, caller, state, _ = reports
+
+    async def scenario():
+        started, release = asyncio.Event(), asyncio.Event()
+        count = 0
+        class Overlap:
+            async def request(self, *args, **kwargs):
+                nonlocal count
+                count += 1
+                if count == 1:
+                    started.set()
+                    await release.wait()
+                    if failure == "transport":
+                        raise TransportError("synthetic-stale-failure")
+                    return ServiceResponse(404) if failure == "http" else ServiceResponse(
+                        200, (("content-type", "application/json"),), b"{}",
+                    )
+                return await caller.request(*args, **kwargs)
+        client.caller = Overlap()
+        old = asyncio.create_task(client.capabilities())
+        await started.wait()
+        await client.capabilities()
+        release.set()
+        with pytest.raises(ReplayClientError, match="report_discovery_superseded"):
+            await old
+        assert (await client.read("diff", {"number": 7, "budget_seconds": 2}))["owner_exit"] == 0
+    asyncio.run(scenario())
+    assert state["calls"] == [("diff", 7)]
+
+
+@pytest.mark.parametrize("gap,status", [("deadline", 503), ("withdrawal", 403)])
+def test_publication_is_rechecked_after_worker_finishes_before_coroutine_resumes(
+    reports, monkeypatch, gap, status,
+):
+    reader, state = reports[2], reports[5]
+    original = asyncio.to_thread
+    async def delayed(function, *args, **kwargs):
+        result = await original(function, *args, **kwargs)
+        if function == reader.execute and args[0] == "threads":
+            if gap == "deadline":
+                state["clock"] = 10
+            else:
+                state["active"] = False
+        return result
+    monkeypatch.setattr(asyncio, "to_thread", delayed)
+    with pytest.raises(ReplayClientError) as caught:
+        read(reports[3])
+    assert caught.value.http_status == status
+    assert state["calls"] == [("threads", 7)]
 
 
 @pytest.mark.parametrize("argv", [

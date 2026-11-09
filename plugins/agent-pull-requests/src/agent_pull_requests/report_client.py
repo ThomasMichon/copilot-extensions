@@ -25,7 +25,7 @@ class ReportClient:
         self._selected = False
         self._epoch = 0
 
-    async def _exchange(self, operation, payload):
+    async def _exchange(self, operation, payload, *, epoch):
         body = json.dumps(
             {"binding": self.binding.document(), "request": payload}, allow_nan=False,
         ).encode("utf-8")
@@ -38,8 +38,12 @@ class ReportClient:
                 body=body, response_limit=BODY_BYTES,
             )
         except TransportError as error:
+            if epoch != self._epoch:
+                raise ReplayClientError("report_discovery_superseded") from None
             self._selected = False
             raise ReplayClientError(error.code, http_status=error.status) from None
+        if epoch != self._epoch:
+            raise ReplayClientError("report_discovery_superseded")
         if response.status != 200:
             self._selected = False
             raise ReplayClientError(
@@ -66,7 +70,7 @@ class ReportClient:
         self._epoch += 1
         epoch = self._epoch
         self._selected = False
-        value = await self._exchange("capabilities", {})
+        value = await self._exchange("capabilities", {}, epoch=epoch)
         if epoch != self._epoch:
             raise ReplayClientError("report_discovery_superseded")
         self._selected = True
@@ -79,7 +83,7 @@ class ReportClient:
         if not self._selected:
             raise ReplayClientError("report_capability_required")
         epoch = self._epoch
-        value = await self._exchange(operation, payload)
+        value = await self._exchange(operation, payload, epoch=epoch)
         if epoch != self._epoch:
             raise ReplayClientError("report_discovery_superseded")
         return value

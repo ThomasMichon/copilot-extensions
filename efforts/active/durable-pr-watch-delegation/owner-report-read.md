@@ -206,3 +206,10 @@ not prepared; no passing whole-repository typecheck is claimed.
 The source implementation still requires its reviewed merge. The parent
 effort, large-report transport, authenticated native-command adopter,
 installed/retained hosting, Windows and live-provider acceptance remain open.
+
+Review refinements fence every in-flight exchange by its discovery epoch
+before an older transport/status/validation failure can change selection.
+The same live owner/deadline checkpoint now crosses the worker-to-coroutine
+handoff and runs immediately before publication. The 58-case focused report
+suite passes, including stale discovery failures after a newer success and
+deadline/owner withdrawal while coroutine resumption is delayed.
