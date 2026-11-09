@@ -126,6 +126,17 @@ replacement and rollout remain with their existing owners.
 
 ## Journal
 
+### 2026-11-09 - Native scope review corrections
+- Review identified creation-namespace drift and a scrubbed teammate flag that
+  still participated in the worker hash. Native reads now receive the exact
+  creation namespace without changing shared environment; both context writers
+  treat the flag as transport state.
+- The private Windows lifetime fixture now uses a deliberately different
+  ambient observer namespace and a parent teammate flag. It must confirm the
+  actual private native incarnation before publishing readiness.
+- The original 89-test hosted Windows result covers the first source slice;
+  changed namespace and worker-scope behavior needs fresh qualification.
+
 ### 2026-11-09 - First source slice and remaining budget failure
 - Removed repeated per-file ancestor walks; payload bytes and digest remain
   unchanged. Existing repair-boundary selection passed 120 tests, with 17

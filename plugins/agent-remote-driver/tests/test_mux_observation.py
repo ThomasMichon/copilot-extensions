@@ -105,6 +105,18 @@ def test_zero_clients_is_live_not_absent(tmp_path):
     assert observed.presence() and observed.clients == 0
 
 
+@pytest.mark.parametrize("namespace", ["", "selected"])
+def test_explicit_native_namespace_overrides_ambient_without_changing_it(tmp_path, monkeypatch, namespace):
+    monkeypatch.setenv("COPILOT_DRIVER_PSMUX_NAMESPACE", "foreign")
+    with native_endpoint(
+        tmp_path, (b"OK\n" + _PANE, b"OK\n", b"OK\n" + _IDENTITY),
+        namespace=namespace,
+    ):
+        observed = mux.observe_psmux("wt-fixture", data_dir=tmp_path, namespace=namespace)
+    assert observed.presence() and observed.incarnation == "$7:100"
+    assert os.environ["COPILOT_DRIVER_PSMUX_NAMESPACE"] == "foreign"
+
+
 def test_current_pane_is_selected_across_two_windows_with_active_panes(tmp_path):
     other_window = _PANE.replace(b"%2", b"%3")
     with native_endpoint(tmp_path, (

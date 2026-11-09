@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agent_procutil import no_window_kwargs
+from agent_remote_driver.mux_observation_types import Observation
 from zdd.diagnostics import process_start_time
 
 from . import engine_client
@@ -70,14 +71,24 @@ class WarmPickerPool:
 
     def _alive(self, slot: Slot) -> bool:
         if not mux_discovery.passive_cli_supported(self.mux):
-            return mux_discovery.observe_psmux(slot.session, timeout=3).presence()
+            return self._native_observation(slot).presence()
         return self._mux("has-session", "-t", slot.session).returncode == 0
+
+    def _native_observation(self, slot: Slot) -> Observation:
+        if self.mux_args and (
+            len(self.mux_args) != 2 or self.mux_args[0] != "-L"
+        ):
+            raise RuntimeError("Unsupported native warm Picker namespace")
+        return mux_discovery.observe_psmux(
+            slot.session, timeout=3,
+            namespace=self.mux_args[1] if self.mux_args else "",
+        )
 
     def _incarnation(self, slot: Slot) -> str | None:
         from .mux_discovery import _valid_native_incarnation
 
         if not mux_discovery.passive_cli_supported(self.mux):
-            observed = mux_discovery.observe_psmux(slot.session, timeout=3)
+            observed = self._native_observation(slot)
             return observed.incarnation if observed.presence() else None
         result = self._mux("display-message", "-p", "-t", slot.session, "#{session_id}:#{session_created}")
         value = (result.stdout or "").strip()

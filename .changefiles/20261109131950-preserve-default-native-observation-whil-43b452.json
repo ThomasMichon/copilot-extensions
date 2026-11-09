@@ -1,0 +1,13 @@
+{
+  "comment": "Preserve default native observation while allowing an explicit creation namespace for warm Picker consumers.",
+  "changes": [
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
