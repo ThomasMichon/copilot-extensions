@@ -108,8 +108,12 @@ def test_manual_resume_qualification_does_not_depend_on_the_generic_mux_packet()
     assert "inputs.portfolio == 'resume-pane'" in job["if"]
     resume = next(step for step in job["steps"] if "test_resume_pane_startup.py" in step.get("run", ""))
     generic = next(step for step in job["steps"] if "test_generic_mux_startup.py" in step.get("run", ""))
-    assert resume["if"] == "inputs.portfolio == 'resume-pane'"
+    assert resume["if"] == "inputs.portfolio == 'resume-pane' || inputs.portfolio == 'mux-continuity'"
     assert generic["if"] == "inputs.portfolio == 'generic-mux'"
+    assert "mux-continuity" in events["workflow_dispatch"]["inputs"]["portfolio"]["options"]
+    prepare = next(step for step in job["steps"] if step.get("name") == "Prepare preferred disposable PSMux")
+    assert "$version = '3.4.0'" in prepare["run"]
+    assert "a66b6be7c13c6fa0dc3660a267b9e34eaa91a4eb7f07fbd55a0468018bd0f721" in prepare["run"]
 
 
 def test_complete_source_is_attested_and_read_back_before_the_final_main_pr():

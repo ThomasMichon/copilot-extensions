@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "copilot-extensions-worktree-manager"
-version = "0.7.25-dev2"
+version = "0.7.26-dev1"
 description = "Standalone, out-of-plugin control plane (installer, configurator & worktree launcher) for the copilot-extensions harness."
 readme = "README.md"
 license = "MIT"
@@ -32,10 +32,12 @@ dependencies = [
     # Preserve the embedded libraries' ordinary external constraints.
     "pyyaml>=6.0",
     "pyyaml>=6.0.3",
+    "websockets>=15,<16",
 ]
 
 [dependency-groups]
 first-party-core = [
+    "agent-copilot-driver-core", "agent-repository-policy",
     "agent-process-telemetry", "agent-plugin-resolve", "agent-procutil",
     "agent-dropin-registry", "agent-plugin-activation", "agent-work-coalescing-singleton",
     "agent-zdd", "agent-remote-login-shell", "agent-machine-transport", "agent-ssh-manager",
@@ -44,6 +46,8 @@ first-party-core = [
 ]
 
 [tool.uv.sources]
+agent-copilot-driver-core = { path = "libs/copilot-driver-core" }
+agent-repository-policy = { path = "libs/repository-policy" }
 agent-single-instance-lease = { path = "libs/single-instance-lease" }
 agent-ssh-manager = { path = "libs/ssh-manager" }
 agent-process-telemetry = { path = "libs/process-telemetry" }
