@@ -70,6 +70,7 @@ and authorized installed-consumer acceptance. No global validation rule is waive
 | lopsided-gasket | Existing handover implementation and focused qualification | Managed implementation worktree |
 | patient-spanner | Incoming/retirement architecture and acceptance amendment | Managed documentation worktree |
 | squeaky-crank | Bounded #10951 resident configuration-context implementation | Managed source worktree; coordinator owns publication and rollout |
+| stubborn-latch | #11524 Worktrees incoming-monitor publication correction | Coordinator-controlled source worktree; separate from MCP handover implementation |
 | Session-path evidence | Read-only client, host and upstream-state analysis | Coordinator delegation |
 | Activation evidence | Read-only installer, selection and retirement analysis | Coordinator delegation |
 | Keeper evidence | Read-only existing lifecycle/transport primitive analysis | Coordinator delegation |
@@ -95,6 +96,10 @@ and authorized installed-consumer acceptance. No global validation rule is waive
 - Generic SDK observation work belongs to the independent #10925 objective, not
   an MCP implementation slice. Historical journals remain here unchanged; SDK
   progress cannot block this effort's independent implementation or completion.
+- stubborn-latch owns the #11524 Worktrees installer/monitor correction under
+  the coordinator. Lopsided-gasket's MCP handover implementation and retained
+  source changes remain independently owned; this correction does not replace
+  that writer or settle its remaining work.
 
 ## Context
 
@@ -372,6 +377,85 @@ backend execution. This plan does not assert that reattachment or legacy live
 migration already works.
 
 ## Journal
+
+### 2026-11-09 - Incoming-monitor correction resumed
+
+- Claimed #11524 as stubborn-latch, retaining the separate MCP handover owner.
+- The source correction separates outgoing native observations from incoming
+  election. It archives exact unresolved recovery bytes and retains prior code
+  without recovery or termination; structural route CAS and actual incoming
+  preparation, promotion and serving checks remain mandatory.
+- Focused source qualification passed 39 installer, actual-cutover and
+  retention cases, including unavailable outgoing birth, uncertain/corrupt
+  recovery, incoming identity mismatches and archive I/O failure. Broader
+  affected-file qualification, review, release and installed acceptance remain
+  open; this is not a clean full-update or MCP-session-handover result.
+- Final local contract qualification subsequently passed 345 tests across the
+  installer, actual-cutover, retirement and cancellation files, with verified
+  bounded-owner cleanup. Five cases from two expensive native installer
+  scenarios were deselected and remain unqualified; the earlier all-file
+  300-second timeout is not counted as a pass. Lint, install-contract,
+  unchanged module-size and whitespace guards pass. Review, release, actual
+  normal-update performance and installed consumer acceptance remain open.
+- Review of #11673 identified six blocking edge cases. Regression-first
+  corrections preserve previous-only startup with raw-active CAS, defer failed
+  outgoing reuse probes, retain exact dev-release obligations even without a
+  known outgoing slot, and use bounded atomic reference groups plus write-ahead
+  archives that survive changed observations. Current local affected-file
+  qualification passes 362 tests; the same five native cases remain
+  unqualified. The shared ZDD cutover suite passes 49 cases, including
+  unchanged legacy healing. Required CI, renewed review, release and installed
+  acceptance remain open; no new deployment or whole-objective completion is
+  claimed.
+- The intervening old-head review also exposed malformed archive envelopes,
+  unreadable breadcrumb cleanup and normalized legacy-route comparisons.
+  Added regression-first corrections, including orphan references after loss
+  of the archive directory. Final affected-file qualification passes 369
+  tests with the same five native cases unqualified; the shared cutover and
+  refusal files pass 64 tests. These are source results only, not current-head
+  review acceptance, required CI, release or installed completion.
+- Further review exposed retry ordering, prepared-claim reference repair, GC
+  between inventory and fencing, and predecessor exit after qualification.
+  Added direct installer retry and actual-GC/selection regressions. Write-ahead
+  intent now precedes the deletion fence and inventory capture, interrupted
+  inventory resumes under that fence, and archived references recover before
+  ordinary retirement reservation and prepared-claim reconciliation. Qualified
+  cleanup also preserves raw-active selection. The complete affected selection
+  passes 376 tests with verified bounded-owner cleanup; the same five native
+  cases remain unqualified. Review, required CI, release, normal full-update
+  performance and session-preserving acceptance remain open.
+- Current-head review confirmed those seven prior findings resolved, then
+  identified multi-archive recovery clearing a shared fence too early and
+  cleanup retry re-retaining already-collected slots. New failure-first
+  controls cover GC between archive commits and deletion failure after
+  reference release, with and without a dev claim. Recovery now publishes
+  combined references under one fence, and terminal cleanup intent precedes
+  their removal. CI also exposed stale generated ZDD admission copies and
+  three exact cold-start controls: regenerated the copies and restored the
+  explicit retired-predecessor native-exit checks. The combined affected and
+  legacy-custody selection passes 487 tests, with the same five native cases
+  still unqualified and bounded cleanup verified. The admitted source
+  fingerprint is refreshed without changing nodes, source inventory or budget.
+  Renewed current-head review and CI remain required; no installed or
+  whole-effort acceptance is claimed.
+- Source CI and the Linux native acceptance job then passed. Windows reached
+  the later native transport controls and exposed six obsolete expectations
+  of eager passive reaping. Updated only that assertion to require explicit
+  deferred ownership and zero reaper effects; native readiness, publication,
+  grace, refusal and rollback assertions remain intact. The exact Windows CI
+  selection reproduced six failures, then passed all eight cases with verified
+  cleanup under unchanged limits. The latest review reports no open findings
+  but remains `COMMENTED`, not a current-head approval. Renewed CI and the
+  separately required approval remain open.
+- Added a failure-first case to the existing installer-custody controls:
+  outgoing native-identity observation is unavailable, but the healthy incoming
+  runtime must publish with retirement pending and both slots preserved.
+  The current source fails this case before publication; bounded test cleanup
+  was verified. No installed correction is claimed.
+- Conditional route publication already separates the raw predecessor route
+  from native identity of the incoming writer. The remaining implementation
+  must preserve uncertain recovery records and conflicting-work protection,
+  rather than merely suppressing the first outgoing-observation exception.
 
 ### 2026-11-08 - Termination-free installer source merged
 
