@@ -257,6 +257,39 @@ def test_execution_preserves_actual_collection_failure_and_skip_outcomes(
         assert actual["incomplete_reason"] == "empty-selection"
 
 
+def test_execution_preserves_real_unicode_console_output_and_failed_outcome(tmp_path, monkeypatch):
+    import agent_procutil.owned_process as owned_process
+    from agent_procutil.owned_process import run_caller_owned
+
+    root = tmp_path / "candidate"
+    test = root / "plugins/sample/tests/test_sample.py"
+    test.parent.mkdir(parents=True)
+    test.touch()
+    output = tmp_path / "evidence"
+    monkeypatch.setenv("PYTHONIOENCODING", "cp1252")
+
+    def run(argv, **kwargs):
+        (output / "junit").mkdir()
+        (output / "junit/actual.xml").write_text(
+            '<testsuite><testcase name="real"><failure/></testcase></testsuite>',
+            encoding="utf-8",
+        )
+        return run_caller_owned(
+            [sys.executable, "-c", "import sys;print(chr(0x2014));sys.exit(1)"],
+            **kwargs,
+        )
+
+    monkeypatch.setattr(owned_process, "run_caller_owned", run)
+    monkeypatch.setattr(worker, "Transport", lambda *args: SimpleNamespace(
+        git=lambda *args: SimpleNamespace(stdout="b" * 40),
+    ))
+    actual = worker.execute(root, request(), output)
+    assert actual["outcome"] == "failed"
+    assert actual["error"] == "selected command failed (1)"
+    assert actual["tests"][0]["outcome"] == "failed"
+    assert (output / "phase-2.stdout.log").read_text("utf-8") == "\u2014\n"
+
+
 def result():
     return {
         "version": 1, "request": request(), "run_id": 42, "run_attempt": 1,

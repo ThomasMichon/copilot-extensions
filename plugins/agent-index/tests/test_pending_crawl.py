@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import json
 import time
 from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
@@ -31,8 +32,9 @@ def item(path: str, content: str) -> FileEntry:
     return FileEntry(path, content, "markdown", "forge:repo")
 
 
-def test_restart_replays_pinned_delta_before_newer_net_delta_can_omit_reverted_file(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+@pytest.mark.parametrize("completion", ["interrupted", "other-alias"])
+def test_restart_or_alias_refuses_a_net_delta_that_can_omit_reverted_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, completion: str,
 ) -> None:
     paths = PathIndex(tmp_path / "paths.db")
     state_file = tmp_path / "state.json"
@@ -61,6 +63,8 @@ def test_restart_replays_pinned_delta_before_newer_net_delta_can_omit_reverted_f
 
     connector = SimpleNamespace(
         source_name="forge:repo", discover_delta=discover, recovery_identity=("fixture-target",),
+        current_commit=lambda: upstream,
+        discover=lambda **kwargs: [item("first.md", "original"), item("second.md", "latest")],
     )
     monkeypatch.setattr("agent_index.sources.get_connector", lambda *a, **k: connector)
     monkeypatch.setattr(engine, "selected_layout", lambda: None)
@@ -82,16 +86,20 @@ def test_restart_replays_pinned_delta_before_newer_net_delta_can_omit_reverted_f
     monkeypatch.setattr(engine, "_embed_and_store_batch", embed)
     store = SimpleNamespace(reconcile_file_chunks=lambda *a, **k: 0)
 
-    def run() -> None:
+    def run(alias: str = "alias", *, full: bool = False) -> None:
         engine._index_source(
-            "alias", config=config, state=state, path_index=paths,
-            multi_store=store, multi_clients={}, full=False,
+            alias, config=config, state=state, path_index=paths,
+            multi_store=store, multi_clients={}, full=full,
         )
 
     run()
-    upstream, fail_second = "middle", True
-    with pytest.raises(RuntimeError, match="interruption"):
-        run()
+    upstream = "middle"
+    if completion == "interrupted":
+        fail_second = True
+        with pytest.raises(RuntimeError, match="interruption"):
+            run()
+    else:
+        run("other-alias")
     assert contents["first.md"] == "temporary"
     assert IndexState.load(state_file).sources["alias"].last_commit == "old"
     # A fresh process sees the durable acquired target, not mutable provider input.
@@ -99,11 +107,19 @@ def test_restart_replays_pinned_delta_before_newer_net_delta_can_omit_reverted_f
     state = IndexState.load(state_file)
     calls.clear()
     upstream, fail_second = "latest", False
-    run()
-    assert calls == ["middle"]
+    if completion == "other-alias":
+        with pytest.raises(ValueError, match="family.*full reindex"):
+            run()
+        assert calls == []  # Refuse before upstream acquisition, not after applying the bad net delta.
+        run(full=True)
+    else:
+        run()
+        assert calls == ["middle"]
     assert contents == {"first.md": "original", "second.md": "latest"}
     assert state.sources["alias"].last_commit == "latest"
-    assert state.total_chunks == 4
+    assert state.sources["alias"].chunk_count == 4
+    if completion == "interrupted":
+        assert state.total_chunks == 4
     assert PendingCrawls(paths).load("alias", "alias") is None
 
 
@@ -248,6 +264,74 @@ def test_failed_atomic_state_publication_preserves_prior_cursor(
     assert path.read_bytes() == before
     assert IndexState.load(path).sources["alias"].last_commit == "old"
     assert not list(tmp_path.glob(".state.json.*.tmp"))
+
+
+@pytest.mark.parametrize("failure", ["apply", "save"])
+def test_alias_noops_remain_usable_after_failed_family_cursor_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str,
+) -> None:
+    paths = PathIndex(tmp_path / "paths.db")
+    state_file = tmp_path / "state.json"
+    state = IndexState()
+    acquired: list[tuple[str, str]] = []
+
+    def publish(source: str, commit: str, *, fail_apply: bool = False) -> None:
+        def acquire() -> CrawlManifest:
+            acquired.append((source, commit))
+            return CrawlManifest(source=source, accounting_family="forge:repo", commit=commit)
+
+        def apply(*, manifest: CrawlManifest, full: bool) -> tuple[int, int, int]:
+            state.mark_source_indexed(source, manifest.commit, 0)
+            if fail_apply:
+                raise RuntimeError("fixture apply failure")
+            return 0, 0, 0
+
+        recover_source(
+            source, scope=recovery_scope(source, SimpleNamespace(source_name="forge:repo")),
+            family="forge:repo", state=state,
+            state_file=state_file, paths=paths, full=False, acquire=acquire, apply=apply,
+        )
+
+    publish("one", "old")
+    publish("two", "old")
+
+    def fail_save(path: Path) -> None:
+        raise RuntimeError("fixture save failure")
+
+    with monkeypatch.context() as patch:
+        if failure == "save":
+            patch.setattr(state, "save", fail_save)
+        with pytest.raises(RuntimeError, match=f"fixture {failure} failure"):
+            publish("two", "new", fail_apply=failure == "apply")
+    # Both the live object and a fresh reader retain the last completed family.
+    publish("one", "old")
+    state = IndexState.load(state_file)
+    publish("two", "old")
+    publish("two", "new")
+    before = len(acquired)
+    with pytest.raises(ValueError, match="family.*full reindex"):
+        publish("one", "latest")
+    assert len(acquired) == before
+    assert state.sources["one"].last_commit == "old"
+    assert IndexState.load(state_file).sources["two"].last_commit == "new"
+
+    from agent_index.indexing.crawl import collect_source_changes
+
+    with pytest.raises(ValueError, match="family.*full reindex"):
+        collect_source_changes(
+            "one", state=state, path_index=paths, full=False, source_aware=False,
+            connector=SimpleNamespace(source_name="forge:repo"),
+        )
+
+
+@pytest.mark.parametrize("completed", [[], {"": "target"}, {"forge:repo": 7}])
+def test_invalid_completed_family_cursor_refuses_loading(
+    tmp_path: Path, completed: object,
+) -> None:
+    state_file = tmp_path / "state.json"
+    state_file.write_text(json.dumps({"completed_family_cursors": completed}), encoding="utf-8")
+    with pytest.raises(ValueError, match="completed family cursors"):
+        IndexState.load(state_file)
 
 
 @pytest.mark.parametrize("via_environment", [False, True])

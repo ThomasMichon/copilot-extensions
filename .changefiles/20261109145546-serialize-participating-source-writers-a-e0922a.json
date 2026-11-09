@@ -1,0 +1,9 @@
+{
+  "comment": "Serialize participating source writers across acquisition and checkpoint publication",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}
