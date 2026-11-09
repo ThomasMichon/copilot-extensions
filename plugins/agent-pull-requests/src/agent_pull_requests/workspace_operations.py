@@ -92,6 +92,7 @@ class WorkspaceOperations:
                  selection_preparer_deadline: bool = False,
                  selection_owned_edits: bool = False,
                  retention_target: Callable | None = None,
+                 terminal_reads: bool = False,
                  write_context_factory: Callable[..., Callable] | None = None) -> None:
         writers = (write_context, write_context_factory)
         write_available = sum(value is not None for value in writers) == 1
@@ -108,6 +109,14 @@ class WorkspaceOperations:
             or type(conversations) is not bool
             or type(prepared_reviews) is not bool
             or type(comment_mappings) is not bool
+            or type(terminal_reads) is not bool
+            or terminal_reads and (
+                not conversations or retention_target is None or any(writers)
+                or feedback_owner is not None or prepared_reviews or comment_mappings
+                or selection_preparer is not None
+                or not all((store.terminal_retention, store.terminal_recovery,
+                            store.terminal_cache_retirement))
+            )
             or comment_mappings and not (conversations and prepared_reviews)
             or type(selection_owned_edits) is not bool
             or type(selection_preparer_deadline) is not bool
@@ -151,6 +160,7 @@ class WorkspaceOperations:
         self.selection_preparer_deadline = selection_preparer_deadline
         self.selection_owned_edits = selection_owned_edits
         self.retention_target = retention_target
+        self.terminal_reads = terminal_reads
         from .workspace_retention import WorkspaceRetention
         self.retention = WorkspaceRetention(self)
         self._materializations = OrderedDict()
@@ -203,6 +213,10 @@ class WorkspaceOperations:
 
     def execute(self, operation, payload, *, expires_at, checkpoint,
                 selection_validator: Callable[[dict], None] | None = None):
+        if self.terminal_reads:
+            from .workspace_terminal_read import OPERATIONS as READ_OPERATIONS
+            if operation not in READ_OPERATIONS:
+                raise WorkspaceUnavailable("terminal workspace is read-only")
         if operation not in OPERATIONS or not isinstance(payload, dict):
             raise ValueError("unsupported workspace operation")
         with self.retention.request(
@@ -254,6 +268,9 @@ class WorkspaceOperations:
 
         check()
         if operation == "capabilities":
+            if self.terminal_reads:
+                from .workspace_terminal_read import capabilities
+                return capabilities(self, expires_at=expires_at, checkpoint=check)
             from .conversation_store import ConversationStore
             conversation_contract = None
             if self.conversations:
@@ -312,7 +329,7 @@ class WorkspaceOperations:
                 expires_at=expires_at, checkpoint=check,
             )
             check()
-            return {"protocol": PROTOCOL, "scope": scope, "result": result}
+            return {"protocol": self.protocol, "scope": scope, "result": result}
         for field in ("generation_id", "previous_id"):
             if field in payload:
                 identifier(payload[field])
@@ -329,7 +346,7 @@ class WorkspaceOperations:
                 validate_intent=selection_validator, deadline=deadline,
             )
             check()
-            return {"protocol": PROTOCOL, "scope": scope, "result": result}
+            return {"protocol": self.protocol, "scope": scope, "result": result}
         if operation in ("load", "sync"):
             previous = None
             if operation == "sync":
@@ -496,7 +513,12 @@ class WorkspaceOperations:
         result.pop("comment_observations", None)
         if isinstance(result.get("operation"), dict):
             result["operation"].pop("comment_observations", None)
-        return {"protocol": PROTOCOL, "scope": scope, "result": result}
+        return {"protocol": self.protocol, "scope": scope, "result": result}
+
+    @property
+    def protocol(self) -> str:
+        from .workspace_terminal_read import PROTOCOL as TERMINAL_PROTOCOL
+        return TERMINAL_PROTOCOL if self.terminal_reads else PROTOCOL
 
     def _materialized(self, cache, scope, generation_id):
         from .generation_cache import _plain
@@ -569,6 +591,7 @@ class NativeWorkspaceClient:
         self._owned_edit_contract: object = None
         self._observation_contract: object = None
         self._mapping_contract: object = None
+        self._terminal_contract: object = None
         self._prepared_lock = threading.Lock()
         self._discovery_epoch = 0
 
@@ -592,6 +615,7 @@ class NativeWorkspaceClient:
                 self._owned_edit_contract = None
                 self._observation_contract = None
                 self._mapping_contract = None
+                self._terminal_contract = None
         if operation == "retained-comment":
             current()
             with self._prepared_lock:
@@ -621,15 +645,27 @@ class NativeWorkspaceClient:
                 supported = supports_prepared_review(self._prepared_contract)
             if not supported:
                 raise WorkspaceUnavailable("prepared review capability required")
-        result = self.operations.execute(
-            operation, payload, expires_at=self.expires_at(),
+        from .workspace_terminal_read import serve, supports, PROTOCOL as TERMINAL_PROTOCOL
+        with self._prepared_lock:
+            terminal_contract = self._terminal_contract
+        result = serve(
+            self.operations, operation, payload, expires_at=self.expires_at(),
             checkpoint=current if checkpoint is not None else self.checkpoint,
+            selection=terminal_contract,
         )
         if operation == "capabilities":
+            if result.get("protocol") not in (PROTOCOL, TERMINAL_PROTOCOL):
+                raise WorkspaceUnavailable("unsupported workspace contract")
+            if result.get("protocol") == TERMINAL_PROTOCOL and not supports(result):
+                raise WorkspaceUnavailable("unsupported terminal workspace read contract")
             with self._prepared_lock:
                 if epoch != self._discovery_epoch:
                     raise WorkspaceUnavailable("workspace discovery superseded")
                 self._prepared_contract = copy.deepcopy(result.get("prepared_review_contract"))
+                self._terminal_contract = (
+                    result["terminal_read_contract"]["protocol"]
+                    if result.get("protocol") == TERMINAL_PROTOCOL else None
+                )
                 self._selection_contract = copy.deepcopy(result.get("selection_contract"))
                 self._owned_edit_contract = copy.deepcopy(result.get("owned_edit_selection_contract"))
                 self._observation_contract = (

@@ -2,7 +2,7 @@
 
 This internal source embedding implements the storage/workspace stages of the reviewed
 [terminal-retention sequence](../../../efforts/active/durable-pr-watch-delegation/terminal-retention.md).
-It adds no service, discovery operation or automatic adoption. The existing
+It adds no service, activation operation or automatic adoption. The existing
 [conversation journal](conversation-journal.md),
 [review owner](review-owner-store.md) and
 [workspace](workspace-integration.md) retain their baseline behavior by default.
@@ -29,9 +29,65 @@ operation/attempt/receipt records are never discarded.
 Older strict readers, including a new reader not explicitly selected for this
 extension, refuse the expanded envelope without rewriting it. A capable reader
 still preserves non-adopted layouts. No downgrade or automatic rollback is
-provided. There is no terminal-retention HTTP/CLI capability: an installed or
-independently updated service must not adopt this source embedding until its
-actual reader/lifecycle/consumer boundary is separately qualified.
+provided. The optional read-only serving contract below does not adopt state
+or expose retirement as an HTTP/CLI operation. Installed reader/lifecycle
+transition and consumer qualification remain separate.
+
+## Optional executing read-only receiver
+
+A trusted embedding may construct `WorkspaceOperations(...,
+conversations=True, retention_target=..., terminal_reads=True)` with all three
+terminal ReplayStore readers selected and their existing storage extensions
+already adopted. It supplies no writer, feedback owner, prepared receiver,
+comment mappings or selection preparer. Construction and service startup do
+not provision, adopt, compact, retire, downgrade or change credentials.
+
+The existing capability route then declares `agent-pull-requests.workspace/v2`
+and an exact `terminal_read_contract`:
+
+```json
+{
+  "protocol": "agent-pull-requests.terminal-workspace-read/v1",
+  "effects": "none",
+  "retirement": "existing_lifecycle_only",
+  "terminal_retention_version": 1,
+  "terminal_recovery_version": 1,
+  "terminal_cache_retirement_version": 1
+}
+```
+
+Only `capabilities`, `load`, `sync`, `lookup`, `chunk` and `events` are served.
+The descriptor reports the **actual** adopted owner version (3, 4, 5 or 6);
+its `agent-pull-requests.terminal-conversation/v1` descriptor remains body-free,
+trusted-ingest-only and non-acknowledging. Read-only means no forge mutation;
+load/sync still commit their normal acquired journal/cache state. An operation
+cannot inspect compact recovery or submit/allocate an action through this
+receiver. Retirement continues through the existing internal lifecycle API,
+not through a request field or new collector.
+
+Native/Fleet clients validate the executing receiver's declaration before
+selecting this optional form. Fleet calls carry `workspace_contract` equal to
+the terminal-read protocol on the same scoped request envelope; Native calls
+retain that selection only after successful discovery. The receiver refuses
+missing/mismatched selection before acquisition. The existing CLI/tool facade
+uses the same negotiation and exposes no write tools. Unknown metadata refuses
+without sending an operation or falling back to v1.
+
+Default-off non-adopted workspace/v1 owners and prior clients keep their
+baseline. A prior client cannot use a terminal v2 descriptor as v1; a rolled-back
+strict file reader refuses adopted extensions without rewriting them. The old
+conversation/v1 descriptor still refuses terminal and higher owner layouts.
+No baseline contract is deprecated and no simultaneous upgrade is assumed.
+Reader exclusion during storage adoption remains the lifecycle owner's duty.
+
+`WatchService` validates the selected reader under its actual writer before
+starting its connector/observer. The existing attention reader requires a
+protected writer and is not composable with this read-only binding.
+Source fixtures exercise this boundary, same-file reader/service
+restart, all four declared layouts, terminal/cache retirement and reopen,
+Native/Gateway reads and CLI selection. The fixture connector/native source
+does not prove installed hosting, live provider transport, retained-volume
+adoption, feedback/write serving or a complete automatic retirement lifecycle.
 
 ## One terminal decision
 
