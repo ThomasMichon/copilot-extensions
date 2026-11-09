@@ -149,6 +149,56 @@ def test_source_primary_binding_reuses_startup_defaults_on_live_edit(tmp_path, m
     assert incoming.generation == changed.profile_generation
 
 
+def test_source_primary_invalid_live_mode_change_retains_incumbent_and_recovers(tmp_path, monkeypatch):
+    from agent_dispatch import pool_source_snapshot, procutil, source_start, supervisor_source
+    from agent_dispatch.supervisor_profile import MasterProfile
+    from tests.test_source_supervisor_startup import _sources
+    from tests.test_supervisor_daemon import FakeClient, FakeLauncher, FakeLock, _daemon
+
+    _sources(monkeypatch)
+    monkeypatch.setattr(
+        supervisor_source, "read_legacy_declarations",
+        lambda **_: pool_source_snapshot.DeclarationRead((), True),
+    )
+    primary = tmp_path / "supervisor.env"
+    original = (
+        "AGENT_DISPATCH_SUPERVISE_MODE=serve\n"
+        "AGENT_DISPATCH_SUPERVISE_MACHINE=anomalous-potato\n"
+        "AGENT_DISPATCH_SUPERVISE_LABELS=fixture\n"
+        "AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=--no-declared\n"
+    )
+    primary.write_text(original)
+    initial = source_start.supervisor_plan(tmp_path)
+    binding = MasterProfile(primary, initial.profile_generation, initial.argv, source_primary=True)
+    slot = tmp_path / "versions" / "1.0" / "Scripts" / "python.exe"
+    slot.parent.mkdir(parents=True)
+    slot.touch()
+    (tmp_path / "current-version").write_text("1.0")
+    now, target_checks, captured = [100.0], [], []
+    lock = FakeLock()
+    daemon = _daemon(
+        FakeClient([]), FakeLauncher(), lock=lock, clock=lambda: now[0],
+        self_update_enabled=True, self_update_argv=list(initial.argv),
+        self_update_install_dir=lambda: tmp_path, self_update_running_version="1.0",
+        self_update_stale_target=lambda *_: target_checks.append(True), self_update_poll_interval=1,
+    )
+    assert daemon.acquire_singleton()
+    monkeypatch.setattr(daemon, "_recheck_governance", lambda _: None)
+    monkeypatch.setattr(procutil, "spawn_dispatch_daemon", lambda command, **_: captured.append(command))
+    binding.configure(daemon)
+    primary.write_text(original.replace("MODE=serve", "MODE=legacy"))
+    assert daemon._maybe_self_update() is False
+    assert not lock.released
+    assert daemon._self_update_argv == list(initial.argv)
+    assert binding.next_generation == binding.generation
+    assert target_checks == captured == []
+    primary.write_text(original + "AGENT_DISPATCH_SUPERVISE_INTERVAL=7\n")
+    now[0] += 2
+    assert daemon._maybe_self_update() is True
+    assert lock.released and target_checks == [True]
+    assert captured == [[slot, "-m", "agent_dispatch", *source_start.supervisor_plan(tmp_path).argv]]
+
+
 @pytest.mark.parametrize("name", ["supervisor.env", "supervisors/named.env"])
 def test_compatibility_bindings_keep_their_own_interval_and_legacy_defaults(tmp_path, name):
     from agent_dispatch import __main__ as cli

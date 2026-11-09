@@ -529,7 +529,10 @@ def supervisor_plan(root: Path, *, profiles_only=False) -> SupervisorStartupPlan
             if path != primary and re.fullmatch(r"[A-Za-z0-9_-]+", path.stem) is None:
                 raise ValueError("classic supervisor profile name is unsupported")
             arguments = profile_arguments(values)
-            parsed = cli.build_parser().parse_args(arguments)
+            try:
+                parsed = cli.build_parser().parse_args(arguments)
+            except SystemExit as error:
+                raise ValueError("classic supervisor profile arguments are invalid") from error
             if not explicit_master and not parsed.label:
                 continue
             if (getattr(parsed, "once", False) or getattr(parsed, "no_single_instance", False)
