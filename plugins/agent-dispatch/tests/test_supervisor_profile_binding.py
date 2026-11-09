@@ -14,14 +14,20 @@ def test_master_binding_reaches_only_successor_environment(tmp_path, monkeypatch
     from agent_dispatch.registrar_discovery import _parse_env_file
 
     profile = tmp_path / "supervisor.env"
-    original = "AGENT_DISPATCH_SUPERVISE_MODE=serve\nAGENT_DISPATCH_SUPERVISE_INTERVAL=5\n"
+    original = (
+        "AGENT_DISPATCH_SUPERVISE_MODE=serve\nAGENT_DISPATCH_SUPERVISE_INTERVAL=5\n"
+        "AGENT_DISPATCH_SUPERVISE_MACHINE=fixture\n"
+    )
     profile.write_text(original)
     argv = profile_arguments(_parse_env_file(profile, strict=True))
     monkeypatch.setenv(PROFILE_ENV, str(profile))
     monkeypatch.setenv(GENERATION_ENV, hashlib.sha256(profile.read_bytes()).hexdigest())
     binding = profiles.take_master_profile(argv)
     assert PROFILE_ENV not in os.environ and GENERATION_ENV not in os.environ
-    daemon = SimpleNamespace(_self_update_stale_target=lambda *_: tmp_path / "new-python", _self_update_argv=argv)
+    daemon = SimpleNamespace(
+        _self_update_stale_target=lambda *_: tmp_path / "new-python",
+        _self_update_argv=argv, machine="fixture", env="default",
+    )
     binding.configure(daemon)
     if changed:
         profile.write_text(original.replace("=5", "=7") + "AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=--no-declared\n")
@@ -58,6 +64,8 @@ def test_master_profile_reconfiguration_refuses_nonresident_or_nonfinite_setting
 @pytest.mark.parametrize("invalid", [
     "AGENT_DISPATCH_SUPERVISE_INTERVAL=not-a-number\n",
     "AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=--unknown-fixture-option\n",
+    "AGENT_DISPATCH_SUPERVISE_MACHINE=other-machine\n",
+    "AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=--env other-environment\n",
 ])
 def test_invalid_live_profile_keeps_incumbent_and_recovers_after_valid_edit(tmp_path, monkeypatch, invalid):
     from agent_dispatch import procutil
@@ -88,7 +96,11 @@ def test_invalid_live_profile_keeps_incumbent_and_recovers_after_valid_edit(tmp_
     binding.configure(daemon)
     captured = []
     monkeypatch.setattr(procutil, "spawn_dispatch_daemon", lambda command, **options: captured.append(command))
-    profile.write_text(original + invalid)
+    edited = (
+        original.replace("AGENT_DISPATCH_SUPERVISE_MACHINE=anomalous-potato\n", invalid)
+        if invalid.startswith("AGENT_DISPATCH_SUPERVISE_MACHINE=") else original + invalid
+    )
+    profile.write_text(edited)
     assert daemon._maybe_self_update() is False
     assert not lock.released
     assert daemon._self_update_argv == argv

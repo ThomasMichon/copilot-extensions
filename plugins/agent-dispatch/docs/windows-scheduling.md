@@ -137,6 +137,9 @@ arguments are not part of the effective supervisor-settings identity.
 Malformed live profile arguments are recoverable configuration errors: parser
 exits do not terminate the incumbent, and rejected input does not replace its
 captured arguments or generation. A later valid edit can retry normally.
+Live edits cannot change the master's machine/environment scope: that is a
+different singleton and worker cohort, not a settings-only handoff. Such an
+edit is rejected while the current master and its captured scope remain active.
 
 Source handoff excludes the incumbent's own retained preparation and selects
 only incoming effective settings (including declaration-discovery intent) and

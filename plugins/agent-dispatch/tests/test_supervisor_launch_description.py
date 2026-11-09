@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import re
+import sys
 
 import pytest
 from agent_procutil import python_cache_args
@@ -152,3 +153,37 @@ if($assignment.Count -ne 1){{throw 'coordinator launcher is ambiguous'}}
         assert resolved.returncode != 0
         assert "Task runtime unresolved" in resolved.stderr
     assert not (root / "serve-service.log").exists()
+
+
+@pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
+def test_selected_runtime_decodes_real_hidden_probe_output(tmp_path, host):
+    shell = shutil.which(host)
+    if shell is None:
+        pytest.skip(f"{host} unavailable")
+    root = tmp_path / "runtime's \u00e9 directory"
+    slot = root / "versions" / "1.0"
+    python = slot / "Scripts" / "python.exe"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    (root / "current-version").write_text("1.0")
+    (slot / ".install-complete.json").write_text(json.dumps({
+        "version": "1.0", "completed_at": "fixture", "pid": 0,
+    }))
+    selected = root / "selected.ps1"
+    selected.write_text(
+        "$ErrorActionPreference='Stop'\n"
+        "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)\n"
+        f". {quote(INSTALLER.with_name('versioned_runtime_native.ps1'))}\n"
+        f". {quote(INSTALLER.parents[1] / 'src' / 'agent_dispatch' / 'windows-scheduling.ps1')}\n"
+        f"$InstallDir={quote(root)};$ScriptDir={quote(INSTALLER.parent)}\n"
+        f"function Get-BootstrapPython {{ {quote(sys.executable)} }}\n"
+        "@{selected=(Get-DispatchSelectedPython)}|ConvertTo-Json -Compress\n",
+        encoding="utf-8-sig",
+    )
+    result = subprocess.run(
+        [shell, "-NoProfile", "-NonInteractive", "-File", str(selected)],
+        capture_output=True, encoding="utf-8", timeout=15,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert Path(json.loads(result.stdout)["selected"]).samefile(python)

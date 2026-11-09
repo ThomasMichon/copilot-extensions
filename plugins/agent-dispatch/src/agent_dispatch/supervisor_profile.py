@@ -32,6 +32,7 @@ class MasterProfile:
             from . import __main__ as cli
             from .registrar_discovery import _parse_env_file
             from .self_update import read_current_version, slot_python
+            from .supervisor_registration import registration_scope
 
             selected = original_target(root, running)
             generation = hashlib.sha256(self.path.read_bytes()).hexdigest()
@@ -49,6 +50,8 @@ class MasterProfile:
                     or hashlib.sha256(self.path.read_bytes()).hexdigest() != generation
                 ):
                     raise ValueError("master profile changed or no longer configures a resident master")
+                if registration_scope(args) != (daemon.machine, daemon.env):
+                    raise ValueError("live master profile cannot change its machine or environment")
                 selected = selected or slot_python(root, read_current_version(root))
             daemon._self_update_argv = arguments
             self.next_generation = generation
