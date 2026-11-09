@@ -3093,3 +3093,25 @@ auth-wait transition. This does not authorize generic re-hook after lost
 control, clearing unknown/pending/native-input holds, weakening caller Job
 limits or changing the raw Host write path. No live action or activation
 follows from this source-scope release.
+
+### 2026-11-09 - Seedless public caller admission correction
+
+Ordinary seedless `embody` now uses the existing admission-only deferred
+execution owner rather than copying setup alone. It forwards the fenced
+resume selection and preserves a staged Resume seed ID without claiming
+that intent. Seeded, deferred-delivery and Bridge-acquisition ownership stays
+on its existing path; preparation refusal starts no mux and has no legacy
+fallback. The complete focused embodiment file passes all 102 cases, including
+fresh/resume/preserved-intent/refusal regressions, existing seed and acquisition
+controls, and corrected wrapper assertions. Two stale fixture expectations
+were also reconciled to the existing uncertain-mux result and mocked live-pane
+boundary; no production guard was relaxed. F/E9 and diff checks pass.
+
+Documentation impact: the existing testing reference already requires the
+same broker across fresh and cold resume, explicitly documents native binding
+and excludes automatic-hook adoption. The correction restores that stated
+consumer contract; broader caller migration remains incomplete in the core
+reference. The existing Worktrees patch changefile now names this correction.
+Native proof at the new immutable source remains required. The actual protected
+controller at `2b66d4fe0974ee17051fb03687e53c848b8eb0e2` still has the prior
+worker, not the reviewed UTF-8 capture correction; do not claim that fix live.
