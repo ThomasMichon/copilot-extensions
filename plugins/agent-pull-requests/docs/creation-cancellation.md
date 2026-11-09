@@ -12,6 +12,8 @@ frontend refuses before reading Worktrees. Retain or reconcile useful/uncertain
 work instead of abandoning it because of a conflict, rebase or delay.
 Repository/PR-number selection, worker configuration and abbreviated flags are
 not accepted. An abbreviated worktree ID cannot satisfy the exact status match.
+An empty or whitespace-only command selector is rejected by the parser even
+when a governed same-cell launch would otherwise supply the executing peer.
 
 The selected Worktrees receiver must declare
 `agent-worktrees.pr-creation-cancellation.v1` through

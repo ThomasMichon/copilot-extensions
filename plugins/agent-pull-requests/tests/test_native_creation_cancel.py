@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -100,6 +101,18 @@ def test_strict_native_parser_never_ignores_external_or_unknown_selection(
     calls = stub(monkeypatch, {}, {})
     with pytest.raises(SystemExit) as exc:
         cli.main(arguments(command, "--confirm", *extra))
+    assert exc.value.code == 2 and not calls
+
+
+@pytest.mark.parametrize("value", ["", " ", "\t"])
+def test_managed_peer_cannot_bypass_blank_command_selector(command, monkeypatch, value):
+    from agent_pull_requests.watch_invocation import WatchInvocation
+
+    peer = SimpleNamespace(snapshot_peer_prefix=lambda: [command])
+    monkeypatch.setattr(WatchInvocation, "capture", lambda **kwargs: peer)
+    calls = stub(monkeypatch, discovery(), receipt())
+    with pytest.raises(SystemExit) as exc:
+        cli.main(arguments(command, "--confirm", "--worktrees-command", value))
     assert exc.value.code == 2 and not calls
 
 

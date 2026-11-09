@@ -182,6 +182,10 @@ The final diagnostics/recovery subset passed **146 tests with five platform
 skips**. Missing stderr now uses one text-only fallback at every failure site.
 Failure output separately carries the original selected worktree, creation,
 revision and reason without overwriting mismatched receiver evidence.
+The complete review then identified blank command-selector admission on the
+managed peer path. Reusing the shared parser validator closes that gap before
+peer selection or discovery. Three managed-peer regressions and the affected
+native suite passed **149 tests with five platform skips**.
 
 Exact original-revision recovery, non-active creation selection, retained audit,
 source/index/HEAD/refs, sibling attempts, resource claims and the source

@@ -11,6 +11,8 @@ CONTRACT = "agent-worktrees.pr-creation-cancellation.v1"
 
 
 def add_parser(subparsers, handler):
+    from .native_cli import validate_selector
+
     parser = subparsers.add_parser(
         "cancel-creation", allow_abbrev=False,
         help="cancel one explicitly approved unpublished creation in its owning worktree",
@@ -20,7 +22,7 @@ def add_parser(subparsers, handler):
     parser.add_argument("--expected-revision", required=True, type=int)
     parser.add_argument("--reason", required=True)
     parser.add_argument("--confirm", action="store_true", help="requires actual operator approval")
-    parser.add_argument("--worktrees-command", required=True)
+    parser.add_argument("--worktrees-command", required=True, type=validate_selector)
     parser.add_argument("--json", action="store_true")
     parser.set_defaults(handler=handler)
 

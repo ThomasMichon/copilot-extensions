@@ -1323,6 +1323,10 @@ callback an implicit credential store.
 
 ### 2026-11-08 - Native cancellation source qualification
 
+- Full review then identified missing blank-selector admission on the
+  governed peer path. Reused the existing parser validator before peer
+  selection/discovery; three managed-peer controls reproduce that boundary.
+  Final affected isolated suite: 149 passed, five platform skips.
 - The next bounded re-review added two distinct findings, repeated at five
   locations: missing-stderr fallback and original-target recovery evidence.
   Centralized text-only stderr handling and added frontend-owned original
