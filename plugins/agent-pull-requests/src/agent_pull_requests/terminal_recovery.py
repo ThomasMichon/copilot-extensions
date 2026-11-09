@@ -277,6 +277,11 @@ class TerminalRecoveryStore:
         """Only attributable native readback may resolve an original unknown attempt."""
         original, receipt = copy.deepcopy(original), copy.deepcopy(receipt)
 
+        def current() -> None:
+            checkpoint()
+            if self.owner.clock() >= original["recovery"]["deadline_at"]:
+                raise TimeoutError("original recovery deadline requires escalation")
+
         def record(document: dict) -> dict:
             current = self.selected(document, original["scope"], original["operation_id"])
             if any(current[name] != original[name] for name in current if name != "actions"):
@@ -305,4 +310,4 @@ class TerminalRecoveryStore:
             state.update(state="confirmed", receipt=validated)
             return state
 
-        return self.owner._review_transaction(record, expires_at=expires_at, checkpoint=checkpoint)
+        return self.owner._review_transaction(record, expires_at=expires_at, checkpoint=current)

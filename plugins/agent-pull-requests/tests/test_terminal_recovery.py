@@ -423,7 +423,7 @@ def test_compacted_unknown_native_identity_still_guards_actual_reopened_edit_all
         assert allocate()["status"] == "prepared"
 
 
-@pytest.mark.parametrize("boundary", ["read", "record"])
+@pytest.mark.parametrize("boundary", ["read", "record", "validation", "commit-validation"])
 def test_original_deadline_crossed_during_protected_readback_escalates_immediately(
     workspace: tuple, monkeypatch: pytest.MonkeyPatch, boundary: str,
 ) -> None:
@@ -431,6 +431,7 @@ def test_original_deadline_crossed_during_protected_readback_escalates_immediate
     operations, recovery, intent, admitted, _, policies, backend = prepared
     backend.threads = [matching_thread(intent, admitted)]
     compact(prepared)
+    before = operations.store.path.read_bytes()
     deadline = policies[intent["operation_id"]]["deadline_at"]
     if boundary == "read":
         request = backend.request
@@ -442,7 +443,7 @@ def test_original_deadline_crossed_during_protected_readback_escalates_immediate
             return result
 
         monkeypatch.setattr(backend, "request", delayed)
-    else:
+    elif boundary == "record":
         record = recovery.record
 
         def delayed_record(*args, **kwargs):
@@ -450,9 +451,23 @@ def test_original_deadline_crossed_during_protected_readback_escalates_immediate
             return record(*args, **kwargs)
 
         monkeypatch.setattr(recovery, "record", delayed_record)
+    else:
+        validate = operations.store._validate_owner
+        confirmations = 0
+
+        def delayed_validation(document: dict) -> None:
+            nonlocal confirmations
+            validate(document)
+            if document["terminal_recovery"]["operations"][0]["actions"][0]["state"] == "confirmed":
+                confirmations += 1
+                if confirmations == (1 if boundary == "validation" else 2):
+                    operations.store.clock = lambda: deadline
+
+        monkeypatch.setattr(operations.store, "_validate_owner", delayed_validation)
     result = reconcile(prepared)
     assert result["status"] == "escalation_required"
     assert result["actions"][0]["state"] == "unknown" and result["actions"][0]["receipt"] is None
+    assert operations.store.path.read_bytes() == before
 
 
 def test_reopen_preserves_historical_recovery_but_cannot_resume_old_compactor(workspace: tuple) -> None:
