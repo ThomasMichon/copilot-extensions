@@ -157,13 +157,15 @@ def _seed_confirmed_comment(path: Path, evidence: dict[str, Any]) -> dict[str, A
     return {"number": 42, "operation_id": selected["operation_id"], "action_id": "retained-finding"}
 
 
-@pytest.mark.parametrize("workspace_enabled,preparation_enabled,missing_preparer,mapping_enabled", [
-    (False, False, False, False), (True, False, False, False),
-    (True, True, False, False), (True, True, True, True),
+@pytest.mark.parametrize("workspace_enabled,preparation_enabled,missing_preparer,mapping_enabled,terminal_enabled", [
+    (False, False, False, False, False), (True, False, False, False, False),
+    (True, True, False, False, False), (True, True, True, True, False),
+    (True, False, False, False, True),
 ])
 def test_installed_host_process_register_observe_reconnect_restart_and_ack(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
     workspace_enabled: bool, preparation_enabled: bool, missing_preparer: bool, mapping_enabled: bool,
+    terminal_enabled: bool,
 ) -> None:
     # The existing Fleet fixture owns issuer, policy and TLS; do not add a fake Gateway.
     root = Path(__file__).resolve().parents[3]
@@ -315,6 +317,7 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                         "scope": scope,
                     }],
                     "cache_bytes": 4 * 1024 * 1024, "cache_generations": 20,
+                    **({"terminal_reads": True} if terminal_enabled else {}),
                 }
                 if preparation_enabled:
                     preparation_profile.parent.mkdir(parents=True)
@@ -460,6 +463,9 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                     assert "submit" not in capabilities["operations"]
                     assert ("retained-comment" in capabilities["operations"]) is mapping_enabled
                     assert capabilities["backend_contract"]["read_acquisition"] == PROFILE
+                    if terminal_enabled:
+                        from agent_pull_requests.workspace_terminal_read import supports
+                        assert supports(capabilities["backend_contract"])
                     initial = (await workspace("load", {
                         "number": 42, "expected_current": None, "budget_seconds": 10,
                     }))["result"]
@@ -538,8 +544,23 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                     assert unchanged["conversation"]["cursor"] == synced["conversation"]["cursor"]
                     generation_id = unchanged["descriptor"]["id"]
                     cursor = unchanged["conversation"]["cursor"]
+                    if terminal_enabled:
+                        evidence["sections"]["pull_request"]["data"]["status"] = "completed"
+                        save_evidence(6)
+                        terminal_result = (await workspace("load", {
+                            "number": 42, "expected_current": generation_id, "budget_seconds": 10,
+                        }))["result"]
+                        assert terminal_result["publication"]["status"] == "retired"
+                        assert terminal_result["descriptor"] is None
+                        cursor = terminal_result["conversation"]["cursor"]
+                        page = (await workspace("events", {
+                            "number": 42, "after": None, "limit": 16,
+                        }))["result"]
+                        assert page["current"]["sections"] == {} and page["current"]["state"] == "merged"
                     workspace_calls = evidence_path.with_suffix(".calls").read_text()
-                    assert workspace_calls.splitlines() == ["capabilities", "read", "read", "read"]
+                    assert workspace_calls.splitlines() == ["capabilities", "read", "read", "read"] + (
+                        ["read"] if terminal_enabled else []
+                    )
                 settled_reads = calls.read_text()
                 assert settled_reads.splitlines() and set(settled_reads.splitlines()) == {"read"}
                 persisted = (state / "watch-replay.json").read_bytes()
@@ -617,13 +638,34 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                         "number": 42, "after": cursor, "limit": 16,
                     }))["result"]
                     assert retained["high_water"] == cursor and retained["events"] == []
+                    assert evidence_path.with_suffix(".calls").read_text() == workspace_calls
+                    if terminal_enabled:
+                        before_reopen = (await workspace("events", {
+                            "number": 42, "after": None, "limit": 16,
+                        }))["result"]
+                        assert before_reopen["current"]["state"] == "merged"
+                        failures = len(workspace_errors)
+                        with pytest.raises(AssertionError):
+                            await workspace("materialize", {"number": 42, "generation_id": generation_id})
+                        assert len(workspace_errors) > failures
+                        assert getattr(workspace_errors[-1], "outcome_unknown", None) is False
+                        evidence["sections"]["pull_request"]["data"]["status"] = "active"
+                        save_evidence(8)
+                        reopened = (await workspace("load", {
+                            "number": 42, "expected_current": generation_id, "budget_seconds": 10,
+                        }))["result"]
+                        assert reopened["conversation"]["cursor"] == {"epoch": 2, "sequence": 1}
+                        generation_id = reopened["descriptor"]["id"]
+                        stale = (await workspace("events", {
+                            "number": 42, "after": cursor, "limit": 16,
+                        }))["result"]
+                        assert stale["status"] == "resync_required"
                     materialized = await workspace("materialize", {
                         "number": 42, "generation_id": generation_id,
                     })
                     assert materialized["sections"]["discussions"]["data"][0]["comments"][0][
                         "content"
                     ] == "Same-head dialogue"
-                    assert evidence_path.with_suffix(".calls").read_text() == workspace_calls
                 completion = {
                     "request_id": original["request_id"], "issued_at": original["issued_at"],
                     "registration_id": receipt["registration_id"], "event_id": event["event_id"],

@@ -15,7 +15,7 @@ from agent_pull_requests.native_read import NativeReadHandler
 from agent_pull_requests.review_workspace import _scope
 from agent_pull_requests.review_selection_store import ReviewSelectionStore
 from agent_pull_requests.watch_observer import NativeObservationBinding
-from agent_pull_requests.watch_replay import ConsumerScope
+from agent_pull_requests.watch_replay import ConsumerScope, ObservationTarget
 from agent_pull_requests.watch_replay_store import ReplayServiceIdentity, ReplayStore, json_object
 from agent_pull_requests.workspace_operations import WorkspaceOperations
 from fleet_manager.gateway_service_channel import origin
@@ -23,12 +23,18 @@ from fleet_manager.gateway_service_context import identifier
 from single_instance_lease import SingleInstance
 
 from .preparation import PreparationConfig
+from . import terminal
 
 _LIMIT = 1024 * 1024
 
 
 class _MappingOptions(TypedDict, total=False):
     comment_mappings: bool
+
+
+class _TerminalOptions(TypedDict, total=False):
+    terminal_reads: bool
+    retention_target: Callable[[dict[str, Any]], ObservationTarget]
 
 
 def _mapping_store() -> Any:
@@ -96,6 +102,7 @@ class WorkspaceConfig:
     cache_generations: int
     preparations: tuple[tuple[str, str, PreparationConfig], ...] = ()
     comment_mappings: tuple[tuple[str, str], ...] = ()
+    terminal_targets: tuple[WatchScopeBinding, ...] = ()
 
     def cache(self, store: ReplayStore) -> GenerationCache:
         return GenerationCache(
@@ -111,6 +118,20 @@ class WorkspaceConfig:
         mapping_options: dict[tuple[str, str], _MappingOptions] = {
             key: {"comment_mappings": True} for key in mappings
         }
+        terminal_options: dict[tuple[str, str], _TerminalOptions] = {}
+        if self.terminal_targets:
+            terminal.core()
+            for binding in self.terminal_targets:
+                def target(
+                    scope: dict[str, Any], admitted: ConsumerScope = binding.scope,
+                ) -> ObservationTarget:
+                    return ObservationTarget(
+                        admitted.account, admitted.repo, scope["number"], frozenset(),
+                    )
+
+                terminal_options[(binding.principal, binding.target)] = {
+                    "terminal_reads": True, "retention_target": target,
+                }
         preparations = {
             (principal, target): config.select(
                 dict(reader.scope), checkpoint, seconds,
@@ -125,6 +146,7 @@ class WorkspaceConfig:
                 max_work_seconds=seconds, conversations=True,
                 prepared_reviews=(principal, target) in preparations,
                 **mapping_options.get((principal, target), {}),
+                **terminal_options.get((principal, target), {}),
                 selection_preparer=preparations.get((principal, target)),
                 selection_preparer_deadline=preparations.get((principal, target)) is not None,
             )
@@ -155,6 +177,13 @@ class HostConfig:
         return self.root / "service-status.json"
 
     def store(self) -> ReplayStore:
+        if self.workspaces and self.workspaces.terminal_targets:
+            terminal.core()
+            return ReplayStore(
+                self.root, self.namespace,
+                service_identity=ReplayServiceIdentity(self.fleet, self.gateway, self.slot),
+                terminal_retention=True, terminal_recovery=True, terminal_cache_retirement=True,
+            )
         return ReplayStore(
             self.root, self.namespace,
             service_identity=ReplayServiceIdentity(self.fleet, self.gateway, self.slot),
@@ -169,13 +198,15 @@ class HostConfig:
             self.root.is_symlink() or self.root.exists() and any(self.root.iterdir())
         ):
             raise ValueError("workspace provisioning requires a fresh dedicated root")
-        if self.workspaces is not None and self.workspaces.preparations:
+        if self.workspaces is not None and (
+            self.workspaces.preparations or self.workspaces.terminal_targets
+        ):
             lease = SingleInstance(self.root, service="agent-pull-requests-watch")
             pid, deadline = os.getpid(), time.monotonic() + self.operation_seconds
 
             def lifecycle() -> None:
                 if not lease.held or os.getpid() != pid or time.monotonic() >= deadline:
-                    raise ValueError("fresh preparation lifecycle exclusion unavailable")
+                    raise ValueError("fresh workspace lifecycle exclusion unavailable")
 
             with lease:
                 if self.root.is_symlink() or any(
@@ -185,12 +216,15 @@ class HostConfig:
                 lifecycle()
                 store.provision(conversations=True)
                 expires_at = int(time.time()) + self.operation_seconds
-                store.adopt_prepared_reviews(
-                    lifecycle_checkpoint=lifecycle, expires_at=expires_at, checkpoint=lifecycle,
-                )
-                ReviewSelectionStore(store).adopt(
-                    lifecycle_checkpoint=lifecycle, expires_at=expires_at, checkpoint=lifecycle,
-                )
+                if self.workspaces.terminal_targets:
+                    terminal.adopt(store, lifecycle, expires_at)
+                else:
+                    store.adopt_prepared_reviews(
+                        lifecycle_checkpoint=lifecycle, expires_at=expires_at, checkpoint=lifecycle,
+                    )
+                    ReviewSelectionStore(store).adopt(
+                        lifecycle_checkpoint=lifecycle, expires_at=expires_at, checkpoint=lifecycle,
+                    )
                 if mapping_store is not None:
                     mapping_store(store).adopt(
                         lifecycle_checkpoint=lifecycle, expires_at=expires_at, checkpoint=lifecycle,
@@ -205,7 +239,10 @@ class HostConfig:
 
 def _workspaces(value: object, bindings: list[WatchScopeBinding],
                 observations: list[NativeObservationBinding], seconds: int) -> WorkspaceConfig:
-    selected = _fields(value, {"bindings", "cache_bytes", "cache_generations"})
+    selected = _fields(value, {"bindings", "cache_bytes", "cache_generations"}, {"terminal_reads"})
+    terminal_reads = selected.get("terminal_reads", False)
+    if type(terminal_reads) is not bool:
+        raise ValueError("terminal_reads requires a JSON boolean")
     cache_bytes, cache_generations = selected["cache_bytes"], selected["cache_generations"]
     if (
         type(cache_bytes) is not int or not 65536 <= cache_bytes <= 1024 * 1024 * 1024
@@ -226,6 +263,8 @@ def _workspaces(value: object, bindings: list[WatchScopeBinding],
             raise ValueError("comment_mappings requires a JSON boolean")
         if mapping and "preparation" not in entry:
             raise ValueError("comment_mappings requires explicit preparation hosting")
+        if terminal_reads and ("preparation" in entry or mapping):
+            raise ValueError("terminal_reads cannot select preparation or comment mappings")
         key = (entry["principal"], entry["target"])
         if key not in scopes or any((p, t) == key for p, t, _ in readers):
             raise ValueError("workspace requires one existing admitted caller/target")
@@ -259,6 +298,9 @@ def _workspaces(value: object, bindings: list[WatchScopeBinding],
             comment_mappings.append(key)
     return WorkspaceConfig(
         tuple(readers), cache_bytes, cache_generations, tuple(preparations), tuple(comment_mappings),
+        tuple(b for b in bindings if any(
+            (p, t) == (b.principal, b.target) for p, t, _ in readers
+        )) if terminal_reads else (),
     )
 
 

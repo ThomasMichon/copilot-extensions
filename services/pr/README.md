@@ -388,6 +388,46 @@ exporter subprocess and workspace CLI to qualify load/sync, mapping retention,
 and restart after optional origin-provider withdrawal. It does not qualify a
 live native send, provider enrollment, production migration or rollout.
 
+## Optional terminal read hosting
+
+The trusted `workspaces` object may additionally set `"terminal_reads": true`
+alongside its `bindings`, `cache_bytes` and `cache_generations`. Absence or
+explicit `false` preserves baseline behavior; other JSON types refuse. This
+selects all workspace bindings on that storage owner and cannot be combined
+with preparation or retained comment mappings. An older strict host rejects
+the field. The selected executing PR core must declare the exact
+`agent-pull-requests.terminal-workspace-read/v1` contract before the host
+constructs its terminal-capable store. Missing or incompatible support refuses
+the explicit selection before provisioning; an unselected baseline host does
+not require the optional declaration.
+
+Only explicit **fresh** provisioning, under the existing host-local writer
+lease and operation deadline, adopts the core's terminal retention, recovery
+and cache-retirement extensions in the owner-store v3 envelope. It uses the
+core's bounded 8 MiB terminal reservation. Partial provisioning retains its
+progress and refuses blind reprovisioning. Serve validates the existing
+envelope/cache before connector admission, never adopts or repairs either.
+Existing volumes require their own reader/lifecycle transition. Removing the
+selection or rolling back to a reader that cannot understand adopted storage
+refuses without stripping extensions or rewriting the volume.
+
+The actual workspace receiver advertises
+[workspace/v2 terminal reads](../../plugins/agent-pull-requests/docs/workspace-tools.md)
+through the existing authenticated Gateway route. Native acquisition remains
+the existing no-effect exporter. Terminal observations use the configured
+admitted account/repository target, not caller-supplied identity. Events remain
+body-free; terminal admission fences stale materialization, and authoritative
+reopen creates a new epoch. No protected writer, feedback/preparation owner,
+remote retirement operation, compact recovery read, deletion worker or new
+service is installed. Actual physical retirement still belongs to the existing
+explicit lifecycle owner; this selection does not execute it automatically.
+
+The fresh foreground-process fixture qualifies CLI discovery, native export,
+terminal fencing, retained restart, reopen and cursor resynchronization over
+real Gateway TLS/PoP with synthetic provider inputs. This is source
+qualification, not retained-host adoption, provider enrollment, production
+cleanup, configuration authority or rollout.
+
 ## Independently constructed container
 
 `container/Dockerfile` is an offline wheel-only recipe, not an image published
