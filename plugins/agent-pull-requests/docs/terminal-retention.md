@@ -133,7 +133,18 @@ proof that an already admitted effect did not happen.
 
 The existing workspace accounts for admitted acquisition/read/send work.
 Its explicit `retention_target` callback supplies the actual pre-acquisition
-watch selection. A terminal generation is observed without publishing another
+watch selection. A consumer that needs the original request budget first
+checks `workspace_terminal_read.target_capture_contract()` for
+`agent-pull-requests.terminal-target-capture/v1`, with `phase:
+before_acquisition` and `budget: request_checkpoint_and_expiry`. It may then
+select `retention_target_deadline=True`; the callback receives the original
+`expires_at` and budget-aware `checkpoint` as keyword arguments before native
+IO. The default retains the single-scope callback shape. This separate
+in-process declaration does not change the remote terminal-read descriptor.
+Capture matching admitted registrations through the existing ReplayStore;
+an empty synthetic set is not a substitute for existing watches. A callback
+failure or withdrawn budget prevents acquisition, not an implicit retry.
+A terminal generation is observed without publishing another
 body-bearing cache object or returning its descriptor. An accepted complete
 live acquisition binds its generation to the current epoch before cache
 publication. Late observations and old-epoch generations cannot republish or

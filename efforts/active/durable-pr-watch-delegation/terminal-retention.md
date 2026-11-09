@@ -151,13 +151,16 @@ Retain only the prior compact terminal summary, not old conversation bodies.
   are source-qualified; executing-host and installed adoption remain T3.
 - [ ] T3: Qualify the executing workspace/reader/service boundary and supported
   skew/restart/reopen paths; update actual-behavior docs only as leaves land.
-  The first bounded source leaf selects an independently versioned read-only
+  The first bounded source leaf, merged in #11625, selects an independently versioned read-only
   terminal workspace receiver through the existing Native/Fleet/Gateway
   negotiation and CLI facade. It does not relax conversation/v1 or enable
   submission, compact recovery reads, retirement requests or host adoption.
   Source fixtures qualify all declared layouts and actual service-writer
   validation/restart; installed/provider and full lifecycle qualification,
   feedback/write serving and retained-volume reader transition stay open.
+  Next is strict explicit selection through the existing standalone
+  read-only host and its fresh-only storage/provisioning boundary; serving
+  must not adopt a retained volume or infer grants from observation credentials.
 
 Each runtime leaf needs normal review and focused supervised validation.
 Source acceptance is not installed adoption, live provider qualification,
