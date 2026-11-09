@@ -219,7 +219,33 @@ def test_native_ready_old_or_malformed_support_refuses_before_mutation(command, 
     assert cli.main(arguments("ready", command)) == 1
     result = json.loads(capsys.readouterr().out)
     assert result["number"] == 7 and result["actions"]["draft"]["status"] == "not-attempted"
+    assert result["schema"] == "agent-worktrees.pr-ready" and result["version"] == 1
+    assert result["provider"] is None
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("provider", ["missing", None, "", "   ", 7, False])
+def test_native_ready_invalid_capability_provider_refuses_before_dispatch(
+    command, monkeypatch, capsys, provider,
+):
+    support = author_capabilities()
+    support["operations"]["draft-ready"] = True
+    if provider == "missing":
+        del support["provider"]
+    else:
+        support["provider"] = provider
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, json.dumps(support), "")
+
+    monkeypatch.setattr(native_author, "run_command", run)
+    assert cli.main(arguments("ready", command)) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["actions"]["draft"]["status"] == "not-attempted"
+    assert result["schema"] == "agent-worktrees.pr-ready" and result["version"] == 1
+    assert result["provider"] is None and len(calls) == 1
 
 
 @pytest.mark.parametrize("damage", [
@@ -242,6 +268,8 @@ def test_native_ready_unconfirmed_result_never_falls_back(command, monkeypatch, 
     assert cli.main(arguments("ready", command)) == 1
     result = json.loads(capsys.readouterr().out)
     assert result["number"] == 7 and result["actions"]["draft"]["status"] == "unknown"
+    assert result["schema"] == "agent-worktrees.pr-ready" and result["version"] == 1
+    assert result["provider"] == "azure-devops"
     assert len(calls) == 2
 
 
@@ -260,6 +288,8 @@ def test_native_ready_lost_result_preserves_target_without_retry(command, monkey
     assert cli.main(arguments("ready", command)) == 1
     result = json.loads(capsys.readouterr().out)
     assert result["number"] == 7 and result["actions"]["draft"]["status"] == "unknown"
+    assert result["schema"] == "agent-worktrees.pr-ready" and result["version"] == 1
+    assert result["provider"] == "azure-devops"
     assert len(calls) == 2
 
 

@@ -78,8 +78,9 @@ auto-completion, vote, reviewer, title, source or claim is changed.
 
 Its `agent-worktrees.pr-ready` version-1 result retains `repo`, `number`,
 `provider` and `actions.draft.status`. Only `confirmed` has `ok: true` and
-exit 0; `not-attempted`, `failed` and `unknown` exit nonzero. A lost native
-response preserves the selected target as unconfirmed rather than falling
+exit 0; `not-attempted`, `failed` and `unknown` exit nonzero. Synthesized failures retain that same schema/version and the provider
+when already resolved; pre-dispatch refusal may have `provider: null`.
+A lost native response preserves the selected target as unconfirmed rather than falling
 back or replaying. Reconcile this same PR through observation before another
 intentional attempt. Provider readback is not atomic compare-and-swap and
 cannot prevent a later participant change. Unsupported or rolled-back peers

@@ -1300,7 +1300,7 @@ callback an implicit credential store.
   the target's existing provider/transport owner. Explicit Worktrees and native
   author parsers preserve the old tracked invocation, draft-only effects,
   active/identity readback and failed-versus-unknown outcomes without replay.
-- The final isolated source selections pass 52 Worktrees and 78 native frontend
+- The final isolated source selections pass 52 Worktrees and 84 native frontend
   cases, with five Windows-only skips and verified cleanup. Initial fixture
   failures were missing required repository fields and the expected worker-file
   argv order; corrected fixtures retain the production semantics.
@@ -1309,6 +1309,10 @@ callback an implicit credential store.
   preserve their null provider and actionable diagnostic. Actual frontend/
   Worktrees refusal and read-only probe controls pass; attempted outcomes
   still require the selected provider and lost write results stay unknown.
+- The next review identified missing pre-dispatch provider validation and
+  unversioned synthesized failures. Malformed declarations now refuse before
+  writes; synthesized results retain the versioned envelope and known provider.
+  The final native packet and both actual owner-result controls pass.
 - Fatal lint and the 13-plugin installation contract pass. The typing inventory
   keeps both changed plugins pending; the broader enforced preflight stopped at
   an unprepared unrelated `lib-config-migrate` checker environment after its

@@ -75,6 +75,9 @@ def capability(args, prefix: list[str], operation: str | None = None) -> dict:
         or type(body.get("version")) is not int or body["version"] != 1
         or body.get("repo") != args.repo or not isinstance(body.get("operations"), dict)
         or operation is not None and body["operations"].get(operation) is not True
+        or operation == "draft-ready" and (
+            not isinstance(body.get("provider"), str) or not body["provider"].strip()
+        )
         or options and body["operations"].get("worker-policy-config") is not True
     ):
         raise ValueError(
@@ -95,6 +98,16 @@ def create_options(args, prefix: list[str]) -> list[str]:
         return config_options(args)
     capability(args, prefix, "qualified-create")
     return [f"--source-workspace={workspace}", f"--expected-head={expected}", *config_options(args)]
+
+
+def readiness_failure(repo: str, number: int, error: str, *,
+                      provider: str | None = None, status: str = "not-attempted") -> dict:
+    """Keep synthesized outcomes on the same versioned readiness wire contract."""
+    return {
+        "schema": "agent-worktrees.pr-ready", "version": 1,
+        "repo": repo, "number": number, "provider": provider, "ok": False,
+        "actions": {"draft": {"status": status}}, "error": error,
+    }
 
 
 def run(args, prefix: list[str]) -> tuple[int, dict]:
@@ -133,6 +146,17 @@ def run(args, prefix: list[str]) -> tuple[int, dict]:
     if getattr(args, "publication_origin", None):
         argv.append(f"--publication-origin={args.publication_origin}")
     argv.extend(f"--publication-label={label}" for label in getattr(args, "publication_label", ()))
+    try:
+        return _execute(args, prefix, argv, support)
+    except (OSError, RuntimeError, subprocess.SubprocessError, UnicodeError) as exc:
+        if args.command != "ready":
+            raise
+        return 1, readiness_failure(
+            args.repo, args.number, str(exc), provider=support["provider"], status="unknown",
+        )
+
+
+def _execute(args, prefix: list[str], argv: list[str], support: dict) -> tuple[int, dict]:
     try:
         result = run_command([*prefix, *argv], timeout=90.0)
     except (OSError, RuntimeError, subprocess.SubprocessError, UnicodeError):
