@@ -87,8 +87,8 @@ completed component work is not lost when aggregate checklists are consolidated:
 - The [parent Journal](README.md#journal) retains reviewed deliveries and
   containing-release observations without rewriting their dates or claims.
 - The [retained source-journal contribution](https://github.com/ThomasMichon/copilot-extensions/pull/11669)
-  preserves bounded source qualification separately from new acceptance.
-  Journal-only delivery is not a new whole-portfolio, native or installed pass.
+  preserves reviewed clean-break intent, not runtime or installation qualification.
+  Journal-only delivery is not a whole-portfolio, native or installed pass.
 - [Ordinary/repair replacement](journal/2026/11.01%20replacement-qualification.md)
   retains the contained incoming-first and external-bytecode-cache qualification,
   not installed-adopter survival or the later whole wheel-first flow.
