@@ -136,6 +136,11 @@ replacement and rollout remain with their existing owners.
   actual private native incarnation before publishing readiness.
 - The original 89-test hosted Windows result covers the first source slice;
   changed namespace and worker-scope behavior needs fresh qualification.
+- The revised private native lifetime packet passed all six Windows cases
+  and four Linux cases (two Windows-only cases skipped on Linux). The enclosing
+  workflow then failed in an old active-pane control that still expected a
+  PSMux CLI probe. That control is being corrected to assert the native caller
+  contract while retaining the TMux syntax check; the workflow is not called green.
 
 ### 2026-11-09 - First source slice and remaining budget failure
 - Removed repeated per-file ancestor walks; payload bytes and digest remain
