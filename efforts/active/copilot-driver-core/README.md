@@ -40,6 +40,13 @@ an extraction-only PR or one migrated caller is not completion.
   that build claim, reviews the implementation, and owns native qualification
   before positive renewal can be enabled. Qualification infrastructure is not
   a prerequisite for the receiver contributor to start.
+  The released source scope includes receiver-owned modules and auth-specific
+  changes in `headed/acp-adapter.mjs`, `headed/extension.mjs`,
+  `headed/backend.py`, and the coupled `headed/launcher.py`
+  `run_headed`/`_PaneChild` lifecycle, plus minimal receiver-owned containment
+  support and focused tests/docs. Generic launcher behavior, unrelated Host
+  changes, raw Host write observation, Worktrees seed/handoff/native fixtures
+  and global process/Job policy are not transferred.
 - **Handoff:** continue this canonical effort across contexts. Preserve its
   parent completion gate, exact current slice, effects and one next action.
 - Consume the source delivered in #10692/#10748; do not supersede its separate
@@ -3076,3 +3083,13 @@ non-callable. The implementation contributor must supply the actual interface,
 receiver identity/revision rules and enforcement semantics for review; native
 UI/in-flight source loss, conservative stop/preserve, obsolete-authority
 negatives and same-durable-history resume remain qualification obligations.
+
+The receiver contributor accepts the assignment and identifies the necessary
+auth-specific `run_headed`/`_PaneChild` seam. Release only that coupled
+launcher lifecycle for the default-off receiver: exact owned-child and
+descendant stop with confirmed cleanup, preserved durable conversation/history,
+seedless resume and a new receiving incarnation limited to the qualified
+auth-wait transition. This does not authorize generic re-hook after lost
+control, clearing unknown/pending/native-input holds, weakening caller Job
+limits or changing the raw Host write path. No live action or activation
+follows from this source-scope release.
