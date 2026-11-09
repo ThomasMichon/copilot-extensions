@@ -11,12 +11,13 @@ from .native_command import run_command
 def add_parsers(subparsers, *, repo_type, handler):
     from .native_cli import validate_selector
 
-    for name in ("author-capabilities", "update", "push", "ready"):
+    for name in ("author-capabilities", "update", "push", "ready", "nudge"):
         author = subparsers.add_parser(name, help={
             "author-capabilities": "read target-qualified native author capabilities",
             "update": "repair existing native PR metadata without pushing",
             "push": "publish a pinned admitted source workspace through Worktrees",
             "ready": "move an explicit native draft PR to ready without consent or hold release",
+            "nudge": "request the target's configured automated reviewer without a comment",
         }[name], allow_abbrev=False)
         author.add_argument("--repo", required=True, type=repo_type)
         author.add_argument("--worktrees-command", required=True, type=validate_selector)
@@ -25,7 +26,7 @@ def add_parsers(subparsers, *, repo_type, handler):
         author.set_defaults(handler=handler)
         if name == "author-capabilities":
             continue
-        if name == "ready":
+        if name in ("ready", "nudge"):
             author.add_argument("--number", required=True, type=int)
             continue
         author.add_argument("--publication-origin")
@@ -75,9 +76,10 @@ def capability(args, prefix: list[str], operation: str | None = None) -> dict:
         or type(body.get("version")) is not int or body["version"] != 1
         or body.get("repo") != args.repo or not isinstance(body.get("operations"), dict)
         or operation is not None and body["operations"].get(operation) is not True
-        or operation == "draft-ready" and (
+        or operation in ("draft-ready", "reviewer-request") and (
             not isinstance(body.get("provider"), str) or not body["provider"].strip()
         )
+        or operation == "reviewer-request" and body.get("provider") != "github"
         or options and body["operations"].get("worker-policy-config") is not True
     ):
         raise ValueError(
