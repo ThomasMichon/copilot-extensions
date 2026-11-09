@@ -94,7 +94,7 @@ After the reviewed proposal, the operator admitted execution:
 
 ### Phase 1 - Shared delta and compatibility contracts
 
-- [ ] Specify an additive, versioned change-set: canonical source/account scope,
+- [x] Specify an additive, versioned change-set: canonical source/account scope,
   base/target revision or cursor, changed identities, explicit tombstones,
   provider metadata revisions and snapshot-completeness evidence.
 - [x] Distinguish event deltas, bounded polling and complete reconciliation.
