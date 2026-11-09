@@ -37,7 +37,7 @@ proof that all legacy operations can be retired.
 | `pr-publication-labels` and author metadata | Metadata-only repair, exact body/reviewer/work-item meaning, preserve unrelated values | Bounded native metadata repair delivered in #10402; author amendment A4-A5 retains full scope |
 | `pr-merge` | Distinguish consent, human-only and direct completion; exact head, required policy/checks/holds, no privilege escalation | Native adapter uses target policy; explicit CLI differences are not parity |
 | `pr-complete` | Source reconciliation after authoritative merge, preserve subsequent work; not finalize | Worktrees source authority retained; successor invokes it rather than remote source mutation |
-| `pr-abandon` | Exact operator-approved close/cancel and revision confirmation; no inferred abandonment | Successor integration open; terminal observation grants no close permission |
+| `pr-abandon` | Exact operator-approved close/cancel and revision confirmation; no inferred abandonment | [Local creation-cancellation frontend proposed](native-creation-cancellation.md); remote close/comment/claim integration remains separate and open |
 | `pr-research`, checks and evidence helpers | Same target policy, independent review/check evidence, caller-owned workspace and supported refusal | Existing policy/evidence owners retained; migration inventory remains open |
 
 This is the initial source inventory, not proof it is exhaustive. Before

@@ -285,6 +285,10 @@ The [explicit native reviewer-request contract](native-reviewer-request.md)
 cleared review in #11645; its finite native source merged in #11647.
 Windows, provider, installed and HTTP qualification remain open;
 request acceptance is not evidence that a fresh review exists.
+The [native creation-cancellation proposal](native-creation-cancellation.md)
+selects only the existing unpublished-reservation owner. Remote closure,
+reason-comment publication and abandoned-claim settlement remain separate;
+the proposal is not executing support or complete `pr-abandon` parity.
 
 - [x] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence)
   (merged in #10380; implementation, provider and adoption gates remain).
@@ -1315,6 +1319,24 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-08 - Merge the abandonment prerequisite and select local cancellation
+
+- #11649 merged as `d84413cc0d34c2c4300a7778f8bfc8351a19af93` after
+  current-head Copilot approval with no open findings and every required
+  CI check green. Both review findings were corrected and resolved; the
+  final 183-case isolated packet passes with verified cleanup.
+- Confirmed merged attribution and reconciled the owned source through normal
+  PR completion without finalizing or releasing parent/source custody.
+  Re-read the complete parent Plan and Validation Plan; the broader native,
+  HTTP, provider, installed and operational gates remain open.
+- Select the smallest independent continuation: review a native
+  unpublished-creation cancellation frontend over the existing v1 owner and
+  read-only status declaration. It preserves exact original revision/reason
+  recovery and does not expose remote close or silently bypass unfinished
+  reason-comment identity and partial-effect contracts.
+- The new document is a proposal, not implementation or native/platform proof.
+  No live provider, host activation, deployment or resource effect occurred.
 
 ### 2026-11-08 - Preserve abandonment custody after combined provider failures
 
