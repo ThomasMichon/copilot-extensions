@@ -411,3 +411,34 @@ def test_anchor_registry_failure_cannot_be_repaired_by_later_account_read(target
     with pytest.raises(ValueError, match="anchor registry" if fail else "credential selection is unsupported"):
         select_report_target(path, "example/project")
     assert failed[0] is fail and anchor_reads == [{"strict": True}]
+
+
+@pytest.mark.parametrize("kind", ["ref", "tree", "blob", "direct-head", "declared-branch"])
+def test_unresolved_committed_git_state_cannot_qualify_absent_policy(committed_target, monkeypatch, kind):
+    path, anchor, git = committed_target
+    if kind == "ref":
+        git("update-ref", "-d", "refs/remotes/origin/main")
+    elif kind in ("tree", "blob"):
+        revision = "HEAD^{tree}" if kind == "tree" else "HEAD:.agent-worktrees/config.yaml"
+        oid = git("rev-parse", revision).stdout.strip()
+        (anchor / ".git" / "objects" / oid[:2] / oid[2:]).unlink()
+    elif kind == "direct-head":
+        git("update-ref", "--no-deref", "refs/remotes/origin/HEAD", "HEAD")
+    else:
+        policy = anchor / ".agent-worktrees" / "config.yaml"
+        policy.write_text("default_branch: unavailable-policy\n", encoding="utf-8")
+        git("add", ".agent-worktrees/config.yaml")
+        git("commit", "-m", "fixture unavailable branch")
+        git("update-ref", "refs/remotes/origin/main", "HEAD")
+        policy.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(repos, "account_from_map", lambda *a, **k: pytest.fail("unresolved Git state selected account"))
+    with pytest.raises(ValueError, match="committed repository policy"):
+        select_report_target(path, "example/project")
+
+
+def test_readable_committed_tree_can_confirm_policy_path_absence(committed_target):
+    path, _, git = committed_target
+    git("rm", "--cached", "--", ".agent-worktrees/config.yaml")
+    git("commit", "-m", "fixture confirmed policy absence")
+    git("update-ref", "refs/remotes/origin/main", "HEAD")
+    assert select_report_target(path, "example/project")["account"] == "selected"

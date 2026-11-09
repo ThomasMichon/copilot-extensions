@@ -124,6 +124,8 @@ def _offline_remote_head_branch(
         return _unavailable(str(anchor), "committed-head", type(exc).__name__, strict=strict)
     if proc.returncode != 0:
         if proc.returncode == 1:
+            if strict and _offline_remote_branch_exists(anchor, remote, "HEAD", deadline, strict=True):
+                raise ValueError("committed repository policy HEAD is not symbolic")
             observe(acquisition.current_observations(), str(anchor), "committed-head", ScanAuthority.ABSENT)
             return None
         return _unavailable(str(anchor), "committed-head", "Git did not resolve remote HEAD", strict=strict)
@@ -377,6 +379,8 @@ def _resolve_committed_config(
             for candidate in rel_path_candidates:
                 if candidate in batch:
                     return _parse(batch[candidate], branch, candidate)
+            if strict and _committed_candidates(anchor, remote, branch, rel_path_candidates, deadline) != frozenset():
+                raise ValueError("committed repository policy absence is unavailable")
             return None
         logging.getLogger("agent-worktrees").warning(
             "Committed-config batch unavailable; retaining bounded ordered reads.",
@@ -405,11 +409,13 @@ def _resolve_committed_config(
         isinstance(declared, str)
         and declared
         and declared != head_branch
-        and _offline_remote_branch_exists(anchor, remote, declared, deadline, **({"strict": True} if strict else {}))
     ):
-        hopped = _read_config_on(declared)
-        if hopped is not None:
-            data = hopped
+        if _offline_remote_branch_exists(anchor, remote, declared, deadline, **({"strict": True} if strict else {})):
+            hopped = _read_config_on(declared)
+            if hopped is not None:
+                data = hopped
+        elif strict:
+            raise ValueError("committed repository policy branch is unavailable")
     return data
 
 

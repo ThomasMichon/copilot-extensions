@@ -1375,6 +1375,11 @@ callback an implicit credential store.
 
 ### 2026-11-09 - Native report boundary corrections
 
+- An empty committed batch is not policy-path absence until the existing
+  exact-candidate tree probe confirms it. Missing refs, trees or blobs,
+  non-symbolic remote HEAD and unavailable declared policy branches refuse.
+  Actual Git corruption/absence fixtures and existing source controls pass
+  together in the 97-case target/committed-policy packet.
 - Strict anchor-registry acquisition refuses before checkout-free selection;
   a later successful account read cannot erase an earlier anchor failure.
   Registry-derived policy and one-time read-failure controls pass within the
@@ -1472,8 +1477,8 @@ callback an implicit credential store.
 - Normal source reconciliation preserved its backup and the attribution-only
   commit; merged contribution trailers are verified. No parent or source
   worktree was finalized. #11680 remains open for its implementation and tests.
-- Returned to the current root Plan/Validation and the companion acceptance:
-  the 82 public and 11 private open items remain. Next is the reviewed finite
+- Returned to the canonical Plan/Validation; its wider acceptance remains open.
+  Next is the reviewed finite
   GitHub.com native owner adapter with new isolated fixtures, not actual
   credential acquisition, installed-host configuration, rollout or source
   completion of the broader program.

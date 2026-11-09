@@ -227,7 +227,11 @@ Intentional plugin disable remains a confirmed inactive selection.
 Registry-derived anchor acquisition is strict as well: a failed anchor read
 cannot become checkout-free selection after a later account-registry read succeeds.
 Failed reads of established committed policy cannot select a divergent checkout;
-confirmed absence and successful same-source recovery remain supported. Provider
+confirmed absence and successful same-source recovery remain supported.
+Policy-path absence requires a readable committed tree; unresolved refs/objects,
+a non-symbolic remote HEAD or an unavailable declared policy branch refuse.
+The existing exact-candidate tree probe runs only for an otherwise ambiguous
+empty batch, not as a repository crawl or network request. Provider
 access errors retain a sanitized native failed report and owner exit; transport
 and cleanup failures remain unavailable. Existing native commands and unselected
 providers are unchanged.
