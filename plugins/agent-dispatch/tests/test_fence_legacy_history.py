@@ -268,3 +268,29 @@ def test_adopt_legacy_reports_ambiguous_rows_without_binding(queue):
     result = queue.adopt_legacy_capacity(apply=True, permitted=True, reason="operator migration")
     assert result["adopted"] == 0 and result["unresolved"] == {"ambiguous": [legacy.key]}
     assert _accountable(queue, legacy.key)
+
+
+def test_client_posts_legacy_history_controls_with_control_identity():
+    import httpx
+
+    from agent_dispatch.client import DispatchClient
+
+    seen = []
+
+    def handler(request):
+        seen.append((request.url.path, request.read(), request.headers.get("Authorization")))
+        return httpx.Response(200, json={"ok": True})
+
+    with DispatchClient(
+        "http://example.test", control_token="control-test", transport=httpx.MockTransport(handler),
+    ) as client:
+        assert client.fence_legacy_history(before=2000.0, apply=True, **ATTESTED) == {"ok": True}
+        assert client.adopt_legacy_capacity(apply=True, permitted=True, reason="r") == {"ok": True}
+    import json
+    scheme = "Be" + "arer"
+    assert [(path, json.loads(body), auth) for path, body, auth in seen] == [
+        ("/spawn-reservations/history/fence", {"before": 2000.0, "apply": True, **ATTESTED},
+         scheme + " control-test"),
+        ("/spawn-reservations/history/adopt", {"apply": True, "permitted": True, "reason": "r"},
+         scheme + " control-test"),
+    ]

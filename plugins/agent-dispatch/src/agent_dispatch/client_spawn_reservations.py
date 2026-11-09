@@ -1,4 +1,5 @@
-"""``list_reservations``/``get_reservation`` for :class:`DispatchClient`.
+"""Spawn-reservation reads, lifecycle records and legacy-history
+reconciliation (fence/adopt) for :class:`DispatchClient`.
 
 Split out of ``client.py`` to keep that module under its module-size cap
 (same pattern as :mod:`agent_dispatch.client_suspend` /
@@ -23,6 +24,7 @@ class SpawnReservationClientMixin:
 
     _http: Any
     _unwrap: Callable[[Any], Any]
+    _control_headers: Callable[[], dict]
 
     def fence_spawn_startup(self, key: str, *, startup_revision: int) -> dict:
         """Close completed startup admission while retaining resource ownership."""
@@ -197,6 +199,28 @@ class SpawnReservationClientMixin:
             ):
                 raise DispatchError(426, "coordinator did not apply pool-accountable/v1 reservation query")
         return reservations
+
+    def fence_legacy_history(
+        self, *, before: float, apply: bool = False, permitted: bool = False,
+        confirmed_no_live_holder: bool = False, reason: str = "",
+    ) -> dict:
+        return self._unwrap(self._http.post(
+            "/spawn-reservations/history/fence",
+            headers=self._control_headers(),
+            json={
+                "before": before, "apply": apply, "permitted": permitted,
+                "confirmed_no_live_holder": confirmed_no_live_holder, "reason": reason,
+            },
+        ))
+
+    def adopt_legacy_capacity(
+        self, *, apply: bool = False, permitted: bool = False, reason: str = "",
+    ) -> dict:
+        return self._unwrap(self._http.post(
+            "/spawn-reservations/history/adopt",
+            headers=self._control_headers(),
+            json={"apply": apply, "permitted": permitted, "reason": reason},
+        ))
 
     def get_reservation(self, key: str) -> dict:
         return self._unwrap(self._http.get(f"/spawn-reservations/{key}"))
