@@ -276,7 +276,7 @@ def test_invalid_utf8_committed_policy_refuses_on_both_read_paths(committed_targ
             raise subprocess.TimeoutExpired(args, 1)
         return original(*args, **kwargs)
     monkeypatch.setattr(git_ops, "git", unavailable)
-    monkeypatch.setattr(repos, "account_from_map", lambda *a, **k: pytest.fail("corrupted policy acquired account"))
+    monkeypatch.setattr(repos, "account_for_github_owner", lambda *a, **k: pytest.fail("corrupted policy acquired account"))
     with pytest.raises(ValueError, match="lossless UTF-8"):
         select_report_target(path, "example/project")
 
@@ -322,7 +322,7 @@ def test_duplicate_keys_in_other_config_sources_cannot_drop_credential_policy(ta
                 '{"schema_version":1,"plugin":"first@market","plugin":"other@market",'
                 '"plugin_root":"/fixture","target":"policy.yaml"}', encoding="utf-8",
             )
-    monkeypatch.setattr(repos, "account_from_map", lambda *a, **k: pytest.fail("duplicate policy selected account"))
+    monkeypatch.setattr(repos, "account_for_github_owner", lambda *a, **k: pytest.fail("duplicate policy selected account"))
     with pytest.raises(ValueError):
         select_report_target(path, "example/project")
 
@@ -351,7 +351,7 @@ def test_unreadable_policy_link_is_not_confirmed_absence(target, tmp_path, monke
     else:
         policy.parent.mkdir(parents=True, exist_ok=True)
         policy.symlink_to(policy.name if kind == "loop" else "missing-policy.yaml")
-    monkeypatch.setattr(repos, "account_from_map", lambda *a, **k: pytest.fail("unreadable policy selected account"))
+    monkeypatch.setattr(repos, "account_for_github_owner", lambda *a, **k: pytest.fail("unreadable policy selected account"))
     with pytest.raises((OSError, ValueError)):
         select_report_target(path, "example/project")
 
@@ -393,7 +393,7 @@ def test_enabled_dropin_policy_must_be_available_before_account_selection(target
     if kind == "disabled":
         assert select_report_target(path, "example/project")["account"] == "selected"
     else:
-        monkeypatch.setattr(repos, "account_from_map", lambda *a, **k: pytest.fail("unavailable dropin selected account"))
+        monkeypatch.setattr(repos, "account_for_github_owner", lambda *a, **k: pytest.fail("unavailable dropin selected account"))
         with pytest.raises(ValueError):
             select_report_target(path, "example/project")
 
@@ -448,7 +448,7 @@ def test_unresolved_committed_git_state_cannot_qualify_absent_policy(committed_t
         git("commit", "-m", "fixture unavailable branch")
         git("update-ref", "refs/remotes/origin/main", "HEAD")
         policy.write_text("{}\n", encoding="utf-8")
-    monkeypatch.setattr(repos, "account_from_map", lambda *a, **k: pytest.fail("unresolved Git state selected account"))
+    monkeypatch.setattr(repos, "account_for_github_owner", lambda *a, **k: pytest.fail("unresolved Git state selected account"))
     with pytest.raises(ValueError, match="committed repository policy"):
         select_report_target(path, "example/project")
 
