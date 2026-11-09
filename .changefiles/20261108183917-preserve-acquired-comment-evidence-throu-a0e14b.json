@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve acquired comment evidence through explicitly adopted terminal compaction and scoped historical library reads",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

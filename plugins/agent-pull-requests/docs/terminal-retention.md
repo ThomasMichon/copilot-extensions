@@ -257,6 +257,53 @@ original unknown attempt when it commits.
 Crossing the original deadline during IO or receipt commit reports escalation
 on that same invocation while retaining the unresolved attempt.
 
+## Optional lossless acquired-comment mapping
+
+The independent `terminal_comment_mapping=True` ReplayStore reader requires
+terminal/recovery reader selection. Its explicit
+`TerminalCommentMappingStore(owner).adopt(lifecycle_checkpoint=...,
+expires_at=..., checkpoint=...)` requires existing terminal recovery and
+`review_comment_mapping_version: 1` adoption. It adds
+`terminal_comment_mapping_version: 1` to the same owner-v3/v4/v5/v6 envelope,
+without changing the base layout. The lifecycle owner excludes incompatible
+readers; older strict readers refuse without rewriting state. Selection,
+startup, acquisition and reads do not adopt or downgrade it.
+
+The original compaction transaction transfers each captured prepared action's
+existing nullable acquired-evidence slot into `comment_observation` on its
+compact action. Its 2 KiB maximum growth remains independently funded alongside
+the compact record's original receipt allowance, within the same review
+capacity and operation/action bounds. Invalid or unfunded replacement refuses
+atomically. Compaction of an operation carrying adopted mapping slots now
+refuses unless this lossless extension is adopted, rather than silently
+discarding the slots. Non-mapping operations retain their prior behavior.
+
+`TerminalCommentMappingStore.read(operation_id, scope, action_id,
+expires_at=...)` reads either the active original action or its compact
+replacement under the same scoped owner. Its internal
+`agent-pull-requests.terminal-comment-observation/v1` result identifies
+`representation: active|compact`, original candidate/intent/action identity,
+minimal prepared comment/write GUIDs and body hash, original outcome/receipt,
+`mapping_supported` and the nullable retained slot. It does not reconstruct
+retired source/preparation fields or change the prior retained-comment/v1
+response. No body, cache access, native read or send is needed.
+
+A compact prepared action created before lossless preservation has no
+recoverable slot: the new read reports `mapping_supported: false`, not an
+invented null observation. Adoption never backfills that missing evidence.
+An admitted but unobserved slot instead reports support with `mapping: null`.
+Transferred evidence keeps its original generation and discussion interval;
+neither a positive current-content correlation nor its object digest proves
+an original native version. Protected recovery receipt/state changes clear
+the affected slot in the same envelope. Reopen does not recalculate compact
+history, confirm an unknown effect or restore executable preparation.
+
+This is internal storage/library composition only. Terminal-read/v1 still
+excludes retained-comment, preparation, submission, feedback and retirement
+requests. Optional receiver/client expansion needs its own discovery contract
+and qualification before any new request or result is served. Source fixtures
+do not establish retained-host adoption, provider or installed acceptance.
+
 ## Scoped cache and server-memory retirement
 
 The independent, default-off `terminal_cache_retirement=True` ReplayStore
