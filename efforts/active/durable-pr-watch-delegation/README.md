@@ -299,8 +299,9 @@ _Operator-required outcome; agent-recommended slices and validation._
   in #11605. T2a compact recovery-only operations and actual protected readback
   merged in #11614. T2b scoped cache/materialization retirement merged in
   #11623. The optional read-only T3 receiver source merged in #11625;
-  strict standalone selection, full executing-host qualification and P1/P2
-  acceptance remain open.
+  strict standalone selection and fresh-only source provisioning merged
+  in #11628. Full executing lifecycle/retained-reader qualification and
+  P1/P2 acceptance remain open.
   Existing normalized ADO load/sync acquisition feeds the explicitly enabled
   journal after confirmed cache publication (#10405); native observation and
   standalone-host adoption remain distinct prerequisites.
