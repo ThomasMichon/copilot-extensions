@@ -601,7 +601,7 @@ def test_native_rejects_old_powershell_before_target_execution(tmp_path, monkeyp
 
 @pytest.mark.parametrize(("verb", "with_config"), [
     ("status", False), ("wait", False), ("create", False), ("merge", False), ("create", True),
-    ("ready", False), ("ready", True),
+    ("ready", False), ("ready", True), ("nudge", False), ("nudge", True),
 ])
 def test_native_front_door_crosses_real_worktrees_command_boundary(
     verb, with_config, tmp_path, monkeypatch, capsys,
@@ -624,6 +624,14 @@ def test_native_front_door_crosses_real_worktrees_command_boundary(
     elif verb == "ready":
         expected = ["pr-author-ready", "--repo=project/repo", "--json", "--number=7"]
         value = ready_result()
+    elif verb == "nudge":
+        expected = ["pr-author-nudge", "--repo=project/repo", "--json", "--number=7"]
+        value = {
+            "schema": "agent-worktrees.pr-review-request", "version": 1,
+            "repo": "project/repo", "number": 7, "provider": "github",
+            "ok": True, "supported": False, "requested": False, "reviewer": "",
+            "actions": {"review_request": {"status": "no-op"}},
+        }
     extra = []
     if with_config:
         policy = tmp_path / "worker policy.json"
@@ -638,10 +646,13 @@ def test_native_front_door_crosses_real_worktrees_command_boundary(
         f"import sys\nassert sys.argv[1:] == {expected!r}\n"
         f"print({json.dumps(value)!r})\n"
     )
-    if with_config or verb == "ready":
+    if with_config or verb in ("ready", "nudge"):
         capabilities = author_capabilities()
         capabilities["operations"]["worker-policy-config"] = True
         capabilities["operations"]["draft-ready"] = True
+        if verb == "nudge":
+            capabilities["provider"] = "github"
+            capabilities["operations"]["reviewer-request"] = True
         probe = ["pr-author-capabilities", "--repo=project/repo", "--json"]
         if with_config:
             probe.append(f"--config={policy}")

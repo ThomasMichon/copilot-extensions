@@ -36,19 +36,20 @@ def load_author_config(path, repository: str, *, claimant: bool = False):
 
 
 def add_parsers(sub):
-    for name in ("pr-author-capabilities", "pr-update", "pr-push", "pr-author-ready"):
+    for name in ("pr-author-capabilities", "pr-update", "pr-push", "pr-author-ready", "pr-author-nudge"):
         parser = sub.add_parser(name, help={
             "pr-author-capabilities": "Report target-qualified author operations without mutation",
             "pr-update": "Repair existing PR metadata without creating or pushing",
             "pr-push": "Publish an admitted delegated source without managed branch renaming",
             "pr-author-ready": "Move an explicit native draft PR to ready without consent or hold release",
+            "pr-author-nudge": "Request the explicit target's configured automated reviewer without a comment",
         }[name], allow_abbrev=False)
         parser.add_argument("--repo", required=True)
         parser.add_argument("--config")
         parser.add_argument("--json", action="store_true")
         if name == "pr-author-capabilities":
             continue
-        if name == "pr-author-ready":
+        if name in ("pr-author-ready", "pr-author-nudge"):
             parser.add_argument("--number", required=True, type=int)
             continue
         pr_publication_labels_cli.add_options(parser)
@@ -79,8 +80,10 @@ def capabilities(config, repository: str) -> dict:
         "operations": {
             "qualified-create": supported, "metadata-update": supported,
             "source-push": supported, "remote-evidence": False,
-            "worker-policy-config": supported, "worker-policy-export": True,
+            "worker-policy-config": pr.enabled and pr.provider in ("azure-devops", "github"),
+            "worker-policy-export": True,
             "draft-ready": supported,
+            "reviewer-request": pr.enabled and pr.provider == "github",
         },
         "source_adapter": "reachable-workspace" if supported else None,
         "completion_authority": "target-repository-policy",
@@ -120,9 +123,29 @@ def readiness_project_unavailable(argv: list[str], message: str) -> int:
     parser = argparse.ArgumentParser(allow_abbrev=False)
     add_parsers(parser.add_subparsers(dest="command", required=True))
     args = parser.parse_args(argv)
-    result = pr_readiness.outcome(args.repo, args.number, error=message)
+    if args.command == "pr-author-nudge":
+        from . import pr_reviewer_request
+        result = pr_reviewer_request.outcome(args.repo, args.number, error=message)
+    else:
+        result = pr_readiness.outcome(args.repo, args.number, error=message)
     output._json_output(result) if args.json else print(result)
     return 1
+
+
+def cmd_nudge(args: argparse.Namespace) -> int:
+    """Preserve pre-dispatch refusal separately from accepted or uncertain requests."""
+    from . import pr_cli, pr_reviewer_request
+
+    try:
+        _, error = pr_cli.require_claimant_worktree("pr-author-nudge")
+        if error:
+            raise ValueError(error)
+        config = load_author_config(args.config, args.repo, claimant=True)
+        result = pr_reviewer_request.nudge(config, args.repo, args.number)
+    except (ValueError, OSError, ProviderError) as exc:
+        result = pr_reviewer_request.outcome(args.repo, args.number, error=str(exc))
+    output._json_output(result) if args.json else print(result)
+    return 0 if result["ok"] else 1
 
 
 def cmd_update(args):

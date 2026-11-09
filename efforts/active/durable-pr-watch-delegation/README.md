@@ -281,6 +281,9 @@ The [CLI parity inventory](cli-parity-inventory.md) records the draft-to-ready
 contract reviewed in #11641 and its finite native source delivery in #11643.
 Windows, provider, installed and HTTP parity acceptance remain separate;
 readiness does not grant merge consent or release a hold.
+The [explicit native reviewer-request contract](native-reviewer-request.md)
+cleared review in #11645. Its implementation and qualification remain open;
+request acceptance is not evidence that a fresh review exists.
 
 - [x] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence)
   (merged in #10380; implementation, provider and adoption gates remain).
@@ -1301,6 +1304,40 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-08 - Qualify the bounded explicit reviewer-request source candidate
+
+- Implement the reviewed optional target-qualified operation through the
+  existing Worktrees/GitHub provider and conditional native client. The
+  tracked nudge transport and no-op behavior remain unchanged; explicit
+  requests preflight active non-draft identity and preserve accepted,
+  rejected and unknown outcomes without retry or fallback.
+- The isolated owner/provider/legacy packet passes 398 cases; the final
+  request-owner subset passes 33, overlapping the packet and adding four
+  explicit target/policy refusals. The native packet passes 116 with five
+  Windows-only skips and real-process forwarding. Cleanup is verified.
+- The first broad provider packet exposed four old creation fixtures that
+  forbade even local authority resolution. They now allow the existing
+  reservation owner and assert zero forge creates when auto-open is off;
+  the failure control injects the actual create API instead of preventing
+  reservation. No production reservation or publication guard was weakened.
+  Two initial native assertions were corrected to expect argparse's actual
+  strict `SystemExit(2)` rather than an ordinary return code.
+- Source review, required CI, native Windows, live-provider, installed and
+  HTTP acceptance remain open. No host activation, credentials, rollout,
+  protected writer or parent completion is claimed.
+
+### 2026-11-08 - Merge the native reviewer-request contract and return to parent gates
+
+- #11645 merged as `92797be51c5006d9a59aedb2f99e02bdd32c6f29` after
+  current-head Copilot approval with no findings and all required CI green.
+  The merged commit retains its required provenance trailers.
+- Re-read both entire parent Plan/Validation sections after the actual merge.
+  The 82 public and 11 companion unfinished rows remain open; the proposal
+  does not deliver a command, activate a host or qualify provider parity.
+- Next: implement the bounded GitHub/provider and conditional native-client
+  path under the reviewed contract, then exercise actual owner composition
+  and mixed-version refusal without altering tracked nudge behavior.
 
 ### 2026-11-08 - Specify explicit native reviewer requests before implementation
 

@@ -1,4 +1,4 @@
-# Native Azure DevOps author operations
+# Native author operations
 
 The native frontend delegates to the selected Worktrees runtime. It does not
 keep another PR-policy, credential or source-custody store. Substitute the exact
@@ -34,7 +34,7 @@ and `operations.worker-policy-config`; this frontend separately advertises
 These additive schema-1 capabilities are independent of package versions.
 Do not infer frontend support from the Worktrees peer's declaration alone.
 
-On capable peers, `author-capabilities`, `create`, `update`, `ready` and `push` accept
+On capable peers, `author-capabilities`, `create`, `update`, `ready`, `nudge` and `push` accept
 `--config <delivered-worker-policy>`. The frontend checks the actual peer
 response before the dependent author operation, and forwards the same explicit
 file. Missing files, unsupported old peers and mismatched worker targets refuse
@@ -56,6 +56,8 @@ no credentials, self-approval, self-merge role or bypass grant, and does not
 authorize dispatch, publication, auto-completion or a human-only action.
 Status/wait and subscription routing remain unchanged by this author-only
 configuration option.
+Author exports preserve the target's configured automated `reviewer` binding;
+they do not grant a worker arbitrary reviewer selection.
 
 PATs are not required. Without an explicitly selected or already inherited
 compatibility credential, ADO operations reuse the existing Azure CLI/Entra
@@ -85,6 +87,36 @@ back or replaying. Reconcile this same PR through observation before another
 intentional attempt. Provider readback is not atomic compare-and-swap and
 cannot prevent a later participant change. Unsupported or rolled-back peers
 refuse only this optional operation; existing supported commands remain usable.
+
+## Reviewer requests are not verdicts
+
+```text
+<PR command> nudge --repo owner/repository --number 42 --worktrees-command <Worktrees command> --json
+```
+
+Native `nudge` requires `operations.reviewer-request: true` from the actual
+selected Worktrees runtime. The initial explicit-target owner supports enabled
+GitHub bindings and invokes `pr-author-nudge`, not tracked `pr-nudge`.
+The latter retains its original tracked selection and normal unsupported/no-op
+behavior. Unsupported explicit targets refuse only this optional feature.
+
+The target's configured automated reviewer is the only selection. An
+unbound/unmapped reviewer is a normal no-op without credential acquisition.
+For a mapped reviewer the provider checks authoritative target identity,
+active lifecycle and non-draft state, then sends one `requested_reviewers`
+request through its existing transport. No comment, coding-agent mention,
+hold, consent, vote, source, merge or claim mutation is performed.
+
+The `agent-worktrees.pr-review-request` version-1 result retains `repo`,
+`number`, `provider`, `supported`, `requested` and
+`actions.review_request.status`. Only `accepted` and `no-op` have `ok: true`
+and exit 0. Only `accepted` has `requested: true`; it means API acceptance,
+not a new review, a pinned review head or merge permission. `not-attempted`,
+`failed` and `unknown` exit nonzero. A generic subprocess error or lost or
+malformed response after dispatch stays unknown, not a known rejection.
+The frontend validates the versioned identity and outcomes and never replays
+or falls back. Observe the same PR before deciding on another intentional
+request; no fresh verdict does not prove that the earlier request failed.
 
 ## Candidate checks and source custody
 
