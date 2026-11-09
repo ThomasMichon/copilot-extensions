@@ -3,9 +3,12 @@
 Back to the [CLI parity inventory](cli-parity-inventory.md) and
 [canonical effort](README.md).
 
-**Contract reviewed in #11665; optional source implementation supplied;
+**Contract reviewed in #11665; finite optional source merged in #11668;
 installed adoption remains pending.**
 The bounded source claim is #11664 under #6007.
+The [selected native owner proposal](native-report-owner.md), tracked in
+#11680, addresses the next account/endpoint/budget adoption gap without
+claiming installed support.
 This source slice closes part of
 [one service contract](../../../visions/plugins/agent-pull-requests/README.md#cli-through-one-service-contract)
 using the existing authenticated Gateway connector and PR-service request owner.
@@ -210,8 +213,8 @@ output owner to keep command routing within its existing module-size cap.
 The repository-wide enforced typecheck could not complete its
 preflight because the unrelated `lib-config-migrate` checker environment is
 not prepared; no passing whole-repository typecheck is claimed.
-The source implementation still requires its reviewed merge. The parent
-effort, large-report transport, authenticated native-command adopter,
+The source implementation merged in #11668. The parent effort,
+large-report transport, authenticated native-command adopter,
 installed/retained hosting, Windows and live-provider acceptance remain open.
 
 Every in-flight exchange is fenced by its discovery epoch

@@ -303,8 +303,11 @@ live-provider and workspace generation acceptance remain independent.
 The [existing-owner HTTP report boundary](owner-report-read.md), reviewed in #11665,
 adds a read-only thread/diff exchange through the existing authenticated
 Gateway without treating raw reports as principal-bound generations.
-The optional source embedding follows that reviewed contract; large-report, native-command adopter,
+The optional source embedding merged in #11668; large-report, native-command adopter,
 installed and live-provider acceptance remain separate.
+The [selected native report-owner proposal](native-report-owner.md) under
+#11680 defines a finite GitHub.com-first adopter; runtime implementation follows
+review and does not change legacy native authentication or imply host adoption.
 
 - [x] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence)
   (merged in #10380; implementation, provider and adoption gates remain).
@@ -1057,6 +1060,15 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
+- [x] Qualify the finite optional existing-owner report boundary (#11668):
+  configured report scope before resolution/acquisition, full native report and
+  original exit preservation, epoch-safe negotiation, current owner/deadline
+  checks through worker and shielded task handoffs, and actual Gateway drain.
+  Final focused report qualification passes 62 cases; the earlier coupled
+  CLI/watch packet passes 210 with five Windows-only skips. Native-command
+  account binding, larger-report transport, installed/live-provider and full
+  HTTP/CLI acceptance remain open.
+
 - [x] Qualify the finite [explicit native diff-read source boundary](native-diff-read.md#compatibility-and-qualification) (#11661)
   after contract review: 149 native cases with five Windows-only skips and
   362 actual owner/read/provider/tracked cases. Real subprocess provider
@@ -1360,6 +1372,44 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+### 2026-11-09 - Native report-owner source trace and proposal
+
+- Claimed #11680 after checking open report-related work. Traced actual
+  Worktrees target resolution, account selection and provider execution:
+  legacy ambient authentication, relative GitHub thread routing and independent
+  child timeouts prevent treating matching callback labels as service admission.
+- Proposed one optional GitHub.com-first owner adapter through the existing
+  report embedding. Strict configured-account/store selection, authenticated
+  login matching, endpoint-pinned provider calls and the original request
+  budget precede body reads; native legacy behavior stays unchanged.
+- This is a review-first source proposal, not runtime implementation,
+  credential acquisition, installed support or parent completion. Other
+  providers, large reports and the retained operational gates remain open.
+
+### 2026-11-09 - Existing-owner report source merged; full parent return
+
+- #11668 merged as `a510df7bfcdb855caa3c121cf66ad49148febf4b`
+  after genuine current-head Approval `5824357118`, no remaining findings
+  and all three required CI gates green. Normal managed completion used
+  only the admitted additional CODEOWNER exception, not a review/check waiver.
+- Corrected four runtime findings: stale discovery failure invalidation,
+  both asynchronous publication gaps, and endpoint/provider remapping before
+  acquisition. The final focused report suite passes 62 cases with verified
+  cleanup; initial CLI/watch qualification passes 210 with five Windows-only
+  skips. A final documentation-only correction states current guarantees
+  directly rather than embedding review history in contract prose.
+- Normal source reconciliation preserved a pre-completion backup and aligned
+  to the confirmed merge. Contribution trailers remain in the merge commit.
+  The finite #11664 source issue is complete; #6007 and its parent gates remain.
+- Re-read the complete root Plan/Validation after merge. Credit only the
+  finite optional report source; native-command account
+  binding, large reports, all-publisher/protected-writer, Dispatch, installed,
+  provider, container/shadow and retained-origin acceptance remain open.
+- Next source action: trace actual Worktrees report target/account/endpoint
+  resolution and credential admission, then derive the smallest review-first
+  native report-owner adopter. Callback labels alone are not authenticated
+  native selection, and this continuation grants no operational enrollment.
 
 ### 2026-11-09 - Existing-owner report source qualification
 
