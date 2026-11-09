@@ -444,3 +444,172 @@ inventory; unsupported execution must not be reported as a successful gate.
   395.14 seconds. This closes the observed catalog gap without weakening
   provenance checks or substituting a source import for installation.
   Fresh review, required CI, normal release and Main activation remain open.
+
+### 2026-11-09 - Native fixture correction merged; release enforcement still open
+
+- PR #11696 merged as `214b8996f69412c883710363c33f215646ae32bf`
+  after final-head approval on
+  `d4fd82ead47fe00fa90f8af69e2ec9088c431889` and required CI run
+  42647183791 passed. The fixed review thread was explicitly resolved after
+  actual-consumer validation; the stale overview entry was not treated as an
+  unfixed defect or a reason to bypass review.
+- The source workspace pulled forward onto the provider-confirmed merge,
+  preserving a backup after the automatic squash-range rebase conflicted.
+  The merged fixture and dependent-consumer files were verified equal before
+  dropping only the already-merged range.
+- The next stretch remains normal release of this fixture correction, then
+  refreshed workflow-only Main adoption in #11478 and actual frozen-candidate
+  installed-TTY/receipt/artifact enforcement. This effort is still Active;
+  neither a Main activation nor an operator update has occurred.
+
+### 2026-11-09 - GitHub event brownout blocks trusted release admission
+
+- Automatic release run 42648954729 qualified fixture source
+  `214b8996f69412c883710363c33f215646ae32bf`, published its immutable source
+  assets and completed raw readback. Generated candidate PR #11701 remains
+  open at `22349bdc4c2ab49e24340bd78482870139ddafe3`; no Main merge is claimed.
+- The checkout-free merge job 129278627899 reached its existing eight-minute
+  limit waiting for required checks to register. Trusted admission run
+  42651457621 had `startup_failure` with no checks, not a test failure.
+- GitHub's run page identifies a scheduled public-repository
+  `pull_request_target` protection brownout ending at 18:00 UTC on
+  2026-11-09. No Actions event policy or other security setting is changed.
+- After that external window, recheck all current identities and policy,
+  recover the existing trusted admission run, then resume only the existing
+  merge job under the source-owned controller recovery contract. Do not repeat
+  full qualification, open a duplicate candidate or use a manual/admin merge.
+  The original qualified assets and publication obligation remain retained.
+- Main activation #11478, actual frozen-candidate installed-TTY enforcement
+  and any separately authorized operator rollout remain open.
+
+### 2026-11-09 - Required admission recovered; provider outage blocks merge recovery
+
+- The post-brownout check confirmed candidate #11701 and Main remained at
+  their exact recorded identities. GitHub refused to retry startup-failed
+  run 42651457621 because it contained no jobs.
+- A metadata-only edit of the same PR triggered trusted admission run
+  42671190452. Its first attempt encountered an internal server error.
+  One normal rerun executed the required `main source gate` successfully
+  in job 129348612232. Live required-check readback reported `SUCCESS`
+  and the unchanged candidate was `CLEAN`.
+- Only the existing canceled merge job 129278627899 was resumed. The
+  resulting release-run attempt 2 failed before any merge job started,
+  with GitHub internal-server correlation
+  `2f134c59-1289-4d98-8837-c2196269a315`. Provider readback still showed
+  #11701 open and Main unchanged; no merge or release completion is claimed.
+- GitHub Status identifies incident `tp8cghg7tlc4`, an Actions major outage
+  beginning at 18:12 UTC. Workflow retries are held for provider recovery.
+  Required checks, original qualification ownership, immutable published
+  assets and the existing candidate remain preserved. No security policy,
+  source generation or merge authority was changed.
+
+### 2026-11-09 - Explicit retirement and one fresh normal qualification
+
+- GitHub reported Actions operational after mitigation, but both supported
+  recovery paths for the outage-damaged run refused execution: the original
+  merge-job ID could not be rerun and failed-jobs recovery reported that the
+  workflow run could not be retried.
+- The operator explicitly authorized retirement of #11701 and one fresh
+  normal qualification. Exact head, author, Main and retained source assets
+  were rechecked before closing. Readback confirms `CLOSED`, `mergedAt=null`,
+  branch still at `22349bdc4c2ab49e24340bd78482870139ddafe3`, and all 27
+  assets retained in source release 439342400. This was not a merge.
+- Current Dev `c81a63f07c1f868b555973f4b1c94e57a3de103f` contains the fixture
+  correction and has green CI run 42686720445.
+- One explicit normal dispatch of the trusted Main controller created run
+  42688223747 at 19:57 UTC, with publication requested through the existing
+  `push=true` input. No second generation was dispatched. Qualification,
+  actual fixture release, Main activation and final installed-TTY enforcement
+  remain open until their provider evidence is observed.
+- A normal automatic controller run, 42688134895, started at 19:56:27 UTC
+  between the inventory read and the manual dispatch. The manual request
+  remained serialized behind it and executed no jobs.
+- The automatic run checked out the approved Dev head
+  `c81a63f07c1f868b555973f4b1c94e57a3de103f` and passed source units,
+  Windows Resume, artifact construction and attestation. The coordinator
+  adopted that existing qualification and canceled only the unstarted manual
+  request. Readback confirms run 42688223747 `cancelled` with zero jobs.
+  Exactly one actual qualification proceeds; no other owner's run was canceled.
+
+### 2026-11-09 - Fixture release confirmed; Main activation refreshed
+
+- Normal controller run 42688134895 completed successfully. Its generated
+  release PR #11717 merged at 20:12:39 UTC as
+  `c5d09c6315519dd8f549f7f35785c60800ef8e4e`.
+  Main's authoritative release record names validated Dev
+  `c81a63f07c1f868b555973f4b1c94e57a3de103f`, which contains the fixture
+  correction. The pipeline is unpaused.
+- The workflow-only Main activation branch in #11478 rebased onto that
+  confirmed release as `fad40a1dc55146534b7558594f3cdeb5976d3673`.
+  Its diff remains one workflow file. The unchanged workflow bytes passed
+  the current released source's 25 exact publication-boundary and 42
+  merge-wait tests; the existing owned PR was updated with its exact lease.
+- Phase 3 and the frozen-candidate validation item remain open. Fresh
+  current-head Main review and native checks precede activation; actual
+  installed-Manager TTY/receipt/artifact enforcement must then be observed.
+  No gate activation or operator rollout is claimed.
+
+### 2026-11-09 - Current-baseline sparse candidate materialization
+
+- Main subsequently advanced to a broader runtime baseline. The workflow-only
+  activation PR was refreshed to `38383557eb748a00510d925d59677a964d1aa7b8`.
+  Earlier native results remain historical, not qualification of this new head.
+- The owner-only Windows lane executed that exact head in run 42709189534.
+  Preparation failed before installation: the sparse candidate archive omitted
+  `plugins/agent-containers/setup.py`, an explicit build resource now required
+  by the canonical Invocation admission toolkit. This was not a TTY failure
+  or a provider outage, and it does not qualify the candidate.
+- The fixture now retains that one resource from the same Git archive as its
+  other candidate inputs. A focused regression exercises the actual sparse
+  archive and canonical Invocation materialization, verifies the generated
+  toolkit's inventory and resource bytes, and confirms refusal when the
+  required resource is removed. It does not duplicate unrelated payload scans.
+  Strict refusal, negative-control classification, installed-TTY work deadlines
+  and cleanup are unchanged.
+- This is a below-altitude fixture-input correction, not a new installer or
+  admission policy. No adopter-facing command or configuration changed; the
+  existing qualification documentation remains accurate. Actual current-head
+  installed TTY qualification and frozen-candidate gate activation remain open.
+- Focused contained validation passed all six selected cases, including real
+  archive/Invocation materialization, missing-resource refusal and the residual
+  negative-control, Git-environment and unconfirmed-cleanup controls
+  (76.23 seconds test execution). Ruff and all 13 installation-contract checks
+  passed. The wider first draft of the regression exceeded its preparation
+  budget while scanning unrelated payloads; the narrowed test preserves the
+  real failing boundary without duplicating complete installation.
+- Windows source validation uses the existing contained runner because the
+  Linux-only devcontainer lane is unavailable on this host. Fresh installed
+  construction and real TTY interaction are still owed through the supported
+  owner-only disposable Windows lane. This local preparation test is not a
+  substitute for those or for the post-activation frozen-candidate proof.
+- Published Dev PR #11771 at
+  `44c6a116be96346b8cf48838aa7c9bf8a461cad5`; required CI passed and Copilot's
+  review reported no open issues, with actual Windows qualification still
+  pending.
+- Owner-only run 42715623014 tested that exact source. The new sparse
+  materialization regression passed in 11.789 seconds. Both fresh runtimes
+  constructed and project registration succeeded, but the terminal witness
+  failed before its readiness assertion (138.600 seconds for the whole case).
+  Retained output shows the project bootstrap and Manager UI with the current
+  uppercase `WORKTREES` tab; the old case-sensitive `Worktrees` predicate
+  never recognized it. The observed root exit remains a failure, not a pass.
+- The readiness predicate now accepts the tab's display casing while still
+  requiring an alternate-screen terminal and the named project bootstrap.
+  Focused controls reject missing-project, missing-terminal and startup-only
+  output. Input response, installed-process attribution, successful interactive
+  exit and strict negative-control classification remain mandatory. A new
+  exact-head full native result is required; rendered output alone is not
+  qualification.
+- The changed-head run 42717974211 recognized the rendered UI, then failed
+  during descendant image attribution with Windows error 31. Pinned process
+  handles may outlive short-lived startup helpers. Image queries now skip
+  only handles confirmed exited, including an exit racing the query; an image
+  error on a live process still propagates. The installed Manager must still
+  be identified through a live pinned handle before input is sent.
+- Four focused contained attribution/readiness/negative-control cases passed
+  in 0.62 seconds. These verify that live image-query errors are not swallowed
+  and that only confirmed exits are ignored. This in-process selection used
+  the existing containment owner with a 120-second aggregate bound; the base
+  interpreter lacks pytest-timeout, so its native timeout markers were not
+  exercised. Full native qualification still uses the canonical managed
+  environment and unchanged installed-TTY deadlines.
