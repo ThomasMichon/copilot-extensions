@@ -124,6 +124,29 @@ def test_source_cli_preserves_full_report_and_native_exit(reports, monkeypatch, 
     asyncio.run(gateway.drain(timeout=1))
 
 
+@pytest.mark.parametrize("operation", ["threads", "diff"])
+def test_v1_keeps_native_raw_json_allowance_when_encoded_exchange_fits(reports, operation):
+    store, gateway, _, client, _, state, report = reports
+    before = store.path.read_bytes()
+    state["change"] = lambda value: value.update(future={"formatting": [{"x": 0}] * 1000})
+    original = state["binding"].collect
+
+    def pretty(*args):
+        code, text = original(*args)
+        text = json.dumps(json.loads(text), indent=4)
+        assert BODY_BYTES < len(text.encode()) < 1_048_576
+        return code, text
+
+    state["binding"] = replace(state["binding"], collect=pretty)
+    value = read(client, operation)
+    expected = report(operation, 7)
+    state["change"](expected)
+    assert value["report"] == expected and value["profile"] == PROFILE
+    assert len(json.dumps(value).encode()) < BODY_BYTES
+    assert state["calls"] == [(operation, 7)] and store.path.read_bytes() == before
+    asyncio.run(gateway.drain(timeout=1))
+
+
 @pytest.mark.parametrize("change", [
     lambda value: value.update(supported=False, complete=False),
     lambda value: value.update(error="provider refusal", complete=False),

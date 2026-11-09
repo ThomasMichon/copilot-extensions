@@ -77,8 +77,10 @@ def parse_request(operation: str, value: object, *, response_limit: int = BODY_B
 
 def validate_report(operation: str, text: str, scope: dict, number: int, *,
                     response_limit: int = BODY_BYTES) -> dict:
+    response_budget(response_limit)
+    options = {"max_bytes": response_limit} if response_limit > BODY_BYTES else {}
     report = (thread_report if operation == "threads" else diff_report)(
-        text, scope["repo"], number, max_bytes=response_budget(response_limit),
+        text, scope["repo"], number, **options,
     )
     if report["provider"] != scope["provider"]:
         raise ValueError("report provider differs from selected owner")
