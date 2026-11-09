@@ -590,6 +590,17 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 
 ### Phase 2 - Continuing reconciliation
 
+The [canonical reliability cohort](<journal/2026/11.09 canonical-reliability-cohort.md>)
+records five audited tracking consolidations into OPEN #11663, not five
+completed fixes. Its 21 unchecked acceptance rows preserve the separate
+diagnostic, Windows lifecycle, conditional-field and handoff-lookup contracts,
+including the original owners and literal alternatives. A sixth candidate
+stopped at metadata qualification before any original text was acquired.
+Two identical complete scans at 00:54:56 PST measure 853 whole OPEN,
+511 original-cohort and 342 inflow issues, 124 above fixed 729. The five
+departures and one new canonical produce a net reduction of four;
+1,048 audited dispositions and the still-Active parent are distinct metrics.
+
 The [admitted hook-source follow-through](<journal/2026/11.07 admitted-hook-source-followthrough.md>)
 records prospective full-source inspection, a bounded resolver follow-through
 and qualified public research comments without repairing the earlier invalid
@@ -3077,6 +3088,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   normal publication flow.
 
 ## Validation Plan
+
+The [five canonical tracking folds](<journal/2026/11.09 canonical-reliability-cohort.md>)
+have exact live acknowledgment readbacks, unchanged source assignees and
+an OPEN receiver with all 21 acceptance rows unchecked. Their metadata-only
+close mutations reacquired no original body. This establishes tracking
+consolidation only; no product, native, receiving-resource or campaign
+completion checkbox changes.
 
 The [worker-witness and safe Resume study](<journal/2026/11.08 worker-witness-and-safe-resume.md>)
 distinguishes complete prebody provenance qualification, static witness
