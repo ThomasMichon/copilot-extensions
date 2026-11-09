@@ -342,7 +342,9 @@ class TestAbandonPr:
         assert result["success"] is False
         assert result["error"].startswith("gh pr close failed")
         assert "comment post failed:" in result["error"]
-        assert [call[2] for call in calls] == ["comment", "close"]
+        assert [call[:3] for call in calls] == [
+            ["gh", "pr", "comment"], ["gh", "pr", "close"],
+        ]
         reloaded = tracking.load_record(rec.yaml_path)
         assert reloaded.active_pr().state == "open"
         assert not reloaded.active_pr().closed_at
