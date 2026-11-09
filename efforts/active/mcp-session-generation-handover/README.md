@@ -218,6 +218,14 @@ named tracked objective before the whole effort is Done.
 - [ ] **Clean measured sweep:** resolve actual incoming completion and update
   performance; a selected runtime or a successful isolated tool call does not
   make a failed full update successful.
+- [x] **Worktrees incoming-monitor source correction:** #11673 merged the
+  #11524 correction at `2e575be1a26c789f1b5b1912df626165fb9c7158`
+  after current-head approval, required CI and Windows/Linux native acceptance.
+- [x] **Bounded Worktrees correction delivery:** #11673 was promoted to Main
+  `48556f2680f5dbbdbdf5ada65867a5feb5d85de5`; authorized Windows payload and
+  runtime phases installed `1.25.53-dev1`. Independent serving, native identity,
+  physical-runtime and selection checks passed. This is not a normal full-update,
+  outgoing-cleanup or MCP-session-reattachment result.
 - [x] **Optional installer backstop source merged:** #11550 delivers the #11534
   termination-free, addressed-runtime correction; explicit lifecycle-owner
   cleanup remains separate.
@@ -380,6 +388,30 @@ migration already works.
 
 ### 2026-11-09 - Incoming-monitor correction resumed
 
+- Promotion run `42613130492` qualified the immutable candidate from Dev
+  `2e575be1a26c789f1b5b1912df626165fb9c7158` and landed Main
+  `48556f2680f5dbbdbdf5ada65867a5feb5d85de5`. Both corrected Worktrees
+  files exactly match the reviewed source in that generated release snapshot.
+- Authorized Worktrees-only Windows payload and runtime phases completed in
+  41.48 and 81.49 seconds respectively. The new `1.25.53-dev1` monitor
+  independently reports ready and published after installer exit; its native
+  birth, route, physical runtime, manifest, current version, last-known-good
+  selection and fresh command version agree. The imported correction bytes
+  match the reviewed release.
+- Outgoing recovery and retirement remained explicitly unconfirmed without
+  vetoing the healthy incoming monitor. Installer-instance reconciliation also
+  reported deferred native observation; no cleanup success or manual retirement
+  is claimed. Both phase requests completed and no update remained active.
+  Normal full-update performance and all MCP-wide publication, preservation and
+  adopted-wrapper reattachment gates remain open.
+- #11673 merged at `2e575be1a26c789f1b5b1912df626165fb9c7158`
+  after genuine current-head Copilot approval, zero unresolved findings and
+  green source and native CI. The live-lock and legacy-protocol installer
+  cases passed on both Windows and Linux; absent/stale-lock and
+  construct-then-reuse cases remain unqualified. The next stretch is formal
+  release promotion and authorized installed acceptance, not whole-effort
+  completion. No deployment, clean full-update performance or session
+  reattachment is claimed by this source merge.
 - Claimed #11524 as stubborn-latch, retaining the separate MCP handover owner.
 - The source correction separates outgoing native observations from incoming
   election. It archives exact unresolved recovery bytes and retains prior code
