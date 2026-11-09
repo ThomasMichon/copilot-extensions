@@ -202,6 +202,15 @@ must not substitute for bounded tests and timely CI feedback.
 
 ## Focused packet catalog
 
+The manual `installation-context-full.yml` portfolio `mux-continuity` runs the
+native Resume consumer packet on disposable hosted Windows with digest-pinned
+PSMux 3.4.0. It covers cold Open, reattachment to the same pane/child,
+independent attachment preservation and fresh Driver/Worktrees/Manager
+listings. JUnit retains consumer timing properties. `resume-pane` retains its
+PSMux 3.3.8 compatibility packet; neither lane authorizes shared-host probes
+or installation. Dispatch at the exact published candidate ref and retain
+the run's source SHA, not merely its green name.
+
 For contained Windows post-tool entry diagnosis, set
 `AGENT_WORKTREES_PROFILE_ENTRY=1` and select `prepared_post_entry_stage_profile`
 in `tests/test_post_tool_shell.py`. For a fixed-fixture A/B/A comparison, select
@@ -349,7 +358,8 @@ tests/test_pr_config_foreign_repo.py --test-file tests/test_pr_related_binding.p
 tests/test_lazy_dispatch.py --allow-explicit-tiers` packet exercises the
 declared optional association fact through actual private tracking files and
 current/frozen-prior parser processes. It covers canonical empty versus
-unknown/omitted evidence, scope/incarnation/reassignment, typed record state,
+unknown/omitted evidence, scope/incarnation/reassignment, typed record state
+(no recorded lifecycle or PR claim qualifies provider openness),
 shared fresh configuration acquisition, independent cached core facts,
 three-provider bindings and unchanged strict parsing. The existing passive
 snapshot supplies a separate effective endpoint; no test acquires real credentials,
@@ -372,11 +382,30 @@ Manager's opt-in `--test-file tests/test_companion_head_observation.py
 admission, actual private Worktrees file/task receipt reads through the selected
 process, independent durable/Picker facts and old-caller/new-provider compatibility.
 Real Textual controls cover Refresh/reopen, narrow rendering, separately retained
-lineage, source failures, rollback and late-selection fencing. A native Linux
-pidfd witnesses exact blocked optional-child exit on Escape; other-platform
-skips are not native coverage. These are isolated source/process controls, not
+lineage, source failures, rollback and late-selection fencing. A POSIX
+signal-0 poll witnesses exact blocked optional-child exit on Escape (the managed
+test interpreter may lack `os.pidfd_open`); Windows is skipped, and that skip is
+not native coverage. These are isolated source/process controls, not
 installed, native performance or the original live manual-cutover acceptance.
 The required unit-only packet is unchanged.
+
+Manager's `--test-file tests/test_companion_pr_panel_ui.py` packet checks the
+recorded-PR panel at a 40-column viewport (controls stay on screen; wrapped
+rows keep provider text literal plus the point-read state and record caveat)
+and retirement of a blocked real point-read child on Escape, Refresh and
+deselection with no engine cleanup failure. It uses the same POSIX signal-0
+witness and skips Windows; it is source/process evidence, not installed or
+native job-object coverage.
+
+Manager's `--test-file tests/test_companion_pr_compat_process.py` packet runs
+the real Companion association/point-read caller through the engine-client
+subprocess path against the real Worktrees entry point (tracking location,
+status daemon, configuration and provider fetch replaced) and a frozen prior
+owner. It covers old/new caller-owner pairs, rollback before any snapshot, and
+actual snapshot payload construction through the real codec for open, landed,
+closed-unmerged, merged, pending, foreign, malformed, provider-error and
+oversized replies, with canonical writes and credential acquisition forbidden.
+It is POSIX source/process evidence, not installed or live acceptance.
 
 Worktrees' opt-in `--test-file tests/test_handoff_head_observation.py --test-file
 tests/test_lazy_dispatch.py --test-file tests/test_session_lifecycle.py

@@ -25,10 +25,17 @@ Mux uncertainty is separate from process liveness: `MUX(?)` means last-known
 mux hosting cannot be confirmed, and `HOST(?)` means a live process's hosting
 is unknown. Neither is a zero-client detached session or proof of a safe cold
 launch. Passive PSMux CLI discovery, attachment refresh and status validation
-are unavailable rather than executing commands that can perform startup cleanup.
-Existing mappings and counts are preserved, not revalidated. See
+are replaced by Driver-owned finite authenticated socket observations,
+including fresh session identity and real client counts. Failed/unsupported
+observations preserve existing mappings without claiming fresh proof.
+The launcher qualifies the actual selected Worktrees provider's observation
+contract; older providers stay explicitly unsupported without a CLI downgrade.
+Open still creates or reattaches through the existing launch flow. Foreground
+PSMux attach/create and explicit writes retain their startup-cleanup risk. See
 [preservation-first recovery](../plugins/agent-worktrees/docs/mux.md#preserve-first-when-discovery-is-unavailable)
 for the scope, older-consumer limitation and separately authorized recovery.
+Periodic PSMux status-bar writes remain refused: restoring fresh listings
+does not reactivate cleanup-bearing background CLI work.
 
 The Picker allocates rows only for real Knowledge setup and cached-source
 refresh notices: none when healthy, one for either notice, two when both apply.
@@ -3068,6 +3075,22 @@ explicit action. It disposes and terminally marks the hosted binding so a later
 normal Finalize can proceed; terminal exit never performs that destruction.
 
 ### Actions dialog refinement
+
+**Finalize** is available on ordinary machine-backed worktree rows and bulk
+selections regardless of cleanup bucket. It opens an explicit confirmation;
+cancel runs nothing.
+Controller-owned children and unsupported sources retain their action boundary.
+Known live sessions, lock residue and unavailable mux observations return a
+visible refusal without invoking the engine. Resolve those lifecycle conditions
+before retrying.
+
+Otherwise the existing asynchronous executor calls the selected engine's
+canonical `finalize <id> --json`, never force cleanup. Content, objectives,
+PRs and resource obligations remain engine-owned checks; the menu does not
+reimplement them or remove saved conversations. Failed results retain the
+engine's diagnostics. Press **v** in completed Finalize progress to read the
+full scrollable result, including exact claim references; ask
+`help clean up worktree <id>` for the existing claims/obligations procedure.
 
 Actions opens from a private snapshot of the published row. Tracking-path and
 locality discovery run on its existing background worker, never before modal

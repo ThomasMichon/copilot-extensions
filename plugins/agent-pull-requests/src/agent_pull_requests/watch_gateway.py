@@ -236,7 +236,13 @@ class WatchGateway:
             return _response(415, {"error": "workspace_json_required"})
         try:
             payload = json_object(request.body)
-            if set(payload) != {"binding", "request"} or not isinstance(payload["request"], dict):
+            if (
+                not {"binding", "request"} <= payload.keys()
+                or payload.keys() - {"binding", "request"} - (
+                    set() if is_attention else {"workspace_contract"}
+                )
+                or not isinstance(payload["request"], dict)
+            ):
                 raise ValueError
             expected = ReplayBinding.from_document(payload["binding"])
             if self._binding(request, target) != expected:
@@ -249,6 +255,7 @@ class WatchGateway:
             return _response(503, {"error": "workspace_service_unavailable"})
         task = asyncio.create_task(self._execute_workspace(
             workspace, operation, payload["request"], request, target, expected,
+            selection=payload.get("workspace_contract"),
         ))
         self._tasks.add(task)
         task.add_done_callback(self._completed)
@@ -258,7 +265,8 @@ class WatchGateway:
             request.lifetime.close()
             raise
 
-    async def _execute_workspace(self, workspace, operation, payload, request, target, expected):
+    async def _execute_workspace(self, workspace, operation, payload, request, target, expected,
+                                 *, selection=None):
         from .attention_read import AttentionUnavailable, MAX_BATCH_BYTES
         from .generation_cache import CacheInvalid
         from .owner_read import OwnerReadResponseTooLarge
@@ -291,9 +299,13 @@ class WatchGateway:
                 raise OwnerReadResponseTooLarge("prepared preview or submission exceeds transport limit")
 
         try:
+            from .workspace_terminal_read import serve
+            attention = request.target.startswith("/v1/attention/")
             value = await asyncio.to_thread(
-                workspace.execute, operation, payload,
+                workspace.execute if attention else serve,
+                *((operation, payload) if attention else (workspace, operation, payload)),
                 expires_at=request.context.expires_at, checkpoint=checkpoint,
+                **({} if attention else {"selection": selection}),
                 **({"selection_validator": validate_selection} if operation == "allocate" else {}),
             )
             checkpoint()

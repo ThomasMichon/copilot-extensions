@@ -8,6 +8,12 @@ reader. It adds no installed owner, service, credentials or acquisition fallback
 `GenerationCache`, `ReplayStore` and protected `execute_review`. Construction
 performs no provisioning/adoption, source fetching, installation or credential
 acquisition.
+The internal [terminal-intent embedding](terminal-retention.md) adds explicitly
+adopted epoch fencing and owner drain. Its independently selected
+[read-only terminal receiver](terminal-retention.md#optional-executing-read-only-receiver)
+uses workspace/v2 without enabling writes, adoption or retirement over the wire.
+Default workspace/v1 operations remain unchanged; neither form activates an
+installed host.
 Construct it only inside the current owner pipeline with an authorized fixed
 native repository/principal scope, read binding and actual write-context factory.
 The factory accepts the selected PR number and returns the normal pinned context;
@@ -44,6 +50,8 @@ same ReplayStore. The optional cache must share its root, namespace and persiste
 service binding. Absent support preserves every existing watch response field.
 The standalone launcher does not accept arbitrary callback configuration and
 does not advertise workspace operations without actual adopter integration.
+The optional terminal receiver is an in-process trusted embedding, not a new
+standalone configuration field.
 
 The existing handler serves `/v2/review/<target>/<operation>` over its normal
 authenticated Fleet connector, request lifetime and task/drain owner. Requests
@@ -138,8 +146,9 @@ explicitly adopted v5 storage. Results separately expose native execution
 and `feedback` handled/pending/unavailable disposition. Confirmed retries
 perform fresh protected readback without another send; exact vote-event
 attribution and later echo coverage remain unavailable. This source seam
-does not advertise a new serving capability: the current conversation
-descriptor still refuses v4/v5, and default hosts supply no feedback owner.
+does not advertise feedback serving: the baseline conversation descriptor
+still refuses v4/v5, the separate terminal receiver is read-only, and default
+hosts supply no feedback owner.
 Only a successful load/sync journal acquisition binds a retained generation
 to its actual epoch/cursor in the existing workspace's bounded in-process
 metadata. A bare cache lookup, equal current contents, missing binding after

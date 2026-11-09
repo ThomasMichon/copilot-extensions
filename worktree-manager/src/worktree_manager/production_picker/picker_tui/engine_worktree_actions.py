@@ -11,7 +11,7 @@ from ... import picker_review
 from .engine_dialogs import SubMenuScreen, WtDetailsScreen
 from .controller_workspaces import target_row
 from .engine_live_screens import MsgViewScreen
-from .worktree_action_context import build_worktree_action_context
+from .worktree_action_context import build_worktree_action_context, worktree_reclaimable
 from .command_transport import parse_action_json
 
 class PickerScreenWorktreeActionsMixin:
@@ -32,46 +32,7 @@ class PickerScreenWorktreeActionsMixin:
         while preserving the healthy mux, then re-derives state.
         """
         return bool(rec.get("mux_live") and rec.get("session_bare_orphan"))
-    @staticmethod
-    def _reclaimable(rec) -> bool:
-        """Whether a bound Copilot or lock residue that **Stop cannot reach**
-        (i.e. no live mux) is present, so the Reclaim verb applies. The
-        load-bearing invariant: a worktree holding a bound lock or lock residue
-        must always expose *some* lifecycle verb (Stop when muxed, else Reclaim)
-        -- never strand the row with no way to act on it.
-
-        True when there is **no live mux** AND any of:
-
-        * ``session_bare_orphan`` -- the machine-wide scan flagged a **bare**
-          (un-muxed) bound Copilot (#662/#1416).
-        * a live bound lock -- ``session_lock_live`` (authoritative menu-open
-          verdict) or ``session_bound_live`` (cached off-hot-path hint) -- whose
-          homing could not be positively classified ``bare``.
-        * ``session_bridge_live`` -- a live **bridge-owned** Copilot (#4272),
-          read file-first from ``bridge.lock`` (cwd=home, so invisible to the
-          mux + cwd-keyed lock scans -- #1416). Without this, an
-          ACTIVE-via-bridge worktree with no mux and no row-visible inuse lock
-          would fall through to Resume -- which then FAILS because the
-          bridge Copilot already holds the session -- stranding the row.
-          ``reclaim_one`` resolves the bridge.lock's owner pid (via
-          :func:`reclaim.resolve_bridge_bound`) so this verb actually reaps it.
-        * ``session_lock_stale`` -- stale ``inuse.<pid>.lock`` residue from a
-          crashed/killed session (file present, pid dead). Reclaim clears it to
-          zero ("to the point where the pid lock file is removed").
-
-        The **no-mux guard** keeps Reclaim mutually exclusive with the muxed
-        ``{Open, Stop}`` group and routes the mux+orphan double-binding to
-        WARNING/Repair instead (see :meth:`_warning`).
-        """
-        if rec.get("mux_live"):
-            return False
-        return bool(
-            rec.get("session_bare_orphan")
-            or rec.get("session_lock_live")
-            or rec.get("session_bound_live")
-            or rec.get("session_bridge_live")
-            or rec.get("session_lock_stale")
-        )
+    _reclaimable = staticmethod(worktree_reclaimable)
     @staticmethod
     def _session_action_verbs(rec) -> list[str]:
         """The session-lifecycle verbs a worktree's Actions menu offers, from its
@@ -122,6 +83,9 @@ class PickerScreenWorktreeActionsMixin:
             # Open attaches the live mux (needs the dir); a leaked mux on a gone
             # worktree offers Stop alone to clear it.
             acts = ["Open", "Stop"] if not gone else ["Stop"]
+        elif rec.get("mux_observation_unknown"):
+            # The launcher rechecks before create/join; uncertainty is not residue.
+            acts = ["Open"] if not gone and not rec.get("managed_child") else []
         elif reclaimable:
             restorable = bool(
                 rec.get("last_session_id")
@@ -165,22 +129,22 @@ class PickerScreenWorktreeActionsMixin:
         # registered.
         if rec.get("session_count"):
             acts.append("Sessions")
-        # FF-sync / cleanup / finalize -- offered only in the non-broken,
+        # FF-sync / cleanup -- offered only in the non-broken,
         # non-residue lifecycle states (never beside Reclaim/Repair, where a
         # Cleanup/Sync would race the residue). A gone worktree still offers
         # Cleanup to prune the leftover record.
-        if acts and not warning and not reclaimable and not gone and not rec.get("managed_child"):
+        if (acts and not warning and not reclaimable and not gone
+                and not rec.get("managed_child") and not rec.get("mux_observation_unknown")):
             if rec.get("sync_eligible", rec.get("ff_eligible")):
                 acts.append("Sync")
             if PickerScreenWorktreeActionsMixin._cleanable(rec):
                 acts.append("Cleanup")
-            if rec.get("cleanup_bucket") in ("conversation", "unused"):
-                # A conversation-only / unused worktree (no commits) can be
-                # wrapped up directly -- finalize validates nothing is unpushed
-                # and removes it (#2258 follow-up).
-                acts.append("Finalize")
         elif gone and PickerScreenWorktreeActionsMixin._cleanable(rec) and not rec.get("managed_child"):
             acts.append("Cleanup")
+        if not rec.get("managed_child"):
+            # The executor explains protected states; only the engine can
+            # decide whether work and outbound obligations are settled.
+            acts.append("Finalize")
         acts.append("Refresh")
         return acts
     def _submenu_target(self):

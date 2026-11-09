@@ -300,8 +300,7 @@ class PickerScreenSelectionMixin:
         ):
             acts.append("Cleanup")
         if any(
-            r.get("cleanup_bucket") in ("conversation", "unused")
-            and self._record_supports(r, "finalize")
+            self._record_supports(r, "finalize")
             for r in chosen
         ):
             acts.append("Finalize")

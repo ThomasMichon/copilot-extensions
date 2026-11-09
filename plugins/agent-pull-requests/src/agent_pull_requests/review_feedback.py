@@ -109,6 +109,11 @@ class ReviewFeedback:
         key = conversation_key(selected["scope"], self.owner.namespace)
 
         def capture(document: dict) -> dict:
+            from .terminal_retention import require_live
+            require_live(
+                document, selected["scope"], operation_id=selected["operation_id"],
+                generation_id=selected["generation_id"],
+            )
             if document["version"] not in (5, 6):
                 raise FeedbackUnavailable("capture_layout_unavailable")
             retained = self.owner._review_operation(

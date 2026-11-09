@@ -1,0 +1,13 @@
+{
+  "comment": "Qualify Companion PR association records, cross-version processes and snapshot codec",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

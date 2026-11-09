@@ -91,6 +91,8 @@ class WorkspaceOperations:
                  selection_preparer: Callable[..., Callable[..., dict]] | None = None,
                  selection_preparer_deadline: bool = False,
                  selection_owned_edits: bool = False,
+                 retention_target: Callable | None = None,
+                 terminal_reads: bool = False,
                  write_context_factory: Callable[..., Callable] | None = None) -> None:
         writers = (write_context, write_context_factory)
         write_available = sum(value is not None for value in writers) == 1
@@ -107,6 +109,14 @@ class WorkspaceOperations:
             or type(conversations) is not bool
             or type(prepared_reviews) is not bool
             or type(comment_mappings) is not bool
+            or type(terminal_reads) is not bool
+            or terminal_reads and (
+                not conversations or retention_target is None or any(writers)
+                or feedback_owner is not None or prepared_reviews or comment_mappings
+                or selection_preparer is not None
+                or not all((store.terminal_retention, store.terminal_recovery,
+                            store.terminal_cache_retirement))
+            )
             or comment_mappings and not (conversations and prepared_reviews)
             or type(selection_owned_edits) is not bool
             or type(selection_preparer_deadline) is not bool
@@ -119,6 +129,10 @@ class WorkspaceOperations:
             or attention_owner is not None and (not callable(attention_owner) or not conversations)
             or feedback_owner is not None and (
                 not callable(feedback_owner) or not conversations or not write_available
+            )
+            or retention_target is not None and (
+                not callable(retention_target) or iscoroutinefunction(retention_target)
+                or not conversations or not store.terminal_retention
             )
         ):
             raise ValueError("actual workspace owner inputs required")
@@ -145,6 +159,10 @@ class WorkspaceOperations:
         self.selection_preparer = selection_preparer
         self.selection_preparer_deadline = selection_preparer_deadline
         self.selection_owned_edits = selection_owned_edits
+        self.retention_target = retention_target
+        self.terminal_reads = terminal_reads
+        from .workspace_retention import WorkspaceRetention
+        self.retention = WorkspaceRetention(self)
         self._materializations = OrderedDict()
         self._generation_positions: OrderedDict[str, dict | None] = OrderedDict()
         self._materialization_lock = threading.Lock()
@@ -195,6 +213,23 @@ class WorkspaceOperations:
 
     def execute(self, operation, payload, *, expires_at, checkpoint,
                 selection_validator: Callable[[dict], None] | None = None):
+        if self.terminal_reads:
+            from .workspace_terminal_read import OPERATIONS as READ_OPERATIONS
+            if operation not in READ_OPERATIONS:
+                raise WorkspaceUnavailable("terminal workspace is read-only")
+        if operation not in OPERATIONS or not isinstance(payload, dict):
+            raise ValueError("unsupported workspace operation")
+        with self.retention.request(
+            operation, payload, expires_at=expires_at, checkpoint=checkpoint,
+        ) as epoch:
+            return self._execute(
+                operation, payload, expires_at=expires_at, checkpoint=checkpoint,
+                selection_validator=selection_validator, retention_epoch=epoch,
+            )
+
+    def _execute(self, operation, payload, *, expires_at, checkpoint,
+                 selection_validator: Callable[[dict], None] | None = None,
+                 retention_epoch: int | None = None):
         if operation not in OPERATIONS or not isinstance(payload, dict):
             raise ValueError("unsupported workspace operation")
         fields = {
@@ -233,6 +268,9 @@ class WorkspaceOperations:
 
         check()
         if operation == "capabilities":
+            if self.terminal_reads:
+                from .workspace_terminal_read import capabilities
+                return capabilities(self, expires_at=expires_at, checkpoint=check)
             from .conversation_store import ConversationStore
             conversation_contract = None
             if self.conversations:
@@ -291,7 +329,7 @@ class WorkspaceOperations:
                 expires_at=expires_at, checkpoint=check,
             )
             check()
-            return {"protocol": PROTOCOL, "scope": scope, "result": result}
+            return {"protocol": self.protocol, "scope": scope, "result": result}
         for field in ("generation_id", "previous_id"):
             if field in payload:
                 identifier(payload[field])
@@ -308,13 +346,21 @@ class WorkspaceOperations:
                 validate_intent=selection_validator, deadline=deadline,
             )
             check()
-            return {"protocol": PROTOCOL, "scope": scope, "result": result}
+            return {"protocol": self.protocol, "scope": scope, "result": result}
         if operation in ("load", "sync"):
             previous = None
             if operation == "sync":
-                previous = cache.lookup(scope, generation_id=payload["previous_id"])["generation"]
+                previous = self.retention.guarded(
+                    scope, lambda: cache.lookup(scope, generation_id=payload["previous_id"])["generation"],
+                    expires_at=expires_at, checkpoint=check, epoch=retention_epoch,
+                    generation_id=payload["previous_id"],
+                )
                 if previous is None:
                     raise WorkspaceUnavailable("selected comparison generation unavailable")
+            terminal_target = (
+                self.retention_target(copy.deepcopy(scope))
+                if retention_epoch is not None and self.retention_target is not None else None
+            )
             observed = self.read_owner.read({
                 "schema": REQUEST_SCHEMA, "version": 1, "binding_ref": self.binding_ref,
                 "number": number, "budget_seconds": deadline - time.monotonic(),
@@ -323,19 +369,36 @@ class WorkspaceOperations:
             generation = observed["generation"]
             _generation(generation, scope)
             check()
-            publication = cache.publish(generation, expected_current=payload["expected_current"])
+            retention_observation = None
+            if retention_epoch is not None:
+                attention = self.attention_owner(copy.deepcopy(generation)) if self.attention_owner else None
+                publication, retention_observation = self.retention.publish(
+                    generation, cache, expected_current=payload["expected_current"],
+                    expires_at=expires_at, checkpoint=check, attention=attention,
+                    comment_mappings=mapping_available(self, expires_at=expires_at, checkpoint=check),
+                    target=terminal_target,
+                )
+            else:
+                publication = cache.publish(generation, expected_current=payload["expected_current"])
             result = {
-                "publication": publication, "descriptor": self._descriptor(generation),
+                "publication": publication,
+                "descriptor": (
+                    self._descriptor(generation)
+                    if retention_observation is None or publication["status"] == "published" else None
+                ),
                 "acquisition": copy.deepcopy(observed["acquisition"]),
             }
             if self.conversations:
                 from .conversation_store import ConversationStore
                 attention = None
-                if publication["status"] == "published" and self.attention_owner is not None:
+                if (
+                    retention_observation is None and publication["status"] == "published"
+                    and self.attention_owner is not None
+                ):
                     attention = self.attention_owner(copy.deepcopy(generation))
                     if type(attention) is not AttentionInputs:
                         raise ValueError("actual attention owner inputs required")
-                result["conversation"] = (
+                result["conversation"] = retention_observation if retention_observation is not None else (
                     ConversationStore(self.store).observe_workspace(
                         generation, expires_at=expires_at, checkpoint=check,
                         attention=attention,
@@ -360,7 +423,10 @@ class WorkspaceOperations:
                 result["comparison"].pop("generation")
                 result["comparison"]["generation_id"] = generation["id"]
         elif operation in ("lookup", "chunk"):
-            descriptor, data = self._materialized(cache, scope, payload.get("generation_id"))
+            descriptor, data = self.retention.materialize(
+                cache, scope, payload.get("generation_id"), expires_at=expires_at,
+                checkpoint=check, epoch=retention_epoch,
+            )
             result = {"descriptor": descriptor}
             if operation == "chunk":
                 offset = payload["offset"]
@@ -447,7 +513,12 @@ class WorkspaceOperations:
         result.pop("comment_observations", None)
         if isinstance(result.get("operation"), dict):
             result["operation"].pop("comment_observations", None)
-        return {"protocol": PROTOCOL, "scope": scope, "result": result}
+        return {"protocol": self.protocol, "scope": scope, "result": result}
+
+    @property
+    def protocol(self) -> str:
+        from .workspace_terminal_read import PROTOCOL as TERMINAL_PROTOCOL
+        return TERMINAL_PROTOCOL if self.terminal_reads else PROTOCOL
 
     def _materialized(self, cache, scope, generation_id):
         from .generation_cache import _plain
@@ -520,6 +591,7 @@ class NativeWorkspaceClient:
         self._owned_edit_contract: object = None
         self._observation_contract: object = None
         self._mapping_contract: object = None
+        self._terminal_contract: object = None
         self._prepared_lock = threading.Lock()
         self._discovery_epoch = 0
 
@@ -543,6 +615,7 @@ class NativeWorkspaceClient:
                 self._owned_edit_contract = None
                 self._observation_contract = None
                 self._mapping_contract = None
+                self._terminal_contract = None
         if operation == "retained-comment":
             current()
             with self._prepared_lock:
@@ -572,15 +645,27 @@ class NativeWorkspaceClient:
                 supported = supports_prepared_review(self._prepared_contract)
             if not supported:
                 raise WorkspaceUnavailable("prepared review capability required")
-        result = self.operations.execute(
-            operation, payload, expires_at=self.expires_at(),
+        from .workspace_terminal_read import serve, supports, PROTOCOL as TERMINAL_PROTOCOL
+        with self._prepared_lock:
+            terminal_contract = self._terminal_contract
+        result = serve(
+            self.operations, operation, payload, expires_at=self.expires_at(),
             checkpoint=current if checkpoint is not None else self.checkpoint,
+            selection=terminal_contract,
         )
         if operation == "capabilities":
+            if result.get("protocol") not in (PROTOCOL, TERMINAL_PROTOCOL):
+                raise WorkspaceUnavailable("unsupported workspace contract")
+            if result.get("protocol") == TERMINAL_PROTOCOL and not supports(result):
+                raise WorkspaceUnavailable("unsupported terminal workspace read contract")
             with self._prepared_lock:
                 if epoch != self._discovery_epoch:
                     raise WorkspaceUnavailable("workspace discovery superseded")
                 self._prepared_contract = copy.deepcopy(result.get("prepared_review_contract"))
+                self._terminal_contract = (
+                    result["terminal_read_contract"]["protocol"]
+                    if result.get("protocol") == TERMINAL_PROTOCOL else None
+                )
                 self._selection_contract = copy.deepcopy(result.get("selection_contract"))
                 self._owned_edit_contract = copy.deepcopy(result.get("owned_edit_selection_contract"))
                 self._observation_contract = (
