@@ -6,9 +6,9 @@ Back to the [CLI parity inventory](cli-parity-inventory.md) and
 **Contract reviewed in #11665; finite optional source merged in #11668;
 installed adoption remains pending.**
 The bounded source claim is #11664 under #6007.
-The [selected native owner proposal](native-report-owner.md), tracked in
-#11680, addresses the next account/endpoint/budget adoption gap without
-claiming installed support.
+The [selected native owner source](native-report-owner.md), merged in #11686
+under #11680, supplies finite GitHub.com account/endpoint/budget composition
+without claiming installed or live-provider support.
 This source slice closes part of
 [one service contract](../../../visions/plugins/agent-pull-requests/README.md#cli-through-one-service-contract)
 using the existing authenticated Gateway connector and PR-service request owner.
@@ -148,11 +148,14 @@ work, but the Gateway keeps its original task until synchronous acquisition
 and any owned cleanup settle. Draining may time out rather than falsely release
 that custody. No background retry, second dispatch or abandoned worker is added.
 
-The complete encoded exchange must fit the existing Gateway body limit
-(currently 32 KiB). Validate before response construction and enforce the same
+The complete encoded v1 exchange must fit the current caller-aware handler/report
+limit of 32 KiB. The underlying channel's separate 8 MiB response ceiling does
+not qualify this handler path. Validate before response construction and enforce the same
 limit at the client. A larger native report is explicitly unavailable over
 this finite wire; do not truncate its diff, drop additive fields, relabel it
 partial, change the physical frame limit or persist chunks to make it fit.
+The [size-qualified response proposal](bounded-report-response.md) treats the
+required optional handler expansion and larger report profile separately.
 Large-report transport is a remaining parity obligation, not delivered here.
 Native readers retain their separate existing limits.
 

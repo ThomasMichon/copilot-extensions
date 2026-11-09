@@ -307,7 +307,13 @@ The optional source embedding merged in #11668; large-report, native-command ado
 installed and live-provider acceptance remain separate.
 The [selected native report-owner contract](native-report-owner.md), reviewed in
 #11681 under #11680, defines a finite GitHub.com-first adopter. Implementation
-does not change legacy native authentication or imply host adoption.
+merged in #11686 without changing legacy native authentication or implying
+host adoption. Large-report, native-platform, installed/live-provider and full
+CLI/HTTP acceptance remain separate.
+The [size-qualified response proposal](bounded-report-response.md) under #11692
+reuses the existing 8 MiB channel while preserving current 32 KiB caller-aware
+handler/report defaults. Review its opt-in SDK prerequisite and parallel report
+profile before runtime expansion; no installed or provider acceptance is implied.
 
 - [x] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence)
   (merged in #10380; implementation, provider and adoption gates remain).
@@ -1060,13 +1066,21 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
+- [x] Qualify the finite optional selected GitHub.com report owner (#11686):
+  actual configuration/strict account policy, explicit verified CLI-store
+  identity, pinned provider reads, one request budget and original cleanup
+  custody. The final target/committed-policy packet passes 97 cases and the
+  actor-free packet passes 4,665; earlier overlapping report/Gateway/TLS and
+  native-adapter packets pass 88 and 22. Linux fixtures are not native Windows,
+  installed hosting, live-provider, large-report or full CLI/HTTP acceptance.
+
 - [x] Qualify the finite optional existing-owner report boundary (#11668):
   configured report scope before resolution/acquisition, full native report and
   original exit preservation, epoch-safe negotiation, current owner/deadline
   checks through worker and shielded task handoffs, and actual Gateway drain.
   Final focused report qualification passes 62 cases; the earlier coupled
-  CLI/watch packet passes 210 with five Windows-only skips. Native-command
-  account binding, larger-report transport, installed/live-provider and full
+  CLI/watch packet passes 210 with five Windows-only skips. Broader native-command
+  adoption, larger-report transport, installed/live-provider and full
   HTTP/CLI acceptance remain open.
 
 - [x] Qualify the finite [explicit native diff-read source boundary](native-diff-read.md#compatibility-and-qualification) (#11661)
@@ -1372,6 +1386,8 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+- [2026-11-09 - Native report-owner source merged; parent acceptance retained](journal/2026/11.09%20Native%20report%20owner%20source.md)
 
 ### 2026-11-09 - Native report boundary corrections
 

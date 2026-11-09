@@ -1,0 +1,9 @@
+{
+  "comment": "Clarify the current caller-aware report limit while reviewing size-qualified response expansion",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}
