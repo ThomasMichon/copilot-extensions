@@ -213,7 +213,7 @@ def test_orphan_and_new_server_cannot_be_omitted(registered, monkeypatch):
             reader.observe()
 
 
-def test_registration_change_and_duplicate_pid_refuse(registered, monkeypatch):
+def test_registration_change_refuses(registered, monkeypatch):
     def query(*args):
         (registered / "wt-other.port").write_text("12346")
         return "wt-other", 1, 101
@@ -221,8 +221,17 @@ def test_registration_change_and_duplicate_pid_refuse(registered, monkeypatch):
     monkeypatch.setattr(reader, "_query", query)
     with pytest.raises(MuxObservationUnavailable):
         reader.observe()
-    (registered / "renamed.pid").write_text("101:123")
-    with pytest.raises(MuxObservationUnavailable):
+
+
+def test_duplicate_reported_pid_refuses_without_pid_sentinels(registered, monkeypatch):
+    (registered / "wt-other.pid").unlink()
+    (registered / "renamed.port").write_text("12346")
+    (registered / "renamed.key").write_text("b" * 16)
+    monkeypatch.setattr(
+        reader, "_query",
+        lambda port, *a: ("wt-other" if port == 12345 else "renamed", 1, 101),
+    )
+    with pytest.raises(MuxObservationUnavailable, match="identity is ambiguous"):
         reader.observe()
 
 
