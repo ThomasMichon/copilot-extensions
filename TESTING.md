@@ -4257,6 +4257,9 @@ and isolates home, app-data, provider, Manager, temp and mux paths. This is
 not full engine/daemon or performance qualification. Run that selector locally
 on Windows with psmux and PowerShell available; platforms without supported
 warm-worker birth identity retain the cold path and skip this packet.
+The Windows fixture also verifies the creation's private namespace against a
+different ambient observer selector and carries a parent teammate-mode flag
+through the caller-to-worker admission boundary.
 
 ## Optional daemon-instance lifetime acceptance
 
