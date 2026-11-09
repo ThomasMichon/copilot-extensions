@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass
-from http.client import HTTPResponse, HTTPSConnection
+from http.client import HTTPException, HTTPResponse, HTTPSConnection
 from io import BufferedReader, RawIOBase
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlsplit
@@ -173,7 +173,7 @@ class AdoReader:
                 ) from None
             raise ProviderError(f"ADO observation GET returned HTTP {exc.code}",
                                 transient=exc.code in (408, 429) or exc.code >= 500) from None
-        except (URLError, OSError, TimeoutError) as exc:
+        except (HTTPException, URLError, OSError, TimeoutError) as exc:
             if (isinstance(exc, _ReadDeadlineExpired)
                     or isinstance(getattr(exc, "reason", None), _ReadDeadlineExpired)
                     or self.clock() >= self.deadline):

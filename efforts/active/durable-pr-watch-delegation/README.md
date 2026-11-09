@@ -1086,7 +1086,7 @@ or silently expanding a bounded source claim.
   mutation, consumed-key recovery, unknown outcomes and old/new runtime
   composition. Source controls do not establish atomic CAS, other-provider
   support, installed/HTTP adoption or the full lifecycle acceptance in #7051.
-  All five linked source controls now pass (330 Worktrees and 150 dedicated
+  All five linked source controls now pass (336 Worktrees and 150 dedicated
   frontend cases, five existing platform skips); independent implementation
   review, required CI and merge remain open.
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from http.client import HTTPException
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request
@@ -99,7 +100,7 @@ class AdoMutator(AdoReader):
                     and exc.code in (400, 401, 403, 404, 405, 409, 410, 412, 422)):
                 raise AdoWriteRejected(f"Native status request rejected with HTTP {exc.code}") from None
             raise ProviderError("ADO remediation write outcome is unknown; no automatic retry") from exc
-        except (URLError, OSError, TimeoutError) as exc:
+        except (HTTPException, URLError, OSError, TimeoutError) as exc:
             raise ProviderError("ADO remediation write outcome is unknown; no automatic retry") from exc
         if authoritative_rejection and self.clock() >= self.deadline:
             raise ProviderError("ADO remediation response arrived after its deadline; reconcile outcome")

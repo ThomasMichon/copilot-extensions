@@ -64,11 +64,8 @@ def candidate(reader: AdoReader, pr: dict, provider: Any, repo: str,
     latest = max(iterations, key=lambda row: row["id"])
     head = full_sha((pr.get("lastMergeSourceCommit") or {}).get("commitId"))
     base = full_sha((pr.get("lastMergeTargetCommit") or {}).get("commitId"))
-    if (
-        full_sha((latest.get("sourceRefCommit") or {}).get("commitId")) != head
-        or full_sha((latest.get("targetRefCommit") or {}).get("commitId")) != base
-    ):
-        raise RemediationError("Native source/base and iteration evidence differ")
+    if full_sha((latest.get("sourceRefCommit") or {}).get("commitId")) != head:
+        raise RemediationError("Native source and iteration evidence differ")
     value = {
         "version": 1, "endpoint": endpoint(reader.api_base),
         "project_id": native_id(project.get("id")),

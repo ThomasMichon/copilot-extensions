@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
+from http.client import IncompleteRead
 from io import BytesIO
 import json
 import os
@@ -35,10 +36,13 @@ class Response:
     status = 200
     headers: dict = {}
 
-    def __init__(self, value: Any) -> None:
+    def __init__(self, value: Any, *, truncated: bool = False) -> None:
         self.data = BytesIO(value if isinstance(value, bytes) else json.dumps(value).encode())
+        self.truncated = truncated
 
     def read(self, size: int) -> bytes:
+        if self.truncated:
+            raise IncompleteRead(b"partial", 100)
         return self.data.read(size)
 
     def __enter__(self) -> Response:
@@ -119,7 +123,7 @@ class Backend:
             response = deepcopy(self.rows[0])
             if self.fault == "wrong-response":
                 response["id"] = 10
-            return Response(response)
+            return Response(response, truncated=self.fault == "truncated-patch")
         assert method == "GET", "no POST, reply, vote, consent, push or alternate transport"
         if path.endswith("/connectionData"):
             return Response({"authorizedUser": {"id": self.actor}})
@@ -131,7 +135,7 @@ class Backend:
                 raise URLError("readback unavailable")
             if self.writes and self.fault == "changed-base":
                 self.change_base()
-            return Response(self.pull)
+            return Response(self.pull, truncated=self.fault == "truncated-readback" and bool(self.writes))
         if path.endswith("/securitynamespaces"):
             namespace = "44444444-4444-4444-4444-444444444444"
             return Response({"count": 1, "value": [{
@@ -152,7 +156,6 @@ class Backend:
 
     def change_base(self) -> None:
         self.pull["lastMergeTargetCommit"]["commitId"] = "d" * 40
-        self.iterations[0]["targetRefCommit"]["commitId"] = "d" * 40
 
     def expectations(self) -> dict[str, str]:
         report = get_report(azure.AzureDevOpsProvider(), REPO, 7, api_base=ORG, token="fixture")
@@ -294,8 +297,20 @@ def test_candidate_movement_during_preflight_and_report_is_explicit(backend: Bac
     assert report["resolution_candidate"]["changed"] and not report["resolution_candidate"]["available"]
 
 
+def test_stable_target_only_advance_supplies_a_fresh_usable_candidate(backend: Backend) -> None:
+    prior = backend.expectations()
+    backend.change_base()
+    assert backend.iterations[0]["targetRefCommit"]["commitId"] == "b" * 40
+    expected = backend.expectations()
+    assert expected["expected_candidate"] != prior["expected_candidate"]
+    assert status(execute(backend, **prior)) == "not-attempted"
+    assert status(execute(backend, **expected)) == "confirmed"
+    assert len(backend.writes) == 1
+
+
 @pytest.mark.parametrize("fault", [
-    "reject", "timeout", "lost", "malformed", "wrong-response", "edited-comment", "readback", "changed-base",
+    "reject", "timeout", "lost", "malformed", "wrong-response", "edited-comment", "readback",
+    "changed-base", "truncated-patch", "truncated-readback",
 ])
 def test_authoritative_rejection_or_unknown_never_issues_a_second_patch(backend: Backend, fault: str) -> None:
     expected = backend.expectations()
@@ -309,6 +324,31 @@ def test_authoritative_rejection_or_unknown_never_issues_a_second_patch(backend:
     assert len(backend.writes) == 1
     conflicting = execute(backend, **{**expected, "expected_thread": "sha256:" + "0" * 64})
     assert conflicting["reason"] == "operation-conflict" and conflicting["original_operation"] == result
+    assert len(backend.writes) == 1
+
+
+def test_truncated_consumed_key_read_preserves_original_unknown_envelope(backend: Backend) -> None:
+    expected = backend.expectations()
+    backend.fault = "lost"
+    original = execute(backend, **expected)
+    backend.fault = ""
+    next_snapshot = backend.pr_reads + 2
+    backend.on_pr = lambda server: setattr(
+        server, "fault", "truncated-readback",
+    ) if server.pr_reads >= next_snapshot else None
+    recovered = execute(backend, **expected)
+    assert status(recovered) == "unknown" and recovered["error"] == original["error"]
+    assert recovered["reconciled"] and len(backend.writes) == 1
+
+
+@pytest.mark.parametrize("fault", ["truncated-patch", "truncated-readback"])
+def test_actual_cli_emits_unknown_json_after_truncated_native_response(backend: Backend, fault: str) -> None:
+    expected = backend.expectations()
+    backend.fault = fault
+    with output.capture_json_output() as capture:
+        assert cli.main(arguments(expected)) == 1
+    result = json.loads(capture.getvalue())
+    assert status(result) == "unknown" and result["operation_id"] == expected["operation_id"]
     assert len(backend.writes) == 1
 
 
