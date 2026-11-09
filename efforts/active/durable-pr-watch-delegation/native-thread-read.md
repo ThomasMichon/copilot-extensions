@@ -118,7 +118,7 @@ No new preflight RPC, mandatory handshake or legacy retirement is required.
   authorized provider-account and HTTP/CLI consumer migration. Keep the parent
   Plan and Validation Plan open beyond this finite adapter.
 
-The native thread/routing packet passes 140 cases with five Windows-only
+The native thread/routing packet passes 148 cases with five Windows-only
 skips. The actual Worktrees read/observation packet passes 43 cases, including
 old and new callers over a real process boundary, neutral CWD and the actual
 GitHub, Gitea and ADO report builders with synthetic transport responses.

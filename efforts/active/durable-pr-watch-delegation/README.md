@@ -1336,6 +1336,11 @@ callback an implicit credential store.
 
 ### 2026-11-08 - Native thread-read source qualification
 
+- Reject option-prefixed repository values in the new native parser before
+  either launch path. The shared legacy slug parser accepts them; passing
+  one as a positional Worktrees argument could reinterpret it as a host,
+  token or config override before later result-identity validation. Direct
+  and managed parser regressions retain the pre-dispatch boundary.
 - Implemented the contract reviewed in #11655 with one bounded invocation of
   the existing Worktrees report owner. The new native-only parser validates
   required target/runtime selection before direct or managed launch.
@@ -1343,7 +1348,7 @@ callback an implicit credential store.
   or unknown completeness, candidate changes and report errors. Keep invocation
   failures separate on stderr without rewriting owner evidence, inferring an
   empty discussion list, retrying or adding another forge route.
-- Isolated thread/routing qualification passes 140 cases with five existing
+- Isolated thread/routing qualification passes 148 cases with five existing
   Windows-only skips. Actual checkout-free owner/observation qualification
   passes 43, including old and new process callers, synthetic GitHub/Gitea/ADO
   provider report construction, partial ADO reads and changed candidates.

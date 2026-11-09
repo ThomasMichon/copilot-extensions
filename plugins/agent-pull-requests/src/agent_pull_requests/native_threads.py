@@ -21,10 +21,15 @@ def add_parser(subparsers, *, repo_type, handler):
     """Register the native-only explicit target read."""
     from .native_cli import validate_selector
 
+    def repository(value):
+        if value.startswith("-"):
+            raise argparse.ArgumentTypeError("repo must not begin with an option prefix")
+        return repo_type(value)
+
     parser = subparsers.add_parser(
         "threads", help="read native discussion bodies on demand", allow_abbrev=False,
     )
-    parser.add_argument("--repo", required=True, type=repo_type)
+    parser.add_argument("--repo", required=True, type=repository)
     parser.add_argument("--number", required=True, type=_positive_number)
     parser.add_argument("--worktrees-command", required=True, type=validate_selector)
     parser.add_argument("--json", action="store_true")

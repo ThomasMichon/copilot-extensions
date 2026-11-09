@@ -123,6 +123,8 @@ def test_plain_bad_report_preserves_literal_diagnostic(command, monkeypatch, cap
     ["--number", "0"], ["--number", "-7"], ["--number", "true"],
     ["--worktrees-command", ""], ["--worktrees-command", " \t"],
     ["--repo", "wrong"], ["--resolve"], ["--num", "7"], ["--config", "worker.json"],
+    ["--repo=--host=https://forge.example/foo"], ["--repo=--token=value/repo"],
+    ["--repo=-leading/repo"], ["--repo=--config=path/file"],
 ])
 @pytest.mark.parametrize("managed", [False, True])
 def test_parser_refuses_before_direct_or_managed_selection(command, monkeypatch, extra, managed):
