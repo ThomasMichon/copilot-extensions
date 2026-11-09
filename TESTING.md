@@ -5494,6 +5494,12 @@ from an unknown similarly named command. They exercise only the existing
 in-process routing predicate, with exact source/node admission; actual
 provider/CLI subprocess qualification remains in the selected plugin packet.
 
+The peer-environment packet reuses the canonical library assertions. Vault
+route rebinding substitutes only its native suffix calculation; platform and
+checksum refusals remain actor-free. These three units do not load a native
+library or start a process. Actual native suffix/environment parity and retained
+same-cell invocation stay in the opt-in `vault-activation` portfolio.
+
 Five binding-projection controls in `test_related_acquisition.py` exercise the
 actual synthesis body with logical paths and substituted canonical-registry
 acquisition. They preserve metadata provenance, knowledge/legacy-worktree

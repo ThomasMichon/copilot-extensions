@@ -381,15 +381,24 @@ jobs:
           python tools/run-plugin-tests.py agent-vault --allow-explicit-tiers
           --test-file tests/test_payload_invocation.py
           --test-file tests/test_runtime_activation.py
-          -k "scheduled_task_launcher_resolves_slot_at_every_run or cold_namespaced_capture or native_batch_reads_real_cache_without_service"
+          -k "scheduled_task_launcher_resolves_slot_at_every_run or cold_namespaced_capture or native_batch_reads_real_cache_without_service or shared_runtime_environment_replaces_every_foreign_route"
           --plugin-timeout 180 --timeout 120 --test-timeout 60
           --junit-dir vault-configuration-critical-junit
+      - name: Qualify selected Vault peer without credential or service effects
+        timeout-minutes: 5
+        run: >-
+          python tools/run-plugin-tests.py agent-dispatch
+          --test-file tests/test_procutil.py -k vault_peer
+          --plugin-timeout 180 --timeout 120 --test-timeout 30
+          --junit-dir vault-peer-junit
       - name: Retain Vault launcher and cold peer results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: vault-configuration-critical-${{ runner.os }}-${{ github.sha }}
-          path: vault-configuration-critical-junit
+          path: |
+            vault-configuration-critical-junit
+            vault-peer-junit
           if-no-files-found: warn
       - name: Measure isolated Vault bootstrap cold and current metadata
         run: >-
