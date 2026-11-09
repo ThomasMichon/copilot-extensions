@@ -6,10 +6,11 @@ This is an **agent-recommended, review-first source refinement** of P1/P2,
 not serving support or authority to delete retained state.
 It closes the design gap between a metadata tombstone and coordinated
 body/cache/outbox/effect retention.
-The first [internal source embedding](../../../plugins/agent-pull-requests/docs/terminal-retention.md)
-adds adopted terminal intent, admission/drain and minimal replay notification.
-It does not compact retained bodies or qualify an installed host; the complete
-delivery and validation gates below remain the acceptance contract.
+The [internal source embedding](../../../plugins/agent-pull-requests/docs/terminal-retention.md)
+adds adopted terminal intent, admission/drain, minimal replay notification and
+compact recovery-only original operations with protected readback.
+Cache/materialization retirement and installed-host qualification remain open;
+the complete delivery and validation gates below remain the acceptance contract.
 
 ## Existing seams and the unsafe shortcut
 
@@ -144,6 +145,9 @@ Retain only the prior compact terminal summary, not old conversation bodies.
   remain T2/T3, not implied by this finite source result.
 - [ ] T2: Implement compact recovery-only operations and actual protected
   readback, then resumable scoped cache/materialization retirement.
+  T2a source #11614 is merged. Original compact identities/deadlines and
+  protected readback are source-qualified; T2b scoped physical retirement
+  remains open, not inferred from removal of selected owner-file bodies.
 - [ ] T3: Qualify the executing workspace/reader/service boundary and supported
   skew/restart/reopen paths; update actual-behavior docs only as leaves land.
 

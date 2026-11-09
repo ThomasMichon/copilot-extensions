@@ -215,3 +215,79 @@ class WorkspaceRetention:
                 return result
 
             return owner._review_transaction(retire, expires_at=expires_at, checkpoint=current)
+
+    def retire_cache(
+        self, scope: dict, cursor: Cursor, *, expires_at: int,
+        checkpoint: Callable[[], None], deadline: float, lifecycle_checkpoint: Callable[[], None],
+    ) -> dict:
+        """Resume one terminal epoch; delivery and unknown effects remain independent."""
+        from dataclasses import asdict
+        from .generation_cache import GenerationCache
+        from .terminal_cache_retirement import TerminalCacheRetirementStore
+
+        scope = _scope(scope)
+        workspace, owner = self.workspace, self.workspace.store
+        selected = TerminalCacheRetirementStore(owner)
+
+        def current() -> None:
+            checkpoint()
+            lifecycle_checkpoint()
+            if time.monotonic() >= deadline:
+                raise TimeoutError("terminal workspace drain incomplete")
+
+        selected.inspect(scope, cursor, expires_at=expires_at, checkpoint=current)
+        self.drain(
+            scope, cursor, expires_at=expires_at, checkpoint=current,
+            deadline=deadline, lifecycle_checkpoint=lifecycle_checkpoint,
+        )
+        with self._condition:
+            if self._active.get(_digest(scope), 0):
+                raise TerminalAdmissionClosed("terminal workspace drain must be rejoined")
+
+            def retire(document: dict, commit: Callable[[], None]) -> dict:
+                _, progress = selected.selected(document, scope, cursor)
+
+                def fenced():
+                    owner.check_current(expires_at, current)
+                    selected.selected(document, scope, cursor)
+
+                def capture(ids, pointer):
+                    row = {
+                        "scope": copy.deepcopy(scope), "cursor": asdict(cursor),
+                        "generation_ids": ids, "current_id": pointer, "stage": "captured",
+                    }
+                    document["terminal_cache_retirement"]["records"].append(row)
+                    commit()
+                    return row
+
+                cache = GenerationCache(
+                    workspace.cache.owner_root, owner.namespace,
+                    max_bytes=workspace.cache.max_bytes, max_generations=workspace.cache.max_generations,
+                    service_identity=owner.service_identity, checkpoint=fenced,
+                )
+                with workspace._materialization_lock:
+                    progress = cache._retire_scope(scope, progress, capture=capture, checkpoint=fenced)
+                    progress["stage"] = "cache_retired"
+                    commit()
+                    fenced()
+                    for key in list(workspace._materializations):
+                        if key[0] == _digest(scope):
+                            fenced()
+                            del workspace._materializations[key]
+                    ids = set(progress["generation_ids"]) | {
+                        row["generation_id"] for row in document["terminal_retention"]["generations"]
+                        if row["scope"] == scope and row["epoch"] <= cursor.epoch
+                    }
+                    for identity in ids:
+                        fenced()
+                        workspace._generation_positions.pop(identity, None)
+                    progress["stage"] = "complete"
+                    fenced()
+                return {
+                    "status": "complete", **copy.deepcopy(progress),
+                    "delivery_settled": False, "recovery_settled": False,
+                }
+
+            return owner._review_transaction(
+                retire, expires_at=expires_at, checkpoint=current, staged=True,
+            )
