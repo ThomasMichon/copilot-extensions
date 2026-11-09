@@ -1953,6 +1953,14 @@ whatever changefiles are pending; nothing here is hand-edited directly.
 > consumer seeds, nested library edges and packaged-source declarations use that
 > same selected tree and the shared parsers. Git symlink modes are rejected even
 > when the checkout contains a regular file.
+>
+> New or changed library release intents and consumer coverage require fresh
+> changefile filenames: do not edit an old file to add a library/type intent or
+> recycle a filename already used in the target branch's history. Promotion
+> excludes previously consumed filenames regardless of edited contents. Use
+> `tools/changefile.py add` for a new identity; a rename to a previously unused
+> filename also creates a new release identity. Complete Git history is required
+> to verify freshness, including identities integrated after a PR forked.
 
 **All version files for a plugin must be bumped together in the same
 commit.** If any file is out of sync: a stale `plugin.json` makes

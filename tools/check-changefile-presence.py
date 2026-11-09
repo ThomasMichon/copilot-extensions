@@ -28,6 +28,7 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
+from types import ModuleType
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -44,8 +45,8 @@ def _load_check_version_bump():
     return module
 
 
-def _resolve_mbase(cvb, base_ref: str, head_ref: str) -> tuple[str, str] | None:
-    """The ``(merge_base, head_sha)`` pair for ``base_ref``/``head_ref``, or
+def _resolve_mbase(cvb, base_ref: str, head_ref: str) -> tuple[str, str, str] | None:
+    """The ``(merge_base, head_sha, target_base)`` for ``base_ref``/``head_ref``, or
     ``None`` when either ref is unresolvable OR they share no common
     ancestor at all.
 
@@ -75,7 +76,7 @@ def _resolve_mbase(cvb, base_ref: str, head_ref: str) -> tuple[str, str] | None:
             file=sys.stderr,
         )
         return None
-    return mbase, head
+    return mbase, head, base
 
 
 def touched_plugins(base_ref: str, head_ref: str = "HEAD") -> set[str]:
@@ -85,12 +86,13 @@ def touched_plugins(base_ref: str, head_ref: str = "HEAD") -> set[str]:
     resolved = _resolve_mbase(cvb, base_ref, head_ref)
     if resolved is None:
         return set()
-    mbase, head = resolved
+    mbase, head, target_base = resolved
     changed = cvb._changed_files(mbase, head)
     if not changed:
         return set()
     changed.extend(
-        f"{library}/pyproject.toml" for library in _changed_library_intents(cvb, mbase, head)
+        f"{library}/pyproject.toml"
+        for library in _changed_library_intents(cvb, mbase, head, target_base)
     )
     tree = cvb._GitTree(head)
     consumers = cvb._vendored_consumers(tree=tree)
@@ -140,7 +142,22 @@ def _read_changefile_intents(
         raise RuntimeError(f"invalid {label}: {error}") from error
 
 
-def _changed_library_intents(cvb, base: str, head: str) -> set[str]:
+def _require_fresh_changefile(cvb: ModuleType, target_base: str, relative: Path) -> None:
+    """Do not reuse identities promotion may have consumed, even after the PR fork."""
+    history = cvb._git(
+        "--literal-pathspecs", "log", "-1", "--format=%H", target_base, "--",
+        relative.as_posix(),
+    )
+    if history.returncode:
+        raise RuntimeError(f"could not verify fresh changefile identity for {relative}")
+    if history.stdout.strip():
+        raise RuntimeError(f"{relative}: release intent requires a fresh changefile filename")
+    depth = cvb._git("rev-parse", "--is-shallow-repository")
+    if depth.returncode or depth.stdout.strip() != "false":
+        raise RuntimeError(f"{relative}: complete Git history is required to verify a fresh changefile")
+
+
+def _changed_library_intents(cvb, base: str, head: str, target_base: str) -> set[str]:
     """Expand only added/changed bump entries, not unrelated baseline intents."""
     result = cvb._git(
         "diff", "--name-status", "-z", "--no-renames", "--diff-filter=AMT", f"{base}..{head}",
@@ -172,6 +189,7 @@ def _changed_library_intents(cvb, base: str, head: str) -> set[str]:
                 library = plugin[len("libs/"):]
                 if not cvb.uer.is_safe_lib_name(library) or "\\" in library:
                     raise RuntimeError(f"invalid library changefile target {plugin!r}")
+                _require_fresh_changefile(cvb, target_base, relative)
                 libraries.add(plugin)
     return libraries
 
@@ -205,8 +223,8 @@ def added_changefile_names(base_ref: str, head_ref: str = "HEAD") -> set[str]:
     resolved = _resolve_mbase(cvb, base_ref, head_ref)
     if resolved is None:
         return set()
-    mbase, head = resolved
-    r = cvb._git("diff", "--name-only", "-z", "--diff-filter=A", f"{mbase}..{head}",
+    mbase, head, _target_base = resolved
+    r = cvb._git("diff", "--name-only", "-z", "--no-renames", "--diff-filter=A", f"{mbase}..{head}",
                  "--", ".changefiles")
     names = set()
     for ln in r.stdout.split("\0"):
@@ -226,22 +244,28 @@ def plugins_with_pending_changefiles(base_ref: str, head_ref: str = "HEAD") -> s
     resolved = _resolve_mbase(cvb, base_ref, head_ref)
     if resolved is None:
         return set()
-    base, head = resolved
-    added = added_changefile_names(base, head)
+    _mbase, head, target_base = resolved
+    added = added_changefile_names(target_base, head)
     plugins: set[str] = set()
     for name in sorted(added):
-        plugins.update(
-            plugin for plugin, _kind in
-            _read_changefile_intents(cvb, head, Path(".changefiles") / name)
-        )
+        relative = Path(".changefiles") / name
+        intents = _read_changefile_intents(cvb, head, relative)
+        if intents:
+            _require_fresh_changefile(cvb, target_base, relative)
+            plugins.update(plugin for plugin, _kind in intents)
     return plugins
 
 
 def check(base_ref: str, head_ref: str = "HEAD") -> tuple[int, list[str]]:
-    plugins = touched_plugins(base_ref, head_ref)
+    cvb = _load_check_version_bump()
+    resolved = _resolve_mbase(cvb, base_ref, head_ref)
+    if resolved is None:
+        return 0, []
+    _mbase, head, target_base = resolved
+    plugins = touched_plugins(target_base, head)
     if not plugins:
         return 0, []
-    pending = plugins_with_pending_changefiles(base_ref, head_ref)
+    pending = plugins_with_pending_changefiles(target_base, head)
     missing = sorted(plugins - pending)
     return (1 if missing else 0), missing
 

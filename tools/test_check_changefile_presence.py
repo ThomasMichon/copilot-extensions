@@ -303,7 +303,7 @@ def test_only_new_or_changed_library_intents_charge_consumers(repo: Path, edit: 
         result.stdout + result.stderr
     )
     if edit in ("type", "added"):
-        assert "alpha" in result.stderr
+        assert "fresh changefile" in result.stderr
 
 
 @pytest.mark.parametrize("data", [
@@ -526,3 +526,84 @@ def test_quoted_library_source_path_requires_consumer_bump(repo: Path, guard: st
     )
     assert result.returncode == 1, result.stdout + result.stderr
     assert "alpha" in result.stderr
+
+
+@pytest.mark.parametrize("edit", ["added", "type"])
+def test_consumed_library_intent_requires_fresh_filename(repo: Path, edit: str) -> None:
+    baseline = _intent("alpha" if edit == "added" else "libs/leaf")
+    _nested_library_base(repo, pending=baseline)
+    _git(repo, "update-ref", "refs/heads/last-promotion", "HEAD")
+    pending = _intent(baseline["changes"][0]["plugin"])
+    if edit == "added":
+        pending["changes"].append({"plugin": "libs/leaf", "type": "patch"})
+    else:
+        pending["changes"][0]["type"] = "minor"
+    _write(repo, ".changefiles/pending.json", json.dumps(pending))
+    _write(repo, ".changefiles/consumer-new.json", json.dumps(_intent("alpha")))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "change a consumed library filename with fresh consumer coverage")
+
+    result = _run(repo)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "fresh changefile" in result.stderr
+    assert "pending.json" in result.stderr
+
+    _write(repo, ".changefiles/pending.json", json.dumps(baseline))
+    _write(repo, ".changefiles/library-new.json",
+           json.dumps(_intent("libs/leaf", "patch" if edit == "added" else "minor")))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "place new library release intent in a fresh filename")
+    result = _run(repo)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("target", ["libs/leaf", "alpha"])
+def test_consumed_filename_cannot_be_readded_as_bump_coverage(repo: Path, target: str) -> None:
+    _nested_library_base(repo, pending=_intent(target))
+    _git(repo, "update-ref", "refs/heads/last-promotion", "HEAD")
+    _git(repo, "rm", "--", ".changefiles/pending.json")
+    _git(repo, "commit", "-qm", "clear the consumed filename from the contribution branch")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _write(repo, ".changefiles/pending.json", json.dumps(_intent(target)))
+    other = "alpha" if target == "libs/leaf" else "libs/leaf"
+    _write(repo, ".changefiles/fresh-other.json", json.dumps(_intent(other)))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "reuse a consumed filename beside a fresh companion intent")
+
+    result = _run(repo)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "fresh changefile" in result.stderr
+    assert "pending.json" in result.stderr
+
+
+def test_filename_consumed_on_target_after_branch_fork_is_not_fresh(repo: Path) -> None:
+    _nested_library_base(repo)
+    _write(repo, ".changefiles/pending.json", json.dumps(_intent("libs/leaf")))
+    _write(repo, ".changefiles/consumer-new.json", json.dumps(_intent("alpha")))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "candidate release intents")
+    _git(repo, "branch", "candidate")
+    _git(repo, "checkout", "-q", "-b", "integrated-base", "origin/main")
+    _write(repo, ".changefiles/pending.json", json.dumps(_intent("libs/leaf")))
+    _write(repo, ".changefiles/consumer-old.json", json.dumps(_intent("alpha")))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "the target integrates and promotes the same filename")
+    _git(repo, "update-ref", "refs/heads/last-promotion", "HEAD")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _git(repo, "checkout", "-q", "candidate")
+
+    result = _run(repo)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "fresh changefile" in result.stderr
+
+
+def test_renamed_consumer_uses_a_fresh_release_identity(repo: Path) -> None:
+    _nested_library_base(repo, pending=_intent("alpha"))
+    _git(repo, "update-ref", "refs/heads/last-promotion", "HEAD")
+    _git(repo, "mv", ".changefiles/pending.json", ".changefiles/consumer-new.json")
+    _write(repo, ".changefiles/library-new.json", json.dumps(_intent("libs/leaf")))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "fresh library intent and renamed consumer release identity")
+
+    result = _run(repo)
+    assert result.returncode == 0, result.stdout + result.stderr
