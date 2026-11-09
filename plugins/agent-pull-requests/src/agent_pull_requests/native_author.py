@@ -10,6 +10,9 @@ from .native_command import run_command
 
 def add_parsers(subparsers, *, repo_type, handler):
     from .native_cli import validate_selector
+    from .native_source_complete import add_parser as add_complete_parser
+
+    add_complete_parser(subparsers, repo_type, handler)
 
     for name in ("author-capabilities", "update", "push", "ready", "nudge", "resolve-thread", "reopen-thread"):
         author = subparsers.add_parser(name, help={

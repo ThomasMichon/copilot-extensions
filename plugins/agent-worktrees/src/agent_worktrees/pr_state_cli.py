@@ -135,13 +135,17 @@ def add_parsers(sub) -> None:
         "pr-complete",
         help="Reconcile the worktree after its PR merged (fast-forward past the "
         "squash-merge, or rebase to preserve new work). Distinct from finalize.",
+        allow_abbrev=False,
     )
     p.add_argument("worktree_id", nargs="?", default=None)
+    p.add_argument("--repo", help="Guarded mode: this managed source's registered target")
+    p.add_argument("--expected-branch", help="Guarded mode: exact current local branch")
+    p.add_argument("--expected-head", help="Guarded mode: full current local commit ID")
     p.add_argument(
         "--dry-run",
         action="store_true",
         dest="dry_run",
-        help="Report the action that would be taken; change nothing",
+        help="Preview reconciliation without changing source files or branch; may fetch upstream",
     )
     p.add_argument("--json", action="store_true", help="JSON output mode")
     p.add_argument("--config", default=None)
@@ -602,6 +606,10 @@ def cmd_pr_nudge(args: argparse.Namespace) -> int:
 def cmd_pr_complete(args: argparse.Namespace) -> int:
     from . import pr_complete
 
+    if any(getattr(args, name, None) is not None for name in ("repo", "expected_branch", "expected_head")):
+        from . import pr_source_complete
+
+        return pr_source_complete.emit(args, pr_source_complete.complete(args))
     use_json = getattr(args, "json", False)
     try:
         config = cfg.load_config(Path(args.config) if args.config else None)

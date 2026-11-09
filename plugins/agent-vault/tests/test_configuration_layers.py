@@ -514,7 +514,7 @@ def test_installed_reader_uses_retained_sdk_for_qualified_activation(
 
     def run(argv, **kwargs):
         assert argv == [
-            str(python), "-I", "-B", "-X", "utf8", "-m", "agent_worktrees",
+            str(python), "-I", "-B", "-X", "utf8", "-B", "-m", "agent_worktrees",
             "state-root", "--configuration", "--json",
         ]
         assert kwargs["cwd"] == base
