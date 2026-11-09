@@ -20,7 +20,6 @@ rewriting historical journal evidence or treating a source merge as rollout.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [Derived Disk Hygiene](active/derived-disk-hygiene/README.md) | Active; bytecode, scratch and claim-engine slices merged; guided cleanup delivery, producer/lock integration and rollout observation remain | #10968/#10965/#10966/#10967; independent per-track PRs, no automatic finalize deletion or unapproved cleanup/rollout |
-| [Mux Functional Continuity](active/mux-functional-continuity/README.md) | Active; plan #11547 accepted, complete Open/resume/listing flow next | #11544; Driver-owned observation, existing hosting/creation owners retained; no shared-host probes or rollout |
 | [Bridge Delivery Status](active/bridge-delivery-status/README.md) | Draft; model-facing receipt and coalesced host subscription proposal before implementation | #11448; preserves #6394 inbox, #11445 registration and #11298 roster owners; no rollout or peer-session repair |
 | [Podman Runtime and Image Sources](active/podman-runtime-and-image-sources/README.md) | Draft; reviewed driver/consumer proposal before implementation | #11386; existing runtime-driver, fleet/lease and credential owners retained; no engine/machine/image/venue effects or rollout |
 | [Installed Manager TTY Qualification](active/installed-manager-tty-qualification/README.md) | Active; actual installed-binstub native witness passed; source review and Main gate activation remain open | #11377; extends existing #3336/#7529 qualification, preserves native and launcher owners; no live rollout |
@@ -181,6 +180,7 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Mux Functional Continuity](2026/11/09%20mux-functional-continuity/README.md) | Done for source scope; plan #11547 and implementation #11564 merged, exact-source PSMux 3.3.8/3.4.0 native consumers passed | #11544; normal promotion and separately authorized installed adoption remain independent; no host rollout |
 | [Durable Goals and Steers](2026/11/07%20durable-goals-and-steers/README.md) | Done for source scope; reviewed plan and implementation #11408/#11432 merged, actual native replay qualified | #11403; normal promotion and authorized installed adoption remain separate; semantic reading not asserted |
 | [Worktree Activity Convergence](2026/11/07%20worktree-activity-convergence/README.md) | Done for the four requested fixes; source released, selected installed code/resident and fresh native Picker controls accepted | #11195 closeout; #6389/#11322/#10752 retain independent installer convergence, original retirement/publication/event owners preserved |
 | [Live Question Answers](2026/11/07%20live-question-answers/README.md) | Done for source scope; authenticated exact-request answers merged in #11309 after approval, required CI, native structured-form proof and 285-case contract qualification | #4418 retains native legacy input qualification; #6917 MR9/MRV10 receives the Windows capture investigation from retired #11311; no shared-session answers or rollout |
