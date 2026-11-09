@@ -2,6 +2,8 @@
 
 See the [configuration reference](docs/configuration.md) for coordinator
 environment, reusable registrar/identity fields and configuration boundaries.
+Windows scheduling is optional and separate from service capability; see
+[scheduling and classic-lane readiness](docs/windows-scheduling.md).
 
 Sustained role charters that may use Dispatch as one adapter, such as
 sustained pull-request review (`agent-roles:review-pull-requests`) and fleet

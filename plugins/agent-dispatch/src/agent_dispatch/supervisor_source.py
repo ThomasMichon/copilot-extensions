@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import os
 from pathlib import Path
@@ -21,7 +22,10 @@ def _directory(root: Path) -> Path:
     return root / "run" / "supervisor-candidates"
 
 
-def read_prepared(root: Path, version: str, scope: str, *, authority=None, instance_id=None, pid=None):
+def read_prepared(
+    root: Path, version: str, scope: str, *,
+    authority=None, instance_id=None, pid=None, exclude_pid=None, expected=None,
+):
     from agent_procutil._daemon_instance_identity import identity_state, path_identity
     from agent_procutil.daemon_instances import inspect_instances
     from .source_start import _path_name
@@ -53,7 +57,11 @@ def read_prepared(root: Path, version: str, scope: str, *, authority=None, insta
         if document.get("runtime_version") != version or document.get("scope") != scope:
             continue
         generation = document.get("generation")
+        if exclude_pid is not None and isinstance(generation, dict) and generation.get("pid") == exclude_pid:
+            continue
         if pid is not None and isinstance(generation, dict) and generation.get("pid") != pid:
+            continue
+        if expected is not None and any(document.get(key) != value for key, value in expected.items()):
             continue
         owner = document.get("owner", {})
         if not isinstance(owner, dict):
@@ -152,6 +160,9 @@ class CandidateAdmission:
             "birth": birth_identity(os.getpid()),
             "settings": effective_settings(arguments),
         }
+        binding = getattr(daemon, "_master_profile", None)
+        if binding is not None:
+            self.record["profile_binding"] = binding.preparation()
         if not self.record["generation"]["start_token"] or not self.record["birth"]:
             raise RuntimeError("supervisor preparation native birth is unavailable")
         pending = path.with_suffix(".pending")
@@ -170,9 +181,12 @@ class CandidateAdmission:
 
         if read_current_version(self.root) != self.version:
             raise RuntimeError("supervisor candidate Source selection changed")
+        if not _profile_current(self.record.get("profile_binding")):
+            raise RuntimeError("supervisor candidate profile generation changed")
         if read_prepared(
             self.root, self.version, self.record["scope"],
             instance_id=self.record["instance_id"],
+            expected={key: self.record.get(key) for key in ("settings", "profile_binding")},
         ) is None:
             raise RuntimeError("supervisor candidate preparation lost native custody")
 
@@ -217,7 +231,13 @@ def acquire_candidate(daemon, admission, *, once, single_instance):
                 and process_start_token(peer["pid"]) == peer["start_token"]
                 and is_locked(lock_path_for(run_dir(), scope))
                 and read_holder_pid(lock_path_for(run_dir(), scope)) == peer["pid"]
-                and read_prepared(admission.root, admission.version, scope, pid=peer["pid"]) is not None
+                and read_prepared(
+                    admission.root, admission.version, scope, pid=peer["pid"],
+                    **({
+                        "authority": admission.record["owner"]["authority_target"],
+                        "expected": {key: admission.record.get(key) for key in ("settings", "profile_binding")},
+                    } if getattr(admission, "record", None) is not None else {}),
+                ) is not None
             ):
                 return False
         daemon.sleep(daemon.poll_interval)
@@ -229,6 +249,12 @@ def configure_admission(daemon, args, guard, clients):
     from .install_paths import install_dir
     from .source_start import _path_name, config_identity, require_selected_source
     from .supervise_cli import _client, _supervisor_authority_target, _write_supervisor_cycle_start
+
+    root = _path_name(require_selected_source())
+    if args is not None and getattr(daemon, "_master_profile", None) is None:
+        _adopt_declared_primary(daemon, args, root)
+    if getattr(args, "no_declared", False):
+        daemon.declared_source = lambda: read_legacy_declarations(enabled=args.legacy_env)
 
     def probe():
         with _client(args, ensure=False, allow_ssh_failover=False) as peer:
@@ -252,18 +278,48 @@ def configure_admission(daemon, args, guard, clients):
         )
 
     admission = CandidateAdmission(
-        _path_name(require_selected_source()), __version__, guard, admitted, probe=probe,
+        root, __version__, guard, admitted, probe=probe,
     )
     clients.callback(admission.close)
     return admission
 
 
-def spawn_candidate(python, argv, *, root, version):
+def _adopt_declared_primary(daemon, args, root):
+    from .client_authority import supervisor_authority_target
+    from .source_start import SupervisorStartupPlan, supervisor_plan
+    from .supervisor_profile import MasterProfile, configure_master_profile
+    from .supervisor_registration import registration_scope
+    from .registrar import RegistrarError
+
+    try:
+        (root / "supervisor.env").lstat()
+        plan = supervisor_plan(root)
+        if (
+            not isinstance(plan, SupervisorStartupPlan) or plan.profile is None
+            or getattr(args, "once", False) or getattr(args, "no_single_instance", False)
+            or registration_scope(args) != (daemon.machine, daemon.env)
+            or (plan.machine, plan.env) != (daemon.machine, daemon.env)
+            or effective_settings(args) != effective_settings(plan.args)
+            or supervisor_authority_target(args) != supervisor_authority_target(plan.args)
+        ):
+            return
+        binding = MasterProfile(
+            plan.profile, plan.profile_generation, daemon._self_update_argv, source_primary=True,
+        )
+    except (OSError, ValueError, RuntimeError, RegistrarError):
+        # An unknown primary is not evidence that an unmarked custom role owns it.
+        log.warning("Source primary binding is unconfirmed; unmarked candidate remains unbound")
+        return
+    configure_master_profile(daemon, binding)
+
+
+def spawn_candidate(python, argv, *, root, version, profile_binding=None):
     from .procutil import spawn_dispatch_daemon
 
     return spawn_dispatch_daemon(
         [str(python), "-m", "agent_dispatch", *argv, "--source-candidate", version],
         log_name="logs/supervisor-candidate.log", cwd=root,
+        **({"env": dict(os.environ, **profile_binding)} if profile_binding is not None else {}),
     )
 
 
@@ -289,7 +345,41 @@ def effective_settings(args):
     from .supervisor_registration import registration_scope
 
     machine, env = registration_scope(args)
-    return {"machine": machine, "env": env, "interval": float(args.interval), "legacy_env": bool(args.legacy_env)}
+    return {
+        "machine": machine, "env": env, "interval": float(args.interval),
+        "legacy_env": bool(args.legacy_env), "no_declared": bool(getattr(args, "no_declared", False)),
+    }
+
+
+def read_legacy_declarations(*, enabled):
+    from .pool_source_snapshot import DeclarationRead
+    from .registrar import RegistrarError
+    from .registrar_discovery import read_legacy_env_profiles
+
+    try:
+        profiles = read_legacy_env_profiles(strict=True) if enabled else ()
+    except (OSError, UnicodeError, RegistrarError):
+        return DeclarationRead((), False, "legacy-source-unavailable")
+    return DeclarationRead(tuple(profiles), True)
+
+
+def _expected_preparation(daemon):
+    from . import __main__ as cli
+
+    binding = getattr(daemon, "_master_profile", None)
+    return {
+        "settings": effective_settings(cli.build_parser().parse_args(daemon._self_update_argv)),
+        "profile_binding": None if binding is None else binding.preparation(incoming=True),
+    }
+
+
+def _profile_current(binding):
+    if binding is None:
+        return True
+    try:
+        return hashlib.sha256(Path(binding["path"]).read_bytes()).hexdigest() == binding["generation"]
+    except OSError:
+        return False
 
 
 def _cancel_owned_candidate(child, root):
@@ -464,7 +554,13 @@ def advance_handoff(daemon, root, version, target):
         return _pause_handoff(daemon)
     scope = supervisor_lease_scope(daemon.machine, daemon.env)
     try:
-        ready = read_prepared(root, version, scope, authority=_authority(daemon))
+        expected = _expected_preparation(daemon)
+        if not _profile_current(expected["profile_binding"]):
+            return _retarget_handoff(daemon, state) if state is not None else False
+        ready = read_prepared(
+            root, version, scope, authority=_authority(daemon),
+            exclude_pid=os.getpid(), expected=expected,
+        )
     except (OSError, RuntimeError, ValueError):
         log.warning("source supervisor preparation is unconfirmed; original custody retained", exc_info=True)
         return False
@@ -478,6 +574,8 @@ def advance_handoff(daemon, root, version, target):
             try:
                 child = spawn_candidate(
                     target, list(daemon._self_update_argv), root=root, version=version,
+                    **({"profile_binding": daemon._master_profile.environment()}
+                       if getattr(daemon, "_master_profile", None) is not None else {}),
                 )
             except Exception as error:
                 if (
@@ -527,7 +625,12 @@ def advance_handoff(daemon, root, version, target):
     if any(not future.done() for future in _tracked_work(daemon)):
         return False
     try:
-        confirmed = read_prepared(root, version, scope, instance_id=ready["instance_id"])
+        confirmed = read_prepared(
+            root, version, scope, instance_id=ready["instance_id"],
+            authority=_authority(daemon), exclude_pid=os.getpid(), expected=expected,
+        )
+        if not _profile_current(expected["profile_binding"]):
+            return _retarget_handoff(daemon, state)
     except (OSError, RuntimeError, ValueError):
         return False
     if confirmed is None:
