@@ -321,6 +321,13 @@ def run_tier(
 ) -> RunResult:
     if tier not in TIER_SPECS:
         raise ValueError(f"unknown fleet-update tier: {tier}")
+    if not opted_in:
+        return RunResult(
+            tier=tier,
+            status="noop",
+            opted_in=False,
+            detail=f"tier {tier!r} is not opted in",
+        )
     ownership = read_update_ownership(home)
     refusal = ownership.refusal(automatic=True)
     if refusal:
@@ -329,13 +336,6 @@ def run_tier(
             status="error" if ownership.state == "refused" else "deferred",
             opted_in=opted_in,
             detail=refusal,
-        )
-    if not opted_in:
-        return RunResult(
-            tier=tier,
-            status="noop",
-            opted_in=False,
-            detail=f"tier {tier!r} is not opted in",
         )
     lock = TierLock(tier=tier, home=home)
     acquired, detail = lock.acquire()

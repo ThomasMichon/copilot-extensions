@@ -1,5 +1,5 @@
 {
-  "comment": "Hand off automatic suite updates without competing owners, preserve standalone Manager version-skew compatibility through guarded fleet wrappers, and validate scheduler ownership and inactivity before reconfiguration or retirement",
+  "comment": "Hand off automatic suite updates without competing owners, preserve opted-out fleet no-ops and standalone Manager version-skew compatibility, and validate scheduler ownership and inactivity before reconfiguration or retirement",
   "changes": [
     {
       "plugin": "agent-machines",

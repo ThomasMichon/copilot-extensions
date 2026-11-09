@@ -205,17 +205,19 @@ def test_automatic_ownership_watchdog_does_not_depend_on_manager(
         "watchdog",
         opted_in=True,
         home=tmp_path,
-        host_healer=lambda: self_update.StepResult("host", "ok"),
+        host_healer=lambda: self_update.StepResult("dtssh-host-health", "ok"),
         mesh_refresher=lambda: self_update.StepResult("mesh", "ok"),
     )
     assert result.ok
-    assert [step.name for step in result.steps] == ["dtssh-launcher", "host", "mesh"]
+    assert [step.name for step in result.steps] == ["dtssh-launcher", "dtssh-host-health", "mesh"]
 
 
 @pytest.mark.parametrize("owner", ["manager", "external", "disabled", "refused", None])
+@pytest.mark.parametrize("opted_in", [False, True])
 def test_automatic_ownership_fleet_run_admission(
     tmp_path: Path,
     owner: str | None,
+    opted_in: bool,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(fleet_update, "run_compatible_manager_update", unit_guarded_manager_update)
@@ -231,14 +233,17 @@ def test_automatic_ownership_fleet_run_admission(
 
     result = fleet_update.run_tier(
         "sweep",
-        opted_in=True,
+        opted_in=opted_in,
         runner=runner,
         home=tmp_path,
     )
-    allowed = owner is None
+    allowed = opted_in and owner is None
     assert bool(calls) is allowed
-    assert result.ok is allowed
-    if not allowed:
+    assert result.ok is (not opted_in or allowed)
+    if not opted_in:
+        assert result.status == "noop"
+        assert result.detail == "tier 'sweep' is not opted in"
+    elif not allowed:
         assert result.status == ("error" if owner == "refused" else "deferred")
 
 
