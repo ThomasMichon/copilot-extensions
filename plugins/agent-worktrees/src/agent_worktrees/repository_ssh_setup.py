@@ -75,18 +75,25 @@ def key_binding(context, description: dict) -> None:
         raise protocol.SetupError("Selected Vault directory differs from the SSH request's exact key references.")
 
 
-def _vault_call(selection, arguments: list[str], *, timeout: int) -> tuple[int, dict]:
-    environment = protocol._environment(attended=False)
+def _vault_call(selection, arguments: list[str], *, timeout: int, invocation=None) -> tuple[int, dict]:
+    if invocation is not None:
+        invocation.verify()
+    environment = (
+        dict(invocation.environment) if invocation is not None else protocol._environment(attended=False)
+    )
     environment["AGENT_VAULT_NO_SELFPROVISION"] = "1"
     environment.pop("AGENT_VAULT_PINNED_CONTEXT", None)
     # A routing-only guard must not clear the caller's explicit provisioning inhibition.
     environment.pop("_AGENT_WORKTREES_VAULT_RUNTIME_GUARD", None)
     try:
         completed = run_caller_owned(
-            [str(Path(selection.argv[0]).expanduser()), *selection.argv[1:],
+            [*(invocation.argv if invocation is not None else
+               (str(Path(selection.argv[0]).expanduser()), *selection.argv[1:])),
              "--configuration-root", str(Path(selection.configuration_root).expanduser()), *arguments],
             env=environment, timeout=timeout, max_stdout_bytes=16384, max_stderr_bytes=16384,
         )
+        if invocation is not None:
+            invocation.verify()
         value = json.loads(completed.stdout, object_pairs_hook=protocol._object)
         if not isinstance(value, dict):
             raise ValueError
@@ -126,7 +133,12 @@ def prepare_key(setup, context, description: dict) -> protocol.Outcome | None:
     except OSError:
         raise protocol.SetupError("Selected Vault configuration root is unavailable.") from None
     setup.verify()
-    code, contract = _vault_call(selection, ["invocation-contract", "--json"], timeout=30)
+    invocation = {}
+    if selection.owner is not None:
+        from . import repository_vault
+
+        invocation["invocation"] = repository_vault.selected()
+    code, contract = _vault_call(selection, ["invocation-contract", "--json"], timeout=30, **invocation)
     if (
         code != 0 or contract.get("schema") != "agent-vault.invocation"
         or type(contract.get("version")) is not int or contract["version"] != 1
@@ -144,7 +156,7 @@ def prepare_key(setup, context, description: dict) -> protocol.Outcome | None:
                 "--expected-fingerprint", selection.fingerprint,
             ])
         setup.verify()
-        code, result = _vault_call(selection, arguments, timeout=120)
+        code, result = _vault_call(selection, arguments, timeout=120, **invocation)
         if operation == "install":
             setup.verify()
         if code != 0:
