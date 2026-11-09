@@ -454,6 +454,31 @@ def test_dispatch_attempt_policy_releases_own_stale_session_claim(
     assert released.state == "released"
 
 
+def test_bridge_creation_policy_releases_own_stale_session_claim(
+    tmp_path, monkeypatch, _worker_seed
+):
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch, _worker_seed)
+    record = tracking.load_record(record_path)
+    record.interface = "acp"
+    record.origin = "delegate"
+    session_ref = tracking.format_claim_ref(
+        record.machine, "demo", record.worktree_id, session="session-exact",
+    )
+    record.resources = [tracking.ResourceClaim(
+        kind="session", ref=session_ref, created_at="2026-09-21T12:24:04",
+        state="active", note="live Copilot session",
+    )]
+    tracking.save_record(record, record_path)
+
+    result = _conclude(
+        record_path, repo, policy=tc.BRIDGE_CREATION_POLICY,
+        creation_nonce=record.creation_nonce,
+    )
+
+    assert result["action"] == "primed"
+    assert tracking.load_record(record_path).live_resources == []
+
+
 def test_dispatch_attempt_policy_releases_only_the_concluding_session_claim(
     tmp_path, monkeypatch, _worker_seed
 ):

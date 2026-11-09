@@ -366,24 +366,40 @@ def conclude_dispatch_attempt(
     worktree_path: str | None = None,
     creation_nonce: str | None = None,
 ) -> dict:
-    """Safely conclude one dispatch-created (or Bridge-created, by nonce) worktree."""
-    proof = (
-        ["--policy", "bridge-creation", "--creation-nonce", creation_nonce]
-        if creation_nonce
-        else ["--policy", "dispatch-attempt", "--reservation", reservation_key]
+    """Safely conclude one dispatch-created (or Bridge-created, by nonce) worktree.
+
+    Dispatch provenance is always tried first, so a preallocated worker that
+    Bridge merely targeted keeps its exact reservation proof. Only a record
+    without dispatch provenance falls back to Bridge's retained creation
+    nonce; a runtime without that policy preserves the workspace."""
+    def proof_args(proof: list[str]) -> list[str]:
+        args = ["conclude-disposable", "--worktree", worktree, *proof,
+                "--owner", owner, "--remove", "--json"]
+        return args + ["--session", session] if session else args
+
+    payload = _run_dispatch_conclusion(
+        worktree, proof_args(["--policy", "dispatch-attempt", "--reservation", reservation_key]),
+        timeout=timeout, project=project, worktree_path=worktree_path,
     )
-    args = [
-        "conclude-disposable",
-        "--worktree",
-        worktree,
-        *proof,
-        "--owner",
-        owner,
-        "--remove",
-        "--json",
-    ]
-    if session:
-        args += ["--session", session]
+    if not creation_nonce or payload.get("reason") != "dispatch-provenance-missing":
+        return payload
+    try:
+        return _run_dispatch_conclusion(
+            worktree, proof_args(["--policy", "bridge-creation", "--creation-nonce", creation_nonce]),
+            timeout=timeout, project=project, worktree_path=worktree_path,
+        )
+    except _UnsupportedConclusionPolicy:
+        return {**payload, "bridge_creation": "unsupported-runtime"}
+
+
+class _UnsupportedConclusionPolicy(DisposableConclusionError):
+    """The installed agent-worktrees runtime predates a conclusion policy."""
+
+
+def _run_dispatch_conclusion(
+    worktree: str, args: list[str], *, timeout: float,
+    project: str | None, worktree_path: str | None,
+) -> dict:
     prefix = _agent_worktrees_launch_prefix()
     if prefix is None:
         raise DisposableConclusionError("agent-worktrees CLI not found on this host")
@@ -418,10 +434,13 @@ def conclude_dispatch_attempt(
             (result.stderr or "").strip()[:300]
             or "agent-worktrees returned invalid dispatch conclusion output"
         ) from exc
+    stderr = (result.stderr or "").strip()
+    if result.returncode == 2 and ("invalid choice" in stderr or "unrecognized arguments" in stderr):
+        raise _UnsupportedConclusionPolicy(stderr[-300:])
     if result.returncode != 0 or not isinstance(payload, dict) or payload.get("error"):
         detail = payload.get("error") if isinstance(payload, dict) else None
         raise DisposableConclusionError(
-            str(detail or (result.stderr or "").strip() or "dispatch conclusion failed")[:300]
+            str(detail or stderr or "dispatch conclusion failed")[:300]
         )
     return payload
 
