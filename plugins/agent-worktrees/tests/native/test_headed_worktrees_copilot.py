@@ -89,7 +89,8 @@ def _qualify_native_worktrees(
     source_root = Path(__file__).resolve().parents[4]
     site_packages = None if installed else sysconfig.get_paths()["purelib"]
     prefix = [str(worktrees_python) if installed else sys.executable, "-I", "-B", "-X", "utf8"]
-    home, checkout = tmp_path / "copilot-home", tmp_path / "checkout"
+    home = tmp_path / (".copilot" if public_embody else "copilot-home")
+    checkout = tmp_path / "checkout"
     home.mkdir()
     checkout.mkdir()
     temporary = tmp_path / "temp"
@@ -142,7 +143,8 @@ def _qualify_native_worktrees(
         COPILOT_OFFLINE="true", COPILOT_PROVIDER_TYPE="openai",
         COPILOT_PROVIDER_BASE_URL=f"http://127.0.0.1:{provider.server_port}",
         COPILOT_PROVIDER_MODEL_ID="gpt-4.1", COPILOT_MODEL="gpt-4.1", USE_TGREP="false",
-        HOME=str(home), USERPROFILE=str(home),
+        HOME=str(home.parent if public_embody else home),
+        USERPROFILE=str(home.parent if public_embody else home),
         PSMUX_DATA_DIR=str(mux_data), PSMUX_CONFIG_FILE=os.devnull,
         PSMUX_NO_WARM="1", PSMUX_SERVER_DEBUG="1",
         WORKTREE_PANE_MIN_RUNTIME="0", WORKTREE_PANE_WAIT_TIMEOUT="0",
@@ -708,6 +710,18 @@ class Mux {
                 f"{leg}: native history did not restore or finish its original seed",
             )
             if public_embody:
+                # This isolated application has no installed sessionStart plugin hook.
+                registered = run_caller_owned(
+                    [str(console), "--project", "native-copilot", "bind-session",
+                     "--worktree-id", worktree_id, "--session-id", native,
+                     "--pane", identities[target].split("|")[1],
+                     "--pid", str(state["child_pid"])],
+                    cwd=checkout, env=environment, timeout=30,
+                    max_stdout_bytes=65536, max_stderr_bytes=65536,
+                )
+                assert registered.returncode == 0, registered.stdout + registered.stderr
+                binding = json.loads(registered.stdout)
+                assert binding["bound"] and binding["is_head"] and binding["head_session"] == native
                 launched_attempts = set(record.parent.glob("launch-attempts/*"))
                 reused = run_caller_owned(
                     [str(console), "--project", "native-copilot", "embody",
