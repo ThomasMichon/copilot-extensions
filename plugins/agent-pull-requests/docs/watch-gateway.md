@@ -204,8 +204,13 @@ same credential supplies absolute GitHub.com GraphQL and REST diff routes,
 without `gh pr diff`'s auxiliary discovery or ambient token/host overrides.
 Selection is rechecked before requests and publication. Configuration,
 credentials and provider children share the original finite execution/cleanup
-budget; delayed cleanup keeps the original Gateway task and cannot publish a
-success. Existing native commands and unselected providers are unchanged.
+budget. Publication checks run in shielded, tracked workers rather than on the
+Gateway event loop; delayed cleanup retains the admitted request's custody and
+cannot publish a success. Malformed or unavailable contributing configuration
+refuses credential selection instead of dropping repository policy. Provider
+access errors retain a sanitized native failed report and owner exit; transport
+and cleanup failures remain unavailable. Existing native commands and unselected
+providers are unchanged.
 
 This is not installed HTTP adoption: native Windows execution, larger-report
 transport, retained hosting and live-provider proof remain separate. Gitea,

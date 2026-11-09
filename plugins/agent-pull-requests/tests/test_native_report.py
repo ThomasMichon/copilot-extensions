@@ -70,11 +70,15 @@ def native(tmp_path, monkeypatch):
         "   p=pathlib.Path(os.environ['FIXTURE_REGISTRY']);p.write_text('{\"account_map\":{\"example\":\"replacement\"}}')\n"
         "  print('HTTP/2 200 OK\\r\\n\\r\\n'+json.dumps({'login':os.environ.get('FIXTURE_LOGIN','selected')}))\n"
         " elif args[3]=='https://api.github.com/graphql':\n"
+        "  assert args[4]=='-f' and args[5].startswith('query=')\n"
+        "  assert args[6:]==['-f','variables[owner]=example','-f','variables[name]=project','-F','variables[number]=7']\n"
+        "  if os.environ.get('FIXTURE_NONZERO'):print('fixture-secret',file=sys.stderr);sys.exit(1)\n"
         "  if os.environ.get('FIXTURE_FAIL'):print('{\"errors\":[{\"message\":\"fixture-secret\"}]}');sys.exit(0)\n"
         "  print(json.dumps({'data':{'repository':{'pullRequest':{'reviewThreads':{'nodes':[{'path':'x','comments':{'nodes':[{'body':'body\\r\\ntext','author':{'login':'fixture'}}]}}]}}}}}))\n"
         " else:\n"
         "  assert args[3:]==['https://api.github.com/repos/example/project/pulls/7','-H','Accept: application/vnd.github.diff']\n"
         "  if os.environ.get('FIXTURE_FAIL'):print('fixture-secret',file=sys.stderr);sys.exit(1)\n"
+        "  if os.environ.get('FIXTURE_NONZERO'):print('fixture-secret',file=sys.stderr);sys.exit(1)\n"
         "  if os.environ.get('FIXTURE_LARGE'):sys.stdout.buffer.write(b'x'*40000);sys.exit(0)\n"
         "  if os.environ.get('FIXTURE_ROTATE_AFTER_REPORT'):\n"
         "   p=pathlib.Path(os.environ['FIXTURE_REGISTRY']);p.write_text('{\"account_map\":{\"example\":\"replacement\"}}')\n"
@@ -164,8 +168,24 @@ def test_provider_failures_have_native_failure_exit_without_diagnostics(native, 
     binding = owner.resolve(remaining)
     exit_code, text = binding.collect(operation, 7, remaining)
     report = json.loads(text)
-    assert exit_code == 1 and report["complete"] is False
+    assert exit_code == 1 and report["complete"] is False and report["supported"] is True
     assert report["error"] and "fixture-secret" not in text
+
+
+@pytest.mark.parametrize("operation", ["threads", "diff"])
+def test_nonzero_provider_child_remains_supported_native_error(native_gateway, monkeypatch, operation):
+    monkeypatch.setenv("FIXTURE_NONZERO", "1")
+    _, gateway, client, _ = native_gateway
+
+    async def scenario():
+        await client.capabilities()
+        value = await client.read(operation, {"number": 7, "budget_seconds": 15})
+        assert value["owner_exit"] == 1
+        assert value["report"]["supported"] is True and value["report"]["complete"] is False
+        assert value["report"]["error"] and "fixture-secret" not in json.dumps(value)
+        await gateway.drain(timeout=2)
+
+    asyncio.run(scenario())
 
 
 @pytest.fixture
@@ -298,3 +318,53 @@ def test_delayed_native_cleanup_retains_original_gateway_task(native_gateway, mo
 
     asyncio.run(scenario())
     assert store.path.read_bytes() == before
+
+
+def test_publication_selection_cleanup_is_off_loop_and_keeps_request_custody(native_gateway, monkeypatch):
+    from agent_procutil.owned_process import OwnedCleanupError
+    from agent_pull_requests import native_report
+    from agent_pull_requests.watch_replay_client import ReplayClientError
+
+    _, gateway, client, _ = native_gateway
+    entered, release = threading.Event(), threading.Event()
+    armed = [False]
+    original_shield = asyncio.shield
+    original_run = native_report.run_caller_owned
+    loop_thread = threading.get_ident()
+
+    async def prepared(awaitable):
+        result = await original_shield(awaitable)
+        if not isinstance(awaitable, asyncio.Task) and json.loads(result.body).get("operation") == "diff":
+            armed[0] = True
+        return result
+
+    def cleanup(deadline):
+        entered.set()
+        if not release.wait(max(0, deadline - time.monotonic())):
+            raise TimeoutError
+
+    def delayed(argv, **kwargs):
+        if armed[0]:
+            assert threading.get_ident() != loop_thread
+            raise OwnedCleanupError(None, cleanup_retry=cleanup)
+        return original_run(argv, **kwargs)
+
+    monkeypatch.setattr(asyncio, "shield", prepared)
+    monkeypatch.setattr(native_report, "run_caller_owned", delayed)
+
+    async def scenario():
+        await client.capabilities()
+        pending = asyncio.create_task(client.read("diff", {"number": 7, "budget_seconds": 15}))
+        try:
+            assert await asyncio.to_thread(entered.wait, 10)
+            assert not pending.done() and len(gateway._tasks) == 1
+            with pytest.raises(TimeoutError):
+                await gateway.drain(timeout=.01)
+            assert not pending.done()
+        finally:
+            release.set()
+            results = await asyncio.gather(pending, return_exceptions=True)
+            assert isinstance(results[0], ReplayClientError)
+            await gateway.drain(timeout=5)
+
+    asyncio.run(scenario())

@@ -112,3 +112,48 @@ def test_strict_registry_and_duplicate_slug_refuse(target):
     write()
     with pytest.raises(ValueError, match="ambiguous"):
         select_report_target(path, "example/project")
+
+
+@pytest.mark.parametrize("content", ["pr: [", "pr: {}\npr: {token_command: helper}\n", "[]"])
+def test_invalid_target_policy_cannot_disappear_into_explicit_binding(target, tmp_path, content):
+    path, _, document, _, write = target
+    anchor = tmp_path / "target"
+    policy = anchor / ".agent-worktrees" / "config.yaml"
+    policy.parent.mkdir(parents=True)
+    policy.write_text(content, encoding="utf-8")
+    document["repos"]["target"]["anchor"] = str(anchor)
+    write()
+    with pytest.raises(ValueError):
+        select_report_target(path, "example/project")
+
+
+def test_unreadable_target_policy_refuses_before_account_acquisition(target, tmp_path, monkeypatch):
+    from agent_worktrees import repos_configuration_sources
+
+    path, _, document, _, write = target
+    anchor = tmp_path / "target"
+    policy = anchor / ".agent-worktrees" / "config.yaml"
+    policy.parent.mkdir(parents=True)
+    policy.write_text("pr: {token_command: helper}\n", encoding="utf-8")
+    document["repos"]["target"]["anchor"] = str(anchor)
+    write()
+    original = repos_configuration_sources.read_bytes
+
+    def unavailable(source):
+        if source == policy:
+            raise PermissionError("fixture-private-diagnostic")
+        return original(source)
+
+    monkeypatch.setattr(repos_configuration_sources, "read_bytes", unavailable)
+    monkeypatch.setattr(repos, "account_for_github_slug", lambda *a, **k: pytest.fail("credential policy bypass"))
+    with pytest.raises(PermissionError):
+        select_report_target(path, "example/project")
+
+
+def test_failed_config_dropin_is_not_an_absent_policy(target):
+    path, _, _, _, _ = target
+    dropins = path.parent / "config.d"
+    dropins.mkdir()
+    (dropins / "policy.yaml").write_text("repos: [", encoding="utf-8")
+    with pytest.raises(ValueError, match="acquisition"):
+        select_report_target(path, "example/project")

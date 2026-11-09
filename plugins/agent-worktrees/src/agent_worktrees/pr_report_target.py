@@ -12,6 +12,8 @@ from urllib.parse import urlsplit
 def select_report_target(config_path: Path, repository: str) -> dict:
     """Resolve the actual explicit configuration and strict configured account."""
     from . import config, repos
+    from .config_acquisition import capture_config_observations
+    from dropin_registry import ScanAuthority
     from .pr_read_context import read_explicit_config
     from .pr_related_binding import resolve_related_binding
     from .repos_configuration_sources import identity
@@ -19,9 +21,17 @@ def select_report_target(config_path: Path, repository: str) -> dict:
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
         raise ValueError("invalid native report repository")
     read_explicit_config(config_path)
-    selected = config.load_config(
-        config_path, include_control_plane_related_pr=False, include_knowledge_preferences=False,
-    )
+    with capture_config_observations() as observations:
+        selected = config.load_config(
+            config_path, include_control_plane_related_pr=False, include_knowledge_preferences=False,
+            strict_inrepo_config=True,
+        )
+    if any(
+        item.authority is ScanAuthority.INDETERMINATE
+        and item.stage in ("config-yaml", "config-dropins", "config-dropin-entry", "inrepo-file", "inrepo-yaml")
+        for item in observations
+    ):
+        raise ValueError("native report configuration acquisition is unavailable")
     target, name, error = resolve_related_binding(
         selected, repository, include_control_plane=False,
     )

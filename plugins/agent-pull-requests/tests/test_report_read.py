@@ -370,17 +370,18 @@ def test_publication_is_rechecked_after_worker_finishes_before_coroutine_resumes
 
 
 @pytest.mark.parametrize("gap,status", [("deadline", 503), ("withdrawal", 403)])
-def test_publication_is_rechecked_after_shielded_task_completion(reports, gap, status):
-    gateway, state = reports[1], reports[5]
-    original = gateway._completed
-    def completed(task):
-        original(task)
-        if json.loads(task.result().body).get("operation") == "threads":
+def test_publication_is_rechecked_after_prepared_response_handoff(reports, monkeypatch, gap, status):
+    state = reports[5]
+    original = asyncio.shield
+    async def delayed(awaitable):
+        result = await original(awaitable)
+        if not isinstance(awaitable, asyncio.Task) and json.loads(result.body).get("operation") == "threads":
             if gap == "deadline":
                 state["clock"] = 10
             else:
                 state["active"] = False
-    gateway._completed = completed
+        return result
+    monkeypatch.setattr(asyncio, "shield", delayed)
     with pytest.raises(ReplayClientError) as caught:
         read(reports[3])
     assert caught.value.http_status == status

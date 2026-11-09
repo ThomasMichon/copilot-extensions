@@ -1373,6 +1373,22 @@ callback an implicit credential store.
 
 ## Journal
 
+### 2026-11-09 - Native report boundary corrections
+
+- Publication-time selection can perform process work and delayed cleanup.
+  Keep both asynchronous publication rechecks in shielded, tracked workers so
+  unrelated Gateway requests and drain timers remain responsive while the
+  admitted request retains cleanup custody.
+- Require strict repository policy parsing and refuse failed configuration
+  contributions before account acquisition. Preserve ordinary fail-soft
+  configuration behavior outside this optional selection path.
+- Absolute GraphQL API routes require explicitly nested variables with native
+  string/integer types. Provider access failures remain supported native error
+  reports, distinct from unavailable transport and cleanup.
+- Isolated qualification passed 724 Worktrees cases, including the existing
+  authentication suite against the extracted runner, and 80 report/Gateway/TLS
+  cases. Current-head CI and genuine approval remain required before merge.
+
 ### 2026-11-09 - Native report-owner source qualification pending review
 
 - Implemented the reviewed #11681 contract under #11680 as an optional

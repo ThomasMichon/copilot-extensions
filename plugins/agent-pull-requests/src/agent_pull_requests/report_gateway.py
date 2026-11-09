@@ -64,27 +64,29 @@ async def handle(gateway, request):
         return _response(400, {"error": "invalid_report_request"})
     if gateway._closing or len(gateway._tasks) >= 8:
         return _response(503, {"error": "report_service_unavailable"})
-    publication = []
+    prepared = asyncio.get_running_loop().create_future()
+    handoff = asyncio.Event()
     task = asyncio.create_task(execute(
-        gateway, owner, operation, payload, request, target, expected, expected_scope, publication,
+        gateway, owner, operation, payload, request, target, expected, expected_scope, prepared, handoff,
     ))
     gateway._tasks.add(task)
     task.add_done_callback(gateway._completed)
     try:
+        await asyncio.shield(prepared)
+        handoff.set()
         response = await asyncio.shield(task)
-        if response.status == 200:
-            if len(publication) != 1:
-                raise ReportUnavailable("report publication checkpoint unavailable")
-            publication[0]()
+        gateway._check(request)
         return response
     except asyncio.CancelledError:
         request.lifetime.close()
         raise
     except Exception as error:
         return _failure(error)
+    finally:
+        handoff.set()
 
 
-async def execute(gateway, owner, operation, payload, request, target, expected, expected_scope, publication):
+async def execute(gateway, owner, operation, payload, request, target, expected, expected_scope, prepared, handoff):
     from .watch_gateway import _response
 
     response = None
@@ -93,7 +95,6 @@ async def execute(gateway, owner, operation, payload, request, target, expected,
     def encode(value, current):
         nonlocal response, publication_checkpoint
         publication_checkpoint = current
-        publication.append(current)
         response = _response(200, dict(value, binding=expected.document()))
         if len(response.body) > BODY_BYTES:
             raise ReportUnavailable("report response exceeds transport limit")
@@ -114,7 +115,15 @@ async def execute(gateway, owner, operation, payload, request, target, expected,
         )
         if publication_checkpoint is None:
             raise ReportUnavailable("report publication checkpoint unavailable")
-        publication_checkpoint()
+        await asyncio.to_thread(publication_checkpoint)
+        checkpoint()
+        prepared.set_result(response)
+        await handoff.wait()
+        await asyncio.to_thread(publication_checkpoint)
+        checkpoint()
         return response
     except Exception as error:
-        return _failure(error)
+        response = _failure(error)
+        if not prepared.done():
+            prepared.set_result(response)
+        return response

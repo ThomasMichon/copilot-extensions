@@ -45,7 +45,7 @@ def api(value, code=200, exit_code=0):
 
 @pytest.fixture
 def provider(monkeypatch):
-    from agent_procutil import owned_process
+    from agent_worktrees import github_account_observation
 
     calls = []
     responses = [
@@ -61,7 +61,7 @@ def provider(monkeypatch):
             raise value
         return value
 
-    monkeypatch.setattr(owned_process, "run_caller_owned", run)
+    monkeypatch.setattr(github_account_observation, "run_caller_owned", run)
     monkeypatch.setattr("shutil.which", lambda name: "/qualified/gh" if name == "gh" else None)
     return calls, responses
 
@@ -329,6 +329,7 @@ def test_real_capture_composes_synthetic_provider_and_aggregate_deadline(
 ):
     from agent_procutil import owned_process
     from agent_procutil.owned_budget import OwnedExecutionBudget
+    from agent_worktrees import github_account_observation
 
     script = tmp_path / "synthetic_provider.py"
     script.write_text(
@@ -349,7 +350,7 @@ def test_real_capture_composes_synthetic_provider_and_aggregate_deadline(
         calls.append(argv)
         return original_run([sys.executable, "-B", str(script), *argv[1:]], **kwargs)
 
-    monkeypatch.setattr(owned_process, "run_caller_owned", run)
+    monkeypatch.setattr(github_account_observation, "run_caller_owned", run)
     monkeypatch.setattr("shutil.which", lambda name: "/qualified/gh" if name == "gh" else None)
     if expire:
         monkeypatch.setattr(

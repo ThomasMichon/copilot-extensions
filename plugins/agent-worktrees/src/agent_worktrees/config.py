@@ -889,6 +889,7 @@ def _load_config_uncached(
     include_knowledge_preferences: bool = True,
     project: str | None = None,
     _machine_binding: dict[str, str] | None = None,
+    strict_inrepo_config: bool = False,
 ) -> Config:
     """Load and parse the layered project config.
 
@@ -933,6 +934,8 @@ def _load_config_uncached(
             machine/global ``repo_name`` values for this load.
         _machine_binding: Internal per-load provenance capture; never a YAML
             setting and never persisted.
+        strict_inrepo_config: Refuse malformed repository policy for finite
+            selected-owner reads; ordinary callers retain fail-soft loading.
 
     Returns:
         Parsed Config object.
@@ -1042,7 +1045,7 @@ def _load_config_uncached(
         )
 
         # Tier 2: the repo's own in-repo flat settings (base for repo settings).
-        inrepo_settings = _load_inrepo_config(anchor)
+        inrepo_settings = _load_inrepo_config(anchor, strict=True) if strict_inrepo_config else _load_inrepo_config(anchor)
         inrepo_preferences[name] = inrepo_settings
         inrepo_profile_assignments[name] = inrepo_settings.get(
             "profile_assignment"
@@ -1165,6 +1168,7 @@ def load_config(
     include_control_plane_related_pr: bool = True,
     include_knowledge_preferences: bool = True,
     project: str | None = None,
+    strict_inrepo_config: bool = False,
 ) -> Config:
     """Load config; memoized inside ``cached_load_config_scope()`` (see
     :mod:`agent_worktrees.config_cache`), else identical to the unwrapped loader."""
@@ -1174,6 +1178,7 @@ def load_config(
             include_control_plane_related_pr=include_control_plane_related_pr,
             include_knowledge_preferences=include_knowledge_preferences,
             project=project,
+            **({"strict_inrepo_config": True} if strict_inrepo_config else {}),
         )
 
 
