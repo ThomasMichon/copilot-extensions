@@ -1949,8 +1949,10 @@ whatever changefiles are pending; nothing here is hand-edited directly.
 > entries, release-note-only edits and removed intents do not create new
 > obligations. Consumer coverage still requires this PR's own newly added
 > changefiles, not coincidental pending entries from an earlier PR. Intent and
-> coverage reads use the resolved Git revisions, not checkout contents; Git
-> symlink modes are rejected even when the checkout contains a regular file.
+> coverage reads use the resolved Git revisions, not checkout contents. Direct
+> consumer seeds, nested library edges and packaged-source declarations use that
+> same selected tree and the shared parsers. Git symlink modes are rejected even
+> when the checkout contains a regular file.
 
 **All version files for a plugin must be bumped together in the same
 commit.** If any file is out of sync: a stale `plugin.json` makes

@@ -92,8 +92,9 @@ def touched_plugins(base_ref: str, head_ref: str = "HEAD") -> set[str]:
     changed.extend(
         f"{library}/pyproject.toml" for library in _changed_library_intents(cvb, mbase, head)
     )
-    consumers = cvb._vendored_consumers()
-    return set(cvb._plugins_needing_bump(changed, consumers))
+    tree = cvb._GitTree(head)
+    consumers = cvb._vendored_consumers(tree=tree)
+    return set(cvb._plugins_needing_bump(changed, consumers, tree=tree))
 
 
 def _changefile_intents(data: object, label: str) -> set[tuple[str, str]]:

@@ -56,6 +56,8 @@ an empty change set.
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import re
 import subprocess
 import sys
@@ -151,40 +153,107 @@ def _consumer_version_at(ref: str, consumer: str) -> str | None:
     top-level, out-of-plugin consumer tree like ``worktree-manager`` (its
     own ``pyproject.toml`` ``[project].version``, since it has no
     ``plugin.json`` at all)."""
-    if (PLUGINS_DIR / consumer).is_dir():
-        return _plugin_json_version_at(ref, consumer)
+    version = _plugin_json_version_at(ref, consumer)
+    if version is not None:
+        return version
     return _pyproject_project_version_at(ref, f"{consumer}/pyproject.toml")
 
 
-def _canonical_dependencies(lib: str) -> set[str]:
+class _GitTree:
+    """Read dependency inputs and modes without consulting a different checkout."""
+
+    def __init__(self, revision: str):
+        result = _git("ls-tree", "-r", "-z", "--full-tree", revision)
+        if result.returncode:
+            raise RuntimeError(result.stderr.strip() or "could not read dependency tree")
+        self.entries: dict[str, tuple[str, str, str]] = {}
+        self.blobs: dict[str, str] = {}
+        for record in result.stdout.split("\0"):
+            if not record:
+                continue
+            metadata, separator, name = record.partition("\t")
+            fields = metadata.split()
+            if not separator or len(fields) != 3:
+                raise RuntimeError("invalid dependency tree entry")
+            self.entries[name] = tuple(fields)
+
+    def validate(self, relative: str) -> None:
+        path = Path(relative)
+        for part in (path, *path.parents):
+            entry = self.entries.get(part.as_posix())
+            if entry is not None and entry[0] == "120000":
+                raise RuntimeError(f"symlinked dependency input {part}")
+            if entry is not None and entry[1] != "blob":
+                raise RuntimeError(f"unsupported dependency input {part}")
+
+    def has_dir(self, relative: str) -> bool:
+        self.validate(relative)
+        return any(name.startswith(relative + "/") for name in self.entries)
+
+    def has_file(self, relative: str) -> bool:
+        self.validate(relative)
+        return relative in self.entries
+
+    def read(self, relative: str) -> str | None:
+        self.validate(relative)
+        entry = self.entries.get(relative)
+        if entry is None:
+            if self.has_dir(relative):
+                raise RuntimeError(f"not a regular dependency input {relative}")
+            return None
+        mode, kind, oid = entry
+        if mode not in {"100644", "100755"} or kind != "blob":
+            raise RuntimeError(f"not a regular dependency input {relative}")
+        if oid not in self.blobs:
+            result = _git("cat-file", "blob", oid)
+            if result.returncode:
+                raise RuntimeError(f"could not read dependency input {relative}")
+            self.blobs[oid] = result.stdout
+        return self.blobs[oid]
+
+    def toml(self, relative: str) -> dict:
+        text = self.read(relative)
+        try:
+            return tomllib.loads(text) if text is not None else {}
+        except tomllib.TOMLDecodeError as error:
+            raise RuntimeError(f"invalid dependency input {relative}: {error}") from error
+
+
+def _canonical_dependencies(lib: str, *, tree: _GitTree | None = None) -> set[str]:
     """Read sibling library edges with the materializer's shared UV parser."""
     if not uer.is_safe_lib_name(lib):
         raise SystemExit(f"check-version-bump: unsafe canonical library name {lib!r}")
     directory = LIBS_DIR / lib
     pyproject = directory / "pyproject.toml"
-    linked = uer._find_symlinked_ancestor(pyproject, REPO)
+    linked = uer._find_symlinked_ancestor(pyproject, REPO) if tree is None else None
     if linked is not None:
         raise SystemExit(
             f"check-version-bump: {linked} is a symlink -- cannot safely "
             f"determine {lib}'s nested consumers."
         )
-    if pyproject.exists() and not pyproject.is_file():
+    if tree is None and pyproject.exists() and not pyproject.is_file():
         raise SystemExit(f"check-version-bump: {pyproject} is not a manifest file")
     try:
-        refs = uer.find_uv_editable_refs(directory)
+        refs = uer.find_uv_editable_refs(directory) if tree is None else (
+            uer.find_uv_editable_refs(
+                directory, data=tree.toml(f"libs/{lib}/pyproject.toml"),
+                resolve_symlinks=False,
+            )
+        )
     except uer.ManifestUnreadable as exc:
         raise SystemExit(
             f"check-version-bump: {exc} -- cannot safely determine "
             f"{lib}'s nested consumers; fix its pyproject.toml [tool.uv.sources] table."
         ) from exc
     dependencies: set[str] = set()
+    resolve = Path.resolve if tree is None else lambda path: Path(os.path.abspath(path))
     for _name, raw_path, dependency, _editable in refs:
         # Promotion places each nested dependency at the same sibling location.
         # Never reinterpret an arbitrary escaping path by its basename alone.
         if (
             not uer.is_safe_lib_name(dependency)
             or Path(raw_path).is_absolute()
-            or (directory / raw_path).resolve() != (LIBS_DIR / dependency).resolve()
+            or resolve(directory / raw_path) != resolve(LIBS_DIR / dependency)
         ):
             raise SystemExit(
                 f"check-version-bump: {pyproject} references {raw_path!r}, "
@@ -194,7 +263,9 @@ def _canonical_dependencies(lib: str) -> set[str]:
     return dependencies
 
 
-def _transitive_consumers(direct: dict[str, list[str]]) -> dict[str, list[str]]:
+def _transitive_consumers(
+    direct: dict[str, list[str]], *, tree: _GitTree | None = None,
+) -> dict[str, list[str]]:
     """Charge each seed's consumers for its complete, cycle-safe library closure."""
     consumers: dict[str, set[str]] = {}
     dependencies: dict[str, set[str]] = {}
@@ -208,12 +279,69 @@ def _transitive_consumers(direct: dict[str, list[str]]) -> dict[str, list[str]]:
             visited.add(lib)
             consumers.setdefault(lib, set()).update(names)
             if lib not in dependencies:
-                dependencies[lib] = _canonical_dependencies(lib)
+                dependencies[lib] = _canonical_dependencies(lib, tree=tree)
             pending.extend(sorted(dependencies[lib], reverse=True))
     return {lib: sorted(names) for lib, names in sorted(consumers.items())}
 
 
-def _vendored_consumers() -> dict[str, list[str]]:
+def _implicit_consumer_seeds(consumers: dict[str, list[str]], plugins: set[str]) -> None:
+    installer_engine_consumers = plugins & set(ier.ADOPTERS)
+    if installer_engine_consumers:
+        consumers["installer-engine"] = sorted(
+            set(consumers.get("installer-engine", ())) | installer_engine_consumers
+        )
+    packaged_peers = plugins & {
+        "agent-bridge", "agent-dispatch", "agent-codespaces", "agent-containers",
+        "agent-logger", "agent-index", "agent-machines", "agent-worktrees",
+        "agent-pull-requests",
+    }
+    if packaged_peers:
+        consumers["peer-launch"] = sorted(packaged_peers)
+
+
+def _snapshot_consumers(tree: _GitTree) -> dict[str, list[str]]:
+    plugin_names = {
+        name.split("/")[1] for name in tree.entries if name.startswith("plugins/")
+    }
+    roots = {
+        name: f"plugins/{name}" for name in plugin_names if tree.has_dir(f"plugins/{name}")
+    }
+    roots.update({name: name for name in uer._EXTRA_CONSUMER_DIRS if tree.has_dir(name)})
+    consumers: dict[str, list[str]] = {}
+    for name, root in sorted(roots.items()):
+        prefix = f"{root}/libs/"
+        for path, (mode, _kind, _oid) in tree.entries.items():
+            if not path.startswith(prefix):
+                continue
+            parts = path[len(prefix):].split("/")
+            if len(parts) < 2:
+                tree.validate(path)
+                continue
+            inner = parts[1:]
+            if (
+                any(part.endswith(".egg-info") for part in inner[:-1])
+                or set(inner[:-1]) & {".ruff_cache", ".pytest_cache", ".mypy_cache", "__pycache__"}
+                or (len(inner) > 1 and inner[0] in {".venv", "build", "dist"})
+                or (mode != "120000" and inner[-1].endswith(".egg-info"))
+            ):
+                continue
+            if name not in consumers.get(parts[0], ()):
+                consumers.setdefault(parts[0], []).append(name)
+        try:
+            refs = uer.find_uv_editable_refs(
+                REPO / root, data=tree.toml(f"{root}/pyproject.toml"),
+                resolve_symlinks=False,
+            )
+        except uer.ManifestUnreadable as error:
+            raise RuntimeError(f"invalid dependency input {root}: {error}") from error
+        for _name, _raw_path, lib, _editable in refs:
+            if name not in consumers.get(lib, ()):
+                consumers.setdefault(lib, []).append(name)
+    _implicit_consumer_seeds(consumers, set(roots) & plugin_names)
+    return _transitive_consumers(consumers, tree=tree)
+
+
+def _vendored_consumers(*, tree: _GitTree | None = None) -> dict[str, list[str]]:
     """Map ``lib name -> [consumers that vendor it]`` -- both an ordinary
     in-tree ``<consumer>/libs/*`` real copy AND a `uv`-editable canonical-
     reference pointer in a consumer's own ``pyproject.toml`` (vendor-
@@ -236,6 +364,8 @@ def _vendored_consumers() -> dict[str, list[str]]:
     inside a real ``pyproject.toml``. Canonical sibling dependencies expand
     every seed's consumers transitively, matching the release materializer,
     including shared edges and cycles."""
+    if tree is not None:
+        return _snapshot_consumers(tree)
     consumers: dict[str, list[str]] = {}
     if PLUGINS_DIR.is_dir():
         for plugin in sorted(p for p in PLUGINS_DIR.iterdir() if p.is_dir()):
@@ -293,23 +423,10 @@ def _vendored_consumers() -> dict[str, list[str]]:
         for _name, _raw_path, lib, _editable in refs:
             if name not in consumers.get(lib, ()):
                 consumers.setdefault(lib, []).append(name)
-    installer_engine_consumers = [
-        plugin for plugin in ier.ADOPTERS if (PLUGINS_DIR / plugin).is_dir()
-    ]
-    if installer_engine_consumers:
-        consumers["installer-engine"] = sorted(
-            set(consumers.get("installer-engine", ())) | set(installer_engine_consumers)
-        )
-    packaged_peers = [
-        plugin for plugin in (
-            "agent-bridge", "agent-dispatch", "agent-codespaces", "agent-containers",
-            "agent-logger", "agent-index", "agent-machines", "agent-worktrees",
-            "agent-pull-requests",
-        )
-        if (PLUGINS_DIR / plugin).is_dir()
-    ]
-    if packaged_peers:
-        consumers["peer-launch"] = packaged_peers
+    _implicit_consumer_seeds(
+        consumers, {p.name for p in PLUGINS_DIR.iterdir() if p.is_dir()}
+        if PLUGINS_DIR.is_dir() else set(),
+    )
     return _transitive_consumers(consumers)
 
 
@@ -321,7 +438,9 @@ def _is_ignored(rel_parts: tuple[str, ...], name: str) -> bool:
     return any(name.endswith(s) for s in _IGNORE_SUFFIX)
 
 
-def _plugins_needing_bump(changed: list[str], consumers: dict[str, list[str]]) -> dict[str, set[str]]:
+def _plugins_needing_bump(
+    changed: list[str], consumers: dict[str, list[str]], *, tree: _GitTree | None = None,
+) -> dict[str, set[str]]:
     """Map ``plugin -> {reasons}`` for every plugin whose content changed.
 
     A path under ``plugins/<p>/`` charges ``<p>``; a path under a top-level
@@ -333,11 +452,20 @@ def _plugins_needing_bump(changed: list[str], consumers: dict[str, list[str]]) -
     which both depend on this same map (PR #4514 review)."""
     needing: dict[str, set[str]] = {}
     packaged_sources: dict[str, set[str]] = {}
-    manifests = list(PLUGINS_DIR.glob("*/packaged-assets.json"))
-    manifests.extend(
-        REPO / name / "packaged-assets.json" for name in uer._EXTRA_CONSUMER_DIRS
-        if (REPO / name / "packaged-assets.json").is_file()
-    )
+    if tree is None:
+        manifests = list(PLUGINS_DIR.glob("*/packaged-assets.json"))
+        manifests.extend(
+            REPO / name / "packaged-assets.json" for name in uer._EXTRA_CONSUMER_DIRS
+            if (REPO / name / "packaged-assets.json").is_file()
+        )
+    else:
+        manifests = [
+            REPO / name for name in tree.entries
+            if (
+                name.startswith("plugins/") and len(name.split("/")) == 3
+                and name.endswith("/packaged-assets.json")
+            ) or name in {f"{root}/packaged-assets.json" for root in uer._EXTRA_CONSUMER_DIRS}
+        ]
     if manifests:
         import launch_wrapper_assets_ref as assets
 
@@ -346,8 +474,11 @@ def _plugins_needing_bump(changed: list[str], consumers: dict[str, list[str]]) -
             manifest_path.parent.name if manifest_path.is_relative_to(PLUGINS_DIR)
             else manifest_path.parent.relative_to(REPO).as_posix()
         )
+        kwargs = {} if tree is None else {
+            "data": json.loads(tree.read(manifest_path.relative_to(REPO).as_posix()))
+        }
         groups = assets.load_manifest_groups(
-            manifest_path.parent, manifest_name=assets.PACKAGED_MANIFEST_NAME,
+            manifest_path.parent, manifest_name=assets.PACKAGED_MANIFEST_NAME, **kwargs,
         )
         for manifest in groups:
             for name in manifest.files:
@@ -365,7 +496,10 @@ def _plugins_needing_bump(changed: list[str], consumers: dict[str, list[str]]) -
             if inner and _is_ignored(inner, parts[-1]):
                 continue
             # Only real plugin dirs (with a manifest) count.
-            if (PLUGINS_DIR / plugin / "plugin.json").exists():
+            if (
+                (PLUGINS_DIR / plugin / "plugin.json").exists() if tree is None else
+                tree.has_file(f"plugins/{plugin}/plugin.json")
+            ):
                 needing.setdefault(plugin, set()).add(f"plugins/{plugin}/")
         elif parts[0] == "libs" and len(parts) >= 2:
             lib = parts[1]
@@ -374,9 +508,16 @@ def _plugins_needing_bump(changed: list[str], consumers: dict[str, list[str]]) -
                 continue
             for plugin in consumers.get(lib, ()):
                 needing.setdefault(plugin, set()).add(f"libs/{lib}/ (vendored)")
-        elif parts[0] in uer._EXTRA_CONSUMER_DIRS and (REPO / parts[0] / "pyproject.toml").exists():
-            consumer = parts[0]
-            inner = parts[1:]
+        else:
+            consumer = next(
+                (root for root in uer._EXTRA_CONSUMER_DIRS if path.startswith(root + "/")), None,
+            )
+            if consumer is None or not (
+                (REPO / consumer / "pyproject.toml").exists() if tree is None else
+                tree.has_file(f"{consumer}/pyproject.toml")
+            ):
+                continue
+            inner = parts[len(Path(consumer).parts):]
             if inner and _is_ignored(inner, parts[-1]):
                 continue
             needing.setdefault(consumer, set()).add(f"{consumer}/")
@@ -427,8 +568,9 @@ def check(base_ref: str, head_ref: str) -> tuple[int, list[str]]:
         print("check-version-bump: no changes vs base; nothing to check.")
         return 0, []
 
-    consumers = _vendored_consumers()
-    needing = _plugins_needing_bump(changed, consumers)
+    tree = _GitTree(head)
+    consumers = _vendored_consumers(tree=tree)
+    needing = _plugins_needing_bump(changed, consumers, tree=tree)
     if not needing:
         print("check-version-bump: no plugin content touched; nothing to bump.")
         return 0, []

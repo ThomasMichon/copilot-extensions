@@ -26,7 +26,7 @@ SCRIPT = TOOLS_DIR / "check-changefile-presence.py"
 # this suite alongside the synchronizer and version-bump regressions.
 DEP_SCRIPTS = ["check-version-bump.py", "changefile.py", "uv_editable_ref.py",
                "installer_engine_ref.py", "standalone_consumers.py",
-               "vendored_lib_inventory.py"]
+               "vendored_lib_inventory.py", "launch_wrapper_assets_ref.py"]
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -396,3 +396,117 @@ def test_git_symlink_changefile_rejected_even_with_regular_checkout_file(
     result = _run(repo)
     assert result.returncode == 1, result.stdout + result.stderr
     assert "symlinked" in result.stderr
+
+
+@pytest.mark.parametrize("manifest", [
+    "libs/parent/pyproject.toml", "plugins/alpha/pyproject.toml",
+])
+@pytest.mark.parametrize("head_has_edge", [False, True])
+def test_dependency_graph_uses_selected_head_not_checkout(
+    repo: Path, manifest: str, head_has_edge: bool,
+):
+    _nested_library_base(repo)
+    original = (repo / manifest).read_text(encoding="utf-8")
+    without_edge = '[project]\nname = "unrelated"\n'
+    if not head_has_edge:
+        _write(repo, manifest, without_edge)
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-qm", "baseline without dependency edge")
+        _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _write(repo, ".changefiles/library.json", json.dumps(_intent("libs/leaf")))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "selected library intent")
+    _write(repo, manifest, without_edge if head_has_edge else original)
+
+    result = _run(repo)
+    assert result.returncode == (1 if head_has_edge else 0), result.stdout + result.stderr
+    if head_has_edge:
+        assert "alpha: content changed" in result.stderr
+
+
+@pytest.mark.parametrize("manifest", [
+    "libs/parent/pyproject.toml", "plugins/alpha/pyproject.toml",
+])
+def test_dependency_graph_validates_git_manifest_modes(repo: Path, manifest: str):
+    _nested_library_base(repo)
+    blob = subprocess.run(
+        ["git", "rev-parse", f"HEAD:{manifest}"], cwd=repo,
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    _git(repo, "update-index", "--cacheinfo", f"120000,{blob},{manifest}")
+    _write(repo, ".changefiles/library.json", json.dumps(_intent("libs/leaf")))
+    _write(repo, ".changefiles/consumer.json", json.dumps(_intent("alpha")))
+    _git(repo, "add", "--", ".changefiles")
+    _git(repo, "commit", "-qm", "selected symlink mode with regular checkout manifest")
+
+    result = _run(repo)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "symlink" in result.stderr
+
+
+def test_dependency_manifest_directory_is_not_treated_as_missing(repo: Path):
+    _nested_library_base(repo)
+    _git(repo, "rm", "--", "libs/parent/pyproject.toml")
+    _write(repo, "libs/parent/pyproject.toml/unexpected.txt", "not a manifest\n")
+    _write(repo, ".changefiles/library.json", json.dumps(_intent("libs/leaf")))
+    _write(repo, ".changefiles/consumer.json", json.dumps(_intent("alpha")))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "directory in place of selected dependency manifest")
+
+    result = _run(repo)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "not a regular dependency input" in result.stderr
+
+
+def test_packaged_source_inventory_uses_selected_head_not_checkout(repo: Path):
+    _write(repo, "tools/shared.py", "value = 1\n")
+    manifest = {
+        "schema": "copilot-extensions.packaged-assets", "version": 1,
+        "canonicalDir": "tools", "files": ["shared.py"],
+    }
+    _write(repo, "plugins/alpha/packaged-assets.json", json.dumps(manifest))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "packaged source baseline")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _write(repo, "tools/shared.py", "value = 2\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "selected packaged source change")
+    manifest["files"] = ["other.py"]
+    _write(repo, "plugins/alpha/packaged-assets.json", json.dumps(manifest))
+
+    result = _run(repo)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "alpha: content changed" in result.stderr
+
+
+def test_snapshot_ignores_links_inside_retired_build_artifacts(repo: Path):
+    content = "outside"
+    blob = subprocess.run(
+        ["git", "hash-object", "-w", "--stdin"], cwd=repo, input=content,
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    relative = "plugins/alpha/libs/leaf/build/link"
+    _write(repo, relative, content)
+    _git(repo, "update-index", "--add", "--cacheinfo", f"120000,{blob},{relative}")
+    _git(repo, "commit", "-qm", "retired build artifact baseline")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _write(repo, ".changefiles/library.json", json.dumps(_intent("libs/leaf")))
+    _git(repo, "add", "--", ".changefiles")
+    _git(repo, "commit", "-qm", "library intent without a real copied consumer")
+
+    result = _run(repo)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_snapshot_recognizes_multilevel_standalone_consumer(repo: Path):
+    _write(repo, "services/pr/pyproject.toml", '[project]\nname = "service"\nversion = "1.0"\n')
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "standalone consumer baseline")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _write(repo, "services/pr/src/service.py", "value = 1\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "standalone consumer source change")
+
+    result = _run(repo)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "services/pr: content changed" in result.stderr
