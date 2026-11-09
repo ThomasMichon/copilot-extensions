@@ -3,8 +3,9 @@
 - **Slug:** `mux-question-answers`
 - **Repo:** copilot-extensions
 - **Created:** 2026-11-07
-- **Status:** Active
-- **Vision:** [interactive-session-representation](../../../visions/plugins/agent-bridge/README.md#interactive-session-representation)
+- **Status:** Done
+- **Completed:** 2026-11-09
+- **Vision:** [interactive-session-representation](../../../../visions/plugins/agent-bridge/README.md#interactive-session-representation)
 - **Umbrella issue:** #11371
 
 ## Guiding Intent
@@ -34,7 +35,7 @@ daemons or interactive extensions may not expose it. #11371 records an
 explicit mux fallback prototype for single-question rendered forms.
 
 This closes existing interactive-representation intent. Apply the
-[contract-evolution pattern](../../../docs/patterns/service-contract-evolution.md)
+[contract-evolution pattern](../../../../docs/patterns/service-contract-evolution.md)
 and existing authenticated local control, session-binding and observation
 owners. No new daemon, prompt injection, cancellation or session takeover.
 
@@ -98,10 +99,12 @@ runtime remediation, elevated operation or destructive cleanup is authorized.
 - [x] Land qualified implementation after whole-surface audit, review and CI.
 - [x] Verify ordinary promotion to `main`; diagnose actual failing jobs and
   fix forward rather than bypassing a red release gate.
-- [ ] Complete the separately authorized adopter updates and synthetic proof
+- [x] Complete the separately authorized adopter updates and synthetic proof
   on both environments, retaining undelivered-row and session-preservation
   evidence privately. Report each delivery layer separately.
-- [ ] Reconcile #11371, archive this effort through review and finalize.
+- [x] Deferred to `#11371`: Reconcile #11371, archive this effort through review
+  and finalize. The protocol driver explicitly retains these administrative
+  delivery gates on the root issue until they are actually completed.
 
 ## Validation Plan
 
@@ -111,21 +114,25 @@ runtime remediation, elevated operation or destructive cleanup is authorized.
   timeout, mismatched/stale echo and unknown outcomes without retry.
 - [x] Actual authenticated HTTP/CLI and unsupported-provider controls preserve
   native preference and legacy syntax; audit admission precedes key effects.
-- [ ] Use fixture-owned mux namespaces for actual Windows and POSIX command
+- [x] Use fixture-owned mux namespaces for actual Windows and POSIX command
   qualification. Never target a pre-existing session or shared mux shutdown.
 - [x] Run affected lint, unit/contract, install, type-admission and documentation
   gates; keep exhaustive source capture outside required fast unit CI.
-- [ ] Verify source merge, release inclusion, selected installed generation,
+- [x] Verify source merge, release inclusion, selected installed generation,
   actual synthetic answer and same-session continuation on both authorized
   environments. Preserve session processes and queue observations.
-- [ ] Resolve every plan/validation row or explicitly transfer it to a named
+- [x] Resolve every plan/validation row or explicitly transfer it to a named
   tracked objective before declaring Done.
 
 ## Journal
 
+- [2026-11-09 - Installed acceptance and closeout](journal/2026/11.09%20installed-acceptance-and-closeout.md):
+  both current installed environments accepted the answer and continued the
+  same conversation; root-issue review/publication/resource settlement retained.
 - [2026-11-07/08 - Source qualification and release](journal/2026/11.08%20source-and-release.md):
   original 2026-11-07/08 entries, reviewed source and release evidence, and
-  the POSIX prerequisite; both installed acceptance gates remain open.
+  the POSIX prerequisite and first installed acceptance, before Windows
+  acceptance.
 
 Compatibility anchors for the former inline journal, newest first:
 
