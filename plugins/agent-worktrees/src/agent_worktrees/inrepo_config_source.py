@@ -447,7 +447,7 @@ def load_config_base(
     )
     if not merged:
         base = next((anchor / rel for rel in candidates
-                     if acquisition.source_exists(anchor / rel, "inrepo-disk")), None)
+                     if acquisition.source_exists(anchor / rel, "inrepo-disk", **({"strict": True} if strict else {}))), None)
         merged = load_config_file(base, strict=strict) if base is not None else {}
     if observations is not None:
         if len(observations) == start:

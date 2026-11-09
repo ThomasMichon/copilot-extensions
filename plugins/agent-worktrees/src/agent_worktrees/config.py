@@ -1253,7 +1253,7 @@ def _load_inrepo_config(anchor: str, *, strict: bool = False) -> dict[str, Any]:
             / marketplace_id
             / GLOBAL_CONFIG_FILENAME
         )
-        if config_acquisition.source_exists(overlay_path, "marketplace-config"):
+        if config_acquisition.source_exists(overlay_path, "marketplace-config", **({"strict": True} if strict else {})):
             merged = _deep_merge(merged, inrepo_config_source.load_config_file(overlay_path, strict=strict))
     return merged
 

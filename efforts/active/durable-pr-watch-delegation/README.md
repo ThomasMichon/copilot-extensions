@@ -1375,6 +1375,11 @@ callback an implicit credential store.
 
 ### 2026-11-09 - Native report boundary corrections
 
+- Strict presence acquisition uses raw stat outcomes rather than a fail-soft
+  existence predicate. Looping and dangling policy links refuse before account
+  selection across global, repository and marketplace sources; confirmed
+  optional absence remains supported. POSIX link fixtures pass within 450
+  Worktrees cases, and 22 actual native-adapter cases pass in isolation.
 - Any unavailable selection checkpoint or capture stays unavailable across
   provider normalization, including transient failures whose next selection
   succeeds. Only actual provider access errors become native error reports.

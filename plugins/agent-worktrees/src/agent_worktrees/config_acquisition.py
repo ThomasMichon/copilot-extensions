@@ -79,16 +79,31 @@ def full_load_started() -> None:
     opaque_source("execution-machine")
 
 
-def source_exists(path: Path, stage: str) -> bool:
+def source_exists(path: Path, stage: str, *, strict=False) -> bool:
     """Observe the owner's existing presence check, preserving raised errors."""
     try:
-        present = path.exists()
+        if strict:
+            try:
+                path.stat()
+                present = True
+            except FileNotFoundError:
+                try:
+                    path.lstat()
+                except FileNotFoundError:
+                    present = False
+                else:
+                    raise ValueError("configuration source target is unavailable") from None
+        else:
+            present = path.exists()
     except Exception as exc:
         failed(current_observations(), str(path), stage, "unreadable-source", type(exc).__name__)
         raise
     if not present:
-        failed(current_observations(), str(path), stage, "presence-provenance-unavailable",
-               "legacy presence result does not expose a raw stat outcome")
+        if strict:
+            observe(current_observations(), str(path), stage, ScanAuthority.ABSENT)
+        else:
+            failed(current_observations(), str(path), stage, "presence-provenance-unavailable",
+                   "legacy presence result does not expose a raw stat outcome")
     return present
 
 
@@ -116,7 +131,10 @@ def yaml_value(path: Path, observations: list[SourceObservation] | None = None, 
     if observations is None:
         observations = current_observations()
     try:
-        present = path.exists() if observations is None else probe_source(path, "exists", observations, "config-yaml")
+        present = (
+            source_exists(path, "config-yaml", strict=True) if strict else
+            path.exists() if observations is None else probe_source(path, "exists", observations, "config-yaml")
+        )
         if not present:
             return {}
         with open(path, encoding="utf-8") as stream:

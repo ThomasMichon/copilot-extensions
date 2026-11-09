@@ -216,9 +216,11 @@ Gateway event loop; delayed cleanup retains the admitted request's custody and
 cannot publish a success. Malformed or unavailable contributing configuration
 and duplicate keys in explicit/global/drop-in sources refuse credential
 selection instead of dropping repository policy. A failed selection checkpoint
-or unavailable report transport remains unavailable even if a provider builder catches
-that failure; it cannot become a successful HTTP error-report exchange. Failed
-reads of established committed policy cannot select a divergent checkout;
+or unavailable report transport remains unavailable even if a provider builder
+catches that failure; it cannot become a successful HTTP error-report exchange.
+Failed strict presence probes, including looping or dangling policy links, are not
+confirmed absence. This applies to global, repository and marketplace policy.
+Failed reads of established committed policy cannot select a divergent checkout;
 confirmed absence and successful same-source recovery remain supported. Provider
 access errors retain a sanitized native failed report and owner exit; transport
 and cleanup failures remain unavailable. Existing native commands and unselected
