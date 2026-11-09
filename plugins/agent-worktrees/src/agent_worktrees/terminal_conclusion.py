@@ -24,6 +24,7 @@ DISPATCH_ATTEMPT_POLICY = "dispatch-attempt"
 # authority, so the record carries no ``dispatch_attempt``) is proven by the
 # exact creation nonce the creator retained from that creation.
 BRIDGE_CREATION_POLICY = "bridge-creation"
+CONCLUSION_POLICIES = (DISPOSABLE_CLI_POLICY, DISPATCH_ATTEMPT_POLICY, BRIDGE_CREATION_POLICY)
 
 def _normalized(path: str | Path) -> str:
     return os.path.normcase(os.path.normpath(str(path)))
@@ -593,7 +594,7 @@ def conclude_disposable_worktree(
     failures raise so a higher layer can distinguish a failed conclusion from a
     deliberate preservation decision.
     """
-    if policy not in {DISPOSABLE_CLI_POLICY, DISPATCH_ATTEMPT_POLICY, BRIDGE_CREATION_POLICY}:
+    if policy not in CONCLUSION_POLICIES:
         raise ValueError(f"unsupported terminal conclusion policy: {policy!r}")
 
     record_path = Path(record_path)

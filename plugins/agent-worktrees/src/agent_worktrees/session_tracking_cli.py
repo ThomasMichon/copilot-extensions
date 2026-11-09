@@ -181,11 +181,7 @@ def add_parsers(sub) -> None:
     )
     sp.add_argument(
         "--policy",
-        choices=[
-            terminal_conclusion.DISPOSABLE_CLI_POLICY,
-            terminal_conclusion.DISPATCH_ATTEMPT_POLICY,
-            terminal_conclusion.BRIDGE_CREATION_POLICY,
-        ],
+        choices=terminal_conclusion.CONCLUSION_POLICIES,
         required=True,
         help="Explicit discard policy authorizing generated checkout reconciliation",
     )
@@ -195,12 +191,7 @@ def add_parsers(sub) -> None:
         default=None,
         help="Exact dispatch reservation required by dispatch-attempt policy",
     )
-    sp.add_argument(
-        "--creation-nonce",
-        dest="creation_nonce",
-        default=None,
-        help="Exact creation nonce required by bridge-creation policy",
-    )
+    sp.add_argument("--creation-nonce", help="Exact creation nonce for bridge-creation policy")
     sp.add_argument(
         "--owner",
         required=True,

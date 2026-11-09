@@ -366,11 +366,7 @@ def conclude_dispatch_attempt(
     worktree_path: str | None = None,
     creation_nonce: str | None = None,
 ) -> dict:
-    """Safely conclude one provenance-verified dispatch-created worktree.
-
-    A Bridge-created worker workspace carries no dispatch allocation record, so
-    ``creation_nonce`` (retained from Bridge's creation facts) proves it instead.
-    """
+    """Safely conclude one dispatch-created (or Bridge-created, by nonce) worktree."""
     proof = (
         ["--policy", "bridge-creation", "--creation-nonce", creation_nonce]
         if creation_nonce
