@@ -7,9 +7,10 @@ not serving support or authority to delete retained state.
 It closes the design gap between a metadata tombstone and coordinated
 body/cache/outbox/effect retention.
 The [internal source embedding](../../../plugins/agent-pull-requests/docs/terminal-retention.md)
-adds adopted terminal intent, admission/drain, minimal replay notification and
-compact recovery-only original operations with protected readback.
-Cache/materialization retirement and installed-host qualification remain open;
+adds adopted terminal intent, admission/drain, minimal replay notification,
+compact recovery-only original operations with protected readback and scoped
+cache/materialization retirement.
+Executing-host reader/service and installed qualification remain open;
 the complete delivery and validation gates below remain the acceptance contract.
 
 ## Existing seams and the unsafe shortcut
@@ -143,13 +144,20 @@ Retain only the prior compact terminal summary, not old conversation bodies.
   admission/drain integration and atomic minimal notification progress.
   Source #11605 is merged; physical retirement and executing-host adoption
   remain T2/T3, not implied by this finite source result.
-- [ ] T2: Implement compact recovery-only operations and actual protected
+- [x] T2: Implement compact recovery-only operations and actual protected
   readback, then resumable scoped cache/materialization retirement.
-  T2a source #11614 is merged. Original compact identities/deadlines and
-  protected readback are source-qualified; T2b scoped physical retirement
-  remains open, not inferred from removal of selected owner-file bodies.
+  T2a source #11614 and T2b source #11623 are merged. Original compact
+  identities/deadlines, protected readback and scoped cache/memory retirement
+  are source-qualified; executing-host and installed adoption remain T3.
 - [ ] T3: Qualify the executing workspace/reader/service boundary and supported
   skew/restart/reopen paths; update actual-behavior docs only as leaves land.
+  The first bounded source leaf selects an independently versioned read-only
+  terminal workspace receiver through the existing Native/Fleet/Gateway
+  negotiation and CLI facade. It does not relax conversation/v1 or enable
+  submission, compact recovery reads, retirement requests or host adoption.
+  Source fixtures qualify all declared layouts and actual service-writer
+  validation/restart; installed/provider and full lifecycle qualification,
+  feedback/write serving and retained-volume reader transition stay open.
 
 Each runtime leaf needs normal review and focused supervised validation.
 Source acceptance is not installed adoption, live provider qualification,
