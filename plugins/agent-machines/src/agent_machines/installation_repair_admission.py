@@ -39,13 +39,6 @@ def digest(value: object) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
-def _ordinary_type(info: os.stat_result, *, directory: bool) -> None:
-    if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
-        raise RepairAdmissionError("repair refuses linked or reparse entries")
-    if not (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode)):
-        raise RepairAdmissionError("repair owner entry has an unsupported type")
-
-
 def ordinary(path: Path, *, directory: bool = False) -> None:
     """Reject linked/reparse ancestors before consuming an execution target."""
     if not path.is_absolute() or ".." in path.parts:
@@ -55,7 +48,11 @@ def ordinary(path: Path, *, directory: bool = False) -> None:
             info = entry.lstat()
         except OSError:
             raise RepairAdmissionError("repair owner entry is unavailable") from None
-        _ordinary_type(info, directory=entry != path or directory)
+        if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+            raise RepairAdmissionError("repair refuses linked or reparse entries")
+        expected_directory = entry != path or directory
+        if not (stat.S_ISDIR(info.st_mode) if expected_directory else stat.S_ISREG(info.st_mode)):
+            raise RepairAdmissionError("repair owner entry has an unsupported type")
 
 
 def payload_identity(root: Path) -> str:
@@ -67,16 +64,15 @@ def payload_identity(root: Path) -> str:
     ignored = {".git", "__pycache__", ".pytest_cache", ".ruff_cache"}
     while pending:
         directory = pending.pop()
-        ordinary(directory, directory=True)
         for entry in sorted(directory.iterdir()):
             if entry.name in ignored:
                 continue
             info = entry.lstat()
-            is_directory = stat.S_ISDIR(info.st_mode)
-            _ordinary_type(info, directory=is_directory)
-            if is_directory:
+            if stat.S_ISDIR(info.st_mode):
+                ordinary(entry, directory=True)
                 pending.append(entry)
                 continue
+            ordinary(entry)
             if len(rows) >= 8192 or info.st_size > 8 * 1024 * 1024:
                 raise RepairAdmissionError("repair payload exceeds its file bound")
             with entry.open("rb") as stream:

@@ -101,9 +101,9 @@ retained resources. Source completion does not claim installed recovery.
 
 ## Proposal
 
-Agent-recommended implementation direction: avoid repeated ancestor traversal
-within one bounded payload walk, retaining content hashing and existing safety
-properties. Do not solve latency by increasing the admission timeout, disabling
+The initial ancestor-walk optimization was rejected after review demonstrated
+a directory-replacement race. Retain the original per-leaf ancestor checks and
+full payload hashing for installer plans. Do not solve latency by increasing the admission timeout, disabling
 required readiness, adding a resident cache or silently trusting a newer payload
 instead of the selected runtime.
 
@@ -141,9 +141,14 @@ replacement and rollout remain with their existing owners.
   workflow then failed in an old active-pane control that still expected a
   PSMux CLI probe. That control is being corrected to assert the native caller
   contract while retaining the TMux syntax check; the workflow is not called green.
+- A controlled directory-replacement finding invalidated the attempted
+  ancestor-walk optimization. It did not meet the launch budget anyway, so
+  restore the original full-plan traversal instead of adding handle/attestation
+  machinery. Add deterministic symlink/reparse replacement controls. Phase 3's
+  readiness-only scope remains the proposed latency correction.
 
 ### 2026-11-09 - First source slice and remaining budget failure
-- Removed repeated per-file ancestor walks; payload bytes and digest remain
+- Initially removed repeated per-file ancestor walks; payload bytes and digest remain
   unchanged. Existing repair-boundary selection passed 120 tests, with 17
   platform/tier skips.
 - New diagnostics and the legacy updater controls passed 87 tests, with six

@@ -1,5 +1,5 @@
 {
-  "comment": "Reduce repeated readiness path inspection, identify admission failure stages, and remove legacy passive PSMux CLI reads.",
+  "comment": "Preserve payload admission integrity, identify New failure stages, and remove legacy passive PSMux CLI reads.",
   "changes": [
     {
       "plugin": "agent-machines",

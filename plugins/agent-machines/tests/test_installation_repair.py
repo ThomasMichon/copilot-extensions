@@ -21,25 +21,36 @@ from agent_machines.installation_repair_process import run_action
 pytestmark = pytest.mark.guard
 
 
-def test_payload_identity_checks_ancestors_per_directory_not_per_file(tmp_path, monkeypatch):
-    from collections import Counter
+@pytest.mark.parametrize("reparse", [False, True])
+def test_payload_identity_refuses_parent_replacement_during_enumeration(tmp_path, monkeypatch, reparse):
+    import stat
+    from types import SimpleNamespace
 
     root = tmp_path / "payload"
-    directory = root / "scripts" / "nested"
-    directory.mkdir(parents=True)
-    for index in range(40):
-        (directory / f"module-{index}.py").write_bytes(b"content")
-    calls = Counter()
-    original = Path.lstat
+    root.mkdir()
+    (root / "entry.py").write_bytes(b"content")
+    replaced = False
+    original_lstat, original_iterdir = Path.lstat, Path.iterdir
+
+    def entries(path):
+        nonlocal replaced
+        result = list(original_iterdir(path))
+        if path == root:
+            replaced = True
+        return iter(result)
 
     def observed(path, *args, **kwargs):
-        calls[path] += 1
-        return original(path, *args, **kwargs)
+        if path == root and replaced:
+            return SimpleNamespace(
+                st_mode=stat.S_IFDIR if reparse else stat.S_IFLNK,
+                st_file_attributes=0x400 if reparse else 0,
+            )
+        return original_lstat(path, *args, **kwargs)
 
+    monkeypatch.setattr(Path, "iterdir", entries)
     monkeypatch.setattr(Path, "lstat", observed)
-    admission_api.payload_identity(root)
-    assert calls[tmp_path] <= 4
-    assert calls[directory / "module-0.py"] == 1
+    with pytest.raises(RepairAdmissionError, match="linked or reparse"):
+        admission_api.payload_identity(root)
 
 
 def test_payload_identity_preserves_content_paths_and_ignored_directories(tmp_path):
