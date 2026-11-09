@@ -35,7 +35,9 @@ def _read(path: Path) -> str:
 
 def _registrations(
     root: Path, servers: dict[int, str], deadline: float,
-) -> dict[int, tuple[str, int, str]]:
+) -> dict[str, tuple[int, str, tuple[int, str] | None]]:
+    if not servers:
+        return {}
     entries = []
     try:
         with os.scandir(root) as iterator:
@@ -49,25 +51,29 @@ def _registrations(
             raise MuxObservationUnavailable("Live mux servers have no readable registrations") from None
         return {}
     result = {}
-    for name in sorted(entries):
-        if not name.endswith(".pid"):
-            continue
+    bases = {name.rsplit(".", 1)[0] for name in entries if name.endswith((".port", ".pid"))}
+    for base in sorted(bases):
         _remaining(deadline)
-        value = _read(root / name)
-        match = re.fullmatch(r"([1-9][0-9]*):([1-9][0-9]*)", value)
-        if match is None or int(match[1]) not in servers:
-            continue
-        pid = int(match[1])
-        if match[2] != servers[pid] or pid in result:
-            raise MuxObservationUnavailable("Native mux registration identity is ambiguous")
-        base = name[:-4]
+        identity = None
+        try:
+            value = _read(root / (base + ".pid"))
+        except FileNotFoundError:
+            pass
+        else:
+            match = re.fullmatch(r"([1-9][0-9]*):([1-9][0-9]*)", value)
+            if match is None:
+                raise MuxObservationUnavailable("Native mux registration identity is malformed")
+            pid = int(match[1])
+            if pid not in servers:
+                continue
+            if match[2] != servers[pid]:
+                raise MuxObservationUnavailable("Native mux registration identity is ambiguous")
+            identity = (pid, match[2])
         port = _read(root / (base + ".port"))
         key = _read(root / (base + ".key"))
         if not port.isdecimal() or not 0 < int(port) < 65536 or not re.fullmatch(r"[a-zA-Z0-9]{16,128}", key):
             raise MuxObservationUnavailable("Native mux registration is malformed")
-        result[pid] = (base, int(port), key)
-    if result.keys() != servers.keys():
-        raise MuxObservationUnavailable("A live mux server is missing its registration")
+        result[base] = (int(port), key, identity)
     return result
 
 
@@ -104,9 +110,11 @@ def observe_registrations(
 ) -> dict[str, tuple[str, int]]:
     """Keep registration basenames and authenticated logical names together.
 
-    Registration absence alone cannot exclude an orphaned live server. Query
-    every enumerated server, including warm servers, then recheck coverage and
-    process births. No CLI, registry repair, pane command or cache is involved.
+    Legacy servers publish no PID sentinel. Authenticate their port/key pairs
+    and match the reported PID to the native census instead. Existing sentinels
+    remain additional identity fences. Query every enumerated server, including
+    warm servers, then recheck coverage, registrations and process births.
+    No CLI, registry repair, pane command or cache is involved.
     ``timeout`` may shorten, but never expand, the five-second total budget.
     """
     deadline = time.monotonic() + min(timeout, 5)
@@ -119,13 +127,28 @@ def observe_registrations(
         servers = windows_mux_processes.servers()
         registrations = _registrations(root, servers, deadline)
         result = {}
-        for pid, (base, port, key) in registrations.items():
-            name, clients, reported_pid = _query(port, key, deadline)
-            if reported_pid != pid or not (base == name or base.endswith("__" + name)):
+        covered = set()
+        for base, (port, key, identity) in registrations.items():
+            try:
+                name, clients, reported_pid = _query(port, key, deadline)
+            except (OSError, MuxObservationUnavailable):
+                if identity is not None:
+                    raise
+                # Legacy hints can outlive a server. The coverage check below
+                # still requires an authenticated reply from every live PID.
+                continue
+            if (
+                reported_pid not in servers
+                or identity is not None and identity != (reported_pid, servers[reported_pid])
+                or not (base == name or base.endswith("__" + name))
+            ):
                 raise MuxObservationUnavailable("Native mux reply disagrees with its registration")
-            if base in result:
-                raise MuxObservationUnavailable("Native mux session name is ambiguous")
+            if reported_pid in covered:
+                raise MuxObservationUnavailable("Native mux registration identity is ambiguous")
+            covered.add(reported_pid)
             result[base] = (name, clients)
+        if covered != servers.keys():
+            raise MuxObservationUnavailable("A live mux server is missing its registration")
         if (
             windows_mux_processes.servers() != servers
             or _registrations(root, servers, deadline) != registrations
