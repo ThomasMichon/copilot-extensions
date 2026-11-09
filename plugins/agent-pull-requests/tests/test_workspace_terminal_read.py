@@ -61,6 +61,43 @@ def request(binding, operation: str, payload: dict, *, selected: bool = True) ->
     )
 
 
+@pytest.mark.parametrize("withdrawn", [False, True])
+def test_target_capture_uses_request_budget_before_native_acquisition(
+    terminal_reader: tuple, monkeypatch: pytest.MonkeyPatch, withdrawn: bool,
+) -> None:
+    operations, _, _, native, _, _, _, _, initial = terminal_reader
+    original_target, original_read = operations.retention_target, operations.read_owner.read
+    admitted_expiry = int(time.time()) + 60
+    native.expires_at = lambda: admitted_expiry
+    calls = []
+
+    def capture(scope, *, expires_at, checkpoint):
+        assert expires_at == admitted_expiry
+        checkpoint()
+        calls.append("capture")
+        if withdrawn:
+            raise RuntimeError("capture withdrawn")
+        return original_target(scope)
+
+    def read(*args, **kwargs):
+        assert calls == ["capture"]
+        calls.append("read")
+        return original_read(*args, **kwargs)
+
+    operations.retention_target, operations.retention_target_deadline = capture, True
+    monkeypatch.setattr(operations.read_owner, "read", read)
+    native.exchange("capabilities", {})
+    before = operations.store.path.read_bytes()
+    payload = {"number": 42, "expected_current": initial["id"], "budget_seconds": 10}
+    if withdrawn:
+        with pytest.raises(RuntimeError, match="capture withdrawn"):
+            native.exchange("load", payload)
+        assert calls == ["capture"] and operations.store.path.read_bytes() == before
+    else:
+        assert native.exchange("load", payload)["result"]["descriptor"]["id"]
+        assert calls == ["capture", "read"]
+
+
 @pytest.mark.parametrize("version", [3, 4, 5, 6])
 def test_negotiated_native_and_gateway_reads_retire_then_reopen_without_serving_old_bytes(
     terminal_reader: tuple, version: int,

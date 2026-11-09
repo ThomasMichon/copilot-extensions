@@ -400,6 +400,10 @@ the field. The selected executing PR core must declare the exact
 constructs its terminal-capable store. Missing or incompatible support refuses
 the explicit selection before provisioning; an unselected baseline host does
 not require the optional declaration.
+It additionally requires the core's separate
+`agent-pull-requests.terminal-target-capture/v1` declaration before selecting
+the budget-aware target callback. The existing remote terminal-read descriptor
+and legacy single-argument callbacks remain unchanged.
 
 Only explicit **fresh** provisioning, under the existing host-local writer
 lease and operation deadline, adopts the core's terminal retention, recovery
@@ -421,6 +425,11 @@ reopen creates a new epoch. No protected writer, feedback/preparation owner,
 remote retirement operation, compact recovery read, deletion worker or new
 service is installed. Actual physical retirement still belongs to the existing
 explicit lifecycle owner; this selection does not execute it automatically.
+Before native acquisition, the target callback captures matching existing
+watch registrations through the original ReplayStore using that request's
+expiry and budget-aware checkpoint. Accepted terminal notifications therefore
+retain their original delivery identity after reopen; a registration added
+after capture is not retroactively included.
 
 The fresh foreground-process fixture qualifies CLI discovery, native export,
 terminal fencing, retained restart, reopen and cursor resynchronization over

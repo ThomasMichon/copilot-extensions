@@ -88,8 +88,19 @@ def test_fresh_terminal_provision_restart_and_legacy_rollback_refusal(
     ]
     operations.validate_storage(expires_at=int(time.time()) + 60, checkpoint=lambda: None)
     assert operations.retention_target is not None
-    target = operations.retention_target({**operations.scope, "number": 42})
+    receipt = config.store().execute(
+        config.bindings[0].scope, "register", {
+            "request_id": "terminal-watch", "issued_at": time.time(),
+            "number": 42, "until": ("closed",), "deadline_at": time.time() + 60,
+        }, expires_at=int(time.time()) + 60,
+    )
+    original = config.store().path.read_bytes()
+    target = operations.retention_target(
+        {**operations.scope, "number": 42},
+        expires_at=int(time.time()) + 60, checkpoint=lambda: None,
+    )
     assert (target.account, target.repo, target.number) == ("account-a", "example/repository", 42)
+    assert target.registration_ids == frozenset({receipt["registration_id"]})
     with pytest.raises(ValueError, match="fresh dedicated root"):
         successor.provision()
     value["workspaces"]["terminal_reads"] = False

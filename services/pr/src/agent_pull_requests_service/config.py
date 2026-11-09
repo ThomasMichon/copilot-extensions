@@ -34,7 +34,8 @@ class _MappingOptions(TypedDict, total=False):
 
 class _TerminalOptions(TypedDict, total=False):
     terminal_reads: bool
-    retention_target: Callable[[dict[str, Any]], ObservationTarget]
+    retention_target_deadline: bool
+    retention_target: Callable[..., ObservationTarget]
 
 
 def _mapping_store() -> Any:
@@ -123,14 +124,17 @@ class WorkspaceConfig:
             terminal.core()
             for binding in self.terminal_targets:
                 def target(
-                    scope: dict[str, Any], admitted: ConsumerScope = binding.scope,
+                    scope: dict[str, Any], *, expires_at: int, checkpoint: Callable[[], None],
+                    admitted: ConsumerScope = binding.scope,
                 ) -> ObservationTarget:
-                    return ObservationTarget(
-                        admitted.account, admitted.repo, scope["number"], frozenset(),
+                    return terminal.target(
+                        store, admitted.account, admitted.repo, scope["number"],
+                        expires_at=expires_at, checkpoint=checkpoint,
                     )
 
                 terminal_options[(binding.principal, binding.target)] = {
                     "terminal_reads": True, "retention_target": target,
+                    "retention_target_deadline": True,
                 }
         preparations = {
             (principal, target): config.select(

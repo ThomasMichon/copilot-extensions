@@ -203,6 +203,7 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
         allocation: dict[str, Any] = {}
         prepared_preview: dict[str, Any] = {}
         retained_request: dict[str, Any] = {}
+        terminal_completion: dict[str, Any] = {}
         snapshot = {
             "schema": "agent-worktrees.pr-snapshot", "version": 1,
             "repo": "example/project", "pr": 1, "provider": "github",
@@ -211,10 +212,14 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
         }
         native = (
             "import json,pathlib,sys;"
-            "assert sys.argv[1:6]==['pr-watch','snapshot','example/project','1','--json'];"
+            "assert sys.argv[1:4]==['pr-watch','snapshot','example/project'];"
+            "assert sys.argv[5]=='--json';"
             "assert sys.argv[6]=='--credential-command';"
             f"pathlib.Path({str(calls)!r}).open('a').write('read\\n');"
-            f"print(json.dumps({snapshot!r}))"
+            f"value=dict({snapshot!r});"
+            "number=int(sys.argv[4]);"
+            "value.update(pr=number,pr_state='closed' if number==1 else 'open',merged=number==1);"
+            "print(json.dumps(value))"
         )
         flags: ProcessFlags = {
             "creationflags": cast(int, getattr(subprocess, "CREATE_NO_WINDOW")),
@@ -545,7 +550,12 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                     generation_id = unchanged["descriptor"]["id"]
                     cursor = unchanged["conversation"]["cursor"]
                     if terminal_enabled:
-                        evidence["sections"]["pull_request"]["data"]["status"] = "completed"
+                        terminal_original = {
+                            "request_id": "workspace-close", "issued_at": time.time(),
+                            "number": 42, "until": ["closed"], "deadline_at": time.time() + 60,
+                        }
+                        terminal_receipt = await send("register", terminal_original)
+                        evidence["sections"]["pull_request"]["data"]["status"] = "abandoned"
                         save_evidence(6)
                         terminal_result = (await workspace("load", {
                             "number": 42, "expected_current": generation_id, "budget_seconds": 10,
@@ -553,10 +563,23 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                         assert terminal_result["publication"]["status"] == "retired"
                         assert terminal_result["descriptor"] is None
                         cursor = terminal_result["conversation"]["cursor"]
+                        pending = await send("pending")
+                        terminal_event = next(
+                            value for value in pending["events"]
+                            if value["registration_id"] == terminal_receipt["registration_id"]
+                        )
+                        assert not terminal_event["timed_out"]
+                        terminal_completion = {
+                            "request_id": terminal_original["request_id"],
+                            "issued_at": terminal_original["issued_at"],
+                            "registration_id": terminal_receipt["registration_id"],
+                            "event_id": terminal_event["event_id"],
+                        }
                         page = (await workspace("events", {
                             "number": 42, "after": None, "limit": 16,
                         }))["result"]
-                        assert page["current"]["sections"] == {} and page["current"]["state"] == "merged"
+                        assert page["current"]["sections"] == {}
+                        assert page["current"]["state"] == "closed-unmerged"
                     workspace_calls = evidence_path.with_suffix(".calls").read_text()
                     assert workspace_calls.splitlines() == ["capabilities", "read", "read", "read"] + (
                         ["read"] if terminal_enabled else []
@@ -643,7 +666,7 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                         before_reopen = (await workspace("events", {
                             "number": 42, "after": None, "limit": 16,
                         }))["result"]
-                        assert before_reopen["current"]["state"] == "merged"
+                        assert before_reopen["current"]["state"] == "closed-unmerged"
                         failures = len(workspace_errors)
                         with pytest.raises(AssertionError):
                             await workspace("materialize", {"number": 42, "generation_id": generation_id})
@@ -660,6 +683,7 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                             "number": 42, "after": cursor, "limit": 16,
                         }))["result"]
                         assert stale["status"] == "resync_required"
+                        assert await send("pending") == pending
                     materialized = await workspace("materialize", {
                         "number": 42, "generation_id": generation_id,
                     })
@@ -673,8 +697,14 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                 ack = await send("acknowledge", completion)
                 assert ack["status"] == "acknowledged"
                 assert await send("acknowledge", completion) == ack
+                if terminal_enabled:
+                    remaining = await send("pending")
+                    assert len(remaining["events"]) == 1
+                    assert remaining["events"][0]["event_id"] == terminal_completion["event_id"]
+                    assert (await send("acknowledge", terminal_completion))["status"] == "acknowledged"
                 assert await send("pending") == {"events": [], "more": False}
-                assert calls.read_text() == settled_reads
+                if not terminal_enabled:
+                    assert calls.read_text() == settled_reads
                 assert rig.backends[0].requests == []
             finally:
                 await close(successor)
