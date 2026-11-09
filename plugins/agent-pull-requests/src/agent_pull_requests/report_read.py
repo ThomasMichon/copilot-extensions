@@ -75,8 +75,11 @@ def parse_request(operation: str, value: object, *, response_limit: int = BODY_B
     return parsed
 
 
-def validate_report(operation: str, text: str, scope: dict, number: int) -> dict:
-    report = (thread_report if operation == "threads" else diff_report)(text, scope["repo"], number)
+def validate_report(operation: str, text: str, scope: dict, number: int, *,
+                    response_limit: int = BODY_BYTES) -> dict:
+    report = (thread_report if operation == "threads" else diff_report)(
+        text, scope["repo"], number, max_bytes=response_budget(response_limit),
+    )
     if report["provider"] != scope["provider"]:
         raise ValueError("report provider differs from selected owner")
     return report
@@ -129,7 +132,8 @@ def validate_exchange(value: object, *, operation: str, scope: dict, number=None
             raise ValueError("invalid report observation interval")
     if value["observed_to"] < value["observed_from"]:
         raise ValueError("invalid report observation interval")
-    validate_report(operation, json.dumps(value["report"], allow_nan=False), scope, number)
+    validate_report(operation, json.dumps(value["report"], allow_nan=False), scope, number,
+                    response_limit=response_limit)
     return value
 
 
@@ -235,7 +239,8 @@ class ReportReader:
             current()
             if not isinstance(result, tuple) or len(result) != 2 or type(result[0]) is not int:
                 raise ReportUnavailable("invalid report owner outcome")
-            report = validate_report(operation, result[1], self.scope, parsed["number"])
+            report = validate_report(operation, result[1], self.scope, parsed["number"],
+                                     response_limit=response_limit)
             value = {
                 "protocol": protocol, "profile": profile, "scope": dict(self.scope),
                 "operation": operation, "number": parsed["number"],

@@ -74,7 +74,7 @@ def native(tmp_path, monkeypatch):
         "  assert args[6:]==['-f','variables[owner]=example','-f','variables[name]=project','-F','variables[number]=7']\n"
         "  if os.environ.get('FIXTURE_NONZERO'):print('fixture-secret',file=sys.stderr);sys.exit(1)\n"
         "  if os.environ.get('FIXTURE_FAIL'):print('{\"errors\":[{\"message\":\"fixture-secret\"}]}');sys.exit(0)\n"
-        "  body='body\\r\\ntext' if not os.environ.get('FIXTURE_LARGE') else 'λ\\r\\n'*11000\n"
+        "  body='body\\r\\ntext' if not os.environ.get('FIXTURE_LARGE') else 'λ\\r\\n'*int(os.environ.get('FIXTURE_THREAD_REPEATS','11000'))\n"
         "  print(json.dumps({'data':{'repository':{'pullRequest':{'reviewThreads':{'nodes':[{'path':'x','comments':{'nodes':[{'body':body,'author':{'login':'fixture'}}]}}]}}}}}))\n"
         " else:\n"
         "  assert args[3:]==['https://api.github.com/repos/example/project/pulls/7','-H','Accept: application/vnd.github.diff']\n"

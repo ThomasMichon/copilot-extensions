@@ -29,8 +29,11 @@ from test_report_read import reports as reports
 
 
 @pytest.mark.parametrize("operation", ["threads", "diff"])
+@pytest.mark.parametrize("limit,thread_repeats,diff_bytes", [
+    (LIMIT, 11000, 40000), (8 * 1024 * 1024, 160000, 2 * 1024 * 1024),
+])
 def test_actual_native_sdk_gateway_tls_and_source_cli_deliver_large_report(
-    native_gateway, tmp_path, monkeypatch, capsys, operation,
+    native_gateway, tmp_path, monkeypatch, capsys, operation, limit, thread_repeats, diff_bytes,
 ):
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "fleet-manager" / "tests"))
     from gateway_service_transport_fixtures import running
@@ -38,14 +41,16 @@ def test_actual_native_sdk_gateway_tls_and_source_cli_deliver_large_report(
 
     store, gateway, selected, scope = native_gateway
     reader = next(iter(gateway.reports.values()))
-    reader.response_limit = LIMIT
+    reader.response_limit = limit
     monkeypatch.setenv("FIXTURE_LARGE", "1")
+    monkeypatch.setenv("FIXTURE_THREAD_REPEATS", str(thread_repeats))
+    monkeypatch.setenv("FIXTURE_REPORT_BYTES", str(diff_bytes))
     monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(b'{"number":7,"budget_seconds":15}')))
     before = store.path.read_bytes()
 
     async def scenario():
         async with running(tmp_path) as rig:
-            await connect_handler(rig, gateway.handle, response_limit=LIMIT)
+            await connect_handler(rig, gateway.handle, response_limit=limit)
 
             async def access():
                 return rig.access("caller-a", 3)
@@ -53,18 +58,26 @@ def test_actual_native_sdk_gateway_tls_and_source_cli_deliver_large_report(
             client = ReportClient(ServiceCaller(
                 gateway_origin=rig.origin, gateway_ca=rig.ca, access_token_callback=access,
                 proof_key=rig.h.keys[3].get_op_key("sign"),
-            ), route_prefix="/api", binding=selected.binding, scope=scope, response_limit=LIMIT)
+            ), route_prefix="/api", binding=selected.binding, scope=scope, response_limit=limit)
             assert await asyncio.to_thread(
                 cli.main, ["report", operation, "--request", "-"], report_host=client,
             ) == 0
             value = json.loads(capsys.readouterr().out)
-            assert value["max_response_bytes"] == LIMIT and value["owner_exit"] == 0
+            assert value["max_response_bytes"] == limit and value["owner_exit"] == 0
             assert value["scope"] == scope and value["report"]["complete"] is None
             if operation == "threads":
-                assert value["report"]["threads"][0]["comments"][0]["text"] == ("λ\r\n" * 11000).rstrip()
+                assert value["report"]["threads"][0]["comments"][0]["text"] == ("λ\r\n" * thread_repeats).rstrip()
             else:
-                assert value["report"]["diff"] == "x" * 40000 + "λ\r\ntail"
-            assert BODY_BYTES < len(json.dumps(value).encode()) < LIMIT
+                assert value["report"]["diff"] == "x" * diff_bytes + "λ\r\ntail"
+            assert BODY_BYTES < len(json.dumps(value).encode()) < limit
+            if limit > LIMIT:
+                from agent_pull_requests.native_diff import _report as diff_report
+                from agent_pull_requests.native_threads import _report as thread_report
+
+                text = json.dumps(value["report"])
+                assert len(text.encode()) > 1_048_576
+                with pytest.raises(ValueError, match="size budget"):
+                    (thread_report if operation == "threads" else diff_report)(text, scope["repo"], 7)
             assert rig.backends[0].requests == []
             await gateway.drain(timeout=2)
     asyncio.run(scenario())
