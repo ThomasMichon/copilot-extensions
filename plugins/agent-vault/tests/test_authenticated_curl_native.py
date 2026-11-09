@@ -162,6 +162,28 @@ def test_system_curl_auth_is_private_and_reaches_only_the_bound_endpoint(
         assert observed[0].split(" ", 1)[1] == SECRET
 
 
+def test_basic_mixed_unicode_json_echo_never_reaches_stdout(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsysbinary: pytest.CaptureFixture[bytes],
+) -> None:
+    value = "synthetic-\u00e9\U0001f600-password"
+    observed: list[str] = []
+    with server(observed, body=json.dumps({"echo": value}).encode()) as url:
+        configure(monkeypatch, tmp_path, url, "basic")
+        monkeypatch.setattr(
+            http,
+            "read_credential",
+            lambda args: SimpleNamespace(
+                code=0, value="sample-user" if args.field == "username" else value
+            ),
+        )
+        assert cli.main(["curl", "--", url]) == 2
+    captured = capsysbinary.readouterr()
+    assert len(observed) == 1 and captured.out == b""
+    assert b"response withheld" in captured.err and value.encode() not in captured.err
+
+
 def test_cross_host_redirect_sends_no_second_request(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

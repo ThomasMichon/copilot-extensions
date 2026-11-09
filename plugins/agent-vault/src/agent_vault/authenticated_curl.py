@@ -24,7 +24,10 @@ from .http_bindings import BindingError, HttpBinding, binding_file, read_binding
 
 _STATUS = b"\nagent-vault-http-status:"
 _BODY_LIMIT = 8 * 1024 * 1024
-_JSON_ESCAPE = re.compile(rb'\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}(?:\\u[0-9a-fA-F]{4})?)')
+_JSON_ESCAPE = re.compile(
+    rb'\\(?:u[dD][89aAbB][0-9a-fA-F]{2}\\u[dD][c-fC-F][0-9a-fA-F]{2}'
+    rb'|u[0-9a-fA-F]{4}|["\\/bfnrt])'
+)
 
 
 @dataclass(frozen=True)

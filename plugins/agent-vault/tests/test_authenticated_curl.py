@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import importlib.metadata
 import json
 import logging
 import sys
@@ -16,6 +17,7 @@ import pytest
 
 from agent_vault import authenticated_curl as http
 from agent_vault import config
+from agent_vault import extensions as ext
 from agent_vault.curl_arguments import parse_arguments
 from agent_vault.extensions import ExtensionRegistry
 from agent_vault.http_bindings import (
@@ -213,6 +215,54 @@ def test_failed_extension_policy_cannot_fall_through_to_another_binding(
     assert SECRET not in caplog.text
 
 
+@pytest.mark.parametrize("failure", [
+    "module", "callable", "register", "discovery", "entry-point", "entry-point-callable",
+])
+def test_incomplete_extension_loading_refuses_http_but_preserves_legacy_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture,
+    failure: str,
+) -> None:
+    document(tmp_path / "http-bindings.json")
+    entry_points = Mock(return_value=SimpleNamespace(select=lambda **kwargs: []))
+    monkeypatch.setattr(importlib.metadata, "entry_points", entry_points)
+    monkeypatch.setenv(ext.EXTENSIONS_ENV, "")
+    failed = Mock(side_effect=RuntimeError("synthetic extension failure"))
+    if failure in {"module", "callable", "register"}:
+        monkeypatch.setenv(ext.EXTENSIONS_ENV, "synthetic_http_policy")
+        loader = failed if failure == "module" else Mock(
+            return_value=SimpleNamespace(register=None if failure == "callable" else failed)
+        )
+        monkeypatch.setattr(ext.importlib, "import_module", loader)
+    elif failure == "discovery":
+        entry_points.side_effect = RuntimeError("synthetic discovery failure")
+    else:
+        point = SimpleNamespace(
+            name="synthetic-http-policy",
+            load=failed if failure == "entry-point" else lambda: None,
+        )
+        entry_points.return_value = SimpleNamespace(select=lambda **kwargs: [point])
+
+    registry = ext.load_extensions(ExtensionRegistry())
+    registry.register_config_source(lambda cwd: {"group": "legacy-compatible"})
+    assert registry.collect_config(None)["group"] == "legacy-compatible"
+    monkeypatch.setattr(ext, "_REGISTRY", registry)
+    monkeypatch.setattr(config, "load_global_config", lambda **kwargs: {})
+    monkeypatch.setattr(config, "_global_config_dir", lambda: tmp_path)
+    read = Mock(side_effect=AssertionError("credential read is forbidden"))
+    monkeypatch.setattr(http, "read_credential", read)
+    assert http.command(argparse.Namespace(curl_arguments=["--", URL], prompt=False)) == 2
+    read.assert_not_called()
+    captured = capsys.readouterr()
+    assert captured.out == "" and "configuration could not be resolved" in captured.err
+
+    monkeypatch.setattr(
+        config, "load_global_config", lambda **kwargs: {"http_bindings": "owner.json"}
+    )
+    assert binding_file() == tmp_path / "owner.json"
+
+
 @pytest.mark.parametrize(
     "arguments",
     [
@@ -386,6 +436,16 @@ def test_encoding_normalization_preserves_literal_case(echo: bytes) -> None:
     with pytest.raises(BindingError, match="response withheld"):
         http.redact(echo, [value])
     assert not http._contains_credential(echo.lower(), [value])
+
+
+@pytest.mark.parametrize("uppercase_hex", [False, True])
+def test_mixed_unicode_json_password_echo_is_withheld(uppercase_hex: bool) -> None:
+    value = "synthetic-\u00e9\U0001f600-password"
+    encoded = json.dumps({"echo": value})
+    if uppercase_hex:
+        encoded = encoded.replace("00e9", "00E9").replace("d83d", "D83D").replace("de00", "DE00")
+    with pytest.raises(BindingError, match="response withheld"):
+        http.redact(encoded.encode(), [value])
 
 
 @pytest.mark.parametrize(("body", "suffix"), [
