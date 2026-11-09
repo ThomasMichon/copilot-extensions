@@ -1,0 +1,9 @@
+{
+  "comment": "Project the rule that session-guidance writers are only for facts computed at session start; static text belongs in the owning skill",
+  "changes": [
+    {
+      "plugin": "customizing-copilot",
+      "type": "patch"
+    }
+  ]
+}

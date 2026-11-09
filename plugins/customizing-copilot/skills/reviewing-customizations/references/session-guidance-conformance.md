@@ -107,6 +107,12 @@ Unclassified and legacy-direct hooks fail the migration.
 
 ### 2. Conform dynamic guidance plugins
 
+Use this shape only for facts computed at session start. Remove a writer whose
+output is entirely static: keep standing policy and critical safeguards in a
+declared static projection (§3), and move task-specific reference material
+(definitions, trigger phrases, procedures, plugin-internal paths) into the
+owning skill.
+
 A dynamic guidance plugin ships:
 
 - `instruction-projections.json`;
