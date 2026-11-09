@@ -200,9 +200,14 @@ class Mux {
                 return 2;
             Console.Out.Write(stdout.Result);
             Console.Error.Write(stderr.Result);
-            if (writes.Contains(args[0])) {
-                File.AppendAllText(COMMAND_LOG,
-                    "exit=" + child.ExitCode + " " + stderr.Result + Environment.NewLine);
+            if (writes.Contains(args[0]) || reads.Contains(args[0])) {
+                try {
+                    File.AppendAllText(COMMAND_LOG,
+                        String.Join(" ", args.TakeWhile(value => value != "--")) +
+                        " exit=" + child.ExitCode + " " +
+                        (reads.Contains(args[0]) ? stdout.Result : "") +
+                        stderr.Result + Environment.NewLine);
+                } catch (IOException) {}
             }
             return child.ExitCode;
         }
