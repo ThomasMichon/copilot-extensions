@@ -837,7 +837,8 @@ class AzureDevOpsProvider:
         return "; ".join(errors)
 
     def get_diff(
-        self, repo: str, number: int, *, api_base: str = "", token: str | None = None
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
+        preserve_line_endings: bool = False,
     ) -> "PRDiff":
         """Azure DevOps has no single REST/CLI call that returns a unified
         diff text (it exposes structured per-iteration ``changes``, not a
@@ -846,7 +847,7 @@ class AzureDevOpsProvider:
         :meth:`observe_head`)."""
         from ..pr_contract import PRDiff
 
-        _ = (repo, number, api_base, token)
+        _ = (repo, number, api_base, token, preserve_line_endings)
         return PRDiff(
             supported=False,
             error="Azure DevOps does not expose a unified-diff read "

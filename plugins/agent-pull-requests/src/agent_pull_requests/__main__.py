@@ -871,6 +871,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_cancellation_parser(subparsers, _cmd_native)
     from .native_threads import add_parser as add_threads_parser
     add_threads_parser(subparsers, repo_type=_validate_repo_slug, handler=_cmd_native)
+    from .native_diff import add_parser as add_diff_parser
+    add_diff_parser(subparsers, repo_type=_validate_repo_slug, handler=_cmd_native)
 
     watch = subparsers.add_parser(
         "watch", help="non-blocking subscription against the shared watch daemon"

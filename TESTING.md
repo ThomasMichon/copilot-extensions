@@ -5489,6 +5489,11 @@ the new constructor must not repair it.
 
 ## Unit-only promotion packet
 
+The project-routing controls distinguish the explicit `pr-watch diff` read
+from an unknown similarly named command. They exercise only the existing
+in-process routing predicate, with exact source/node admission; actual
+provider/CLI subprocess qualification remains in the selected plugin packet.
+
 Five binding-projection controls in `test_related_acquisition.py` exercise the
 actual synthesis body with logical paths and substituted canonical-registry
 acquisition. They preserve metadata provenance, knowledge/legacy-worktree
