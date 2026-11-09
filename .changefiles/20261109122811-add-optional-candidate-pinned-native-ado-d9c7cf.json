@@ -1,0 +1,13 @@
+{
+  "comment": "Add optional candidate-pinned native ADO selected-thread resolution with consumed-operation recovery and no bulk fallback",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

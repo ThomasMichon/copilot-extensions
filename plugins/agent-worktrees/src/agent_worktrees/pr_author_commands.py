@@ -6,6 +6,7 @@ HANDLERS = {
     "pr-push": "cmd_push",
     "pr-author-ready": "cmd_ready",
     "pr-author-nudge": "cmd_nudge",
+    "pr-thread-resolve": "cmd_thread_resolve",
 }
 LAZY_DISPATCH = {name: ("pr_author_cli", handler) for name, handler in HANDLERS.items()}
 
