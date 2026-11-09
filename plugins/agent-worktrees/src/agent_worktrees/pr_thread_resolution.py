@@ -14,15 +14,16 @@ def outcome(repo: str, number: int, thread: int, operation_id: str,
             expected_candidate: str, expected_thread: str, *, provider: str | None = None,
             actor: str | None = None, status: str = "not-attempted", reason: str = "admission-refused",
             error: str = "", observed_candidate: dict | None = None,
-            observed_thread: dict | None = None) -> dict[str, Any]:
+            observed_thread: dict | None = None, reopening: bool = False) -> dict[str, Any]:
     """Keep the original selection and independent evidence on every outcome."""
     return {
-        "schema": SCHEMA, "version": 1, "repo": repo, "number": number,
+        "schema": "agent-worktrees.pr-thread-reopen" if reopening else SCHEMA,
+        "version": 1, "repo": repo, "number": number,
         "thread": thread, "operation_id": operation_id, "provider": provider,
         "actor": actor, "ok": status == "confirmed", "reason": reason, "error": error,
         "expected_candidate": expected_candidate, "expected_thread": expected_thread,
         "observed_candidate": observed_candidate, "observed_thread": observed_thread,
-        "actions": {"resolution": {"status": status}},
+        "actions": {"reopening" if reopening else "resolution": {"status": status}},
     }
 
 
@@ -43,28 +44,33 @@ def validate(repo: str, number: int, thread: int, operation_id: str,
 
 
 def resolve(config: Config, repo: str, number: int, thread: int, *, operation_id: str,
-            expected_candidate: str, expected_thread: str) -> dict[str, Any]:
+            expected_candidate: str, expected_thread: str,
+            reopening: bool = False) -> dict[str, Any]:
     """Use only the selected enabled target's optional provider operation."""
     from . import pr_config, providers
 
     fields = (repo, number, thread, operation_id, expected_candidate, expected_thread)
+    def result(**kwargs: Any) -> dict[str, Any]:
+        return outcome(*fields, reopening=reopening, **kwargs)
+
+    name = "thread-reopen" if reopening else "thread-resolve"
     try:
         validate(*fields)
     except ValueError as exc:
-        return outcome(*fields, reason="invalid-input", error=str(exc))
+        return result(reason="invalid-input", error=str(exc))
     resolution = pr_config.resolve_repo_config_for_slug(config, repo)
     if not resolution.resolved:
-        return outcome(*fields, reason="target-unavailable",
+        return result(reason="target-unavailable",
                        error=resolution.error or "Selected resolution needs a registered PR target")
     policy = resolution.repo_config.pr
     if not policy.enabled or policy.provider != "azure-devops":
-        return outcome(*fields, provider=policy.provider, reason="unsupported",
-                       error="Selected target does not support thread-resolve")
+        return result(provider=policy.provider, reason="unsupported",
+                      error=f"Selected target does not support {name}")
     provider = providers.get_provider(policy.provider)
-    operation = getattr(provider, "resolve_selected_thread", None)
+    operation = getattr(provider, "reopen_selected_thread" if reopening else "resolve_selected_thread", None)
     if not callable(operation):
-        return outcome(*fields, provider=policy.provider, reason="unsupported",
-                       error="Selected provider does not support thread-resolve")
+        return result(provider=policy.provider, reason="unsupported",
+                      error=f"Selected provider does not support {name}")
     token = providers.account_token_for_slug(repo, policy)
     return operation(
         repo, number, thread, operation_id=operation_id,

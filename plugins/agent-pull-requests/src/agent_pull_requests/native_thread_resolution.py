@@ -13,26 +13,31 @@ from .native_command import run_command
 def failure(args: Namespace, error: str, *, provider: str | None = None,
             status: str = "not-attempted") -> dict:
     """Preserve the exact request even when owner output is lost."""
+    reopening = args.command == "reopen-thread"
     return {
-        "schema": "agent-worktrees.pr-thread-resolve", "version": 1,
+        "schema": "agent-worktrees.pr-thread-reopen" if reopening else "agent-worktrees.pr-thread-resolve",
+        "version": 1,
         "repo": args.repo, "number": args.number, "thread": args.thread,
         "operation_id": args.operation_id, "provider": provider, "actor": None, "ok": False,
         "expected_candidate": args.expected_candidate, "expected_thread": args.expected_thread,
         "observed_candidate": None, "observed_thread": None,
         "reason": "owner-unconfirmed" if status == "unknown" else "admission-refused",
-        "error": error, "actions": {"resolution": {"status": status}},
+        "error": error, "actions": {"reopening" if reopening else "resolution": {"status": status}},
     }
 
 
 def _validate(body: dict, args: Namespace, provider: str, code: int) -> None:
     if not isinstance(body, dict):
         raise ValueError("Invalid selected-thread response")
+    reopening = args.command == "reopen-thread"
     actions = body.get("actions")
-    action = actions.get("resolution") if isinstance(actions, dict) else None
+    action = actions.get("reopening" if reopening else "resolution") if isinstance(actions, dict) else None
     status = action.get("status") if isinstance(action, dict) else None
     confirmed = status == "confirmed"
     if (
-        body.get("schema") != "agent-worktrees.pr-thread-resolve"
+        body.get("schema") != (
+            "agent-worktrees.pr-thread-reopen" if reopening else "agent-worktrees.pr-thread-resolve"
+        )
         or type(body.get("version")) is not int or body["version"] != 1
         or body.get("repo") != args.repo
         or any(type(body.get(key)) is not int or body[key] != getattr(args, key)
@@ -55,7 +60,8 @@ def _validate(body: dict, args: Namespace, provider: str, code: int) -> None:
             not isinstance(body.get("actor"), str) or not body["actor"].strip()
             or not isinstance(candidate, dict) or candidate.get("fingerprint") != args.expected_candidate
             or not isinstance(thread, dict) or type(thread.get("id")) is not int
-            or thread["id"] != args.thread or thread.get("status") not in ("closed", 4)
+            or thread["id"] != args.thread or type(thread.get("status")) not in (int, str)
+            or thread.get("status") not in (("active", 1) if reopening else ("closed", 4))
             or not isinstance(thread.get("fingerprint"), str)
             or re.fullmatch(r"sha256:[0-9a-f]{64}", thread["fingerprint"]) is None
         ):
@@ -75,9 +81,11 @@ def run(args: Namespace, prefix: list[str]) -> tuple[int, dict]:
                for value in (args.expected_candidate, args.expected_thread))
     ):
         raise ValueError("Exact candidate/thread fingerprints and a bounded operation ID are required")
-    support = capability(args, prefix, "thread-resolve")
+    reopening = args.command == "reopen-thread"
+    operation = "thread-reopen" if reopening else "thread-resolve"
+    support = capability(args, prefix, operation)
     argv = [
-        *prefix, "pr-thread-resolve", f"--repo={args.repo}", "--json",
+        *prefix, f"pr-{operation}", f"--repo={args.repo}", "--json",
         f"--number={args.number}", f"--thread={args.thread}",
         f"--expected-candidate={args.expected_candidate}", f"--expected-thread={args.expected_thread}",
         f"--operation-id={args.operation_id}", *config_options(args),
@@ -90,7 +98,11 @@ def run(args: Namespace, prefix: list[str]) -> tuple[int, dict]:
         return response.returncode, body
     except (ValueError, TypeError, OSError, RuntimeError, subprocess.SubprocessError, UnicodeError):
         result = failure(
-            args, "Selected native resolution response is unconfirmed; retain this operation ID, do not replay",
+            args, (
+                "Selected native reopening response is unconfirmed; retain this operation ID, do not replay"
+                if reopening else
+                "Selected native resolution response is unconfirmed; retain this operation ID, do not replay"
+            ),
             provider=support["provider"], status="unknown",
         )
         if isinstance(body, dict) and all(body.get(key) == getattr(args, key) for key in (

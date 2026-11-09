@@ -2888,6 +2888,34 @@ own scopes. No source/resource/physical custody or updater authority transfers.
 
 ## Journal
 
+### 2026-11-09 - Truthful Knowledge readiness and explicit Reload retry
+
+- Managed source `humming-staple` takes #11735 as a bounded follow-up to the
+  existing #10763 / Phase 5 binding consumer. A check that is pending or
+  unavailable is not evidence that setup is missing. Confirmed missing
+  binding still offers configuration; an unresolved existing binding offers
+  inspection. Native New admission and configuration writers are unchanged.
+- Ordinary Worktrees Reload now requests a fresh bounded asynchronous
+  observation. There is no timer, per-render probe or automatic binding.
+  Generation fencing remains in the original reader, and unchanged action
+  sets do not reset toolbar focus. Reload's existing overall selection
+  policy is unchanged.
+- Eight fail-first cases reproduce the prior labels/state classification;
+  thirteen focused consumer cases pass after correction, including delayed
+  reads, failures, explicit Reload recovery and focus preservation. The
+  test fixture now supplies its startup scalars instead of reaching an
+  ambient engine; no timeout budget was increased.
+- The complete Configuration/notice consumer packet passes 63 cases, with
+  four opt-in native-owner cases skipped because their isolated engine
+  interpreter was not selected. No backend writer or provisioning path
+  changes here. Touched Python lint and the thirteen-plugin install
+  contract pass; this is source consumer proof, not an installed rollout.
+- The original intermittent red message is not currently reproduced and
+  its provider failure was not captured. This fixes independently confirmed
+  presentation/recovery defects, not an asserted timeout root cause or a
+  missing real binding. Broader source checks, review/CI, release and
+  separately authorized installed validation remain distinct gates.
+
 ### 2026-11-08 - Bounded #4437 Finalize consumer slice
 
 - Managed source `weathered-crank` claims only M4437-P1 through P4 and

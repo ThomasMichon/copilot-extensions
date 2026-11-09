@@ -172,6 +172,15 @@ shared paged acquisition journal, durable query progress, immutable full
 snapshots or authoritative tombstones. This legacy optimization does not
 qualify those delta-bounded or recovery gates.
 
+Work-item comments follow the comments API's JSON-body continuation tokens
+on the same selected work-item path, without following a supplied `nextPage`
+URL. Malformed pages, repeated tokens, a next-page indicator without a token,
+later-page HTTP failures and cancellation refuse the document rather than return partial
+comments. The existing initial comments-404 and legacy `value` array behaviors
+are retained. Each request is measured as `comment_page`; this is not parsed
+comment-body accounting. Pagination remains in-memory within one work item,
+not resumable acquisition progress or an immutable comment snapshot.
+
 An external provider's existing `content-current-commit --source SOURCE` reply
 may add `source_delta` with contract `agent-index.source-delta`, explicit
 `versions`, canonical `family`, stable nonsecret `account` and effective

@@ -55,6 +55,16 @@ forge fallback. Required unit-only CI is unchanged. Native Windows,
 installed/account/HTTP and complete three-provider lifecycle acceptance remain
 separate; a synthetic pass and platform skips do not qualify them.
 
+Selected reopening adds `--test-file tests/test_ado_thread_reopening.py` to
+that Worktrees packet and `--test-file tests/test_native_thread_reopening.py`
+to the frontend packet. The shared resolution fixture retains both actual
+frontend/owner process compositions and concurrent ledger owners. Reopening
+controls cover every supported resolved state, delivered policy, old receiver
+refusal through a real process, strict numeric/boolean status evidence,
+original unknown/confirmed outcomes after later active/reclosed observations
+and unchanged legacy status rejection. These remain opt-in source controls,
+not an expansion of required unit-only CI or live-provider qualification.
+
 ## Owner-only hosted Windows escape hatch
 
 `windows-qualification.yml` is an explicit manual lane on a disposable

@@ -19,7 +19,6 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Portable Agent Topology](active/portable-agent-topology/README.md) | Draft; portable dispatcher vision and contract before implementation | #11715; payload-only agent-roles extension, native owners retained, no live fleet activation |
 | [Launch Observation Regressions](active/launch-observation-regressions/README.md) | Draft; caller audit and readiness-discovery correction proposal before implementation | #11722; preserves #11564/#11718 mux owners, admission and operational holds; no rollout |
 | [Derived Disk Hygiene](active/derived-disk-hygiene/README.md) | Active; bytecode, scratch and claim-engine slices merged; guided cleanup delivery, producer/lock integration and rollout observation remain | #10968/#10965/#10966/#10967; independent per-track PRs, no automatic finalize deletion or unapproved cleanup/rollout |
 | [Bridge Delivery Status](active/bridge-delivery-status/README.md) | Draft; model-facing receipt and coalesced host subscription proposal before implementation | #11448; preserves #6394 inbox, #11445 registration and #11298 roster owners; no rollout or peer-session repair |
@@ -181,6 +180,7 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Portable Agent Topology](2026/11/09%20portable-agent-topology/README.md) | Done for source scope; portable dispatcher, schema and read-only helper merged in #11738 after approval and required CI | #11715 retains archive and native settlement; normal promotion and authorized live adoption remain separate, no rollout |
 | [Mux Question Answers](2026/11/09%20mux-question-answers/README.md) | Done; reviewed source released, both authorized installed environments accepted a fresh mux answer and same-conversation continuation | #11371 retains archive review/Main publication and exact resource settlement; #10486 keeps broader MCP handover/whole-suite acceptance |
 | [Mux Functional Continuity](2026/11/09%20mux-functional-continuity/README.md) | Done for source scope; plan #11547 and implementation #11564 merged, exact-source PSMux 3.3.8/3.4.0 native consumers passed | #11544; normal promotion and separately authorized installed adoption remain independent; no host rollout |
 | [Durable Goals and Steers](2026/11/07%20durable-goals-and-steers/README.md) | Done for source scope; reviewed plan and implementation #11408/#11432 merged, actual native replay qualified | #11403; normal promotion and authorized installed adoption remain separate; semantic reading not asserted |

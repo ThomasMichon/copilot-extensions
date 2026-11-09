@@ -394,6 +394,8 @@ class PickerScreenSelectionMixin:
         host_tag = "  (this host)" if (tm, te) == self._src_local() else ""
         labels = {"N": " + New worktree… ", "K": " ✕ Clean ", "SY": " ⟳ Sync ",
                   "KB": " Configure knowledge "}
+        if (getattr(self, "_knowledge_readiness", None) or {}).get("code") == "state_root_resolution_failed":
+            labels["KB"] = " Inspect knowledge "
 
         t = Text("  ")
         first = True

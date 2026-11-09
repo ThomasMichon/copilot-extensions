@@ -302,7 +302,9 @@ class WorktreesView:
                 if readiness.get("code") == "loading" else
                 "Knowledge binding is required before an ordinary New task."
                 if readiness.get("code") == "knowledge_binding_required" else
-                "Knowledge readiness is unavailable; inspect Configuration before New."
+                "Knowledge binding could not be resolved; inspect Configuration or press r to retry."
+                if readiness.get("code") == "state_root_resolution_failed" else
+                "Knowledge setup check unavailable; press r to retry."
             )
             lines.append(Text(f"  {message}", style=C_DIM))
         from .source_read_notices import worktree_read_feedback
