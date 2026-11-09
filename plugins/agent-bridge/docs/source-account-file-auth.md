@@ -110,3 +110,51 @@ platform controls. All credentials, accounts and files in it are synthetic.
 The Index HTTP fixture additionally runs this client against its actual native
 health/credential routes and real account-relay provider, including installation
 identity, renewal and wrong-capability refusal.
+
+## Disabled integration prestage
+
+There is no callable native source-auth enforcement contract today.
+`source-auth-state/v1` is a proposed credential-free observation shape, not an
+implemented RPC. An ordinary Driver `initialize` response, `nativeSend` support,
+`backend_admitted`, a merged controller or an inbox receipt cannot substitute
+for it. Missing runtime support is **unsupported**; unavailable or ambiguous
+receiving identity, state or admission is **unknown**. Neither permits automatic
+acquisition, file renewal, process action, fallback or replay. No enabled
+configuration, renewal loop or positive integration adapter is introduced here.
+
+The source-loss controls in `tests/test_source_file_auth.py` prestage the
+credential side: an unavailable source does not extend an existing lease or
+rewrite the file, and fresh acquisition through the same file owner does not
+revive expired authority. Their private synthetic history fixture proves only
+that these file operations leave unrelated bytes intact. It is not a native
+conversation, process-preservation or recovery test.
+
+The positive integration remains blocked on the existing native execution
+owner. Its revision-bound acceptance record must cover the actual receiving
+incarnation, native UI and in-flight work, not only semantic prompt admission.
+The [Driver core](../../../libs/copilot-driver-core/README.md) remains the owner;
+`requireControl`, `prompt` and `nativeSend` do not yet implement source-auth wait,
+and raw Host write observation is not an enforcement seam. Renewal must never
+clear irreversible control loss, pending/sending state or unknown admission.
+
+Prepare the following proof against that owner's implemented contract, without
+inventing a new RPC or treating synthetic controls as a native pass:
+
+| Consumer checkpoint | Required observation |
+|---|---|
+| Disabled, unsupported or unknown receiving owner | No source acquisition, file mutation, process action or seed submission |
+| Approved source and native file | Ordinary SSH followed by plain `copilot` uses the selected account without manual login or token environment |
+| One approved signed-in source remains | Fresh bounded authorization sustains renewal without changing account, file-writer or execution custody |
+| All approved sources unavailable | Renewal refuses, retained source authority expires conservatively, and the original native owner stops auth-dependent UI/in-flight work while preserving history and uncertain operations |
+| Fresh source after auth wait | The owner restores the same durable conversation/history, possibly with a new PID/incarnation, without replaying the seed or uncertain sends |
+| Obsolete lease, source loss or changed owner | Stale authority cannot resume execution or reset irreversible control holds |
+| End of the proof | Exact owned-child cleanup is confirmed; unrelated sessions and services remain untouched |
+
+Use the native owner's existing public-caller qualification lane rather than
+launching another qualification or taking over core/Host/backend/launcher code.
+Do not revoke real credentials, sign users out, alter a global clock, restart
+shared services or delete history to manufacture expiry. Acceptance of that
+native contract is necessary for integration readiness, not permission to
+activate an installation. A source-only or draft prestage stays disabled until
+the operator separately authorizes enablement and the normal runtime owner
+completes its current source, caller, host and custody checks.
