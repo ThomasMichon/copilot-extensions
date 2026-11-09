@@ -980,9 +980,9 @@ class GitHubProvider:
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None
     ) -> PRDiff:
         """Return the PR's current unified diff via ``gh pr diff``."""
-        _ = api_base
         proc = run_cli(
-            ["gh", "pr", "diff", str(number), "--repo", repo], env=self._env(token),
+            ["gh", "pr", "diff", str(number), "--repo", repo],
+            env=self._env(token, host=self.authority_endpoint(api_base)),
         )
         if proc.returncode != 0:
             return PRDiff(

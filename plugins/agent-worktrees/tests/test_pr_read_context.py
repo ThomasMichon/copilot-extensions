@@ -130,9 +130,9 @@ def test_one_shot_snapshot_has_no_mutating_or_durable_claimant_requirement(monke
     assert "agent-worktrees.pr-snapshot" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("verb", ["snapshot", "status", "threads"])
+@pytest.mark.parametrize("verb", ["snapshot", "status", "threads", "diff"])
 def test_one_shot_read_reuses_discovery_but_next_read_reacquires(monkeypatch, capsys, verb):
-    from agent_worktrees import config_cache, pr_thread_report, providers
+    from agent_worktrees import config_cache, pr_diff_report, pr_thread_report, providers
 
     discoveries = []
     endpoints = []
@@ -164,6 +164,7 @@ def test_one_shot_read_reuses_discovery_but_next_read_reacquires(monkeypatch, ca
         return {"supported": True, "threads": []}
 
     monkeypatch.setattr(pr_thread_report, "thread_report", threads)
+    monkeypatch.setattr(pr_diff_report, "diff_report", threads)
     # An enclosing resident cache must not supply a prior read's policy.
     with config_cache.ConfigCacheSession().scope():
         pr_related_binding.control_plane_pr_map()

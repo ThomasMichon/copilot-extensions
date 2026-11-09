@@ -3,7 +3,8 @@
 Back to the [CLI parity inventory](cli-parity-inventory.md) and
 [canonical effort](README.md).
 
-**Agent-recommended contract proposal; no runtime delivery claimed.**
+**Contract reviewed in #11659; finite source qualification below is not
+installed or live-provider acceptance.**
 This finite read-only slice closes part of the PR-domain
 [provider-neutral surface](../../../visions/plugins/agent-pull-requests/README.md#first-class-provider-neutral-pr-surface)
 and Worktrees'
@@ -60,9 +61,9 @@ The new owner emits `schema: agent-worktrees.pr-diff-read`, integer `version: 1`
 the exact selected `repo`, positive integer `pr`, nonempty string `provider`,
 boolean `supported`, string `diff`, string `error` and `complete` as boolean
 or null. This schema is exclusive to the new explicit-target report; the
-tracked command keeps its existing unversioned shape and is not an
-interchangeable report source. JSON booleans are not integer versions or
-PR numbers.
+tracked command keeps its existing shape (including the generic JSON
+formatter's version 1, but no diff-read schema) and is not an interchangeable
+report source. JSON booleans are not integer versions or PR numbers.
 
 `complete: true` means the report has evidence that all declared diff
 acquisition completed, false means known incomplete acquisition, and null
@@ -110,21 +111,29 @@ incompatibility with no fallback or second dispatch; existing operations
 remain usable. Migrate ordinary consumers only after receiver qualification;
 no legacy retirement is proposed.
 
-- [ ] Exercise the actual owner/parser and dedicated frontend across a real
+- [x] Exercise the actual owner/parser and dedicated frontend across a real
   process boundary from neutral CWD, with distinct caller/target bindings and
   no target checkout or lifecycle/resource writes.
-- [ ] Use actual GitHub/Gitea/ADO provider methods with synthetic IO.
+- [x] Use actual GitHub/Gitea/ADO provider methods with synthetic IO.
   Prove configured GitHub endpoint selection despite an unrelated ambient
   host; preserve missing-credential/provider errors and explicit ADO refusal.
-- [ ] Preserve exact diff bytes as UTF-8 text through JSON encoding, additive
+- [x] Preserve exact diff bytes as UTF-8 text through JSON encoding, additive
   fields, empty text, incomplete/unknown completeness, valid error reports
   and owner-exit/envelope disagreement. No inferred candidate freshness.
-- [ ] Cover direct and managed-peer selection, pre-dispatch option-prefix
+- [x] Cover direct and managed-peer selection, pre-dispatch option-prefix
   refusal, strict unknown options, invalid numbers/types/targets, malformed
   envelopes, missing executable, timeout and output limits; no second call.
-- [ ] Exercise old tracked caller/new owner, new caller/version-1 owner,
+- [x] Exercise old tracked caller/new owner, new caller/version-1 owner,
   unsupported old owner and supported rollback through real parser/process
   fixtures. Preserve tracked reconciliation and its existing exit semantics.
 - [ ] Record isolated source/platform qualification separately from installed,
   live-provider, HTTP, generation-bound workspace and complete parent parity.
   Keep the canonical Plan and Validation Plan open after finite delivery.
+
+The native diff/routing packet passes 148 cases with five Windows-only
+skips. The actual Worktrees owner/read/observation/tracked packet passes 84,
+including real subprocess GitHub/Gitea/ADO provider methods with synthetic IO,
+configured-versus-ambient GitHub host selection, missing credentials,
+native refusal and unchanged tracked parser/reconciliation/output.
+Both isolated runs verify cleanup. Native Windows/macOS, installed,
+authorized provider-account, HTTP and broader parent parity remain open.
