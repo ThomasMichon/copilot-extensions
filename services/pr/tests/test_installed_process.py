@@ -115,8 +115,11 @@ def _seed_confirmed_comment(path: Path, evidence: dict[str, Any]) -> dict[str, A
 
     config = load_config(path)
     assert config.workspaces is not None
-    preparation = config.workspaces.preparations[0][2]
-    profile, errors = load_profile(preparation.profile_home, preparation.source_root, env={})
+    preparation = config.workspaces.preparations[0][2] if config.workspaces.preparations else None
+    profile, errors = load_profile(
+        preparation.profile_home if preparation else path.parent / "producer-home",
+        preparation.source_root if preparation else path.parent / "producer", env={},
+    )
     assert not errors
     prepared = prepare(
         "Retained note.", profile, {"domain": "forge", "visibility": "public", "activity": "comment"},
@@ -125,6 +128,12 @@ def _seed_confirmed_comment(path: Path, evidence: dict[str, Any]) -> dict[str, A
         comment_id="11111111-1111-4111-8111-111111111111",
         write_id="22222222-2222-4222-8222-222222222222",
     )
+    evidence["sections"]["discussions"]["data"] = [{
+        "id": 100, "status": "active", "comments": [{
+            "id": 1, "content": prepared["body"], "commentType": 1, "parentCommentId": 0,
+            "author": {"id": evidence["scope"]["principal_id"]},
+        }],
+    }]
     generation = build_generation(evidence)["generation"]
     selected = {
         "schema": "agent-pull-requests.review-intent", "version": 2,
@@ -138,6 +147,20 @@ def _seed_confirmed_comment(path: Path, evidence: dict[str, Any]) -> dict[str, A
     }
     store = config.store()
     expires_at = int(time.time()) + 60
+    if config.workspaces.terminal_mapping_reads:
+        from agent_pull_requests.conversation_store import ConversationStore
+        from agent_pull_requests.terminal_retention import bind_generation
+        from agent_pull_requests.watch_replay import ObservationTarget
+
+        observed = ConversationStore(store).observe_workspace(
+            generation, expires_at=expires_at,
+            terminal_target=ObservationTarget("account-a", "example/project", 42, frozenset()),
+        )
+        transaction: Callable[..., Any] = store._review_transaction
+        transaction(
+            lambda document: bind_generation(document, generation, observed["cursor"]),
+            expires_at=expires_at,
+        )
     store.admit_review(selected, expires_at=expires_at)
     begun = store.begin_review_action(
         selected["operation_id"], selected["scope"], "retained-finding", expires_at=expires_at,
@@ -148,24 +171,54 @@ def _seed_confirmed_comment(path: Path, evidence: dict[str, Any]) -> dict[str, A
         {"origin": "response", "platform_ids": {"thread_id": 100, "comment_id": 1}, "proof": None},
         expires_at=expires_at, confirm=True,
     )
-    evidence["sections"]["discussions"]["data"] = [{
-        "id": 100, "status": "active", "comments": [{
-            "id": 1, "content": prepared["body"], "commentType": 1, "parentCommentId": 0,
-            "author": {"id": selected["scope"]["principal_id"]},
-        }],
-    }]
+    if config.workspaces.terminal_mapping_reads:
+        ConversationStore(store).observe_workspace(
+            generation, expires_at=expires_at,
+            comment_mappings=True,
+            terminal_target=ObservationTarget("account-a", "example/project", 42, frozenset()),
+        )
     return {"number": 42, "operation_id": selected["operation_id"], "action_id": "retained-finding"}
 
 
-@pytest.mark.parametrize("workspace_enabled,preparation_enabled,missing_preparer,mapping_enabled,terminal_enabled", [
-    (False, False, False, False, False), (True, False, False, False, False),
-    (True, True, False, False, False), (True, True, True, True, False),
-    (True, False, False, False, True),
+def _compact_terminal_mapping(path: Path, scope: dict[str, Any], cursor: dict[str, int]) -> None:
+    from agent_pull_requests.attention import Cursor
+    from agent_pull_requests_service.config import load_config
+    from single_instance_lease import SingleInstance
+
+    config = load_config(path)
+    assert config.workspaces is not None
+    with SingleInstance(config.root, service="agent-pull-requests-watch") as lease:
+        def current() -> None:
+            assert lease.held
+        store = config.store()
+        operations = config.workspaces.operations(store, current, 60)[("caller-a", "project")]
+        expires_at, deadline = int(time.time()) + 60, time.monotonic() + 60
+        policies = {
+            row["intent"]["operation_id"]: {
+                "owner": "original-owner", "deadline_at": expires_at - 10,
+                "escalation_ref": "original-escalation",
+            } for row in json.loads(store.path.read_bytes())["reviews"]
+        }
+        operations.retention.compact_recovery(
+            scope, Cursor(**cursor), policies, expires_at=expires_at,
+            checkpoint=current, deadline=deadline, lifecycle_checkpoint=current,
+        )
+        operations.retention.retire_cache(
+            scope, Cursor(**cursor), expires_at=expires_at,
+            checkpoint=current, deadline=deadline, lifecycle_checkpoint=current,
+        )
+        assert not list(operations.cache.generations.glob("*.json"))
+
+
+@pytest.mark.parametrize("workspace_enabled,preparation_enabled,missing_preparer,mapping_enabled,terminal_enabled,terminal_mapping_enabled", [
+    (False, False, False, False, False, False), (True, False, False, False, False, False),
+    (True, True, False, False, False, False), (True, True, True, True, False, False),
+    (True, False, False, False, True, False), (True, False, False, False, True, True),
 ])
 def test_installed_host_process_register_observe_reconnect_restart_and_ack(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
     workspace_enabled: bool, preparation_enabled: bool, missing_preparer: bool, mapping_enabled: bool,
-    terminal_enabled: bool,
+    terminal_enabled: bool, terminal_mapping_enabled: bool,
 ) -> None:
     # The existing Fleet fixture owns issuer, policy and TLS; do not add a fake Gateway.
     root = Path(__file__).resolve().parents[3]
@@ -204,6 +257,7 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
         prepared_preview: dict[str, Any] = {}
         retained_request: dict[str, Any] = {}
         terminal_completion: dict[str, Any] = {}
+        terminal_mapping: dict[str, Any] = {}
         snapshot = {
             "schema": "agent-worktrees.pr-snapshot", "version": 1,
             "repo": "example/project", "pr": 1, "provider": "github",
@@ -323,6 +377,7 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                     }],
                     "cache_bytes": 4 * 1024 * 1024, "cache_generations": 20,
                     **({"terminal_reads": True} if terminal_enabled else {}),
+                    **({"terminal_mapping_reads": True} if terminal_mapping_enabled else {}),
                 }
                 if preparation_enabled:
                     preparation_profile.parent.mkdir(parents=True)
@@ -362,7 +417,7 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
             path.write_text(json.dumps(config))
             assert (await command("provision", "--config", str(path)))[0] == 0
             assert (await command("provision", "--config", str(path)))[0] == 1
-            if mapping_enabled:
+            if mapping_enabled or terminal_mapping_enabled:
                 retained_request = _seed_confirmed_comment(path, evidence)
                 save_evidence(0)
             owner = await launch()
@@ -466,11 +521,19 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                 if workspace_enabled:
                     capabilities = await workspace("capabilities", {})
                     assert "submit" not in capabilities["operations"]
-                    assert ("retained-comment" in capabilities["operations"]) is mapping_enabled
+                    assert ("retained-comment" in capabilities["operations"]) is (
+                        mapping_enabled or terminal_mapping_enabled
+                    )
                     assert capabilities["backend_contract"]["read_acquisition"] == PROFILE
                     if terminal_enabled:
                         from agent_pull_requests.workspace_terminal_read import supports
                         assert supports(capabilities["backend_contract"])
+                    if terminal_mapping_enabled:
+                        from agent_pull_requests.workspace_terminal_mapping import FIELD, contract
+                        assert capabilities["backend_contract"][FIELD] == contract()
+                        assert not {"prepare", "allocate", "receipt", "observe-comment"} & set(
+                            capabilities["operations"]
+                        )
                     initial = (await workspace("load", {
                         "number": 42, "expected_current": None, "budget_seconds": 10,
                     }))["result"]
@@ -490,6 +553,11 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                             "fresh_native_read", "original_version_proven", "feedback_progress",
                         ))
                         assert "Retained note." not in json.dumps(mapping)
+                    if terminal_mapping_enabled:
+                        terminal_mapping = (await workspace("retained-comment", retained_request))["result"]
+                        assert terminal_mapping["representation"] == "active"
+                        assert terminal_mapping["mapping"]["status"] == "correlated"
+                        assert terminal_mapping["action_state"] == "confirmed"
                     if preparation_enabled:
                         from agent_pull_requests.review_workspace import _digest
 
@@ -601,6 +669,8 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                 assert await send("pending") == pending
             finally:
                 await close(owner)
+            if terminal_mapping_enabled:
+                _compact_terminal_mapping(path, {**scope, "number": 42}, cursor)
             # Remounting the same namespace does not rebind the retained volume.
             # The real installed host must refuse before attachment/observation.
             retained = (state / "watch-replay.json").read_bytes()
@@ -657,6 +727,13 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                         assert not any(mapping[name] for name in (
                             "fresh_native_read", "original_version_proven", "feedback_progress",
                         ))
+                    if terminal_mapping_enabled:
+                        mapping_before = (state / "watch-replay.json").read_bytes()
+                        mapping = (await workspace("retained-comment", retained_request))["result"]
+                        assert mapping == {**terminal_mapping, "representation": "compact"}
+                        assert (state / "watch-replay.json").read_bytes() == mapping_before
+                        assert evidence_path.with_suffix(".calls").read_text() == workspace_calls
+                        assert not list((state / "review-cache/generations").glob("*.json"))
                     retained = (await workspace("events", {
                         "number": 42, "after": cursor, "limit": 16,
                     }))["result"]
@@ -675,7 +752,9 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                         evidence["sections"]["pull_request"]["data"]["status"] = "active"
                         save_evidence(8)
                         reopened = (await workspace("load", {
-                            "number": 42, "expected_current": generation_id, "budget_seconds": 10,
+                            "number": 42,
+                            "expected_current": None if terminal_mapping_enabled else generation_id,
+                            "budget_seconds": 10,
                         }))["result"]
                         assert reopened["conversation"]["cursor"] == {"epoch": 2, "sequence": 1}
                         generation_id = reopened["descriptor"]["id"]

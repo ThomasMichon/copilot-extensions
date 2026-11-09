@@ -46,6 +46,25 @@ def adopt(store: ReplayStore, checkpoint: Callable[[], None], expires_at: int) -
     checkpoint()
 
 
+def mapping_core() -> Any:
+    try:
+        from agent_pull_requests.terminal_comment_mapping import TerminalCommentMappingStore
+        from agent_pull_requests.workspace_terminal_mapping import contract
+
+        value = contract()
+        if value != {
+            "protocol": "agent-pull-requests.terminal-comment-mapping-reader/v1",
+            "operations": ["retained-comment"],
+            "result_protocol": "agent-pull-requests.terminal-comment-observation/v1",
+            "representations": ["active", "compact"],
+            "terminal_comment_mapping_version": 1, "effects": "none",
+        } or type(value["terminal_comment_mapping_version"]) is not int:
+            raise ValueError("unsupported terminal mapping declaration")
+        return TerminalCommentMappingStore
+    except (ImportError, AttributeError, TypeError, ValueError, RuntimeError):
+        raise ValueError("selected terminal mapping read core unsupported") from None
+
+
 def target(
     store: ReplayStore, account: str, repo: str, number: int, *,
     expires_at: int, checkpoint: Callable[[], None],
