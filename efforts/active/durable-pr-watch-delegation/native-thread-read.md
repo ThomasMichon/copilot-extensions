@@ -3,8 +3,8 @@
 Back to the [CLI parity inventory](cli-parity-inventory.md) and
 [canonical effort](README.md).
 
-**Contract reviewed in #11655; finite source qualification below is not
-installed or live-provider acceptance.**
+**Contract reviewed in #11655; finite native source merged in #11657.**
+Source qualification below is not installed or live-provider acceptance.
 This finite read-only slice closes part of the PR-domain
 [provider-neutral surface](../../../visions/plugins/agent-pull-requests/README.md#first-class-provider-neutral-pr-surface)
 and Worktrees'
