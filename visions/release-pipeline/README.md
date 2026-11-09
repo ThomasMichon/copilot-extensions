@@ -3,7 +3,7 @@
 - **Subject:** continuous publication of development snapshots and their artifacts
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-11-07
+- **Last revised:** 2026-11-09
 - **Reality docs:** [`docs/pipelines.md`](../../docs/pipelines.md) ·
   [`docs/patterns/dev-main-promotion-pipeline.md`](../../docs/patterns/dev-main-promotion-pipeline.md)
 
@@ -21,7 +21,9 @@ Its general test portfolio consists only of unit tests with coverage; required P
 selects that unit portfolio conditionally by impact. A separate, bounded
 construction and installed-entry-point qualification must establish that every
 declared release environment can be assembled and launched under the selected
-package-feed restrictions before publication. This is an explicit exception to
+package-feed restrictions before publication. The installed Manager must also
+prove its real create, exit/resume and active-session Open lifecycle in a
+representative assembled harness. This is an explicit exception to
 unit-only release execution, not permission to reclassify integration as unit
 evidence or restore the general integration portfolio. Every promotion must also
 qualify the real Windows Resume pane-startup consumer against the frozen release
@@ -132,10 +134,10 @@ server-enforced freshness protect the final merge.
 ### qualified-before-complete
 
 Complete admitted unit evidence, production artifact-availability/integrity and
-complete configured-feed construction/launch qualification and native Windows
+complete configured-feed construction/installed-lifecycle qualification and native Windows
 Resume consumer qualification establish the actual release, not merely successful
 submission or an open PR. Apart from these bounded
-construction/launch and Resume exceptions, real-Git, multi-process, native, installation and
+construction/installed-lifecycle and Resume exceptions, real-Git, multi-process, native, installation and
 end-to-end integration tests belong to periodic containerized validation.
 Publication and runtime activation remain distinct outcomes. Optional client
 artifact use and governed source assembly follow the
@@ -218,7 +220,7 @@ a green wrapper, a larger deadline or an ever-growing test gate.
 Promotion runs eligible unit tests and collects coverage once. Conditional PR
 testing uses that bounded unit portfolio. General integration does not rejoin the
 gate through a baseline, preflight or generated-consumer dependency. The separate
-configured-feed construction/launch qualification below and native Windows Resume
+configured-feed construction/installed-lifecycle qualification below and native Windows Resume
 consumer qualification are the two bounded exceptions. Neither changes unit
 eligibility or credits integration coverage as unit proof.
 
@@ -250,6 +252,29 @@ candidate, environment inventory, platform/profile and package-policy inputs.
 Provider coordinates remain adopter configuration; no public-index fallback or
 policy exception is inferred from a successful build on another host.
 
+### installed-manager-lifecycle-before-publication
+
+A release qualifies the installed suite in a representative harness through
+the Manager's normal user entry point and controls. The Manager creates a real
+worktree and starts an interactive Copilot session; after Copilot exits, a
+newly opened Manager resumes that worktree with its durable conversation
+continuity intact. A Manager opened alongside an active session can Open that
+same session without replacing or duplicating its owner. Closing the Manager
+or detaching its view must not end the active session.
+
+The real installation, project/path resolution, launch admission, terminal,
+native mux and session persistence participate in this proof. A deterministic
+local inference endpoint may remove model-credit and credential dependence
+without substituting the Copilot CLI or its lifecycle. Rendering a picker,
+running lower-level create/resume commands or launching a synthetic child
+alone does not qualify the user flow.
+
+Complete successful lifecycle evidence binds the same frozen candidate and
+admitted execution inputs as publication. Missing, skipped, failed, timed-out,
+stale or incomplete evidence blocks promotion. Qualification remains bounded,
+separate from unit coverage and isolated from real operator state; it neither
+weakens production admission nor repairs the fixture until it appears green.
+
 ### consumer-feed-availability-before-promotion
 
 Promotion must not publish dependency requirements that cannot be admitted
@@ -280,8 +305,8 @@ eligible units within the same or smaller budget, instead of accumulating them.
 - No fake or omitted admitted-unit evidence, or removal of byte integrity,
   signing, exact locks, source governance or publication authority.
 - No general end-to-end, actual-Git or multi-process integration-test portfolio
-  in promotion; only bounded configured-feed construction/launch and native
-  Windows Resume consumer qualification are exceptions.
+  in promotion; only bounded configured-feed construction/installed-lifecycle
+  and native Windows Resume consumer qualification are exceptions.
 - No implicit authorization for a main repair, stale overwrite, forced tag
   movement or change to independently governed control preservation.
 - No second release channel, competing publisher or separate client provenance

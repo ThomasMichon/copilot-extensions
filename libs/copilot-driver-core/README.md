@@ -88,6 +88,9 @@ Client counts come from client rows, not PSMux's boolean `session_attached`.
 The default namespace uses the native `PSMUX_DATA_DIR` or native home.
 An explicitly namespaced launcher can pair its existing `psmux -L <name>`
 selector with `COPILOT_DRIVER_PSMUX_NAMESPACE=<name>` for observation.
+An in-process caller can instead supply `observe_psmux(..., namespace=<name>)`
+to select its exact creation transport without changing the environment shared
+with other observers. An explicit empty namespace selects the default transport.
 This Driver selector does not configure the PSMux CLI or isolate its startup
 cleanup; the caller must keep both selectors consistent. No environment
 setting makes native tests safe on a shared host.

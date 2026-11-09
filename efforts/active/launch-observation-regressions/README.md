@@ -14,7 +14,7 @@ observation failure without bypassing admission or affecting existing sessions.
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent reviewed source slices targeting `dev`
 - **Created:** 2026-11-09
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [Picker](../../../visions/picker/README.md);
   [authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement)
 - **Umbrella issue:** #11722
@@ -75,14 +75,19 @@ retained resources. Source completion does not claim installed recovery.
 ## Plan
 
 ### Phase 1 - Review the correction
-- [ ] Land this proposal through the normal review and CI gate.
+- [x] Land this proposal through the normal review and CI gate (#11725).
 
 ### Phase 2 - Audit and repair
 - [ ] Audit mux callers' targets, arguments, environment/CWD, observation provenance, budgets and cleanup; identify installed-versus-source differences and preserve independent owners.
 - [ ] Remove redundant readiness-discovery filesystem work without weakening payload identity, linked-path refusal, selected-owner qualification or the existing admission deadline.
 - [ ] Make readiness failures identify their stage and timeout versus unsupported selection without exposing raw output or changing refusal semantics.
 
-### Phase 3 - Deliver and close
+### Phase 3 - Read-only New observation
+- [ ] Review a readiness-only observation scope before implementing it: bind enabled-owner declarations and the actual readiness invocation without constructing an installer plan.
+- [ ] Keep full payload identity and executable/installer qualification for ordinary repair planning/apply; a readiness-only digest must never authorize apply.
+- [ ] Prove the New observer finishes within the original aggregate budget against a representative payload roster; reject changed declarations, unsupported selected runtimes and incomplete readiness.
+
+### Phase 4 - Deliver and close
 - [ ] Land the bounded correction after passing review and required CI.
 - [ ] Record source results and any separately owned operational acceptance; archive this effort only after every item is resolved or transferred to a named tracker.
 
@@ -96,11 +101,22 @@ retained resources. Source completion does not claim installed recovery.
 
 ## Proposal
 
-Agent-recommended implementation direction: avoid repeated ancestor traversal
-within one bounded payload walk, retaining content hashing and existing safety
-properties. Do not solve latency by increasing the admission timeout, disabling
+The initial ancestor-walk optimization was rejected after review demonstrated
+a directory-replacement race. Retain the original per-leaf ancestor checks and
+full payload hashing for installer plans. Do not solve latency by increasing the admission timeout, disabling
 required readiness, adding a resident cache or silently trusting a newer payload
 instead of the selected runtime.
+
+The first bounded source optimization did not meet the real admission budget:
+discovery still timed out at 55 seconds, and a shorter instrumented control
+remained opening files in the first owner's payload tree. Phase 3 therefore
+proposes separating New's explicitly read-only observation from an installer
+plan. The former needs the current owner/roster declarations and the exact
+readiness action; it must not recursively hash unrelated tests, documentation
+or installer inputs. The latter retains its complete existing identity and
+effect gates. These scopes must be non-interchangeable and tested before any
+apply. This direction is proposed for review, not implemented by the first
+source slice.
 
 This closes existing responsiveness and truthful-observation intent rather
 than extending a vision. The service-contract and performance-measurement
@@ -109,6 +125,52 @@ current/prior providers retain the same required observation contract. Runtime
 replacement and rollout remain with their existing owners.
 
 ## Journal
+
+### 2026-11-09 - Native scope review corrections
+- Review identified creation-namespace drift and a scrubbed teammate flag that
+  still participated in the worker hash. Native reads now receive the exact
+  creation namespace without changing shared environment; both context writers
+  treat the flag as transport state.
+- The private Windows lifetime fixture now uses a deliberately different
+  ambient observer namespace and a parent teammate flag. It must confirm the
+  actual private native incarnation before publishing readiness.
+- The original 89-test hosted Windows result covers the first source slice;
+  changed namespace and worker-scope behavior needs fresh qualification.
+- The revised private native lifetime packet passed all six Windows cases
+  and four Linux cases (two Windows-only cases skipped on Linux). The enclosing
+  workflow then failed in an old active-pane control that still expected a
+  PSMux CLI probe. That control is being corrected to assert the native caller
+  contract while retaining the TMux syntax check; the workflow is not called green.
+- A controlled directory-replacement finding invalidated the attempted
+  ancestor-walk optimization. It did not meet the launch budget anyway, so
+  restore the original full-plan traversal instead of adding handle/attestation
+  machinery. Add deterministic symlink/reparse replacement controls. Phase 3's
+  readiness-only scope remains the proposed latency correction.
+
+### 2026-11-09 - First source slice and remaining budget failure
+- Initially removed repeated per-file ancestor walks; payload bytes and digest remain
+  unchanged. Existing repair-boundary selection passed 120 tests, with 17
+  platform/tier skips.
+- New diagnostics and the legacy updater controls passed 87 tests, with six
+  platform/tier skips. Warm Picker and badge assertions passed 89 tests, but
+  local teardown failed on a synthetic launcher executable; a one-case control
+  repeated that teardown failure. This is not a clean local suite pass.
+- The real discovery-only candidate still exceeded its 55-second execution
+  allowance. A 30-second per-owner control found the first payload hash still
+  opening files; no application readiness script was invoked. Phase 3 is the
+  remaining correction, not a reason to enlarge the deadline.
+- Compared #11710's sole production change with its parent: the added
+  post-lock expiry check handles four send-only mutation notices, not the
+  pre-allocation application observer. It does not explain the captured New
+  failure; no conclusion is claimed about a separately unobserved launch error.
+
+### 2026-11-09 - Proposal accepted
+- #11725 merged after an approving Copilot review and green required CI.
+- Continue Phase 2 in the same source worktree; no operational hold changed.
+- The caller sweep also found legacy status-updater fallback and warm Picker
+  observation paths that still execute PSMux CLI reads. Confirm their actual
+  consumers and add focused source controls rather than treating nominal reads
+  as harmless or duplicating #11718's inventory work.
 
 ### 2026-11-09 - Diagnosis and proposal
 - Separated intentional installed mux-listing suppression from a PSMux failure.

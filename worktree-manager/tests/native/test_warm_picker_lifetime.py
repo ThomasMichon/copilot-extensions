@@ -163,6 +163,7 @@ def _environment(root):
         native_temp = Path(env["USERPROFILE"]) / "AppData" / "Local" / "Temp"
         native_temp.mkdir(parents=True)
         env["TMP"] = env["TEMP"] = str(native_temp)
+        env["COPILOT_DRIVER_PSMUX_NAMESPACE"] = "not-the-created-namespace"
     else:
         env["TMUX"] = str(root / "tmux" / "fixture.sock") + ",0,0"
     return env
@@ -227,6 +228,8 @@ def _owner(root, namespace):
     from worktree_manager.warm_picker_contract import CONTEXT_KEYS
 
     publish(root / "owner.json", {"pid": os.getpid(), "start": process_start_time(os.getpid())})
+    if os.name == "nt":
+        os.environ["PSMUX_CLAUDE_TEAMMATE_MODE"] = "1"
     pool = WarmPickerPool(root / "manager")
     pool.mux_args = namespace
     payload = {
@@ -279,6 +282,11 @@ def _owner(root, namespace):
                 ready = _read(slot.directory / "ready.json")
                 if ready is None:
                     continue
+                if os.name == "nt":
+                    if slot.incarnation is None:
+                        continue
+                    observed = pool._native_observation(slot)
+                    assert observed.presence() and observed.incarnation == slot.incarnation
                 if not (root / "slot.json").exists():
                     publish(root / "slot.json", {
                         "directory": str(slot.directory), "session": slot.session,

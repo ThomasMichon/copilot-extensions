@@ -21,6 +21,87 @@ from agent_machines.installation_repair_process import run_action
 pytestmark = pytest.mark.guard
 
 
+@pytest.mark.parametrize("reparse", [False, True])
+def test_payload_identity_refuses_parent_replacement_during_enumeration(tmp_path, monkeypatch, reparse):
+    import stat
+    from types import SimpleNamespace
+
+    root = tmp_path / "payload"
+    root.mkdir()
+    (root / "entry.py").write_bytes(b"content")
+    replaced = False
+    original_lstat, original_iterdir = Path.lstat, Path.iterdir
+
+    def entries(path):
+        nonlocal replaced
+        result = list(original_iterdir(path))
+        if path == root:
+            replaced = True
+        return iter(result)
+
+    def observed(path, *args, **kwargs):
+        if path == root and replaced:
+            return SimpleNamespace(
+                st_mode=stat.S_IFDIR if reparse else stat.S_IFLNK,
+                st_file_attributes=0x400 if reparse else 0,
+            )
+        return original_lstat(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "iterdir", entries)
+    monkeypatch.setattr(Path, "lstat", observed)
+    with pytest.raises(RepairAdmissionError, match="linked or reparse"):
+        admission_api.payload_identity(root)
+
+
+def test_payload_identity_preserves_content_paths_and_ignored_directories(tmp_path):
+    import hashlib
+
+    root = tmp_path / "payload"
+    (root / "scripts").mkdir(parents=True)
+    (root / "plugin.json").write_bytes(b"manifest")
+    script = root / "scripts" / "check.py"
+    script.write_bytes(b"ready")
+    expected = admission_api.digest([
+        ("plugin.json", hashlib.sha256(b"manifest").hexdigest()),
+        ("scripts/check.py", hashlib.sha256(b"ready").hexdigest()),
+    ])
+    assert admission_api.payload_identity(root) == expected
+    (root / "__pycache__").mkdir()
+    (root / "__pycache__" / "ignored.pyc").write_bytes(b"ignored")
+    assert admission_api.payload_identity(root) == expected
+    script.write_bytes(b"changed")
+    assert admission_api.payload_identity(root) != expected
+
+
+@pytest.mark.parametrize("kind", ["reparse-file", "reparse-directory", "nonregular", "oversized"])
+def test_payload_identity_keeps_entry_refusals(tmp_path, monkeypatch, kind):
+    import stat
+    from types import SimpleNamespace
+
+    root = tmp_path / "payload"
+    root.mkdir()
+    entry = root / "entry"
+    if kind == "reparse-directory":
+        entry.mkdir()
+    else:
+        entry.write_bytes(b"content")
+    original = Path.lstat
+
+    def observed(path, *args, **kwargs):
+        info = original(path, *args, **kwargs)
+        if path != entry:
+            return info
+        return SimpleNamespace(
+            st_mode=stat.S_IFIFO if kind == "nonregular" else info.st_mode,
+            st_file_attributes=0x400 if kind.startswith("reparse") else 0,
+            st_size=8 * 1024 * 1024 + 1 if kind == "oversized" else info.st_size,
+        )
+
+    monkeypatch.setattr(Path, "lstat", observed)
+    with pytest.raises(RepairAdmissionError):
+        admission_api.payload_identity(root)
+
+
 @pytest.mark.parametrize("containerized,expected", [(True, "linux"), (False, "wsl")])
 def test_installation_repair_platform_uses_userspace_not_container_host_kernel(
     monkeypatch, containerized, expected,
