@@ -274,6 +274,7 @@ def test_interrupted_reconciliation_recovers_known_rejection_not_unknown_effect(
         client.append_transport(directory, state)
     original = client.load(state["request"]["request_id"])[1]
     assert original["phase"] == "transport-attempt"
+    assert original["transport_history_anchor"]
     assert len(pushes) == 1
     client.transport = Transport(root, str(remote))
     dispatched = []
@@ -289,6 +290,7 @@ def test_interrupted_reconciliation_recovers_known_rejection_not_unknown_effect(
         assert recovered["request"]["source_sha"] == candidate
         assert recovered["request"]["envelope_sha"] != original["envelope_sha"]
         assert recovered["transport_failure"] is None
+        assert recovered["transport_history_anchor"] == original["transport_history_anchor"]
         assert recovered["transport_history"] == [{
             key: original[key] for key in
             ("envelope_sha", "previous_tip", "phase", "transport_failure")
@@ -369,7 +371,13 @@ def test_recovery_keeps_original_history_across_append_reads_and_retries(
     if mutation == "contended-rewrite":
         assert saved["transport_history"][0]["envelope_sha"] == original
     else:
-        assert saved == state
+        assert saved == {**state, "transport_history_anchor": competing}
+    assert saved["transport_history_anchor"] == competing
+    with pytest.raises((ValueError, RuntimeError), match="history"):
+        client.resume(state["request"]["request_id"])
+    assert dispatches == []
+    assert len(pushes) == (1 if mutation == "contended-rewrite" else 0)
+    assert client.load(state["request"]["request_id"])[1] == saved
     current = git(root, "ls-remote", "--refs", str(remote), TRANSPORT_REF)
     assert current == ("" if mutation == "delete" else rewritten + "\t" + TRANSPORT_REF)
 

@@ -108,7 +108,7 @@ class Transport:
             "-c", "credential.https://github.com.helper=" + helper,
         ]
 
-    def tip(self) -> str | None:
+    def tip(self, *, persist: Callable[[dict], None] | None = None) -> str | None:
         output = self.git("ls-remote", "--refs", self.remote, TRANSPORT_REF).stdout.strip()
         if not output:
             return None
@@ -116,6 +116,8 @@ class Transport:
         if len(fields) != 2 or fields[1] != TRANSPORT_REF:
             raise ValueError("unexpected transport ref response")
         tip = sha(fields[0])
+        if persist is not None:
+            persist({"transport_history_anchor": tip})
         self.git("fetch", "--no-tags", "--no-write-fetch-head", self.remote, tip)
         return tip
 
@@ -148,9 +150,11 @@ class Transport:
         if required_history is not None:
             sha(required_history)
         history = required_history
+        if history:
+            persist({"transport_history_anchor": history})
         tree = self.git("rev-parse", candidate + "^{tree}").stdout.strip()
         for _ in range(4):
-            previous = self.tip()
+            previous = self.tip(persist=persist if history is None else None)
             if history and (not previous or self.git(
                 "merge-base", "--is-ancestor", history, previous, check=False,
             ).returncode):
@@ -185,7 +189,7 @@ class Transport:
             }
             persist({"transport_failure": failure})
             # A lost response can still have published this exact envelope.
-            actual = self.tip()
+            actual = self.tip(persist=persist if history is None else None)
             if actual and self.git(
                 "merge-base", "--is-ancestor", envelope, actual, check=False,
             ).returncode == 0:

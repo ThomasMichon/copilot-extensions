@@ -177,8 +177,12 @@ class Client:
     ) -> None:
         """Retain superseded attempt evidence before starting another envelope."""
         value = state["request"]
+        required_history = required_history or state.get("transport_history_anchor")
 
         def persist(delta):
+            anchor = delta.get("transport_history_anchor")
+            if anchor and state.get("transport_history_anchor") not in {None, anchor}:
+                raise ValueError("Original transport history anchor changed")
             replacing = delta.get("phase") in {"transport-attempt", "transport-confirmed"}
             if replacing and state.get("envelope_sha") and (
                 delta["phase"] == "transport-attempt"
@@ -238,7 +242,22 @@ class Client:
             raise ValueError("provider identity changed")
         self.transport.scoped_credentials(provider["owner"])
         if state.get("envelope_sha"):
-            tip = self.transport.tip()
+            history = state.get("transport_history_anchor") or state.get("previous_tip")
+
+            def remember(delta):
+                if not state.get("transport_history_anchor"):
+                    state.update(delta)
+                    self.save(directory, state)
+
+            tip = (
+                self.transport.tip(persist=remember)
+                if rejected_attempt(state) and history is None else self.transport.tip()
+            )
+            history = state.get("transport_history_anchor") or state.get("previous_tip")
+            if history and (not tip or self.transport.git(
+                "merge-base", "--is-ancestor", history, tip, check=False,
+            ).returncode):
+                raise ValueError("shared transport history changed; refusing reconciliation")
             envelope = state["envelope_sha"]
             if not tip or self.transport.git(
                 "merge-base", "--is-ancestor", envelope, tip, check=False,
@@ -252,12 +271,9 @@ class Client:
                 ]
                 if parents != expected:
                     raise ValueError("rejected transport ancestry differs from original request")
-                previous = state.get("previous_tip")
-                if not tip or previous and self.transport.git(
-                    "merge-base", "--is-ancestor", previous, tip, check=False,
-                ).returncode:
+                if not tip:
                     raise ValueError("shared transport history changed; refusing replacement")
-                self.append_transport(directory, state, required_history=previous or tip)
+                self.append_transport(directory, state, required_history=history or tip)
             else:
                 self.transport.validate_tip(envelope)
                 state["request"]["envelope_sha"] = envelope
