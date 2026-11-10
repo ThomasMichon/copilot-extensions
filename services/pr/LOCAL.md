@@ -176,8 +176,12 @@ fall back to one-shot watch, a state-file read or an ambient account.
 
 Source limits are eight admitted requests/connections, 8 KiB headers, 32 KiB
 request bodies, 1 MiB selected responses, query/event pages of 1..16 and
-subscription TTL 1..86,400 seconds. Follow intervals are 1..300 seconds and
-polling windows 1..3,600 seconds. The original monotonic follow deadline bounds
+subscription TTL 1..86,400 seconds.
+Byte paging includes each operation's full registration/subscription envelope,
+so a near-limit baseline or event page is shortened rather than rejected after
+the durable registration/delivery operation.
+Follow intervals are 1..300 seconds and polling windows 1..3,600 seconds.
+The original monotonic follow deadline bounds
 capability discovery, event reads, ACK and every socket send/receive; a slow
 or trickling peer cannot reset that window. No new ACK starts after expiry.
 History gaps return 410 and require explicit baseline/new-subscription recovery,

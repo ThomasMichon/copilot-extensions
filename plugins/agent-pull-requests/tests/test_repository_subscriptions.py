@@ -243,3 +243,52 @@ def test_large_settled_history_trimming_does_not_reencode_full_cache_per_evictio
     assert 0 < len(full_encodes) <= 3
     assert 0 < len(state["events"]) < 20 and state["events"][-1]["sequence"] == 1000
     assert len(original(state).encode()) <= 4096
+
+
+def test_subscription_page_accounts_for_its_actual_registration_envelope(selected, monkeypatch):
+    import copy
+    import json
+    from agent_pull_requests import repository_subscriptions
+    observe(selected)
+    def populate(document):
+        repository = document["repository_cache"]["repositories"][0]
+        original = repository["pulls"][0]
+        repository["pulls"] = [
+            {**copy.deepcopy(original), "number": number} for number in range(1, 17)
+        ]
+    selected[1]._review_transaction(populate, expires_at=10000)
+    monkeypatch.setattr(repository_subscriptions, "RESPONSE_BYTES", 14000)
+    result = execute(selected, "consumer" * 16, "subscribe", {
+        "request_id": "\U0001f642" * 128, "ttl": 3600,
+    })
+    assert result["baseline"]["pulls"] and result["baseline"]["more"]
+    assert len(json.dumps(result).encode()) <= 14000 - 8192
+    assert execute(selected, "consumer" * 16, "inspect", {
+        "registration_id": result["subscription"]["registration_id"],
+    })["status"] == "active"
+
+
+def test_event_page_accounts_for_registration_id_before_admitting_delivery(selected, monkeypatch):
+    import json
+    from agent_pull_requests import repository_subscriptions
+    observe(selected)
+    row = execute(selected, "reader", "subscribe", {
+        "request_id": "original", "ttl": 3600, "after": 0,
+    })["subscription"]
+    monkeypatch.setattr(repository_subscriptions, "RESPONSE_BYTES", 14000)
+    def enlarge(document):
+        events = document["repository_cache"]["events"]
+        candidate = {"status": "active", "events": events, "more": True}
+        padding = 14000 - 8192 - len(json.dumps(candidate).encode())
+        assert padding > 0
+        events[-1]["facts"]["title"] += "x" * padding
+    selected[1]._review_transaction(enlarge, expires_at=10000)
+    registration = {"registration_id": row["registration_id"]}
+    first = execute(selected, "reader", "events", registration)
+    assert first["events"] and first["more"]
+    assert len(json.dumps(first).encode()) <= 14000 - 8192
+    execute(selected, "reader", "acknowledge", registration | {
+        "event_id": first["events"][-1]["event_id"],
+    })
+    last = execute(selected, "reader", "events", registration)
+    assert len(last["events"]) == 1 and not last["more"]

@@ -39,7 +39,8 @@ def _text(value):
     return value
 
 
-def _page(state, identity, after=0, limit=16, number=None, now=0):
+def _page(state, identity, after=0, limit=16, number=None, now=0, *, budget=None):
+    budget = RESPONSE_BYTES - 8192 if budget is None else budget
     row = next((row for row in state["repositories"]
                 if RepositoryIdentity.parse(row["identity"]).key == identity.key), None)
     if row is None:
@@ -51,7 +52,7 @@ def _page(state, identity, after=0, limit=16, number=None, now=0):
               "pulls": [], "more": False, "cursor": state["next_sequence"] - 1, "now": now}
     for pull in rows[:limit]:
         candidate = {**result, "pulls": [*result["pulls"], pull]}
-        if len(json.dumps(candidate).encode()) > RESPONSE_BYTES - 8192:
+        if len(json.dumps(candidate, allow_nan=False).encode()) > budget:
             break
         result["pulls"].append(pull)
     result["more"] = len(rows) > len(result["pulls"])
@@ -124,8 +125,11 @@ class RepositorySubscriptions:
                 status = "cancelled" if row["cancelled"] else (
                     "expired" if row["expires_at"] <= now else "active"
                 )
-                result = {"status": status, "subscription": copy.deepcopy(row),
-                          "baseline": _page(state, identity, now=now)}
+                result = {"status": status, "subscription": copy.deepcopy(row), "baseline": None}
+                overhead = len(json.dumps(result, allow_nan=False).encode()) - len(b"null")
+                result["baseline"] = _page(
+                    state, identity, now=now, budget=RESPONSE_BYTES - 8192 - overhead,
+                )
             else:
                 registration_id = _text(payload["registration_id"])
                 row = next((row for row in state["registrations"] if (
@@ -152,16 +156,17 @@ class RepositorySubscriptions:
                         and (status == "active" or event["sequence"] <= row["delivered"])
                     )]
                     batch = []
+                    result = {"status": status, "registration_id": registration_id,
+                              "events": batch, "more": False}
                     for event in events[:limit]:
-                        candidate = {"status": status, "events": [*batch, event], "more": True}
-                        if len(json.dumps(candidate).encode()) > RESPONSE_BYTES - 8192:
+                        candidate = {**result, "events": [*batch, event]}
+                        if len(json.dumps(candidate, allow_nan=False).encode()) > RESPONSE_BYTES - 8192:
                             break
                         batch.append(event)
                     if batch and batch[-1]["sequence"] > row["delivered"]:
                         row["delivered"] = batch[-1]["sequence"]
                         changed = True
-                    result = {"status": status, "registration_id": registration_id,
-                              "events": batch, "more": len(events) > len(batch)}
+                    result["more"] = len(events) > len(batch)
                 else:
                     event_id = _text(payload["event_id"])
                     if row["acknowledged_event"] == event_id:
