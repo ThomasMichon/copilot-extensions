@@ -1938,7 +1938,7 @@ from .worktree_creation import (  # noqa: E402 -- re-export position matches ori
 )
 
 
-from .launch_environment import _build_env, _self_owner_ref  # noqa: E402,F401 -- compatibility exports
+from .launch_environment import _build_env  # noqa: E402,F401 -- compatibility export
 
 
 def _repo_session_env(config: cfg.Config, work_dir: str = "") -> dict[str, str]:

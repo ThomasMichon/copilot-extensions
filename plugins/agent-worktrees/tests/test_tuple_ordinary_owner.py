@@ -34,7 +34,7 @@ def test_invalid_tuple_component_still_returns_json(
 
 @pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])
 @pytest.mark.parametrize("map_kind", ["absent", "matching", "unscoped", "sibling-only"])
-@pytest.mark.parametrize("owner_source", ["cwd", "environment", "run"])
+@pytest.mark.parametrize("owner_source", ["cwd", "inherited", "run"])
 def test_ordinary_nested_creation_uses_retained_parent_execution_owner(
     observed_config, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture,
     platform: str, map_kind: str, owner_source: str,
@@ -55,10 +55,10 @@ def test_ordinary_nested_creation_uses_retained_parent_execution_owner(
     monkeypatch.delenv("AGENT_WORKTREES_OWNER_REF", raising=False)
     monkeypatch.delenv("COPILOT_AGENT_SESSION_ID", raising=False)
     owner_ref = f"{parent.execution_machine}/{config.repo_name}/{parent.worktree_id}"
-    if owner_source == "environment":
+    if owner_source == "inherited":
         env = launch_environment._build_env(None, None, work_dir=parent.worktree_path, config=config)
-        assert env["AGENT_WORKTREES_OWNER_REF"] == owner_ref
-        monkeypatch.setenv("AGENT_WORKTREES_OWNER_REF", env["AGENT_WORKTREES_OWNER_REF"])
+        assert "AGENT_WORKTREES_OWNER_REF" not in env
+        monkeypatch.setenv("AGENT_WORKTREES_OWNER_REF", "stale/other/wt#parent")
     if owner_source == "run":
         produced = {"worktree": {
             **parent_row, "id": "child", "path": str(Path(parent.worktree_path).parent / "child"),
@@ -88,7 +88,7 @@ def test_ordinary_nested_creation_uses_retained_parent_execution_owner(
 
 
 @pytest.mark.parametrize("platform", ["windows", "wsl", "linux"])
-@pytest.mark.parametrize("owner_source", ["explicit", "environment", "run"])
+@pytest.mark.parametrize("owner_source", ["explicit", "run"])
 def test_explicit_foreign_owner_is_never_replaced_by_local_inference(
     observed_config, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture,
     platform: str, owner_source: str,
@@ -114,10 +114,7 @@ def test_explicit_foreign_owner_is_never_replaced_by_local_inference(
     else:
         args = _create_args(json_output=True)
         args.no_owner = False
-        if owner_source == "explicit":
-            args.owner_ref = foreign
-        else:
-            monkeypatch.setenv("AGENT_WORKTREES_OWNER_REF", foreign)
+        args.owner_ref = foreign
         code = m.cmd_create(args)
         assert json.loads(capfd.readouterr().out)["error"]
     assert code != 0

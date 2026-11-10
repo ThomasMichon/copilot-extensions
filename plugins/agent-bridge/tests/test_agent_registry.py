@@ -2489,14 +2489,19 @@ class TestSenderRepoFallback:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("qualifier", ["", "#session"])
-    async def test_owning_harness_survives_knowledge_default_and_unavailable_cwd_probe(self, monkeypatch, qualifier):
+    async def test_cwd_owning_harness_survives_knowledge_default(self, monkeypatch, qualifier):
         from agent_bridge import __main__ as cli
+        from agent_bridge import worktree_head
 
         self.agents["dev6"].project = "knowledge-fixture"
         monkeypatch.setattr(cli, "_PROJECT_OVERRIDE", None)
-        monkeypatch.setenv("AGENT_WORKTREES_OWNER_REF", "host/harness-fixture/wt" + qualifier)
         monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "session")
-        monkeypatch.setattr(cli, "_worktrees_get", lambda key: None)
+        monkeypatch.setattr(cli, "_worktrees_get", lambda key: (
+            "host/harness-fixture/wt" + qualifier if key == "owner-ref" else None
+        ))
+        monkeypatch.setattr(worktree_head, "resolve_head", lambda wid: worktree_head.HeadInfo(
+            tracked=True, active=True, head_session="session",
+        ))
         sender_repo = cli._sender_repo()
         with self._resolver():
             resolver = AgentResolver(self.agents, self.machines)

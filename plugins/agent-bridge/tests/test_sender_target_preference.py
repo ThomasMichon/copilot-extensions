@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from agent_bridge import __main__ as cli
+from agent_bridge import worktree_head
 from agent_bridge.client import BridgeClientError
 from agent_bridge.models import PhasedTimeouts
 from agent_bridge.session_start_cli import _CallerContext, _sender_repo_for_target, _start_agent_session
@@ -16,6 +17,12 @@ def invalid_owner(monkeypatch):
     monkeypatch.setattr(cli, "_PROJECT_OVERRIDE", None)
     monkeypatch.setenv("AGENT_WORKTREES_OWNER_REF", "host/harness/wt#old")
     monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "new")
+    monkeypatch.setattr(cli, "_worktrees_get", lambda key: (
+        "host/harness/wt#new" if key == "owner-ref" else None
+    ))
+    monkeypatch.setattr(worktree_head, "resolve_head", lambda wid: worktree_head.HeadInfo(
+        tracked=True, active=True, head_session="old",
+    ))
 
 
 @pytest.mark.parametrize("target", [
@@ -62,7 +69,9 @@ def test_known_colon_machine_alias_still_consumes_preference():
 
 
 def test_valid_bare_machine_preserves_harness_preference(monkeypatch):
-    monkeypatch.setenv("AGENT_WORKTREES_OWNER_REF", "host/harness/wt")
+    monkeypatch.setattr(worktree_head, "resolve_head", lambda wid: worktree_head.HeadInfo(
+        tracked=True, active=True, head_session="new",
+    ))
     inventory = [
         {"name": "machine", "derived": True, "host": "machine"},
     ]
@@ -73,7 +82,6 @@ def test_valid_bare_machine_preserves_harness_preference(monkeypatch):
 def test_actual_start_request_scopes_owner_validation_to_preference_consumers(monkeypatch, target):
     requests = []
     monkeypatch.setattr(cli, "_get_caller_id", lambda: None)
-    monkeypatch.setattr(cli, "_worktrees_get", lambda key: None)
     monkeypatch.setattr(cli, "_phased_timeouts", lambda: PhasedTimeouts())
     monkeypatch.setattr(cli, "_wait_for_idle", lambda *args, **kwargs: None)
     inventory = [{"name": "machine", "derived": True, "host": "machine"}]
@@ -123,7 +131,6 @@ def test_known_session_restart_preflights_before_end(monkeypatch, machine):
     events = []
     agent = "machine" if machine else "worker"
     monkeypatch.setattr(cli, "_get_caller_id", lambda: None)
-    monkeypatch.setattr(cli, "_worktrees_get", lambda key: None)
     monkeypatch.setattr(cli, "_phased_timeouts", lambda: PhasedTimeouts())
     monkeypatch.setattr(cli, "_wait_for_idle", lambda *args, **kwargs: None)
     client = SimpleNamespace(
