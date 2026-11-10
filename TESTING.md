@@ -384,6 +384,14 @@ For prepared Windows file-local writes, `prepared-membership-native.yml` runs
 The controls use actual membership and guard-map publication for legacy and
 installation-cell scopes, retain protected-write decisions, and cover current
 metadata, unsupported shapes, incomplete maps and changed guard/reader sources.
+The safe/admission packet also covers complete prepared all-read batches using
+the same native envelope validator as writes. It checks legacy and selected-cell
+entries, mixed read kinds, batch-over-single precedence, working-directory
+context, 128/129 calls, later protected/unknown/shell/malformed members and
+extra keys that shadow dictionary metadata. Missing/older prepared evidence
+and missing or changed normalizer contracts retain byte-exact policy input.
+Real-worker comparisons cover the read no-op and a later protected-write deny;
+the original child/item/group bounds remain unchanged.
 Native batch cases prove all-call admission with mixed reads/writes, per-call
 arguments, batch-over-single precedence, the 128-call bound and a later
 protected/foreign member defeating an earlier safe write. The separate

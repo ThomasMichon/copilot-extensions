@@ -92,10 +92,33 @@ function Test-NativePreToolSources([bool]$WriteProof = $false) {
     } catch { return $false }
 }
 
+function Get-NativePreToolBatch([object]$Calls) {
+    if ($Calls -isnot [Collections.IList] -or $Calls.Count -lt 1 -or $Calls.Count -gt 128) {
+        return $null
+    }
+    foreach ($call in $Calls) {
+        if ($call -isnot [Collections.IDictionary] -or $call['name'] -isnot [string] -or
+            -not $call['name']) { return $null }
+        # A caller's Keys field must not shadow the dictionary's own keys.
+        foreach ($key in $call.get_Keys()) {
+            if ($key -cnotin @('name', 'args', 'id')) { return $null }
+        }
+    }
+    return ,$Calls
+}
+
 function Test-NativePreToolRead([object]$Payload, [bool]$PreparedMembership = $false) {
     if (($env:COPILOT_EXTENSIONS_CONTEXT -and -not $PreparedMembership) -or
         $Payload -isnot [Collections.IDictionary]) { return $false }
-    if ($Payload.ContainsKey('toolCalls')) { return $false }
+    if ($Payload.ContainsKey('toolCalls')) {
+        if (-not $PreparedMembership) { return $false }
+        $calls = Get-NativePreToolBatch $Payload['toolCalls']
+        if ($null -eq $calls) { return $false }
+        foreach ($call in $calls) {
+            if ($call['name'] -cnotin @('view', 'rg', 'glob')) { return $false }
+        }
+        return Test-NativePreToolSources -WriteProof $true
+    }
     $name = $Payload.toolName
     if (-not $name) { $name = $Payload.tool_name }
     if ($name -isnot [string] -or $name -cnotin @('view', 'rg', 'glob')) { return $false }
@@ -133,16 +156,10 @@ function Test-NativePreToolWrite([object]$Payload, [object]$Facts) {
         $cwd = $Payload.cwd
         if ($Payload.ContainsKey('toolCalls')) {
             # tool_call_forms gives batch members precedence over top-level tool fields.
-            $calls = $Payload['toolCalls']
-            if ($calls -isnot [Collections.IList] -or $calls.Count -lt 1 -or $calls.Count -gt 128) {
-                return $false
-            }
+            $calls = Get-NativePreToolBatch $Payload['toolCalls']
+            if ($null -eq $calls) { return $false }
             foreach ($call in $calls) {
-                if ($call -isnot [Collections.IDictionary] -or $call['name'] -isnot [string] -or
-                    $call['name'] -cnotin ($writeTools + @('view', 'rg', 'glob'))) { return $false }
-                foreach ($key in $call.Keys) {
-                    if ($key -cnotin @('name', 'args', 'id')) { return $false }
-                }
+                if ($call['name'] -cnotin ($writeTools + @('view', 'rg', 'glob'))) { return $false }
                 if ($call['name'] -cin $writeTools) {
                     $writeArgs.Add(@{ name = $call['name']; args = $call['args'] })
                 }

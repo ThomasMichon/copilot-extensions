@@ -3275,6 +3275,19 @@ contract tests also exercise each real guard's read decision, not just hashes.
 A hot active pre-tool stop can return natively; invalid/unsupported flag state
 keeps the normal guard path and its diagnostic.
 
+Prepared membership also permits complete all-read native batches of
+`view`, `rg` and `glob`. Read and write branches share one strict batch-envelope
+validator: 1..128 dictionary members, nonempty string names and only
+`name`/`args`/`id` keys, including when a caller supplies a key named `Keys`.
+Every member must be a recognized read before the read exemption applies;
+batch members override top-level tool fields through the original normalization
+contract. This proof additionally binds the existing target-form and map-reader
+sources, without reading target inventories or interpreting read arguments as
+shell commands. Missing prepared evidence or incompatible source contracts,
+empty/malformed/oversized envelopes and unsupported members retain the original
+route. A later write must still satisfy the complete write proof below or use
+the original raw-event evaluator.
+
 For prepared Windows membership, the original guards' native write
 names (`create`, `edit`, `str_replace`, `str_replace_editor`,
 `str_replace_based_edit_tool`, `write`, `write_file`, `insert`, `new_file` and
@@ -3320,8 +3333,11 @@ a target that the original strict guards would inspect as freeform input.
 The entry discovers optional facts support from the loaded admission function;
 an older helper keeps its original call and policy path without that proof.
 
-The native read contract currently hashes four bounded source files per read
-(at most 128 KiB each); it is not a daemon-published worktree-policy cache and
+The single-read contract hashes four bounded guard sources; all-read batches
+add the two existing normalizer/reader sources (at most 128 KiB per file).
+Source checks are per event, not per member. The shared envelope validation can
+run again when an ineligible read batch proceeds to write proof, but performs
+no process, filesystem or topology work. This is not a daemon-published worktree-policy cache and
 does not claim zero filesystem cost. Exact fingerprints deliberately prevent a
 partial helper upgrade from reusing a stale exemption. A future lifecycle- or
 daemon-published generation may replace this repeated check after its own
