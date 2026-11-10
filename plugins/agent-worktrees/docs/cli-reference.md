@@ -668,6 +668,8 @@ that the actual clean checkout commit is contained in the declared local
 default branch (`refs/heads/<default>`). It neither fetches nor rewrites refs,
 merges local work, or invents an `origin`. Missing or unreadable refs,
 uncontained commits and dirty content refuse finalization.
+Checks ignore inherited Git repository selectors and enumerate untracked files
+explicitly, regardless of `status.showUntrackedFiles`; failed status reads refuse.
 
 A failed remote inspection or fetch is not evidence that a repository is
 local-only. Configured remotes and PR-mode repositories keep their existing

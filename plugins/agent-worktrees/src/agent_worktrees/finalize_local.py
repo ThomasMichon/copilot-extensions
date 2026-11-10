@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from . import git_ops
+from .git_repository_environment import repository_identity_scope
 
 
 def _remote_free(anchor: str) -> bool:
@@ -15,6 +16,7 @@ def _remote_free(anchor: str) -> bool:
     return not result.stdout.strip()
 
 
+@repository_identity_scope()
 def resolve_upstream(repo, *, pr_mode: bool) -> tuple[str, bool]:
     """Select a local default only for a positively remote-free, non-PR repo."""
     if not _remote_free(repo.anchor):
@@ -24,6 +26,7 @@ def resolve_upstream(repo, *, pr_mode: bool) -> tuple[str, bool]:
     return f"refs/heads/{repo.default_branch}", True
 
 
+@repository_identity_scope()
 def content_error(repo, worktree_path: str, branch: str, upstream: str) -> str | None:
     """Recheck actual clean checkout containment without moving any reference."""
     try:
@@ -33,8 +36,10 @@ def content_error(repo, worktree_path: str, branch: str, upstream: str) -> str |
         return str(exc)
     exists = Path(worktree_path).exists()
     cwd = worktree_path if exists else repo.anchor
-    if exists and not git_ops.is_clean(cwd=cwd):
-        return "Local-only finalization requires a clean worktree; preserve and resolve its changes."
+    if exists:
+        status = git_ops.git("status", "--porcelain", "--untracked-files=all", cwd=cwd, check=False)
+        if status.returncode != 0 or status.stdout.strip():
+            return "Local-only finalization requires verified clean content, including untracked files."
     current = "HEAD" if exists else f"refs/heads/{branch}"
     result = git_ops.git(
         "rev-parse", "--revs-only", "--end-of-options",

@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from agent_worktrees import config as cfg
-from agent_worktrees import finalize, git_ops, tracking
+from agent_worktrees import finalize, finalize_local, git_ops, tracking
 from pr_test_helpers import _git
 
 
@@ -35,6 +35,22 @@ def local_repo(pr_repo, monkeypatch):
     return config, wid, checkout
 
 
+@pytest.fixture
+def foreign_repo(tmp_path):
+    repo = tmp_path / "foreign"
+    repo.mkdir()
+    _git("init", "--template=", "-b", "master", cwd=repo)
+    _git("config", "user.name", "Test", cwd=repo)
+    _git("config", "user.email", "test@example.com", cwd=repo)
+    _git("commit", "--allow-empty", "-m", "foreign base", cwd=repo)
+    return repo
+
+
+def _foreign_selectors(monkeypatch, repo):
+    monkeypatch.setenv("GIT_DIR", str(repo / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(repo))
+
+
 def test_finalize_local_content_without_fetch_or_ref_rewrite(local_repo, monkeypatch, capsys):
     config, wid, checkout = local_repo
     before = _git("show-ref", cwd=checkout)
@@ -46,6 +62,52 @@ def test_finalize_local_content_without_fetch_or_ref_rewrite(local_repo, monkeyp
     assert tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml").status == "finalized"
     assert _git("show-ref", cwd=checkout) == before
     assert "refs/heads/master" in capsys.readouterr().out
+
+
+def test_inherited_selectors_cannot_hide_configured_target_remote(local_repo, foreign_repo, monkeypatch):
+    config, _, checkout = local_repo
+    _git("remote", "add", "origin", str(checkout / "missing-remote"), cwd=checkout)
+    _foreign_selectors(monkeypatch, foreign_repo)
+    assert finalize_local.resolve_upstream(config.default_repo, pr_mode=False) == ("origin/master", False)
+
+
+@pytest.mark.parametrize("state", ["dirty", "uncontained"])
+def test_inherited_selectors_cannot_authorize_foreign_content(
+    local_repo, foreign_repo, monkeypatch, state,
+):
+    config, wid, checkout = local_repo
+    (checkout / "unfinished.txt").write_text("keep\n")
+    if state == "uncontained":
+        _git("add", "unfinished.txt", cwd=checkout)
+        _git("commit", "-m", "uncontained target work", cwd=checkout)
+    _foreign_selectors(monkeypatch, foreign_repo)
+    assert finalize_local.content_error(
+        config.default_repo, str(checkout), f"worktree/{wid}", "refs/heads/master",
+    ) is not None
+    assert (checkout / "unfinished.txt").read_text() == "keep\n"
+
+
+def test_inherited_selectors_do_not_redirect_nested_finalization(
+    local_repo, foreign_repo, monkeypatch,
+):
+    config, wid, checkout = local_repo
+    (foreign_repo / "foreign-only.txt").write_text("keep\n")
+    _git("remote", "add", "origin", str(foreign_repo / "missing-remote"), cwd=foreign_repo)
+    before = _git("show-ref", cwd=foreign_repo)
+    _foreign_selectors(monkeypatch, foreign_repo)
+    assert finalize.validate_and_finalize(wid, config)
+    assert _git("show-ref", cwd=foreign_repo) == before
+    assert (foreign_repo / "foreign-only.txt").read_text() == "keep\n"
+    assert tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml").status == "finalized"
+
+
+def test_local_finalization_refuses_hidden_untracked_files(local_repo):
+    config, wid, checkout = local_repo
+    _git("config", "status.showUntrackedFiles", "no", cwd=checkout)
+    (checkout / "hidden.txt").write_text("keep\n")
+    assert not finalize.validate_and_finalize(wid, config)
+    assert (checkout / "hidden.txt").read_text() == "keep\n"
+    assert tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml").status == "active"
 
 
 @pytest.mark.parametrize("state", ["dirty", "uncontained", "missing-default", "pr-required"])
@@ -71,14 +133,18 @@ def test_finalize_local_refuses_unproved_content(local_repo, state):
     assert tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml").status == "active"
 
 
-def test_finalize_local_rechecks_content_after_retirement_inspection(local_repo, monkeypatch):
+@pytest.mark.parametrize("late_work", ["committed", "hidden-untracked"])
+def test_finalize_local_rechecks_content_after_retirement_inspection(local_repo, monkeypatch, late_work):
     config, wid, checkout = local_repo
     monkeypatch.setattr(finalize, "_has_live_session", lambda record: False)
+    if late_work == "hidden-untracked":
+        _git("config", "status.showUntrackedFiles", "no", cwd=checkout)
 
     def new_work(_path):
         (checkout / "later.txt").write_text("keep\n")
-        _git("add", "later.txt", cwd=checkout)
-        _git("commit", "-m", "new work during retirement inspection", cwd=checkout)
+        if late_work == "committed":
+            _git("add", "later.txt", cwd=checkout)
+            _git("commit", "-m", "new work during retirement inspection", cwd=checkout)
         return None
 
     monkeypatch.setattr(finalize.procs, "checkout_retirement_blocker", new_work)

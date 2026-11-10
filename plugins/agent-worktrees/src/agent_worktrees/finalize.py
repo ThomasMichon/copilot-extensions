@@ -67,6 +67,7 @@ from .finalize_support import authority_fenced_write as _authority_fenced_write
 from .finalize_support import dry_run_finalize_preview as _dry_run_finalize_preview
 from .finalize_support import rollback_finalizing_freeze as _rollback_finalizing_freeze
 from .finalize_ref import is_content_on_upstream as _is_content_on_upstream
+from .git_repository_environment import repository_identity_scope
 from .finalize_ref import resolve_finalize_ref as _resolve_finalize_ref
 from .finalize_ref import warn_if_tracked_branch_diverged as _warn_if_diverged
 from .pr_incremental_publish import push_refspec as _push_changes_pr_refspec
@@ -1168,6 +1169,7 @@ def _worktree_branch(
     return f"worktree/{worktree_id}"
 
 
+@repository_identity_scope()
 def validate_and_finalize(
     worktree_id: str,
     config: Config,
