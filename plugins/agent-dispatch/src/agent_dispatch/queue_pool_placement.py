@@ -412,10 +412,12 @@ def record_pool_claim(
 
 def require_pool_workspace(
     conn: sqlite3.Connection, task: Task, worktree: str, execution_machine: object,
-    *, driver: object,
+    *, driver: object, reservation_key: str | None = None,
 ) -> None:
     assignment = pool_assignment(conn, task.id)
     if assignment is None:
+        if reservation_key is not None:
+            _require_accounting_workspace(conn, task, reservation_key, worktree, execution_machine)
         return
     if driver not in {"cli", "ordinary-bridge"}:
         raise TaskError("pool workspace requires a qualified startup driver")
@@ -436,6 +438,26 @@ def require_pool_workspace(
         task, worktree, execution_machine, machine=assignment.machine, env=assignment.env,
         registration_id=assignment.registration_id,
         capabilities=frozenset(json.loads(binding["capabilities"])),
+    )
+    if conflict is not None:
+        raise TaskError(conflict)
+
+
+def _require_accounting_workspace(
+    conn: sqlite3.Connection, task: Task, reservation_key: str, worktree: str | None,
+    execution_machine: object,
+) -> None:
+    # An accounting-only (adopted) binding has no assignment; its immutable
+    # binding still decides where the body may record or publish a workspace.
+    bound = conn.execute(
+        "SELECT * FROM pool_reservation_bindings WHERE reservation_key = ?", (reservation_key,),
+    ).fetchone()
+    if bound is None:
+        return
+    conflict = bound_workspace_conflict(
+        task, worktree, execution_machine, machine=bound["machine"], env=bound["env"],
+        registration_id=bound["registration_id"],
+        capabilities=frozenset(json.loads(bound["capabilities"] or "[]")),
     )
     if conflict is not None:
         raise TaskError(conflict)
@@ -479,23 +501,11 @@ def pool_native_publication(
         return False
     if not releasing and not row["worktree"]:
         raise TaskError("pool publication requires its recorded workspace")
-    if not releasing and pool_assignment(conn, task.id) is not None:
+    if not releasing:
         require_pool_workspace(
             conn, task, row["worktree"], row["execution_machine"], driver=row["driver"],
+            reservation_key=row["key"],
         )
-    elif not releasing:
-        # An accounting-only (adopted) binding has no assignment; its immutable
-        # binding still decides where the body may publish.
-        bound = conn.execute(
-            "SELECT * FROM pool_reservation_bindings WHERE reservation_key = ?", (row["key"],),
-        ).fetchone()
-        conflict = bound_workspace_conflict(
-            task, row["worktree"], row["execution_machine"], machine=bound["machine"],
-            env=bound["env"], registration_id=bound["registration_id"],
-            capabilities=frozenset(json.loads(bound["capabilities"] or "[]")),
-        )
-        if conflict is not None:
-            raise TaskError(conflict)
     from .ordinary_native_bindings import native_binding_evidence, reservation_native_identity
     candidate = {**dict(row), "session_handle": session_handle, "conversation_retired": 0}
     native = reservation_native_identity(conn, candidate)

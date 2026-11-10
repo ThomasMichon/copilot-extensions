@@ -66,7 +66,7 @@ class SpawnWorkspaceMixin:
                 raise TaskError("recorded execution machine cannot change")
             execution_machine = row["execution_machine"] or execution_machine
             require_pool_workspace(
-                conn, task, worktree, execution_machine, driver=driver,
+                conn, task, worktree, execution_machine, driver=driver, reservation_key=key,
             )
             if row["allocation_project"] or row["worktree_path"]:
                 if (

@@ -475,6 +475,25 @@ def test_adopted_binding_refuses_publishing_a_newly_excluded_workspace(queue):
     assert queue.get_reservation(reservation.key).state == "reserving"
 
 
+def test_adopted_binding_refuses_replacing_its_workspace_with_an_excluded_one(queue):
+    from tests.test_pool_placement import pool, publish
+
+    launching = queue.create("launching", excludes=["worktree:blocked"])
+    reservation, _ = queue.reserve_spawn(launching.id)
+    queue.record_spawn_worktree(reservation.key, "allowed")
+    publish(queue, pool())
+    assert queue.adopt_legacy_capacity(apply=True, permitted=True, reason="migration")["adopted"] == 1
+    with pytest.raises(TaskError, match="excluded"):
+        queue.record_spawn(
+            reservation.key, worktree="blocked", session_handle="local-body:launch",
+            startup_complete=True, startup_revision=1,
+        )
+    with pytest.raises(TaskError, match="excluded"):
+        queue.record_spawn(reservation.key, worktree="blocked")
+    current = queue.get_reservation(reservation.key)
+    assert (current.state, current.worktree) == ("reserving", "allowed")
+
+
 def test_client_posts_legacy_history_controls_with_control_identity():
     import httpx
 

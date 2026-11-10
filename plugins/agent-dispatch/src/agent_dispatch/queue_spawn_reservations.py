@@ -684,7 +684,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
             if worktree is not None:
                 from .queue_pool_placement import require_pool_workspace
                 task = self._fetch(conn, row["task_id"])
-                require_pool_workspace(conn, task, worktree, row["execution_machine"], driver=row["driver"])
+                require_pool_workspace(conn, task, worktree, row["execution_machine"], driver=row["driver"], reservation_key=key)
             validate_cooling_publication(row, cooling_token, expected_startup_revision)
             if release_requested or to_state in {SpawnState.FAILED, SpawnState.SETTLED, SpawnState.RELEASING}:
                 require_no_wake_for_release(self, conn, row)
