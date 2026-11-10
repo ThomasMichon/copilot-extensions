@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import io
 import json
 import sys
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from types import ModuleType
@@ -187,3 +189,62 @@ def test_empty_health_history_is_visible_without_fabricating_domain_rows(owners,
     assert "0/168 observed slots" in chart and "slot missing" in chart
     assert "local listener</text>" not in chart
     assert "observed ok;" not in chart
+
+
+@pytest.mark.parametrize("error_type", [RuntimeError, OSError])
+def test_unresolvable_store_preserves_independent_json_and_external_chart(
+    owners, monkeypatch, capsys, error_type,
+):
+    modules, parser = owners
+    store = Path("unresolvable-store")
+    output = io.StringIO()
+
+    class Chart:
+        def __fspath__(self):
+            return "external.svg"
+
+        def resolve(self):
+            return Path("external.svg")
+
+        def open(self, mode, encoding):
+            assert mode == "x" and encoding == "utf-8"
+            return nullcontext(output)
+
+    def resolve(path):
+        assert path == store
+        raise error_type("private-resolution-detail")
+
+    def inspect(*args, **kwargs):
+        raise modules["health_slots"].HealthError("path-unavailable")
+
+    monkeypatch.setattr(Path, "resolve", resolve)
+    monkeypatch.setattr(modules["health_slots"], "inspect", inspect)
+    args = parser.parse_args([
+        "health", "report", "--store-dir", str(store), "--service", "agent-dispatch",
+        "--now", NOW.isoformat(),
+    ])
+    args.chart = Chart()
+    assert args.func(args) == 0
+    raw = capsys.readouterr().out
+    result = json.loads(raw)
+    assert result["health"] == {"state": "unavailable", "reason": "local-store-unavailable"}
+    assert result["services"][0]["state"] == "unsupported"
+    assert "private" not in raw
+    assert "Local health store unavailable" in output.getvalue()
+    ElementTree.fromstring(output.getvalue())
+
+
+def test_unresolvable_chart_is_a_bounded_output_refusal(owners, monkeypatch, capsys):
+    _modules, parser = owners
+
+    def resolve(path):
+        raise RuntimeError("private-chart-detail")
+
+    monkeypatch.setattr(Path, "resolve", resolve)
+    args = parser.parse_args([
+        "health", "report", "--store-dir", "store", "--chart", "external.svg",
+        "--now", NOW.isoformat(),
+    ])
+    assert args.func(args) == 2
+    captured = capsys.readouterr()
+    assert not captured.out and "private" not in captured.err

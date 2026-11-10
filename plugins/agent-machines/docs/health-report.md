@@ -268,7 +268,9 @@ not a combined observe/record job: it neither calls the listener nor changes the
 store, its policy, revisions or writer lock. Observation and confirmed storage
 remain separate explicit operations. A chart destination inside the selected
 store is refused, including new paths; keep presentation artifacts outside its
-exclusive namespace.
+exclusive namespace. Both lexical and resolved overlap refuse. A store that
+cannot be resolved remains unavailable evidence while a valid external chart
+can still be written; an unresolvable chart is instead an output refusal.
 
 The additive `health` object has `state: available` and the complete age-qualified
 `view`, or `state: unavailable` and `reason: local-store-unavailable` if the store

@@ -7,6 +7,9 @@
         "tools/promotion_unit_tests/test_health_composition.py::test_old_report_selection_is_unchanged_and_unknown_new_syntax_is_rejected",
         "tools/promotion_unit_tests/test_health_composition.py::test_chart_inside_selected_store_refuses_before_reading_or_writing",
         "tools/promotion_unit_tests/test_health_composition.py::test_empty_health_history_is_visible_without_fabricating_domain_rows",
+        "tools/promotion_unit_tests/test_health_composition.py::test_unresolvable_store_preserves_independent_json_and_external_chart[RuntimeError]",
+        "tools/promotion_unit_tests/test_health_composition.py::test_unresolvable_store_preserves_independent_json_and_external_chart[OSError]",
+        "tools/promotion_unit_tests/test_health_composition.py::test_unresolvable_chart_is_a_bounded_output_refusal",
         "tools/promotion_unit_tests/test_hourly_contributions.py::test_wire_owner_hour_units_population_and_partial_coverage_are_not_coerced[owner]",
         "tools/promotion_unit_tests/test_hourly_contributions.py::test_wire_owner_hour_units_population_and_partial_coverage_are_not_coerced[hour]",
         "tools/promotion_unit_tests/test_hourly_contributions.py::test_wire_owner_hour_units_population_and_partial_coverage_are_not_coerced[unit]",
@@ -4736,8 +4739,8 @@
         "tools/promotion_unit_tests/test_release_helper_decisions.py::test_native_installer_copy_is_verified_before_entrypoint_rewrite[source-drift-sh]"
     ],
     "sources": {
-        "tools/promotion_unit_tests/test_health_composition.py": "4d5f9a8ce68c52dd7c03d341789e93cd00407cf4552b08e2a10b2ff1b55b7bb3",
-        "plugins/agent-machines/src/agent_machines/cli_health.py": "b3e61657d44296826f856baa469032bc52f229452707ef257b68e80febab33db",
+        "tools/promotion_unit_tests/test_health_composition.py": "4070409b213677412c8e86daf16d93ab6fa02f4e992c883b9c592631d31a039f",
+        "plugins/agent-machines/src/agent_machines/cli_health.py": "5070388c16be05706707137a07c49fdeafc2ad59333ad6ff7c7790a0df2bd246",
         "plugins/agent-machines/src/agent_machines/health_chart.py": "740366846cb17ceaf92db8e949082512cc674babd480539da8e36e3c62ac788b",
         "plugins/agent-machines/src/agent_machines/health_report.py": "8e1684c9466b2d0d2a3065787ab2ffcc0232c14b0b01ae25f11605e70260f2da",
         "plugins/agent-machines/src/agent_machines/health_slots.py": "dd9bcc255a4d1d1751dd4da91da46fde39d469c13473ea6ede2a04a8b0f31ac6",

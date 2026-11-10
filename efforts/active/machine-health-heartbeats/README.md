@@ -990,3 +990,15 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   Native job overlap/storage/lifetime, broader domain adapters, installed
   adoption, scheduling, selected carrier, peer receipt and activation remain
   parent gates; no source result authorizes enrollment or service changes.
+
+### 2026-11-09 - Preserve independent output for unresolvable stores
+- A cyclic store path can fail canonical resolution before the qualified
+  reader runs. Store-resolution failures now remain unavailable evidence for
+  a valid external chart; lexical and resolved namespace overlap still refuse.
+  An unresolvable chart remains a bounded output refusal rather than an
+  uncaught path-bearing exception.
+- All nine actor-free composition cases pass, including both runtime and OS
+  resolution errors. Three focused native cases pass without skips: an actual
+  cyclic filesystem path with independent telemetry/external chart, the
+  normal qualified local-listener flow and the actual Bridge-owner flow.
+  The existing storage and chart-namespace protections remain intact.

@@ -72,6 +72,21 @@ def _silence_failed_stdout() -> None:
             pass
 
 
+def _chart_overlaps_store(chart: Path, store: Path) -> bool:
+    if Path(os.path.abspath(chart)).is_relative_to(Path(os.path.abspath(store))):
+        return True
+    try:
+        destination = chart.resolve()
+    except RuntimeError:
+        raise ValueError("invalid chart path") from None
+    try:
+        namespace = store.resolve()
+    except (OSError, RuntimeError):
+        # An unresolvable store is unavailable evidence, not an output failure.
+        return False
+    return destination.is_relative_to(namespace)
+
+
 def run_slots(args) -> int:
     from . import health_slots
 
@@ -121,7 +136,7 @@ def run_report(args) -> int:
             raise ValueError("an explicit input, service or health store is required")
         if (
             args.store_dir is not None and args.chart is not None
-            and args.chart.resolve().is_relative_to(args.store_dir.resolve())
+            and _chart_overlaps_store(args.chart, args.store_dir)
         ):
             raise ValueError("chart overlaps health store")
         seen = set()
