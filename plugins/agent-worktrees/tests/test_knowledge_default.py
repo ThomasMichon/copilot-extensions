@@ -104,7 +104,8 @@ def test_configuration_default_requires_confirmation_and_rechecks_selected_input
     assert configured.calls[-1][2] == "apply"
 
 
-def test_pointer_precondition_rechecks_accepted_inputs_after_native_preview(configured, monkeypatch):
+@pytest.mark.parametrize("change", ["input", "machine-during-read", "source-during-read"])
+def test_pointer_precondition_rechecks_accepted_inputs_after_native_preview(configured, monkeypatch, change):
     plan = defaults.observe("first")
     script = configured.root / "binding.py"
     script.touch()
@@ -113,8 +114,21 @@ def test_pointer_precondition_rechecks_accepted_inputs_after_native_preview(conf
 
     def selected(path, *, run_name, init_globals):
         check = init_globals["_NATIVE_BINDING_PRECONDITION"]
-        check()
-        configured.projection["input_revision"] = "b" * 64
+        if change == "input":
+            check()
+            configured.projection["input_revision"] = "b" * 64
+        else:
+            original = defaults._read
+
+            def read(*args):
+                result = original(*args)
+                if change == "machine-during-read":
+                    configured.config.machine = "changed-worker"
+                else:
+                    configured.config.knowledge_preferences = {"state_dir": str(configured.root / "other-state")}
+                return result
+
+            monkeypatch.setattr(defaults, "_read", read)
         check()
         pytest.fail("changed inputs reached pointer commit")
 

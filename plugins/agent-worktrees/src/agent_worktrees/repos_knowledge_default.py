@@ -131,7 +131,11 @@ def observe(project: str) -> dict:
 
 def revalidate(project: str, selection: dict) -> None:
     current = observe(project)
-    if current.get("status") != "suggested" or current.get("selection") != selection:
+    config = native._binding_config(project)
+    if (
+        current.get("status") != "suggested" or current.get("selection") != selection
+        or getattr(config, "knowledge_preferences", None) != selection["source"]
+    ):
         raise ConfigurationError("preview-conflict", "Accepted preference inputs changed; preview again.")
 
 

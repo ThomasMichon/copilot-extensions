@@ -137,6 +137,10 @@ def _run_selected_payload(
         raise ConfigurationError("binding-owner-changed", "The binding owner changed; preview again.")
 
     def revalidate() -> None:
+        if preference_selection is not None:
+            from .repos_knowledge_default import revalidate
+
+            revalidate(project, preference_selection)
         if portable_resolution is not None:
             from .repos_knowledge_preferences import resolve
 
@@ -146,11 +150,6 @@ def _run_selected_payload(
             )
             if current != portable_resolution:
                 raise ConfigurationError("preview-conflict", "Portable binding scope changed; preview again.")
-        if preference_selection is not None:
-            from .repos_knowledge_default import revalidate
-
-            revalidate(project, preference_selection)
-
     previous = sys.argv
     try:
         sys.argv = _owner_arguments(script, project, name, operation, token)

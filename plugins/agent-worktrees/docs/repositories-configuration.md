@@ -256,7 +256,10 @@ Cancel-default confirmation remain unchanged. The richer portable-resolution
 response is not passed to that strict UI decoder.
 The token additionally binds the configured source, selected runtime and
 Machines' scoped input revision. Apply rechecks them, including inside the
-existing binding pointer-write precondition. A changed snapshot, policy,
+existing binding pointer-write precondition. The final portable-scope comparison
+runs after the potentially blocking Machines read, so an identity change during
+that read cannot commit a previous machine's preference. The machine-local source
+selection is also reread after that child returns. A changed snapshot, policy,
 override, scope, source or runtime requires a fresh preview.
 
 Existing effective local bindings win; unresolved explicit bindings require
